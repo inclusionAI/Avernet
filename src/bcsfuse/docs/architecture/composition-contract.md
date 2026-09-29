@@ -53,6 +53,15 @@ requests and awaits `startup_provider.shutdown()` when the application stops.
 Initialization failures propagate and prevent startup. Business-route mounting
 failures also propagate instead of producing a partially usable service.
 
+Background indexing starts only after startup initialization succeeds. During
+shutdown, the application waits for an active index build before shutting down
+providers so that background work cannot race provider teardown.
+
+Protected public routes use `AuthProvider.validate_request(request)` from the
+published provider contract. Replacement authentication providers must
+implement the complete contract rather than relying on methods available only
+on the public default implementation.
+
 The readiness endpoint reports the provider mode and readiness status. When
 registry inspection fails, it returns HTTP 503 with the exception type only;
 exception messages and provider values are not returned to clients.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.bootstrap.app_factory import create_bcsfuse_app
@@ -23,17 +24,27 @@ def disable_background_index(
 
 
 class StartupSpy:
-    def __init__(self, *, fail_on_initialize: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_initialize: bool = False,
+        events: list[str] | None = None,
+    ) -> None:
         self.fail_on_initialize = fail_on_initialize
+        self.events = events
         self.initialized = False
         self.shutdown_called = False
 
     async def initialize(self) -> None:
         if self.fail_on_initialize:
             raise RuntimeError("startup failed")
+        if self.events is not None:
+            self.events.append("provider.initialize")
         self.initialized = True
 
     async def shutdown(self) -> None:
+        if self.events is not None:
+            self.events.append("provider.shutdown")
         self.shutdown_called = True
 
 
@@ -118,6 +129,77 @@ def test_factory_runs_startup_and_shutdown_lifecycle() -> None:
     assert startup.shutdown_called is True
 
 
+def test_factory_runs_background_index_inside_provider_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    startup = StartupSpy(events=events)
+    context, _ = build_context(startup=startup)
+
+    class ThreadSpy:
+        def __init__(self, *, target, daemon: bool, name: str) -> None:
+            assert callable(target)
+            assert daemon is True
+            assert name == "bg-index-build"
+
+        def start(self) -> None:
+            events.append("thread.start")
+
+        def join(self) -> None:
+            events.append("thread.join")
+
+    monkeypatch.setattr(
+        "src.infra.config.feature_flags.FeatureFlags.is_enabled",
+        lambda _: True,
+    )
+    monkeypatch.setattr("threading.Thread", ThreadSpy)
+
+    app = create_bcsfuse_app(context)
+    assert events == []
+
+    with TestClient(app):
+        assert events == ["provider.initialize", "thread.start"]
+
+    assert events == [
+        "provider.initialize",
+        "thread.start",
+        "thread.join",
+        "provider.shutdown",
+    ]
+
+
+def test_factory_shuts_down_provider_when_background_thread_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    startup = StartupSpy()
+    context, _ = build_context(startup=startup)
+
+    class FailingThread:
+        def __init__(self, *, target, daemon: bool, name: str) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread start failed")
+
+        def join(self) -> None:
+            raise AssertionError("an unstarted thread must not be joined")
+
+    monkeypatch.setattr(
+        "src.infra.config.feature_flags.FeatureFlags.is_enabled",
+        lambda _: True,
+    )
+    monkeypatch.setattr("threading.Thread", FailingThread)
+
+    app = create_bcsfuse_app(context)
+
+    with pytest.raises(RuntimeError, match="thread start failed"):
+        with TestClient(app):
+            pass
+
+    assert startup.initialized is True
+    assert startup.shutdown_called is True
+
+
 def test_factory_propagates_startup_failure() -> None:
     context, startup = build_context(startup=StartupSpy(fail_on_initialize=True))
     app = create_bcsfuse_app(context)
@@ -129,7 +211,9 @@ def test_factory_propagates_startup_failure() -> None:
     assert startup.shutdown_called is False
 
 
-def test_factory_propagates_business_route_mount_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_propagates_business_route_mount_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     context, _ = build_context()
 
     def fail_to_mount_routes(_: object) -> None:
@@ -141,6 +225,49 @@ def test_factory_propagates_business_route_mount_failure(monkeypatch: pytest.Mon
     )
 
     with pytest.raises(RuntimeError, match="route mount failed"):
+        create_bcsfuse_app(context)
+
+
+def test_factory_propagates_required_route_group_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, _ = build_context()
+
+    def fail_to_mount_r3(_: object) -> None:
+        raise RuntimeError("r3 mount failed")
+
+    monkeypatch.setattr(
+        "src.interfaces.api.worker_profile_parity_routes.include_r3_routes",
+        fail_to_mount_r3,
+    )
+
+    with pytest.raises(RuntimeError, match="R3 worker/profile"):
+        create_bcsfuse_app(context)
+
+
+def test_factory_rejects_when_both_recommend_mounts_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.interfaces.api.recommend_routes import router as recommend_router
+
+    context, _ = build_context()
+    original_include_router = FastAPI.include_router
+
+    def fail_real_recommend_mount(self, router, *args, **kwargs):
+        if router is recommend_router:
+            raise RuntimeError("real recommend mount failed")
+        return original_include_router(self, router, *args, **kwargs)
+
+    def fail_fallback_recommend_mount(_: object) -> None:
+        raise RuntimeError("fallback recommend mount failed")
+
+    monkeypatch.setattr(FastAPI, "include_router", fail_real_recommend_mount)
+    monkeypatch.setattr(
+        "src.interfaces.api.recommend_parity_routes.include_r4_routes",
+        fail_fallback_recommend_mount,
+    )
+
+    with pytest.raises(RuntimeError, match="Recommend"):
         create_bcsfuse_app(context)
 
 

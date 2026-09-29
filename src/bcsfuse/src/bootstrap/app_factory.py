@@ -1,13 +1,16 @@
 """Transport composition for a fully assembled BCSFuse application context."""
 
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from src.bootstrap.application_context import ApplicationContext
 from src.bootstrap.oss_business_routes import include_oss_business_routes
+from src.bootstrap.route_mount_contract import (
+    validate_required_oss_business_routes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +90,35 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     context.registry.require("config")
     context.registry.require("secret_provider")
     startup_provider = context.registry.require("startup_provider")
+    background_index_target = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        background_thread = None
+        background_thread_started = False
         await startup_provider.initialize()
         try:
+            if background_index_target is not None:
+                import threading
+
+                background_thread = threading.Thread(
+                    target=background_index_target,
+                    daemon=True,
+                    name="bg-index-build",
+                )
+                background_thread.start()
+                background_thread_started = True
+                logger.info(
+                    "[Startup] Background index build thread started — "
+                    "search will return empty results until complete"
+                )
             yield
         finally:
-            await startup_provider.shutdown()
+            try:
+                if background_thread_started:
+                    background_thread.join()
+            finally:
+                await startup_provider.shutdown()
 
     # CRITICAL: Share application context with fusion_dependencies to avoid
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
@@ -137,6 +161,7 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # Starlette resolves duplicate routes in registration order.
     app.include_router(worker_lifecycle_router)
     include_oss_business_routes(app)
+    validate_required_oss_business_routes(app)
     logger.info("[App Factory] Business routes mounted successfully")
 
     # ========================================
@@ -147,11 +172,12 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # build completes, but the API won't block for minutes.
     try:
         from src.infra.config.feature_flags import FeatureFlags
+
         if FeatureFlags.is_enabled("ENABLE_PROFILE_EMBEDDING_INDEX"):
-            import threading
 
             def _background_build_index():
                 import time
+
                 start = time.time()
                 try:
                     logger.info("[Startup] Background vector index build starting...")
@@ -167,20 +193,35 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
                     vector_store = context.registry.get("vector_store")
 
                     if not embedding_gen:
-                        logger.warning("[Startup] Embedding generator not available — skipping background index build")
+                        logger.warning(
+                            "[Startup] Embedding generator not available — skipping background index build"
+                        )
                         return
                     if not profile_src:
-                        logger.warning("[Startup] Profile source not available — skipping background index build")
+                        logger.warning(
+                            "[Startup] Profile source not available — skipping background index build"
+                        )
                         return
                     if vector_store and vector_store.size() > 0:
-                        logger.info("[Startup] Vector store already has %d vectors — skipping background index build", vector_store.size())
+                        logger.info(
+                            "[Startup] Vector store already has %d vectors — skipping background index build",
+                            vector_store.size(),
+                        )
                         return
 
-                    from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-                    from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
+                    from src.domain.services.profile_embedding_indexer import (
+                        ProfileEmbeddingIndexer,
+                    )
                     from src.infra.config.data_paths import resolve_data_path
+                    from src.infra.indexing.profile_embedding_store import (
+                        ProfileEmbeddingStore,
+                    )
 
-                    dimension = getattr(vector_store, "dimension", 4096) if vector_store else 4096
+                    dimension = (
+                        getattr(vector_store, "dimension", 4096)
+                        if vector_store
+                        else 4096
+                    )
                     profile_store = ProfileEmbeddingStore(
                         dimension=dimension,
                         index_type="local",
@@ -196,29 +237,43 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
 
                     scan_result = profile_src.scan()
                     all_profiles = scan_result.profiles
-                    logger.info("[Startup] Found %d profiles to index", len(all_profiles))
+                    logger.info(
+                        "[Startup] Found %d profiles to index", len(all_profiles)
+                    )
 
                     if not all_profiles:
-                        logger.warning("[Startup] No profiles found — skipping background index build")
+                        logger.warning(
+                            "[Startup] No profiles found — skipping background index build"
+                        )
                         return
 
                     # Build worker_states for payload (availability, runtime_state)
                     worker_states = {}
                     try:
-                        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-                        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+                        from src.domain.models.worker_lifecycle_state import (
+                            WorkerLifecycleState,
+                        )
+                        from src.domain.models.worker_runtime_state import (
+                            WorkerRuntimeState,
+                        )
 
                         registry_store = _get_registry_store()
                         runtime_state_store = _get_runtime_state_store()
-                        active_workers = registry_store.list(lifecycle_states=[WorkerLifecycleState.ACTIVE])
+                        active_workers = registry_store.list(
+                            lifecycle_states=[WorkerLifecycleState.ACTIVE]
+                        )
                         worker_ids = [w.id for w in active_workers]
-                        runtime_states = runtime_state_store.batch_get_runtime_states(worker_ids)
+                        runtime_states = runtime_state_store.batch_get_runtime_states(
+                            worker_ids
+                        )
 
                         for worker in active_workers:
                             runtime_state = runtime_states.get(worker.id)
                             state_info = {
                                 "availability": worker.state.availability.value,
-                                "runtime_state": runtime_state.value if runtime_state else WorkerRuntimeState.OFFLINE.value,
+                                "runtime_state": runtime_state.value
+                                if runtime_state
+                                else WorkerRuntimeState.OFFLINE.value,
                             }
                             worker_states[worker.id] = state_info
                             handle = worker.identity.handle
@@ -227,9 +282,15 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
                             if hasattr(worker, "external_id") and worker.external_id:
                                 worker_states[worker.external_id] = state_info
 
-                        logger.info("[Startup] Loaded %d worker states for indexing", len(worker_states))
+                        logger.info(
+                            "[Startup] Loaded %d worker states for indexing",
+                            len(worker_states),
+                        )
                     except Exception as e:
-                        logger.warning("[Startup] Failed to load worker states: %s — indexing without visibility filters", e)
+                        logger.warning(
+                            "[Startup] Failed to load worker states: %s — indexing without visibility filters",
+                            e,
+                        )
 
                     result = indexer.build_index(
                         profiles=all_profiles,
@@ -241,7 +302,9 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
                     if result.indexed_count > 0:
                         logger.info(
                             "✅ [Startup] Background index build completed: indexed=%d, failed=%d, duration=%.1fs",
-                            result.indexed_count, result.failed_count, elapsed,
+                            result.indexed_count,
+                            result.failed_count,
+                            elapsed,
                         )
                         # Sync vectors to service index
                         if vector_store:
@@ -249,18 +312,27 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
                                 vector_store.sync_from_backend(force=True)
                             elif hasattr(vector_store, "sync_incremental"):
                                 vector_store.sync_incremental()
-                            logger.info("[Startup] Vector store now has %d vectors", vector_store.size())
+                            logger.info(
+                                "[Startup] Vector store now has %d vectors",
+                                vector_store.size(),
+                            )
                     else:
-                        logger.warning("⚠️ [Startup] Background index build produced no results (duration=%.1fs)", elapsed)
+                        logger.warning(
+                            "⚠️ [Startup] Background index build produced no results (duration=%.1fs)",
+                            elapsed,
+                        )
 
                 except Exception as e:
                     elapsed = time.time() - start
-                    logger.error("❌ [Startup] Background index build failed (duration=%.1fs): %s", elapsed, e, exc_info=True)
+                    logger.error(
+                        "❌ [Startup] Background index build failed (duration=%.1fs): %s",
+                        elapsed,
+                        e,
+                        exc_info=True,
+                    )
 
-            thread = threading.Thread(target=_background_build_index, daemon=True, name="bg-index-build")
-            thread.start()
-            logger.info("[Startup] Background index build thread started — search will return empty results until complete")
+            background_index_target = _background_build_index
     except Exception as e:
-        logger.warning("[Startup] Could not start background index build: %s", e)
+        logger.warning("[Startup] Could not configure background index build: %s", e)
 
     return app
