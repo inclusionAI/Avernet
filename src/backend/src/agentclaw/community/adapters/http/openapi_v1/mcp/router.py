@@ -56,16 +56,7 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
-from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
-    EffectiveMCPStateReaderProtocol,
-)
-from agentclaw.community.core.repository.protocols.bot import (
-    BotMCPConfigRepositoryProtocol,
-    BotRepository,
-)
-from agentclaw.community.core.repository.protocols.bot.mcp import (
-    ScopedMCPConfigRepositoryProtocol,
-)
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
@@ -78,8 +69,6 @@ from agentclaw.community.core.mcp.config_flow import (
 from agentclaw.community.core.mcp.scoped_config_flow import (
     HeaderGroup,
     ScopedMCPConfig,
-    read_scoped_config,
-    write_scoped_config,
 )
 from agentclaw.community.core.mcp.errors import McpServerNotFoundError
 from agentclaw.community.core.mcp.presentation import (
@@ -514,17 +503,9 @@ async def get_scoped_mcp_config(
     server_code: ServerCodePath,
     request: Request,
     owner_id: UserIdDep,
-    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
-    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
+    scoped_service: MCPScopedConfigServiceProtocol = Injected(MCPScopedConfigServiceProtocol),
 ) -> Envelope[McpScopedConfig]:
-    config = read_scoped_config(
-        user_id=owner_id,
-        server_code=server_code,
-        config_service=config_service,
-        bot_config_repo=bot_config_repo,
-        bot_repo=bot_repo,
-    )
+    config = scoped_service.read(user_id=owner_id, server_code=server_code)
     return envelope(_to_scoped_config(config), request)
 
 
@@ -540,15 +521,9 @@ async def update_scoped_mcp_config(
     body: McpScopedConfigWrite,
     request: Request,
     owner_id: UserIdDep,
-    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
-    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
-    command_repo: ScopedMCPConfigRepositoryProtocol = Injected(ScopedMCPConfigRepositoryProtocol),
-    market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
-    sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
-    capability_reader: EffectiveMCPStateReaderProtocol = Injected(EffectiveMCPStateReaderProtocol),
+    scoped_service: MCPScopedConfigServiceProtocol = Injected(MCPScopedConfigServiceProtocol),
 ) -> Envelope[McpScopedConfig]:
-    config = await write_scoped_config(
+    config = await scoped_service.replace(
         user_id=owner_id,
         server_code=server_code,
         endpoint_env=body.endpoint_env,
@@ -557,13 +532,6 @@ async def update_scoped_mcp_config(
             HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
             for group in body.params
         ),
-        config_service=config_service,
-        bot_config_repo=bot_config_repo,
-        bot_repo=bot_repo,
-        command_repo=command_repo,
-        market_service=market_service,
-        sync_service=sync_service,
-        capability_reader=capability_reader,
     )
     return envelope(_to_scoped_config(config), request)
 

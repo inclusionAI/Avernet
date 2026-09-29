@@ -1,6 +1,6 @@
 # Merge user and Bot MCP Headers per key
 
-Status: accepted design decision; implementation pending.
+Status: implemented in Avernet; enterprise integration and deployment pending.
 
 `ac_user_mcp_config` remains the user default and `ac_bot_mcp_config` remains the Bot's explicit configuration. Both the product UI and Manifest write control-plane state. A Manifest Apply replaces the target Bot's complete explicit Header set, not the user's defaults. The effective Header set for a normal MCP Center endpoint is formed by merging user defaults with the Bot's explicit Headers by name, with the Bot value winning on a collision. Thus a Manifest declaration of `{A: 3}` and a user default of `{B: 2}` yield `{A: 3, B: 2}` for that Bot. A later user update of B remains visible without rewriting the Bot row.
 

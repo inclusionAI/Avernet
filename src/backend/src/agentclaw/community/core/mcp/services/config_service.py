@@ -144,12 +144,13 @@ class MCPConfigService(MCPConfigServiceProtocol):
             for name in self._mcp_runtime_credentials.header_secrets.get(server_code, {})
         }
         for name, value in entries:
-            if not name or not name.strip() or len(name) > 256:
+            normalized_name = name.strip()
+            if not normalized_name or len(normalized_name) > 256:
                 return {"valid": False, "error": "Invalid MCP Header name"}
             if len(value) > 2000:
                 return {"valid": False, "error": f"Header value too long: {name}"}
-            if name.lower() in managed:
-                return {"valid": False, "error": f"Platform-managed Header: {name}"}
+            if normalized_name.lower() in managed:
+                return {"valid": False, "error": f"Platform-managed Header: {normalized_name}"}
         return {"valid": True, "error": None}
 
     def validate_bot_override(

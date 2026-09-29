@@ -31,6 +31,8 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
+from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
 from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
     EffectiveMCPStateReaderProtocol,
 )
@@ -126,6 +128,18 @@ def client(market, auth, config, sync, scoped_dependencies):
             binder.bind(BotMCPConfigRepositoryProtocol, to=bot_configs)
             binder.bind(ScopedMCPConfigRepositoryProtocol, to=command_repo)
             binder.bind(EffectiveMCPStateReaderProtocol, to=capability)
+            binder.bind(
+                MCPScopedConfigServiceProtocol,
+                to=MCPScopedConfigService(
+                    config_service=config,
+                    bot_config_repo=bot_configs,
+                    bot_repo=bots,
+                    command_repo=command_repo,
+                    market_service=market,
+                    sync_service=sync,
+                    capability_reader=capability,
+                ),
+            )
 
     app = FastAPI()
     app.include_router(router)
