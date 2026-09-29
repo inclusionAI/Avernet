@@ -115,3 +115,42 @@ def test_missing_config_or_non_json_cannot_ack(response, configured):
     )
     if not configured:
         client.post.assert_not_called()
+
+
+def test_real_transport_does_not_follow_redirects_or_forward_credentials():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+    from agentclaw.community.plugins.http_client import HttpxClient
+
+    paths = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            paths.append(self.path)
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(307)
+            self.send_header("Location", "/must-not-follow")
+            self.end_headers()
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = HttpxClient("")
+    adapter = HttpResourceWithdrawalPublisher(
+        base_url=f"http://127.0.0.1:{server.server_port}",
+        authorization_value="test-only",
+        http_client=client,
+        timeout_seconds=2,
+    )
+    try:
+        with pytest.raises(WithdrawalDeliveryError, match="http_307"):
+            adapter.publish(EVENT)
+        assert paths == ["/api/v1/knowledge/integrations/tc/files/withdraw-by-resource"]
+    finally:
+        client.close()
+        server.shutdown()
+        server.server_close()
+        thread.join()

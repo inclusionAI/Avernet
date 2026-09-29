@@ -150,6 +150,45 @@ async def test_active_lifecycle_recovers_storage_error_and_drains(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retry_count,error,expected",
+    [
+        (1, None, "retry_exhausted_crash_recovery"),
+        (0, RuntimeError("private"), "unexpected_delivery_error"),
+        (8, WithdrawalDeliveryError("timeout", retryable=True), "timeout"),
+    ],
+)
+async def test_crash_budget_unknown_failure_and_capped_backoff(
+    store, retry_count, error, expected
+):
+    from agentclaw.community.core.session_resources.withdrawal_models import (
+        ResourceWithdrawalModel,
+    )
+
+    store[1].create(_record())
+    delete(store[1])
+    with store[0].transactional_orm_session() as session:
+        session.query(ResourceWithdrawalModel).update({"retry_count": retry_count})
+    publisher = LocalResourceWithdrawalPublisher()
+
+    def fail(_):
+        raise error
+
+    if error is not None:
+        publisher.set_override("publish", fail)
+    await worker(
+        store, publisher, max_attempts=1 if error is None else 20, retry_max_seconds=20
+    ).run_once()
+    record = store[2].get("tc.resource.withdrawn:sr_001")
+    assert record.last_error == expected
+    assert record.status == ("pending" if expected == "timeout" else "blocked")
+    if expected == "timeout":
+        assert (record.available_at - record.updated_at).total_seconds() == 20
+    if error is None:
+        assert not publisher.calls_to("publish")
+
+
+@pytest.mark.asyncio
 async def test_lost_lease_is_not_acknowledged(store, monkeypatch, caplog):
     store[1].create(_record())
     delete(store[1])

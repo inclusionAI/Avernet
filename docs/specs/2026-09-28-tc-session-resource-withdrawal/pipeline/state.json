@@ -1,11 +1,12 @@
 {
   "change": "2026-09-28-tc-session-resource-withdrawal",
-  "stage": 1,
+  "stage": 2,
   "tested_base": "cd36acdfc48eec0597126b2cdb1197f44a45d8f7",
-  "tested_source_tree": "5c9e2bdf8ca5d2114d2c05aa50a1cad88b278b60",
+  "tested_source_tree": "70124666c70164ef23eadb3f3e8b129e35712fd1",
   "submission_authorized_date": "2026-09-29",
   "submission_intent": "commit and push; user creates PR; CI/merge readiness not claimed",
   "singlebox": "failed",
   "remote_pr": null,
-  "checks": "See validation.md; source unchanged since isolated stage verification."
+  "checks": "See validation.md; combined source unchanged since full-suite verification.",
+  "foundation_commit": "0e53dded56b5ed2156e14d31b39ccb1350b6a39c"
 }

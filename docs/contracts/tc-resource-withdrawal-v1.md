@@ -1,8 +1,3 @@
-> **Stage 1 review snapshot:** This document describes the complete target.
-> This stage adds the paused delivery foundation only. Automatic single-chat
-> deletion events and the operator CLI arrive in the stacked stage 2 patch.
-> Combined-tree results are not a separate full-suite run of this stage.
-
 # TC single-chat resource withdrawal — v1 draft
 
 Status: **TC implemented, default-paused; ECB wire contract NOT yet frozen**
