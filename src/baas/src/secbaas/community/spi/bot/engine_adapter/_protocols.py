@@ -12,7 +12,7 @@ device 亲和 key、adapter session 创建语义）收敛成可注册、可测�
   的 `real/` + `stub/`（noop/mock）。
 - **Scope**：全部引擎（openclaw / teclaw / aicoding / hermes / claude_code）；
   亲和键差异：openclaw → `agent:main:session:`、teclaw → `agent:main:default:`、
-  其余 → 基类默认通用格式。
+  aicoding / claude_code → `user:` 前置 + `:agent:` 尾段、其余（hermes）→ 基类默认通用格式。
 - send/inject 在 service 内无引擎分叉，**不属于本 SPI**。
 """
 
@@ -58,8 +58,10 @@ class BotEngineAdapter(Protocol):
         语义为路由亲和字符串（**非**去重 tuple）。显式 ``session_id`` 由调用方
         （``plan_session_id``）前置短路处理，本方法仅在无显式 session_id 时被调用。
 
-        - 基类默认（aicoding / hermes / claude_code）→
+        - 基类默认（hermes）→
           ``f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"``
+        - aicoding / claude_code →
+          ``f"user:{user_id}:session:{run_id}:agent:{tc_bot_id}"``
         - openclaw → ``f"agent:main:session:{run_id}:user:{user_id}"``
         - teclaw → ``f"agent:main:default:{run_id}:user:{user_id}"``
         """

@@ -429,7 +429,9 @@ class AsyncChatClient:
                 # 6. 检查是否以 error 状态终止（带上引擎侧真实错误，
                 #    否则上游 error 字段只剩 "error state" 外壳）
                 if state.state == "error":
-                    detail = f", error={state.error_message}" if state.error_message else ""
+                    detail = (
+                        f", error={state.error_message}" if state.error_message else ""
+                    )
                     raise BotSessionError(
                         f"session ended with error state: "
                         f"session_key={session_key}{detail}"

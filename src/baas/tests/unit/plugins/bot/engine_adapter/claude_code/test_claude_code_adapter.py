@@ -46,7 +46,7 @@ def test_session_consistency_key(cls: type) -> None:
     adapter = cls()
     assert (
         adapter.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-        == "agent:u1:session:r1:user:b1"
+        == "user:u1:session:r1:agent:b1"
     )
 
 
@@ -57,7 +57,7 @@ async def test_create_adapter_session_resolves_key_and_creates(cls: type) -> Non
     client = _FakeSessionClient(created_id="new-sess")
     sid, reused = await cls().create_adapter_session(
         session_client=client,
-        planned_id="agent:cc-bot:session:run-1:user:u1",
+        planned_id="user:u1:session:run-1:agent:cc-bot",
         user_id="u1",
         metadata={},
         bot_id="agent-1",
@@ -92,13 +92,13 @@ async def test_create_adapter_session_explicit_id_reuses(cls: type) -> None:
     client = _FakeSessionClient()
     sid, reused = await cls().create_adapter_session(
         session_client=client,
-        planned_id="agent:main:session:existing-key:user:u1",
+        planned_id="user:u1:session:existing-key:agent:cc-bot",
         user_id="u1",
         metadata={},
         bot_id="agent-1",
         session_pending=False,
     )
-    assert (sid, reused) == ("agent:main:session:existing-key:user:u1", True)
+    assert (sid, reused) == ("user:u1:session:existing-key:agent:cc-bot", True)
     assert client.create_calls == []
 
 
