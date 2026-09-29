@@ -747,7 +747,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
 
         本地模式下返回 localhost 可访问地址。
         """
-        deployment_name = paas_device_id.split(_SANDBOX_ID_DELIMITER, maxsplit=1)[0]
+        deployment_name = paas_device_id
         public_port = self._resolve_public_port(deployment_name)
         normalized_path = "/" + path.lstrip("/")
         return WsConnectionInfo(
@@ -765,7 +765,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         template_id: int | None = None,
     ) -> HttpConnectionInfo:
         """解析 HTTP 连接信息。"""
-        deployment_name = paas_device_id.split(_SANDBOX_ID_DELIMITER, maxsplit=1)[0]
+        deployment_name = paas_device_id
         public_port = self._resolve_public_port(deployment_name)
         normalized_path = "/" + path.lstrip("/")
         return HttpConnectionInfo(
