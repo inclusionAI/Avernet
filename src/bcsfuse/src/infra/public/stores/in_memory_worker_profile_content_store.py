@@ -34,6 +34,7 @@ class InMemoryWorkerProfileContentStore:
             previous_content = WorkerProfileContent.model_validate(previous)
             stored.created_at = previous_content.created_at
             stored.version = previous_content.version + 1
+            stored.is_active = previous_content.is_active
         else:
             stored.created_at = stored.created_at or now
         stored.updated_at = now

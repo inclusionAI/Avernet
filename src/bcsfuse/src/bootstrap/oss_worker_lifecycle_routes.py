@@ -231,12 +231,22 @@ async def activate_worker_profile(
     registry = request.app.state.context.registry
     profile_store = registry.get("worker_profile_content_store")
     binding_store = registry.get("worker_profile_binding_store")
-    if profile_store is None or binding_store is None:
+    worker_store = registry.get("worker_registry_store")
+    if profile_store is None or binding_store is None or worker_store is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "PROVIDER_NOT_AVAILABLE",
-                "message": "profile content or binding provider unavailable",
+                "message": "profile content, binding, or worker provider unavailable",
+            },
+        )
+    worker = worker_store.get_by_id(worker_id)
+    if worker is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "WORKER_NOT_FOUND",
+                "message": f"Worker {worker_id} not found",
             },
         )
     target_profile = profile_store.get(worker_id, profile_id)
@@ -263,6 +273,9 @@ async def activate_worker_profile(
         activated = profile_store.activate(worker_id, profile_id)
         if activated is None:
             raise RuntimeError("profile activation did not update a record")
+        updated_worker = worker.model_copy(deep=True)
+        updated_worker.active_profile_key = f"{worker_id}:{profile_id}"
+        worker_store.update(updated_worker)
     except Exception as error:
         if binding_written:
             try:
@@ -300,7 +313,7 @@ async def activate_worker_profile(
         "profile_id": profile_id,
         "is_active": True,
         "binding_updated": True,
-        "worker_updated": False,
+        "worker_updated": True,
         "message": f"Profile {profile_id} activated successfully for worker {worker_id}",
     }
 

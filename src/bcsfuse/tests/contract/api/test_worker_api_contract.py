@@ -133,6 +133,11 @@ def test_composed_app_matches_worker_profile_lifecycle_contract(composed_test_cl
     assert activated.status_code == 200, activated.text
     assert activated.json()["is_active"] is True
     assert activated.json()["binding_updated"] is True
+    assert activated.json()["worker_updated"] is True
+    activated_worker = app.state.context.registry.get(
+        "worker_registry_store"
+    ).get_by_id(worker_id)
+    assert activated_worker.active_profile_key == f"{worker_id}:{profile_id}"
 
     read_profile = client.get(
         f"/v1/workers/{worker_id}/profiles/{profile_id}",

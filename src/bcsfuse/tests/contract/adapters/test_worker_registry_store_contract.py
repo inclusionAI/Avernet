@@ -66,6 +66,30 @@ def test_in_memory_profile_activation_keeps_only_one_active_profile():
     assert store.get_active(first.worker_id).profile_id == second.profile_id
 
 
+def test_in_memory_profile_save_preserves_active_state():
+    store = InMemoryWorkerProfileContentStore()
+    saved = store.save(
+        WorkerProfileContent(
+            worker_id="wrk_profile_update",
+            profile_id="default",
+            display_name="Before Update",
+        )
+    )
+    store.activate(saved.worker_id, saved.profile_id)
+
+    updated = store.save(
+        WorkerProfileContent(
+            worker_id=saved.worker_id,
+            profile_id=saved.profile_id,
+            display_name="After Update",
+        )
+    )
+
+    assert updated.is_active is True
+    assert store.get(saved.worker_id, saved.profile_id).is_active is True
+    assert store.get_active(saved.worker_id).display_name == "After Update"
+
+
 def test_profile_route_compatibility_adapter_uses_only_typed_port():
     typed_store = InMemoryWorkerProfileContentStore()
     adapter = WorkerProfileContentStoreCompatibilityAdapter(typed_store)
