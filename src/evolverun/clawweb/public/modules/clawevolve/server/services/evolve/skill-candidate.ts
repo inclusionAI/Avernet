@@ -10,6 +10,7 @@ export type FrozenSkillTarget = {
   skillId: string;
   name: string;
   ownerUserId?: string;
+  botEnv?: string;
   spaceId?: string | null;
   spaceType?: "PERSONAL" | "TEAM" | null;
   baseline: { ref: string; sha256: string; versionId?: string; versionNo?: number };
@@ -83,6 +84,7 @@ export async function freezeSkillTarget(input: {
   taskId: string;
   ownerUserId: string;
   botId: string;
+  botEnv?: string;
   assetId: string;
   skillAssetRepo: SkillAssetRepository;
   hostLocalSkills: BotSkillGateway;
@@ -96,8 +98,12 @@ export async function freezeSkillTarget(input: {
   if (!asset || !canReadSpaceRecord(asset, input.identity.userId, spaces) || asset.bot_id !== input.botId) {
     throw Object.assign(new Error("待处理 Skill 不存在，或不属于当前 Bot"), { status: 404 });
   }
+  if (asset.bot_env && input.botEnv !== asset.bot_env) {
+    throw Object.assign(new Error("任务 Bot 环境与登记 Skill 不一致"), { status: 409 });
+  }
   const exported = await input.hostLocalSkills.exportLocalSkill({
     botId: asset.bot_id,
+    botEnv: asset.bot_env ?? input.botEnv,
     skillId: asset.external_skill_id,
     ownerUserId: asset.owner_user_id,
     identity: input.identity,
@@ -110,6 +116,7 @@ export async function freezeSkillTarget(input: {
   return {
     assetId: asset.asset_id,
     ownerUserId: asset.owner_user_id,
+    botEnv: asset.bot_env ?? exported.botEnv ?? input.botEnv,
     spaceId: asset.space_id ?? null,
     spaceType: asset.space_type ?? null,
     skillId: asset.external_skill_id,

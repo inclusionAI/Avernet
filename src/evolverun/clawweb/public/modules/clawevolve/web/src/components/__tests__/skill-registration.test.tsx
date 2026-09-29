@@ -13,7 +13,7 @@ const bots = [
 ]
 function open(onRegistered = vi.fn()) { render(<SkillRegistrationDialog bots={bots} onClose={vi.fn()} onRegistered={onRegistered} />) }
 function choose(name: string) {
-  fireEvent.click(screen.getByRole('button', { name: /请选择 Bot|展开查看|owner.*bot/ }))
+  fireEvent.click(screen.getByRole('button', { name: /请选择 Bot|展开查看|owner.*(?:bot|default)/ }))
   fireEvent.click(screen.getByRole('radio', { name: new RegExp(name) }))
 }
 beforeEach(() => {
@@ -33,7 +33,7 @@ it('uses the native task Bot picker with environment and service badges and regi
   expect(screen.getByText('服务型 Bot')).toBeTruthy()
   fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 's1' } })
   fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
-  await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'prod-bot', skillId: 's1' }))
+  await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'prod-bot', botEnv: 'prod', skillId: 's1' }))
   await waitFor(() => expect(registered).toHaveBeenCalledWith({ assetId: 'ASSET-1' }))
 })
 
@@ -73,4 +73,17 @@ it('keeps permission failures distinct from an unreachable Bot and leaves unknow
   fireEvent.click(screen.getByRole('button', { name: '重试读取 Skill' }))
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Skill 列表读取失败，请稍后重试。'))
   expect(screen.queryByText(/Internal Server Error/)).toBeNull()
+})
+
+ it('keeps pre and prod distinct when their Bot IDs and owners are identical', async () => {
+  render(<SkillRegistrationDialog bots={bots.map(bot => ({ ...bot, botId: 'default' }))} onClose={vi.fn()} onRegistered={vi.fn()} />)
+  choose('预发普通 Bot')
+  await waitFor(() => expect(api.evolve.listAvailableLocalSkills).toHaveBeenLastCalledWith('default', 'pre'))
+  await screen.findByRole('option', { name: '我的技能' })
+  choose('生产服务 Bot')
+  await waitFor(() => expect(api.evolve.listAvailableLocalSkills).toHaveBeenLastCalledWith('default', 'prod'))
+  await screen.findByRole('option', { name: '我的技能' })
+  fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 's1' } })
+  fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
+  await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'default', botEnv: 'prod', skillId: 's1' }))
 })

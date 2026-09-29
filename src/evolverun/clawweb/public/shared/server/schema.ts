@@ -3297,4 +3297,9 @@ END`,
     migrate: cleanupEvolveSchema,
   },
   ...repairBatchMigrations,
+  {
+    version: 139,
+    description: "Preserve the selected Bot environment for Skill assets",
+    sql: [`ALTER TABLE ce_skill_assets ADD COLUMN bot_env VARCHAR(32) DEFAULT NULL COMMENT '来源Bot环境；历史未记录时为空'`],
+  },
 ];

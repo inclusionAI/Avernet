@@ -19,7 +19,7 @@ const asset = { assetId: 'asset-1', botId: 'owner-bot', name: 'Fixed Skill', cur
 const bot = { botId: 'owner-bot', botName: 'Owner Bot', ownerId: 'original-owner', env: 'dev', activeEngine: 'openclaw', deviceProvider: 'baas' }
 const stageExtensions = { diagnose: { preprocess: { enabled: true, implementationId: 'verified-host' } } }
 const hardeningExtensions = { hardening: { replace: { enabled: true, implementationId: 'hardening-host' } } }
-const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
+const defaults = { assetId: asset.assetId, botId: asset.botId, botEnv: 'dev', userId: 'original-owner',
   diagnose: { taskType: 'diagnose', goal: '原技能诊断目标', unavailableReason: null, launchDescription: null, stageExtensions },
   hardening: { taskType: 'hardening', goal: '原技能加固目标', unavailableReason: null, launchDescription: null, stageExtensions: hardeningExtensions },
   optimize: { taskType: 'full', goal: '原技能优化目标', unavailableReason: null, launchDescription: null, stageExtensions } }
@@ -43,7 +43,7 @@ beforeEach(() => {
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset, { ...asset, assetId: 'other-skill', name: 'Other Skill' }] })
   api.evolve.stageCatalog.mockResolvedValue({ stages: [], flows: [] })
   api.evolve.listStageSkills.mockResolvedValue({ items: [] })
-  api.bots.list.mockResolvedValue({ bots: [bot, { ...bot, botId: 'other-bot', botName: 'Other Bot' }] })
+  api.bots.list.mockResolvedValue({ bots: [{ ...bot, env: 'prod' }, bot, { ...bot, botId: 'other-bot', botName: 'Other Bot' }] })
   api.evolve.createTask.mockResolvedValue({ task_id: 'created', status: 'pending' })
   api.evolve.createDiagnosis.mockResolvedValue({ task_id: 'created', status: 'pending' })
 })

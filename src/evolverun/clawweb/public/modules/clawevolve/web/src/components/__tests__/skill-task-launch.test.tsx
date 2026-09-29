@@ -16,7 +16,7 @@ vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { us
 
 const asset = { assetId: 'asset / 1', botId: 'bot-1', name: '我的技能', skillId: 'skill-1', currentVersion: 'v1', updatedAt: 1789060000 }
 const stageBinding = { diagnose: { preprocess: { enabled: true, implementationId: 'host-stage-v3' } } }
-const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
+const defaults = { assetId: asset.assetId, botId: asset.botId, botEnv: 'prod', userId: 'original-owner',
   diagnose: { taskType: 'diagnose', goal: '检查该技能的表现', unavailableReason: null,
     stageExtensions: stageBinding, launchDescription: 'Host diagnostic flow。' },
   hardening: { taskType: 'hardening', goal: '加固该技能的内容', unavailableReason: null,
@@ -69,7 +69,7 @@ describe('Skill task launch confirmation', () => {
     await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledTimes(1))
     const [input, key] = api.evolve.createTask.mock.calls[0]
     expect(input).toMatchObject({ taskType: action === 'diagnose' ? 'diagnose' : action === 'hardening' ? 'hardening' : 'full',
-      targetSkillAssetId: asset.assetId, botId: 'bot-1', userId: 'original-owner', goal: defaults[action].goal,
+      targetSkillAssetId: asset.assetId, botId: 'bot-1', botEnv: 'prod', userId: 'original-owner', goal: defaults[action].goal,
       runtimeMaintenance: false, stageSelection: action === 'hardening'
         ? { diagnose: false, hardening: true, plan: false, optimize: false }
         : { diagnose: true, hardening: false, plan: true, optimize: action === 'optimize' } })

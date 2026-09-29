@@ -63,7 +63,7 @@ afterEach(async () => {
 
 async function seedAsset(space: AccessibleSpace = team) {
   return skills.createAsset({ assetId: "target", versionId: "target-v1", ownerUserId: actor,
-    spaceId: space.id, spaceType: space.type, spaceName: space.name, botId: "target-bot", externalSkillId: "target-skill",
+    spaceId: space.id, spaceType: space.type, spaceName: space.name, botId: "target-bot", botEnv: "prod", externalSkillId: "target-skill",
     displayName: "Evidence Skill", packageRef: "fixture:skill", packageSha256: "fixture-checksum" });
 }
 
@@ -128,6 +128,7 @@ describe("GET Skill task defaults", () => {
     await seedStage("old", 1);
     await seedStage("newest", 2);
     const response = await getDefaults();
+    expect((await response.clone().json()).botEnv).toBe("prod");
     expect(response.status, await response.clone().text()).toBe(200);
     const result = await response.json();
     for (const action of [result.diagnose, result.hardening, result.optimize]) {

@@ -68,6 +68,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
         taskName: `${actionName[action]} · ${asset.name}`.slice(0, 128),
         userId: defaults.userId,
         botId: defaults.botId,
+        ...(defaults.botEnv ? { botEnv: defaults.botEnv } : {}),
         targetSkillAssetId: asset.assetId,
         goal: preset.goal,
         diagnoseIntent: preset.goal,
@@ -83,6 +84,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
             ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }
         : action === 'hardening'
           ? { taskName: common.taskName, userId: defaults.userId, botId: defaults.botId,
+              ...(defaults.botEnv ? { botEnv: defaults.botEnv } : {}),
               targetSkillAssetId: asset.assetId, goal: preset.goal, model: common.model, runtimeMaintenance: false,
               stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
               ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}), taskType: 'hardening' }

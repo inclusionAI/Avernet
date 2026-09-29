@@ -44,6 +44,7 @@ export type EvolveTaskStageExtensions = Partial<Record<
 >>
 
 export type EvolveSkillTaskDefaults = {
+  botEnv?: string | null
   assetId: string
   botId: string
   userId: string
@@ -134,7 +135,7 @@ export const api = {
     }): Promise<EvolveStageDevelopment> {
       return fetchJson('/api/evolve/stage-developments', { method: 'POST', body: JSON.stringify(input) })
     },
-    registerSkillAsset(input: { botId: string; skillId: string; spaceId?: string }): Promise<EvolveSkillAsset> {
+    registerSkillAsset(input: { botId: string; botEnv?: string; skillId: string; spaceId?: string }): Promise<EvolveSkillAsset> {
       return fetchJson('/api/evolve/skill-assets', { method: 'POST', body: JSON.stringify(input) })
     },
   },

@@ -14,22 +14,30 @@ export interface BotSkillGateway {
   /** Live display metadata only; never substitutes for the registering user's authorization. */
   getBotMetadata?(input: {
     botId: string;
+    /** Exact directory environment; when omitted the host must reject ambiguous targets. */
+    botEnv?: string;
     identity: RequestIdentity;
   }): Promise<{ ownerId: string | null }>;
   listLocalSkills(input: {
     botId: string;
+    /** Exact directory environment; when omitted the host must reject ambiguous targets. */
+    botEnv?: string;
     identity: RequestIdentity;
   }): Promise<BotSkillSummary[]>;
   exportLocalSkill(input: {
     botId: string;
+    /** Exact directory environment; when omitted the host must reject ambiguous targets. */
+    botEnv?: string;
     skillId: string;
     ownerUserId: string;
     identity: RequestIdentity;
-  }): Promise<{ packageBytes: Buffer; sha256: string; displayName: string; description?: string | null }>;
+  }): Promise<{ packageBytes: Buffer; sha256: string; displayName: string; description?: string | null; botEnv?: string }>;
   /** A pre-write rejection may set writeNotStarted=true. Never set it after
    * starting a mutation or when the external outcome is unknown. */
   replaceLocalSkill(input: {
     botId: string;
+    /** Exact directory environment; when omitted the host must reject ambiguous targets. */
+    botEnv?: string;
     skillId: string;
     ownerUserId: string;
     /** Read-before-upload check; this port does not promise atomic provider CAS. */

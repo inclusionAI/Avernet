@@ -282,6 +282,7 @@ async function runSkillEvolutionToWaitingAcceptance(input: {
     versionId: `${input.assetId}-BASE`,
     ownerUserId: "user-1",
     botId: "bot-arca",
+    botEnv: "pre",
     externalSkillId: input.externalSkillId,
     displayName: "待优化 Skill",
     packageRef: `oss://clawevolve-artifacts/evolve/skills/${input.assetId}/versions/v1/package.zip`,
@@ -309,6 +310,7 @@ async function runSkillEvolutionToWaitingAcceptance(input: {
   expect(created.status).toBe(201);
   expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({
     botId: "bot-arca",
+    botEnv: "pre",
     skillId: input.externalSkillId,
   }));
   expect(putObject).toHaveBeenCalledWith(
@@ -5294,4 +5296,23 @@ describe("business output preflight", () => {
     expect(await repo.findStep("PREFLIGHT-S")).toEqual(before);
     expect(await db.query("SELECT * FROM ce_stage_interactions WHERE task_id = ?", ["PREFLIGHT"])).toEqual([]);
   });
+});
+
+it('uses the registered environment before dispatch and rejects an explicitly different task environment', async () => {
+  await seedArcaBot('user-1', 'default', 'prod');
+  await skillAssetRepo.createAsset({ assetId: 'ENV-SKILL', versionId: 'ENV-V1', ownerUserId: 'user-1',
+    botId: 'default', botEnv: 'prod', externalSkillId: 'env-skill', displayName: 'Example',
+    packageRef: 'oss://bucket/example.zip', packageSha256: 'sha' });
+  const body = { taskType: 'diagnose', taskName: '环境回归', userId: 'user-1', botId: 'default',
+    targetSkillAssetId: 'ENV-SKILL', judgeBackend: 'subagent', model: 'GLM-5.2', diagnoseIntent: '检查实际表现' };
+  const send = (input: unknown) => fetch(`${baseUrl}/api/evolve/tasks`, { method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify(input) });
+  expect((await send({ ...body, botEnv: 'pre' })).status).toBe(409);
+  expect(dispatch).not.toHaveBeenCalled();
+  expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+  const response = await send(body);
+  expect(response.status).toBe(201);
+  const task = await repo.findTask((await response.json()).task_id);
+  expect(JSON.parse(task!.config_json!)).toMatchObject({ botEnv: 'prod', targetSkill: { botEnv: 'prod' } });
+  expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: 'default', botEnv: 'prod' }));
 });
