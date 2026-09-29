@@ -16,7 +16,7 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-bcs_dir="$repo_root/src/bcs"
+bcs_dir="$repo_root/apps/bcs"
 
 base=""
 head="HEAD"
@@ -49,7 +49,7 @@ run_required() {
 # ----------------------------------------------------------------------------
 # Parallel-gate helpers (Bash 3.2 compatible: no associative arrays, no wait -n)
 # ----------------------------------------------------------------------------
-_PREPUSH_LOG_DIR="$repo_root/scripts/.dependencies/logs/prepush"
+_PREPUSH_LOG_DIR="$repo_root/singlebox/.dependencies/logs/prepush"
 
 # _kill_tree <pid> [signal] — recursively terminate a process and all its
 # descendants. Portable (no `setsid`); macOS ships pgrep/pkill in /usr/bin.

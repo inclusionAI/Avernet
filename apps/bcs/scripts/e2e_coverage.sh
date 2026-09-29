@@ -174,7 +174,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   # there with BCS_DEBUG=true above. The file is truncated right before e2e runs
   # below so the endpoint report counts only the e2e suite's hits, not singlebox's
   # bot-onboarding setup requests nor a stale log from a prior run.
-  bcs_log="$repo_root/scripts/.dependencies/logs/bcs.log"
+  bcs_log="$repo_root/singlebox/.dependencies/logs/bcs.log"
   # Use bcsfuse dev mode (SQLite) so e2e does not need an external MySQL.
   export BCSFUSE_PROVIDER_MODE=dev
   "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start bcsfuse bcs_bots
@@ -215,7 +215,7 @@ cli_gate_status=0
 # truncating here is safe (it is already running; it keeps its file offset and
 # the next line lands at the new EOF). Skipped under --skip-start only if the
 # caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
-bcs_log="${bcs_log:-${BCS_LOG:-$repo_root/scripts/.dependencies/logs/bcs.log}}"
+bcs_log="${bcs_log:-${BCS_LOG:-$repo_root/singlebox/.dependencies/logs/bcs.log}}"
 : > "$bcs_log" 2>/dev/null || true
 cli_coverage_log="$cov_dir/cli_commands.log"
 mkdir -p "$cov_dir"

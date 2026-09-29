@@ -71,7 +71,7 @@ fi
 
 echo "=== CI COVERAGE REPORT ==="
 ci_check_args=(
-  "$repo_root/scripts/ci/report_check.py"
+  "$repo_root/singlebox/ci/report_check.py"
   --junit "$unit_report"
   --coverage "$coverage_report"
   --source-root "$baas_dir/src"
@@ -87,7 +87,7 @@ echo "BAAS CI GATE PASSED"
 
 echo "=== E2E COVERAGE REPORT ==="
 asgi_check_args=(
-  "$repo_root/scripts/ci/report_check.py"
+  "$repo_root/singlebox/ci/report_check.py"
   --junit "$report_dir/asgi.xml"
   --coverage "$report_dir/cov-asgi.xml"
   --source-root "$baas_dir/src"

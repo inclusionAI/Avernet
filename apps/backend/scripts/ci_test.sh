@@ -114,7 +114,7 @@ if [[ "$pytest_status" -ne 0 ]]; then
 fi
 
 check_args=(
-  "$repo_root/scripts/ci/report_check.py"
+  "$repo_root/singlebox/ci/report_check.py"
   --junit "$junit_report"
   --coverage "$coverage_report"
   --source-root "$repo_root/apps/backend/src"

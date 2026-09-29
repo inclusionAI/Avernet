@@ -70,7 +70,7 @@ fi
 
 echo "--- unit coverage report ---"
 check_args=(
-  "$repo_root/scripts/ci/report_check.py"
+  "$repo_root/singlebox/ci/report_check.py"
   --junit "$unit_report"
   --coverage "$coverage_report"
   --source-root "$gateway_dir/apps/gateway"
