@@ -58,7 +58,9 @@ _SECBAAS_HASH = (
     ":UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
 )
 
-_SECBAAS_RELPATH = "apps/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
+_SECBAAS_RELPATH = (
+    "apps/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
+)
 _OURS_RELPATH = "apps/gateway/apps/gateway/community/core/app/_key_gen.py"
 
 # The monorepo root is the ancestor holding both module trees. Derived from the
