@@ -71,7 +71,9 @@ offer the legacy route methods keep their original registry identity; internal
 providers only need to implement the typed Plugin API. Durable Worker/Profile
 records are deleted together by the registry provider. Vector data is treated
 as rebuildable derived state, so vector cleanup occurs before that atomic
-durable delete without deleting Profile records separately.
+durable delete without deleting Profile records separately. Profile vector
+cleanup covers both the legacy exact ID (`worker:profile`) and every indexed
+fragment below its prefix (`worker:profile:*`).
 
 The composed application exposes the canonical Worker/Profile lifecycle under
 `/v1`: worker creation and lookup, online/offline transitions, profile upsert,
@@ -79,7 +81,14 @@ activation and lookup, and worker deletion. Missing workers use HTTP 404 with
 `WORKER_NOT_FOUND`; duplicate creation uses HTTP 409 with
 `WORKER_ALREADY_EXISTS`; a second delete is the same explicit 404 result. The
 legacy `/api/v1/workers/{worker_id}/online|offline` aliases preserve those
-status and error-code semantics during migration.
+status and error-code semantics alongside the canonical routes.
+
+The existing direct `/v1` and `/api/v1` service paths used by Backend and
+BCS/BCN are long-lived compatibility contracts. Gateway routes are additive
+aliases and do not replace those direct paths. OCB's externally observable
+BCSFuse behavior is the internal compatibility baseline; deployment-only
+administration and diagnostics may remain conditionally mounted by the
+internal composition root rather than becoming public OSS routes.
 
 ## Lifecycle and failure behavior
 
@@ -91,6 +100,12 @@ failures also propagate instead of producing a partially usable service.
 Background indexing starts only after startup initialization succeeds. During
 shutdown, the application waits for an active index build before shutting down
 providers so that background work cannot race provider teardown.
+
+Worker registration is a compensating operation across registry, runtime,
+binding, audit, and index providers. If a post-create side effect fails, the
+service removes any partially written index state and deletes the durable
+worker aggregate before returning the error. Retrying the same registration
+must not fail with `WORKER_ALREADY_EXISTS` because of the failed attempt.
 
 Protected public routes use `AuthProvider.validate_request(request)` from the
 published provider contract. Replacement authentication providers must
