@@ -43,7 +43,13 @@ As with task detail reads, administrators can also open Skill details, event
 history and frozen version content/diffs without a space membership check.
 This grants no additional editing, rollback, task execution or application
 permission; those operations retain their existing authorization checks.
-Host Bot metadata is optional and still uses the caller's identity.
+After visibility checks, Bot names and owners are enriched in one database query
+restricted to the returned records' Bot IDs, using the injected `botDb` when
+present. Shared Bot IDs are matched by owner; ambiguous metadata stays unknown.
+Missing metadata never hides an authorized record or grants mutation access.
+Existing host Skill description reads still use the caller's identity. The
+frontend consumes the returned `botName`; the personal Bot list is loaded only
+for the registration dialog and retains its original access rules.
 
 ## Singlebox and capability discovery
 

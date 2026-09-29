@@ -21,6 +21,13 @@ export type SkillAssetRow = {
   gmt_modified: number | string;
 };
 
+export type SkillBotMetadataRow = {
+  bot_id: string;
+  bot_name: string | null;
+  owner_id: string | null;
+  entity_id: string | null;
+};
+
 export type SkillVersionRow = {
   id: number;
   version_id: string;
@@ -50,7 +57,18 @@ const eventProjection = `SELECT e.*, vf.version_no AS version_from_no, vt.versio
   JOIN ce_skill_assets a ON a.asset_id = e.asset_id`;
 
 export class SkillAssetRepository {
-  constructor(private readonly db: IDatabase) {}
+  constructor(private readonly db: IDatabase, private readonly botDb: Pick<IDatabase, "query"> = db) {}
+
+  /** Display metadata for already-authorized records, never a source of access permissions. */
+  async listBotMetadata(botIds: readonly string[]): Promise<SkillBotMetadataRow[]> {
+    const ids = [...new Set(botIds.filter(Boolean))];
+    if (!ids.length) return [];
+    return this.botDb.query<SkillBotMetadataRow>(
+      `SELECT bot_id, bot_name, owner_id, entity_id FROM ac_bots
+       WHERE bot_id IN (${ids.map(() => "?").join(",")}) AND is_delete = 0 ORDER BY id DESC`,
+      ids,
+    ).catch(() => []);
+  }
 
   /** Only release after the host proves that no write was started. */
   async releaseUnstartedApplication(assetId: string, operationId: string, reservationId: string) {

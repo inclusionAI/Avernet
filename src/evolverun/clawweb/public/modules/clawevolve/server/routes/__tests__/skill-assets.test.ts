@@ -49,6 +49,7 @@ async function startRouter(realRepository = false, spaces?: Array<{ id: string; 
     await runMigrations(database, "sqlite");
   }
   const repo = database ? new SkillAssetRepository(database) : {
+    listBotMetadata: async () => [],
     findAsset: async () => asset,
     findVersion: async () => version,
   } as unknown as SkillAssetRepository;

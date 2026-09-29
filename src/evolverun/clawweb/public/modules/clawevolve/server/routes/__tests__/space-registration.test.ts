@@ -449,4 +449,41 @@ describe("Skill administrator read scope", () => {
     expect((await bodyOf(await get(`/skill-assets/${personal.assetId}`, "administrator"))).canEdit).toBe(false);
     expect((await bodyOf(await get(`/skill-assets/${personal.assetId}/history`, "administrator"))).events).toHaveLength(1);
   });
+
+  it("enriches both administrator lists from only the authorized records' Bot IDs", async () => {
+    await seed();
+    vi.mocked(hostLocalSkills.getBotMetadata!).mockRejectedValue(new Error("No personal Bot access"));
+    vi.mocked(hostLocalSkills.listLocalSkills).mockRejectedValue(new Error("No personal Bot access"));
+    const metadata = vi.spyOn(assets, 'listBotMetadata').mockResolvedValue([
+      { bot_id: 'bot-fixture', bot_name: 'Database Bot', owner_id: 'real-bot-owner', entity_id: 'real-bot-owner' },
+    ]);
+    for (const path of ['/skill-assets', '/skill-events']) {
+      const all = await bodyOf(await get(`${path}?scope=all`, 'administrator'));
+      expect(all.items).toHaveLength(3);
+      expect(all.items.every((item: { botName: string; ownerId: string }) =>
+        item.botName === 'Database Bot' && item.ownerId === 'real-bot-owner')).toBe(true);
+      expect(metadata).toHaveBeenLastCalledWith(['bot-fixture']);
+      metadata.mockClear();
+      expect((await bodyOf(await get(`${path}?scope=all`, 'unrelated-user'), 403)).error).toBe('Forbidden');
+      expect(metadata).not.toHaveBeenCalled();
+      expect((await bodyOf(await get(path, 'unrelated-user'))).items).toEqual([]);
+      expect(metadata).toHaveBeenLastCalledWith([]);
+    }
+  });
+
+  it("does not confuse owners of a shared Bot ID when enriching list records", async () => {
+    await seed();
+    vi.mocked(hostLocalSkills.getBotMetadata!).mockResolvedValue({ ownerId: owner });
+    vi.spyOn(assets, 'listBotMetadata').mockResolvedValue([
+      { bot_id: 'bot-fixture', bot_name: 'Registrar Bot', owner_id: owner, entity_id: owner },
+      { bot_id: 'bot-fixture', bot_name: 'Member Bot', owner_id: member, entity_id: member },
+    ]);
+    for (const path of ['/skill-assets', '/skill-events']) {
+      expect((await bodyOf(await get(`${path}?scope=all&ownerUserId=${member}`, 'administrator'))).items[0])
+        .toMatchObject({ botName: 'Member Bot', ownerId: member });
+      expect((await bodyOf(await get(`${path}?scope=all&ownerUserId=${outsider}`, 'administrator'))).items[0])
+        .toMatchObject({ botName: null, ownerId: null });
+    }
+  });
+
 });
