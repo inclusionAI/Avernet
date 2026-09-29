@@ -90,6 +90,16 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     context.registry.require("config")
     context.registry.require("secret_provider")
     startup_provider = context.registry.require("startup_provider")
+    profile_store = context.registry.get("worker_profile_content_store")
+    if profile_store is not None:
+        from src.bootstrap.profile_store_compat import (
+            ensure_profile_route_compatibility,
+        )
+
+        context.registry.register(
+            "worker_profile_content_store",
+            ensure_profile_route_compatibility(profile_store),
+        )
     background_index_target = None
 
     @asynccontextmanager
@@ -153,6 +163,7 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # DO NOT import from src.interfaces.api.* because it triggers:
     # __init__.py -> app.py -> recommend_routes.py -> drm_resource.py -> Layotto init
     from src.bootstrap.oss_worker_lifecycle_routes import (
+        external_router as worker_lifecycle_external_router,
         router as worker_lifecycle_router,
     )
 
@@ -160,6 +171,7 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # worker router, which exposes the same path with best-effort cleanup.
     # Starlette resolves duplicate routes in registration order.
     app.include_router(worker_lifecycle_router)
+    app.include_router(worker_lifecycle_external_router)
     include_oss_business_routes(app)
     validate_required_oss_business_routes(app)
     logger.info("[App Factory] Business routes mounted successfully")

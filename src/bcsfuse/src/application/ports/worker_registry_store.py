@@ -1,75 +1,62 @@
-from typing import Protocol, Optional, List
-from datetime import datetime
+"""Transport-agnostic persistence contract for Worker registry data."""
+
+from __future__ import annotations
+
+from typing import Protocol, runtime_checkable
+
+from src.domain.models.worker import TrustLevel, Worker
+from src.domain.models.worker_config import WorkerConfig
+from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from src.domain.models.worker_source_info import WorkerSourceType
 
 
+@runtime_checkable
 class WorkerRegistryStore(Protocol):
-    """Public worker registry store contract.
+    """Canonical registry API implemented by public and internal providers."""
 
-    Implementations may be OSS defaults (SQLite, PostgreSQL) or internal plugins (ZDAS).
-    Public code must depend on this contract, not internal store SDKs.
-    """
+    def create(self, worker: Worker) -> Worker: ...
 
-    def register(self, worker_id: str, worker_info: dict) -> bool:
-        """Register a new worker.
+    def get_by_id(self, worker_id: str) -> Worker | None: ...
 
-        Args:
-            worker_id: Unique worker identifier
-            worker_info: Worker metadata and capabilities
+    def list(
+        self,
+        lifecycle_states: list[WorkerLifecycleState] | None = None,
+        source_types: list[WorkerSourceType] | None = None,
+        domains: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[Worker]: ...
 
-        Returns:
-            True if registration successful, False otherwise.
-        """
-        ...
+    def update(self, worker: Worker) -> Worker: ...
 
-    def get(self, worker_id: str) -> Optional[dict]:
-        """Get worker info by ID.
+    def update_lifecycle_state(
+        self,
+        worker_id: str,
+        lifecycle_state: WorkerLifecycleState,
+        version: int,
+    ) -> Worker: ...
 
-        Args:
-            worker_id: Unique worker identifier
+    def delete(self, worker_id: str) -> bool: ...
 
-        Returns:
-            Worker info dict if found, None otherwise.
-        """
-        ...
+    def exists(self, worker_id: str) -> bool: ...
 
-    def update(self, worker_id: str, updates: dict) -> bool:
-        """Update worker info.
+    def count(
+        self,
+        lifecycle_states: list[WorkerLifecycleState] | None = None,
+    ) -> int: ...
 
-        Args:
-            worker_id: Unique worker identifier
-            updates: Fields to update
+    def update_trust_level(
+        self,
+        worker_id: str,
+        trust_level: TrustLevel,
+    ) -> Worker: ...
 
-        Returns:
-            True if update successful, False otherwise.
-        """
-        ...
+    def get_by_ids(self, worker_ids: list[str]) -> dict[str, Worker]: ...
 
-    def delete(self, worker_id: str) -> bool:
-        """Delete a worker.
+    def batch_get_configs(
+        self,
+        worker_ids: list[str],
+    ) -> tuple[dict[str, WorkerConfig], list[str]]: ...
 
-        Args:
-            worker_id: Unique worker identifier
 
-        Returns:
-            True if deletion successful, False otherwise.
-        """
-        ...
-
-    def list_all(self) -> List[dict]:
-        """List all registered workers.
-
-        Returns:
-            List of worker info dicts.
-        """
-        ...
-
-    def find_by_capability(self, capability: str) -> List[dict]:
-        """Find workers by capability.
-
-        Args:
-            capability: Required capability
-
-        Returns:
-            List of matching worker info dicts.
-        """
-        ...
+__all__ = ["WorkerRegistryStore"]

@@ -13,7 +13,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.domain.models.worker_profile_content import (
     ProfileContentType,
@@ -34,6 +34,7 @@ class ProfilePatchResult:
         self.content_changed = content_changed
 
 if TYPE_CHECKING:
+    from src.domain.models.worker_profile import WorkerProfile
     from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,12 @@ class WorkerProfileContentService:
     def has_vector_cleanup(self) -> bool:
         """Return whether profile deletion can also remove searchable vectors."""
         return self._vector_indexer is not None
+
+    def delete_profile_vectors(self, worker_id: str, profile_id: str) -> int:
+        """Delete derived vectors without deleting the durable profile record."""
+        if self._vector_indexer is None:
+            raise RuntimeError("profile vector cleanup provider is unavailable")
+        return self._vector_indexer.delete_by_profile(f"{worker_id}:{profile_id}")
 
     def register_or_update_profile(
         self,
@@ -469,7 +476,7 @@ class WorkerProfileContentService:
         # 🔧 Step 1: 删除向量（如果 indexer 可用）
         if self._vector_indexer:
             logger.info("[ProfileService] Vector indexer available, deleting vectors for %s", profile_key)
-            deleted_count = self._vector_indexer.delete_by_profile(profile_key)
+            deleted_count = self.delete_profile_vectors(worker_id, profile_id)
             logger.info("[ProfileService] Vectors deleted for %s: count=%d", profile_key, deleted_count)
         else:
             logger.warning("[ProfileService] Vector indexer NOT available, skipping vector deletion for %s", profile_key)

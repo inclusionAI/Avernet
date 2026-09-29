@@ -11,7 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from src.domain.models.worker import Worker
+from src.domain.models.worker import TrustLevel, Worker
+from src.domain.models.worker_config import WorkerConfig
 from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
 from src.domain.models.worker_source_info import WorkerSourceType
 from src.domain.exceptions import (
@@ -88,10 +89,9 @@ class InMemoryWorkerRegistryStore:
                 result[wid] = worker.model_copy(deep=True)
         return result
 
-    def batch_get_configs(self, worker_ids: list[str]) -> tuple[dict[str, "WorkerConfig"], list[str]]:
+    def batch_get_configs(self, worker_ids: list[str]) -> tuple[dict[str, WorkerConfig], list[str]]:
         """批量获取 Worker config，仅返回配置，不返回完整 Worker"""
-        from src.domain.models.worker_config import WorkerConfig
-        configs: dict[str, "WorkerConfig"] = {}
+        configs: dict[str, WorkerConfig] = {}
         not_found: list[str] = []
         for wid in worker_ids:
             worker = self._workers.get(wid)
@@ -227,6 +227,18 @@ class InMemoryWorkerRegistryStore:
         # 存储
         self._workers[worker_id] = worker.model_copy(deep=True)
         return worker.model_copy(deep=True)
+
+    def update_trust_level(
+        self,
+        worker_id: str,
+        trust_level: TrustLevel,
+    ) -> Worker:
+        """Update trust level while preserving the remaining Worker state."""
+        worker = self.get_by_id(worker_id)
+        if worker is None:
+            raise WorkerNotFoundException(worker_id)
+        worker.state.trust_level = trust_level
+        return self.update(worker)
 
     def delete(self, worker_id: str) -> bool:
         """

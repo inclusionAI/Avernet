@@ -11,7 +11,7 @@ import json
 import logging
 import threading
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional
 
 from mysql.connector import Error
 
@@ -297,7 +297,7 @@ class MySQLWorkerRegistryStore:
         finally:
             conn.close()
 
-    def create(self, worker: Worker) -> Optional[Worker]:
+    def create(self, worker: Worker) -> Worker:
         if self.exists(worker.id):
             raise DuplicateWorkerException(worker.id)
         now = datetime.utcnow()
@@ -365,6 +365,31 @@ class MySQLWorkerRegistryStore:
             return None
         return self._row_to_worker(row)
 
+    def get_by_ids(self, worker_ids: list[str]) -> dict[str, Worker]:
+        """Fetch workers in one query for the canonical registry port."""
+        if not worker_ids:
+            return {}
+
+        placeholders = ",".join("%s" for _ in worker_ids)
+        conn = self._pool.get_connection()
+        try:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                cursor.execute(
+                    f"SELECT * FROM bcsfuse_workers WHERE id IN ({placeholders})",
+                    tuple(worker_ids),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
+        return {
+            worker.id: worker
+            for worker in (self._row_to_worker(row) for row in rows)
+        }
+
     def exists(self, worker_id: str) -> bool:
         sql = "SELECT 1 FROM bcsfuse_workers WHERE id = %s LIMIT 1"
         row = self._execute(sql, (worker_id,))
@@ -402,17 +427,17 @@ class MySQLWorkerRegistryStore:
         self,
         worker_id: str,
         lifecycle_state: WorkerLifecycleState,
-        version: Optional[int] = None,
-    ) -> Optional[Union[Worker, dict]]:
+        version: int,
+    ) -> Worker:
         worker = self.get_by_id(worker_id)
         if worker is None:
-            return None
-        if version is not None and worker.version != version:
+            raise WorkerNotFoundException(worker_id)
+        if worker.version != version:
             raise ValueError(f"Version conflict: expected {version}, got {worker.version}")
         worker.lifecycle_state = lifecycle_state
         return self.update(worker)
 
-    def update_trust_level(self, worker_id: str, trust_level: TrustLevel) -> Optional[Worker]:
+    def update_trust_level(self, worker_id: str, trust_level: TrustLevel) -> Worker:
         worker = self.get_by_id(worker_id)
         if worker is None:
             raise WorkerNotFoundException(worker_id)
@@ -431,13 +456,20 @@ class MySQLWorkerRegistryStore:
         try:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM bcsfuse_worker_profile_contents WHERE worker_id = %s", (worker_id,))
-                cursor.execute("DELETE FROM bcsfuse_worker_runtime_states WHERE worker_id = %s", (worker_id,))
-                cursor.execute("DELETE FROM bcsfuse_worker_profile_bindings WHERE worker_id = %s", (worker_id,))
-                cursor.execute("DELETE FROM bcsfuse_worker_audit_logs WHERE worker_id = %s", (worker_id,))
-                cursor.execute("DELETE FROM bcsfuse_workers WHERE id = %s", (worker_id,))
-                conn.commit()
-                return True
+                conn.autocommit = False
+                try:
+                    cursor.execute("DELETE FROM bcsfuse_worker_profile_contents WHERE worker_id = %s", (worker_id,))
+                    cursor.execute("DELETE FROM bcsfuse_worker_runtime_states WHERE worker_id = %s", (worker_id,))
+                    cursor.execute("DELETE FROM bcsfuse_worker_profile_bindings WHERE worker_id = %s", (worker_id,))
+                    cursor.execute("DELETE FROM bcsfuse_worker_audit_logs WHERE worker_id = %s", (worker_id,))
+                    cursor.execute("DELETE FROM bcsfuse_workers WHERE id = %s", (worker_id,))
+                    conn.commit()
+                    return True
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    conn.autocommit = True
             finally:
                 cursor.close()
         finally:

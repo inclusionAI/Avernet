@@ -1,57 +1,40 @@
-from typing import Protocol, Optional, List
+"""Transport-agnostic persistence contract for Worker Profile content."""
+
+from __future__ import annotations
+
+from typing import Protocol, runtime_checkable
+
+from src.domain.models.worker_profile_content import (
+    WorkerProfileContent,
+    WorkerProfileContentList,
+)
 
 
+@runtime_checkable
 class WorkerProfileContentStore(Protocol):
-    """Public worker profile content store contract.
+    """Canonical store API implemented by public and internal providers."""
 
-    Implementations may be OSS defaults (SQLite, filesystem) or internal plugins (ZDAS).
-    Public code must depend on this contract, not internal store SDKs.
-    """
+    def save(self, content: WorkerProfileContent) -> WorkerProfileContent: ...
 
-    def save(self, worker_id: str, profile_id: str, content: dict) -> bool:
-        """Save profile content for a worker.
+    def get(self, worker_id: str, profile_id: str) -> WorkerProfileContent | None: ...
 
-        Args:
-            worker_id: Unique worker identifier
-            profile_id: Profile identifier
-            content: Profile content dict
+    def list_by_worker(self, worker_id: str) -> WorkerProfileContentList: ...
 
-        Returns:
-            True if save successful, False otherwise.
-        """
-        ...
+    def delete(self, worker_id: str, profile_id: str) -> bool: ...
 
-    def get(self, worker_id: str, profile_id: str) -> Optional[dict]:
-        """Get profile content for a worker.
+    def activate(
+        self,
+        worker_id: str,
+        profile_id: str,
+    ) -> WorkerProfileContent | None: ...
 
-        Args:
-            worker_id: Unique worker identifier
-            profile_id: Profile identifier
+    def get_active(self, worker_id: str) -> WorkerProfileContent | None: ...
 
-        Returns:
-            Profile content dict if found, None otherwise.
-        """
-        ...
+    def exists(self, worker_id: str, profile_id: str) -> bool: ...
 
-    def list_profiles(self, worker_id: str) -> List[dict]:
-        """List all profiles for a worker.
+    def count(self, worker_id: str | None = None) -> int: ...
 
-        Args:
-            worker_id: Unique worker identifier
+    def get_all_active(self) -> list[WorkerProfileContent]: ...
 
-        Returns:
-            List of profile metadata dicts.
-        """
-        ...
 
-    def delete(self, worker_id: str, profile_id: str) -> bool:
-        """Delete a profile.
-
-        Args:
-            worker_id: Unique worker identifier
-            profile_id: Profile identifier
-
-        Returns:
-            True if deletion successful, False otherwise.
-        """
-        ...
+__all__ = ["WorkerProfileContentStore"]

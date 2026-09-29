@@ -473,36 +473,43 @@ class SQLiteWorkerRegistryStore:
             raise WorkerNotFoundException(worker_id)
 
         cursor = self._conn.cursor()
+        deleted_profiles = 0
+        try:
+            cursor.execute("BEGIN")
 
-        # 1. 删除 Profile 内容（向量删除由上层 ProfileEmbeddingStore 处理）
-        cursor.execute(
-            "DELETE FROM bcsfuse_worker_profile_contents WHERE worker_id = ?",
-            (worker_id,)
-        )
-        deleted_profiles = cursor.rowcount
+            # Profile storage is an optional sibling adapter. An isolated registry
+            # store therefore may not have created its table yet.
+            cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                ("bcsfuse_worker_profile_contents",),
+            )
+            if cursor.fetchone() is not None:
+                cursor.execute(
+                    "DELETE FROM bcsfuse_worker_profile_contents WHERE worker_id = ?",
+                    (worker_id,),
+                )
+                deleted_profiles = cursor.rowcount
 
-        # 2. 删除运行状态
-        cursor.execute(
-            "DELETE FROM bcsfuse_worker_runtime_states WHERE worker_id = ?",
-            (worker_id,)
-        )
-
-        # 3. 删除 Profile 绑定
-        cursor.execute(
-            "DELETE FROM bcsfuse_worker_profile_bindings WHERE worker_id = ?",
-            (worker_id,)
-        )
-
-        # 4. 删除审计日志
-        cursor.execute(
-            "DELETE FROM bcsfuse_worker_audit_logs WHERE worker_id = ?",
-            (worker_id,)
-        )
-
-        # 5. 删除 Worker 主记录
-        cursor.execute("DELETE FROM bcsfuse_workers WHERE id = ?", (worker_id,))
-
-        self._conn.commit()
+            cursor.execute(
+                "DELETE FROM bcsfuse_worker_runtime_states WHERE worker_id = ?",
+                (worker_id,),
+            )
+            cursor.execute(
+                "DELETE FROM bcsfuse_worker_profile_bindings WHERE worker_id = ?",
+                (worker_id,),
+            )
+            cursor.execute(
+                "DELETE FROM bcsfuse_worker_audit_logs WHERE worker_id = ?",
+                (worker_id,),
+            )
+            cursor.execute(
+                "DELETE FROM bcsfuse_workers WHERE id = ?",
+                (worker_id,),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
         logger.info(
             "[SQLite] Worker deleted: %s (profiles=%d)",
