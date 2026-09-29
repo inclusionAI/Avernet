@@ -100,8 +100,10 @@ record for a historical audit trail. No automatic purge is introduced.
 
 ## Evidence and rollout
 
-TC unit, consumer-contract and real-router tests are listed in
-[validation.md](../specs/2026-09-28-tc-session-resource-withdrawal/validation.md).
+TC coverage lives in the [repository and worker tests](../../src/backend/tests/community/core/session_resources/),
+[consumer-contract tests](../../src/backend/tests/community/contracts/test_tc_resource_withdrawal.py),
+and [HTTP deletion tests](../../src/backend/tests/community/endpoints/test_session_withdrawal.py).
+Per-commit results and limitations belong in PR validation and CI reports.
 Local publisher conformance is not ECB conformance. See
 [runbook.md](../specs/2026-09-28-tc-session-resource-withdrawal/runbook.md) for
 migration, configuration, recovery and explicit production enablement gates.

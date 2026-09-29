@@ -43,8 +43,9 @@
 
 ## Contracts and Evidence
 - 对用户的删除响应保持兼容；需与 ECB 新增并冻结“按上传资源撤销引用”的服务契约。接口及回执目前仅为 handoff 草案，尚未获得对端确认。
-- 现有模块边界、相关协议入口和静态代码证据见 [research.md](research.md)；目前无直接适用的已接受 ADR，不将 Skill 撤回规则套用于会话文件。
-- TC 自动化证据见 [validation.md](validation.md)。AC4/7/8/9/10/12 的 TC 部分已覆盖；跨系统业务效果、可信集成鉴权和真实 UI/ECB 验证仍未完成，因此保留未勾选，不能宣称端到端完成。AC11 已提供日志/统计，实际告警阈值与路由属于上线配置。
+- 模块边界见 [session_resources](../../../src/backend/src/agentclaw/community/core/session_resources/README.md)；事件、回执及测试入口见 [v1 契约](../../contracts/tc-resource-withdrawal-v1.md)。目前无直接适用的已接受 ADR，不将 Skill 撤回规则套用于会话文件。
+- AC4/7/8/9/10/12 的 TC 部分已有自动化覆盖；跨系统业务效果、可信集成鉴权和真实 UI/ECB 验证仍未完成，因此保留未勾选，不能宣称端到端完成。AC11 已提供日志/统计，实际告警阈值与路由属于上线配置，详见 [runbook.md](runbook.md)。
+- 2026-09-28 本地验证中的统一 Singlebox gate 未通过；文档整理不代表该问题已解决。各提交的测试结果及限制记录在 PR Validation 和对应 CI 中，不能仅凭本地测试宣称可合并或上线。
 
 ## Open Questions
 - **Q2 / ECB Contract**：由谁与 ECB 冻结接口、契约版本、可信租户范围、幂等及持久接收回执，并确认删除先到和迟到上传不会恢复引用？对端就绪情况尚未验证。
