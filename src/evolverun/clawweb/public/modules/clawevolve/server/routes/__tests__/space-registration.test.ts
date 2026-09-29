@@ -70,6 +70,10 @@ beforeEach(async () => {
   };
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.isClawEvolveAdmin = req.header("X-User-Id") === "administrator";
+    next();
+  });
   app.use("/api/evolve", createSkillAssetsRouter({ repo: assets, artifactStore: store, hostLocalSkills, hostSpaces }));
   app.use("/api/evolve", createStageSkillsRouter({ repo: stages, artifactStore: store, hostSpaces }));
   // Leave Express's real status propagation in place, including thrown 403s.
@@ -383,5 +387,66 @@ describe("Space registration with real repositories", () => {
     expect(await bodyOf(response)).toEqual({ deleted: true });
     if (implementation) expect((await stages.findImplementation(implementation.implementationId))?.status).toBe("deleted");
     else expect(await stages.findDevelopment(development.stageSkillId)).toBeNull();
+  });
+});
+
+
+describe("Skill administrator read scope", () => {
+  async function seed() {
+    const personal = await bodyOf(await registerAsset(`personal-${owner}`), 201);
+    const shared = await bodyOf(await registerAsset(team.id, member), 201);
+    const unassigned = await bodyOf(await registerAsset(undefined, outsider), 201);
+    return { personal, shared, unassigned };
+  }
+
+  it.each(["/skill-assets", "/skill-events"])("gates all-owner access for %s and preserves ordinary visibility", async path => {
+    const { personal, shared, unassigned } = await seed();
+    const ids = (items: Array<{ assetId: string }>) => items.map(item => item.assetId).sort();
+    expect((await get(`${path}?scope=all`, owner)).status).toBe(403);
+    expect(ids((await bodyOf(await get(`${path}?ownerUserId=${outsider}`, owner))).items))
+      .toEqual([personal.assetId, shared.assetId].sort());
+    expect(ids((await bodyOf(await get(path, outsider))).items)).toEqual([unassigned.assetId]);
+    expect((await bodyOf(await get(path, "administrator"))).items).toEqual([]);
+    expect(ids((await bodyOf(await get(`${path}?scope=all`, "administrator"))).items))
+      .toEqual([personal.assetId, shared.assetId, unassigned.assetId].sort());
+    expect(ids((await bodyOf(await get(`${path}?scope=all&ownerUserId=${member}`, "administrator"))).items))
+      .toEqual([shared.assetId]);
+    expect((await bodyOf(await get(`${path}?scope=all&ownerUserId=missing`, "administrator"))).items).toEqual([]);
+    expect((await bodyOf(await get(`${path}?scope=all&ownerUserId=%27%20OR%201%3D1--`, "administrator"))).items).toEqual([]);
+    expect((await bodyOf(await get(path, "administrator"))).items).toEqual([]);
+  });
+
+  it("reads all Skill details, history and frozen files without expanding write permissions", async () => {
+    const { personal, shared, unassigned } = await seed();
+    for (const asset of [personal, shared, unassigned]) {
+      const path = `/skill-assets/${asset.assetId}`;
+      const detail = await bodyOf(await get(path, "administrator"));
+      expect(detail.canEdit).toBe(false);
+      const versionId = detail.versions[0].versionId;
+      const paths = [path, `${path}/history`, `${path}/versions/${versionId}/content`, `${path}/versions/${versionId}/diff`];
+      for (const readPath of paths) {
+        expect((await get(readPath, "administrator")).status).toBe(200);
+        expect((await get(readPath, "unrelated-user")).status).toBe(404);
+      }
+      const history = await bodyOf(await get(`${path}/history`, "administrator"));
+      expect(history.events).toHaveLength(1);
+      expect(history.events[0].assetId).toBe(asset.assetId);
+      for (const mode of ['edit', 'upload', 'rollback']) {
+        expect((await post(`${path}/versions`, { mode, baseVersionId: versionId }, "administrator")).status).toBe(404);
+      }
+    }
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it("does not depend on the administrator's space membership or Bot credentials", async () => {
+    const { personal } = await seed();
+    vi.mocked(hostSpaces.listAccessibleSpaces).mockRejectedValue(new Error("Space provider unavailable"));
+    vi.mocked(hostLocalSkills.listLocalSkills).mockRejectedValue(new Error("Bot access denied"));
+    vi.mocked(hostLocalSkills.getBotMetadata!).mockRejectedValue(new Error("Bot access denied"));
+    for (const path of ['/skill-assets?scope=all', '/skill-events?scope=all']) {
+      expect((await bodyOf(await get(path, "administrator"))).items).toHaveLength(3);
+    }
+    expect((await bodyOf(await get(`/skill-assets/${personal.assetId}`, "administrator"))).canEdit).toBe(false);
+    expect((await bodyOf(await get(`/skill-assets/${personal.assetId}/history`, "administrator"))).events).toHaveLength(1);
   });
 });
