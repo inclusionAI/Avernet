@@ -24,6 +24,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from clawevolve_runtime.agent_registry import registration_lock
+
 
 PHASES = (
     "check_version",
@@ -668,7 +671,8 @@ class Workflow:
         model = str(report_config.get("model") or (self.config.get("bench") or {}).get("model") or os.environ.get("CLAWEVOLVE_BENCH_MODEL", "")).strip()
         if model:
             args.extend(["--model", model])
-        added = self.command_runner(args, text=True, capture_output=True, timeout=120, env=child_env)
+        with registration_lock():
+            added = self.command_runner(args, text=True, capture_output=True, timeout=120, env=child_env)
         if added.returncode == 0:
             return
         verified = self.command_runner(

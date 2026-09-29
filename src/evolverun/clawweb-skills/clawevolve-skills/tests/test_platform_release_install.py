@@ -38,6 +38,7 @@ def test_release_installs_code_runtime_and_retires_managed_stage_skill(release, 
     (old / "SKILL.md").write_text("old orchestration Skill")
     (old / ".clawevolve-version").write_text("clawevolve-20260920-v1")
     env = os.environ | {"SECBAAS_SANDBOX_BACKEND": "local_proc",
+        "OPENCLAW_STATE_DIR": str(tmp_path),
         "OPENCLAW_WORKSPACE": str(tmp_path), "SKILL_BASE_DIR": str(runtime),
         "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]}
     runner = release / "clawevolve_async_runner.sh"
@@ -74,3 +75,17 @@ def test_release_manifest_covers_the_exact_platform_files(release):
     assert not any("__pycache__" in name or ".pytest_cache" in name for name in files)
     digest_input = "".join(f"./{name}  {hashlib.sha256(files[name]).hexdigest()}\n" for name in sorted(files))
     assert hashlib.sha256(digest_input.encode()).hexdigest() == runtime[3]
+
+
+@pytest.mark.parametrize("script", ["cleanup_clawevolve_openclaw_runtime.py", "adapt_openclaw_environment.py"])
+def test_packaged_config_writer_imports_the_same_registry_lock(release, tmp_path, script):
+    # The launcher package is flat, unlike the source checkout's scripts/ dir.
+    # Import it from an unrelated cwd so a checkout PYTHONPATH cannot hide a
+    # missing release dependency. --help performs no Bot operations.
+    helper = release / script
+    env = os.environ | {"PYTHONPATH": ""}
+    completed = subprocess.run([sys.executable, "-B", str(helper), "--help"],
+                               cwd=tmp_path, env=env, capture_output=True, text=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr
+    assert (release / "platform/clawevolve_runtime/agent_registry.py").read_bytes() == (
+        ROOT / "platform/clawevolve_runtime/agent_registry.py").read_bytes()

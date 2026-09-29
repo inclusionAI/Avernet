@@ -5,6 +5,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -16,6 +17,9 @@ from ..constants import DEFAULT_SESSION_JUDGE_TIMEOUT_SECONDS
 from ..models import SubagentJudgeConfig
 from .openai_chat_client import loads_json_object
 from .runtime import subagent_workspace_path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform"))
+from clawevolve_runtime.agent_registry import registration_lock
 
 _JSON_ONLY_SYSTEM = (
     "You are a strict JSON judge for clawevolve-diagnose. Return exactly one "
@@ -705,13 +709,14 @@ def _create_agent(config: SubagentJudgeConfig, workspace: Path) -> None:
     if config.model:
         cmd.extend(["--model", config.model])
     cmd.extend(["--workspace", str(workspace), "--non-interactive"])
-    proc = _run_openclaw_command(
-        config,
-        cmd,
-        timeout=_AGENT_ADD_TIMEOUT_SECONDS,
-        action="openclaw agents add",
-        raise_on_nonzero=False,
-    )
+    with registration_lock():
+        proc = _run_openclaw_command(
+            config,
+            cmd,
+            timeout=_AGENT_ADD_TIMEOUT_SECONDS,
+            action="openclaw agents add",
+            raise_on_nonzero=False,
+        )
     if proc.returncode != 0:
         raise SubagentJudgeError(
             "openclaw agents add failed: "
@@ -728,13 +733,14 @@ def _create_agent(config: SubagentJudgeConfig, workspace: Path) -> None:
 
 
 def _delete_agent(config: SubagentJudgeConfig, agent_name: str) -> None:
-    proc = _run_openclaw_command(
-        config,
-        ["agents", "delete", agent_name, "--force"],
-        timeout=_AGENT_DELETE_TIMEOUT_SECONDS,
-        action="openclaw agents delete",
-        raise_on_nonzero=False,
-    )
+    with registration_lock():
+        proc = _run_openclaw_command(
+            config,
+            ["agents", "delete", agent_name, "--force"],
+            timeout=_AGENT_DELETE_TIMEOUT_SECONDS,
+            action="openclaw agents delete",
+            raise_on_nonzero=False,
+        )
     if proc.returncode != 0:
         raise SubagentJudgeError(
             "openclaw agents delete failed: "

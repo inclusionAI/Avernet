@@ -8,8 +8,14 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
+
+_release_platform = Path(__file__).resolve().parent / "platform"
+_source_platform = Path(__file__).resolve().parents[1] / "platform"
+sys.path.insert(0, str(_release_platform if _release_platform.is_dir() else _source_platform))
+from clawevolve_runtime.agent_registry import registration_lock
 
 
 TASK_AGENT_PREFIXES = (
@@ -245,14 +251,15 @@ def cleanup_runtime(
             delete_errors[agent_id.lower()] = "agent is active; deletion skipped"
             continue
         try:
-            result = run(
-                [openclaw_path, "agents", "delete", agent_id, "--force", "--json"],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=DELETE_TIMEOUT_SECONDS,
-                env=openclaw_env,
-            )
+            with registration_lock():
+                result = run(
+                    [openclaw_path, "agents", "delete", agent_id, "--force", "--json"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=DELETE_TIMEOUT_SECONDS,
+                    env=openclaw_env,
+                )
         except Exception as exc:  # noqa: BLE001 - record one target failure and continue.
             delete_errors[agent_id.lower()] = str(exc)[-4000:]
             continue
