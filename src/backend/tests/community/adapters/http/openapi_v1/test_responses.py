@@ -52,6 +52,10 @@ class _BotUpdate(BaseModel):
     api_token: str = "s3cret"
 
 
+class _HeaderGroups(BaseModel):
+    params: list[dict[str, object]]
+
+
 def _request(trace_id: str | None = "trace-123") -> Request:
     """A minimal ASGI request; ``trace_id`` on state unless explicitly omitted."""
     state: dict[str, object] = {}
@@ -207,6 +211,42 @@ async def test_unmapped_error_stashes_params_for_the_app_handler():
         await handler("b-9", request=request)
 
     assert recall_call_params(request) == {"bot_id": "b-9"}
+
+
+@pytest.mark.asyncio
+async def test_credential_named_body_redacts_nested_value_for_all_errors(caplog):
+    from agentclaw.community.adapters.http.error_logging import (
+        REDACTED,
+        recall_call_params,
+    )
+    from agentclaw.community.core.mcp.errors import McpConfigValueError
+
+    sentinel = "Bearer TEST_HEADER_CREDENTIAL"
+    body = _HeaderGroups(params=[{"key": "Authorization", "value": sentinel, "bots": []}])
+
+    @envelope_errors
+    async def mapped(server_code: str, credential_body: _HeaderGroups, request: Request):
+        raise McpConfigValueError("invalid endpoint")
+
+    mapped_request = _request()
+    with caplog.at_level(logging.DEBUG):
+        response = await mapped("mcp.weather", body, mapped_request)
+    assert response.status_code == 400
+    assert sentinel not in caplog.text
+    assert recall_call_params(mapped_request) == {
+        "server_code": "mcp.weather", "credential_body": REDACTED
+    }
+
+    @envelope_errors
+    async def unmapped(server_code: str, credential_body: _HeaderGroups, request: Request):
+        raise RuntimeError("unmapped failure")
+
+    unmapped_request = _request()
+    with pytest.raises(RuntimeError, match="unmapped failure"):
+        await unmapped("mcp.weather", body, unmapped_request)
+    assert recall_call_params(unmapped_request) == {
+        "server_code": "mcp.weather", "credential_body": REDACTED
+    }
 
 
 def test_end_to_end_through_a_real_route(caplog):
