@@ -6,6 +6,7 @@ import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { WorkflowEvolutionRepository } from "../../repositories/workflow-evolution-repository.js";
 import { createEvolveRouter } from "../evolve.js";
 import { IssueAggregationRepository } from '../../repositories/issue-aggregation-repository.js';
+import { ISSUE_AGGREGATION_INPUT_V2 } from '../../services/evolution/issue-aggregation.js';
 import { createInternalEvolveRouter } from '../internal/evolve.js';
 import { createEvolveKnowledgeRouter } from '../evolve-knowledge.js';
 
@@ -132,9 +133,9 @@ describe("evolve knowledge endpoints", () => {
     expect((await aggregates.listSources('wf')).map(group => group.signature)).toContain('timeout-old');
   });
   it.each([
-    [undefined, 'workflow-issue-summary-input/v1', 0],
-    ['workflow-issue-summary-input/v2', 'workflow-issue-summary-input/v2', 1],
-  ] as const)('serves aggregation input version %s without changing the frozen snapshot', async (requestedVersion, expectedVersion, compactSources) => {
+    [undefined, 'workflow-issue-summary-input/v1', 0, { totalSources: 25, fullSources: 25, compactSources: 0 }],
+    ['workflow-issue-summary-input/v2', 'workflow-issue-summary-input/v2', 1, { totalSources: 25, fullSources: 24, compactSources: 1 }],
+  ] as const)('serves aggregation input version %s without changing the frozen snapshot', async (requestedVersion, expectedVersion, compactSources, expectedSummary) => {
     const diagnoses = Array.from({ length: 25 }, (_, index) => ({ diagnosisId: `d-${index}`, flowIds: ['run-a'], nodeId: 'fetch',
       failureSignature: 'timeout', failureMode: 'timeout', severity: 'high', reasoning: `reason-${index}`, evidenceEventIds: [] }));
     const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: 'parent', facts: [], inferences: [], unknowns: [], diagnoses };
@@ -158,6 +159,40 @@ describe("evolve knowledge endpoints", () => {
     expect(job.input.sources).toHaveLength(25);
     expect(job.input.sources.filter(source => 'detailLevel' in source && source.detailLevel === 'compact')).toHaveLength(compactSources);
     if (!requestedVersion) expect(job.input.sources.every(source => 'flowId' in source && !('detailLevel' in source))).toBe(true);
+
+    const aggregates = new IssueAggregationRepository(db);
+    await aggregates.complete('parent', job.id, { summary: 'Network delays', unknowns: [], causes: [{
+      title: 'Network', conclusion: 'Slow upstream', certainty: 'hypothesis', sourceIds: job.input.sources.map(source => source.sourceId),
+    }] });
+    const completed = (await aggregates.list('wf'))[0];
+    expect(completed.aggregationInputVersion).toBe(expectedVersion);
+    expect(completed.aggregationInputSummary).toEqual(expectedSummary);
+
+    const replacement = { ...result, analysisId: 'replacement', diagnoses: Array.from({ length: 30 }, (_, index) => ({
+      ...diagnoses[index % diagnoses.length], diagnosisId: `replacement-${index}`,
+    })) };
+    await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+      (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+      VALUES ('replacement', 'replacement', 'single_run', '{}', 'run-a', 'wf', 'completed', 'v1', ?, 2, 2)`, [JSON.stringify(replacement)]);
+    const stale = (await aggregates.list('wf'))[0];
+    expect(stale.stale).toBe(true);
+    expect(stale.aggregationInputVersion).toBe(expectedVersion);
+    expect(stale.aggregationInputSummary).toEqual(expectedSummary);
+  });
+  it('reports oversized legacy input while allowing the compact v2 job', async () => {
+    const diagnoses = Array.from({ length: 50 }, (_, index) => ({ diagnosisId: `large-${index}`, flowIds: ['run-a'], nodeId: 'fetch',
+      failureSignature: 'large-timeout', failureMode: 'timeout', severity: 'high', reasoning: `${index}:${'x'.repeat(4_000)}`, evidenceEventIds: [] }));
+    const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: 'large-parent', facts: [], inferences: [], unknowns: [], diagnoses };
+    await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+      (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+      VALUES ('large-parent', 'large-parent', 'single_run', '{}', 'run-a', 'wf', 'completed', 'v1', ?, 1, 1)`, [JSON.stringify(result)]);
+
+    const aggregates = new IssueAggregationRepository(db);
+    expect((await aggregates.list('wf'))[0].aggregationStatus).toBe('too_large');
+    expect(await aggregates.prepare('large-parent')).toEqual([]);
+    const compactJobs = await aggregates.prepare('large-parent', ISSUE_AGGREGATION_INPUT_V2);
+    expect(compactJobs).toHaveLength(1);
+    expect('inputSummary' in compactJobs[0].input ? compactJobs[0].input.inputSummary.compactSources : 0).toBe(26);
   });
   it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
     const insert = async (id: string, run: string, time: number, findings = true) => {
