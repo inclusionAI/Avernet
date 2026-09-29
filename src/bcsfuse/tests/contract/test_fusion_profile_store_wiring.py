@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from src.bootstrap.app_factory import _configure_fusion_dependencies
 from src.interfaces.api.dependencies import fusion_dependencies as dependencies
 from src.infra.adapters import sqlite_worker_profile_content_store as sqlite_module
 
@@ -52,3 +53,17 @@ def test_without_context_preserves_local_store(monkeypatch, wiring):
     monkeypatch.setattr(dependencies, "_api_profile_store", local_store)
     assert dependencies._get_api_profile_store() is local_store
     wiring.assert_not_called()
+
+
+def test_fused_profile_storage_uses_composed_provider(monkeypatch):
+    shared_store = Mock()
+    monkeypatch.setattr(dependencies, "_fused_profile_storage_service", None)
+    context = SimpleNamespace(
+        registry={"fused_profile_store": shared_store},
+    )
+
+    _configure_fusion_dependencies(context)
+    service = dependencies._fused_profile_storage_service
+
+    assert service is not None
+    assert service._repository is shared_store

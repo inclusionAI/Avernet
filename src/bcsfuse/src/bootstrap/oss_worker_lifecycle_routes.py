@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.bootstrap.oss_business_routes import require_oss_auth
 from src.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
+from src.interfaces.api.schemas.worker_config_schemas import (
+    BatchQueryConfigRequest,
+    BatchQueryConfigResponse,
+    WorkerConfigItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,37 @@ def _runtime_response(worker) -> dict:
         "lifecycle_state": _enum_value(worker.lifecycle_state),
         "version": worker.version,
     }
+
+
+@router.post(
+    "/workers/config/batch",
+    response_model=BatchQueryConfigResponse,
+)
+async def batch_query_worker_configs(
+    payload: BatchQueryConfigRequest,
+    request: Request,
+) -> BatchQueryConfigResponse:
+    """Preserve the gateway-facing batch config query contract."""
+    require_oss_auth(request)
+    store = request.app.state.context.registry.get("worker_registry_store")
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "message": "worker_registry_store provider not available",
+            },
+        )
+
+    configs, not_found_ids = store.batch_get_configs(payload.worker_ids)
+    return BatchQueryConfigResponse(
+        success=True,
+        data={
+            worker_id: WorkerConfigItem(fusion_enable=config.fusion_enable)
+            for worker_id, config in configs.items()
+        },
+        not_found_ids=not_found_ids,
+    )
 
 
 @router.post("/workers", status_code=status.HTTP_201_CREATED)

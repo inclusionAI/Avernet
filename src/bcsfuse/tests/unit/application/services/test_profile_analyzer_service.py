@@ -25,6 +25,41 @@ from src.application.services.profile_analyzer_service import (
     ProfileAnalysisResult,
     ProfileAnalyzerService,
 )
+from src.application.utils.drm_config_helper import get_drm_config, set_drm_config
+from src.domain.models.worker_profile_content import WorkerProfileContent
+
+
+def test_profile_prompt_template_is_read_from_composed_provider_per_request():
+    class MutableDrmProvider:
+        template = "first {display_name}"
+
+        def get_profile_prompt_template(self) -> str:
+            return self.template
+
+    provider = MutableDrmProvider()
+    previous_provider = get_drm_config()
+    gateway = MagicMock()
+    gateway.generate.return_value = MagicMock(
+        raw_text="",
+        errors=[],
+        warnings=[],
+        parse_success=False,
+        finish_reason="stop",
+        latency_ms=0,
+    )
+    service = ProfileAnalyzerService(llm_gateway=gateway)
+    content = WorkerProfileContent(worker_id="worker-1", display_name="Alpha")
+
+    try:
+        set_drm_config(provider)
+        service._call_llm_analyze(content)
+        assert gateway.generate.call_args.args[0].user_prompt == "first Alpha"
+
+        provider.template = "second {display_name}"
+        service._call_llm_analyze(content)
+        assert gateway.generate.call_args.args[0].user_prompt == "second Alpha"
+    finally:
+        set_drm_config(previous_provider)
 
 
 class TestProfileAnalyzerServiceParseRawResponse:

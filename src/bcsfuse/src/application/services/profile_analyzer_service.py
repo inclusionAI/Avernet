@@ -32,7 +32,7 @@ from src.domain.models.llm_task_spec import (
     TaskType,
 )
 from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.application.utils.drm_config_helper import profile_prompt_template
+from src.application.utils.drm_config_helper import get_profile_prompt_template
 
 if TYPE_CHECKING:
     from src.domain.protocols.bot_cognition_protocol import BotCognitionProvider
@@ -44,10 +44,7 @@ _MAX_TAGS = 3
 
 SYSTEM_PROMPT = "你是一个专业的企业 AI Bot 能力标签评估器。"
 
-if profile_prompt_template is not None and profile_prompt_template != "":
-    USER_PROMPT_TEMPLATE = profile_prompt_template
-else:
-    USER_PROMPT_TEMPLATE = """
+USER_PROMPT_TEMPLATE = """
 请阅读以下agent配置文件，生成一个精简的profile用于agent职责与能力的匹配。
 
 ## 基本信息
@@ -240,7 +237,9 @@ class ProfileAnalyzerService:
         skill_sets_data = [skill.model_dump(mode='json') for skill in content_obj.skill_sets]
         skills_list_section = format_section("skill_list", json.dumps(skill_sets_data, ensure_ascii=False))
 
-        user_prompt = USER_PROMPT_TEMPLATE.format(
+        configured_template = get_profile_prompt_template()
+        prompt_template = configured_template or USER_PROMPT_TEMPLATE
+        user_prompt = prompt_template.format(
             display_name=display_name,
             description=description,
             soul_md_section=soul_md_section,

@@ -224,6 +224,43 @@ class TestMySQLVectorPersistenceBackendContract:
         assert backend._conn is None
         assert backend._schema_initialized is False
 
+    def test_read_operations_release_repeatable_read_snapshot(self):
+        """A later sync must be able to observe writes from another instance."""
+        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+            MySQLVectorPersistenceBackend,
+        )
+
+        class Cursor:
+            def execute(self, sql, params=None):
+                return None
+
+            def fetchall(self):
+                return []
+
+            def close(self):
+                return None
+
+        class Connection:
+            def __init__(self):
+                self.rollback_calls = 0
+
+            def is_connected(self):
+                return True
+
+            def cursor(self):
+                return Cursor()
+
+            def rollback(self):
+                self.rollback_calls += 1
+
+        backend = MySQLVectorPersistenceBackend()
+        connection = Connection()
+        backend._conn = connection
+        backend._schema_initialized = True
+
+        assert backend.load_all() == []
+        assert connection.rollback_calls == 1
+
     def test_logs_have_correlation_id(self):
         """Test that all log events include correlation_id.
 

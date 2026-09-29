@@ -43,6 +43,32 @@ def _worker_payload(worker_id: str) -> dict:
     }
 
 
+def test_composed_app_preserves_gateway_batch_config_query(
+    composed_test_client,
+) -> None:
+    client, _ = composed_test_client
+    worker_id = "wrk_gateway_batch_config"
+    created = client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        "/v1/workers/config/batch",
+        headers=AUTH_HEADERS,
+        json={"worker_ids": [worker_id, "wrk_missing"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "success": True,
+        "data": {worker_id: {"fusion_enable": False}},
+        "not_found_ids": ["wrk_missing"],
+    }
+
+
 class CanonicalOnlyProfileStore:
     """Profile provider exposing exactly the published typed port."""
 

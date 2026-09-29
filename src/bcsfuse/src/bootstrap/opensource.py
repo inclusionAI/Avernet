@@ -28,6 +28,95 @@ def _safe_host(url: str | None) -> str:
         return "<invalid-url>"
 
 
+def register_runtime_service_providers(
+    registry: "ProviderRegistry", config: "YamlEnvConfigProvider"
+) -> None:
+    """Register real public HTTP providers without selecting storage.
+
+    Internal compositions use this seam to keep Avernet-owned embedding, LLM,
+    and reranker behavior while injecting their own durable stores first.
+    """
+    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
+    from src.infra.llm.config.llm_settings import LLMSettings
+    from src.infra.public.embedding.real_embedding_provider import (
+        RealEmbeddingProvider,
+    )
+    from src.infra.public.llm.anthropic_compatible_provider import (
+        AnthropicCompatibleProvider,
+    )
+    from src.infra.public.reranker.http_reranker import HttpReranker
+
+    embedding_base_url = (
+        os.getenv("EMBEDDING_BASE_URL")
+        or config.get("embedding.base_url")
+        or ""
+    )
+    embedding_model = (
+        os.getenv("EMBEDDING_MODEL")
+        or config.get("embedding.model")
+        or "Qwen3-Embedding-8B"
+    )
+    embedding_dimension = int(
+        os.getenv("EMBEDDING_DIMENSION")
+        or config.get("embedding.dimension")
+        or 4096
+    )
+
+    logger.info(
+        "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
+        "base_url_host=%s model=%s dimension=%s env_base_url_present=%s env_model_present=%s "
+        "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
+        "runtime",
+        True,
+        "RealEmbeddingProvider",
+        _safe_host(embedding_base_url),
+        embedding_model,
+        embedding_dimension,
+        "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
+        "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
+        "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
+        "YES" if os.getenv("EMBEDDING_DIMENSION") else "NO",
+        "YES"
+        if not os.getenv("EMBEDDING_BASE_URL")
+        and not config.get("embedding.base_url")
+        else "NO",
+    )
+
+    registry.register(
+        "embedding_provider",
+        RealEmbeddingProvider(
+            settings=EmbeddingSettings(
+                base_url=embedding_base_url,
+                auth_token=os.getenv("EMBEDDING_AUTH_TOKEN")
+                or config.get("embedding.auth_token"),
+                model=embedding_model,
+                dimension=embedding_dimension,
+            )
+        ),
+    )
+    registry.register("reranker_provider", HttpReranker())
+    registry.register(
+        "llm_provider",
+        AnthropicCompatibleProvider(
+            settings=LLMSettings(
+                base_url=os.getenv("LLM_BASE_URL") or config.get("llm.base_url"),
+                auth_token=os.getenv("LLM_AUTH_TOKEN")
+                or config.get("llm.auth_token"),
+                fast_model=(
+                    os.getenv("LLM_FAST_MODEL")
+                    or config.get("llm.fast_model")
+                    or "claude-3-sonnet"
+                ),
+                reasoning_model=(
+                    os.getenv("LLM_REASONING_MODEL")
+                    or config.get("llm.reasoning_model")
+                    or "claude-3-opus"
+                ),
+            )
+        ),
+    )
+
+
 def build_opensource_provider_registry(mode: str = "runtime") -> "ProviderRegistry":
     """Build provider registry for OSS deployment.
 
@@ -113,11 +202,6 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
     from src.infra.public.audit.mysql_worker_audit_log_store import MySQLWorkerAuditLogStore
     from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
-    from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-    from src.infra.public.reranker.http_reranker import HttpReranker
-    from src.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
-    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-    from src.infra.llm.config.llm_settings import LLMSettings
 
     # R12-Pool-2 Fix: Create shared MySQL connection pool for thread-safe access
     # Pool size covers G1/G2/G5 concurrent workers + headroom
@@ -173,20 +257,19 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
     )
     registry.register("vector_store", vector_store)
 
-    # Rebuild local Qdrant index from MySQL durable backend on startup
-    try:
-        rebuild_result = vector_store.rebuild_from_mysql()
-        logger.info(
-            "[QdrantMySQLVectorStore] Bootstrap rebuild completed: "
-            f"loaded={rebuild_result.get('loaded_count', 0)}, "
-            f"indexed={rebuild_result.get('indexed_count', 0)}, "
-            f"qdrant_size={rebuild_result.get('qdrant_size', 0)}"
-        )
-    except Exception as rebuild_err:
-        logger.warning(
-            "[QdrantMySQLVectorStore] Bootstrap rebuild failed (will continue with empty index): %s",
-            rebuild_err
-        )
+    # Rebuild only after startup dependencies initialize. A failed rebuild
+    # prevents readiness instead of serving an empty index.
+    from src.providers.public.vector_index_startup_provider import (
+        VectorIndexStartupProvider,
+    )
+
+    registry.register(
+        "startup_provider",
+        VectorIndexStartupProvider(
+            registry.require("startup_provider"),
+            vector_store,
+        ),
+    )
 
     logger.info(
         "[QdrantMySQLVectorStore] component=Bootstrap "
@@ -196,68 +279,7 @@ def _build_runtime_providers(registry: "ProviderRegistry", config: "YamlEnvConfi
         f"source=created dimension={vector_store.dimension}"
     )
 
-    # Real embedding provider
-    # Log embedding config resolution for parity diagnosis
-    # Priority: env var > config value > default
-    embedding_base_url = (
-        os.getenv("EMBEDDING_BASE_URL")
-        or config.get("embedding.base_url")
-        or ""
-    )
-    embedding_auth_token = (
-        os.getenv("EMBEDDING_AUTH_TOKEN")
-        or config.get("embedding.auth_token")
-    )
-    embedding_model = (
-        os.getenv("EMBEDDING_MODEL")
-        or config.get("embedding.model")
-        or "Qwen3-Embedding-8B"
-    )
-    embedding_dimension = int(
-        os.getenv("EMBEDDING_DIMENSION")
-        or config.get("embedding.dimension")
-        or 4096
-    )
-
-    logger.info(
-        "[EMBEDDING_CONFIG_RESOLUTION] provider_mode=%s enabled=%s provider_class=%s "
-        "base_url_host=%s model=%s dimension=%s env_base_url_present=%s env_model_present=%s "
-        "env_token_present=%s env_dimension_present=%s fallback_default_used=%s",
-        "runtime",
-        True,
-        "RealEmbeddingProvider",
-        _safe_host(embedding_base_url),
-        embedding_model,
-        embedding_dimension,
-        "YES" if os.getenv("EMBEDDING_BASE_URL") else "NO",
-        "YES" if os.getenv("EMBEDDING_MODEL") else "NO",
-        "YES" if os.getenv("EMBEDDING_AUTH_TOKEN") else "NO",
-        "YES" if os.getenv("EMBEDDING_DIMENSION") else "NO",
-        "YES" if (not os.getenv("EMBEDDING_BASE_URL") and not config.get("embedding.base_url")) else "NO",
-    )
-
-    embedding_settings = EmbeddingSettings(
-        base_url=embedding_base_url,
-        auth_token=embedding_auth_token,
-        model=embedding_model,
-        dimension=embedding_dimension,
-    )
-    embedding_provider = RealEmbeddingProvider(settings=embedding_settings)
-    registry.register("embedding_provider", embedding_provider)
-
-    # HTTP reranker
-    reranker_provider = HttpReranker()
-    registry.register("reranker_provider", reranker_provider)
-
-    # Anthropic-compatible LLM provider
-    llm_settings = LLMSettings(
-        base_url=config.get("llm.base_url"),
-        auth_token=config.get("llm.auth_token"),
-        fast_model=config.get("llm.fast_model", "claude-3-sonnet"),
-        reasoning_model=config.get("llm.reasoning_model", "claude-3-opus"),
-    )
-    llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
-    registry.register("llm_provider", llm_provider)
+    register_runtime_service_providers(registry, config)
 
 
 def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigProvider") -> None:
