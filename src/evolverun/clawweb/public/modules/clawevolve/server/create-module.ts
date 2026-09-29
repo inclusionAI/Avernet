@@ -112,7 +112,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const benchTag = new BenchTagRepository(db);
   const stageSkill = new StageSkillRepository(db);
   const appConfig = new AppConfigRepository(db);
-  const skillAsset = new SkillAssetRepository(db);
+  const skillAsset = new SkillAssetRepository(db, options.botDb);
   const botWorkflowPermission = new BotWorkflowPermissionRepository(db);
   const taskSourceService = options.taskSourceService ?? null;
   const dispatch = options.dispatch ?? ((input) => dispatchEvolveCommand({ ...input, ...options.resolveExecutionOptions?.(input) }, {

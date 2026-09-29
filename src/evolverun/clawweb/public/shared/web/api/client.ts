@@ -519,6 +519,7 @@ export type EvolveSkillVersion = {
 }
 
 export type EvolveSkillAsset = {
+  botName?: string | null
   description?: string | null
   ownerId?: string | null
   createdAt?: number | string
@@ -535,6 +536,7 @@ export type EvolveSkillAsset = {
 export type EvolveScoreComparison = { name: string | null; baseline: number | null; candidate: number | null; delta: number | null }
 
 export type EvolveSkillEvent = {
+  botName?: string | null
   eventId: string
   assetId: string
   name: string

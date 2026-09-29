@@ -12,7 +12,7 @@ const api = vi.hoisted(() => ({ evolve: { adminOwners: vi.fn(), listSpaces: vi.f
 vi.mock('../../api/client', () => ({ api }))
 const auth = vi.hoisted(() => ({ user: { userId: 'viewer' } as { userId: string; isClawEvolveAdmin?: boolean } | null }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: auth.user }) }))
-const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
+const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', botName: 'Evidence Bot', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
 function Location() { const location = useLocation(); return <output>{location.pathname}</output> }
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.resetAllMocks()
@@ -49,7 +49,7 @@ describe('Skill center asset list and recorded events', () => {
     expect(screen.getAllByRole('combobox')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '登记' })).toBeTruthy()
     expect(screen.queryByText('平台从 Host 读取完整 Skill，并保存登记时的 v1 冻结版本。')).toBeNull()
-    expect(screen.getByRole('button', { name: /请选择 Bot/ })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /请选择 Bot/ })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }).closest('label')?.className).toContain('block')
   })
 
@@ -381,5 +381,44 @@ describe('Skill pages share the existing administrator scope', () => {
       expect(api.evolve.listSkillEvents).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined })
     })
     expect(api.evolve.adminOwners).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('server-provided Skill Bot metadata', () => {
+  it('shows and searches another user Bot without loading the registration Bot list', async () => {
+    api.evolve.listSkillAssets.mockResolvedValue({ items: [{ ...asset, botName: 'Other owner Bot' }] })
+    api.bots.list.mockResolvedValue({ bots: [] })
+    render(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    await screen.findByText('Other owner Bot')
+    expect(api.bots.list).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索技能' }), { target: { value: 'Other owner Bot' } })
+    expect(screen.getByText('Evidence Skill')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    await waitFor(() => expect(api.bots.list).toHaveBeenCalledWith({ ownerId: 'viewer', status: 'all' }))
+    await screen.findByText('当前没有可用 Bot')
+    expect(screen.getByText('Other owner Bot')).toBeTruthy()
+  })
+
+  it('shows and searches the Bot name in event records without a separate Bot lookup', async () => {
+    api.evolve.listSkillEvents.mockResolvedValue({ items: [{
+      eventId: 'EVENT', assetId: 'ASSET-1', name: 'Evidence Skill', botId: 'BOT-1', botName: 'Event Bot',
+      ownerId: 'other-owner', type: 'registered', status: 'completed', updatedAt: 1789060000,
+    }] })
+    render(<MemoryRouter><SkillEventLog /></MemoryRouter>)
+    await screen.findByText('Event Bot')
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索技能事件' }), { target: { value: 'Event Bot' } })
+    expect(screen.getByText('Evidence Skill')).toBeTruthy()
+    expect(api.bots.list).not.toHaveBeenCalled()
+  })
+
+  it('keeps a registration Bot query failure separate from the Skill list', async () => {
+    api.bots.list.mockRejectedValue(new Error('Bot directory unavailable'))
+    render(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    await screen.findByText('Evidence Bot')
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    await screen.findByRole('alert')
+    expect(screen.getByRole('alert').textContent).toBe('Bot directory unavailable')
+    expect(screen.getByText('Evidence Bot')).toBeTruthy()
   })
 })

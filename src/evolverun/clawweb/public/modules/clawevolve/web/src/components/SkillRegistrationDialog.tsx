@@ -18,9 +18,10 @@ function registrationError(reason: unknown, fallback: string): string {
   return reason instanceof Error && !/^API \d+:/.test(reason.message) ? reason.message : fallback
 }
 
-export default function SkillRegistrationDialog({ bots, botsLoading = false, onClose, onRegistered }: {
+export default function SkillRegistrationDialog({ bots, botsLoading = false, botsError = '', onClose, onRegistered }: {
   bots: EvolveBotPickerOption[]
   botsLoading?: boolean
+  botsError?: string
   onClose: () => void
   onRegistered: (asset: EvolveSkillAsset) => void | Promise<void>
 }) {
@@ -72,6 +73,7 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, onC
       <div className="mt-5 space-y-4">
         <SpaceSelector value={spaceId} onChange={setSpaceId} disabled={registering} />
         <section aria-label="所属 Bot">
+          {botsError && <p role="alert" className="mb-2 text-sm text-red-600">{botsError}</p>}
           <p className="mb-1.5 text-xs font-medium text-gray-600">所属 Bot</p>
           <input aria-label="搜索 Bot" value={botQuery} disabled={registering} onChange={event => setBotQuery(event.target.value)} placeholder="搜索 Bot 名称、ID、Owner 或环境" className="mb-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500" />
           <EvolveBotPicker bots={visibleBots} value={botKey} disabled={botsLoading || registering} disableUnsupported={false} inlineOptions
