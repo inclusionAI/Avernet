@@ -3,11 +3,61 @@ import { digestCanonicalJson, type WorkflowEvolutionDiagnosis } from './contract
 export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; diagnoses: WorkflowEvolutionDiagnosis[] };
 export type IssueSource = WorkflowEvolutionDiagnosis & { sourceId: string; analysisId: string; flowId: string; completedAtMs: number };
 export type IssueGroup = { workflowId: string; signature: string; inputDigest: string; flowIds: string[]; sources: IssueSource[] };
+export type AggregationModelSource =
+  | (IssueSource & { detailLevel: 'full'; proposalRef?: string })
+  | { sourceId: string; detailLevel: 'compact'; representativeSourceId?: string; proposalRef?: string; reasoningExcerpt?: string };
+export type IssueAggregationModelInput = Omit<IssueGroup, 'sources'> & {
+  sources: AggregationModelSource[];
+  inputSummary: { totalSources: number; fullSources: number; compactSources: number };
+};
 export type IssueSummary = {
   summary: string;
   causes: Array<{ title: string; conclusion: string; certainty: 'supported' | 'hypothesis' | 'unknown'; sourceIds: string[] }>;
   unknowns: string[];
 };
+
+const FULL_SOURCE_LIMIT = 24;
+const COMPACT_REASONING_CHARS = 240;
+function proposalRef(source: IssueSource): string | undefined {
+  const proposal = source.proposal;
+  return proposal?.operations?.length ? digestCanonicalJson(proposal.operations) : undefined;
+}
+function diversityKey(source: IssueSource): string {
+  return digestCanonicalJson([proposalRef(source) ?? null, source.nodeId, source.failureMode,
+    source.reasoning.replace(/\s+/gu, ' ').trim().slice(0, COMPACT_REASONING_CHARS)]);
+}
+
+/** Preserve every source identity while spending detailed context on recent, diverse diagnoses. */
+export function buildAggregationModelInput(group: IssueGroup): IssueAggregationModelInput {
+  const recent = [...group.sources].sort((a, b) => b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId));
+  const selected = new Set<string>();
+  const seen = new Set<string>();
+  for (const source of recent) {
+    const key = diversityKey(source);
+    if (seen.has(key)) continue;
+    seen.add(key); selected.add(source.sourceId);
+    if (selected.size >= FULL_SOURCE_LIMIT) break;
+  }
+  for (const source of recent) {
+    if (selected.size >= FULL_SOURCE_LIMIT) break;
+    selected.add(source.sourceId);
+  }
+  const representatives = new Map(recent.filter(source => selected.has(source.sourceId)).map(source => [diversityKey(source), source.sourceId]));
+  const sources: AggregationModelSource[] = group.sources.map(source => {
+    const reference = proposalRef(source);
+    if (selected.has(source.sourceId)) return { ...source, detailLevel: 'full', ...(reference ? { proposalRef: reference } : {}) };
+    const representativeSourceId = representatives.get(diversityKey(source));
+    return { sourceId: source.sourceId, detailLevel: 'compact',
+      ...(representativeSourceId ? { representativeSourceId } : {
+        reasoningExcerpt: source.reasoning.replace(/\s+/gu, ' ').trim().slice(0, COMPACT_REASONING_CHARS),
+        ...(reference ? { proposalRef: reference } : {}),
+      }) };
+  });
+  const fullSources = sources.filter(source => source.detailLevel === 'full').length;
+  return { workflowId: group.workflowId, signature: group.signature, inputDigest: group.inputDigest,
+    flowIds: group.flowIds, sources,
+    inputSummary: { totalSources: sources.length, fullSources, compactSources: sources.length - fullSources } };
+}
 
 /** Select entire latest successful analyses before grouping; an empty result replaces older findings. */
 export function buildIssueGroups(workflowId: string, analyses: IssueAnalysis[]): IssueGroup[] {

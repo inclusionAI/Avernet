@@ -19,6 +19,12 @@ function positive(value: unknown, field: string, fallback: number, max = Number.
   if (!Number.isSafeInteger(parsed) || parsed > max) throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
   return parsed;
 }
+function boolean(value: unknown, field: string, fallback = false): boolean {
+  if (value === undefined) return fallback;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
+}
 
 /** Transport adapter. Authorization is injected by a verified-login composition root.
  * No unsigned callback or publication route is exposed here.
@@ -36,7 +42,14 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
           : error.code === 'CAPABILITY_UNAVAILABLE' ? 503
           : ['WORKFLOW_NOT_FOUND', 'TASK_NOT_FOUND', 'REVISION_NOT_FOUND', 'ITEM_NOT_FOUND'].includes(error.code) ? 404 : 409;
         response.status(status).json({ error: error.message, code: error.code, ...error.details });
-      } else response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR' });
+      } else {
+        console.error('[workflow-repair] request failed', {
+          method: request.method,
+          path: request.path,
+          error,
+        });
+        response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR' });
+      }
     }
   };
   async function access(request: Request, response: Response, workflowId: string, mode: 'view' | 'edit') {
@@ -58,7 +71,8 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const state = req.query.state ?? 'all';
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
     if (actor) res.json({ ...await service.candidates(workflowId, { state: state as RepairInboxFilter,
-      page: positive(req.query.page, 'page', 1), pageSize: positive(req.query.pageSize, 'pageSize', 20, 200) }), canEdit: actor.canEdit });
+      page: positive(req.query.page, 'page', 1), pageSize: positive(req.query.pageSize, 'pageSize', 20, 200),
+      includeHistorical: boolean(req.query.includeHistorical, 'includeHistorical') }), canEdit: actor.canEdit });
   }));
   router.get('/items/:itemId', handle(async (req, res) => {
     const workflowId = text(req.query.workflowId, 'workflowId');
@@ -77,6 +91,7 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
       workflowId, itemId: text(req.params.itemId, 'itemId'), inputDigest: req.body.inputDigest,
       expectedStateVersion: req.body.expectedStateVersion, contentRevision: req.body.contentRevision,
       action: req.body.action, reason: req.body.reason, requestId: req.body.requestId,
+      ...(req.body.includeHistorical === undefined ? {} : { includeHistorical: req.body.includeHistorical }),
     }));
   }));
   router.get('/:taskId', handle(async (req, res) => {

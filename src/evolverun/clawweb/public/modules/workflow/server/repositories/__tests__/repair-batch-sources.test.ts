@@ -31,8 +31,9 @@ describe('trusted workflow repair source adapter', () => {
     expect(result[0].item.proposal).toEqual(proposal());
   });
   it('hydrates evidence only for the requested repair item', async () => {
+    const distinct = { ...proposal('修复脚本兼容性'), operations: [{ op: 'replace', nodeId: 'llm', path: '/outputContract/type', value: 'string' }] };
     const groups = async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64),
-      sources: [diagnosis('d1'), diagnosis('d2', proposal('修复脚本兼容性'))] }];
+      sources: [diagnosis('d1'), diagnosis('d2', distinct)] }];
     const summary = await createRepairSourcePort(readers({ groups })).load(db, 'wf', 'summary');
     const selected = summary.find(row => row.item.instruction === '修复输出类型')!;
     const evidence = vi.fn(async (_db: IDatabase, _workflow: string, eventIds: string[]) => eventIds.map(event_id => ({
@@ -49,11 +50,18 @@ describe('trusted workflow repair source adapter', () => {
       diagnoses: [{ evidenceEventIds: ['ev-d2'], evidenceCount: 1 }],
     });
   });
-  it('merges exactly equal proposals and preserves different fixes for the same failure type', async () => {
+  it('merges proposals with identical patch operations despite different summaries', async () => {
     const source = createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64), sources: [diagnosis(), diagnosis('d2'), diagnosis('d3', proposal('修复脚本兼容性'))] }] }));
     const result = await source.load(db, 'wf');
+    expect(result).toHaveLength(1);
+    expect(result[0].item.sources).toHaveLength(3);
+  });
+  it('preserves proposals that target the same prompt with different patch values as variants', async () => {
+    const changed = { ...proposal('允许工具调用'), operations: [{ op: 'replace', nodeId: 'llm', path: '/executor/prompt', value: '允许工具调用' }] };
+    const original = { ...proposal('禁止工具调用'), operations: [{ op: 'replace', nodeId: 'llm', path: '/executor/prompt', value: '禁止工具调用' }] };
+    const result = await createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64),
+      sources: [diagnosis('d1', original), diagnosis('d2', changed)] }] })).load(db, 'wf');
     expect(result).toHaveLength(2);
-    expect(result.find(row => row.item.instruction === '修复输出类型')!.item.sources).toHaveLength(2);
   });
   it('new evidence preserves an unchanged item identity but changes its frozen source snapshot', async () => {
     const first = (await createRepairSourcePort(readers()).load(db, 'wf'))[0];
@@ -68,6 +76,12 @@ describe('trusted workflow repair source adapter', () => {
     expect(result[0].item.sources[0]).toMatchObject({ kind: 'suggestion', suggestionId: '42' });
     expect(result[0].item.context).toMatchObject({ suggestions: [{ status: 'applied_unverified', diagnosisIds: ['d'], runIds: ['run'] }] });
   });
+  it('hides old pending suggestions by default but keeps them available as history', async () => {
+    const suggestions = async () => [{ id: 42, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时',
+      proposal_json: null, status: 'pending', gmt_modified: 1 }];
+    expect(await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf', 'summary')).toEqual([]);
+    expect(await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf', 'summary', { includeHistorical: true })).toHaveLength(1);
+  });
   it.each(['ignored', 'resolved', 'unknown-future-state'])('does not requeue legacy %s suggestions', async status => {
     const result = await createRepairSourcePort(readers({ groups: async () => [], suggestions: async () => [{ id: 42, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', status }] })).load(db, 'wf');
     expect(result[0].initialState).toBe('no_action');
@@ -81,7 +95,8 @@ describe('trusted workflow repair source adapter', () => {
     expect(first[0].initialState).toBe('processing');
   });
   it('does not silently truncate 39 independent candidates to the old 20-item limit', async () => {
-    const sources = Array.from({ length: 39 }, (_, index) => diagnosis(`d${index}`, proposal(`修复 ${index}`)));
+    const sources = Array.from({ length: 39 }, (_, index) => diagnosis(`d${index}`, { ...proposal(`修复 ${index}`),
+      operations: [{ op: 'replace', nodeId: 'llm', path: '/outputContract/type', value: `type-${index}` }] }));
     expect(await createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64), sources }] })).load(db, 'wf')).toHaveLength(39);
   });
   it('includes the referenced problem and evidence for a text-only suggestion without inventing missing diagnoses', async () => {

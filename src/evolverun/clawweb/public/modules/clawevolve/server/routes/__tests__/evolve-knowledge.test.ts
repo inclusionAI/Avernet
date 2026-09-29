@@ -108,6 +108,29 @@ describe("evolve knowledge endpoints", () => {
     expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
     expect((await fetch(`${baseUrl}/api/evolve/issue-groups`)).status).toBe(400);
   });
+  it('bounds repair sources by recent activity and skips one incompatible historical analysis', async () => {
+    const now = Date.now(); const cutoff = now - 30 * 24 * 60 * 60 * 1000;
+    const result = (id: string, run: string) => ({ schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id,
+      facts: [], inferences: [], unknowns: [], diagnoses: [{ diagnosisId: `d-${id}`, flowIds: [run], nodeId: 'fetch',
+        failureSignature: `timeout-${id}`, failureMode: 'timeout', severity: 'high', reasoning: id, evidenceEventIds: [] }] });
+    for (const [id, run, time] of [['old', 'run-old', cutoff - 1], ['recent', 'run-recent', now]] as const) {
+      await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+        (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+        VALUES (?, ?, 'single_run', '{}', ?, 'wf', 'completed', 'v1', ?, ?, ?)`,
+      [id, id, run, JSON.stringify(result(id, run)), time, time]);
+    }
+    await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+      (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+      VALUES ('bad', 'bad', 'single_run', '{}', 'run-bad', 'wf', 'completed', 'v1', '{}', ?, ?)`, [now, now]);
+    await repo.createDiagnosis({ diagnosisId: 'legacy-bad', flowId: 'run-bad', workflowId: 'wf', runId: 'run-bad',
+      nodeId: 'fetch', weakNodeId: 'fetch', failureSignature: 'legacy-fallback', failureMode: 'timeout', executorType: 'cli-script' });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const aggregates = new IssueAggregationRepository(db);
+    const recent = await aggregates.listSources('wf', { sinceMs: cutoff });
+    expect(recent.map(group => group.signature)).toEqual(expect.arrayContaining(['timeout-recent', 'legacy-fallback']));
+    expect(recent.map(group => group.signature)).not.toContain('timeout-old');
+    expect((await aggregates.listSources('wf')).map(group => group.signature)).toContain('timeout-old');
+  });
   it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
     const insert = async (id: string, run: string, time: number, findings = true) => {
       const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns: [],

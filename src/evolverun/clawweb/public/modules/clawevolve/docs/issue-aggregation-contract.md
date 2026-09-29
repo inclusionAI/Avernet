@@ -67,8 +67,18 @@ Each Bot model call is bounded to 120 seconds; new group calls stop after a
 180-second batch budget (an in-flight call can extend the batch up to 300 seconds).
 Failure to synthesize never rolls back an already saved single-run diagnosis.
 
-Groups exceeding 500 source diagnoses or 180,000 UTF-8 input bytes report
-`too_large`; they are never silently sampled. Hierarchical synthesis is not in v1.
+Before the model call, a group with many repeated diagnoses is converted into a
+bounded model view. At most 24 recent and structurally diverse sources retain the
+complete diagnosis/proposal payload; the remaining sources retain their source ID
+and either reference a full representative or carry a bounded reasoning excerpt.
+Representative diversity includes the bounded diagnosis reasoning as well as the
+structured repair action, so a shared fix cannot hide a distinct root cause.
+The frozen `scope_json` still stores the complete source snapshot, result validation
+still requires coverage of every source ID, and the browser exposes full/compact
+counts. This is input compaction, not silent source sampling.
+
+Groups exceeding 500 source diagnoses or 180,000 UTF-8 bytes *after compaction*
+report `too_large`. Hierarchical synthesis is not in v1.
 Historical groups are not automatically backfilled merely by opening a page.
 Run analysis triggers affected groups; reanalyzing an associated run refreshes
 them. There is no separate browser model-dispatch or bulk backfill endpoint in v1.

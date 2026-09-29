@@ -1,31 +1,41 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalJson, digestCanonicalJson, validateWorkflowEvolutionAnalysisResult } from '../services/evolution/contracts.js';
-import { buildIssueGroups, validateIssueSummary, type IssueAnalysis, type IssueGroup, type IssueSummary } from '../services/evolution/issue-aggregation.js';
+import { buildAggregationModelInput, buildIssueGroups, validateIssueSummary, type IssueAggregationModelInput, type IssueAnalysis, type IssueGroup, type IssueSummary } from '../services/evolution/issue-aggregation.js';
 import type { WorkflowEvolutionAnalysisRow } from './workflow-evolution-repository.js';
 
 const SCOPE = 'issue_aggregate';
 type Snapshot = { parentAnalysisId: string; input: IssueGroup };
-export type PresentedIssueGroup = IssueGroup & { summary: IssueSummary | null; summarySources: IssueGroup['sources']; stale: boolean; aggregationStatus: string; aggregationId: string | null };
+export type PresentedIssueGroup = IssueGroup & { summary: IssueSummary | null; summarySources: IssueGroup['sources']; stale: boolean; aggregationStatus: string; aggregationId: string | null;
+  aggregationInputSummary: IssueAggregationModelInput['inputSummary'] };
 
 /** Aggregations are immutable versioned analysis snapshots, not diagnoses or suggestion states. */
 export class IssueAggregationRepository {
   constructor(private readonly db: IDatabase) {}
 
   /** Read-only source API for Workflow repair; does not depend on aggregate model output. */
-  listSources(workflowId: string): Promise<IssueGroup[]> { return this.groups(workflowId); }
+  listSources(workflowId: string, options?: { sinceMs?: number }): Promise<IssueGroup[]> {
+    return this.groups(workflowId, { ...options, tolerateInvalid: true });
+  }
 
-  private async groups(workflowId: string): Promise<IssueGroup[]> {
+  private async groups(workflowId: string, options: { sinceMs?: number; tolerateInvalid?: boolean } = {}): Promise<IssueGroup[]> {
     const analyses: IssueAnalysis[] = [];
     let afterId = 0;
     for (;;) {
       const rows = await this.db.query<WorkflowEvolutionAnalysisRow>(
         `SELECT * FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND status = 'completed'
-         AND scope_type <> ? AND id > ? ORDER BY id ASC LIMIT 200`, [workflowId, SCOPE, afterId]);
+         AND scope_type <> ?${options.sinceMs === undefined ? '' : ' AND COALESCE(completed_at_ms, requested_at_ms) >= ?'}
+         AND id > ? ORDER BY id ASC LIMIT 200`, options.sinceMs === undefined
+          ? [workflowId, SCOPE, afterId] : [workflowId, SCOPE, options.sinceMs, afterId]);
       if (!rows.length) break;
       for (const row of rows) {
-        const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json ?? 'null'));
-        const scope = JSON.parse(row.scope_json) as { flowIds?: unknown };
-        analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses });
+        try {
+          const result = validateWorkflowEvolutionAnalysisResult(JSON.parse(row.result_json ?? 'null'));
+          const scope = JSON.parse(row.scope_json) as { flowIds?: unknown };
+          analyses.push({ analysisId: row.analysis_id, flowId: row.flow_id, flowIds: Array.isArray(scope.flowIds) ? scope.flowIds.map(String) : [], completedAtMs: row.completed_at_ms ?? row.requested_at_ms, diagnoses: result.diagnoses });
+        } catch (error) {
+          if (!options.tolerateInvalid) throw error;
+          console.warn('[workflow-repair] skipped incompatible analysis source', { workflowId, analysisId: row.analysis_id });
+        }
       }
       afterId = rows.at(-1)!.id;
     }
@@ -39,6 +49,7 @@ export class IssueAggregationRepository {
       if (coveredRuns.has(row.flow_id)) continue;
       const numeric = Number(row.gmt_modified);
       const time = Number.isFinite(numeric) ? (numeric < 1e12 ? numeric * 1000 : numeric) : Date.parse(String(row.gmt_modified)) || 0;
+      if (options.sinceMs !== undefined && time < options.sinceMs) continue;
       const entry = legacyByRun.get(row.flow_id) ?? { analysisId: 'legacy', flowId: row.flow_id, completedAtMs: time, diagnoses: [] };
       entry.completedAtMs = Math.max(entry.completedAtMs, time);
       entry.diagnoses.push({ diagnosisId: row.diagnosis_id, flowIds: [row.flow_id], nodeId: row.weak_node_id ?? row.node_id,
@@ -57,16 +68,18 @@ export class IssueAggregationRepository {
       const current = matches.find(row => (JSON.parse(row.scope_json) as Snapshot).input.inputDigest === group.inputDigest);
       const completed = (current?.status === 'completed' ? current : matches.find(row => row.status === 'completed'));
       const frozen = completed ? (JSON.parse(completed.scope_json) as Snapshot).input : null;
-      const tooLarge = Buffer.byteLength(canonicalJson(group), 'utf8') > 180_000 || group.sources.length > 500;
+      const modelInput = buildAggregationModelInput(group);
+      const tooLarge = Buffer.byteLength(canonicalJson(modelInput), 'utf8') > 180_000 || group.sources.length > 500;
       return { ...group, summary: completed && frozen ? validateIssueSummary(JSON.parse(completed.result_json!), frozen) : null,
         summarySources: frozen?.sources ?? [],
         stale: !!completed && frozen?.inputDigest !== group.inputDigest,
         aggregationStatus: tooLarge ? 'too_large' : current?.status === 'queued' && Date.now() - current.requested_at_ms > 600_000 ? 'failed' : current?.status ?? 'not_generated', aggregationId: current?.analysis_id ?? null,
+        aggregationInputSummary: modelInput.inputSummary,
       };
     });
   }
 
-  async prepare(parentAnalysisId: string): Promise<Array<{ id: string; input: IssueGroup }>> {
+  async prepare(parentAnalysisId: string): Promise<Array<{ id: string; input: IssueAggregationModelInput }>> {
     const parent = (await this.db.query<WorkflowEvolutionAnalysisRow>(
       'SELECT * FROM workflow_evolution_analysis_runs WHERE analysis_id = ?', [parentAnalysisId]))[0];
     if (!parent || parent.status !== 'completed' || parent.scope_type === SCOPE || !parent.workflow_id) throw new Error('completed run analysis required');
@@ -78,12 +91,14 @@ export class IssueAggregationRepository {
     const declaredFlows = Array.isArray(parentScope.flowIds) ? parentScope.flowIds.map(String) : [];
     const affectedFlows = new Set([...declaredFlows, ...(parent.flow_id ? [parent.flow_id] : []), ...parentResult.diagnoses.flatMap(d => d.flowIds)]);
     const affectedSignatures = new Set(parentResult.diagnoses.map(d => d.failureSignature));
-    const jobs: Array<{ id: string; input: IssueGroup }> = [];
-    for (const { summary: _summary, summarySources: _sources, stale: _stale, aggregationStatus, aggregationId: previousId, ...input } of groups) {
+    const jobs: Array<{ id: string; input: IssueAggregationModelInput }> = [];
+    for (const { summary: _summary, summarySources: _sources, stale: _stale, aggregationStatus, aggregationId: previousId,
+      aggregationInputSummary: _inputSummary, ...input } of groups) {
       if (!affectedSignatures.has(input.signature) && !_sources.some(source => affectedFlows.has(source.flowId))) continue;
       if (aggregationStatus === 'completed' || aggregationStatus === 'queued') continue;
-      // Fail explicitly rather than silently summarizing a truncated sample.
-      if (Buffer.byteLength(canonicalJson(input), 'utf8') > 180_000 || input.sources.length > 500) continue;
+      const modelInput = buildAggregationModelInput(input);
+      // Every sourceId remains present. Inputs that still exceed the bound fail explicitly.
+      if (Buffer.byteLength(canonicalJson(modelInput), 'utf8') > 180_000 || input.sources.length > 500) continue;
       const requestKey = digestCanonicalJson([SCOPE, input.inputDigest, previousId]);
       const id = `AG-${requestKey.slice(0, 40)}`;
       const now = Date.now();
@@ -93,7 +108,7 @@ export class IssueAggregationRepository {
            requested_by, requested_at_ms, state_version, gmt_create, gmt_modified)
           VALUES (?, ?, ?, ?, ?, 'queued', 'workflow-issue-summary/v1', ?, ?, 0, ?, ?)`,
         [id, requestKey, SCOPE, canonicalJson({ parentAnalysisId, input }), parent.workflow_id, parent.requested_by, now, this.db.dialect.now(), this.db.dialect.now()]);
-        jobs.push({ id, input });
+        jobs.push({ id, input: modelInput });
       } catch (error) {
         const existing = (await this.db.query<{ analysis_id: string }>('SELECT analysis_id FROM workflow_evolution_analysis_runs WHERE request_key = ?', [requestKey]))[0];
         if (!existing) throw error;

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
+import { RepairBatchRepository } from '../../repositories/repair-batch-repository.js';
 import { repairFixture } from './repair-batch-fixtures.js';
 
 describe('repair workbench control service', () => {
@@ -25,7 +26,7 @@ describe('repair workbench control service', () => {
     expect(ignored.state).toBe('no_action');
     expect(await f.service.disposition('human', disposition)).toEqual(ignored);
     f.items.splice(0, 1);
-    const historical = await f.service.candidates('wf-1');
+    const historical = await f.service.candidates('wf-1', { includeHistorical: true });
     expect(historical.items.find(i => i.itemId === 'item-0')).toMatchObject({ state: 'no_action', sourceAvailable: false });
     const restored = await f.service.disposition('human', { ...disposition, action: 'restore', inputDigest: historical.inputDigest, expectedStateVersion: 1, requestId: 'restore-1' });
     expect(restored.state).toBe('pending');
@@ -40,6 +41,44 @@ describe('repair workbench control service', () => {
     expect(first.counts).toMatchObject({ pending: 39, all: 39 });
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
+  });
+  it('uses the historical source scope when disposing an item from the historical inbox', async () => {
+    const f = await repairFixture(2); fixtures.push(f);
+    const [historical, recent] = f.items;
+    f.sourcePort.load = async (_db, _workflowId, _mode, scope) => (scope?.includeHistorical ? [historical, recent] : [recent])
+      .map(item => ({ item, episodeKey: 'initial' }));
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const inbox = await service.candidates('wf-1', { includeHistorical: true });
+    await expect(service.disposition('human', { workflowId: 'wf-1', itemId: historical.itemId,
+      inputDigest: inbox.inputDigest, expectedStateVersion: 0, contentRevision: 1, action: 'no_action',
+      reason: 'Historical issue is no longer actionable', requestId: 'history-ignore', includeHistorical: true }))
+      .resolves.toMatchObject({ itemId: historical.itemId, state: 'no_action' });
+  });
+  it('preserves one persisted lifecycle across proposal-key upgrades and same-action wording changes', async () => {
+    const f = await repairFixture(1); fixtures.push(f);
+    const operations = [{ op: 'replace', nodeId: 'fetch', path: '/timeoutMs', value: 30_000 }];
+    const proposal = (summary: string) => ({ schemaVersion: 'workflow-patch/v1', workflowId: 'wf-1', summary, operations });
+    const legacy = (id: string, summary: string) => ({ ...f.items[0], itemId: id, groupKey: 'timeout',
+      proposalKey: digestRepairJson({ proposal: proposal(summary), instruction: summary }), proposal: proposal(summary), instruction: summary });
+    const oldPending = legacy('legacy-pending', 'Raise timeout');
+    const oldIgnored = legacy('legacy-ignored', 'Avoid premature timeout');
+    const current = { ...legacy('current', 'Increase timeout safely'),
+      proposalKey: digestRepairJson({ schemaVersion: 'workflow-patch/v1', workflowId: 'wf-1', operations }) };
+    const repo = new RepairBatchRepository(f.db);
+    await f.db.transaction(tx => repo.materializeItem(tx, { workflowId: 'wf-1', episodeKey: 'initial', item: oldPending }));
+    await f.db.transaction(tx => repo.materializeItem(tx, { workflowId: 'wf-1', episodeKey: 'initial', item: oldIgnored }));
+    await f.db.transaction(tx => repo.setDisposition(tx, { workflowId: 'wf-1', itemId: oldIgnored.itemId,
+      expectedStateVersion: 0, action: 'no_action', actorId: 'human', requestId: 'legacy-ignore', reason: 'Later' }));
+    f.items.splice(0, 1, current);
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const inbox = await service.candidates('wf-1', { includeHistorical: true });
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0]).toMatchObject({ itemId: oldIgnored.itemId, state: 'no_action',
+      proposal: { summary: 'Avoid premature timeout' }, sourceAvailable: true });
+    await expect(service.disposition('human', { workflowId: 'wf-1', itemId: oldIgnored.itemId,
+      inputDigest: inbox.inputDigest, expectedStateVersion: 1, contentRevision: 1, action: 'restore',
+      reason: 'Reconsider', requestId: 'legacy-restore', includeHistorical: true }))
+      .resolves.toMatchObject({ itemId: oldIgnored.itemId, state: 'pending' });
   });
   it.each([39, 100])('freezes %i sources and atomically creates one running task and one draft step', async count => {
     const f = await setup(count);
@@ -106,7 +145,7 @@ describe('repair workbench control service', () => {
   it('keeps legacy applied sources read-only and blocks an active legacy application', async () => {
     const f = await setup();
     f.sourcePort.load = async () => f.items.map(item => ({ item, episodeKey: 'initial', initialState: 'verified' }));
-    const old = await f.service.candidates('wf-1');
+    const old = await f.service.candidates('wf-1', { includeHistorical: true });
     expect(old.items[0]).toMatchObject({ state: 'verified', sourceAvailable: false });
     await expect(f.service.create('human', { ...f.request, inputDigest: old.inputDigest })).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' });
     f.sourcePort.load = async () => f.items.map(item => ({ item, episodeKey: 'initial' }));

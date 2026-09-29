@@ -9,12 +9,12 @@ type Filter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'n
 const filters: Record<Filter, string> = { pending: '待处理', processing: '处理中', awaiting_verification: '待验证', closed: '已关闭', no_action: '暂不处理', all: '全部' }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const PAGE_SIZE = 20
-function readView(workflowId: string): { filter: Filter; taskId: string; page: number } {
+function readView(workflowId: string): { filter: Filter; taskId: string; page: number; includeHistorical: boolean } {
   try {
     const saved = JSON.parse(sessionStorage.getItem(`workflow-repair:${workflowId}`) ?? '{}')
     return { filter: saved.filter in filters ? saved.filter : 'pending', taskId: typeof saved.taskId === 'string' ? saved.taskId : '',
-      page: Number.isSafeInteger(saved.page) && saved.page > 0 ? saved.page : 1 }
-  } catch { return { filter: 'pending', taskId: '', page: 1 } }
+      page: Number.isSafeInteger(saved.page) && saved.page > 0 ? saved.page : 1, includeHistorical: saved.includeHistorical === true }
+  } catch { return { filter: 'pending', taskId: '', page: 1, includeHistorical: false } }
 }
 
 export default function RepairWorkbench({ workflowId }: { workflowId: string }) {
@@ -58,7 +58,8 @@ function Workbench({ workflowId }: { workflowId: string }) {
     const load = async () => {
       setLoading(true)
       try {
-        const result = await repairBatches.candidates(workflowId, { state: view.filter, page: view.page, pageSize: PAGE_SIZE })
+        const result = await repairBatches.candidates(workflowId, { state: view.filter, page: view.page, pageSize: PAGE_SIZE,
+          includeHistorical: view.includeHistorical })
         if (!current) return
         setData(result); setLoadError('')
         result.items.forEach(item => knownItems.current.set(item.itemId, item))
@@ -72,7 +73,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
     }
     void load()
     return () => { current = false }
-  }, [workflowId, view.filter, view.page, refresh])
+  }, [workflowId, view.filter, view.page, view.includeHistorical, refresh])
   const shouldPoll = !!data?.tasks.some(task => ['drafting', 'publishing'].includes(task.phase))
   useEffect(() => {
     if (!shouldPoll) return
@@ -119,7 +120,8 @@ function Workbench({ workflowId }: { workflowId: string }) {
     if (!data || !form || !canEdit || !data.capabilities.generation || busy) return
     const invalidVisibleSelection = formItems.some(item => formSelection.includes(item.itemId) && !!exclusion(item, form === 'feedback' ? view.taskId : undefined))
     if (!formSelection.length || invalidVisibleSelection) { setActionError('所选建议状态已变化，请重新选择后提交。'); return }
-    const selection = { workflowId, inputDigest: data.inputDigest, itemIds: formSelection, instructions }
+    const selection = { workflowId, inputDigest: data.inputDigest, itemIds: formSelection, instructions,
+      includeHistorical: data.includeHistorical }
     const payload = form === 'feedback' && visibleDetail ? { ...selection, expectedAttemptRevision: visibleDetail.latestAttempt.revision,
       parentCandidateCommit: typeof visibleDetail.latestSuccessful?.draft?.candidateCommit === 'string' ? visibleDetail.latestSuccessful.draft.candidateCommit : null, feedback } : selection
     const withId = { ...payload, requestId: requestId(payload) }
@@ -134,7 +136,8 @@ function Workbench({ workflowId }: { workflowId: string }) {
   const submitDisposition = async () => {
     if (!data || !disposition || !reason.trim() || !canEdit || busy) return
     const payload = { workflowId, inputDigest: data.inputDigest, expectedStateVersion: disposition.item.stateVersion,
-      contentRevision: disposition.item.contentRevision, action: disposition.action, reason: reason.trim() }
+      contentRevision: disposition.item.contentRevision, action: disposition.action, reason: reason.trim(),
+      includeHistorical: data.includeHistorical }
     setBusy(true); setActionError('')
     try { await repairBatches.disposition(disposition.item.itemId, { ...payload, requestId: requestId({ ...payload, itemId: disposition.item.itemId }) }); setDisposition(null); reload() }
     catch (error) { setActionError(message(error)); reload() }
@@ -179,6 +182,12 @@ function Workbench({ workflowId }: { workflowId: string }) {
       <nav aria-label="修复状态筛选" className="mt-4 flex flex-wrap gap-2">{Object.entries(filters).map(([key, label]) => <button type="button" key={key} aria-pressed={view.filter === key}
         className={`${button} ${view.filter === key ? 'border-blue-200 bg-blue-50 text-blue-700' : 'bg-white text-slate-600'}`}
         onClick={() => setView(previous => ({ ...previous, filter: key as Filter, page: 1 }))}>{label} {data.counts[key as Filter]}</button>)}</nav>
+      <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-slate-600"><input type="checkbox"
+        checked={view.includeHistorical} onChange={event => {
+          setSelected([]); initialized.current = false; knownItems.current.clear()
+          setView(previous => ({ ...previous, includeHistorical: event.target.checked, page: 1 }))
+        }} />
+        包含超过 {data.activeLookbackDays} 天未复现的历史问题</label>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-600">已选择 {selected.length} 项 · 最多 {limit} 项 · {data.items.filter(item => !!exclusion(item)).length} 项不参与本次生成</p>
         <div className="flex flex-wrap gap-2"><button className={button} disabled={!canEdit} onClick={() => setSelected(data.items.filter(item => !exclusion(item)).slice(0, limit).map(item => item.itemId))}>选择可处理项</button>
           <button className={button} disabled={!canEdit || !selected.length} onClick={() => setSelected([])}>清空选择</button>
