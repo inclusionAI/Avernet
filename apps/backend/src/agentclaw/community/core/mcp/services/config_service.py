@@ -24,6 +24,19 @@ from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 logger = get_logger()
 
 
+def _merge_headers_by_name(
+    base: dict[str, str], overrides: dict[str, str]
+) -> dict[str, str]:
+    """Merge HTTP Headers by their case-insensitive names."""
+    merged = dict(base)
+    for name, value in overrides.items():
+        for existing in tuple(merged):
+            if existing.lower() == name.lower():
+                del merged[existing]
+        merged[name] = value
+    return merged
+
+
 class MCPConfigService(MCPConfigServiceProtocol):
     """管理用户级 MCP 配置（CRUD + 负载构建）。
 
@@ -122,6 +135,23 @@ class MCPConfigService(MCPConfigServiceProtocol):
 
         return {"valid": True, "error": None}
 
+    def validate_scoped_headers(
+        self, *, server_code: str, entries: tuple[tuple[str, str], ...]
+    ) -> dict[str, Any]:
+        """Reject invalid and platform-managed names in an aggregate snapshot."""
+        managed = {
+            name.lower()
+            for name in self._mcp_runtime_credentials.header_secrets.get(server_code, {})
+        }
+        for name, value in entries:
+            if not name or not name.strip() or len(name) > 256:
+                return {"valid": False, "error": "Invalid MCP Header name"}
+            if len(value) > 2000:
+                return {"valid": False, "error": f"Header value too long: {name}"}
+            if name.lower() in managed:
+                return {"valid": False, "error": f"Platform-managed Header: {name}"}
+        return {"valid": True, "error": None}
+
     def validate_bot_override(
         self,
         *,
@@ -145,6 +175,25 @@ class MCPConfigService(MCPConfigServiceProtocol):
         if result["valid"]:
             result["mcp_data"] = detail
         return result
+
+    def validate_effective_scoped_config(
+        self,
+        *,
+        server_code: str,
+        detail: dict[str, Any],
+        bot_config: dict[str, Any],
+        user_config: dict[str, Any],
+        engine_type: str | None,
+    ) -> dict[str, Any]:
+        """Validate a prospective aggregate snapshot without reading old rows."""
+        return self._validate_effective_config(
+            server_code=server_code,
+            detail=detail,
+            config=bot_config,
+            inherited_config=user_config,
+            engine_type=engine_type,
+            strict_user_selection=True,
+        )
 
     def validate_user_config_update(
         self,
@@ -292,6 +341,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         config: dict[str, Any],
         inherited_config: dict[str, Any],
         engine_type: str | None,
+        strict_user_selection: bool = False,
     ) -> dict[str, Any]:
         if not config and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
             return {"valid": True, "error": None}
@@ -344,6 +394,10 @@ class MCPConfigService(MCPConfigServiceProtocol):
             }
         strict_selection = (
             "endpoint_env" in config or "transport_protocol" in config
+            or (
+                strict_user_selection
+                and inherited_config.get("transport_protocol") is not None
+            )
         )
         if strict_selection and protocol and not any(
             ep.get("transportProtocol") == protocol for ep in matching_env
@@ -490,12 +544,13 @@ class MCPConfigService(MCPConfigServiceProtocol):
 
         user_headers = custom_headers if custom_headers is not None else extra_config.get("headers", {})
 
-        # A Bot override is the highest configuration source. Missing keys
-        # inherit; an explicit empty headers map deliberately blocks user
-        # headers while retaining platform defaults below.
+        # Bot Headers replace only matching names; other user Headers remain
+        # inherited. An explicit empty map means no Bot Header overrides.
         if bot_override:
             if "headers" in bot_override:
-                user_headers = bot_override["headers"]
+                user_headers = _merge_headers_by_name(
+                    user_headers, bot_override["headers"]
+                )
             if "endpoint_env" in bot_override:
                 _endpoint_env = bot_override["endpoint_env"]
             if "transport_protocol" in bot_override:
@@ -522,7 +577,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
                 }
 
         # 合并策略：默认 headers 作为基底，用户 headers 覆盖同名键。
-        merged_headers = {**config_headers, **user_headers}
+        merged_headers = _merge_headers_by_name(config_headers, user_headers)
 
         # Platform-managed headers are the final authority.  Header names are
         # case-insensitive, so discard every differently-cased user/default key

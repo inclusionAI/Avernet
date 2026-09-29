@@ -50,6 +50,9 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotMCPConfigRepositoryProtocol,
     UserMCPConfigRepository,
 )
+from agentclaw.community.core.repository.protocols.bot.mcp import (
+    ScopedMCPConfigRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.mcp_default_exclusion import (
     MCPDefaultExclusionReaderProtocol,
 )
@@ -68,6 +71,9 @@ from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDisp
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.scoped_mcp_config import (
+    ScopedMCPConfigRepository,
 )
 
 
@@ -113,6 +119,11 @@ class McpModule(Module):
         binder.bind(
             BotMCPConfigRepositoryProtocol,
             to=BotMCPConfigRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ScopedMCPConfigRepositoryProtocol,
+            to=ScopedMCPConfigRepository,
             scope=singleton,
         )
         # ``MCPAuthPlugin`` is bound per-profile (corp=Prod, community=permissive,

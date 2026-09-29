@@ -17,26 +17,45 @@ from agentclaw.community.adapters.http.mcp.schemas import (
     MCPUnifiedConfigData,
     MCPUnifiedConfigRequest,
     MCPUnifiedConfigResponse,
+    MCPScopedConfigData,
+    MCPScopedConfigResponse,
+    MCPScopedConfigRequest,
     TenantListResponse,
 )
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
+    EffectiveMCPStateReaderProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    BotRepository,
+)
+from agentclaw.community.core.repository.protocols.bot.mcp import (
+    ScopedMCPConfigRepositoryProtocol,
+)
 from agentclaw.community.core.mcp.config_flow import (
     read_unified_config,
     write_unified_config,
+)
+from agentclaw.community.core.mcp.scoped_config_flow import (
+    HeaderGroup,
+    ScopedMCPConfig,
+    read_scoped_config,
+    write_scoped_config,
 )
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
     McpServerNotFoundError,
     McpSyncFailedError,
+    McpMarketUnavailableError,
 )
 from agentclaw.community.core.mcp.presentation import (
     ALLOWED_NETWORK_TYPES,
     is_network_type_visible,
-    mask_api_key,
     strip_ext_info,
     strip_ext_info_from_list,
 )
@@ -219,6 +238,77 @@ async def list_tenants(
 
 
 # ==================== Unified MCP Config APIs ====================
+
+
+def _scoped_config_data(config: ScopedMCPConfig) -> MCPScopedConfigData:
+    return MCPScopedConfigData(
+        server_code=config.server_code,
+        endpoint_env=config.endpoint_env,
+        transport_protocol=config.transport_protocol,
+        params=[
+            {"key": group.key, "value": group.value, "bots": list(group.bots)}
+            for group in config.params
+        ],
+        sync_results=list(config.sync_results) if config.sync_results is not None else None,
+        sync_summary=config.sync_summary,
+    )
+
+
+@router.get("/config-groups", response_model=MCPScopedConfigResponse)
+async def get_mcp_config_groups(
+    server_code: str = Query(...),
+    user: AuthenticatedUser = Depends(get_current_user),
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+) -> MCPScopedConfigResponse:
+    config = read_scoped_config(
+        user_id=user.staffId,
+        server_code=server_code,
+        config_service=config_service,
+        bot_config_repo=bot_config_repo,
+        bot_repo=bot_repo,
+    )
+    return MCPScopedConfigResponse(success=True, data=_scoped_config_data(config))
+
+
+@router.post("/config-groups", response_model=MCPScopedConfigResponse)
+async def update_mcp_config_groups(
+    request: MCPScopedConfigRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    command_repo: ScopedMCPConfigRepositoryProtocol = Injected(ScopedMCPConfigRepositoryProtocol),
+    market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
+    sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
+    capability_reader: EffectiveMCPStateReaderProtocol = Injected(EffectiveMCPStateReaderProtocol),
+) -> MCPScopedConfigResponse:
+    try:
+        config = await write_scoped_config(
+            user_id=user.staffId,
+            server_code=request.server_code,
+            endpoint_env=request.endpoint_env,
+            transport_protocol=request.transport_protocol,
+            params=tuple(
+                HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
+                for group in request.params
+            ),
+            config_service=config_service,
+            bot_config_repo=bot_config_repo,
+            bot_repo=bot_repo,
+            command_repo=command_repo,
+            market_service=market_service,
+            sync_service=sync_service,
+            capability_reader=capability_reader,
+        )
+    except McpServerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="MCP server not found") from exc
+    except McpMarketUnavailableError as exc:
+        raise HTTPException(status_code=502, detail="MCP Center unavailable") from exc
+    except McpConfigValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MCPScopedConfigResponse(success=True, data=_scoped_config_data(config))
 
 @router.post("/user/config", response_model=MCPUnifiedConfigResponse)
 async def update_mcp_unified_config(
