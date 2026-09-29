@@ -9,6 +9,7 @@ from sqlalchemy import func, update
 from agentclaw.community.core.session_resources.repository.models import (
     SessionResourceModel,
 )
+from agentclaw.community.core.session_resources.withdrawal_models import ResourceWithdrawalModel
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,
@@ -197,8 +198,10 @@ class SessionResourceRepository(
         owner_id: str,
         bot_id: str,
         session_key_hash: str,
+        *,
+        withdrawal_scope_types: tuple[str, ...] = (),
     ) -> SessionResourceRecord | None:
-        with self._db.orm_session() as session:
+        with self._db.transactional_orm_session() as session:
             statement = (
                 update(SessionResourceModel)
                 .where(
@@ -228,4 +231,13 @@ class SessionResourceRepository(
                 .filter(SessionResourceModel.resource_id == resource_id)
                 .one()
             )
+            if model.scope_type in withdrawal_scope_types:
+                session.add(
+                    ResourceWithdrawalModel(
+                        event_id=f"tc.resource.withdrawn:{resource_id}",
+                        res_id=resource_id,
+                        tenant=model.tenant,
+                    )
+                )
+                session.flush()
             return model.to_record()
