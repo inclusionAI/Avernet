@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { api, type EvolveSkillEvent } from '../api/client'
+import { useEvolveAdminScope } from '../features/evolve/admin-scope'
+import { useClientUser } from '../hooks/useClientUser'
 import { Icon, PageTitle } from '../pages/evolve/common'
 import { formatStepTime } from '../pages/evolve/helpers'
 import SkillListPagination, { skillListPageSize } from './SkillListPagination'
@@ -48,6 +50,8 @@ function eventVersion(event: EvolveSkillEvent): string {
 
 export default function SkillEventLog() {
   const location = useLocation()
+  const { user } = useClientUser()
+  const { enabled: adminMode, ownerUserId } = useEvolveAdminScope()
   const [items, setItems] = useState<EvolveSkillEvent[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -56,11 +60,15 @@ export default function SkillEventLog() {
   const [page, setPage] = useState(1)
   useEffect(() => {
     let active = true
-    api.evolve.listSkillEvents().then((result) => { if (active) setItems(result.items) })
+    setLoading(true)
+    setError('')
+    setItems([])
+    setPage(1)
+    api.evolve.listSkillEvents({ scope: adminMode ? 'all' : 'mine', ownerUserId: adminMode ? ownerUserId : undefined }).then((result) => { if (active) setItems(result.items) })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '事件日志加载失败') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [])
+  }, [user?.userId, adminMode, ownerUserId])
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = items.filter((item) => (!type || item.type === type) && [item.name, item.ownerId, item.botId, item.summary, item.taskId].some((value) => value?.toLowerCase().includes(normalizedQuery)))
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))

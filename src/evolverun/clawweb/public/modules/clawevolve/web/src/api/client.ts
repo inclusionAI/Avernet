@@ -102,8 +102,8 @@ export const api = {
     listSpaces(): Promise<{ items: EvolveSpace[] }> {
       return fetchJson('/api/evolve/spaces')
     },
-    listSkillAssets(): Promise<{ items: EvolveSkillAsset[] }> {
-      return sharedApi.evolve.listSkillAssets()
+    listSkillAssets(params: { scope?: 'mine' | 'all'; ownerUserId?: string } = {}): Promise<{ items: EvolveSkillAsset[] }> {
+      return sharedApi.evolve.listSkillAssets(params)
     },
     getSkillAsset(id: string): Promise<EvolveSkillAsset> {
       return sharedApi.evolve.getSkillAsset(id)

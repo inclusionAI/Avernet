@@ -44,6 +44,10 @@ const skillAssetProjection = `SELECT a.*, v.package_ref AS current_package_ref,
   JOIN ce_skill_versions v ON v.asset_id = a.asset_id AND v.version_no = a.current_version_no`;
 const versionProjection = `SELECT v.*, source.version_no AS source_version_no
   FROM ce_skill_versions v LEFT JOIN ce_skill_versions source ON source.version_id = v.source_version_id`;
+const eventProjection = `SELECT e.*, vf.version_no AS version_from_no, vt.version_no AS version_to_no FROM ce_skill_events e
+  LEFT JOIN ce_skill_versions vf ON vf.version_id = e.version_from_id
+  LEFT JOIN ce_skill_versions vt ON vt.version_id = e.version_to_id
+  JOIN ce_skill_assets a ON a.asset_id = e.asset_id`;
 
 export class SkillAssetRepository {
   constructor(private readonly db: IDatabase) {}
@@ -106,15 +110,23 @@ export class SkillAssetRepository {
 
   async listEvents(ownerUserId: string, teamSpaceIds: readonly string[] = [], assetId?: string) {
     return this.db.query<SkillEventRow>(
-      `SELECT e.*, vf.version_no AS version_from_no, vt.version_no AS version_to_no FROM ce_skill_events e
-       LEFT JOIN ce_skill_versions vf ON vf.version_id = e.version_from_id
-       LEFT JOIN ce_skill_versions vt ON vt.version_id = e.version_to_id
-       JOIN ce_skill_assets a ON a.asset_id = e.asset_id
+      `${eventProjection}
        WHERE (e.owner_user_id = ?${teamSpaceIds.length
     ? ` OR (a.space_type = 'TEAM' AND a.space_id IN (${teamSpaceIds.map(() => '?').join(',')}))` : ''})
        ${assetId ? 'AND e.asset_id = ?' : ''}
        ORDER BY e.started_at DESC, e.id DESC`,
       [ownerUserId, ...teamSpaceIds, ...(assetId ? [assetId] : [])],
+    );
+  }
+
+  async listAllEvents(filters: { ownerUserId?: string; assetId?: string } = {}) {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (filters.ownerUserId) { clauses.push('e.owner_user_id = ?'); params.push(filters.ownerUserId); }
+    if (filters.assetId) { clauses.push('e.asset_id = ?'); params.push(filters.assetId); }
+    return this.db.query<SkillEventRow>(
+      `${eventProjection}${clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''} ORDER BY e.started_at DESC, e.id DESC`,
+      params,
     );
   }
 
@@ -137,6 +149,13 @@ export class SkillAssetRepository {
     return this.db.query<SkillAssetRow>(
       `${skillAssetProjection} WHERE a.owner_user_id = ?${teamSpaceIds.length ? ` OR (a.space_type = 'TEAM' AND a.space_id IN (${teamSpaceIds.map(() => "?").join(",")}))` : ""} ORDER BY a.gmt_modified DESC, a.id DESC`,
       [ownerUserId, ...teamSpaceIds],
+    );
+  }
+
+  async listAllAssets(ownerUserId?: string): Promise<SkillAssetRow[]> {
+    return this.db.query<SkillAssetRow>(
+      `${skillAssetProjection}${ownerUserId ? ' WHERE a.owner_user_id = ?' : ''} ORDER BY a.gmt_modified DESC, a.id DESC`,
+      ownerUserId ? [ownerUserId] : [],
     );
   }
 

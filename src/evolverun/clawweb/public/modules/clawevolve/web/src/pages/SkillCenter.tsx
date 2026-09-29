@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type EvolveSkillAsset } from '../api/client'
+import { useEvolveAdminScope } from '../features/evolve/admin-scope'
 import { useClientUser } from '../hooks/useClientUser'
 import type { DirectoryBot } from '../types'
 import { Icon, PageTitle, Status } from './evolve/common'
@@ -13,6 +14,7 @@ import SkillListPagination, { skillListPageSize } from '../components/SkillListP
 export default function SkillCenter() {
   const navigate = useNavigate()
   const { user } = useClientUser()
+  const { enabled: adminMode, ownerUserId } = useEvolveAdminScope()
   const [launch, setLaunch] = useState<{ asset: EvolveSkillAsset; action: SkillTaskAction } | null>(null)
   const [assets, setAssets] = useState<EvolveSkillAsset[]>([])
   const [bots, setBots] = useState<DirectoryBot[]>([])
@@ -26,8 +28,10 @@ export default function SkillCenter() {
     let active = true
     setLoading(true)
     setError('')
+    setAssets([])
+    setPage(1)
     void Promise.allSettled([
-      api.evolve.listSkillAssets(),
+      api.evolve.listSkillAssets({ scope: adminMode ? 'all' : 'mine', ownerUserId: adminMode ? ownerUserId : undefined }),
       user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] }),
     ]).then(([result, directory]) => {
       if (!active) return
@@ -42,7 +46,7 @@ export default function SkillCenter() {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [user?.userId])
+  }, [user?.userId, adminMode, ownerUserId])
 
   const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, bots.find((bot) => bot.botId === asset.botId)?.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))
