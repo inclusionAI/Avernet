@@ -11,6 +11,7 @@ export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
   includeHistorical: boolean; activeLookbackDays: number;
+  repairSignatures: string[];
   counts: Record<RepairInboxFilter, number>;
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;

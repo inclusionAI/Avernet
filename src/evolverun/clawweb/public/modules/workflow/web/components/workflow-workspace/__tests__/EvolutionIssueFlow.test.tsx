@@ -31,10 +31,11 @@ const repairItem = (itemId = 'item-1', summary = '将超时阈值调整为 90 �
 })
 
 const repairPage = ({ items = [repairItem()], tasks = [], page = 1, total = items.length,
-  includeHistorical = false }: { items?: ReturnType<typeof repairItem>[]; tasks?: Array<{ taskId: string; revision: number; phase: string; updatedAtMs: number; itemCount: number }>; page?: number; total?: number; includeHistorical?: boolean } = {}) => ({
+  includeHistorical = false, repairSignatures = [...new Set(items.map(item => item.context.signature))] }:
+  { items?: ReturnType<typeof repairItem>[]; tasks?: Array<{ taskId: string; revision: number; phase: string; updatedAtMs: number; itemCount: number }>; page?: number; total?: number; includeHistorical?: boolean; repairSignatures?: string[] } = {}) => ({
   schemaVersion: 'workflow-repair/v2', workflowId: 'wf-1', inputDigest: 'c'.repeat(64), canEdit: true,
   items, tasks, capabilities: { generation: true, diff: true, publication: false, reason: null },
-  includeHistorical, activeLookbackDays: 30,
+  includeHistorical, activeLookbackDays: 30, repairSignatures,
   counts: { pending: total, processing: 0, awaiting_verification: 0, closed: 0, no_action: 0, all: total },
   page: { page, pageSize: 20, total, totalPages: Math.ceil(total / 20) }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })
@@ -256,12 +257,13 @@ vi.mock('../../../api/hooks', () => ({
 import EvolutionTab from '../EvolutionTab'
 
 describe('issue and optimization flow', () => {
-  it('keeps the issue list primary while repair items load in the same view', () => {
+  it('keeps the issue list primary and defers repair loading until explicit entry', async () => {
     renderView(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     expect(screen.queryByRole('region', { name: '修复收件箱' })).not.toBeInTheDocument()
     expect(screen.queryByText('诊断证据与历史应用')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '查看' }).length).toBeGreaterThan(0)
-    expect(screen.getByText('修复任务与处理状态仍在加载，问题列表可继续查看。')).toBeInTheDocument()
+    expect(repairApi.candidates).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(repairApi.candidates).toHaveBeenCalledTimes(1)
   })
   it('opens legacy evidence directly for a workflow issue deep link', () => {
@@ -276,8 +278,7 @@ describe('issue and optimization flow', () => {
     expect(row).not.toBeNull()
     expect(screen.queryByText(/当前工作流暂无已记录异常/)).not.toBeInTheDocument()
     if (status === 'pending') {
-      expect(within(row).getByText('等待进入 Pack 修复流程')).toBeInTheDocument()
-      expect(within(row).queryByRole('button', { name: '应用建议' })).not.toBeInTheDocument()
+      expect(within(row).getByRole('button', { name: '应用建议' })).toBeInTheDocument()
     } else if (status === 'applied_unverified') {
       expect(within(row).getByRole('button', { name: '确认有效' })).toBeInTheDocument()
       expect(within(row).getByRole('button', { name: '未达预期' })).toBeInTheDocument()
@@ -296,6 +297,7 @@ describe('issue and optimization flow', () => {
       capabilities: { generation: false, diff: false, publication: false, reason: 'AIS unavailable' },
     })
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
@@ -332,7 +334,7 @@ describe('issue and optimization flow', () => {
     expect(within(drawer).queryByText('完整建议')).not.toBeInTheDocument()
     expect(within(drawer).queryByText('本次分析')).not.toBeInTheDocument()
     await userEvent.click(within(drawer).getByText('历史建议与任务（独立于本次修复）'))
-    expect(within(drawer).getByText('等待进入 Pack 修复流程')).toBeInTheDocument()
+    expect(within(drawer).getByRole('button', { name: '应用建议' })).toBeInTheDocument()
 
     const observingIssue = screen.getByText('render-report', { selector: 'span' }).closest('article')
     expect(observingIssue).not.toBeNull()
@@ -437,6 +439,7 @@ describe('issue and optimization flow', () => {
       tasks: [{ taskId: 'FIX-1', revision: 2, phase: 'review', updatedAtMs: 2, itemCount: 1 }],
     }))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     expect(await screen.findByRole('region', { name: '处理任务' })).toHaveTextContent('FIX-1')
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
@@ -459,6 +462,7 @@ describe('issue and optimization flow', () => {
       ? repairPage({ items: [repairItem('item-21', '第 21 条修复建议')], page: 2, total: 21 })
       : repairPage({ total: 21 })))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     expect(await screen.findByText('共 21 条，第 1/2 页')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '下一页' }))
@@ -469,9 +473,10 @@ describe('issue and optimization flow', () => {
   it('pages repair-backed issues instead of leaving other repair pages in the merged list', async () => {
     const retryItem = { ...repairItem('item-21', '修复重复写入'), groupKey: 'group-2', context: { signature: 'retry:write-report' } }
     repairApi.candidates.mockImplementation((_workflowId: string, query: { page?: number }) => Promise.resolve(query.page === 2
-      ? repairPage({ items: [retryItem], page: 2, total: 21 })
-      : repairPage({ total: 21 })))
+      ? repairPage({ items: [retryItem], page: 2, total: 21, repairSignatures: ['timeout:fetch-data', 'retry:write-report'] })
+      : repairPage({ total: 21, repairSignatures: ['timeout:fetch-data', 'retry:write-report'] })))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     expect(await screen.findByText('共 21 条，第 1/2 页')).toBeInTheDocument()
     expect(screen.getByText('fetch-data', { selector: 'span' })).toBeInTheDocument()
@@ -482,11 +487,21 @@ describe('issue and optimization flow', () => {
     expect(screen.queryByText('fetch-data', { selector: 'span' })).not.toBeInTheDocument()
   })
 
+  it('keeps a diagnosis cluster when its incompatible legacy repair source was skipped', async () => {
+    repairApi.candidates.mockResolvedValueOnce(repairPage({ items: [], total: 0, repairSignatures: [] }))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    expect(await screen.findByRole('region', { name: '处理任务' })).toBeInTheDocument()
+    expect(screen.getByText('write-report', { selector: 'span' })).toBeInTheDocument()
+  })
+
   it('loads the selected repair state from the server before paginating it', async () => {
     repairApi.candidates.mockImplementation((_workflowId: string, query: { state?: string }) => Promise.resolve(query.state === 'pending'
       ? repairPage({ items: [repairItem('pending-on-later-page', '后续页待处理建议')], total: 1 })
       : repairPage({ items: [{ ...repairItem('processing-first-page', '首页处理中建议'), state: 'processing' }], total: 21 })))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     expect(await screen.findByText('首页处理中建议')).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: '问题状态' }), 'pending')
@@ -498,6 +513,7 @@ describe('issue and optimization flow', () => {
       ? repairPage({ items: [repairItem('historical-item', '历史未复现建议')], includeHistorical: true })
       : repairPage({ items: [], total: 0 })))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     const history = await screen.findByRole('checkbox', { name: '包含历史未复现' })
     await userEvent.click(history)
@@ -509,6 +525,7 @@ describe('issue and optimization flow', () => {
     repairApi.candidates.mockResolvedValueOnce(repairPage())
     repairApi.item.mockResolvedValueOnce({ ...repairItem(), context: { signature: 'timeout:fetch-data', evidencePayload: '完整证据载荷' } })
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     await userEvent.click(await screen.findByText('查看建议与证据'))
     expect(await screen.findByText(/\u5b8c\u6574\u8bc1\u636e\u8f7d\u8377/)).toBeInTheDocument()
@@ -520,16 +537,18 @@ describe('issue and optimization flow', () => {
       ? Promise.resolve(repairPage({ items: [repairItem('old-item', '旧工作流修复项')] }))
       : new Promise(() => {}))
     const view = render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(await screen.findByText('旧工作流修复项')).toBeInTheDocument()
 
     view.rerender(<MemoryRouter><EvolutionTab workflowId="wf-2" section="diagnosis" /></MemoryRouter>)
     expect(screen.queryByText('旧工作流修复项')).not.toBeInTheDocument()
-    expect(screen.getByText('修复任务与处理状态仍在加载，问题列表可继续查看。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入修复处理' })).toBeInTheDocument()
   })
 
   it('creates a Pack draft when no active repair task exists', async () => {
     repairApi.candidates.mockResolvedValueOnce(repairPage())
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     await userEvent.click(await screen.findByRole('button', { name: '生成 Pack 草稿（1）' }))
     const dialog = screen.getByRole('dialog', { name: '生成 Pack 草稿' })
@@ -546,6 +565,7 @@ describe('issue and optimization flow', () => {
       .mockRejectedValueOnce(new Error('response lost again'))
       .mockResolvedValueOnce({ taskId: 'FIX-2', revision: 1 })
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     await userEvent.click(await screen.findByRole('button', { name: '生成 Pack 草稿（1）' }))
     const dialog = screen.getByRole('dialog', { name: '生成 Pack 草稿' })
@@ -569,6 +589,7 @@ describe('issue and optimization flow', () => {
       .mockRejectedValueOnce(new Error('response lost again'))
       .mockResolvedValueOnce({})
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
 
     await userEvent.click(await screen.findByRole('button', { name: '暂不处理 将超时阈值调整为 90 秒' }))
     const dialog = screen.getByRole('dialog', { name: '暂不处理' })
@@ -589,6 +610,7 @@ describe('issue and optimization flow', () => {
   it('keeps the problem list usable when repair item loading fails', async () => {
     repairApi.candidates.mockRejectedValueOnce(new Error('Repair request failed'))
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(await screen.findByText('修复任务与处理状态加载失败；问题与证据仍可查看。')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '查看' }).length).toBeGreaterThan(0)
   })

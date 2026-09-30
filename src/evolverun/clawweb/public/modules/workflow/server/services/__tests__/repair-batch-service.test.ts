@@ -42,6 +42,15 @@ describe('repair workbench control service', () => {
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
   });
+  it('returns actual repair signatures across every page', async () => {
+    const f = await repairFixture(2); fixtures.push(f);
+    f.items[0].context = { signature: 'timeout:fetch' };
+    f.items[1].context = { signature: 'retry:write' };
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const first = await service.candidates('wf-1', { page: 1, pageSize: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.repairSignatures).toEqual(['retry:write', 'timeout:fetch']);
+  });
   it('uses the historical source scope when disposing an item from the historical inbox', async () => {
     const f = await repairFixture(2); fixtures.push(f);
     const [historical, recent] = f.items;

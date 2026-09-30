@@ -51,7 +51,7 @@ const candidates = () => ({
     workflowId: 'wf-1', episodeKey: 'current', state: 'pending' as const, stateVersion: 0, activeTaskId: null,
     activeRevision: null, disposition: null, updatedAtMs: 3, sourceAvailable: true,
   }], tasks: [], capabilities: { generation: true, diff: true, publication: false as const, reason: null },
-  includeHistorical: false, activeLookbackDays: 30,
+  includeHistorical: false, activeLookbackDays: 30, repairSignatures: ['group-1'],
   counts: { pending: 1, processing: 0, awaiting_verification: 0, closed: 0, no_action: 0, all: 1 },
   page: { page: 1, pageSize: 20, total: 1, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })

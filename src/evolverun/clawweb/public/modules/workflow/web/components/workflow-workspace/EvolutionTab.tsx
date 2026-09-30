@@ -301,7 +301,8 @@ function DiagnosisPanel({
   const [stateFilter, setStateFilter] = useState<IssueState | 'all'>('all')
   const [selectedSignature, setSelectedSignature] = useState<string | null>(issueSignature ?? null)
   const [repairData, setRepairData] = useState<RepairCandidatesResponse | null>(null)
-  const [repairLoading, setRepairLoading] = useState(true)
+  const [repairOpen, setRepairOpen] = useState(false)
+  const [repairLoading, setRepairLoading] = useState(false)
   const [repairError, setRepairError] = useState('')
   const [repairRefresh, setRepairRefresh] = useState(0)
   const [repairPage, setRepairPage] = useState(1)
@@ -327,6 +328,7 @@ function DiagnosisPanel({
   const selectedRepairState = repairInboxFilter(stateFilter)
 
   useEffect(() => {
+    if (!repairOpen) return
     let current = true
     setRepairLoading(true)
     repairBatches.candidates(workflowId, { state: selectedRepairState, page: repairPage, pageSize: repairPageSize, includeHistorical }).then(result => {
@@ -342,7 +344,7 @@ function DiagnosisPanel({
       if (current) setRepairError('修复任务与处理状态加载失败；问题与证据仍可查看。')
     }).finally(() => { if (current) setRepairLoading(false) })
     return () => { current = false }
-  }, [workflowId, repairRefresh, repairPage, repairPageSize, includeHistorical, selectedRepairState])
+  }, [workflowId, repairOpen, repairRefresh, repairPage, repairPageSize, includeHistorical, selectedRepairState])
 
   if (isLoading) return <div className="p-4 text-xs text-slate-500">加载问题与建议...</div>
   if (isError) return <div role="alert" className="p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试</button></div>
@@ -393,10 +395,7 @@ function DiagnosisPanel({
       state: issueState(suggestion?.status),
     }
   })
-  const repairBackedSignatures = new Set([
-    ...suggestions.map(suggestion => suggestion.signature),
-    ...(data?.groups ?? []).filter(group => group.sources.some(source => source.proposal?.summary?.trim())).map(group => group.signature),
-  ])
+  const repairBackedSignatures = new Set(repairData?.repairSignatures ?? [])
   const pagedEnriched = enriched.filter(({ cluster }) => !repairData || !repairBackedSignatures.has(cluster.signature)
     || repairBySignature.has(cluster.signature))
   const filtered = pagedEnriched.filter(({ cluster, repairItems: groupItems, state }) =>
@@ -472,12 +471,15 @@ function DiagnosisPanel({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-semibold text-slate-900">从问题到效果验证</h3>
-        <p className="mt-1 text-xs leading-5 text-slate-500">问题列表持续保留；选择待处理项后只生成可审阅的 Pack 草稿，审核通过后才进入发布。</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h3 className="text-sm font-semibold text-slate-900">从问题到效果验证</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">问题列表持续保留；进入修复处理后才加载候选项并生成可审阅 Pack 草稿。</p></div>
+          {!repairOpen && <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>}
+        </div>
       </div>
 
-      {repairLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">修复任务与处理状态仍在加载，问题列表可继续查看。</p>}
-      {repairError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{repairError}<button type="button" className="ml-2 underline" onClick={() => setRepairRefresh(value => value + 1)}>重试</button></p>}
+      {repairOpen && repairLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">修复任务与处理状态仍在加载，问题列表可继续查看。</p>}
+      {repairOpen && repairError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{repairError}<button type="button" className="ml-2 underline" onClick={() => setRepairRefresh(value => value + 1)}>重试</button></p>}
       {suggestionsLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">历史建议仍在加载，不影响查看问题与修复任务。</p>}
       {repairNotice && <p role="status" className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">{repairNotice}</p>}
 
@@ -652,7 +654,7 @@ function DiagnosisPanel({
                 <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={repairData?.capabilities.generation === false}
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false}
                   onAction={onAction} onApply={onApply} />
               </div>
             </article>
@@ -671,7 +673,7 @@ function DiagnosisPanel({
         selectedFlowId={runId}
         selectedAnalysisId={analysisId}
         canEdit={canEdit}
-        legacyApplyEnabled={repairData?.capabilities.generation === false}
+        legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false}
         onAction={onAction}
         onApply={onApply}
         onClose={() => setSelectedSignature(null)}
