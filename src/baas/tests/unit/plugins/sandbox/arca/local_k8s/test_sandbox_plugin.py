@@ -115,6 +115,11 @@ class TestLocalK8sPluginCreate:
         deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
         container_names = [c.name for c in deployment.spec.template.spec.containers]
         assert container_names == ["bot-runtime", "envoy-sidecar"]
+        sidecar = deployment.spec.template.spec.containers[1]
+        assert sidecar.env[0].name == "HEADER_RULES"
+        assert sidecar.env[0].value == "/etc/sidecar/header-rules/header-rules.yaml"
+        assert sidecar.volume_mounts[0].mount_path == "/etc/sidecar/header-rules"
+        assert not sidecar.volume_mounts[0].sub_path
         volumes = deployment.spec.template.spec.volumes
         assert len(volumes) == 1
         assert volumes[0].config_map.name.startswith("envoy-header-rules-")
@@ -261,6 +266,20 @@ class TestLocalK8sPluginCreate:
         assert "arg.example.com" in yaml_text
         assert "X-Arg" in yaml_text
         assert "env.example.com" not in yaml_text
+
+    def test_connect_sync_sandbox_preserves_sidecar_container(
+        self,
+        plugin,
+        mock_client,
+    ) -> None:
+        """重连时也要保留 sidecar 容器名，供原地刷新使用。"""
+        with patch.object(
+            LocalK8sArcaSandboxPlugin,
+            "_find_pod_name",
+            return_value="bot-pod",
+        ):
+            sandbox = plugin.connect_sync_sandbox("tpl-test-abc")
+        assert sandbox._sidecar_container_name == "envoy-sidecar"
 
     def test_create_sync_sandbox_missing_image_raises(self, mock_client) -> None:
         """Missing image should raise ValueError."""
@@ -510,6 +529,7 @@ class TestLocalK8sSandbox:
         assert info.status == "Running"
         assert info.is_ready is True
         assert info.metadata["pod_ip"] == "10.42.0.10"
+        assert info.metadata["ip_addr"] == "10.42.0.10"
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
@@ -540,17 +560,13 @@ class TestLocalK8sSandbox:
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
-    def test_update_outbound_rule_patches_configmap_and_rolls_deployment(
+    def test_update_outbound_rule_refreshes_sidecar_without_rolling_deployment(
         self,
         mock_core_cls,
         mock_apps_cls,
         mock_client,
     ) -> None:
-        mock_apps = MagicMock()
-        mock_apps_cls.return_value = mock_apps
-        mock_core = MagicMock()
-        mock_core_cls.return_value = mock_core
-
+        """出站规则更新只刷新 envoy sidecar，不滚动 Deployment。"""
         sandbox = LocalK8sArcaSandbox(
             sandbox_id="tpl-test-abc",
             pod_name="bot-pod",
@@ -558,7 +574,9 @@ class TestLocalK8sSandbox:
             template_id="openclaw-default",
             client=mock_client,
             container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
         )
+        sandbox._exec_in_container = MagicMock(return_value=MagicMock(exit_code=0))
 
         rule = OutBoundOperationRule(
             header_operation_rules=[
@@ -571,15 +589,24 @@ class TestLocalK8sSandbox:
             ]
         )
         assert (
-            sandbox.update_outbound_rule(
-                rule, OutBoundOperationRuleUpdatedMode.REPLACE
-            )
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
             is True
         )
-        mock_core.patch_namespaced_config_map.assert_called_once()
-        mock_apps.patch_namespaced_deployment.assert_called_once()
 
-    def test_update_outbound_rule_empty_rule(self, mock_client) -> None:
+        mock_core = mock_core_cls.return_value
+        mock_core.patch_namespaced_config_map.assert_called_once()
+        mock_apps_cls.assert_not_called()
+
+        exec_calls = sandbox._exec_in_container.call_args_list
+        assert len(exec_calls) == 2
+        assert all(
+            call.kwargs["container_name"] == "envoy-sidecar" for call in exec_calls
+        )
+        assert any("quitquitquit" in arg for arg in exec_calls[0].kwargs["command"])
+        assert any("ready" in arg for arg in exec_calls[1].kwargs["command"])
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_empty_rule(self, mock_core_cls, mock_client) -> None:
         sandbox = LocalK8sArcaSandbox(
             sandbox_id="tpl-test-abc",
             pod_name="bot-pod",
@@ -587,7 +614,9 @@ class TestLocalK8sSandbox:
             template_id="openclaw-default",
             client=mock_client,
             container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
         )
+        sandbox._exec_in_container = MagicMock(return_value=MagicMock(exit_code=0))
         assert sandbox.update_outbound_rule(None, MagicMock()) is True
 
 
@@ -661,7 +690,9 @@ class TestResolveOutboundRule:
 
         with patch.dict(
             os.environ,
-            {"LOCAL_K8S_OUTBOUND_RULE": '{"header_operation_rules": [{"domains": 42}]}'},
+            {
+                "LOCAL_K8S_OUTBOUND_RULE": '{"header_operation_rules": [{"domains": 42}]}'
+            },
             clear=True,
         ):
             with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
