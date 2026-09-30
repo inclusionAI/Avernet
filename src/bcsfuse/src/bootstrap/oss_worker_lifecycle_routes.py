@@ -297,25 +297,33 @@ async def activate_worker_profile(
 
     from src.domain.models.worker_source_info import WorkerSourceType
 
-    previous_binding = binding_store.get_active_binding(worker_id)
-    previous_active_profile = profile_store.get_active(worker_id)
+    previous_binding = None
+    previous_active_profile = None
+    persisted_worker = None
     binding_written = False
+    worker_written = False
+    activation_attempted = False
     try:
+        previous_binding = binding_store.get_active_binding(worker_id)
+        previous_active_profile = profile_store.get_active(worker_id)
         binding_store.bind_profile(
             worker_id=worker_id,
             profile_key=f"{worker_id}:{profile_id}",
             source_type=WorkerSourceType.API,
         )
         binding_written = True
+        updated_worker = worker.model_copy(deep=True)
+        updated_worker.active_profile_key = f"{worker_id}:{profile_id}"
+        persisted_worker = worker_store.update(updated_worker)
+        worker_written = True
+        activation_attempted = True
         activated = profile_store.activate(worker_id, profile_id)
         if activated is None:
             raise RuntimeError("profile activation did not update a record")
-        updated_worker = worker.model_copy(deep=True)
-        updated_worker.active_profile_key = f"{worker_id}:{profile_id}"
-        worker_store.update(updated_worker)
     except Exception as error:
         if (
-            previous_active_profile is not None
+            activation_attempted
+            and previous_active_profile is not None
             and previous_active_profile.profile_id != profile_id
         ):
             try:
@@ -326,6 +334,17 @@ async def activate_worker_profile(
             except Exception:
                 logger.exception(
                     "[Profiles OSS] Failed to compensate profile activation for worker %s",
+                    worker_id,
+                )
+        if worker_written:
+            try:
+                rollback_worker = worker.model_copy(deep=True)
+                rollback_worker.version = persisted_worker.version
+                worker_store.update(rollback_worker)
+            except Exception:
+                logger.exception(
+                    "[Profiles OSS] Failed to compensate worker profile mirror "
+                    "for worker %s",
                     worker_id,
                 )
         if binding_written:
@@ -381,16 +400,13 @@ def _get_profile_service():
 async def delete_worker(worker_id: str, request: Request) -> dict:
     """Delete an existing worker through the always-mounted product API."""
     require_oss_auth(request)
-    registry = request.app.state.context.registry
-    store = registry.get("worker_registry_store")
-    profile_store = registry.get("worker_profile_content_store")
-    binding_store = registry.get("worker_profile_binding_store")
-    if store is None or profile_store is None or binding_store is None:
+    store = request.app.state.context.registry.get("worker_registry_store")
+    if store is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "PROVIDER_NOT_AVAILABLE",
-                "message": "worker, profile content, or binding provider unavailable",
+                "message": "worker_registry_store provider unavailable",
             },
         )
     if store.get_by_id(worker_id) is None:
@@ -415,12 +431,7 @@ async def delete_worker(worker_id: str, request: Request) -> dict:
         profiles = profile_service.list_profiles(worker_id)
         for profile in profiles.items:
             profile_service.delete_profile_vectors(worker_id, profile.profile_id)
-        active_binding = binding_store.get_active_binding(worker_id)
         store.delete(worker_id)
-        for profile in profiles.items:
-            profile_store.delete(worker_id, profile.profile_id)
-        if active_binding is not None:
-            binding_store.unbind_profile(worker_id, active_binding.profile_key)
         return {"success": True, "worker_id": worker_id, "deleted": True}
     except HTTPException:
         raise

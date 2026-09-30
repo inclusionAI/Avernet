@@ -517,9 +517,6 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
     from src.infra.public.profile_sources.mock_worker_profile_source import MockWorkerProfileSource
 
     # InMemory stores
-    worker_registry_store = InMemoryWorkerRegistryStore()
-    registry.register("worker_registry_store", worker_registry_store)
-
     worker_runtime_state_store = InMemoryWorkerRuntimeStateStore()
     registry.register("worker_runtime_state_store", worker_runtime_state_store)
 
@@ -529,6 +526,12 @@ def _build_test_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPr
     # Phase B1 Fix: Register worker_profile_binding_store to ensure same instance across all paths
     worker_profile_binding_store = InMemoryWorkerProfileBindingStore()
     registry.register("worker_profile_binding_store", worker_profile_binding_store)
+
+    worker_registry_store = InMemoryWorkerRegistryStore(
+        profile_store=worker_profile_content_store,
+        binding_store=worker_profile_binding_store,
+    )
+    registry.register("worker_registry_store", worker_registry_store)
 
     worker_audit_log_store = InMemoryWorkerAuditLogStore()
     registry.register("worker_audit_log_store", worker_audit_log_store)
