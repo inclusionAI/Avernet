@@ -125,6 +125,15 @@ class MySQLWorkerAuditLogStore:
         now = datetime.utcnow()
         performed_at = audit_log.performed_at or now
 
+        def as_json(value: str | None) -> str | None:
+            if value is None:
+                return None
+            try:
+                json.loads(value)
+            except (TypeError, json.JSONDecodeError):
+                return json.dumps(value, ensure_ascii=False)
+            return value
+
         conn = self._pool.get_connection()
         try:
             cursor = conn.cursor()
@@ -139,8 +148,8 @@ class MySQLWorkerAuditLogStore:
                     audit_log.id,
                     audit_log.worker_id,
                     audit_log.action.value,
-                    audit_log.old_value,
-                    audit_log.new_value,
+                    as_json(audit_log.old_value),
+                    as_json(audit_log.new_value),
                     audit_log.source_type.value,
                     audit_log.source_ref,
                     audit_log.performed_by,

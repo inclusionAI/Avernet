@@ -150,6 +150,18 @@ def get_app_context() -> Optional["ApplicationContext"]:
     return _app_context
 
 
+def set_fused_profile_storage_service(storage_service) -> None:
+    """Replace composed G9 storage and invalidate services that captured it."""
+    global _fused_profile_storage_service
+    global _profile_merge_service, _fusion_expert_chat_service
+    global _group_fusion_service
+
+    _fused_profile_storage_service = storage_service
+    _profile_merge_service = None
+    _fusion_expert_chat_service = None
+    _group_fusion_service = None
+
+
 # =============================================================================
 # Configuration Functions
 # =============================================================================

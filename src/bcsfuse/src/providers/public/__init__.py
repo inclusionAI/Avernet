@@ -13,6 +13,7 @@ Available providers:
 """
 
 from .noop_startup_provider import NoopStartupProvider
+from .vector_index_startup_provider import VectorIndexStartupProvider
 from .env_secret_provider import EnvSecretProvider
 from .noop_context_provider import NoopContextProvider
 
@@ -23,6 +24,7 @@ from src.infra.public.cache.in_memory_cache_provider import InMemoryCacheProvide
 
 __all__ = [
     "NoopStartupProvider",
+    "VectorIndexStartupProvider",
     "EnvSecretProvider",
     "NoopContextProvider",
     "YamlEnvConfigProvider",

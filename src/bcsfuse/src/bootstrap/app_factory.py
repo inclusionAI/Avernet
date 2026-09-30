@@ -15,6 +15,24 @@ from src.bootstrap.route_mount_contract import (
 logger = logging.getLogger(__name__)
 
 
+def _configure_fusion_dependencies(context: ApplicationContext) -> None:
+    from src.application.services.bot_fuse.fused_profile_storage_service import (
+        FusedProfileStorageService,
+    )
+    from src.interfaces.api.dependencies import fusion_dependencies
+
+    fusion_dependencies.set_app_context(context)
+    fused_store = context.registry.get("fused_profile_store")
+    storage_service = None
+    if fused_store is not None:
+        storage_service = FusedProfileStorageService(repository=fused_store)
+        logger.info(
+            "[App Factory] Composed fused_profile_store registered: %s",
+            type(fused_store).__name__,
+        )
+    fusion_dependencies.set_fused_profile_storage_service(storage_service)
+
+
 def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
     @app.get("/health", tags=["Health"])
     async def health():
@@ -134,9 +152,7 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
     # This allows services without Request access to use the shared vector_store
     # from the provider registry instead of creating duplicate QdrantClient instances.
-    from src.interfaces.api.dependencies.fusion_dependencies import set_app_context
-
-    set_app_context(context)
+    _configure_fusion_dependencies(context)
     logger.info("[App Factory] Application context shared with fusion_dependencies")
 
     # Create FastAPI app

@@ -43,6 +43,32 @@ def _worker_payload(worker_id: str) -> dict:
     }
 
 
+def test_composed_app_preserves_gateway_batch_config_query(
+    composed_test_client,
+) -> None:
+    client, _ = composed_test_client
+    worker_id = "wrk_gateway_batch_config"
+    created = client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        "/v1/workers/config/batch",
+        headers=AUTH_HEADERS,
+        json={"worker_ids": [worker_id, "wrk_missing"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "success": True,
+        "data": {worker_id: {"fusion_enable": False}},
+        "not_found_ids": ["wrk_missing"],
+    }
+
+
 class CanonicalOnlyProfileStore:
     """Profile provider exposing exactly the published typed port."""
 
@@ -174,6 +200,12 @@ def test_composed_app_matches_worker_profile_lifecycle_contract(composed_test_cl
         "deleted": True,
     }
     assert registry.get("worker_registry_store").get_by_id(worker_id) is None
+    assert registry.get("worker_profile_content_store").get(
+        worker_id, profile_id
+    ) is None
+    assert registry.get("worker_profile_binding_store").get_active_binding(
+        worker_id
+    ) is None
 
     deleted_again = client.delete(
         f"/v1/workers/{worker_id}",
@@ -291,6 +323,60 @@ def test_worker_delete_failure_preserves_durable_worker_and_profile(
     assert profile_store.get(worker_id, profile_id) is not None
 
 
+def test_dependent_cleanup_failure_keeps_worker_delete_retryable(
+    composed_test_client,
+    monkeypatch,
+):
+    client, app = composed_test_client
+    worker_id = "wrk_dependent_cleanup_retry"
+    profile_id = "default"
+    assert client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    ).status_code == 201
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}",
+        headers=AUTH_HEADERS,
+        json={"display_name": "Retryable Cleanup", "soul_md": "# Retry"},
+    ).status_code == 200
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}/activate",
+        headers=AUTH_HEADERS,
+    ).status_code == 200
+
+    registry = app.state.context.registry
+    worker_store = registry.get("worker_registry_store")
+    profile_store = registry.get("worker_profile_content_store")
+    binding_store = registry.get("worker_profile_binding_store")
+    original_delete = profile_store.delete
+    delete_attempts = 0
+
+    def fail_first_profile_delete(delete_worker_id, delete_profile_id):
+        nonlocal delete_attempts
+        delete_attempts += 1
+        if delete_attempts == 1:
+            raise RuntimeError("profile cleanup failed")
+        return original_delete(delete_worker_id, delete_profile_id)
+
+    monkeypatch.setattr(profile_store, "delete", fail_first_profile_delete)
+
+    failed = client.delete(f"/v1/workers/{worker_id}", headers=AUTH_HEADERS)
+
+    assert failed.status_code == 500
+    assert failed.json()["detail"]["code"] == "DELETE_WORKER_ERROR"
+    assert worker_store.get_by_id(worker_id) is not None
+    assert profile_store.get(worker_id, profile_id) is not None
+    assert binding_store.get_active_binding(worker_id) is not None
+
+    retried = client.delete(f"/v1/workers/{worker_id}", headers=AUTH_HEADERS)
+
+    assert retried.status_code == 200, retried.text
+    assert worker_store.get_by_id(worker_id) is None
+    assert profile_store.get(worker_id, profile_id) is None
+    assert binding_store.get_active_binding(worker_id) is None
+
+
 def test_profile_activation_propagates_binding_write_failure(
     composed_test_client,
     monkeypatch,
@@ -359,6 +445,148 @@ def test_profile_activation_failure_compensates_new_binding(
         registry.get("worker_profile_binding_store").get_active_binding(worker_id)
         is None
     )
+    assert registry.get("worker_registry_store").get_by_id(
+        worker_id
+    ).active_profile_key is None
+
+
+def test_worker_update_failure_restores_previous_profile_activation(
+    composed_test_client,
+    monkeypatch,
+):
+    client, app = composed_test_client
+    worker_id = "wrk_worker_update_failure"
+    previous_profile_id = "previous"
+    target_profile_id = "target"
+    assert client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    ).status_code == 201
+    for profile_id in (previous_profile_id, target_profile_id):
+        assert client.put(
+            f"/v1/workers/{worker_id}/profiles/{profile_id}",
+            headers=AUTH_HEADERS,
+            json={"display_name": profile_id, "soul_md": f"# {profile_id}"},
+        ).status_code == 200
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{previous_profile_id}/activate",
+        headers=AUTH_HEADERS,
+    ).status_code == 200
+
+    registry = app.state.context.registry
+    worker_store = registry.get("worker_registry_store")
+    original_update = worker_store.update
+    update_attempts = 0
+
+    def fail_first_update(worker):
+        nonlocal update_attempts
+        update_attempts += 1
+        if update_attempts == 1:
+            raise RuntimeError("worker registry update failed")
+        return original_update(worker)
+
+    monkeypatch.setattr(worker_store, "update", fail_first_update)
+    response = client.put(
+        f"/v1/workers/{worker_id}/profiles/{target_profile_id}/activate",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "ACTIVATE_PROFILE_ERROR"
+    active_profile = registry.get("worker_profile_content_store").get_active(
+        worker_id
+    )
+    assert active_profile.profile_id == previous_profile_id
+    active_binding = registry.get(
+        "worker_profile_binding_store"
+    ).get_active_binding(worker_id)
+    assert active_binding.profile_key == f"{worker_id}:{previous_profile_id}"
+    assert (
+        worker_store.get_by_id(worker_id).active_profile_key
+        == f"{worker_id}:{previous_profile_id}"
+    )
+
+
+def test_first_profile_activation_worker_update_failure_restores_inactive_state(
+    composed_test_client,
+    monkeypatch,
+):
+    client, app = composed_test_client
+    worker_id = "wrk_first_activation_update_failure"
+    profile_id = "default"
+    assert client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    ).status_code == 201
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}",
+        headers=AUTH_HEADERS,
+        json={"display_name": "First Activation", "soul_md": "# First"},
+    ).status_code == 200
+
+    registry = app.state.context.registry
+    worker_store = registry.get("worker_registry_store")
+
+    def fail_update(_worker):
+        raise RuntimeError("worker registry update failed")
+
+    monkeypatch.setattr(worker_store, "update", fail_update)
+    response = client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}/activate",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "ACTIVATE_PROFILE_ERROR"
+    assert registry.get("worker_profile_content_store").get_active(worker_id) is None
+    assert (
+        registry.get("worker_profile_binding_store").get_active_binding(worker_id)
+        is None
+    )
+    assert worker_store.get_by_id(worker_id).active_profile_key is None
+
+
+def test_profile_activation_snapshot_failure_uses_stable_error_contract(
+    composed_test_client,
+    monkeypatch,
+):
+    client, app = composed_test_client
+    worker_id = "wrk_activation_snapshot_failure"
+    profile_id = "default"
+    assert client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    ).status_code == 201
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}",
+        headers=AUTH_HEADERS,
+        json={"display_name": "Snapshot Failure", "soul_md": "# Snapshot"},
+    ).status_code == 200
+
+    registry = app.state.context.registry
+    profile_store = registry.get("worker_profile_content_store")
+
+    def fail_active_snapshot(_worker_id):
+        raise RuntimeError("profile provider unavailable")
+
+    monkeypatch.setattr(profile_store, "get_active", fail_active_snapshot)
+    response = client.put(
+        f"/v1/workers/{worker_id}/profiles/{profile_id}/activate",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "ACTIVATE_PROFILE_ERROR"
+    assert (
+        registry.get("worker_profile_binding_store").get_active_binding(worker_id)
+        is None
+    )
+    assert registry.get("worker_registry_store").get_by_id(
+        worker_id
+    ).active_profile_key is None
 
 
 def test_runtime_registry_write_failure_rolls_back_and_returns_error(
