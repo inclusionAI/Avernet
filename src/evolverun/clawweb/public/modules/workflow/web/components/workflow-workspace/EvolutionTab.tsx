@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useEvolveLessons,
   useEvolveSuggestions,
   useRecordSuggestionAction,
+  useEligibleBotsForSuggestion,
+  useApplySuggestionsBatch,
   useSuggestionApplyTasks,
   useWorkflowAccess,
   useRunEvolutionAnalysis,
@@ -111,13 +113,18 @@ function repairInboxFilter(state: IssueState | 'all'): RepairInboxFilter {
   return state
 }
 
-function SuggestionActions({ suggestion, canEdit, onAction }: {
+function SuggestionActions({ suggestion, canEdit, legacyApplyEnabled, onAction, onApply }: {
   suggestion: DisplaySuggestion
   canEdit: boolean
+  legacyApplyEnabled: boolean
   onAction: (id: string, action: Exclude<SuggestionStatus, 'pending'>) => void
+  onApply: (ids: string[]) => void
 }) {
   if (!canEdit) return <span className="text-xs text-slate-400">当前账号为只读权限</span>
-  if (suggestion.status === 'pending' || suggestion.status === 'adopted' || suggestion.status === 'failed') return <span className="text-xs text-slate-500">等待进入 Pack 修复流程</span>
+  if (suggestion.status === 'pending' || suggestion.status === 'adopted' || suggestion.status === 'failed') return legacyApplyEnabled ? <>
+    <button onClick={() => onAction(suggestion.id, 'rejected')} className="rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800">忽略</button>
+    <button onClick={() => onApply([suggestion.id])} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700">{suggestion.status === 'failed' ? '重新应用' : '应用建议'}</button>
+  </> : <span className="text-xs text-slate-500">等待进入 Pack 修复流程</span>
   if (suggestion.status === 'applied_unverified') return <>
     <button onClick={() => onAction(suggestion.id, 'ineffective')} className="rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-red-50 hover:text-red-600">未达预期</button>
     <button onClick={() => onAction(suggestion.id, 'verified')} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700">确认有效</button>
@@ -125,7 +132,8 @@ function SuggestionActions({ suggestion, canEdit, onAction }: {
   return <span className="text-xs text-slate-400">当前状态无需操作</span>
 }
 
-function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFlowId, selectedAnalysisId, canEdit, onAction, onClose }: {
+function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFlowId, selectedAnalysisId, canEdit,
+  legacyApplyEnabled, onAction, onApply, onClose }: {
   cluster: DiagnosisCluster
   suggestion?: DisplaySuggestion
   task?: SuggestionApplyTask
@@ -133,7 +141,9 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
   selectedFlowId?: string
   selectedAnalysisId?: string
   canEdit: boolean
+  legacyApplyEnabled: boolean
   onAction: (id: string, action: Exclude<SuggestionStatus, 'pending'>) => void
+  onApply: (ids: string[]) => void
   onClose: () => void
 }) {
   const initialInstance = cluster.instances.find((instance) =>
@@ -193,7 +203,8 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
               {[...proposalDiff.added, ...proposalDiff.changed, ...proposalDiff.removed].slice(0, 6).map((operation, index) => <p key={`${String(operation.nodeId)}-${String(operation.path)}-${index}`} className="mt-1 font-mono text-[10px] text-slate-500">{String(operation.nodeId ?? 'workflow')} {String(operation.path ?? '')}</p>)}
             </div>}
             <ApplyTaskStatusBadge task={task} />
-            {cluster.aggregation && <div className="mt-3 flex flex-wrap justify-end gap-2"><SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} /></div>}
+            {cluster.aggregation && <div className="mt-3 flex flex-wrap justify-end gap-2"><SuggestionActions suggestion={suggestion} canEdit={canEdit}
+              legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} /></div>}
           </> : <p className="mt-2 rounded-lg bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-700">暂无可执行建议，暂不处理，等待更多证据或人工判断。</p>}
         </details>
 
@@ -250,7 +261,7 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
       </div>
 
       {suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
-        <SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} />
+        <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
       </footer>}
     </aside>
   </div>
@@ -267,6 +278,7 @@ function DiagnosisPanel({
   applyTaskMap,
   applyTasks,
   onAction,
+  onApply,
   canEdit,
 }: {
   workflowId: string
@@ -279,6 +291,7 @@ function DiagnosisPanel({
   applyTaskMap: Record<string, SuggestionApplyTask>
   applyTasks: SuggestionApplyTask[]
   onAction: (id: string, action: Exclude<SuggestionStatus, 'pending'>) => void
+  onApply: (ids: string[]) => void
   canEdit: boolean
 }) {
   const { data, isLoading, isError, refetch } = useIssueGroups(workflowId)
@@ -308,6 +321,8 @@ function DiagnosisPanel({
   const [dispositionReason, setDispositionReason] = useState('')
   const initializedDigest = useRef('')
   const requestId = useRef('')
+  const requestPayloadKey = useRef('')
+  const requestSequence = useRef(0)
   const detailRequests = useRef(new Set<string>())
   const selectedRepairState = repairInboxFilter(stateFilter)
 
@@ -378,7 +393,13 @@ function DiagnosisPanel({
       state: issueState(suggestion?.status),
     }
   })
-  const filtered = enriched.filter(({ cluster, repairItems: groupItems, state }) =>
+  const repairBackedSignatures = new Set([
+    ...suggestions.map(suggestion => suggestion.signature),
+    ...(data?.groups ?? []).filter(group => group.sources.some(source => source.proposal?.summary?.trim())).map(group => group.signature),
+  ])
+  const pagedEnriched = enriched.filter(({ cluster }) => !repairData || !repairBackedSignatures.has(cluster.signature)
+    || repairBySignature.has(cluster.signature))
+  const filtered = pagedEnriched.filter(({ cluster, repairItems: groupItems, state }) =>
     (nodeFilter === 'all' || cluster.node === nodeFilter)
     && (modeFilter === 'all' || cluster.mode === modeFilter)
     && (stateFilter === 'all' || (groupItems.length ? groupItems.some(item => repairIssueState(item) === stateFilter) : stateFilter === state)))
@@ -388,7 +409,7 @@ function DiagnosisPanel({
   const closedCount = repairData?.counts.closed ?? enriched.filter((item) => item.state === 'closed').length
   const noActionCount = repairData?.counts.no_action ?? 0
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
-  const selectedIssue = enriched.find(({ cluster }) => cluster.signature === selectedSignature)
+  const selectedIssue = filtered.find(({ cluster }) => cluster.signature === selectedSignature)
   const selectableFilteredIds = filtered.flatMap(({ repairItems: groupItems }) => groupItems.filter(item => !exclusion(item)).map(item => item.itemId))
   const allFilteredSelected = selectableFilteredIds.length > 0 && selectableFilteredIds.every(id => selectedRepairIds.includes(id))
   const toggleRepairItem = (id: string) => setSelectedRepairIds(current => current.includes(id)
@@ -397,8 +418,14 @@ function DiagnosisPanel({
   const toggleAllFiltered = () => setSelectedRepairIds(current => allFilteredSelected
     ? current.filter(id => !selectableFilteredIds.includes(id))
     : [...new Set([...current, ...selectableFilteredIds])].slice(0, Math.min(100, repairData?.limits.maxItems ?? 100)))
-  const nextRequestId = () => {
-    if (!requestId.current) requestId.current = globalThis.crypto?.randomUUID?.() ?? `repair-${Date.now()}`
+  const resetRequestId = () => { requestId.current = ''; requestPayloadKey.current = '' }
+  const nextRequestId = (payload: unknown) => {
+    const payloadKey = JSON.stringify(payload)
+    if (!requestId.current || requestPayloadKey.current !== payloadKey) {
+      requestSequence.current += 1
+      requestId.current = globalThis.crypto?.randomUUID?.() ?? `repair-${Date.now()}-${requestSequence.current}`
+      requestPayloadKey.current = payloadKey
+    }
     return requestId.current
   }
   const loadRepairDetail = async (itemId: string) => {
@@ -418,24 +445,26 @@ function DiagnosisPanel({
   }
   const submitDraft = async () => {
     if (!repairData || !selectedRepairIds.length || repairBusy) return
+    const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
+      instructions, includeHistorical: repairData.includeHistorical }
     setRepairBusy(true); setRepairActionError('')
     try {
-      const result = await repairBatches.create({ workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
-        instructions, requestId: nextRequestId(), includeHistorical: repairData.includeHistorical })
+      const result = await repairBatches.create({ ...input, requestId: nextRequestId(input) })
       setDraftOpen(false); setRepairNotice(`已创建 ${result.taskId}，AIS 将生成可审阅 Pack 草稿，不会自动部署。`)
-      requestId.current = ''; initializedDigest.current = ''; setRepairRefresh(value => value + 1)
+      resetRequestId(); initializedDigest.current = ''; setRepairRefresh(value => value + 1)
     } catch (error) {
       setRepairActionError(`生成请求状态未确认，请刷新任务记录后再决定是否重试：${error instanceof Error ? error.message : String(error)}`)
     } finally { setRepairBusy(false) }
   }
   const submitDisposition = async () => {
     if (!repairData || !disposition || !dispositionReason.trim() || repairBusy) return
+    const input = { workflowId, inputDigest: repairData.inputDigest,
+      expectedStateVersion: disposition.item.stateVersion, contentRevision: disposition.item.contentRevision,
+      action: disposition.action, reason: dispositionReason.trim(), includeHistorical: repairData.includeHistorical }
     setRepairBusy(true); setRepairActionError('')
     try {
-      await repairBatches.disposition(disposition.item.itemId, { workflowId, inputDigest: repairData.inputDigest,
-        expectedStateVersion: disposition.item.stateVersion, contentRevision: disposition.item.contentRevision,
-        action: disposition.action, reason: dispositionReason.trim(), requestId: nextRequestId(), includeHistorical: repairData.includeHistorical })
-      setDisposition(null); setDispositionReason(''); requestId.current = ''; initializedDigest.current = ''; setRepairRefresh(value => value + 1)
+      await repairBatches.disposition(disposition.item.itemId, { ...input, requestId: nextRequestId(input) })
+      setDisposition(null); setDispositionReason(''); resetRequestId(); initializedDigest.current = ''; setRepairRefresh(value => value + 1)
     } catch (error) { setRepairActionError(error instanceof Error ? error.message : String(error)) }
     finally { setRepairBusy(false) }
   }
@@ -459,7 +488,7 @@ function DiagnosisPanel({
             <p className="mt-1 text-xs text-slate-500">任务不会替代问题列表；旧批次、新建议和历史状态始终可见。</p>
           </div>
           <button type="button" className={primary} disabled={!canEdit || !repairData.canEdit || !repairData.capabilities.generation || !selectedRepairIds.length || !!activeRepairTask || repairBusy}
-            onClick={() => { requestId.current = ''; setRepairActionError(''); setDraftOpen(true) }}>
+            onClick={() => { resetRequestId(); setRepairActionError(''); setDraftOpen(true) }}>
             生成 Pack 草稿（{selectedRepairIds.length}）
           </button>
         </div>
@@ -564,7 +593,7 @@ function DiagnosisPanel({
                   selected={selectedRepairIds} onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true}
                   limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
                   details={repairDetails} detailLoading={repairDetailLoading} detailErrors={repairDetailErrors} onLoadDetail={itemId => void loadRepairDetail(itemId)}
-                  onDisposition={(item, action) => { requestId.current = ''; setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} /></div>
+                  onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} /></div>
                   : cluster.aggregation ? <p className="mt-2 rounded-lg bg-blue-50/70 px-3 py-2 text-xs text-blue-700">查看问题、建议总览与原始证据；可执行处理项同步后会直接出现在这里。</p> : suggestion ? <div className="mt-2 flex max-w-5xl items-start gap-2 rounded-lg bg-blue-50/70 px-3 py-2">
                   <span className="shrink-0 text-[10px] font-semibold text-blue-700">建议</span>
                   <p className="line-clamp-2 min-w-0 text-xs leading-5 text-blue-700" title={suggestion.description}>{suggestion.description}</p>
@@ -598,7 +627,7 @@ function DiagnosisPanel({
         <RepairItems items={standaloneRepairItems} allItems={standaloneRepairItems} selected={selectedRepairIds} onToggle={toggleRepairItem}
           canEdit={canEdit && repairData?.canEdit === true} limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
           details={repairDetails} detailLoading={repairDetailLoading} detailErrors={repairDetailErrors} onLoadDetail={itemId => void loadRepairDetail(itemId)}
-          onDisposition={(item, action) => { requestId.current = ''; setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
+          onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
       </section>}
 
       {repairData && <Pagination page={repairData.page.page} pageSize={repairData.page.pageSize} total={repairData.page.total}
@@ -623,7 +652,8 @@ function DiagnosisPanel({
                 <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} />
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={repairData?.capabilities.generation === false}
+                  onAction={onAction} onApply={onApply} />
               </div>
             </article>
           })}
@@ -641,7 +671,9 @@ function DiagnosisPanel({
         selectedFlowId={runId}
         selectedAnalysisId={analysisId}
         canEdit={canEdit}
+        legacyApplyEnabled={repairData?.capabilities.generation === false}
         onAction={onAction}
+        onApply={onApply}
         onClose={() => setSelectedSignature(null)}
       />}
 
@@ -815,6 +847,85 @@ function ApplyTaskStatusBadge({ task }: { task: SuggestionApplyTask | undefined 
   )
 }
 
+type ApplySuggestionModalProps = {
+  suggestions: EvolveSuggestion[]
+  previousTask?: SuggestionApplyTask
+  onClose: () => void
+  onApplied: (suggestionIds: string[]) => void
+}
+
+export function ApplySuggestionModal({ suggestions, previousTask, onClose, onApplied }: ApplySuggestionModalProps) {
+  const suggestionIds = suggestions.map((suggestion) => suggestion.id)
+  const firstId = suggestionIds[0]
+  const { data, isLoading, error } = useEligibleBotsForSuggestion(firstId, suggestionIds.length > 0)
+  const [selectedBotId, setSelectedBotId] = useState('')
+  const [notice, setNotice] = useState<string | null>(null)
+  const [isApplying, setIsApplying] = useState(false)
+  const defaultSpec = useMemo(() => suggestions.map((suggestion) => suggestion.description).join('\n'), [suggestions])
+  const [applicationSpec, setApplicationSpec] = useState(previousTask?.applicationSpec?.trim() || defaultSpec)
+  const applyMutation = useApplySuggestionsBatch()
+  const bots = useMemo(() => data?.bots ?? [], [data?.bots])
+  const effectiveSelectedBotId = selectedBotId || (
+    previousTask?.botId && bots.some((bot) => bot.botId === previousTask.botId) ? previousTask.botId : ''
+  )
+  const selectedBot = bots.find((bot) => bot.botId === effectiveSelectedBotId)
+  const isBulk = suggestionIds.length > 1
+  const isRetry = suggestions.some((suggestion) => suggestion.status === 'failed')
+
+  const handleApply = async () => {
+    const spec = applicationSpec.trim()
+    if (!suggestionIds.length || !effectiveSelectedBotId || !spec) return
+    setIsApplying(true)
+    try {
+      await applyMutation.mutateAsync({ suggestionIds, botId: effectiveSelectedBotId,
+        botEnv: selectedBot?.env ?? undefined, applicationSpec: spec })
+      setNotice(`已派发 1 个任务处理 ${suggestionIds.length} 条建议；应用完成后仍需自然流量或人工验证效果`)
+      onApplied(suggestionIds)
+    } catch (err) {
+      setNotice(`应用任务派发失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+    setIsApplying(false)
+  }
+
+  if (!suggestionIds.length) return null
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-labelledby="apply-suggestion-modal-title"
+      className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+      onClick={(event) => event.stopPropagation()}>
+      <div data-testid="apply-suggestion-modal-body" className="min-h-0 flex-1 overflow-y-auto p-5 pb-4">
+        <h3 id="apply-suggestion-modal-title" className="mb-3 text-sm font-semibold text-gray-900">
+          {isBulk ? `批量应用 ${suggestionIds.length} 条建议` : '选择 Bot 自动应用建议'}
+        </h3>
+        <p className="mb-3 text-xs text-amber-700">选择一个具有编辑权限的 Bot。Bot 会读取完整配置，结合建议安全修改并部署；应用完成后仍需验证实际效果。</p>
+        {notice && <div className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700">{notice}</div>}
+        {isLoading && <div className="py-4 text-xs text-gray-500">加载可应用 Bot 中...</div>}
+        {!isLoading && error && <div className="py-3 text-xs text-red-600">加载失败：{error instanceof Error ? error.message : String(error)}</div>}
+        {!isLoading && bots.length === 0 && <div className="py-3 text-xs text-gray-500">没有可用的 Bot 对该 workflow 拥有编辑权限。请先在权限管理中授予 Bot 的 can_edit 权限。</div>}
+        {!isLoading && bots.length > 0 && <div className="mb-4 space-y-2">{bots.map((bot) => <label key={bot.botId}
+          className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 p-2 hover:bg-gray-50">
+          <input type="radio" name="apply-bot" value={bot.botId} checked={effectiveSelectedBotId === bot.botId}
+            onChange={() => setSelectedBotId(bot.botId)} className="text-blue-600" />
+          <span className="text-xs"><span className="block font-medium text-gray-900">{bot.botName ?? bot.botId}</span>
+            <span className="block text-gray-500">{bot.botId}{bot.env ? ` · ${bot.env}` : ''}</span></span>
+        </label>)}</div>}
+        <label className="mb-4 block text-xs font-medium text-slate-700">本次修复要求
+          <textarea aria-label="本次修复要求" value={applicationSpec} maxLength={20_000}
+            onChange={(event) => setApplicationSpec(event.target.value)} rows={6}
+            className="mt-1.5 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
+          <span className="mt-1 block text-[10px] font-normal text-slate-400">只影响本次应用任务，不会修改原始分析和建议。</span>
+        </label>
+      </div>
+      <div data-testid="apply-suggestion-modal-footer" className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-white px-5 py-4">
+        <button onClick={onClose} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">取消</button>
+        <button onClick={() => void handleApply()} disabled={!effectiveSelectedBotId || !applicationSpec.trim() || isApplying}
+          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+          {isApplying ? '派发中...' : (isBulk ? `确认应用 ${suggestionIds.length} 条` : isRetry ? '重新应用' : '确认应用')}
+        </button>
+      </div>
+    </div>
+  </div>
+}
+
 interface EvolutionTabProps {
   workflowId: string
   runId?: string
@@ -829,10 +940,11 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
   const tab = section ?? localTab
   const [localStatus, setLocalStatus] = useState<Record<string, Exclude<SuggestionStatus, 'pending'>>>({})
   const [notice, setNotice] = useState<string | null>(null)
+  const [applySuggestionIds, setApplySuggestionIds] = useState<string[]>([])
   const { data: access } = useWorkflowAccess(workflowId)
   const canEdit = access?.canEdit === true
 
-  const { data: suggestionsData, isLoading: suggestionsLoading } = useEvolveSuggestions({
+  const { data: suggestionsData, isLoading: suggestionsLoading, refetch: refetchSuggestions } = useEvolveSuggestions({
     workflowId,
     enabled: tab === 'diagnosis',
   })
@@ -853,6 +965,10 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
   }, {})
 
   const recordAction = useRecordSuggestionAction()
+  const selectedApplySuggestions = suggestions.filter(suggestion => applySuggestionIds.includes(suggestion.id))
+  const previousApplyTask = selectedApplySuggestions.length === 1
+    ? applyTasks.find(task => task.suggestionId === selectedApplySuggestions[0].id && ['failed', 'canceled'].includes(task.status))
+    : undefined
 
   const showNotice = (text: string) => {
     setNotice(text)
@@ -945,10 +1061,23 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
         applyTaskMap={applyTaskMap}
         applyTasks={applyTasks}
         onAction={handleSuggestionAction}
+        onApply={setApplySuggestionIds}
         canEdit={canEdit}
       />}
 
       {tab === 'remedies' && <RemediesPanel workflowId={workflowId} />}
+
+      <ApplySuggestionModal key={applySuggestionIds.join('|')} suggestions={selectedApplySuggestions} previousTask={previousApplyTask}
+        onClose={() => setApplySuggestionIds([])} onApplied={(ids) => {
+          setLocalStatus(previous => {
+            const next = { ...previous }
+            for (const id of ids) next[id] = 'applying'
+            return next
+          })
+          showNotice(`${ids.length} 条建议应用任务已派发`)
+          void refetchSuggestions()
+          window.setTimeout(() => setApplySuggestionIds([]), 1200)
+        }} />
     </div>
   )
 }
