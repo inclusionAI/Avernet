@@ -39,7 +39,7 @@ load_repo_env_file() {
 
 # .env.example is a template only. Load local overrides without overriding
 # explicit environment variables through repository defaults.
-load_repo_env_file "${PROJECT_ROOT}/.env.local"
+load_repo_env_file "${PROJECT_ROOT}/singlebox/.env.local"
 
 DEP_DIR="${SCRIPT_DIR}/.dependencies"
 LOG_DIR="${DEP_DIR}/logs"
