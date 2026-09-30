@@ -326,6 +326,15 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         """Rebuild local Qdrant and text indexes from the durable backend."""
         logger.info("[QdrantMySQLVectorStore] Rebuilding indexes from durable backend...")
         start = time.time()
+        supports_incremental_sync = isinstance(
+            self._persistence,
+            IncrementalVectorPersistenceBackend,
+        )
+        rebuild_checkpoint = (
+            self._persistence.get_last_modified_time()
+            if supports_incremental_sync
+            else 0.0
+        )
         log_storage_event(
             logger,
             logging.INFO,
@@ -356,6 +365,19 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                     point.id: dict(point.payload or {}) for point in all_points
                 }
 
+            if supports_incremental_sync:
+                changes = self._persistence.load_changes_since(rebuild_checkpoint)
+                if changes.upserts:
+                    self._upsert_local(changes.upserts)
+                if changes.deleted_ids:
+                    self._delete_local(changes.deleted_ids)
+                self._last_sync_time = max(
+                    rebuild_checkpoint,
+                    changes.checkpoint,
+                )
+            else:
+                self._last_sync_time = self._persistence.get_last_modified_time()
+
         duration_ms = (time.time() - start) * 1000
         result = {
             "loaded_count": total_loaded,
@@ -367,7 +389,6 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             "[QdrantMySQLVectorStore] Rebuild complete: loaded=%d indexed=%d qdrant_size=%d duration_ms=%.2f",
             result["loaded_count"], result["indexed_count"], result["qdrant_size"], duration_ms,
         )
-        self._last_sync_time = self._persistence.get_last_modified_time()
         return result
 
     def rebuild_from_mysql(self, batch_size: int = 100) -> dict[str, Any]:

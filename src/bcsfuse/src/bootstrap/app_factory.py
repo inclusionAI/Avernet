@@ -23,14 +23,14 @@ def _configure_fusion_dependencies(context: ApplicationContext) -> None:
 
     fusion_dependencies.set_app_context(context)
     fused_store = context.registry.get("fused_profile_store")
+    storage_service = None
     if fused_store is not None:
-        fusion_dependencies._fused_profile_storage_service = (
-            FusedProfileStorageService(repository=fused_store)
-        )
+        storage_service = FusedProfileStorageService(repository=fused_store)
         logger.info(
             "[App Factory] Composed fused_profile_store registered: %s",
             type(fused_store).__name__,
         )
+    fusion_dependencies.set_fused_profile_storage_service(storage_service)
 
 
 def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:

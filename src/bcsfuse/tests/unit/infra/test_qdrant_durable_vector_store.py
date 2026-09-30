@@ -51,6 +51,26 @@ class FakePersistenceBackend:
         self.closed = True
 
 
+@dataclass
+class MutationDuringRebuildBackend(FakePersistenceBackend):
+    late_point: VectorPoint | None = None
+
+    def load_all(self) -> list[VectorPoint]:
+        snapshot = super().load_all()
+        if self.late_point is not None:
+            self.points[self.late_point.id] = self.late_point
+            self.changes = VectorChangeSet(
+                upserts=[self.late_point],
+                checkpoint=2.0,
+            )
+        return snapshot
+
+    def load_changes_since(self, checkpoint: float) -> VectorChangeSet:
+        if checkpoint < self.changes.checkpoint:
+            return self.changes
+        return VectorChangeSet(checkpoint=checkpoint)
+
+
 def _point(point_id: str, content: str, *, worker_id: str = "worker-1") -> VectorPoint:
     return VectorPoint(
         id=point_id,
@@ -96,6 +116,24 @@ def test_rebuild_restores_dense_and_text_indexes_from_durable_backend(tmp_path) 
     assert result["loaded_count"] == 2
     assert result["indexed_count"] == 2
     assert [hit.id for hit in hits] == ["python"]
+    store.close()
+
+
+def test_rebuild_replays_mutation_committed_after_snapshot_checkpoint(tmp_path) -> None:
+    original = _point("original", "original profile")
+    late = _point("late", "late python profile")
+    backend = MutationDuringRebuildBackend(
+        points={original.id: original},
+        changes=VectorChangeSet(checkpoint=1.0),
+        late_point=late,
+    )
+    store = _store(backend, tmp_path)
+
+    store.rebuild_from_backend()
+    store.sync_incremental()
+
+    assert set(store.get_vector_ids()) == {late.id, original.id}
+    assert [hit.id for hit in store.text_search("python", top_k=5)] == [late.id]
     store.close()
 
 
