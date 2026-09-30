@@ -27,19 +27,29 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const [feedbackPage, setFeedbackPage] = useState(1)
   const [dispatchError, setDispatchError] = useState('')
   const requestId = useRef('')
+  const requestPayloadKey = useRef('')
+  const requestSequence = useRef(0)
+  const activeTask = useRef<{ taskId: string; active: boolean } | null>(null)
 
   useEffect(() => {
     let current = true
     let pollTimer: ReturnType<typeof setTimeout> | undefined
+    const schedulePoll = () => {
+      pollTimer = setTimeout(() => { if (current) setRefresh(value => value + 1) }, 2_000)
+    }
     setLoading(detail == null); setError('')
     repairBatches.task(taskId).then(result => {
       if (!current) return
       if (result.workflowId !== workflowId) throw new Error('此任务不属于当前工作流')
       setDetail(result)
-      if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) {
-        pollTimer = setTimeout(() => { if (current) setRefresh(value => value + 1) }, 2_000)
-      }
-    }).catch(reason => { if (current) setError(message(reason)) })
+      const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase)
+      activeTask.current = { taskId, active }
+      if (active) schedulePoll()
+    }).catch(reason => {
+      if (!current) return
+      setError(message(reason))
+      if (activeTask.current?.taskId === taskId && activeTask.current.active) schedulePoll()
+    })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false; if (pollTimer) clearTimeout(pollTimer) }
   }, [workflowId, taskId, refresh])
@@ -73,17 +83,23 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   }
   const revise = async () => {
     if (!detail || !feedbackCandidates || !feedback.trim() || !feedbackItemIds.length || busy) return
-    if (!requestId.current) requestId.current = globalThis.crypto?.randomUUID?.() ?? `repair-feedback-${Date.now()}`
+    const revisionInput = {
+      workflowId, inputDigest: feedbackCandidates.inputDigest, includeHistorical: feedbackCandidates.includeHistorical,
+      itemIds: feedbackItemIds, instructions,
+      expectedAttemptRevision: detail.latestAttempt.revision,
+      parentCandidateCommit: typeof detail.latestSuccessful?.draft?.candidateCommit === 'string' ? detail.latestSuccessful.draft.candidateCommit : null,
+      feedback: feedback.trim(),
+    }
+    const payloadKey = JSON.stringify(revisionInput)
+    if (!requestId.current || requestPayloadKey.current !== payloadKey) {
+      requestSequence.current += 1
+      requestId.current = globalThis.crypto?.randomUUID?.() ?? `repair-feedback-${Date.now()}-${requestSequence.current}`
+      requestPayloadKey.current = payloadKey
+    }
     setBusy(true); setError('')
     try {
-      await repairBatches.revise(taskId, {
-        workflowId, inputDigest: feedbackCandidates.inputDigest, includeHistorical: feedbackCandidates.includeHistorical, requestId: requestId.current,
-        itemIds: feedbackItemIds, instructions,
-        expectedAttemptRevision: detail.latestAttempt.revision,
-        parentCandidateCommit: typeof detail.latestSuccessful?.draft?.candidateCommit === 'string' ? detail.latestSuccessful.draft.candidateCommit : null,
-        feedback: feedback.trim(),
-      })
-      requestId.current = ''; setMode('detail'); setFeedback(''); reload()
+      await repairBatches.revise(taskId, { ...revisionInput, requestId: requestId.current })
+      requestId.current = ''; requestPayloadKey.current = ''; setMode('detail'); setFeedback(''); reload()
     } catch (reason) { setError(`修订请求状态未确认，请刷新任务后再决定是否重试：${message(reason)}`) }
     finally { setBusy(false) }
   }
@@ -141,6 +157,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     {error && <p role="alert" className="text-xs text-red-600">任务读取失败：{error}</p>}
     {detail && <RepairTaskPanel detail={detail} canEdit={canEdit} busy={busy} dispatchError={dispatchError}
       onFeedback={() => {
+        requestId.current = ''
+        requestPayloadKey.current = ''
         setInstructions(detail.latestAttempt.input.instructions)
         setFeedbackItemIds(detail.latestAttempt.input.items.map(item => item.itemId))
         setFeedbackCandidates(null)
