@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClawevolveModule } from "@avernet/clawevolve";
-import { createInsightRuntime, createInsightRouter } from "@avernet/clawinsight";
+import { createInsightRuntime, createInsightRouter, createSessionRecoveryRouter, type SessionRecoveryRuntime } from "@avernet/clawinsight";
 import { createApprovalRouter } from "@avernet/workflow/server/routes/approval";
 import { createInternalApprovalCardsRouter } from "@avernet/workflow/server/routes/internal/approval-cards";
 import { ApprovalCardRepository } from "@avernet/workflow/server/repositories/approval-card-repository";
@@ -21,7 +21,7 @@ import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 
-export function createClawWebBootstrap(): ClawWebBootstrap {
+export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -68,6 +68,7 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
         },
       }).router);
       app.use("/api/bench", clawevolve.benchRouter);
+      app.use("/api/insight/v1", createSessionRecoveryRouter(options.sessionRecovery));
       app.use("/api/insight/v1", createInsightRouter(insight.service));
       // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)
       const approvalCardRepo = new ApprovalCardRepository(db);
