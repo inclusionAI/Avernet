@@ -63,6 +63,7 @@ from agentclaw.community.api.collaborator_lock_service import (
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
@@ -171,6 +172,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
     CanonicalCenterVersionStore,
 )
+from agentclaw.community.core.service_bot.services.bot_build_policy import PublishBuildPolicyConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
 from agentclaw.community.log import get_logger
@@ -259,7 +261,6 @@ class ServiceBotModule(Module):
         )
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
         # Offloads an oversized config_artifact out of the ac_bot_publish.ext
         # TEXT column into object storage; injected into the repo below.
         binder.bind(
@@ -406,6 +407,25 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def workspace_path_factory(
+        self,
+        skill_repo_sync: SkillRepoSyncPlugin,
+        workspace: cfg.WorkspaceConfig,
+    ) -> WorkspacePathFactory:
+        """Bind the path factory with the deployment's workspace roots.
+
+        ``arca_root``（NAS staging 根）从 typed config 流入 —— core 的
+        path_factory 不读 env/配置链（AGENTS.md：environment access 留在
+        composition root）。
+        """
+        return WorkspacePathFactory(
+            skill_repo_sync=skill_repo_sync,
+            arca_root=workspace.arca_root,
+        )
+
+    @singleton
+    @provider
+    @inject
     def bot_build_service(
         self,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
@@ -418,6 +438,7 @@ class ServiceBotModule(Module):
         bot_repo: BotRepository,
         channel_service: ChannelServiceProtocol,
         baas: cfg.BaasConfig,
+        publish_build_policy: PublishBuildPolicyConfig,
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
     ) -> BotBuildService:
@@ -434,6 +455,7 @@ class ServiceBotModule(Module):
             channel_service=channel_service,
             bot_repository=bot_repo,
             teclaw_template_uuid=baas.teclaw_template_uuid,
+            publish_build_policy=publish_build_policy,
             common_whitelist_service=common_whitelist_service,
             baas_template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
         )

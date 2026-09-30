@@ -494,6 +494,8 @@ class LocalProcessManager:
             self._openclaw_ports.clear()
             self._hermes_ports.clear()
 
+
+
         if entries:
             logger.info("Stopped %d process pair(s)", len(entries))
 

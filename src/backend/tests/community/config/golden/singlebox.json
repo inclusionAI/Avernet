@@ -176,6 +176,10 @@
       "skills_repo_url": ""
     },
     "oss_mount_root": "/aidesktop",
+    "publish_build": {
+      "mcp_catalog_required": false,
+      "nas_migration_required": false
+    },
     "secret_names": {
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
       "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
@@ -381,6 +385,7 @@
     },
     "workspace": {
       "aicoding_root": "~/.aicoding",
+      "arca_root": "/home/admin/.merge_nas",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
       "deepseek_harness_root": "/home/admin/.dsh",

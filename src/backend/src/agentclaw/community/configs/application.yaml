@@ -187,6 +187,14 @@ user_config:
   task_queue_worker:
     enabled: true
 
+  # Publish 构建资源策略（所有部署共享同一套构建码道；构建逻辑不探宿主机
+  # 推断环境差异，部署缺什么资源在此显式声明，经 DI 注入
+  # PublishBuildPolicyConfig）。中性默认全 true == 生产语义：NAS staging
+  # 缺失 / 设备空 MCP catalog 都使构建响亮失败。
+  publish_build:
+    nas_migration_required: true
+    mcp_catalog_required: true
+
   # NOTE: dima (applicationCoding 7x24 hosting API + credentials) is corp-only —
   # carried by the corp env overlays; the community build has no DIMA hosting.
   #

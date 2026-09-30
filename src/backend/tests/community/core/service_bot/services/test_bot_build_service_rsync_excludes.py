@@ -537,14 +537,15 @@ def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_
     service._generate_openclaw_stage_configs = MagicMock(return_value=True)
     service._get_migration_path_base = MagicMock(return_value="/fake/path")
 
-    with patch(
-        "agentclaw.community.core.service_bot.services.bot_build_service.get_bot_nas_dir",
+    # NAS dir 经注入的 path factory 解析（DI: WorkspaceConfig.arca_root）
+    service._path_factory = MagicMock()
+    service._path_factory.get_bot_nas_dir = MagicMock(
         return_value=Path("/home/admin/.merge_nas/pre_staff_382716_claude_code_20260811_lklnq6d0"),
-    ) as mock_get_bot_nas_dir:
-        result = service.build(bot, version=2)
+    )
+    result = service.build(bot, version=2)
 
     assert result["success"] is True
-    mock_get_bot_nas_dir.assert_called_once_with(
+    service._path_factory.get_bot_nas_dir.assert_called_once_with(
         entity_id="382716",
         bot_id="20260811_lklnq6d0",
         engine_type="claude_code",

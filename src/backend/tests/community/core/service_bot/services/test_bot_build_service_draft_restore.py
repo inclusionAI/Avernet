@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.service_bot.services import bot_build_service as module
-from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.bot_build_service import (
+    BotBuildMigrationError,
+    BotBuildService,
+)
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
 
 from agentclaw.community.kernel.device_dto import CommandResult
@@ -52,7 +55,8 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
     nas_root = tmp_path / "draft-nas"
     nas_root.mkdir()
     monkeypatch.setattr(module, "get_bot_dir", lambda *args, **kwargs: bot_root)
-    monkeypatch.setattr(module, "get_bot_nas_dir", lambda *args, **kwargs: nas_root)
+    # NAS dir 经注入的 path factory 解析（DI: WorkspaceConfig.arca_root）
+    svc._path_factory.get_bot_nas_dir = lambda *args, **kwargs: nas_root
     monkeypatch.setattr(module.time, "monotonic", lambda: 100.0)
 
     result = svc.restore_draft(
@@ -617,3 +621,55 @@ def test_sync_extra_include_files_device_exec_failure_does_not_block(tmp_path, c
 
     svc._run_local_command.assert_not_called()  # host copy never attempted
     assert "Skip unreadable extra include file" in caplog.text
+
+def test_restore_draft_missing_nas_mount_fails_loud(monkeypatch, tmp_path):
+    """坏挂载不得静默化（review F2）：draft NAS 根缺失时禁止 mkdir 到
+    未挂载路径谎报恢复成功 —— 必须响亮失败等运维先修挂载。"""
+    bot_root = tmp_path / "bot-data"
+    artifact_dir = bot_root / "3" / "openclaw"
+    artifact_dir.mkdir(parents=True)
+    absent_mount = tmp_path / "absent-nas"  # 不创建 → 模拟未挂载
+    monkeypatch.setattr(module, "get_bot_dir", lambda *args, **kwargs: bot_root)
+    provider = MagicMock()
+    provider.get_build_plan.return_value = module.EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+    baas = MagicMock()
+    baas.resolve_container_provider.return_value = "baas"
+    svc = BotBuildService(
+        build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
+        env="test",
+        device_service=MagicMock(),
+        baas_service=baas,
+        path_factory=MagicMock(),
+        passport_plugin=MagicMock(),
+        device_binding_repo=MagicMock(),
+        sandbox_registry=MagicMock(
+            resolve=MagicMock(return_value=provider),
+        ),
+        channel_service=MagicMock(),
+        bot_repository=MagicMock(),
+        common_whitelist_service=MagicMock(),
+        baas_template_resolver=MagicMock(),
+        teclaw_template_uuid="teclaw-template",
+    )
+    svc._path_factory.get_bot_nas_dir = lambda *args, **kwargs: absent_mount
+
+    with pytest.raises(BotBuildMigrationError, match="draft NAS mount point missing"):
+        svc.restore_draft(
+            bot={
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "entity_type": "staff",
+                "active_engine": "openclaw",
+            },
+            source_version=3,
+            artifact_ext={"migration_path": "/home/admin/nfs/bot-data/3/openclaw"},
+        )

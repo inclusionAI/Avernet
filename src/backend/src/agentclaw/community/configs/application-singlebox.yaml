@@ -117,6 +117,15 @@ user_config:
   git_sync:
     enable_oss_sync: false   # 关掉 OSS sync
 
+  # Singlebox 无 NAS staging 资源（bot 数据在本地 sandbox 文件系统），且设备
+  # 刚启动时装机不含 mcporter 内容（"无远端 MCP 工具"是合法状态）。构建逻辑
+  # 在所有环境是同一套码道，靠这里显式声明资源缺位（不由业务码探宿主机）。
+  # NAS 本地化资源补齐后应把 nas_migration_required 翻回 true，让本地构建
+  # 全路径验证迁移步骤。
+  publish_build:
+    nas_migration_required: false
+    mcp_catalog_required: false
+
   mock_tcauth: true
 
   agentclawproxy:

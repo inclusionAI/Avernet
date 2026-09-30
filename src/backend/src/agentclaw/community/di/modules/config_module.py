@@ -270,9 +270,7 @@ class ConfigModule(Module):
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),
-            claude_code_root=_expand(
-                block.get("claude_code_root"), defaults.claude_code_root
-            ),
+            claude_code_root=_expand(block.get("claude_code_root"), defaults.claude_code_root),
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
@@ -280,6 +278,7 @@ class ConfigModule(Module):
             deepseek_harness_root=_expand(
                 block.get("deepseek_harness_root"), defaults.deepseek_harness_root
             ),
+            arca_root=_expand(block.get("arca_root"), defaults.arca_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────

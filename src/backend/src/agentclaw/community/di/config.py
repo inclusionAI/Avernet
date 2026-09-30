@@ -673,6 +673,9 @@ class WorkspaceConfig:
     aicoding_root: str = "/home/admin/.aicoding"
     hermes_root: str = "/home/admin/.hermes"
     deepseek_harness_root: str = "/home/admin/.dsh"
+    # NAS staging root under which published bot instances live — prod NFS
+    # mount; deployments without NAS point it at a shared local dir.
+    arca_root: str = "/home/admin/.merge_nas"
 
 
 # ── Creating a bot with its configuration manifest (W13) ─────────────────
