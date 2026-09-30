@@ -540,17 +540,13 @@ class TestLocalK8sSandbox:
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
-    def test_update_outbound_rule_patches_configmap_and_rolls_deployment(
+    def test_update_outbound_rule_is_noop_while_roll_disabled(
         self,
         mock_core_cls,
         mock_apps_cls,
         mock_client,
     ) -> None:
-        mock_apps = MagicMock()
-        mock_apps_cls.return_value = mock_apps
-        mock_core = MagicMock()
-        mock_core_cls.return_value = mock_core
-
+        # patch/roll 已禁用：契约是接受规则并返回成功，不触碰任何 K8s 资源。
         sandbox = LocalK8sArcaSandbox(
             sandbox_id="tpl-test-abc",
             pod_name="bot-pod",
@@ -576,8 +572,8 @@ class TestLocalK8sSandbox:
             )
             is True
         )
-        mock_core.patch_namespaced_config_map.assert_called_once()
-        mock_apps.patch_namespaced_deployment.assert_called_once()
+        mock_core_cls.assert_not_called()
+        mock_apps_cls.assert_not_called()
 
     def test_update_outbound_rule_empty_rule(self, mock_client) -> None:
         sandbox = LocalK8sArcaSandbox(

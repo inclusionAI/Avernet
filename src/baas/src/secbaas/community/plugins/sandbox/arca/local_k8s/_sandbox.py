@@ -232,46 +232,46 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         rule: OutBoundOperationRule,
         updated_mode: OutBoundOperationRuleUpdatedMode,
     ) -> Any:
-        """更新 header-rules ConfigMap 并滚动 Deployment 使规则生效。"""
-        from kubernetes.client import AppsV1Api, CoreV1Api
-
-        core_api = CoreV1Api(self._client)
-        apps_api = AppsV1Api(self._client)
-        configmap_name = self._header_rules_configmap_name
-
-        core_api.patch_namespaced_config_map(
-            name=configmap_name,
-            namespace=self._namespace,
-            body={
-                "data": {
-                    "header-rules.yaml": _convert_outbound_rules(rule),
-                }
-            },
-        )
-        logger.info(
-            "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
-        )
-
-        apps_api.patch_namespaced_deployment(
-            name=self._sandbox_id,
-            namespace=self._namespace,
-            body={
-                "spec": {
-                    "template": {
-                        "metadata": {
-                            "annotations": {
-                                "avernet.local-k8s/outbound-rule-updated": str(
-                                    int(time.time())
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-        )
-        logger.info(
-            "local_k8s: rolled deployment %s/%s", self._namespace, self._sandbox_id
-        )
+        """更新出站规则。当前 patch/roll 已禁用：no-op，返回成功，不修改集群资源。"""
+        # from kubernetes.client import AppsV1Api, CoreV1Api
+        #
+        # core_api = CoreV1Api(self._client)
+        # apps_api = AppsV1Api(self._client)
+        # configmap_name = self._header_rules_configmap_name
+        #
+        # core_api.patch_namespaced_config_map(
+        #     name=configmap_name,
+        #     namespace=self._namespace,
+        #     body={
+        #         "data": {
+        #             "header-rules.yaml": _convert_outbound_rules(rule),
+        #         }
+        #     },
+        # )
+        # logger.info(
+        #     "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
+        # )
+        #
+        # apps_api.patch_namespaced_deployment(
+        #     name=self._sandbox_id,
+        #     namespace=self._namespace,
+        #     body={
+        #         "spec": {
+        #             "template": {
+        #                 "metadata": {
+        #                     "annotations": {
+        #                         "avernet.local-k8s/outbound-rule-updated": str(
+        #                             int(time.time())
+        #                         )
+        #                     }
+        #                 }
+        #             }
+        #         }
+        #     },
+        # )
+        # logger.info(
+        #     "local_k8s: rolled deployment %s/%s", self._namespace, self._sandbox_id
+        # )
         return True
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
