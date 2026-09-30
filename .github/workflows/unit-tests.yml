@@ -49,7 +49,7 @@ jobs:
       BCS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/bcs
+        working-directory: apps/bcs
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -58,13 +58,13 @@ jobs:
 
       - name: Validate unit-test diff behavior
         working-directory: ${{ github.workspace }}
-        run: python3 scripts/ci/tests/test_unit_test_workflow_diff.py
+        run: python3 singlebox/ci/tests/test_unit_test_workflow_diff.py
 
       - name: Detect BCS changes vs base
         id: changes
         # Run from the repo root: all git-diff pathspecs here are repo-relative
-        # ("-- src/bcs"), which only resolve correctly from the root. The job default
-        # working-directory is src/bcs, so override to the workspace root.
+        # ("-- apps/bcs"), which only resolve correctly from the root. The job default
+        # working-directory is apps/bcs, so override to the workspace root.
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -74,10 +74,10 @@ jobs:
           # merge commit as HEAD, for which "<base>...HEAD" collapses to nothing (merge-base
           # == base) and would wrongly report zero changes. Diffing base against the tree
           # instead sees all PR-introduced changes regardless of merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}" -- src/bcs || true)
+          mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}" -- apps/bcs || true)
           n=${#files[@]}
           echo "bcs-changed-files-count=${n}" >> "$GITHUB_OUTPUT"
-          mapfile -t dsh_bcn_files < <(printf '%s\n' "${files[@]}" | grep '^src/bcs/crates/plugins/deepseek-harness-channel-bcn/' || true)
+          mapfile -t dsh_bcn_files < <(printf '%s\n' "${files[@]}" | grep '^apps/bcs/crates/plugins/deepseek-harness-channel-bcn/' || true)
           if [ "${#dsh_bcn_files[@]}" -gt 0 ]; then
             echo "dsh-bcn-changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -85,10 +85,10 @@ jobs:
           fi
           if [ "$n" -eq 0 ]; then
             echo "skip-bcs=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/bcs vs ${BCS_BASE_REF}; skipping BCS tests."
+            echo "No changes under apps/bcs vs ${BCS_BASE_REF}; skipping BCS tests."
           else
             echo "skip-bcs=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/bcs vs ${BCS_BASE_REF}."
+            echo "Detected ${n} changed file(s) under apps/bcs vs ${BCS_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -100,7 +100,7 @@ jobs:
 
       - name: Test DeepSeek Harness BCN plugin
         if: steps.changes.outputs.dsh-bcn-changed == 'true'
-        working-directory: ${{ github.workspace }}/src/bcs/crates/plugins/deepseek-harness-channel-bcn
+        working-directory: ${{ github.workspace }}/apps/bcs/crates/plugins/deepseek-harness-channel-bcn
         run: |
           npm install --ignore-scripts --no-package-lock
           npm run ci
@@ -133,8 +133,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src/bcs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src/bcs/Cargo.lock') }}
+            apps/bcs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/bcs/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
@@ -182,7 +182,7 @@ jobs:
         if: steps.changes.outputs.skip-bcs != 'true'
         env:
           BCS_BASE_REF: ${{ env.BCS_BASE_REF }}
-        working-directory: ${{ github.workspace }}/src/bcs
+        working-directory: ${{ github.workspace }}/apps/bcs
         run: |
           python3 scripts/cov_gate.py \
             --base-ref "$BCS_BASE_REF" \
@@ -196,7 +196,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bcs-testresult
-          path: src/bcs/testresult/
+          path: apps/bcs/testresult/
           if-no-files-found: ignore
 
   backend:
@@ -209,7 +209,7 @@ jobs:
       BACKEND_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/backend
+        working-directory: apps/backend
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -218,8 +218,8 @@ jobs:
 
       - name: Detect backend changes vs base
         id: changes
-        # Run from the repo root so the "-- src/backend" pathspec resolves; the job
-        # default working-directory is src/backend, so override to the workspace root.
+        # Run from the repo root so the "-- apps/backend" pathspec resolves; the job
+        # default working-directory is apps/backend, so override to the workspace root.
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -228,14 +228,14 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- src/backend scripts/ci/legacy_skill_compatibility.sh .github/workflows/unit-tests.yml || true)
+          mapfile -t files < <(git diff --name-only "${BACKEND_BASE_REF}" -- apps/backend singlebox/ci/legacy_skill_compatibility.sh .github/workflows/unit-tests.yml || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/backend vs ${BACKEND_BASE_REF}; skipping backend tests."
+            echo "No changes under apps/backend vs ${BACKEND_BASE_REF}; skipping backend tests."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/backend vs ${BACKEND_BASE_REF}."
+            echo "Detected ${n} changed file(s) under apps/backend vs ${BACKEND_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -243,7 +243,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          # Backend targets Python >=3.12,<3.13 (see src/backend/pyproject.toml).
+          # Backend targets Python >=3.12,<3.13 (see apps/backend/pyproject.toml).
           python-version: '3.12'
 
       - name: Install uv
@@ -251,7 +251,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: src/backend/uv.lock
+          cache-dependency-glob: apps/backend/uv.lock
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip != 'true'
@@ -262,14 +262,14 @@ jobs:
       - name: Enforce Legacy Skill compatibility gate
         if: steps.changes.outputs.skip != 'true'
         working-directory: ${{ github.workspace }}
-        run: bash scripts/ci/legacy_skill_compatibility.sh
+        run: bash singlebox/ci/legacy_skill_compatibility.sh
 
       - name: Upload backend test results
         if: always() && steps.changes.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-testresult
-          path: src/backend/pytest_report/
+          path: apps/backend/pytest_report/
           if-no-files-found: ignore
 
   engine:
@@ -279,7 +279,7 @@ jobs:
       ENGINE_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/engine
+        working-directory: engine/adapter
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -292,14 +292,14 @@ jobs:
         shell: bash
         run: |
           git fetch --no-tags --depth=1 origin "${ENGINE_BASE_REF#origin/}" 2>/dev/null || true
-          mapfile -t files < <(git diff --name-only "${ENGINE_BASE_REF}" -- src/engine || true)
+          mapfile -t files < <(git diff --name-only "${ENGINE_BASE_REF}" -- engine/adapter || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/engine vs ${ENGINE_BASE_REF}; skipping engine tests."
+            echo "No changes under engine/adapter vs ${ENGINE_BASE_REF}; skipping engine tests."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/engine vs ${ENGINE_BASE_REF}."
+            echo "Detected ${n} changed file(s) under engine/adapter vs ${ENGINE_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -307,7 +307,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          # Engine targets Python >=3.12 (see src/engine/pyproject.toml).
+          # Engine targets Python >=3.12 (see engine/adapter/pyproject.toml).
           python-version: '3.12'
 
       - name: Install uv
@@ -315,7 +315,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: src/engine/uv.lock
+          cache-dependency-glob: engine/adapter/uv.lock
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip != 'true'
@@ -326,7 +326,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: engine-testresult
-          path: src/engine/pytest_report/
+          path: engine/adapter/pytest_report/
           if-no-files-found: ignore
 
   baas:
@@ -338,7 +338,7 @@ jobs:
       BAAS_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/baas
+        working-directory: apps/baas
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -347,8 +347,8 @@ jobs:
 
       - name: Detect baas changes vs base
         id: changes
-        # Run from the repo root so the "-- src/baas" pathspec resolves; the job
-        # default working-directory is src/baas, so override to the workspace root.
+        # Run from the repo root so the "-- apps/baas" pathspec resolves; the job
+        # default working-directory is apps/baas, so override to the workspace root.
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -357,14 +357,14 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${BAAS_BASE_REF}" -- src/baas || true)
+          mapfile -t files < <(git diff --name-only "${BAAS_BASE_REF}" -- apps/baas || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/baas vs ${BAAS_BASE_REF}; skipping baas tests."
+            echo "No changes under apps/baas vs ${BAAS_BASE_REF}; skipping baas tests."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/baas vs ${BAAS_BASE_REF}."
+            echo "Detected ${n} changed file(s) under apps/baas vs ${BAAS_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -372,7 +372,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          # Baas targets Python >=3.12,<3.13 (see src/baas/pyproject.toml).
+          # Baas targets Python >=3.12,<3.13 (see apps/baas/pyproject.toml).
           python-version: '3.12'
 
       - name: Install uv
@@ -380,7 +380,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: src/baas/uv.lock
+          cache-dependency-glob: apps/baas/uv.lock
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip != 'true'
@@ -393,7 +393,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: baas-testresult
-          path: src/baas/pytest_report/
+          path: apps/baas/pytest_report/
           if-no-files-found: ignore
 
   gateway:
@@ -405,7 +405,7 @@ jobs:
       GATEWAY_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/gateway
+        working-directory: apps/gateway
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -414,8 +414,8 @@ jobs:
 
       - name: Detect gateway changes vs base
         id: changes
-        # Run from the repo root so the "-- src/gateway" pathspec resolves; the job
-        # default working-directory is src/gateway, so override to the workspace root.
+        # Run from the repo root so the "-- apps/gateway" pathspec resolves; the job
+        # default working-directory is apps/gateway, so override to the workspace root.
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -424,14 +424,14 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${GATEWAY_BASE_REF}" -- src/gateway || true)
+          mapfile -t files < <(git diff --name-only "${GATEWAY_BASE_REF}" -- apps/gateway || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/gateway vs ${GATEWAY_BASE_REF}; skipping gateway tests."
+            echo "No changes under apps/gateway vs ${GATEWAY_BASE_REF}; skipping gateway tests."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/gateway vs ${GATEWAY_BASE_REF}."
+            echo "Detected ${n} changed file(s) under apps/gateway vs ${GATEWAY_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -439,7 +439,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          # Gateway targets Python >=3.12 (see src/gateway/pyproject.toml).
+          # Gateway targets Python >=3.12 (see apps/gateway/pyproject.toml).
           python-version: '3.12'
 
       - name: Install uv
@@ -447,7 +447,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: src/gateway/uv.lock
+          cache-dependency-glob: apps/gateway/uv.lock
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip != 'true'
@@ -460,7 +460,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gateway-testresult
-          path: src/gateway/pytest_report/
+          path: apps/gateway/pytest_report/
           if-no-files-found: ignore
 
   proxy:
@@ -472,7 +472,7 @@ jobs:
       PROXY_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
     defaults:
       run:
-        working-directory: src/proxy
+        working-directory: apps/proxy
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -481,8 +481,8 @@ jobs:
 
       - name: Detect proxy changes vs base
         id: changes
-        # Run from the repo root so the "-- src/proxy" pathspec resolves; the job
-        # default working-directory is src/proxy, so override to the workspace root.
+        # Run from the repo root so the "-- apps/proxy" pathspec resolves; the job
+        # default working-directory is apps/proxy, so override to the workspace root.
         working-directory: ${{ github.workspace }}
         shell: bash
         run: |
@@ -491,14 +491,14 @@ jobs:
           # Diff the base ref against the working tree. PR runs check out a merge commit,
           # for which "<base>...HEAD" collapses to nothing; diffing base against the tree
           # sees all PR-introduced changes regardless of the merge-commit checkout.
-          mapfile -t files < <(git diff --name-only "${PROXY_BASE_REF}" -- src/proxy || true)
+          mapfile -t files < <(git diff --name-only "${PROXY_BASE_REF}" -- apps/proxy || true)
           n=${#files[@]}
           if [ "$n" -eq 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/proxy vs ${PROXY_BASE_REF}; skipping proxy tests."
+            echo "No changes under apps/proxy vs ${PROXY_BASE_REF}; skipping proxy tests."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n} changed file(s) under src/proxy vs ${PROXY_BASE_REF}."
+            echo "Detected ${n} changed file(s) under apps/proxy vs ${PROXY_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
 
@@ -506,7 +506,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
-          # Proxy targets Python >=3.12 (see src/proxy/pyproject.toml).
+          # Proxy targets Python >=3.12 (see apps/proxy/pyproject.toml).
           python-version: '3.12'
 
       - name: Install uv
@@ -514,7 +514,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: src/proxy/uv.lock
+          cache-dependency-glob: apps/proxy/uv.lock
 
       - name: Run unit tests with coverage
         if: steps.changes.outputs.skip != 'true'
@@ -527,5 +527,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: proxy-testresult
-          path: src/proxy/pytest_report/
+          path: apps/proxy/pytest_report/
           if-no-files-found: ignore

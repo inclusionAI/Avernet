@@ -1,13 +1,13 @@
 # Running the exported next-generation frontend in Singlebox
 
-Singlebox defaults to `src/frontend` (legacy). Updating `src/frontend-nextgen`
+Singlebox defaults to `apps/frontend` (legacy). Updating `apps/frontend-nextgen`
 by itself does not change the running UI. Select `FRONTEND_VARIANT=nextgen`
 for **every** setup/start/stop/status invocation, or persist it in the checkout's
 untracked `.env.local`. Do not copy secrets between worktrees.
 
 ## FRONTEND_VARIANT=teamclaw: the external internal-UI checkout
 
-`src/frontend-nextgen` is the exported open-core subset of the TeamClaw UI —
+`apps/frontend-nextgen` is the exported open-core subset of the TeamClaw UI —
 internal-only capabilities are deliberately stripped by the exporter. To run
 the **full internal frontend** (the product UI under development), use the
 `teamclaw` variant, which serves an external checkout through the same
@@ -64,7 +64,7 @@ itself:
 ./scripts/frontend_sprint_branch.sh --list          # declared branch + remote sprint heads
 ./scripts/frontend_sprint_branch.sh sprint_teamclaw_S...
 git -C "$TEAMCLAW_DIR" fetch && git -C "$TEAMCLAW_DIR" checkout sprint_teamclaw_S...
-./scripts/singlebox.sh frontend-pull
+./singlebox/singlebox.sh frontend-pull
 ```
 
 Avernet has no submodule to carry the tracked branch in-tree, so
@@ -92,8 +92,8 @@ With `SOURCE` set to that worktree and `TARGET` to a clean Avernet worktree:
 git -C "$SOURCE" rev-parse HEAD
 git -C "$SOURCE" status --short
 (cd "$SOURCE" && npm run export:avernet -- --avernet-dir "$TARGET")
-git -C "$TARGET" diff --stat -- src/frontend-nextgen
-cat "$TARGET/src/frontend-nextgen/OPEN_CORE_MANIFEST.json"
+git -C "$TARGET" diff --stat -- apps/frontend-nextgen
+cat "$TARGET/apps/frontend-nextgen/OPEN_CORE_MANIFEST.json"
 ```
 
 Use Node 22 and public npm dependencies for the export. The exporter runs source

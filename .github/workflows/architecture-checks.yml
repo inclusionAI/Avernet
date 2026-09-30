@@ -26,7 +26,7 @@ jobs:
       PR_BODY_FILE: /tmp/pr_body.txt
     defaults:
       run:
-        working-directory: src/bcs
+        working-directory: apps/bcs
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -51,8 +51,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src/bcs/target
-          key: ${{ runner.os }}-cargo-arch-${{ hashFiles('src/bcs/Cargo.lock') }}
+            apps/bcs/target
+          key: ${{ runner.os }}-cargo-arch-${{ hashFiles('apps/bcs/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 

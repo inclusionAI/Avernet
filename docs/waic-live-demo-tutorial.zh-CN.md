@@ -5,7 +5,7 @@
 本教程使用的模板源码是：
 
 - [世界杯比赛前瞻内容生产 YAML](../src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml)
-- [世界杯 6 Bot 配置](../scripts/6bots_world_cup_creator_profile/bots.json)
+- [世界杯 6 Bot 配置](../singlebox/agents/6bots_world_cup_creator_profile/bots.json)
 
 > 产品文案统一使用“自定义协作”。代码中的 state machine 是它的实现方式；旧资料里的“结构化协同”或“自定义协同”在本教程中都按“自定义协作”理解。
 
@@ -147,7 +147,7 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 推荐让仓库脚本检查并安装缺失工具：
 
 ~~~bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ~~~
 
 这个过程是交互式的。脚本可能会：
@@ -164,7 +164,7 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 完成后执行依赖预检：
 
 ~~~bash
-./scripts/singlebox.sh check bcs_frontend
+./singlebox/singlebox.sh check bcs_frontend
 ~~~
 
 此时还没有编译 BCS，因此暂时不要执行 Bot 的完整预检；下一步编译完成后再检查。
@@ -179,7 +179,7 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 运行：
 
 ~~~bash
-./scripts/singlebox.sh setup bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 ~~~
 
 这一步会：
@@ -193,7 +193,7 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 现在再检查世界杯 Bot 的启动条件：
 
 ~~~bash
-./scripts/singlebox.sh check bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh check bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
 预检应识别到 6 Bot manifest，并检查 30401 至 30451 这 6 个端口。
@@ -250,7 +250,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 运行：
 
 ~~~bash
-./scripts/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ~~~
 
 这个命令只启动 BCS 和前端，不会启动默认 5 Bot，也不会询问模型配置。前端启动时会再次检查依赖；依赖已经是最新状态时会跳过安装，缺失或过期时会自动执行一次安装。
@@ -258,7 +258,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 成功后，终端会显示本地服务已经就绪。可以另外确认状态：
 
 ~~~bash
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
 预期结果：
@@ -273,7 +273,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 保持 BCS 正在运行，然后执行：
 
 ~~~bash
-./scripts/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
 终端会出现：
@@ -292,7 +292,7 @@ Choose model config mode:
 脚本随后会准备 6 份隔离的 OpenClaw profile、连接 BCS、注册 Bot，并把它们设为可发现。等待命令成功结束后检查状态：
 
 ~~~bash
-./scripts/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
 6 个 Bot 都应显示 Running，并各自带有端口和 bot_uuid。
@@ -499,15 +499,15 @@ Choose model config mode:
 演示结束后，先停止 6 个 Bot，再停止前端和 BCS：
 
 ~~~bash
-./scripts/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
-./scripts/singlebox.sh stop bcs_frontend
+./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh stop bcs_frontend
 ~~~
 
 检查是否都已停止：
 
 ~~~bash
-./scripts/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
 stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方便下次继续。不要为了普通重启执行 clean；clean 会删除本地运行数据，只有明确希望从零重置时才使用。
@@ -515,8 +515,8 @@ stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方�
 下次复现通常只需要：
 
 ~~~bash
-./scripts/singlebox.sh start bcs_frontend
-./scripts/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
 ## 17. 常见问题
@@ -527,7 +527,7 @@ stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方�
 
 ~~~bash
 chmod +x scripts/singlebox.sh
-./scripts/singlebox.sh --help
+./singlebox/singlebox.sh --help
 ~~~
 
 ### 17.2 前端提示 cross-env: command not found
@@ -536,7 +536,7 @@ chmod +x scripts/singlebox.sh
 
 ~~~bash
 node --version
-./scripts/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ~~~
 
 如果 npm 安装失败，查看终端中的第一个错误，而不是最后一行。常见原因是公共 npm registry 网络不可达、磁盘空间不足或本机 npm 配置异常。
@@ -546,7 +546,7 @@ node --version
 说明还没有完成 setup，重新执行：
 
 ~~~bash
-./scripts/singlebox.sh setup bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 ~~~
 
 成功后再启动 BCS 和 Bot。
@@ -558,8 +558,8 @@ node --version
 先停止 Bot，再使用真实配置重新启动：
 
 ~~~bash
-./scripts/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
-./scripts/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
 ~~~
 
 选择 2 或 3，并确认模型服务本身可用。
@@ -578,7 +578,7 @@ node --version
 
 ~~~bash
 test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml && echo "模板文件存在"
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
 本地 BCS 使用文件型模板目录，模板列表在请求时读取。如果文件存在但页面仍没有显示：
@@ -612,7 +612,7 @@ Bot profile 的 30401 至 30451 端口目前来自 bots.json。修改它们属�
 
 ### 17.9 看到 faiss-cpu 不支持 Python 3.13
 
-本教程只启动 bcs_frontend 和世界杯 Bot，不需要 BCSFuse，因此不应进入 BCSFuse 依赖安装路径。不要用不带目标的 ./scripts/singlebox.sh 代替本教程的显式命令。
+本教程只启动 bcs_frontend 和世界杯 Bot，不需要 BCSFuse，因此不应进入 BCSFuse 依赖安装路径。不要用不带目标的 ./singlebox/singlebox.sh 代替本教程的显式命令。
 
 如果你另外需要完整栈或 BCSFuse，请先更新到包含兼容性修复的最新代码；当前 setup 会自动选择低于 3.13 的兼容 Python 版本。
 

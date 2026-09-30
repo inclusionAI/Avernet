@@ -8,7 +8,7 @@ created: 2026-08-14
 
 ## 需求
 
-在基于 `origin/dev` 的 Avernet worktree 中，使用 `./scripts/singlebox.sh start hybrid` 启动已启用 Claude profile 的混合栈时，Claude Code 必须复用 manual 模式的 `.env.local` 模型配置。
+在基于 `origin/dev` 的 Avernet worktree 中，使用 `./singlebox/singlebox.sh start hybrid` 启动已启用 Claude profile 的混合栈时，Claude Code 必须复用 manual 模式的 `.env.local` 模型配置。
 
 ## 实施范围
 

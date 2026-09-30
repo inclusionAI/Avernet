@@ -8,7 +8,7 @@
 
 | 编号 | 源码 | 直接证据与结论边界 |
 | --- | --- | --- |
-| B-E01 | `src/backend/src/agentclaw/community/adapters/http/openapi_v1/local/router.py`：123/169/211/262/305/334/399/421/441 行函数 | 设备、目录、创建、列表、详情、授权、重启、删除、打开目录 9 条正式路由。没有 start-progress |
+| B-E01 | `apps/backend/src/agentclaw/community/adapters/http/openapi_v1/local/router.py`：123/169/211/262/305/334/399/421/441 行函数 | 设备、目录、创建、列表、详情、授权、重启、删除、打开目录 9 条正式路由。没有 start-progress |
 | B-E02 | 同文件 `create_local_bot`、`local_bot_auth_status`、`_require_user_delegation` | 当前创建使用 DelegatedUserDep、grant_the_creating_app；auth-status 为 GET 且有 own-bot grant；设备查询接受 holds_delegation。与旧分析的 human-only 结论不同 |
 | B-E03 | `.../openapi_v1/__init__.py` local_router 注册；`.../di/modules/bot_inventory_module.py` desktop_inventory_port/local_bot_workflow_service | local Router 已注册，工作流经 Protocol 复用 DesktopBotService；并非只有孤立 Router 文件 |
 | B-E04 | `.../openapi_v1/local/schemas.py` LocalBot/LocalBotCreate/LocalDevice | 创建 engine/machine_id/mount_path；返回 LocalBot 有 machine/path/avatar，无 bot_type；目录路由返回 dict 而非 LocalDirectoryEntry |
@@ -28,7 +28,7 @@
 | B-E18 | `.../core/desktop_bot/lifecycle.py` startup/_periodic_health_loop；`.../core/desktop_bot/services/desktop_bot_service.py` create_after_authorization | 后台扫描和既有创建幂等实现；不是“全部待开发”。后台实际配置/客户端运行未验证 |
 | B-E19 | `.../core/skill_center/AGENTS.md`；`.../core/skill_center/services/desktop_skill_recovery.py`；`docs/adr/0015-event-driven-desktop-skill-recovery.md` | 必须区分安装关系、内容分发和 runtime；已有恢复代码，不能把历史计划的未开始当当前实现状态 |
 
-`...` 在 B 表中统一为 `src/backend/src/agentclaw/community`。
+`...` 在 B 表中统一为 `apps/backend/src/agentclaw/community`。
 
 ## N：指定新版前端
 
@@ -86,10 +86,10 @@
 
 | 编号 | 源码 | 事实与边界 |
 | --- | --- | --- |
-| B-E20 | `src/backend/src/agentclaw/community/core/engine_runtime/connection.py:334` | `_get_connection` 固定 `ws_conn_mode="relay"`；当前普通 OpenAPI 连接不是桌面 localhost 策略 |
-| B-E21 | `src/baas/src/secbaas/community/core/service/paas/_local_paas_service.py:665` | `resolve_ws_conn_info` 已有 direct/relay 分支；direct 查询真实映射端口并返回 localhost WS，token 为空；relay 有建会话和 open_ws_relay 调用实现。源码存在不代表部署可用 |
-| B-E22 | `src/backend/src/agentclaw/community/core/devices/services/local_device_service.py:430`、`:760` | 现有通用连接组装会合并 WS 与 HTTP info；`path` 在该 provider 被忽略，返回 target/HTTP URL。不能直接将其 HTTP token/url 当 WS 信息，需单独保证 WS 模式、端口、引擎路径、凭证匹配 |
-| B-E23 | `src/backend/src/agentclaw/community/core/devices/services/device_service.py:1741` | desktop/local 的 get_device_connection_v2 走 BaaS invoke-http 分支；管理 HTTP 与浏览器 localhost WS 可分别路由 |
+| B-E20 | `apps/backend/src/agentclaw/community/core/engine_runtime/connection.py:334` | `_get_connection` 固定 `ws_conn_mode="relay"`；当前普通 OpenAPI 连接不是桌面 localhost 策略 |
+| B-E21 | `apps/baas/src/secbaas/community/core/service/paas/_local_paas_service.py:665` | `resolve_ws_conn_info` 已有 direct/relay 分支；direct 查询真实映射端口并返回 localhost WS，token 为空；relay 有建会话和 open_ws_relay 调用实现。源码存在不代表部署可用 |
+| B-E22 | `apps/backend/src/agentclaw/community/core/devices/services/local_device_service.py:430`、`:760` | 现有通用连接组装会合并 WS 与 HTTP info；`path` 在该 provider 被忽略，返回 target/HTTP URL。不能直接将其 HTTP token/url 当 WS 信息，需单独保证 WS 模式、端口、引擎路径、凭证匹配 |
+| B-E23 | `apps/backend/src/agentclaw/community/core/devices/services/device_service.py:1741` | desktop/local 的 get_device_connection_v2 走 BaaS invoke-http 分支；管理 HTTP 与浏览器 localhost WS 可分别路由 |
 | L-E20 | `src/stores/connectionStore.ts:201`；`src/pages/Assistant/Chat/ChatPage.tsx:540` | local/desktop 根据真实 target 直连 WS；本地不设置云端 Caller 换签参数。仍有连接 token 刷新逻辑，不能理解为所有鉴权都可删 |
 | N-E12 | `src/services/workspace/botChatProvider.ts` getChatUrl/initialize/request | 实际代码直接返回 socket.url 并传 SDK；“提取 path 后重建 host”只出现在注释，不能作为当前行为证据。明确缺口是初始化/刷新/发送统一 IAM 策略和缺少 desktop 模式合同 |
 | N-E13 | `src/services/workspace/supportProvider.ts:54` | 另一条 support/private 链路已有 local/desktop WS target 组装；只是复用参考，不能证明 BotChatProvider 已接入 |
