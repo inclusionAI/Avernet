@@ -40,6 +40,8 @@ pub enum ApplicationError {
     Unprocessable { code: String, message: String },
     #[error("{code}: {message}")]
     BadGateway { code: String, message: String },
+    #[error("service unavailable: {0}")]
+    Unavailable(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -96,6 +98,14 @@ impl ApplicationError {
             code: code.into(),
             message: message.into(),
         }
+    }
+
+    /// Transport-neutral "service unavailable" — upstream dependency
+    /// (DB / OAuth provider / pending-login store) failed. Delivery
+    /// adapters map this to HTTP 503; user-facing message is a redacted
+    /// category, never a SQL endpoint or secret.
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self::Unavailable(message.into())
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
@@ -178,6 +188,7 @@ impl ApplicationError {
             Self::Unauthenticated => "unauthenticated",
             Self::Forbidden(_) => "forbidden",
             Self::ForbiddenCode { code, .. } => code,
+            Self::Unavailable(_) => "unavailable",
             Self::Internal(_) => "internal_error",
         }
     }

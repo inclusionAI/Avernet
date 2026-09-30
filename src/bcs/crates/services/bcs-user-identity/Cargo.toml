@@ -17,7 +17,13 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 bcs-db-local = { workspace = true }
+bcs-db-mysql = { workspace = true }
+bcs-config-api = { workspace = true }
 bcs-test-support = { workspace = true }
+mysql_async = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+bcs-jwt = { workspace = true }
 
 [lints]
 workspace = true

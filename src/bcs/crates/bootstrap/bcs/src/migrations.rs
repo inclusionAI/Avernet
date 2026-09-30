@@ -1,513 +1,118 @@
-//! SQLite schema initialization and local upgrade runner.
+//! SQLite schema initialization and local upgrade runner (facade).
 //!
-//! The runner first creates missing tables, then applies versioned SQLite
-//! migrations, then creates indexes. Version 1 is the open-source baseline
-//! record; later schema changes should be added as new versions.
+//! This file is the module root / facade. After the Task 1 split:
+//! - [`registry`] owns the `SqliteMigration` struct, the versioned list
+//!   (`SQLITE_VERSIONED_MIGRATIONS`), and the version/count/checksum helpers.
+//! - [`report`] owns the runner (`run_sqlite_migrations`, the report types,
+//!   and the apply/check helpers).
+//! - [`repairs`] owns the idempotent schema repair / additive migration
+//!   routines (`ensure_*`, `add_sqlite_*`, `migrate_sqlite_*`).
+//! - [`baseline_identity`], [`baseline_collaboration`], and
+//!   [`baseline_delivery`] hold the baseline DDL `&[&str]` groups, organized
+//!   by domain so later tasks can edit them in isolation.
+//!
+//! The facade still publishes the original public API: `run_sqlite_migrations`,
+//! `run_sqlite_migrations_with_report`, `check_sqlite_migrations`,
+//! `run_sqlite_bootstrap_tables`, `run_sqlite_bootstrap_indexes`,
+//! `run_sqlite_versioned_migrations`, `SqliteMigrationReport`,
+//! `SqliteMigrationPlan`, `sqlite_target_version`, and
+//! `sqlite_migration_count`.
+//!
+//! The DDL execution order is preserved by the master `SQLITE_DDL_STATEMENTS`
+//! below — a list of baseline group references chained in the same order as
+//! the original single-array constant. The runner `report`'s `for ddl in
+//! super::SQLITE_DDL_STATEMENTS.iter().copied().flatten()` iterates each
+//! statement one at a time, exactly as before.
 
-use bcs_db_api::{
-    DbError, DbPlugin, DbResult, DbStatement, DbTransactionStep, DbValue, db_get_column,
+#[path = "migrations/baseline_collaboration.rs"]
+mod baseline_collaboration;
+#[path = "migrations/baseline_delivery.rs"]
+mod baseline_delivery;
+#[path = "migrations/baseline_identity.rs"]
+mod baseline_identity;
+#[path = "migrations/registry.rs"]
+mod registry;
+#[path = "migrations/repairs.rs"]
+mod repairs;
+#[path = "migrations/report.rs"]
+mod report;
+
+#[allow(unused_imports)]
+pub use registry::{sqlite_migration_count, sqlite_target_version};
+#[allow(unused_imports)]
+pub use report::{
+    SqliteMigrationPlan, SqliteMigrationReport, check_sqlite_migrations,
+    run_sqlite_bootstrap_indexes, run_sqlite_bootstrap_tables, run_sqlite_migrations,
+    run_sqlite_migrations_with_report, run_sqlite_versioned_migrations,
 };
-use sha2::{Digest, Sha256};
 
-// Integration tests also load this module via #[path] under a different name.
-#[path = "migrations/baseline.rs"]
-mod baseline;
-#[path = "migrations/schema.rs"]
-mod schema;
-use baseline::SQLITE_DDL_STATEMENTS;
-use schema::*;
-
-#[derive(Debug, Clone, Copy)]
-struct SqliteMigration {
-    version: i64,
-    name: &'static str,
-}
-
-const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
-    SqliteMigration {
-        version: 1,
-        name: "init_schema",
-    },
-    SqliteMigration {
-        version: 2,
-        name: "channel_binding_audit_timestamps",
-    },
-    SqliteMigration {
-        version: 3,
-        name: "add_organizations",
-    },
-    SqliteMigration {
-        version: 4,
-        name: "add_session_collection",
-    },
-    SqliteMigration {
-        version: 5,
-        name: "add_session_collection_timestamp",
-    },
-    SqliteMigration {
-        version: 6,
-        name: "session_files",
-    },
-    SqliteMigration {
-        version: 7,
-        name: "human_input_output_metadata",
-    },
-    SqliteMigration {
-        version: 8,
-        name: "human_input_im_requests",
-    },
-    SqliteMigration {
-        version: 9,
-        name: "eventing",
-    },
-    SqliteMigration {
-        version: 10,
-        name: "eventing_plaintext_endpoint",
-    },
-    SqliteMigration {
-        version: 11,
-        name: "group_opening_message",
-    },
-    SqliteMigration {
-        version: 12,
-        name: "add_bot_task_modes",
-    },
-    SqliteMigration {
-        version: 13,
-        name: "edge_permission",
-    },
-    SqliteMigration {
-        version: 14,
-        name: "add_bot_internal_attributes",
-    },
-    SqliteMigration {
-        version: 15,
-        name: "group_participant_tags",
-    },
-    SqliteMigration {
-        version: 16,
-        name: "expand_session_ids",
-    },
-    SqliteMigration {
-        version: 17,
-        name: "session_callback_lease",
-    },
-    SqliteMigration {
-        version: 18,
-        name: "state_machine_rerun_lineage",
-    },
-    SqliteMigration {
-        version: 19,
-        name: "one_shot_opening_message_override",
-    },
-    SqliteMigration {
-        version: 20,
-        name: "invite_code_id",
-    },
-    SqliteMigration {
-        version: 21,
-        name: "human_participant_message_visibility",
-    },
-    SqliteMigration {
-        version: 22,
-        name: "message_deliveries",
-    },
-    SqliteMigration { version: 23, name: "message_delivery_policy" },
-    SqliteMigration { version: 24, name: "delivery_worker_queries" },
-    SqliteMigration { version: 25, name: "delivery_context_selection" },
-    SqliteMigration { version: 26, name: "delivery_pending_abort" },
-    SqliteMigration { version: 27, name: "run_reply_segments" },
-    SqliteMigration { version: 28, name: "provider_bot_webhook" },
-    SqliteMigration { version: 29, name: "fixed_loop_runtime" },
-    SqliteMigration { version: 30, name: "bot_provider_storage" },
-    SqliteMigration {
-        version: 31,
-        name: "group_human_mention_notify_mode",
-    },
+/// Master DDL ordered list. Each entry is a `&[&str]` from one of the
+/// baseline files; the runner iterates this in order so the schema evolves
+/// through the same `CREATE` statements in the original sequence.
+///
+/// Note: this `&[&[&str]]` replaces the historical flat `&[&str]`; the
+/// statements themselves are untouched, only regrouped by responsibility.
+/// Runtime execution order is identical to the legacy single-array form.
+const SQLITE_DDL_STATEMENTS: &[&[&str]] = &[
+    baseline_identity::SCHEMA_MIGRATIONS,
+    baseline_identity::BOTS,
+    baseline_identity::FRIENDSHIPS,
+    baseline_identity::FRIEND_REQUESTS,
+    baseline_identity::INVITE_CODES,
+    baseline_identity::ACTOR_RELATIONS,
+    baseline_identity::PROVIDERS,
+    baseline_identity::ORGANIZATIONS,
+    baseline_identity::ORGANIZATION_MEMBERS,
+    baseline_identity::PROVIDER_BOT_BINDINGS,
+    baseline_delivery::CHANNEL_BINDINGS,
+    baseline_delivery::CHANNEL_CONVERSATIONS,
+    baseline_delivery::CHANNEL_IM_PARTICIPANTS,
+    baseline_delivery::HUMAN_INPUT_IM_REQUESTS,
+    baseline_identity::PROVIDER_CREDENTIALS,
+    baseline_identity::USER_IDENTITIES,
+    baseline_collaboration::GROUPS,
+    baseline_collaboration::CHAT_RUNS,
+    baseline_collaboration::GROUP_PARTICIPANTS,
+    baseline_collaboration::GROUP_SESSIONS,
+    baseline_collaboration::SESSION_PARTICIPANTS,
+    baseline_delivery::MESSAGES,
+    baseline_collaboration::COLLABORATION_DEFINITIONS,
+    baseline_collaboration::COLLABORATION_DEFINITION_BLOBS,
+    baseline_collaboration::COLLABORATION_EVENTS,
+    baseline_collaboration::COLLABORATION_TEMPLATES,
+    baseline_collaboration::COLLABORATION_TEMPLATE_CONTENTS,
+    baseline_collaboration::COLLABORATION_TEMPLATE_TAGS,
+    baseline_collaboration::STATE_MACHINE_RUNS,
+    baseline_collaboration::STATE_MACHINE_NODE_RUNS,
+    baseline_collaboration::STATE_MACHINE_DELIVERY_CORRELATIONS,
+    baseline_collaboration::STATE_MACHINE_DEFINITION_SNAPSHOTS,
+    baseline_collaboration::GROUP_RUNTIME_BINDINGS,
+    baseline_identity::IDENTITY_LINKS,
+    baseline_collaboration::SERVICE_GROUP_TEMPLATES,
+    baseline_collaboration::SERVICE_GROUP_INSTANCES,
+    baseline_delivery::SESSION_FILES,
+    baseline_delivery::PUBLIC_EVENTING,
 ];
 
-pub fn sqlite_target_version() -> i64 {
-    SQLITE_VERSIONED_MIGRATIONS
-        .last()
-        .map(|migration| migration.version)
-        .unwrap_or(0)
-}
-
-#[allow(dead_code)]
-pub fn sqlite_migration_count() -> usize {
-    SQLITE_VERSIONED_MIGRATIONS.len()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SqliteMigrationReport {
-    pub current_version: Option<i64>,
-    pub target_version: i64,
-    pub pending_versions: Vec<SqliteMigrationPlan>,
-    pub applied_versions: Vec<SqliteMigrationPlan>,
-    pub repaired_columns: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SqliteMigrationPlan {
-    pub version: i64,
-    pub name: String,
-    pub checksum: String,
-    pub statements: Vec<String>,
-    pub repairs: Vec<String>,
-}
-
-/// Execute all SQLite schema work against the given DB plugin.
-pub async fn run_sqlite_migrations(db: &dyn DbPlugin) -> DbResult<()> {
-    run_sqlite_migrations_with_report(db).await?;
-    Ok(())
-}
-
-/// Execute all SQLite schema work and return a summary report.
-pub async fn run_sqlite_migrations_with_report(
-    db: &dyn DbPlugin,
-) -> DbResult<SqliteMigrationReport> {
-    let before = check_sqlite_migrations(db).await?;
-    run_sqlite_bootstrap_tables(db).await?;
-    run_sqlite_versioned_migrations(db).await?;
-    run_sqlite_bootstrap_indexes(db).await?;
-    let mut after = check_sqlite_migrations(db).await?;
-    after.applied_versions = before.pending_versions;
-    after.repaired_columns = after
-        .applied_versions
-        .iter()
-        .flat_map(|migration| migration.repairs.iter().cloned())
-        .collect();
-    Ok(after)
-}
-
-/// Inspect the current SQLite migration state without mutating the database.
-pub async fn check_sqlite_migrations(db: &dyn DbPlugin) -> DbResult<SqliteMigrationReport> {
-    let schema_table_exists = table_exists(db, "bcs_schema_migrations").await?;
-    let current_version = current_sqlite_version(db, schema_table_exists).await?;
-    let mut pending_versions = Vec::new();
-
-    for migration in SQLITE_VERSIONED_MIGRATIONS {
-        let checksum = sqlite_migration_checksum(migration);
-        if schema_table_exists
-            && let Some(applied) = applied_sqlite_migration(db, migration.version).await?
-        {
-            validate_applied_sqlite_migration(migration, &applied)?;
-            continue;
-        }
-
-        pending_versions.push(sqlite_migration_plan(migration, checksum));
-    }
-
-    Ok(SqliteMigrationReport {
-        current_version,
-        target_version: sqlite_target_version(),
-        pending_versions,
-        applied_versions: Vec::new(),
-        repaired_columns: Vec::new(),
-    })
-}
-
-/// Create missing SQLite tables for fresh local databases.
-///
-/// This intentionally skips indexes so versioned migrations can run before the
-/// current indexes are created.
-pub async fn run_sqlite_bootstrap_tables(db: &dyn DbPlugin) -> DbResult<()> {
-    for ddl in SQLITE_DDL_STATEMENTS {
-        if is_create_table(ddl) {
-            db.execute(DbStatement::new(*ddl)).await?;
-        }
-    }
-    ensure_sqlite_message_owner_bot_id(db).await?;
-    ensure_sqlite_session_collected_column(db).await?;
-    ensure_bcs_session_files(db).await?;
-    ensure_sqlite_bot_task_modes(db).await?;
-    ensure_sqlite_bot_internal_attributes(db).await?;
-    Ok(())
-}
-
-/// Create missing SQLite indexes after versioned migrations have run.
-pub async fn run_sqlite_bootstrap_indexes(db: &dyn DbPlugin) -> DbResult<()> {
-    for ddl in SQLITE_DDL_STATEMENTS {
-        if is_create_index(ddl) {
-            db.execute(DbStatement::new(*ddl)).await?;
-        }
-    }
-    Ok(())
-}
-
-/// Apply versioned SQLite migrations and record successful versions.
-pub async fn run_sqlite_versioned_migrations(db: &dyn DbPlugin) -> DbResult<()> {
-    for migration in SQLITE_VERSIONED_MIGRATIONS {
-        apply_sqlite_migration(db, migration).await?;
-    }
-    Ok(())
-}
-
-async fn apply_sqlite_migration(db: &dyn DbPlugin, migration: &SqliteMigration) -> DbResult<()> {
-    let checksum = sqlite_migration_checksum(migration);
-    if let Some(applied) = applied_sqlite_migration(db, migration.version).await? {
-        validate_applied_sqlite_migration(migration, &applied)?;
-        return Ok(());
-    }
-
-    apply_sqlite_migration_body(db, migration).await?;
-
-    db.execute(DbStatement::with_params(
-        "INSERT INTO bcs_schema_migrations (version, name, dialect, checksum) VALUES (?, ?, ?, ?)",
-        vec![
-            DbValue::from(migration.version),
-            DbValue::from(migration.name),
-            DbValue::from("sqlite"),
-            DbValue::from(checksum.as_str()),
-        ],
-    ))
-    .await?;
-    Ok(())
-}
-
-async fn apply_sqlite_migration_body(
-    db: &dyn DbPlugin,
-    migration: &SqliteMigration,
-) -> DbResult<()> {
-    match migration.version {
-        2 => repair_sqlite_channel_bindings_audit_schema(db).await,
-        // Startup creates any missing organization tables before recording version 3.
-        3 => Ok(()),
-        // collected column is added by ensure_sqlite_session_collected_column in
-        // run_sqlite_bootstrap_tables; version 4 only records progress.
-        4 => Ok(()),
-        // collected_at column is added by ensure_sqlite_session_collected_column
-        // in run_sqlite_bootstrap_tables; version 5 only records progress.
-        5 => Ok(()),
-        // session_files table is created by run_sqlite_bootstrap_tables via
-        // SQLITE_DDL_STATEMENTS; version 6 only records progress.
-        6 => Ok(()),
-        7 => add_sqlite_human_input_output_metadata_schema(db).await,
-        // Startup DDL creates the HumanInput request table and indexes before
-        // versioned migrations are recorded.
-        8 => Ok(()),
-        // Startup DDL creates the additive Eventing tables and indexes before
-        // versioned migrations are recorded.
-        9 => Ok(()),
-        // Eventing was still under development when per-Subscription HMAC and
-        // encrypted endpoint storage were removed. Repair empty local schemas
-        // without discarding any persisted Subscription configuration.
-        10 => migrate_sqlite_eventing_plaintext_endpoint(db).await,
-        11 => ensure_sqlite_group_opening_message_column(db).await,
-        // task_claim_mode / task_dream_mode columns are added by
-        // ensure_sqlite_bot_task_modes in run_sqlite_bootstrap_tables;
-        // version 12 only records progress.
-        12 => Ok(()),
-        // Edge-permission tables (friend unification) + bcs_bots config columns.
-        13 => add_sqlite_edge_permission_schema(db).await,
-        // Internal Bot attribute columns are added by
-        // ensure_sqlite_bot_internal_attributes in run_sqlite_bootstrap_tables;
-        // version 14 only records progress.
-        14 => Ok(()),
-        15 => add_sqlite_group_participant_tags_schema(db).await,
-        // SQLite stores session identifiers as unbounded TEXT, so version 16
-        // records dialect parity with the MySQL/OceanBase VARCHAR expansion.
-        16 => Ok(()),
-        17 => add_sqlite_session_callback_lease_schema(db).await,
-        18 => add_sqlite_state_machine_rerun_lineage_schema(db).await,
-        19 => add_sqlite_one_shot_opening_message_override_schema(db).await,
-        20 => add_sqlite_invite_code_id_schema(db).await,
-        21 => add_sqlite_human_participant_message_visibility_schema(db).await,
-        22 => {
-            // This migration contains only simple DDL statements, no routines
-            // or string literals containing semicolons.
-            for sql in
-                include_str!("../../../../migrations/sqlite/022_message_deliveries.sql").split(';')
-            {
-                if !sql.trim().is_empty() {
-                    db.execute(DbStatement::new(sql.trim())).await?;
-                }
-            }
-            Ok(())
-        }
-        23 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/023_message_delivery_policy.sql"))).await?;
-            Ok(())
-        }
-        24 => {
-            for sql in include_str!("../../../../migrations/sqlite/024_delivery_worker_queries.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
-                db.execute(DbStatement::new(sql)).await?;
-            }
-            Ok(())
-        }
-        25 => {
-            for sql in include_str!("../../../../migrations/sqlite/025_delivery_context_selection.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
-                db.execute(DbStatement::new(sql)).await?;
-            }
-            Ok(())
-        }
-        26 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/026_delivery_pending_abort.sql"))).await?;
-            Ok(())
-        }
-        27 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/027_run_reply_segments.sql"))).await?;
-            Ok(())
-        }
-        28 => {
-            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/028_provider_bot_webhook.sql"))).await?;
-            Ok(())
-        }
-        29 => add_sqlite_fixed_loop_runtime_schema(db).await,
-        30 => {
-            let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_bots)")).await?
-                .iter().map(|row| db_get_column::<String>(row, "name")).collect::<DbResult<Vec<_>>>()?;
-            let indexes = db.query(DbStatement::new("PRAGMA index_list(bcs_bots)")).await?;
-            let mut index_present = false;
-            for row in indexes {
-                if db_get_column::<String>(&row, "name")? == "uk_bcs_bots_provider_ref_env" {
-                    if !db_get_column::<bool>(&row, "unique")? {
-                        return Err(DbError::Conversion("Bot Provider/ref index must be unique".into()));
-                    }
-                    index_present = true;
-                }
-            }
-            let added = ["provider_id", "provider_bot_ref", "connection_mode", "webhook_url"];
-            for (index, sql) in include_str!("../../../../migrations/sqlite/030_bot_provider_storage.sql")
-                .split(';').map(str::trim).filter(|sql| !sql.is_empty()).enumerate()
-            {
-                if index < added.len() && columns.iter().any(|column| column == added[index]) { continue; }
-                if index == added.len() && index_present { continue; }
-                db.execute(DbStatement::new(sql)).await?;
-            }
-            Ok(())
-        }
-        31 => {
-            // Single additive DDL statement; kept verbatim from
-            // migrations/sqlite/031_group_human_mention_notify_mode.sql.
-            db.execute(DbStatement::new(include_str!(
-                "../../../../migrations/sqlite/031_group_human_mention_notify_mode.sql"
-            )))
-            .await?;
-            Ok(())
-        }
-        _ => Ok(()),
-    }
-}
-
-#[derive(Debug)]
-struct AppliedMigration {
-    name: String,
-    dialect: String,
-    checksum: String,
-}
-
-fn validate_applied_sqlite_migration(
-    migration: &SqliteMigration,
-    applied: &AppliedMigration,
-) -> DbResult<()> {
-    let checksum = sqlite_migration_checksum(migration);
-    if applied.name == migration.name && applied.dialect == "sqlite" && applied.checksum == checksum {
-        return Ok(());
-    }
-    Err(DbError::InvalidInput(format!(
-        "sqlite migration checksum mismatch for version {} ({}): applied={}, current={} (expected name={}, dialect=sqlite; applied dialect={})",
-        migration.version, applied.name, applied.checksum, checksum, migration.name, applied.dialect
-    )))
-}
-
-async fn applied_sqlite_migration(
-    db: &dyn DbPlugin,
-    version: i64,
-) -> DbResult<Option<AppliedMigration>> {
-    let rows = db
-        .query(DbStatement::with_params(
-            "SELECT name, dialect, checksum FROM bcs_schema_migrations WHERE version = ?",
-            vec![DbValue::from(version)],
-        ))
-        .await?;
-    rows.into_iter()
-        .next()
-        .map(|row| {
-            Ok(AppliedMigration {
-                name: db_get_column(&row, "name")?,
-                dialect: db_get_column(&row, "dialect")?,
-                checksum: db_get_column(&row, "checksum")?,
-            })
-        })
-        .transpose()
-}
-
-async fn current_sqlite_version(
-    db: &dyn DbPlugin,
-    schema_table_exists: bool,
-) -> DbResult<Option<i64>> {
-    if !schema_table_exists {
-        return Ok(None);
-    }
-    let rows = db
-        .query(DbStatement::new(
-            "SELECT version FROM bcs_schema_migrations ORDER BY version DESC LIMIT 1",
-        ))
-        .await?;
-    rows.into_iter()
-        .next()
-        .map(|row| db_get_column(&row, "version"))
-        .transpose()
-}
-
-fn sqlite_migration_plan(migration: &SqliteMigration, checksum: String) -> SqliteMigrationPlan {
-    SqliteMigrationPlan {
-        version: migration.version,
-        name: migration.name.to_string(),
-        checksum,
-        statements: Vec::new(),
-        repairs: Vec::new(),
-    }
-}
-
-async fn table_exists(db: &dyn DbPlugin, table: &str) -> DbResult<bool> {
-    let rows = db
-        .query(DbStatement::with_params(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            vec![DbValue::from(table)],
-        ))
-        .await?;
-    Ok(!rows.is_empty())
-}
-
-async fn sqlite_table_columns(db: &dyn DbPlugin, table: &str) -> DbResult<Vec<String>> {
-    let rows = db
-        .query(DbStatement::new(format!("PRAGMA table_info({table})")))
-        .await?;
-    rows.into_iter()
-        .map(|row| db_get_column(&row, "name"))
-        .collect()
-}
-
-fn sqlite_migration_checksum(migration: &SqliteMigration) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(migration.version.to_string().as_bytes());
-    hasher.update(b"\n");
-    hasher.update(migration.name.as_bytes());
-    hasher.update(b"\n");
-    hex::encode(hasher.finalize())
-}
-
-fn is_create_table(sql: &str) -> bool {
-    sql.trim_start()
-        .to_ascii_uppercase()
-        .starts_with("CREATE TABLE")
-}
-
-fn is_create_index(sql: &str) -> bool {
-    let sql = sql.trim_start().to_ascii_uppercase();
-    sql.starts_with("CREATE INDEX") || sql.starts_with("CREATE UNIQUE INDEX")
-}
+// Re-export items the inline test modules historically reached through
+// `use super::*;` against the original single-file migrations module. The
+// cfg(test) re-export keeps the behavior-preserving split from forcing
+// edits inside every test file.
+#[cfg(test)]
+#[allow(unused_imports)]
+use {
+    bcs_db_api::{DbError, DbPlugin, DbResult, DbStatement, DbTransactionStep, DbValue, db_get_column},
+    report::*,
+    repairs::*,
+    registry::*,
+};
 
 #[cfg(test)]
-#[path = "migrations/tests.rs"]
-mod tests;
-
+#[path = "migrations/tests_core.rs"]
+mod tests_core;
 #[cfg(test)]
-#[path = "migrations/collection_migration_tests.rs"]
-mod collection_migration_tests;
-
+#[path = "migrations/tests_eventing.rs"]
+mod tests_eventing;
 #[cfg(test)]
-#[path = "migrations/eventing_migration_tests.rs"]
-mod eventing_migration_tests;
+#[path = "migrations/tests_upgrade.rs"]
+mod tests_upgrade;
