@@ -20,8 +20,9 @@ stop/start/update, status transitions and allocation lock hand-off remain
 untouched. No lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
-resolves the strategy and calls its `execute_restart` contract; coding offloads
-the original synchronous restart method, while default engines execute inline.
+resolves the strategy and first calls `submit_restart`; coding enqueues its
+existing synchronous lifecycle when a queue is wired. Without a queue it uses
+`execute_restart` to offload the lifecycle; default engines execute inline.
 The original synchronous Service API is unchanged. Published restart
 and caller upgrade each invoke the coding precondition before replacement.
 Ordinary publication, instance creation/reuse and workflow adoption are not
@@ -114,3 +115,26 @@ The current polling interval is 2 seconds and the observation deadline is 1500
 seconds. This is not a hard transport timeout: an in-flight exec uses its existing
 transport timeout. These constants remain unchanged in this boundary-only patch;
 configuration and executor-capacity tuning are separate unresolved review items.
+
+## Durable submission ownership
+
+`EngineProvisioningStrategy.submit_restart(ctx, scope, task_queue, payload)` is
+an internal strategy hook. The default returns `False` without queue access;
+BotService and Caller then execute their existing lifecycle. Coding overrides
+it in `AicodingRestartBackupMixin`: `True` means durable acceptance (including
+joining a live task), not backup success. Persistence errors propagate. A
+library caller without a queue retains the synchronous path.
+
+Task submission, dedup keys and the two task adapters now live under
+`engines/aicoding/`; the generic task-queue package contains no restart-specific
+policy. Stored task names and payloads are unchanged, so previously queued rows
+remain consumable. DI registers these adapters with lazy service providers.
+Domain services own response shapes and business continuations, not engine-name
+checks or queue implementation checks. Published restart retains its existing
+publish task/ledger and shares the coding backup gate; it is not re-enqueued.
+
+This refactor does not add a persisted backup-phase state machine or repair
+crash windows in the previously introduced Bot/Caller continuations. Active-task
+enqueue dedup is not a guarantee of exactly-once lifecycle execution after a
+worker crash. End-to-end status polling and redelivery remain required release
+validation before this feature is deployed.

@@ -164,6 +164,7 @@ class AicodingBaasEngineBucketResolver:
 
 class AicodingProvisioningStrategy(AicodingRestartBackupMixin, AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
+
     def __init__(self, engine_type: str) -> None:
         self._engine_type = engine_type
 

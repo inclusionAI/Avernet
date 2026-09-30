@@ -262,6 +262,20 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
+    def submit_restart(self, ctx, *, scope, task_queue, payload):
+        """Coding-only durable submission; domain continuations stay unchanged."""
+        if task_queue is None:
+            return False  # Synchronous library callers can omit the queue.
+        if scope == "bot":
+            from .bot_restart_task import enqueue_restart
+            enqueue_restart(task_queue, **payload)
+        elif scope == "caller":
+            from .caller_restart_task import enqueue_caller_restart
+            enqueue_caller_restart(task_queue, **payload)
+        else:
+            raise ValueError(f"Unsupported restart scope: {scope}")
+        return True
+
     def prepare_restart(self, ctx, *, device_service_provider=None,
                         target_runtime_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.

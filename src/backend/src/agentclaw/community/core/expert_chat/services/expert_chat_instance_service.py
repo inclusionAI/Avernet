@@ -27,7 +27,9 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+from agentclaw.community.core.bot_management.engines.registry import (
+    prepare_instance_restart, resolve_restart_strategy,
+)
 
 import asyncio
 import traceback
@@ -74,6 +76,7 @@ from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol import ExpertChatInstanceServiceProtocol
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 
 logger = get_logger()
 
@@ -105,6 +108,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         common_config_service: CommonConfigService,
+        task_queue_service: TaskQueueService | None = None,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
@@ -117,6 +121,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         self._token_provider = token_provider
         self._runtime_updater = runtime_updater
         self._common_config_service = common_config_service
+        self._task_queue_service = task_queue_service
         self._image_policy_resolver = PublishImagePolicyResolver(
             publish_repository=bot_publish_repo,
             common_config_service=common_config_service,
@@ -277,6 +282,29 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                 silently swallowed).
         """
 
+        if force_upgrade:
+            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if bot:
+                ctx, strategy = resolve_restart_strategy(bot)
+                if strategy.submit_restart(
+                    ctx, scope="caller", task_queue=self._task_queue_service,
+                    payload={"user_id": user_id, "bot_id": bot_id, "owner_id": owner_id},
+                ):
+                    instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+                    return {"instance": instance, "connection": None, "need_poll": True,
+                            "restart_queued": True}
+
+        return await self._get_caller_connection(
+            user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+            force_upgrade=force_upgrade, iam_token=iam_token,
+        )
+
+    async def _get_caller_connection(
+        self, user_id: str, bot_id: str, owner_id: str,
+        force_upgrade: bool = False,
+        iam_token: str | None = None,
+    ) -> Dict[str, Any]:
+        """Original lifecycle continuation; queue workers do not re-submit."""
         publish_record, migration_path = self._resolve_build_artifact(
             bot_id, owner_id
         )

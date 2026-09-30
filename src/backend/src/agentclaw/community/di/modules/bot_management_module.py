@@ -153,6 +153,9 @@ from agentclaw.community.core.bot_management.services.teclaw_provision_service i
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
+from agentclaw.community.core.bot_management.engines.aicoding.bot_restart_task import (
+    BotRestartTaskLifecycle,
+)
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
@@ -608,6 +611,17 @@ class BotManagementModule(Module):
     @inject
     def bot_service_factory(self, injector: Injector) -> Callable[[], BotService]:
         return lambda: injector.get(BotService)
+
+    @singleton
+    @provider
+    @inject
+    def bot_restart_task_lifecycle(
+        self, registry: HandlerRegistry, injector: Injector
+    ) -> BotRestartTaskLifecycle:
+        return BotRestartTaskLifecycle(
+            registry=registry,
+            bot_service_provider=lambda: injector.get(BotService),
+        )
 
     @singleton
     @provider

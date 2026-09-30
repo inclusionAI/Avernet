@@ -4617,9 +4617,22 @@ class BotService(BotServiceProtocol):
         return updated_bot
 
     async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
-        """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        """Submit coding-engine restarts durably; keep other engines unchanged.
+
+        The backup gate can legitimately take many minutes.  It must not be
+        awaited by an HTTP request, and it must not be a fire-and-forget task.
+        The existing synchronous lifecycle remains the single executor inside
+        the durable handler.
+        """
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
         ctx, strategy = resolve_restart_strategy(bot)
+        if strategy.submit_restart(
+            ctx, scope="bot", task_queue=self._task_queue_service, payload=kwargs,
+        ):
+            result = dict(bot)
+            result['status'] = 'PENDING'
+            result['restart_queued'] = True
+            return result
         return await strategy.execute_restart(ctx, self.restart_bot, **kwargs)
 
     def restart_bot(
