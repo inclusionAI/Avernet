@@ -4,6 +4,15 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: false; reason: string | null };
 export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean };
+export function repairSignatureKey(signature: string): string {
+  const bytes = new TextEncoder().encode(signature);
+  const hash = (seed: bigint) => {
+    let value = seed;
+    for (const byte of bytes) value = BigInt.asUintN(64, (value ^ BigInt(byte)) * 0x100000001b3n);
+    return value.toString(16).padStart(16, '0');
+  };
+  return hash(0xcbf29ce484222325n) + hash(0x84222325cbf29ce4n);
+}
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number };
@@ -11,7 +20,7 @@ export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
   includeHistorical: boolean; activeLookbackDays: number;
-  repairSignatures: string[];
+  repairSignatureKeys: string[];
   counts: Record<RepairInboxFilter, number>;
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;

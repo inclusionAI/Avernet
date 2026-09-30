@@ -16,7 +16,7 @@ import { aggregateDiagnoses, diffWorkflowPatchOperations, timeValue, type Diagno
 import { groupDiagnoses, useIssueGroups } from './issue-groups'
 import IssueSummary from './IssueSummary'
 import { repairBatches } from '../../api/repair-batches'
-import type { RepairCandidatesResponse, RepairInboxFilter, RepairInboxItem } from '../../../server/contracts/repair-workbench'
+import { repairSignatureKey, type RepairCandidatesResponse, type RepairInboxFilter, type RepairInboxItem } from '../../../server/contracts/repair-workbench'
 import RepairItems from './repair-batch/RepairItems'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import { exclusion, phases, primary, RepairDialog } from './repair-batch/repair-view'
@@ -427,8 +427,8 @@ function DiagnosisPanel({
       state: issueState(suggestion?.status),
     }
   })
-  const repairBackedSignatures = new Set(repairData?.repairSignatures ?? [])
-  const pagedEnriched = enriched.filter(({ cluster }) => !repairData || !repairBackedSignatures.has(cluster.signature)
+  const repairBackedSignatureKeys = new Set(repairData?.repairSignatureKeys ?? [])
+  const pagedEnriched = enriched.filter(({ cluster }) => !repairData || !repairBackedSignatureKeys.has(repairSignatureKey(cluster.signature))
     || repairBySignature.has(cluster.signature))
   const filtered = pagedEnriched.filter(({ cluster, repairItems: groupItems, state }) =>
     (nodeFilter === 'all' || cluster.node === nodeFilter)
@@ -691,7 +691,7 @@ function DiagnosisPanel({
                 <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false}
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || !repairBySignature.has(suggestion.signature)}
                   onAction={onAction} onApply={onApply} />
               </div>
             </article>
@@ -710,7 +710,7 @@ function DiagnosisPanel({
         selectedFlowId={runId}
         selectedAnalysisId={analysisId}
         canEdit={canEdit}
-        legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false}
+        legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || selectedIssue.repairItems.length === 0}
         onAction={onAction}
         onApply={onApply}
         onClose={() => setSelectedSignature(null)}

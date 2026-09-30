@@ -2,6 +2,7 @@ import { render as renderView, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { repairSignatureKey } from '../../../../server/contracts/repair-workbench'
 
 // Keep a local render alias for the existing interaction tests.
 function render(ui: Parameters<typeof renderView>[0]) {
@@ -35,7 +36,7 @@ const repairPage = ({ items = [repairItem()], tasks = [], page = 1, total = item
   { items?: ReturnType<typeof repairItem>[]; tasks?: Array<{ taskId: string; revision: number; phase: string; updatedAtMs: number; itemCount: number }>; page?: number; total?: number; includeHistorical?: boolean; repairSignatures?: string[] } = {}) => ({
   schemaVersion: 'workflow-repair/v2', workflowId: 'wf-1', inputDigest: 'c'.repeat(64), canEdit: true,
   items, tasks, capabilities: { generation: true, diff: true, publication: false, reason: null },
-  includeHistorical, activeLookbackDays: 30, repairSignatures,
+  includeHistorical, activeLookbackDays: 30, repairSignatureKeys: repairSignatures.map(repairSignatureKey),
   counts: { pending: total, processing: 0, awaiting_verification: 0, closed: 0, no_action: 0, all: total },
   page: { page, pageSize: 20, total, totalPages: Math.ceil(total / 20) }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 })
@@ -512,7 +513,12 @@ describe('issue and optimization flow', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(await screen.findByRole('region', { name: '处理任务' })).toBeInTheDocument()
-    expect(screen.getByText('write-report', { selector: 'span' })).toBeInTheDocument()
+    const issue = screen.getByText('write-report', { selector: 'span' }).closest('article')!
+    expect(issue).not.toBeNull()
+    await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
+    const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    await userEvent.click(within(drawer).getByText('历史建议与任务（独立于本次修复）'))
+    expect(within(drawer).getByRole('button', { name: '应用建议' })).toBeInTheDocument()
   })
 
   it('loads the selected repair state from the server before paginating it', async () => {

@@ -9,6 +9,7 @@ import type {
   RepairWorkbenchService, RepairSourcePort, RepairExecutionPort, RepairSelectionRequest,
   RepairFeedbackRequest, RepairCandidatesResponse, RepairTaskDetail, RepairInboxItem, RepairCapabilities, RepairCandidatesQuery, RepairInboxFilter,
 } from '../contracts/repair-workbench.js';
+import { repairSignatureKey } from '../contracts/repair-workbench.js';
 import { RepairBatchRepository } from '../repositories/repair-batch-repository.js';
 import { RepairTaskRepository } from '../repositories/repair-task-repository.js';
 import { REPAIR_ACTIVE_LOOKBACK_DAYS, structuredRepairProposalIdentity } from '../repositories/repair-source-adapter.js';
@@ -142,14 +143,14 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const counts = Object.fromEntries((['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'] as RepairInboxFilter[])
         .map(key => [key, scopedItems.filter(item => inboxMatch(item, key)).length])) as Record<RepairInboxFilter, number>;
       const filtered = scopedItems.filter(item => inboxMatch(item, state));
-      const repairSignatures = [...new Set(scopedItems.flatMap(item =>
-        typeof item.context?.signature === 'string' && item.context.signature.trim() ? [item.context.signature] : []))].sort();
+      const repairSignatureKeys = [...new Set(scopedItems.flatMap(item =>
+        typeof item.context?.signature === 'string' && item.context.signature.trim() ? [repairSignatureKey(item.context.signature)] : []))].sort();
       const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
       const selectedPage = Math.min(page, totalPages);
       const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
         tasks: [...heads.values()].map(r => ({ taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount: r.input.items.length })),
-        repairSignatures,
+        repairSignatureKeys,
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };

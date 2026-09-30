@@ -132,6 +132,18 @@ describe('trusted workflow repair source adapter', () => {
     expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1' }));
     warning.mockRestore();
   });
+  it('skips one legacy suggestion that exceeds the repair item contract without hiding valid items', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const suggestions = async () => [
+      { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: 'x'.repeat(20_001), proposal_json: null, status: 'pending' },
+      { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', proposal_json: null, status: 'pending' },
+    ];
+    const result = await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf');
+    expect(result).toHaveLength(1);
+    expect(result[0].item.instruction).toBe('增加超时');
+    expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1' }));
+    warning.mockRestore();
+  });
   it('rejects mismatched workflow groups and proposals', async () => {
     await expect(createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'other', signature: 'x', inputDigest: 'a'.repeat(64), sources: [diagnosis()] }] })).load(db, 'wf')).rejects.toMatchObject({ code: 'CONTENT_MISMATCH' });
     await expect(createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'wf', signature: 'x', inputDigest: 'a'.repeat(64), sources: [diagnosis('d', { ...proposal(), workflowId: 'other' })] }] })).load(db, 'wf')).rejects.toMatchObject({ code: 'CONTENT_MISMATCH' });
