@@ -131,6 +131,9 @@ class LocalK8sArcaSandbox(ArcaSandbox):
             "pod_name": self._pod_name,
             "namespace": self._namespace,
             "pod_ip": pod_ip,
+            # ip_addr 与 aliyun_ack 对齐：sandbox proxy 的 ARCA resolver 从
+            # provider_device_props.metadata.ip_addr 读取 Pod IP。
+            "ip_addr": pod_ip,
             "container_name": self._container_name,
         }
         resources = self._resources

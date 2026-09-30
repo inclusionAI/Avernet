@@ -510,6 +510,7 @@ class TestLocalK8sSandbox:
         assert info.status == "Running"
         assert info.is_ready is True
         assert info.metadata["pod_ip"] == "10.42.0.10"
+        assert info.metadata["ip_addr"] == "10.42.0.10"
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
