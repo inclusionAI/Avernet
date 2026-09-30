@@ -269,6 +269,7 @@ class TestLocalK8sPluginCreate:
 
     def test_connect_sync_sandbox_preserves_sidecar_container(
         self,
+        plugin,
         mock_client,
     ) -> None:
         """重连时也要保留 sidecar 容器名，供原地刷新使用。"""
@@ -277,7 +278,6 @@ class TestLocalK8sPluginCreate:
             "_find_pod_name",
             return_value="bot-pod",
         ):
-            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
             sandbox = plugin.connect_sync_sandbox("tpl-test-abc")
         assert sandbox._sidecar_container_name == "envoy-sidecar"
 
