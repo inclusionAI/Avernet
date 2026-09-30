@@ -90,6 +90,22 @@ describe('RepairTaskDialog', () => {
     expect(repairApi.task).toHaveBeenCalledTimes(3)
   })
 
+  it('retries when the initial task read fails', async () => {
+    vi.useFakeTimers()
+    repairApi.task.mockRejectedValueOnce(new Error('temporary unavailable'))
+      .mockResolvedValueOnce(taskDetail('drafting'))
+      .mockResolvedValueOnce(taskDetail('review', '首次失败后已恢复'))
+
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
+      canEdit onClose={() => {}} onChanged={() => {}} />)
+    await act(async () => {})
+    await act(async () => { await vi.runOnlyPendingTimersAsync() })
+    await act(async () => { await vi.runOnlyPendingTimersAsync() })
+
+    expect(screen.getByText('首次失败后已恢复')).toBeInTheDocument()
+    expect(repairApi.task).toHaveBeenCalledTimes(3)
+  })
+
   it('lets feedback revisions reconfirm which frozen items remain selected', async () => {
     repairApi.task.mockResolvedValue(taskDetail('review', '候选已生成', ['item-1', 'item-2']))
     repairApi.candidates.mockResolvedValue(candidates())
@@ -136,5 +152,20 @@ describe('RepairTaskDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
     await waitFor(() => expect(repairApi.revise).toHaveBeenCalledTimes(3))
     expect(repairApi.revise.mock.calls[2][1].requestId).not.toBe(firstId)
+  })
+
+  it('rejects an oversized feedback revision before posting it', async () => {
+    repairApi.task.mockResolvedValue(taskDetail('review', '候选已生成', ['item-1']))
+    repairApi.candidates.mockResolvedValue({ ...candidates(), limits: { maxItems: 100, maxRequestBytes: 300 } })
+
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
+      canEdit onClose={() => {}} onChanged={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: '反馈并生成下一版' }))
+    await screen.findByRole('checkbox', { name: '选择修订项 新出现的修复建议' })
+    await userEvent.type(screen.getByRole('textbox', { name: '修改反馈' }), '修'.repeat(100))
+    await userEvent.click(screen.getByRole('button', { name: '确认生成下一版' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('请求内容过大，请缩短说明或减少选择。')
+    expect(repairApi.revise).not.toHaveBeenCalled()
   })
 })

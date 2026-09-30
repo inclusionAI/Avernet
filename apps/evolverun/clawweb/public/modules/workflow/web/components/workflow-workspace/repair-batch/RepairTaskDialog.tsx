@@ -40,7 +40,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     setLoading(detail == null); setError('')
     repairBatches.task(taskId).then(result => {
       if (!current) return
-      if (result.workflowId !== workflowId) throw new Error('此任务不属于当前工作流')
+      if (result.workflowId !== workflowId) { activeTask.current = { taskId, active: false }; setError('此任务不属于当前工作流'); return }
       setDetail(result)
       const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase)
       activeTask.current = { taskId, active }
@@ -48,7 +48,7 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     }).catch(reason => {
       if (!current) return
       setError(message(reason))
-      if (activeTask.current?.taskId === taskId && activeTask.current.active) schedulePoll()
+      if (activeTask.current?.taskId !== taskId || activeTask.current.active) schedulePoll()
     })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false; if (pollTimer) clearTimeout(pollTimer) }
@@ -96,9 +96,14 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
       requestId.current = globalThis.crypto?.randomUUID?.() ?? `repair-feedback-${Date.now()}-${requestSequence.current}`
       requestPayloadKey.current = payloadKey
     }
+    const payload = { ...revisionInput, requestId: requestId.current }
+    if (new TextEncoder().encode(JSON.stringify(payload)).length > feedbackCandidates.limits.maxRequestBytes) {
+      setError('请求内容过大，请缩短说明或减少选择。')
+      return
+    }
     setBusy(true); setError('')
     try {
-      await repairBatches.revise(taskId, { ...revisionInput, requestId: requestId.current })
+      await repairBatches.revise(taskId, payload)
       requestId.current = ''; requestPayloadKey.current = ''; setMode('detail'); setFeedback(''); reload()
     } catch (reason) { setError(`修订请求状态未确认，请刷新任务后再决定是否重试：${message(reason)}`) }
     finally { setBusy(false) }

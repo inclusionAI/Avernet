@@ -42,6 +42,7 @@ const repairPage = ({ items = [repairItem()], tasks = [], page = 1, total = item
 
 const lifecycle = vi.hoisted(() => ({ hideGroups: false, status: 'pending', canEdit: true }))
 beforeEach(() => {
+  sessionStorage.clear()
   lifecycle.hideGroups = false; lifecycle.status = 'pending'; lifecycle.canEdit = true
   Object.values(repairApi).forEach(mock => mock.mockReset())
   repairApi.candidates.mockImplementation(() => new Promise(() => {}))
@@ -265,6 +266,24 @@ describe('issue and optimization flow', () => {
     expect(repairApi.candidates).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(repairApi.candidates).toHaveBeenCalledTimes(1)
+  })
+  it('stores and restores repair controls per workflow', async () => {
+    repairApi.candidates.mockResolvedValue(repairPage())
+    const first = render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '问题状态' }), 'pending')
+    await userEvent.click(await screen.findByRole('checkbox', { name: '包含历史未复现' }))
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem('workflow-repair:wf-1')!)).toMatchObject({
+      repairOpen: true, stateFilter: 'pending', includeHistorical: true,
+    }))
+    first.unmount()
+    repairApi.candidates.mockClear()
+
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: '进入修复处理' })).not.toBeInTheDocument()
+    await waitFor(() => expect(repairApi.candidates).toHaveBeenCalledWith('wf-1', expect.objectContaining({
+      state: 'pending', page: 1, pageSize: 20, includeHistorical: true,
+    })))
   })
   it('opens legacy evidence directly for a workflow issue deep link', () => {
     renderView(<MemoryRouter><EvolutionTab workflowId="wf-1" issueSignature="timeout:fetch-data" section="diagnosis" /></MemoryRouter>)
@@ -557,6 +576,19 @@ describe('issue and optimization flow', () => {
     await waitFor(() => expect(repairApi.create).toHaveBeenCalledWith(expect.objectContaining({
       workflowId: 'wf-1', itemIds: ['item-1'], inputDigest: 'c'.repeat(64),
     })))
+  })
+
+  it('rejects an oversized Pack draft before posting it', async () => {
+    repairApi.candidates.mockResolvedValueOnce({ ...repairPage(), limits: { maxItems: 100, maxRequestBytes: 300 } })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    await userEvent.click(await screen.findByRole('button', { name: '生成 Pack 草稿（1）' }))
+    const dialog = screen.getByRole('dialog', { name: '生成 Pack 草稿' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '本次修复要求' }), '修'.repeat(100))
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认生成' }))
+
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('请求内容过大，请缩短说明或减少选择。')
+    expect(repairApi.create).not.toHaveBeenCalled()
   })
 
   it('reuses a draft request ID only for an exact retry', async () => {

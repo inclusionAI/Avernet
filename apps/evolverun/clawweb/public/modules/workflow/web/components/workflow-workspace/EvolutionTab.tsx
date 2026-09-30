@@ -63,6 +63,14 @@ type SuggestionStatus = EvolveSuggestion['status']
 type ApplyTaskStatus = SuggestionApplyTask['status']
 type IssueState = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'observing'
 type DisplaySuggestion = Omit<EvolveSuggestion, 'status'> & { status: SuggestionStatus | ApplyTaskStatus }
+type RepairViewState = {
+  repairOpen: boolean
+  stateFilter: IssueState | 'all'
+  repairPage: number
+  repairPageSize: number
+  includeHistorical: boolean
+  selectedTaskId: string
+}
 
 const ISSUE_STATE_LABELS: Record<IssueState | 'all', string> = {
   all: '全部状态',
@@ -72,6 +80,23 @@ const ISSUE_STATE_LABELS: Record<IssueState | 'all', string> = {
   closed: '已关闭',
   no_action: '暂不处理',
   observing: '观察中',
+}
+
+function readRepairView(workflowId: string): RepairViewState {
+  const fallback: RepairViewState = { repairOpen: false, stateFilter: 'all', repairPage: 1, repairPageSize: 20,
+    includeHistorical: false, selectedTaskId: '' }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`workflow-repair:${workflowId}`) ?? '{}')
+    return {
+      repairOpen: saved.repairOpen === true,
+      stateFilter: typeof saved.stateFilter === 'string' && saved.stateFilter in ISSUE_STATE_LABELS
+        ? saved.stateFilter as IssueState | 'all' : fallback.stateFilter,
+      repairPage: Number.isSafeInteger(saved.repairPage) && saved.repairPage > 0 ? saved.repairPage : fallback.repairPage,
+      repairPageSize: Number.isSafeInteger(saved.repairPageSize) && saved.repairPageSize > 0 ? saved.repairPageSize : fallback.repairPageSize,
+      includeHistorical: saved.includeHistorical === true,
+      selectedTaskId: typeof saved.selectedTaskId === 'string' ? saved.selectedTaskId : '',
+    }
+  } catch { return fallback }
 }
 
 function resolveSuggestionStatus(suggestion: EvolveSuggestion, localStatus: Record<string, Exclude<SuggestionStatus, 'pending'>>, task: SuggestionApplyTask | undefined): SuggestionStatus | ApplyTaskStatus {
@@ -296,18 +321,19 @@ function DiagnosisPanel({
 }) {
   const { data, isLoading, isError, refetch } = useIssueGroups(workflowId)
   const diagnoses = (data?.groups ?? []).flatMap(groupDiagnoses)
+  const [initialRepairView] = useState(() => readRepairView(workflowId))
   const [nodeFilter, setNodeFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
-  const [stateFilter, setStateFilter] = useState<IssueState | 'all'>('all')
+  const [stateFilter, setStateFilter] = useState<IssueState | 'all'>(initialRepairView.stateFilter)
   const [selectedSignature, setSelectedSignature] = useState<string | null>(issueSignature ?? null)
   const [repairData, setRepairData] = useState<RepairCandidatesResponse | null>(null)
-  const [repairOpen, setRepairOpen] = useState(false)
+  const [repairOpen, setRepairOpen] = useState(initialRepairView.repairOpen)
   const [repairLoading, setRepairLoading] = useState(false)
   const [repairError, setRepairError] = useState('')
   const [repairRefresh, setRepairRefresh] = useState(0)
-  const [repairPage, setRepairPage] = useState(1)
-  const [repairPageSize, setRepairPageSize] = useState(20)
-  const [includeHistorical, setIncludeHistorical] = useState(false)
+  const [repairPage, setRepairPage] = useState(initialRepairView.repairPage)
+  const [repairPageSize, setRepairPageSize] = useState(initialRepairView.repairPageSize)
+  const [includeHistorical, setIncludeHistorical] = useState(initialRepairView.includeHistorical)
   const [selectedRepairIds, setSelectedRepairIds] = useState<string[]>([])
   const [repairDetails, setRepairDetails] = useState<Record<string, RepairInboxItem>>({})
   const [repairDetailLoading, setRepairDetailLoading] = useState<Record<string, boolean>>({})
@@ -317,7 +343,7 @@ function DiagnosisPanel({
   const [repairBusy, setRepairBusy] = useState(false)
   const [repairActionError, setRepairActionError] = useState('')
   const [repairNotice, setRepairNotice] = useState('')
-  const [selectedTaskId, setSelectedTaskId] = useState('')
+  const [selectedTaskId, setSelectedTaskId] = useState(initialRepairView.selectedTaskId)
   const [disposition, setDisposition] = useState<{ item: RepairInboxItem; action: 'no_action' | 'restore' } | null>(null)
   const [dispositionReason, setDispositionReason] = useState('')
   const initializedDigest = useRef('')
@@ -326,6 +352,12 @@ function DiagnosisPanel({
   const requestSequence = useRef(0)
   const detailRequests = useRef(new Set<string>())
   const selectedRepairState = repairInboxFilter(stateFilter)
+
+  useEffect(() => {
+    try { sessionStorage.setItem(`workflow-repair:${workflowId}`, JSON.stringify({
+      repairOpen, stateFilter, repairPage, repairPageSize, includeHistorical, selectedTaskId,
+    })) } catch { /* Session storage can be disabled. */ }
+  }, [workflowId, repairOpen, stateFilter, repairPage, repairPageSize, includeHistorical, selectedTaskId])
 
   useEffect(() => {
     if (!repairOpen) return
@@ -446,9 +478,14 @@ function DiagnosisPanel({
     if (!repairData || !selectedRepairIds.length || repairBusy) return
     const input = { workflowId, itemIds: selectedRepairIds, inputDigest: repairData.inputDigest,
       instructions, includeHistorical: repairData.includeHistorical }
+    const payload = { ...input, requestId: nextRequestId(input) }
+    if (new TextEncoder().encode(JSON.stringify(payload)).length > repairData.limits.maxRequestBytes) {
+      setRepairActionError('请求内容过大，请缩短说明或减少选择。')
+      return
+    }
     setRepairBusy(true); setRepairActionError('')
     try {
-      const result = await repairBatches.create({ ...input, requestId: nextRequestId(input) })
+      const result = await repairBatches.create(payload)
       setDraftOpen(false); setRepairNotice(`已创建 ${result.taskId}，AIS 将生成可审阅 Pack 草稿，不会自动部署。`)
       resetRequestId(); initializedDigest.current = ''; setRepairRefresh(value => value + 1)
     } catch (error) {
