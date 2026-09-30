@@ -1,3 +1,4 @@
+import RepairRuntimeArtifacts from '../components/RepairRuntimeArtifacts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -1629,6 +1630,7 @@ function RepairDetail({
                   {stepReason && <div className={`mt-3 rounded-lg p-3 text-xs ${reasonClass}`}><p>{reasonLabel}：{stepReason}</p><RepairFailureDetails failure={persistedStep?.failure} /></div>}
                   {!stepReason && persistedStep?.summary && <p className="mt-3 text-sm text-gray-700">{persistedStep.summary}</p>}
                   {step.feedback && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">用户反馈：{step.feedback}</p>}
+                  <RepairRuntimeArtifacts taskId={task.taskId} stepId={step.stepId} output={persistedStep?.output} canDownload={task.canOperate === true} />
                   {historicalPlanExpanded && <div id={`repair-history-plan-${encodeURIComponent(step.stepId)}`} data-historical-plan className="mt-4">
                     {historicalPlan?.status === 'loaded'
                       ? <PlanPanel
@@ -1646,6 +1648,7 @@ function RepairDetail({
               })}
               {task.currentStep && !currentStepIsArchived && <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
                 <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-gray-900">{task.currentStep.phase === 'repair_plan' ? '方案步骤' : '执行步骤'} · 第 {task.currentStep.stepNo} 步</p><p className="mt-1 font-mono text-[10px] text-gray-400">{task.currentStep.stepId}</p>{task.currentStep.aisJobId ? <button type="button" aria-label={`查看第 ${task.currentStep.stepNo} 步关联的 AIS 容器`} className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-700" onClick={() => openAisContainers(task.currentStep?.aisJobId, 'step')}>查看关联容器</button> : <span data-step-container-status className="mt-2 inline-flex text-xs text-gray-500">{currentStepAwaitingAisJob ? 'AIS 容器分配中' : '未关联 AIS 容器'}</span>}</div><StatusPill status={task.currentStep.status} phase={task.currentStep.phase} /></div>
+                <RepairRuntimeArtifacts taskId={task.taskId} stepId={task.currentStep.stepId} output={task.currentStep.output} canDownload={task.canOperate === true} />
                 {task.currentStep.summary && <p className="mt-3 text-sm text-gray-700">{task.currentStep.summary}</p>}
                 {task.currentStep.error && (task.currentStep.status === 'failed'
                   ? <p className="mt-3 text-xs leading-5 text-red-700">本步骤未完成，详细原因和重试入口见页面上方错误卡。</p>

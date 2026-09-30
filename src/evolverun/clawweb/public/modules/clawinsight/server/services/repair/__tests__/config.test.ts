@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveBaasConfig, resolveInsightHandoffConfig } from "@avernet/clawweb-shared/server/db";
+import { configureClawWebRuntimeConfig, resolveBaasConfig, resolveInsightHandoffConfig } from "@avernet/clawweb-shared/server/db";
 import {
   resolveRepairConfig,
   resolveRepairTaskControlPlaneEnvironment,
@@ -29,6 +29,7 @@ ${repairExecution}
 
 describe("resolveRepairConfig", () => {
   beforeEach(() => {
+    configureClawWebRuntimeConfig({ repair: { ais: { snapshots: { pre: 62510265 } } }, baas: { evolveScriptPaths: { dev: "/runner/dev.sh", pre: "/runner/pre.sh", prod: "/runner/prod.sh" } } });
     vi.stubEnv("CLAWWEB_PUBLIC_BASE_URL", "http://localhost:5173");
   });
 

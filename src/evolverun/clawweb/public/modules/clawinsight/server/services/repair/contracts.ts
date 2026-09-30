@@ -158,6 +158,8 @@ export type RepairExecutionState = {
 
 /** Persisted in ce_tasks.config_json. It must never contain credentials or Cookie. */
 export type RepairTaskConfig = {
+  /** Frozen per task; absent for legacy Snapshot executions. */
+  aisBase?: { snapshotId: number; packageId: "clawevolve-repair" };
   schemaVersion: typeof REPAIR_CONTRACT_VERSION;
   taskId: string;
   /**
@@ -364,8 +366,10 @@ export type RepairRuntimeInspectInput = ({ clientRequestId?: unknown; purpose?: 
   | { operation: "fs_find"; path: string; name: string; maxDepth?: number; maxEntries?: number }
   | { operation: "fs_stat"; path: string }
   | { operation: "fs_read"; path: string; startLine?: number; lines?: number }
-  | { operation: "fs_search"; path: string; pattern: string; maxMatches?: number }
+  | { operation: "fs_search"; path: string; pattern: string; matchMode?: "literal" | "regex"; maxMatches?: number }
   | { operation: "process_list"; pattern?: string }
+  | { operation: "process_detail"; pid: number }
+  | { operation: "execution_context" }
   | { operation: "port_list" }
   | { operation: "http_get"; port: number; path: string }
   | { operation: "shell_exec"; command: string }

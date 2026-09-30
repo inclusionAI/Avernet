@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { REPAIR_AIS_PACKAGE, REPAIR_RUNTIME_ARTIFACTS, repairAisParams, repairRuntimeArtifact, validateRuntimeArtifacts } from "./ais-base-contract.js";
 import type { EvolveRepository, EvolveStepRow, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import {
   RepairRepository,
@@ -78,7 +79,7 @@ import {
 } from "./ocb-gateway.js";
 import type { RepairTargetResolver } from "./repository-target-resolver.js";
 import { containsRepairSecret, redactPersistableText, redactText, redactValue } from "./redaction.js";
-import { buildRepairRuntimeCommand, type RepairRuntimeTool } from "./runtime-tool.js";
+import { REPAIR_RUNTIME_USER, assertRepairPlanShellIsObservational, buildRepairRuntimeCommand, type RepairRuntimeTool } from "./runtime-tool.js";
 import type { ImprovementDetail } from "../insight/contracts.js";
 import { issueRepairExecutionTicket } from "./workload-verifier.js";
 import {
@@ -1160,7 +1161,7 @@ function validatePlanBody(
     requiredText(action.verification, "action.verification", 4_000);
     if (action.rollback != null) requiredText(action.rollback, "action.rollback", 4_000);
     if (action.type === "container_command") {
-      requiredText(action.command, "action.command", 16_384);
+      requiredMultilineText(action.command, "action.command", 16_384);
       if (action.operation != null) repairValidation("invalid_repair_plan", "container action 不能包含 OCB operation");
     } else if (action.type === "ocb_operation") {
       const operation = requiredText(action.operation?.type, "action.operation.type", 64);
@@ -1523,6 +1524,7 @@ function safeTaskEnvelope(
       resumeSessionId: task.execution.ccSessionId,
     },
     input: {
+      repairType: "full_repair",
       issue: issueWithInsightSessions(task),
       ...(task.insightSource ? { insightSource: task.insightSource } : {}),
       agent,
@@ -1575,10 +1577,10 @@ function agentVisibleHistory(
 function definition(config: RepairConfig): AisTaskDefinition<RepairDispatchConfig> {
   return {
     taskTypes: ["repair"],
-    snapshotId: task => config.aisSnapshotIds[
+    snapshotId: task => task.aisBase?.snapshotId ?? config.aisSnapshotIds[
       resolveRepairTaskControlPlaneEnvironment(task, config.controlPlaneEnvironment)
     ],
-    artifactTransport: "signed_put",
+    artifactTransport: task => task.aisBase ? "none" : "signed_put",
     dispatchMetadata: task => ({
       taskId: task.taskId,
       stepId: task.current.stepId,
@@ -1593,9 +1595,9 @@ function definition(config: RepairConfig): AisTaskDefinition<RepairDispatchConfi
       ),
       executionId: task.execution.executionId,
     }),
-    buildGlobalParams: (task, uploadArtifacts) => ({
-      [REPAIR_PARAMS_KEY]: JSON.stringify(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket)),
-    }),
+    buildGlobalParams: (task, uploadArtifacts) => task.aisBase
+      ? repairAisParams(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket))
+      : { [REPAIR_PARAMS_KEY]: JSON.stringify(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket)) },
   };
 }
 
@@ -1713,7 +1715,7 @@ function unpackToolRequest(request: unknown): RepairToolRequestView {
   };
 }
 
-function publicToolCall(call: RepairToolCall): Record<string, unknown> {
+function publicToolCall(call: RepairToolCall, receiptScope?: "current_execution" | "historical_step"): Record<string, unknown> {
   const request = unpackToolRequest(call.request);
   return {
     toolCallId: call.callId,
@@ -1731,6 +1733,7 @@ function publicToolCall(call: RepairToolCall): Record<string, unknown> {
     createdAt: call.gmtCreate,
     updatedAt: call.gmtModified,
     requiresBrowserRelay: requiresOwnerBrowserRelay(call),
+    ...(receiptScope ? { receiptScope } : {}),
   };
 }
 
@@ -1890,10 +1893,25 @@ function browserResultSummary(call: RepairToolCall, canViewDetails = true): stri
     if (call.operation === "fs_list") return `目录检查完成，返回 ${nonEmptyLines} 个条目${truncated ? "，结果已截断" : ""}。`;
     if (call.operation === "fs_find") return `文件查找完成，返回 ${nonEmptyLines} 个匹配项${truncated ? "，结果已截断" : ""}。`;
     if (call.operation === "fs_stat") return `文件元数据读取完成，返回 ${nonEmptyLines} 条记录。`;
-    if (call.operation === "fs_read") return `文件片段读取完成，返回 ${nonEmptyLines} 行${truncated ? "，结果已截断" : ""}。`;
-    if (call.operation === "fs_search") return `文本搜索完成，返回 ${nonEmptyLines} 个匹配行${truncated ? "，结果已截断" : ""}。`;
-    if (call.operation === "process_list") return `进程检查完成，返回 ${nonEmptyLines} 行进程信息。`;
-    if (call.operation === "port_list") return `端口检查完成，返回 ${nonEmptyLines} 行监听信息。`;
+    if (call.operation === "fs_read") {
+      return `文件片段读取完成，返回 ${nonEmptyLines} 行${truncated ? "，结果已截断" : ""}；当前文件内容只有在记录时间、trace 或 execution 与原始故障匹配时，才能用于解释历史故障。`;
+    }
+    if (call.operation === "fs_search") {
+      const coverage = result.searchCoverage && typeof result.searchCoverage === "object"
+        ? result.searchCoverage as Record<string, unknown> : {};
+      const limited = coverage.limitReached === true || coverage.outputTruncated === true;
+      const boundary = limited
+        ? `受限检索：时间过滤前已达到返回上限或输出被截断，剩余匹配未知；当前${nonEmptyLines}行不能证明整个故障窗口无其他请求或错误。`
+        : "";
+      const matching = coverage.matchMode === "regex" ? "正则搜索（POSIX ERE）"
+        : coverage.matchMode === "literal" ? "字面搜索（|、.* 等不解释为正则）" : "文本搜索";
+      return `${boundary}${matching}完成，返回 ${nonEmptyLines} 个匹配行${truncated ? "，结果已截断" : ""}；命中只证明文件当前包含该文本，历史归因仍需匹配原始故障时间、trace 或 execution。`;
+    }
+    if (call.operation === "process_list") {
+      return `当前进程快照读取完成，返回 ${nonEmptyLines} 行；仅证明观察时的进程及启动元数据，不建立产品内部资源与宿主 service 或 scheduler 的映射。`;
+    }
+    if (call.operation === "process_detail") return `进程启动身份读取完成，返回 ${nonEmptyLines} 行。`;
+    if (call.operation === "port_list") return `当前端口快照读取完成，返回 ${nonEmptyLines} 行监听信息；只代表观察时刻，不能单独解释或否定历史故障。`;
     if (call.operation === "http_get") return `本地 HTTP 检查成功，响应正文 ${Buffer.byteLength(stdout, "utf8")} 字节（正文未展示）。`;
     return `${outcome}${exitCode != null ? `，退出码 ${exitCode}` : ""}。`;
   }
@@ -2064,7 +2082,10 @@ function compactRecoveryToolCall(call: Record<string, unknown>): Record<string, 
 function browserStepOutput(step: EvolveStepRow): Record<string, unknown> {
   const output = parseOutput(step);
   const recovery = repairRecoveryProgress(output);
+  const runtime = output.runtimeArtifacts;
   return {
+    ...(runtime && typeof runtime === "object" && !Array.isArray(runtime)
+      ? { runtimeArtifactNames: REPAIR_RUNTIME_ARTIFACTS.filter(name => Object.hasOwn(runtime, name)) } : {}),
     ...(typeof output.artifactDigest === "string" ? { artifactDigest: output.artifactDigest } : {}),
     ...(typeof output.summary === "string" ? { summary: redactText(output.summary, 4_000) } : {}),
     ...(recovery == null ? {} : { recovery }),
@@ -2397,6 +2418,11 @@ export class RepairTaskService {
       schemaVersion: REPAIR_CONTRACT_VERSION,
       taskId,
       controlPlaneEnvironment: this.deps.config.controlPlaneEnvironment,
+      ...(this.deps.config.aisBaseSnapshotIds?.[this.deps.config.controlPlaneEnvironment]
+        ? { aisBase: {
+          snapshotId: this.deps.config.aisBaseSnapshotIds[this.deps.config.controlPlaneEnvironment]!,
+          packageId: REPAIR_AIS_PACKAGE,
+        } } : {}),
       shared: false,
       issue: issueOf({
         ...input.body,
@@ -2501,6 +2527,16 @@ export class RepairTaskService {
       canManageShare: access.isOwner || isAdmin,
       canAdminOperate: isAdmin && !access.isOwner,
     });
+  }
+
+  async getRuntimeArtifact(actorUserId: string, taskId: string, stepId: string, name: string, isAdmin = false) {
+    const task = await this.ownedTask(actorUserId, taskId, isAdmin);
+    const step = await this.deps.repo.findStep(stepId);
+    if (!step || step.task_id !== task.task_id) repairNotFound("repair_artifact_not_found", "步骤归档不存在");
+    const artifacts = validateRuntimeArtifacts(taskId, stepId, parseOutput(step).runtimeArtifacts ?? {});
+    const artifact = artifacts[name] as { objectKey: string } | undefined;
+    if (!artifact) repairNotFound("repair_artifact_not_found", "步骤归档不存在");
+    return this.deps.store.createSignedUrl(artifact.objectKey, "GET", 300);
   }
 
   async getStepPlan(
@@ -3018,11 +3054,12 @@ export class RepairTaskService {
         agentRateLimitRetryBaseSeconds: this.deps.config.agentRateLimitRetryBaseSeconds,
       },
       tools: {
+        runtimeUser: REPAIR_RUNTIME_USER,
         logs: true,
         ocbRead: [],
         ocbApply: [...WRITE_OCB_OPERATIONS],
         runtimeRead: [
-          "fs_list", "fs_find", "fs_stat", "fs_read", "fs_search", "process_list", "port_list", "http_get",
+          "fs_list", "fs_find", "fs_stat", "fs_read", "fs_search", "process_list", "process_detail", "execution_context", "port_list", "http_get",
           ...(config.diagnosticMode === "deep" ? ["shell_exec"] : []),
         ],
         applyAction: context.phase === "repair_apply",
@@ -3215,6 +3252,58 @@ export class RepairTaskService {
     return { status: "claimed", reusedJob: true, stepId: next.current.stepId, phase, continuation };
   }
 
+  /** Preflight preserves the runner's correction loop without committing a terminal state. */
+  async validateAisReport(identity: RepairWorkloadIdentity, body: { status?: unknown; output?: unknown }) {
+    const { config } = await this.activeWorkloadContext(identity);
+    if (!config.aisBase) repairValidation("repair_ais_base_required", "任务未启用 AIS Base");
+    if (body.status !== "succeeded") repairValidation("invalid_executor_status", "只能预检成功结果");
+    await this.assertRequiredSemanticConclusions(identity, config.authorizationScopeDigest);
+    const output = executorOutput(body.output);
+    this.validateExecutorOutput(output, config);
+    const digest = artifactDigest(output.artifactDigest);
+    if (config.current.phase === "repair_plan") {
+      await this.loadAndValidatePlan(config, digest);
+    } else {
+      const result = await this.loadAndValidateApplyResult(config, digest);
+      const calls = await this.deps.repairRepo.listToolCalls(config.taskId);
+      assertApplyResultMatchesLedger(result, config, calls);
+    }
+    return { ok: true };
+  }
+
+  async aisArtifactUpload(identity: RepairWorkloadIdentity, name: string, body: Record<string, unknown>) {
+    const { config } = await this.activeWorkloadContext(identity);
+    if (!config.aisBase) repairValidation("repair_ais_base_required", "任务未启用 AIS Base");
+    const target = repairRuntimeArtifact(identity.taskId, identity.stepId, name);
+    validateRuntimeArtifacts(identity.taskId, identity.stepId, { [name]: { ...body, objectKey: target.objectKey } });
+    const url = await this.deps.store.createSignedUrl(target.objectKey, "PUT", 3600, { "Content-Type": target.contentType });
+    return { ...target, method: "PUT", url, headers: { "Content-Type": target.contentType } };
+  }
+
+  async reportAisExecution(identity: RepairWorkloadIdentity, body: Record<string, any>) {
+    const { config } = await this.credentialWorkloadContext(identity);
+    if (!config.aisBase) repairValidation("repair_ais_base_required", "任务未启用 AIS Base");
+    if (body.status === "running") return this.reportStep(identity, { status: "running", summary: body.summary }, "ais_base");
+    if (!["succeeded", "failed"].includes(body.status)) repairValidation("invalid_executor_status", "无效 AIS 终态");
+    const artifacts = validateRuntimeArtifacts(identity.taskId, identity.stepId, body.output?.artifacts ?? {});
+    if (body.status === "succeeded") {
+      if (body.output?.taskId !== identity.taskId || body.output?.success !== true
+        || !["succeeded", "waiting_context"].includes(body.output?.repairReport?.status)) {
+        repairValidation("repair_executor_identity_mismatch", "AIS 结果与 Repair 不匹配");
+      }
+      for (const name of REPAIR_RUNTIME_ARTIFACTS) {
+        if (!artifacts[name]) repairValidation("invalid_repair_runtime_artifacts", "AIS 运行归档不完整");
+      }
+      const report = body.output.repairReport;
+      return this.reportStep(identity, {
+        ...report, output: { ...report.output, runtimeArtifacts: artifacts },
+      }, "ais_base");
+    }
+    return this.reportStep(identity, {
+      status: "failed", error: body.error, output: { runtimeArtifacts: artifacts },
+    }, "ais_base");
+  }
+
   async reportStep(
     identity: RepairWorkloadIdentity,
     body: {
@@ -3225,11 +3314,15 @@ export class RepairTaskService {
       toolCallId?: unknown;
       retryWaitSupported?: unknown;
     },
+    source: "legacy" | "ais_base" = "legacy",
   ): Promise<Record<string, unknown>> {
     const { task, step, config } = await this.credentialWorkloadContext(identity);
     const status = requiredText(body.status, "status", 32).toLowerCase();
     if (!new Set(["running", "succeeded", "failed", "waiting_context"]).has(status)) {
       repairValidation("invalid_executor_status", "status 必须是 running/succeeded/failed/waiting_context");
+    }
+    if (config.aisBase && status !== "running" && source !== "ais_base") {
+      repairValidation("repair_ais_base_report_required", "AIS Base 任务须先归档再通过 Base 回报终态");
     }
     if (TERMINAL_STEP_STATUSES.has(step.status)) {
       const expected = status === "waiting_context" ? "interrupted" : status;
@@ -3283,7 +3376,9 @@ export class RepairTaskService {
           execution: {
             ...config.execution,
             state: "running",
-            leaseExpiresAt: now + this.deps.config.executionLeaseSeconds,
+            leaseExpiresAt: now + (source === "ais_base"
+              ? Math.max(this.deps.config.executionLeaseSeconds, this.deps.config.decisionGraceSeconds)
+              : this.deps.config.executionLeaseSeconds),
             lastHeartbeatAt: now,
           },
         };
@@ -3325,7 +3420,7 @@ export class RepairTaskService {
           ? redactPersistableText(error.message, 2_000) : "Repair AIS 执行失败";
         const failure = repairStepFailureMetadata(error);
         const now = this.now();
-        const retryWaitSupported = config.current.phase === "repair_plan"
+        const retryWaitSupported = !config.aisBase && config.current.phase === "repair_plan"
           && body.retryWaitSupported === true;
         retryWaitDeadlineAt = retryWaitSupported
           ? now + this.deps.config.decisionGraceSeconds
@@ -3349,7 +3444,10 @@ export class RepairTaskService {
           errorCode: repairStepFailureCode(error.code),
           errorMessage: message,
           retryable: typeof error.retryable === "boolean" ? error.retryable : false,
-          ...(failure == null ? {} : { output: { failure } }),
+          ...((failure != null || config.aisBase) ? { output: {
+            ...(failure == null ? {} : { failure }),
+            ...(config.aisBase ? { runtimeArtifacts: validateRuntimeArtifacts(config.taskId, step.step_id, (body.output as Record<string, unknown> | undefined)?.runtimeArtifacts ?? {}) } : {}),
+          } } : {}),
         };
       } else {
         const output = executorOutput(body.output);
@@ -3373,6 +3471,10 @@ export class RepairTaskService {
             decisionDeadlineAt: now + this.deps.config.decisionGraceSeconds,
             invalidatedAt: null,
             lastHeartbeatAt: now,
+            ...(config.aisBase ? {
+              state: "ended" as const, invalidatedAt: now,
+              leaseExpiresAt: now, decisionDeadlineAt: null,
+            } : {}),
           },
         };
         previousStep = {
@@ -3468,6 +3570,7 @@ export class RepairTaskService {
     if (input.operation === "shell_exec" && config.diagnosticMode !== "deep") {
       repairForbidden("repair_diagnostic_shell_not_authorized", "当前 Repair Task 未授权目标 Bot 深度诊断 Shell");
     }
+    assertRepairPlanShellIsObservational(context, input);
     const requestId = clientRequestId(input.clientRequestId, `runtime:${randomUUID()}`);
     const request = { ...input };
     delete request.clientRequestId;
@@ -3566,12 +3669,21 @@ export class RepairTaskService {
   }
 
   async getToolCall(identity: RepairWorkloadIdentity, callId: string): Promise<Record<string, unknown>> {
-    await this.credentialWorkloadContext(identity);
+    const { config } = await this.credentialWorkloadContext(identity);
     const call = await this.deps.repairRepo.findToolCall(requiredText(callId, "toolCallId", 64));
-    if (!call || call.taskId !== identity.taskId || call.stepId !== identity.stepId || call.executionId !== identity.executionId) {
+    const isCurrentExecution = Boolean(call
+      && call.stepId === identity.stepId
+      && call.executionId === identity.executionId);
+    const isAuthorizedHistoricalReceipt = Boolean(call
+      && config.history.some((item) => item.stepId === call.stepId && item.phase === config.current.phase)
+      && call.authorizationScopeDigest === config.authorizationScopeDigest
+      && TERMINAL_TOOL_STATUSES.has(call.status)
+      && call.resultDigest
+      && BUSINESS_AUDIT_TOOLS.has(call.toolName));
+    if (!call || call.taskId !== identity.taskId || (!isCurrentExecution && !isAuthorizedHistoricalReceipt)) {
       repairNotFound("repair_tool_call_not_found", "Repair tool call 不存在");
     }
-    return publicToolCall(call);
+    return publicToolCall(call, isCurrentExecution ? "current_execution" : "historical_step");
   }
 
   async recordSemanticConclusion(
@@ -4586,7 +4698,7 @@ export class RepairTaskService {
 
   private executionCanClaim(config: RepairTaskConfig): boolean {
     const now = this.now();
-    return config.execution.state === "waiting_decision"
+    return !config.aisBase && config.execution.state === "waiting_decision"
       && config.execution.invalidatedAt == null
       && config.execution.leaseExpiresAt > now
       && (config.execution.decisionDeadlineAt ?? 0) > now;

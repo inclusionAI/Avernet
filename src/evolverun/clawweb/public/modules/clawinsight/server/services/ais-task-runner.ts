@@ -6,7 +6,7 @@ export type AisArtifactSpec = { objectKey: string; contentType?: string };
 export type AisTaskDefinition<TConfig> = {
   taskTypes: readonly string[];
   snapshotId: number | ((config: TConfig) => number);
-  artifactTransport?: "signed_put" | "none";
+  artifactTransport?: "signed_put" | "none" | ((config: TConfig) => "signed_put" | "none");
   dispatchMetadata?(config: TConfig): Record<string, unknown>;
   buildGlobalParams(config: TConfig, uploadArtifacts: Record<string, unknown>): Record<string, string>;
 };
@@ -26,7 +26,9 @@ export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifa
    */
   async prepare(config: TConfig): Promise<Record<string, string>> {
     const uploads: Record<string, unknown> = {};
-    if ((this.definition.artifactTransport ?? "signed_put") === "signed_put") {
+    const transport = typeof this.definition.artifactTransport === "function"
+      ? this.definition.artifactTransport(config) : this.definition.artifactTransport;
+    if ((transport ?? "signed_put") === "signed_put") {
       for (const [name, item] of Object.entries(config.artifacts)) {
         const contentType = item.contentType;
         if (contentType != null && (typeof contentType !== "string"

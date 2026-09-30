@@ -160,7 +160,10 @@ export function selectRepairLogSources(sources: Array<{
     const app = source.app?.trim().toLowerCase();
     return sourceNameCounts.get(name) === 1 && name !== "clawweb" && app !== "clawweb";
   });
-  const defaultApps = new Set(["agentclaw", "agentclawscs"]);
+  // Backend is the only generic Repair default. Channel-specific sources such as
+  // BCN stay available, but must be selected explicitly when the symptom or
+  // evidence points at message delivery.
+  const defaultApps = new Set(["agentclaw"]);
   return {
     allowedSourceNames: [...new Set(allowed.map((source) => source.name))],
     defaultSourceNames: [...new Set(allowed

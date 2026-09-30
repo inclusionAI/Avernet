@@ -5,6 +5,8 @@ import type { RepairTaskConfig, RepairWorkloadIdentity } from "./contracts.js";
 import { REPAIR_CONTRACT_VERSION } from "./contracts.js";
 import { RepairError } from "./errors.js";
 
+import { AIS_ARCHIVE_GRACE_SECONDS } from "./ais-base-contract.js";
+
 const TICKET_PREFIX = "ce_repair_";
 
 export interface RepairWorkloadVerifier {
@@ -75,6 +77,11 @@ export class DatabaseRepairWorkloadVerifier implements RepairWorkloadVerifier {
     const decisionClaim = req.method === "POST"
       && (req.path?.endsWith("/decision/claim")
         || String(req.route?.path ?? "").endsWith("/decision/claim"));
+    // The package heartbeat stops before Base uploads runtime archives. Grant only
+    // those uploads a bounded closeout window; never extend business tool access.
+    const archiveCloseout = Boolean(config.aisBase) && req.method === "POST"
+      && /\/ais\/artifacts\/(artifactBundle|runtimeBundle|openclawSessions)\/upload-url$/.test(req.path ?? "")
+      && this.nowSeconds() < execution.leaseExpiresAt + AIS_ARCHIVE_GRACE_SECONDS;
     const previous = Array.isArray(config.history) ? config.history.at(-1) : undefined;
     const decisionClaimAlias = decisionClaim
       && requestedStepId !== currentStepId
@@ -88,7 +95,7 @@ export class DatabaseRepairWorkloadVerifier implements RepairWorkloadVerifier {
       || execution.stepId !== currentStepId
       || (!terminalReportRetry && (execution.invalidatedAt != null
         || execution.state === "ended"
-        || execution.leaseExpiresAt <= this.nowSeconds()))
+        || (execution.leaseExpiresAt <= this.nowSeconds() && !archiveCloseout)))
       || !equalDigest(digestRepairExecutionTicket(ticket), execution.ticketDigest)) {
       throw new RepairError(401, "repair_execution_ticket_invalid", "Repair execution ticket 已失效或作用域不匹配");
     }

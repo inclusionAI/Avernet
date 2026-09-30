@@ -25,6 +25,38 @@ describe("Repair redaction", () => {
     });
   });
 
+  it("preserves strict technical digests in structured values without weakening text redaction", () => {
+    const digestWithPhoneLikeDigits = "d1ddb0b842c1042f4bfd7ee17261208277daad0b3c331c3a1019309dff2a015e";
+    expect(redactValue({
+      wrapper: {
+        baseZipSha256: digestWithPhoneLikeDigits,
+        sourceTreeSha256: digestWithPhoneLikeDigits,
+      },
+      artifactDigest: digestWithPhoneLikeDigits,
+      summary: `manifest ${digestWithPhoneLikeDigits}`,
+    })).toEqual({
+      wrapper: {
+        baseZipSha256: digestWithPhoneLikeDigits,
+        sourceTreeSha256: digestWithPhoneLikeDigits,
+      },
+      artifactDigest: digestWithPhoneLikeDigits,
+      summary: `manifest ${digestWithPhoneLikeDigits.replace("17261208277", "[REDACTED_PHONE]")}`,
+    });
+  });
+
+  it("does not exempt secret-shaped keys or invalid digest values from structured redaction", () => {
+    const digestWithPhoneLikeDigits = "d1ddb0b842c1042f4bfd7ee17261208277daad0b3c331c3a1019309dff2a015e";
+    expect(redactValue({
+      tokenDigest: digestWithPhoneLikeDigits,
+      arbitraryDigest: digestWithPhoneLikeDigits,
+      baseZipSha256: "prefix-13800138000",
+    })).toEqual({
+      tokenDigest: "[REDACTED]",
+      arbitraryDigest: digestWithPhoneLikeDigits.replace("17261208277", "[REDACTED_PHONE]"),
+      baseZipSha256: "prefix-[REDACTED_PHONE]",
+    });
+  });
+
   it("removes bare execution tickets and API key literals from browser-safe text and values", () => {
     const ticket = "ce_repair_browser_projection_canary_1234567890";
     const apiKey = "sk-browser-projection-canary-1234567890";
