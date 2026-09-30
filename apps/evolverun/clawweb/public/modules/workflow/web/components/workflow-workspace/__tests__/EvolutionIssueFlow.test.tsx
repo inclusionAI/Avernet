@@ -324,6 +324,17 @@ describe('issue and optimization flow', () => {
     await userEvent.click(await screen.findByRole('button', { name: '应用建议' }))
     expect(screen.getByRole('dialog', { name: '选择 Bot 自动应用建议' })).toBeInTheDocument()
   })
+  it('does not restore legacy apply for a Pack item on another server page', async () => {
+    lifecycle.hideGroups = true
+    repairApi.candidates.mockResolvedValueOnce(repairPage({ items: [], total: 21, repairSignatures: ['timeout:fetch-data'] }))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+
+    const followup = await screen.findByRole('region', { name: '已有建议跟进' })
+    const offPageSuggestion = within(followup).getByText('将超时阈值调整为 90 秒').closest('article')!
+    expect(offPageSuggestion).not.toBeNull()
+    expect(within(offPageSuggestion).queryByRole('button', { name: '应用建议' })).not.toBeInTheDocument()
+  })
   it('keeps suggestion-only controls read-only without workflow edit permission', () => {
     lifecycle.hideGroups = true
     lifecycle.canEdit = false

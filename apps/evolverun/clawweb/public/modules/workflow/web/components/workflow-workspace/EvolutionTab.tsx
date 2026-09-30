@@ -691,7 +691,7 @@ function DiagnosisPanel({
                 <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || !repairBySignature.has(suggestion.signature)}
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || !repairBackedSignatureKeys.has(repairSignatureKey(suggestion.signature))}
                   onAction={onAction} onApply={onApply} />
               </div>
             </article>

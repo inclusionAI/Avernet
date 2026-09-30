@@ -144,7 +144,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
         validateRepairItem(row.item);
         items.set(itemId, row);
       } catch (error) {
-        if (!(error instanceof RepairBatchError) || error.code !== 'INVALID_INPUT') throw error;
+        if (!(error instanceof RepairBatchError) || !['INVALID_INPUT', 'PAYLOAD_TOO_LARGE'].includes(error.code)) throw error;
         console.warn('[workflow-repair] skipped incompatible suggestion source', {
           workflowId, suggestionId: String(suggestion.id), code: error.code,
         });
