@@ -80,6 +80,7 @@ _DEFAULT_CONTEXT = "colima"
 _SIDECAR_CONTAINER_NAME = "envoy-sidecar"
 _SIDECAR_PROXY_PORT = 38080
 _SIDECAR_ADMIN_PORT = 38081
+_SIDECAR_HEADER_RULES_PATH = "/etc/sidecar/header-rules/header-rules.yaml"
 
 # Environment variable names consumed by this plugin.
 ENV_KUBECONFIG = "LOCAL_K8S_KUBECONFIG"
@@ -450,15 +451,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             api_version="v1",
             kind="ConfigMap",
             metadata=V1ObjectMeta(name=configmap_name, namespace=namespace),
-            data={"header-rules.yaml": _convert_outbound_rules(outbound_operation_rule)},
+            data={
+                "header-rules.yaml": _convert_outbound_rules(outbound_operation_rule)
+            },
         )
         core_api = CoreV1Api(self._client())
-        core_api.create_namespaced_config_map(
-            namespace=namespace, body=configmap
-        )
-        logger.info(
-            "local_k8s: created configmap %s/%s", namespace, configmap_name
-        )
+        core_api.create_namespaced_config_map(namespace=namespace, body=configmap)
+        logger.info("local_k8s: created configmap %s/%s", namespace, configmap_name)
         return configmap_name
 
     def _create_deployment(
@@ -480,6 +479,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             V1Container,
             V1Deployment,
             V1DeploymentSpec,
+            V1EnvVar,
             V1LabelSelector,
             V1ObjectMeta,
             V1PodSpec,
@@ -521,11 +521,16 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                 {"containerPort": _SIDECAR_PROXY_PORT},  # type: ignore[arg-type]
                 {"containerPort": _SIDECAR_ADMIN_PORT},  # type: ignore[arg-type]
             ],
+            env=[
+                V1EnvVar(
+                    name="HEADER_RULES",
+                    value=_SIDECAR_HEADER_RULES_PATH,
+                )
+            ],
             volume_mounts=[
                 V1VolumeMount(
                     name="header-rules",
-                    mount_path="/etc/sidecar/header-rules.yaml",
-                    sub_path="header-rules.yaml",
+                    mount_path="/etc/sidecar/header-rules",
                     read_only=True,
                 )
             ],
@@ -552,9 +557,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
                         volumes=[
                             V1Volume(
                                 name="header-rules",
-                                config_map=V1ConfigMapVolumeSource(
-                                    name=configmap_name
-                                ),
+                                config_map=V1ConfigMapVolumeSource(name=configmap_name),
                             )
                         ],
                     ),
@@ -744,6 +747,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             client=self._client(),
             container_name=self.CONTAINER_NAME,
             credentials=self._credentials,
+            sidecar_container_name=_SIDECAR_CONTAINER_NAME,
         )
 
     def close(self) -> None:

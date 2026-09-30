@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = get_logger("plugin-sandbox")
 
+_SIDECAR_ADMIN_PORT = 38081
+
 
 def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
     """把 OutBoundOperationRule 转成 header-rules.yaml 文本。"""
@@ -178,26 +180,17 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 )
         return True
 
-    def exec_command(
+    def _exec_in_container(
         self,
-        cmd: str,
+        container_name: str,
+        command: list[str],
         timeout_in_millis: int = 30000,
-        envs: dict[str, str] | None = None,
-    ) -> Any:
-        """在 Pod 里执行命令。
-
-        本地开发阶段失败时返回空结果，不打断上层流程。
-        """
+    ) -> _ExecResult:
+        """在一个容器内执行命令并返回退出码/输出。"""
         from kubernetes.client import CoreV1Api
         from kubernetes.client.rest import ApiException
         from kubernetes.stream import stream as k8s_stream
 
-        logger.info(
-            "local_k8s: exec_command pod=%s/%s cmd=%s",
-            self._namespace,
-            self._pod_name,
-            cmd[:200],
-        )
         started = time.monotonic()
         try:
             core_api = CoreV1Api(self._client)
@@ -205,8 +198,8 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 core_api.connect_get_namespaced_pod_exec,
                 name=self._pod_name,
                 namespace=self._namespace,
-                container=self._container_name,
-                command=["/bin/sh", "-c", cmd],
+                container=container_name,
+                command=command,
                 stderr=True,
                 stdout=True,
                 stdin=False,
@@ -222,7 +215,12 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 elapsed_time=elapsed,
             )
         except ApiException as e:
-            logger.warning("local_k8s: exec_command failed (%s): %s", e.status, e.body)
+            logger.warning(
+                "local_k8s: exec failed in %s (%s): %s",
+                container_name,
+                e.status,
+                e.body,
+            )
             return _ExecResult(
                 exit_code=-1,
                 stdout="",
@@ -230,51 +228,109 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 elapsed_time=time.monotonic() - started,
             )
 
+    def exec_command(
+        self,
+        cmd: str,
+        timeout_in_millis: int = 30000,
+        envs: dict[str, str] | None = None,
+    ) -> Any:
+        """在主容器里执行命令。
+
+        本地开发阶段失败时返回空结果，不打断上层流程。
+        """
+        logger.info(
+            "local_k8s: exec_command pod=%s/%s cmd=%s",
+            self._namespace,
+            self._pod_name,
+            cmd[:200],
+        )
+        return self._exec_in_container(
+            container_name=self._container_name,
+            command=["/bin/sh", "-c", cmd],
+            timeout_in_millis=timeout_in_millis,
+        )
+
+    def _require_sidecar_container_name(self) -> str:
+        if not self._sidecar_container_name:
+            raise RuntimeError(
+                f"local_k8s: no sidecar container for sandbox {self._sandbox_id}"
+            )
+        return self._sidecar_container_name
+
+    def _restart_sidecar(self) -> None:
+        """只重启 envoy sidecar 容器，不替换整个 Pod。"""
+        sidecar_container_name = self._require_sidecar_container_name()
+        result = self._exec_in_container(
+            container_name=sidecar_container_name,
+            command=[
+                "curl",
+                "-fsS",
+                "-X",
+                "POST",
+                f"http://127.0.0.1:{_SIDECAR_ADMIN_PORT}/quitquitquit",
+            ],
+            timeout_in_millis=5000,
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(
+                "local_k8s: failed to restart sidecar "
+                f"{sidecar_container_name}: {result.stderr or result.stdout}"
+            )
+
+    def _wait_for_sidecar_ready(self, timeout_seconds: float = 15.0) -> None:
+        """等待 sidecar 的 Envoy admin /ready 恢复。"""
+        sidecar_container_name = self._require_sidecar_container_name()
+        deadline = time.monotonic() + timeout_seconds
+        last_error = "no readiness probe executed"
+        while time.monotonic() < deadline:
+            result = self._exec_in_container(
+                container_name=sidecar_container_name,
+                command=[
+                    "curl",
+                    "-fsS",
+                    f"http://127.0.0.1:{_SIDECAR_ADMIN_PORT}/ready",
+                ],
+                timeout_in_millis=2000,
+            )
+            if result.exit_code == 0:
+                return
+            last_error = result.stderr or result.stdout or str(result.exit_code)
+            time.sleep(0.5)
+        raise RuntimeError(
+            f"local_k8s: sidecar was not ready within {timeout_seconds}s: {last_error}"
+        )
+
     def update_outbound_rule(
         self,
         rule: OutBoundOperationRule,
         updated_mode: OutBoundOperationRuleUpdatedMode,
     ) -> Any:
-        """更新出站规则。当前 patch/roll 已禁用：no-op，返回成功，不修改集群资源。"""
-        # from kubernetes.client import AppsV1Api, CoreV1Api
-        #
-        # core_api = CoreV1Api(self._client)
-        # apps_api = AppsV1Api(self._client)
-        # configmap_name = self._header_rules_configmap_name
-        #
-        # core_api.patch_namespaced_config_map(
-        #     name=configmap_name,
-        #     namespace=self._namespace,
-        #     body={
-        #         "data": {
-        #             "header-rules.yaml": _convert_outbound_rules(rule),
-        #         }
-        #     },
-        # )
-        # logger.info(
-        #     "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
-        # )
-        #
-        # apps_api.patch_namespaced_deployment(
-        #     name=self._sandbox_id,
-        #     namespace=self._namespace,
-        #     body={
-        #         "spec": {
-        #             "template": {
-        #                 "metadata": {
-        #                     "annotations": {
-        #                         "avernet.local-k8s/outbound-rule-updated": str(
-        #                             int(time.time())
-        #                         )
-        #                     }
-        #                 }
-        #             }
-        #         }
-        #     },
-        # )
-        # logger.info(
-        #     "local_k8s: rolled deployment %s/%s", self._namespace, self._sandbox_id
-        # )
+        """更新出站规则并原地刷新 envoy sidecar，不滚动 Deployment。"""
+        from kubernetes.client import CoreV1Api
+
+        core_api = CoreV1Api(self._client)
+        configmap_name = self._header_rules_configmap_name
+        core_api.patch_namespaced_config_map(
+            name=configmap_name,
+            namespace=self._namespace,
+            body={
+                "data": {
+                    "header-rules.yaml": _convert_outbound_rules(rule),
+                }
+            },
+        )
+        logger.info(
+            "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
+        )
+
+        self._restart_sidecar()
+        self._wait_for_sidecar_ready()
+        logger.info(
+            "local_k8s: refreshed sidecar %s/%s/%s without rolling deployment",
+            self._namespace,
+            self._sandbox_id,
+            self._sidecar_container_name,
+        )
         return True
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
