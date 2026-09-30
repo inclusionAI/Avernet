@@ -9,9 +9,10 @@
 """
 
 from ._sandbox import LocalK8sArcaSandbox
-from ._sandbox_plugin import LocalK8sArcaSandboxPlugin
+from ._sandbox_plugin import LocalK8sArcaSandboxPlugin, local_k8s_plugin_factory
 
 __all__ = [
     "LocalK8sArcaSandbox",
     "LocalK8sArcaSandboxPlugin",
+    "local_k8s_plugin_factory",
 ]

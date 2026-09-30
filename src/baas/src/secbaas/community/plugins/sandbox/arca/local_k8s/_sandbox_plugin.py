@@ -2,6 +2,8 @@
 
 基于本地 Kubernetes 集群（colima / k3d / kind / minikube 等）模拟 Arca 沙箱生命周期。
 使用 kubeconfig 连接集群，通过 Deployment + NodePort Service 暴露 bot runtime。
+in-cluster 模式下通过 ClusterIP + Service 端口供集群内部访问；
+out-of-cluster 模式下通过 localhost + NodePort 访问。
 所有 local_k8s 专用参数默认从环境变量读取，避免修改 API 模型。
 
 环境变量：
@@ -37,6 +39,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +54,7 @@ from secbaas.community.api.device_manage import (
     Storage,
 )
 from secbaas.community.logger import get_logger
+from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
 from ._sandbox import LocalK8sArcaSandbox
@@ -407,7 +411,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
     """本地 K8s Arca 沙箱插件。
 
     基于本地 Kubernetes 集群运行 bot runtime，
-    通过 NodePort Service 把端口暴露到 localhost。
+    通过 NodePort Service（out-of-cluster）或 ClusterIP + Service 端口
+    （in-cluster）暴露 bot runtime。
 
     插件需要的所有本地 K8s 参数默认从同名 LOCAL_K8S_* 环境变量读取；
     ArcaCredentials 仅保留基础模板/认证信息，不再扩展 local_k8s 字段。
@@ -420,8 +425,10 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
     def __init__(
         self,
         credentials: ArcaCredentials | None = None,
+        arca_utils: ArcaUtils | None = None,
     ) -> None:
         self._credentials = credentials
+        self._arca_utils = arca_utils
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
@@ -642,8 +649,12 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         )
         return pods.items[0].metadata.name if pods.items else None
 
-    def _resolve_public_port(self, deployment_name: str) -> int:
-        """解析外部可访问端口（读取 Service 自动分配的 NodePort）。"""
+    def _resolve_public_port(self, deployment_name: str) -> tuple[str, int]:
+        """解析外部可访问地址和端口。
+
+        in-cluster 模式下返回 ClusterIP + Service 端口；
+        out-of-cluster 模式下返回 localhost + NodePort。
+        """
         from kubernetes.client import CoreV1Api
 
         namespace = _namespace()
@@ -653,10 +664,13 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         svc = core_api.read_namespaced_service(name=service_name, namespace=namespace)
         if not svc.spec or not svc.spec.ports:
             raise RuntimeError("local_k8s: service has no ports")
-        node_port = svc.spec.ports[0].node_port
+        svc_port = svc.spec.ports[0]
+        if _use_incluster_config():
+            return svc.spec.cluster_ip or "127.0.0.1", svc_port.port
+        node_port = svc_port.node_port
         if not node_port:
             raise RuntimeError("local_k8s: service NodePort is not assigned")
-        return node_port
+        return "localhost", node_port
 
     def create_sync_sandbox(
         self,
@@ -745,15 +759,30 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
     ) -> WsConnectionInfo:
         """解析 WebSocket 连接信息。
 
-        本地模式下返回 localhost 可访问地址。
+        in-cluster 模式下使用 ClusterIP + Service 端口供集群内部访问；
+        out-of-cluster 模式下使用 localhost + NodePort。
         """
-        deployment_name = paas_device_id.split(_SANDBOX_ID_DELIMITER, maxsplit=1)[0]
-        public_port = self._resolve_public_port(deployment_name)
+        deployment_name = paas_device_id
         normalized_path = "/" + path.lstrip("/")
+        if self._arca_utils is not None and _use_incluster_config():
+            target = self._arca_utils._get_arca_target(
+                deployment_name, port=port, template_id=template_id
+            )
+            return WsConnectionInfo(
+                ws_url=self._arca_utils.build_proxypass_url(
+                    target, normalized_path, scheme="ws"
+                ),
+                token=self._arca_utils._get_proxypass_token(
+                    deployment_name, port=port, template_id=template_id, ttl=120
+                ),
+                target=target,
+                expires_at=datetime.now(UTC) + timedelta(seconds=120),
+            )
+        host, svc_port = self._resolve_public_port(deployment_name)
         return WsConnectionInfo(
-            ws_url=f"ws://localhost:{public_port}{normalized_path}",
+            ws_url=f"ws://{host}:{svc_port}{normalized_path}",
             token="",
-            target=f"localhost:{public_port}",
+            target=f"{host}:{svc_port}",
             expires_at=datetime.now(UTC) + timedelta(hours=24),
         )
 
@@ -764,14 +793,18 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         path: str = "/",
         template_id: int | None = None,
     ) -> HttpConnectionInfo:
-        """解析 HTTP 连接信息。"""
-        deployment_name = paas_device_id.split(_SANDBOX_ID_DELIMITER, maxsplit=1)[0]
-        public_port = self._resolve_public_port(deployment_name)
+        """解析 HTTP 连接信息。
+
+        in-cluster 模式下使用 ClusterIP + Service 端口供集群内部访问；
+        out-of-cluster 模式下使用 localhost + NodePort。
+        """
+        deployment_name = paas_device_id
+        host, svc_port = self._resolve_public_port(deployment_name)
         normalized_path = "/" + path.lstrip("/")
         return HttpConnectionInfo(
-            http_url=f"http://localhost:{public_port}{normalized_path}",
+            http_url=f"http://{host}:{svc_port}{normalized_path}",
             token="",
-            target=f"localhost:{public_port}",
+            target=f"{host}:{svc_port}",
         )
 
     def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
@@ -782,3 +815,22 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
             tenant_name,
         )
         return True
+
+
+def local_k8s_plugin_factory(
+    _credentials: ArcaCredentials | None = None,
+    *,
+    arca_utils: ArcaUtils | None = None,
+) -> Callable[[ArcaCredentials], LocalK8sArcaSandboxPlugin]:
+    """Return a callable that builds LocalK8sArcaSandboxPlugin with arca_utils baked in.
+
+    The leading ``_credentials`` arg absorbs any positional argument that
+    dependency_injector may pass when the provider is called with args.
+    In normal flow, Singleton calls this with keyword args only, returning
+    the inner ``_build`` function.
+    """
+
+    def _build(credentials: ArcaCredentials | None = None) -> LocalK8sArcaSandboxPlugin:
+        return LocalK8sArcaSandboxPlugin(credentials=credentials, arca_utils=arca_utils)
+
+    return _build

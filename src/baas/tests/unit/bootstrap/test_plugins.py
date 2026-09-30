@@ -111,6 +111,31 @@ class TestAliyunAckSelector:
         assert plugin is StubArcaSandboxPlugin
 
 
+class TestLocalK8sSelector:
+    """The local_k8s option resolves to a credentials-taking factory."""
+
+    def test_local_k8s_selector_wired(self):
+        from secbaas.community.api.device_manage import ArcaCredentials
+        from secbaas.community.plugins.sandbox.arca.local_k8s import (
+            LocalK8sArcaSandboxPlugin,
+        )
+
+        container = PluginContainer()
+        container.config.from_dict(
+            {"plugins": {"secret": "stub", "sandbox": {"arca": "local_k8s"}}}
+        )
+        creds = ArcaCredentials(
+            template_id=1,
+            template_uuid="u",
+            base_url="http://x",
+            api_key="k",
+        )
+        plugin_factory = container.arca_sandbox_plugin_factory()
+        plugin = plugin_factory(creds)
+        assert isinstance(plugin, LocalK8sArcaSandboxPlugin)
+        assert plugin._credentials is creds
+
+
 class TestRedisCacheSelector:
     """The redis cache option resolves to RedisCachePlugin with stub default."""
 

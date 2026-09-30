@@ -363,6 +363,56 @@ class TestLocalK8sPluginResolve:
 
         assert conn.http_url == "http://localhost:30082/health"
 
+    @patch("kubernetes.client.CoreV1Api")
+    def test_resolve_http_incluster_uses_cluster_ip_and_service_port(
+        self,
+        mock_core_cls,
+        mock_client,
+    ) -> None:
+        """In-cluster backend calls must not use localhost/NodePort.
+
+        The backend pod cannot reach a bot runtime through the host's
+        localhost NodePort, so the connection info must use the runtime
+        Service's ClusterIP and port. Otherwise OpenAPI engine-backed routes
+        surface the transport failure as a generic 502.
+        """
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_KUBECONFIG": "in-cluster",
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=True,
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.cluster_ip = "10.96.42.7"
+            mock_svc.spec.ports = [MagicMock(port=8080, node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_http_connection_info(
+                paas_device_id="tpl-test-abc", port=8080, path="/health"
+            )
+
+        assert conn.http_url == "http://10.96.42.7:8080/health"
+        assert conn.target == "10.96.42.7:8080"
+
 
 class TestImagePullPolicy:
     """Tests for `_image_pull_policy` default behavior based on image tag."""
