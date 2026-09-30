@@ -75,6 +75,11 @@ durable delete without deleting Profile records separately. Profile vector
 cleanup covers both the legacy exact ID (`worker:profile`) and every indexed
 fragment below its prefix (`worker:profile:*`).
 
+Replaceable vector persistence providers follow the versioned
+[Incremental Vector Persistence Contract v1](vector-persistence-contract-v1.md)
+when they expose incremental synchronization. Baseline providers that do not
+implement that optional protocol remain compatible with full index rebuilds.
+
 The composed application exposes the canonical Worker/Profile lifecycle under
 `/v1`: worker creation and lookup, online/offline transitions, profile upsert,
 activation and lookup, and worker deletion. Missing workers use HTTP 404 with

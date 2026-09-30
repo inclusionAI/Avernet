@@ -99,6 +99,24 @@ def test_rebuild_restores_dense_and_text_indexes_from_durable_backend(tmp_path) 
     store.close()
 
 
+def test_text_search_indexes_content_preview_when_full_content_is_missing(
+    tmp_path,
+) -> None:
+    backend = FakePersistenceBackend()
+    store = _store(backend, tmp_path)
+    preview_only = VectorPoint(
+        id="preview-only",
+        vector=[1.0, 0.0, 0.0],
+        payload={"content_preview": "legacy python profile"},
+    )
+    store.upsert([preview_only])
+
+    hits = store.text_search("python", top_k=5)
+
+    assert [hit.id for hit in hits] == ["preview-only"]
+    store.close()
+
+
 def test_text_search_applies_the_same_exact_and_multi_value_filters_as_dense(
     tmp_path,
 ) -> None:

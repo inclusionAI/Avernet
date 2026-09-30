@@ -438,7 +438,12 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
     @staticmethod
     def _searchable_content(payload: dict) -> str:
-        content = payload.get("content") or payload.get("searchable_text") or ""
+        content = (
+            payload.get("content")
+            or payload.get("searchable_text")
+            or payload.get("content_preview")
+            or ""
+        )
         return content if isinstance(content, str) else str(content)
 
     @staticmethod
