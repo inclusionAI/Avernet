@@ -454,6 +454,17 @@ describe('issue and optimization flow', () => {
     expect(screen.getByText('共 21 条，第 2/2 页')).toBeInTheDocument()
   })
 
+  it('loads the selected repair state from the server before paginating it', async () => {
+    repairApi.candidates.mockImplementation((_workflowId: string, query: { state?: string }) => Promise.resolve(query.state === 'pending'
+      ? repairPage({ items: [repairItem('pending-on-later-page', '后续页待处理建议')], total: 1 })
+      : repairPage({ items: [{ ...repairItem('processing-first-page', '首页处理中建议'), state: 'processing' }], total: 21 })))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+
+    expect(await screen.findByText('首页处理中建议')).toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '问题状态' }), 'pending')
+    expect(await screen.findByText('后续页待处理建议')).toBeInTheDocument()
+  })
+
   it('lets users explicitly include historical repair items', async () => {
     repairApi.candidates.mockImplementation((_workflowId: string, query: { includeHistorical?: boolean }) => Promise.resolve(query.includeHistorical
       ? repairPage({ items: [repairItem('historical-item', '历史未复现建议')], includeHistorical: true })
@@ -474,6 +485,18 @@ describe('issue and optimization flow', () => {
     await userEvent.click(await screen.findByText('查看建议与证据'))
     expect(await screen.findByText(/\u5b8c\u6574\u8bc1\u636e\u8f7d\u8377/)).toBeInTheDocument()
     expect(repairApi.item).toHaveBeenCalledWith('wf-1', 'item-1')
+  })
+
+  it('drops repair state immediately when the workflow changes', async () => {
+    repairApi.candidates.mockImplementation((workflowId: string) => workflowId === 'wf-1'
+      ? Promise.resolve(repairPage({ items: [repairItem('old-item', '旧工作流修复项')] }))
+      : new Promise(() => {}))
+    const view = render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    expect(await screen.findByText('旧工作流修复项')).toBeInTheDocument()
+
+    view.rerender(<MemoryRouter><EvolutionTab workflowId="wf-2" section="diagnosis" /></MemoryRouter>)
+    expect(screen.queryByText('旧工作流修复项')).not.toBeInTheDocument()
+    expect(screen.getByText('修复任务与处理状态仍在加载，问题列表可继续查看。')).toBeInTheDocument()
   })
 
   it('creates a Pack draft when no active repair task exists', async () => {

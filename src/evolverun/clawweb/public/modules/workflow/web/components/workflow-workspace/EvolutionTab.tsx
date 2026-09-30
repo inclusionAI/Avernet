@@ -14,7 +14,7 @@ import { aggregateDiagnoses, diffWorkflowPatchOperations, timeValue, type Diagno
 import { groupDiagnoses, useIssueGroups } from './issue-groups'
 import IssueSummary from './IssueSummary'
 import { repairBatches } from '../../api/repair-batches'
-import type { RepairCandidatesResponse, RepairInboxItem } from '../../../server/contracts/repair-workbench'
+import type { RepairCandidatesResponse, RepairInboxFilter, RepairInboxItem } from '../../../server/contracts/repair-workbench'
 import RepairItems from './repair-batch/RepairItems'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import { exclusion, phases, primary, RepairDialog } from './repair-batch/repair-view'
@@ -59,7 +59,7 @@ const SUGGESTION_STATUS: Record<string, { label: string; cls: string }> = {
 
 type SuggestionStatus = EvolveSuggestion['status']
 type ApplyTaskStatus = SuggestionApplyTask['status']
-type IssueState = 'pending' | 'processing' | 'awaiting_verification' | 'verified' | 'no_action' | 'observing'
+type IssueState = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'observing'
 type DisplaySuggestion = Omit<EvolveSuggestion, 'status'> & { status: SuggestionStatus | ApplyTaskStatus }
 
 const ISSUE_STATE_LABELS: Record<IssueState | 'all', string> = {
@@ -67,7 +67,7 @@ const ISSUE_STATE_LABELS: Record<IssueState | 'all', string> = {
   pending: '待处理',
   processing: '处理中',
   awaiting_verification: '待验证',
-  verified: '已验证',
+  closed: '已关闭',
   no_action: '暂不处理',
   observing: '观察中',
 }
@@ -92,7 +92,7 @@ function issueState(status?: SuggestionStatus | ApplyTaskStatus): IssueState {
   if (status === 'pending' || status === 'adopted') return 'pending'
   if (['applying', 'dispatching', 'dispatched', 'running', 'created'].includes(status)) return 'processing'
   if (status === 'applied_unverified') return 'awaiting_verification'
-  if (status === 'verified') return 'verified'
+  if (status === 'verified' || status === 'ineffective') return 'closed'
   if (status === 'rejected' || status === 'benched') return 'no_action'
   return 'observing'
 }
@@ -100,10 +100,15 @@ function issueState(status?: SuggestionStatus | ApplyTaskStatus): IssueState {
 function repairIssueState(item: RepairInboxItem): IssueState {
   if (item.state === 'processing') return 'processing'
   if (item.state === 'awaiting_verification') return 'awaiting_verification'
-  if (item.state === 'verified') return 'verified'
+  if (item.state === 'verified' || item.state === 'ineffective') return 'closed'
   if (item.state === 'no_action') return 'no_action'
   if (item.state === 'pending') return 'pending'
   return 'observing'
+}
+
+function repairInboxFilter(state: IssueState | 'all'): RepairInboxFilter {
+  if (state === 'observing') return 'all'
+  return state
 }
 
 function SuggestionActions({ suggestion, canEdit, onAction }: {
@@ -304,11 +309,12 @@ function DiagnosisPanel({
   const initializedDigest = useRef('')
   const requestId = useRef('')
   const detailRequests = useRef(new Set<string>())
+  const selectedRepairState = repairInboxFilter(stateFilter)
 
   useEffect(() => {
     let current = true
     setRepairLoading(true)
-    repairBatches.candidates(workflowId, { state: 'all', page: repairPage, pageSize: repairPageSize, includeHistorical }).then(result => {
+    repairBatches.candidates(workflowId, { state: selectedRepairState, page: repairPage, pageSize: repairPageSize, includeHistorical }).then(result => {
       if (!current) return
       setRepairData(result)
       setRepairError('')
@@ -321,7 +327,7 @@ function DiagnosisPanel({
       if (current) setRepairError('修复任务与处理状态加载失败；问题与证据仍可查看。')
     }).finally(() => { if (current) setRepairLoading(false) })
     return () => { current = false }
-  }, [workflowId, repairRefresh, repairPage, repairPageSize, includeHistorical])
+  }, [workflowId, repairRefresh, repairPage, repairPageSize, includeHistorical, selectedRepairState])
 
   if (isLoading) return <div className="p-4 text-xs text-slate-500">加载问题与建议...</div>
   if (isError) return <div role="alert" className="p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试</button></div>
@@ -379,7 +385,7 @@ function DiagnosisPanel({
   const pendingCount = repairData?.counts.pending ?? enriched.filter((item) => item.state === 'pending').length
   const processingCount = repairData?.counts.processing ?? enriched.filter((item) => item.state === 'processing').length
   const verifyingCount = repairData?.counts.awaiting_verification ?? enriched.filter((item) => item.state === 'awaiting_verification').length
-  const verifiedCount = repairItems.filter(item => item.state === 'verified').length
+  const closedCount = repairData?.counts.closed ?? enriched.filter((item) => item.state === 'closed').length
   const noActionCount = repairData?.counts.no_action ?? 0
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
   const selectedIssue = enriched.find(({ cluster }) => cluster.signature === selectedSignature)
@@ -487,7 +493,7 @@ function DiagnosisPanel({
             <span><strong className="mr-1 text-sm font-semibold text-amber-700">{pendingCount}</strong>待处理</span>
             <span><strong className="mr-1 text-sm font-semibold text-blue-700">{processingCount}</strong>处理中</span>
             <span><strong className="mr-1 text-sm font-semibold text-blue-700">{verifyingCount}</strong>待验证</span>
-            <span><strong className="mr-1 text-sm font-semibold text-emerald-700">{verifiedCount}</strong>已验证</span>
+            <span><strong className="mr-1 text-sm font-semibold text-emerald-700">{closedCount}</strong>已关闭</span>
             <span><strong className="mr-1 text-sm font-semibold text-slate-600">{noActionCount}</strong>暂不处理</span>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -504,7 +510,12 @@ function DiagnosisPanel({
             <select
               aria-label="问题状态"
               value={stateFilter}
-              onChange={(e) => setStateFilter(e.target.value as IssueState | 'all')}
+              onChange={(e) => {
+                initializedDigest.current = ''
+                setSelectedRepairIds([])
+                setRepairPage(1)
+                setStateFilter(e.target.value as IssueState | 'all')
+              }}
               className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
             >
               {Object.entries(ISSUE_STATE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -659,8 +670,7 @@ function DiagnosisPanel({
       </RepairDialog>}
 
       {selectedTaskId && repairData && <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId}
-        inputDigest={repairData.inputDigest} includeHistorical={repairData.includeHistorical}
-        canEdit={canEdit && repairData.canEdit} onClose={() => setSelectedTaskId('')}
+        includeHistorical={repairData.includeHistorical} canEdit={canEdit && repairData.canEdit} onClose={() => setSelectedTaskId('')}
         onChanged={() => { initializedDigest.current = ''; setRepairRefresh(value => value + 1) }} />}
     </div>
   )
@@ -924,7 +934,7 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
         </div>
       )}
 
-      {tab === 'diagnosis' && <DiagnosisPanel
+      {tab === 'diagnosis' && <DiagnosisPanel key={workflowId}
         workflowId={workflowId}
         runId={runId}
         analysisId={analysisId}
