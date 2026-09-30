@@ -583,6 +583,27 @@ class TestMCPConfigServiceUpdateConfig:
 class TestMCPConfigServiceBuildPayload:
     """Tests for build_mcp_sync_payload."""
 
+    def test_bot_header_overrides_one_name_and_inherits_other_user_names(
+        self, monkeypatch
+    ):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.return_value = {
+            "extra_config": {"headers": {"X-Region": "global", "X-Trace": "on"}}
+        }
+        svc = _service(repo=repo)
+        monkeypatch.setattr(
+            "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
+            lambda _engine: [],
+        )
+
+        _, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1",
+            mcp_data={"serverCode": "mcp.test"},
+            bot_override={"headers": {"x-region": "bot"}},
+        )
+
+        assert headers == {"x-region": "bot", "X-Trace": "on"}
+
     def test_build_payload_with_db_config(self, monkeypatch):
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {
@@ -630,7 +651,7 @@ class TestMCPConfigServiceBuildPayload:
         assert endpoint_env == "PROD"
         assert transport_protocol is None
 
-    def test_bot_override_wins_by_field_and_empty_headers_block_user_headers(
+    def test_empty_bot_headers_inherit_user_headers_and_other_fields_override(
         self, monkeypatch
     ):
         repo = MagicMock()
@@ -660,7 +681,7 @@ class TestMCPConfigServiceBuildPayload:
             bot_override={"headers": {}, "endpoint_env": "PRE"},
         )
 
-        assert headers == {"X-Platform": "1"}
+        assert headers == {"X-Platform": "1", "X-User": "yes"}
         assert endpoint_env == "PRE"
         assert transport == "SSE"
 

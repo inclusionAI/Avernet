@@ -25,6 +25,8 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     McporterComposeError,
 )
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
+from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
     get_current_avernet_tenant,
@@ -297,6 +299,43 @@ def test_mcps_run_collect_then_per_server_merge():
         mcp_cfg.build_mcp_sync_payload.call_args_list[1].kwargs["bot_override"]
         is None
     )
+
+
+@pytest.mark.unit
+def test_whole_artifact_mcps_inherit_user_header_not_overridden_by_bot():
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "mcp.weather"}]
+    detail = {
+        "serverCode": "mcp.weather", "runMode": "REMOTE",
+        "endpoints": [
+            {"env": "PROD", "networkType": "OFFICE", "transportProtocol": "SSE"}
+        ],
+    }
+    svc.mcp_center.get_mcp_detail.return_value = detail
+    user_repo = MagicMock()
+    user_repo.get_by_user_and_server_code.return_value = {
+        "extra_config": {"headers": {"X-Trace": "on", "X-Region": "global"}}
+    }
+    bot_repo = MagicMock()
+    bot_repo.get_by_bot_and_server_code.return_value = {
+        "headers": {"x-region": "bot"}
+    }
+    center = MagicMock()
+    center.get_mcp_detail.return_value = detail
+    config = MCPConfigService(
+        user_mcp_config_repo=user_repo,
+        bot_mcp_config_repo=bot_repo,
+        mcp_center=center,
+        bot_repo=MagicMock(),
+        capability_reader=MagicMock(),
+        mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+        secret_resolver=MagicMock(),
+    )
+
+    inputs = _collector(skill_set_service=svc, mcp_config_service=config).mcps(_req())
+
+    assert len(inputs) == 1
+    assert inputs[0].headers == {"X-Trace": "on", "x-region": "bot"}
 
 
 @pytest.mark.unit

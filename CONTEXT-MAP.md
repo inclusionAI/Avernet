@@ -17,6 +17,7 @@ Read only the sources relevant to the boundary being changed.
 | Area | Read before changing it |
 | --- | --- |
 | Backend | root `AGENTS.md`, the closest local guidance, and the relevant `src/backend/specs/` directory |
+| Backend MCP configuration | [`src/backend/src/agentclaw/community/core/mcp/CONTEXT.md`](src/backend/src/agentclaw/community/core/mcp/CONTEXT.md) and [`docs/adr/0015-merge-user-and-bot-mcp-headers-per-key.md`](docs/adr/0015-merge-user-and-bot-mcp-headers-per-key.md) |
 | BaaS | root `AGENTS.md`, the closest local guidance, and the affected protocol or deployment contract |
 | Engine | root `AGENTS.md`, the closest local guidance, and the relevant runtime-layout contract |
 | BCS | `src/bcs/AGENTS.md`, `src/bcs/CLAUDE.md`, then the closest crate `CONTEXT.md` |

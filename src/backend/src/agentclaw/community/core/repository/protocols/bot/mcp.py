@@ -70,3 +70,22 @@ class BotMCPConfigRepositoryProtocol(Protocol):
     ) -> dict[str, dict[str, Any]]:
         """Return Bot overrides affected by one user-level config update."""
         ...
+
+
+@runtime_checkable
+class ScopedMCPConfigRepositoryProtocol(Protocol):
+    """One transaction replacing user defaults and owned Bot Header maps."""
+
+    @abstractmethod
+    def replace(
+        self,
+        *,
+        user_id: str,
+        server_code: str,
+        headers: dict[str, str],
+        bot_headers: dict[str, dict[str, str]],
+        owned_bot_ids: set[str],
+        endpoint_env: str,
+        transport_protocol: str | None,
+    ) -> None:
+        ...

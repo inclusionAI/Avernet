@@ -900,7 +900,7 @@ Bot 范围的 draft 钉钉渠道配置。每个操作都显式要求 `user_id`�
 的路由/鉴权配置同步到独立维护的 OCB/Sofapy Gateway。Avernet 现有宽泛
 `/openapi/v1/bots/**` 转发与鉴权规则已经覆盖这些路径。
 
-### ✅ totalfrank · P1 —— mcp（6 个端点）· `openapi_v1/mcp/router.py` —— **已实现（PR #610）**
+### ✅ totalfrank · P1 —— mcp（8 个端点）· `openapi_v1/mcp/router.py` —— **已实现**
 市场 + 租户 + 调用者的统一 per-server 配置。6 个端点全部接到内部 MCP 服务，经由从内部
 路由抽取出来的共享 `core/mcp/` 流程（抽取后两套界面回答一致）；用 `caller_owner_id`
 做 owner 作用域，由 Stage 5 守卫做租户作用域。
@@ -912,6 +912,16 @@ Bot 范围的 draft 钉钉渠道配置。每个操作都显式要求 `user_id`�
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | 查询调用者对该服务器的权限 | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 读取调用者的统一服务器配置 | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | 写入配置（下发到设备） | `Envelope[McpConfig]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/config-groups` | 读取 user 默认与本人 Bot 的显式 Header 配置组 | `Envelope[McpScopedConfig]` |
+| PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config-groups` | 原子替换完整 Header 配置组，随后 best-effort 投影 | `Envelope[McpScopedConfig]` |
+
+`config-groups` 写入必须包含 `endpoint_env`（`PROD`/`PRE`）、可为 null 的
+`transport_protocol`（null 表示清除用户协议偏好）及完整的
+`params: [{key, value, bots}]`。`bots: []` 是 user default；指定 Bot 必须归调用者
+所有，未安装该 MCP 也可预存配置。`params: []` 清空 user/Bot 显式 Header，不清除
+API key、Bot URL 或 Bot 自身环境/协议。普通 Center 端点按 Header 名称大小写不敏感地
+合并 user 与 Bot 值，同名 Bot 优先；自定义 Bot URL 不继承 user 凭据。原有
+`/config` 端点保持 user-only 合同。
 
 统一市场搜索还提供 `POST /openapi/v1/bots/market/mcp-servers`。JSON 请求支持老市场
 列表的完整筛选集合：`keyword`、`page_num`、`page_size`、`server_codes`、
