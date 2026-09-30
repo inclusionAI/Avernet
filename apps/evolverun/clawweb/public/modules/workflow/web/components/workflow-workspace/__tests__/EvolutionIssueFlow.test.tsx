@@ -557,6 +557,18 @@ describe('issue and optimization flow', () => {
     expect(repairApi.candidates).toHaveBeenLastCalledWith('wf-1', expect.objectContaining({ includeHistorical: true, page: 1, pageSize: 20 }))
   })
 
+  it('drops the old selection while a changed history scope is loading', async () => {
+    repairApi.candidates.mockResolvedValueOnce(repairPage()).mockImplementationOnce(() => new Promise(() => {}))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+
+    expect(await screen.findByRole('button', { name: '生成 Pack 草稿（1）' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
+
+    expect(screen.queryByRole('button', { name: /生成 Pack 草稿/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '处理任务' })).not.toBeInTheDocument()
+  })
+
   it('loads full evidence only when a repair item is expanded', async () => {
     repairApi.candidates.mockResolvedValueOnce(repairPage())
     repairApi.item.mockResolvedValueOnce({ ...repairItem(), context: { signature: 'timeout:fetch-data', evidencePayload: '完整证据载荷' } })

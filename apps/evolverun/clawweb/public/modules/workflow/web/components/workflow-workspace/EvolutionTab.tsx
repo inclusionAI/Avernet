@@ -431,6 +431,21 @@ function DiagnosisPanel({
     ? current.filter(id => !selectableFilteredIds.includes(id))
     : [...new Set([...current, ...selectableFilteredIds])].slice(0, Math.min(100, repairData?.limits.maxItems ?? 100)))
   const resetRequestId = () => { requestId.current = ''; requestPayloadKey.current = '' }
+  const changeHistoryScope = (next: boolean) => {
+    initializedDigest.current = ''
+    resetRequestId()
+    setRepairData(null)
+    setSelectedRepairIds([])
+    setRepairDetails({})
+    setRepairDetailLoading({})
+    setRepairDetailErrors({})
+    detailRequests.current.clear()
+    setDraftOpen(false)
+    setDisposition(null)
+    setRepairActionError('')
+    setRepairPage(1)
+    setIncludeHistorical(next)
+  }
   const nextRequestId = (payload: unknown) => {
     const payloadKey = JSON.stringify(payload)
     if (!requestId.current || requestPayloadKey.current !== payloadKey) {
@@ -515,8 +530,8 @@ function DiagnosisPanel({
         {!repairData.capabilities.generation && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">{repairData.capabilities.reason || '当前 Host 未接入 AIS 生成能力。问题仍可查看，但不能伪装为已生成或已部署。'}</p>}
         {activeRepairTask && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-800">已有可继续的修复任务，请先在现有任务中审阅、反馈或取消。</p>}
         <label className="mt-3 flex items-center gap-2 text-xs text-slate-600">
-          <input type="checkbox" aria-label="包含历史未复现" checked={includeHistorical}
-            onChange={event => { initializedDigest.current = ''; setRepairPage(1); setIncludeHistorical(event.target.checked) }}
+          <input type="checkbox" aria-label="包含历史未复现" checked={includeHistorical} disabled={repairBusy}
+            onChange={event => changeHistoryScope(event.target.checked)}
             className="h-4 w-4 rounded border-slate-300 text-blue-600" />
           包含历史未复现
         </label>
