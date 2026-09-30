@@ -74,6 +74,36 @@ describe('RepairTaskDialog', () => {
     expect(repairApi.task).toHaveBeenCalledTimes(2)
   })
 
+  it('switches to a newer successful feedback revision after polling', async () => {
+    vi.useFakeTimers()
+    const first = taskDetail('review', '旧候选')
+    const draftingRevision = {
+      ...taskDetail('drafting').latestAttempt,
+      revision: 2,
+      input: { ...taskDetail('drafting').latestAttempt.input, revision: 2, feedback: '请调整' },
+    }
+    const drafting = { ...first, latestAttempt: draftingRevision, revisions: [first.latestAttempt, draftingRevision],
+      execution: { ...taskDetail('drafting').execution!, jobId: 'job-2', executionId: 'exec-2' } }
+    const successfulRevision = {
+      ...draftingRevision,
+      phase: 'review' as const,
+      draft: { candidateCommit: 'e'.repeat(40), summary: '新候选' },
+      checks: {}, candidateDigest: '3'.repeat(64), checksDigest: '4'.repeat(64),
+    }
+    const completed = { ...drafting, latestAttempt: successfulRevision, latestSuccessful: successfulRevision,
+      revisions: [first.latestAttempt, successfulRevision], execution: { ...first.execution!, jobId: 'job-2', executionId: 'exec-2' } }
+    repairApi.task.mockResolvedValueOnce(drafting).mockResolvedValueOnce(completed)
+
+    render(<RepairTaskDialog workflowId="wf-1" taskId="FIX-1" includeHistorical={false}
+      canEdit onClose={() => {}} onChanged={() => {}} />)
+    await act(async () => {})
+    expect(screen.getByText('旧候选')).toBeInTheDocument()
+
+    await act(async () => { await vi.runOnlyPendingTimersAsync() })
+    expect(screen.getByText('新候选')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '查看修复版本' })).toHaveValue('2')
+  })
+
   it('keeps polling an active task after a transient read failure', async () => {
     vi.useFakeTimers()
     repairApi.task.mockResolvedValueOnce(taskDetail('drafting'))

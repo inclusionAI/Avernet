@@ -160,7 +160,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   return <RepairDialog title="修复任务详情" busy={busy} onClose={onClose}>
     {loading && <p role="status" className="text-xs text-slate-500">加载修复任务…</p>}
     {error && <p role="alert" className="text-xs text-red-600">任务读取失败：{error}</p>}
-    {detail && <RepairTaskPanel detail={detail} canEdit={canEdit} busy={busy} dispatchError={dispatchError}
+    {detail && <RepairTaskPanel key={`${detail.taskId}:${detail.latestSuccessful?.revision ?? detail.latestAttempt.revision}`}
+      detail={detail} canEdit={canEdit} busy={busy} dispatchError={dispatchError}
       onFeedback={() => {
         requestId.current = ''
         requestPayloadKey.current = ''

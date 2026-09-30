@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  useEvolveLessons,
   useEvolveSuggestions,
   useRecordSuggestionAction,
-  useEligibleBotsForSuggestion,
-  useApplySuggestionsBatch,
   useSuggestionApplyTasks,
   useWorkflowAccess,
   useRunEvolutionAnalysis,
@@ -21,6 +18,8 @@ import RepairItems from './repair-batch/RepairItems'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import { exclusion, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import Pagination from '../Pagination'
+import ApplySuggestionModal from './ApplySuggestionModal'
+import RemediesPanel, { REMEDY_KIND } from './RemediesPanel'
 
 export type EvoTab = 'diagnosis' | 'remedies'
 
@@ -28,24 +27,6 @@ const EVO_TABS: { key: EvoTab; label: string }[] = [
   { key: 'diagnosis', label: '问题与优化' },
   { key: 'remedies', label: '可复用经验' },
 ]
-
-const REMEDY_STATUS: Record<string, { label: string; cls: string }> = {
-  draft: { label: '草稿', cls: 'bg-gray-100 text-gray-600' },
-  verified: { label: '已验证', cls: 'bg-blue-50 text-blue-700' },
-  published: { label: '已上线', cls: 'bg-emerald-50 text-emerald-700' },
-  retired: { label: '已失效', cls: 'bg-gray-100 text-gray-400' },
-}
-
-const REMEDY_KIND: Record<string, string> = {
-  kb_hint: '提示',
-  prompt_patch: '提示词补丁',
-  arg_template_fix: '参数模板修正',
-  node_patch: '节点结构补丁',
-  alert: '告警',
-  'adjust-timeout': '超时调整',
-  'retry-as-is': '直接重试',
-  'skip-retry': '跳过重试',
-}
 
 const SUGGESTION_STATUS: Record<string, { label: string; cls: string }> = {
   pending: { label: '待应用', cls: 'bg-gray-100 text-gray-600' },
@@ -748,65 +729,6 @@ function DiagnosisPanel({
 }
 
 
-function RemediesPanel({ workflowId }: { workflowId: string }) {
-  const { data, isLoading } = useEvolveLessons({ workflowId, limit: 100 })
-  const lessons = data?.lessons ?? []
-
-  if (isLoading) return <div className="p-4 text-xs text-gray-500">加载经验库...</div>
-
-  return (
-    <div className="space-y-3">
-      <div>
-        <p className="text-xs text-slate-500">经验是经过复用边界审核的知识，不由建议应用自动生成。</p>
-      </div>
-
-      {lessons.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-lg text-slate-500">◇</div>
-          <h4 className="mt-3 text-sm font-medium text-slate-900">还没有可复用经验</h4>
-          <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-slate-500">
-            当同类问题多次出现、修复边界明确且效果经过人工审核后，才适合沉淀为经验。
-          </p>
-          <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] text-slate-500">
-            <span className="rounded-full bg-slate-100 px-2.5 py-1">多次命中</span>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1">边界明确</span>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1">人工审核</span>
-          </div>
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          {lessons.map((r) => (
-            <div key={r.lesson_id} className="flex items-start justify-between gap-5 px-4 py-3.5">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-slate-900">{REMEDY_KIND[r.fix_kind] ?? r.fix_kind}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${REMEDY_STATUS[r.status]?.cls ?? REMEDY_STATUS.draft.cls}`}>{REMEDY_STATUS[r.status]?.label ?? r.status}</span>
-                  <span className="text-[11px] text-slate-400">{r.workflow_id === workflowId ? '当前工作流' : '全局经验'}</span>
-                </div>
-                <p className="mt-1.5 truncate font-mono text-[11px] text-slate-500" title={r.failure_signature}>{r.failure_signature}</p>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  {r.source === 'retry_healing' ? '自愈重试' : r.source === 'manual' ? '手动录入' : r.source === 'evolve_optimize' ? '进化优化' : '日志分析'}
-                  {' · '}{String(r.gmt_create).slice(0, 10)}{' · '}{r.lesson_id}
-                </p>
-              </div>
-              <div className="grid shrink-0 grid-cols-2 gap-5 text-right">
-                <div>
-                  <p className="text-sm font-semibold tabular-nums text-slate-900">{r.hit_count} / {r.rescued_count}</p>
-                  <p className="text-[10px] text-slate-400">命中 / 救回</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold tabular-nums text-slate-900">{r.hit_count > 0 ? `${Math.round((r.successRate ?? 0) * 100)}%` : '—'}</p>
-                  <p className="text-[10px] text-slate-400">成功率</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function formatElapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
   if (seconds < 60) return `${seconds}秒`
@@ -884,85 +806,6 @@ function ApplyTaskStatusBadge({ task }: { task: SuggestionApplyTask | undefined 
       </div>
     </div>
   )
-}
-
-type ApplySuggestionModalProps = {
-  suggestions: EvolveSuggestion[]
-  previousTask?: SuggestionApplyTask
-  onClose: () => void
-  onApplied: (suggestionIds: string[]) => void
-}
-
-export function ApplySuggestionModal({ suggestions, previousTask, onClose, onApplied }: ApplySuggestionModalProps) {
-  const suggestionIds = suggestions.map((suggestion) => suggestion.id)
-  const firstId = suggestionIds[0]
-  const { data, isLoading, error } = useEligibleBotsForSuggestion(firstId, suggestionIds.length > 0)
-  const [selectedBotId, setSelectedBotId] = useState('')
-  const [notice, setNotice] = useState<string | null>(null)
-  const [isApplying, setIsApplying] = useState(false)
-  const defaultSpec = useMemo(() => suggestions.map((suggestion) => suggestion.description).join('\n'), [suggestions])
-  const [applicationSpec, setApplicationSpec] = useState(previousTask?.applicationSpec?.trim() || defaultSpec)
-  const applyMutation = useApplySuggestionsBatch()
-  const bots = useMemo(() => data?.bots ?? [], [data?.bots])
-  const effectiveSelectedBotId = selectedBotId || (
-    previousTask?.botId && bots.some((bot) => bot.botId === previousTask.botId) ? previousTask.botId : ''
-  )
-  const selectedBot = bots.find((bot) => bot.botId === effectiveSelectedBotId)
-  const isBulk = suggestionIds.length > 1
-  const isRetry = suggestions.some((suggestion) => suggestion.status === 'failed')
-
-  const handleApply = async () => {
-    const spec = applicationSpec.trim()
-    if (!suggestionIds.length || !effectiveSelectedBotId || !spec) return
-    setIsApplying(true)
-    try {
-      await applyMutation.mutateAsync({ suggestionIds, botId: effectiveSelectedBotId,
-        botEnv: selectedBot?.env ?? undefined, applicationSpec: spec })
-      setNotice(`已派发 1 个任务处理 ${suggestionIds.length} 条建议；应用完成后仍需自然流量或人工验证效果`)
-      onApplied(suggestionIds)
-    } catch (err) {
-      setNotice(`应用任务派发失败：${err instanceof Error ? err.message : String(err)}`)
-    }
-    setIsApplying(false)
-  }
-
-  if (!suggestionIds.length) return null
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-    <div role="dialog" aria-modal="true" aria-labelledby="apply-suggestion-modal-title"
-      className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
-      onClick={(event) => event.stopPropagation()}>
-      <div data-testid="apply-suggestion-modal-body" className="min-h-0 flex-1 overflow-y-auto p-5 pb-4">
-        <h3 id="apply-suggestion-modal-title" className="mb-3 text-sm font-semibold text-gray-900">
-          {isBulk ? `批量应用 ${suggestionIds.length} 条建议` : '选择 Bot 自动应用建议'}
-        </h3>
-        <p className="mb-3 text-xs text-amber-700">选择一个具有编辑权限的 Bot。Bot 会读取完整配置，结合建议安全修改并部署；应用完成后仍需验证实际效果。</p>
-        {notice && <div className="mb-3 rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700">{notice}</div>}
-        {isLoading && <div className="py-4 text-xs text-gray-500">加载可应用 Bot 中...</div>}
-        {!isLoading && error && <div className="py-3 text-xs text-red-600">加载失败：{error instanceof Error ? error.message : String(error)}</div>}
-        {!isLoading && bots.length === 0 && <div className="py-3 text-xs text-gray-500">没有可用的 Bot 对该 workflow 拥有编辑权限。请先在权限管理中授予 Bot 的 can_edit 权限。</div>}
-        {!isLoading && bots.length > 0 && <div className="mb-4 space-y-2">{bots.map((bot) => <label key={bot.botId}
-          className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 p-2 hover:bg-gray-50">
-          <input type="radio" name="apply-bot" value={bot.botId} checked={effectiveSelectedBotId === bot.botId}
-            onChange={() => setSelectedBotId(bot.botId)} className="text-blue-600" />
-          <span className="text-xs"><span className="block font-medium text-gray-900">{bot.botName ?? bot.botId}</span>
-            <span className="block text-gray-500">{bot.botId}{bot.env ? ` · ${bot.env}` : ''}</span></span>
-        </label>)}</div>}
-        <label className="mb-4 block text-xs font-medium text-slate-700">本次修复要求
-          <textarea aria-label="本次修复要求" value={applicationSpec} maxLength={20_000}
-            onChange={(event) => setApplicationSpec(event.target.value)} rows={6}
-            className="mt-1.5 w-full resize-y rounded-lg border border-slate-200 px-3 py-2 text-xs leading-5 text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100" />
-          <span className="mt-1 block text-[10px] font-normal text-slate-400">只影响本次应用任务，不会修改原始分析和建议。</span>
-        </label>
-      </div>
-      <div data-testid="apply-suggestion-modal-footer" className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-white px-5 py-4">
-        <button onClick={onClose} className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">取消</button>
-        <button onClick={() => void handleApply()} disabled={!effectiveSelectedBotId || !applicationSpec.trim() || isApplying}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60">
-          {isApplying ? '派发中...' : (isBulk ? `确认应用 ${suggestionIds.length} 条` : isRetry ? '重新应用' : '确认应用')}
-        </button>
-      </div>
-    </div>
-  </div>
 }
 
 interface EvolutionTabProps {
