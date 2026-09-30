@@ -1,6 +1,6 @@
 # Evolvetrace Runtime Image for ACK / Aliyun Deployment
 #
-# Build context: repository root (selectively copies only src/evolverun/evolvetrace).
+# Build context: repository root (selectively copies only apps/evolverun/evolvetrace).
 # This keeps internal modules and secrets out of the evolvetrace image.
 #
 # Usage from repo root:
@@ -23,11 +23,11 @@ ENV npm_config_registry=${NPM_CONFIG_REGISTRY} \
 WORKDIR /build
 
 # Copy package metadata first for layer caching.
-COPY src/evolverun/evolvetrace/package.json src/evolverun/evolvetrace/package-lock.json ./
+COPY apps/evolverun/evolvetrace/package.json apps/evolverun/evolvetrace/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 # Copy source and build both frontend and server.
-COPY src/evolverun/evolvetrace/ ./
+COPY apps/evolverun/evolvetrace/ ./
 RUN npm run build && npm run build:server \
     && npm prune --omit=dev
 

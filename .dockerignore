@@ -49,7 +49,7 @@ dist-webview
 .uv
 
 # Local dev state
-scripts/.dependencies
+singlebox/.dependencies
 /logs
 data
 tmp
@@ -67,4 +67,4 @@ temp
 .night-kit
 
 # Vendored internal-registry tarballs — MUST NOT leak to image
-src/bcs/bcs_single_pre_dir
+apps/bcs/bcs_single_pre_dir

@@ -9,10 +9,10 @@
 
 - Avernet HEAD `105257bbeaa8a85aab65ed1f41201be77649dd3c` 包含执行身份服务、
   持久化模型、SQL 和运维接口。
-- `src/backend/src/agentclaw/community/core/execution_identity/service.py`：
+- `apps/backend/src/agentclaw/community/core/execution_identity/service.py`：
   仅服务 Bot 可重签；保持 owner 不变；先保存 PENDING，调用重签，查询 token
   并核对执行工号，运行实例更新成功后才激活身份。
-- `src/backend/src/agentclaw/community/core/bot_management/services/bot_service.py`
+- `apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py`
   的 token 热更新涵盖草稿、线上、验证及 ACTIVE caller binding，并聚合失败。
 - OCB HEAD `565f45f28a` 的企业 Passport 插件已有 `reissueAgentCredentials`
   序列化及 `entityId` / `executionWorkno` 支持。
@@ -22,9 +22,9 @@
 
 ## 明确的组合缺口
 
-OCB 当前提交记录的 `ocb-public` gitlink 和本地子仓库 HEAD 均为
+OCB 当前提交记录的 `submodules/avernet` gitlink 和本地子仓库 HEAD 均为
 `49b808f2bd4bf36c8fb95325a7895c9ebe280b01`，未包含上述执行身份改造。
-OCB `Dockerfile.backend` 从 `ocb-public/src/backend/src/agentclaw/community`
+OCB `Dockerfile.backend` 从 `submodules/avernet/apps/backend/src/agentclaw/community`
 复制公共后端，不会读取旁边独立的 Avernet 工作目录。
 
 因此，独立 Avernet 中的运维接口、身份服务、持久化及新 Passport 契约，

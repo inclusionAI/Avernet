@@ -72,19 +72,19 @@ jobs:
           # Diff base against the working tree so PR-merge-commit checkouts
           # still report all PR-introduced changes (same reasoning as the unit
           # job: "<base>...HEAD" collapses on a merge commit). Run the job when
-          # either src/bcs OR this workflow file itself changed — the latter so
+          # either apps/bcs OR this workflow file itself changed — the latter so
           # changes to the e2e job are exercised, not silently skipped.
-          mapfile -t bcs_files < <(git diff --name-only "${BCS_BASE_REF}" -- src/bcs || true)
+          mapfile -t bcs_files < <(git diff --name-only "${BCS_BASE_REF}" -- apps/bcs || true)
           mapfile -t wf_files < <(git diff --name-only "${BCS_BASE_REF}" -- .github/workflows/e2e-tests.yml || true)
           n_bcs=${#bcs_files[@]}
           n_wf=${#wf_files[@]}
           echo "bcs-changed-files-count=${n_bcs}" >> "$GITHUB_OUTPUT"
           if [ "$n_bcs" -eq 0 ] && [ "$n_wf" -eq 0 ]; then
             echo "skip-bcs=true" >> "$GITHUB_OUTPUT"
-            echo "No changes under src/bcs or the e2e workflow file vs ${BCS_BASE_REF}; skipping BCS e2e."
+            echo "No changes under apps/bcs or the e2e workflow file vs ${BCS_BASE_REF}; skipping BCS e2e."
           else
             echo "skip-bcs=false" >> "$GITHUB_OUTPUT"
-            echo "Detected ${n_bcs} src/bcs + ${n_wf} e2e-workflow file(s) changed vs ${BCS_BASE_REF}; running e2e."
+            echo "Detected ${n_bcs} apps/bcs + ${n_wf} e2e-workflow file(s) changed vs ${BCS_BASE_REF}; running e2e."
           fi
 
       - name: Install system dependencies
@@ -134,7 +134,7 @@ jobs:
         with:
           node-version: 22
           # No `cache: npm` here: the BCN plugin build uses `npm install`
-          # (not `npm ci`) under src/bcs/crates/plugins/openclaw-channel-bcn,
+          # (not `npm ci`) under apps/bcs/crates/plugins/openclaw-channel-bcn,
           # which has no committed package-lock.json for setup-node to key on.
           # The BCN deps are small, so the npm fetch is tolerable.
 
@@ -150,7 +150,7 @@ jobs:
         if: steps.changes.outputs.skip-bcs != 'true'
         uses: actions/cache@v4
         with:
-          # Cache only the registry/git fetch — NOT src/bcs/target. The
+          # Cache only the registry/git fetch — NOT apps/bcs/target. The
           # instrumented coverage build lives under target/cov-e2e/llvm-cov-target
           # (a separate CARGO_TARGET_DIR) and --force-rebuild rebuilds it fresh
           # every run so coverage always reflects the pushed source. Caching the
@@ -158,7 +158,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('src/bcs/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-e2e-${{ hashFiles('apps/bcs/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-e2e-
             ${{ runner.os }}-cargo-
@@ -180,7 +180,7 @@ jobs:
         # measured coverage is correct. Exits non-zero on ANY e2e failure OR
         # e2e line-coverage <40%, method coverage <36%, HTTP endpoint coverage
         # below 100%, or CLI command coverage below 100%.
-        run: bash src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild
+        run: bash apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild
 
       - name: Stop stack (best-effort cleanup)
         if: always() && steps.changes.outputs.skip-bcs != 'true'
@@ -190,7 +190,7 @@ jobs:
         # not interesting.
         continue-on-error: true
         run: |
-          ./scripts/singlebox.sh --standalone stop bcs_bots bcsfuse || true
+          ./singlebox/singlebox.sh --standalone stop bcs_bots bcsfuse || true
 
       - name: Upload e2e coverage artifacts
         if: always() && steps.changes.outputs.skip-bcs != 'true'
@@ -198,10 +198,10 @@ jobs:
         with:
           name: bcs-e2e-coverage
           path: |
-            src/bcs/target/cov-e2e/cobertura.xml
-            src/bcs/target/cov-e2e/coverage.txt
-            src/bcs/target/cov-e2e/summary.json
-            src/bcs/target/cov-e2e/endpoint_coverage.txt
-            src/bcs/target/cov-e2e/endpoint_coverage.xml
-            src/bcs/target/cov-e2e/cli_command_coverage.txt
+            apps/bcs/target/cov-e2e/cobertura.xml
+            apps/bcs/target/cov-e2e/coverage.txt
+            apps/bcs/target/cov-e2e/summary.json
+            apps/bcs/target/cov-e2e/endpoint_coverage.txt
+            apps/bcs/target/cov-e2e/endpoint_coverage.xml
+            apps/bcs/target/cov-e2e/cli_command_coverage.txt
           if-no-files-found: ignore

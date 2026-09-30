@@ -698,7 +698,7 @@ Add this shell contract to `test_singlebox_service_guards.sh` and invoke it at t
 ```bash
 test_backend_separates_profile_env_and_workspace_folder() {
   local start_body
-  start_body="$(sed -n '/^backend_start()/,/^backend_wait_until_ready()/p' "${ROOT}/scripts/modules/backend.sh")"
+  start_body="$(sed -n '/^backend_start()/,/^backend_wait_until_ready()/p' "${ROOT}/singlebox/modules/backend.sh")"
 
   grep -F 'SERVER_ENV=dev DEPLOY_PROFILE=singlebox' <<<"$start_body" >/dev/null || \
     fail "singlebox backend should launch with SERVER_ENV=dev and DEPLOY_PROFILE=singlebox"
@@ -983,10 +983,10 @@ Expected: every script prints `PASS` and exits 0.
 Run:
 
 ```bash
-SINGLEBOX_MODEL_CONFIG_MODE=mock ./scripts/singlebox.sh stop all || true
-SINGLEBOX_MODEL_CONFIG_MODE=mock ./scripts/singlebox.sh setup all
-SINGLEBOX_MODEL_CONFIG_MODE=mock ./scripts/singlebox.sh start all
-./scripts/singlebox.sh status all
+SINGLEBOX_MODEL_CONFIG_MODE=mock ./singlebox/singlebox.sh stop all || true
+SINGLEBOX_MODEL_CONFIG_MODE=mock ./singlebox/singlebox.sh setup all
+SINGLEBOX_MODEL_CONFIG_MODE=mock ./singlebox/singlebox.sh start all
+./singlebox/singlebox.sh status all
 ```
 
 Expected: Backend, BAAS, BCS, bots, demo bot, and Frontend remain running after the start command returns.
@@ -1051,8 +1051,8 @@ Expected: the command starts the real stack, runs Backend/BAAS E2E entrypoints, 
 Run:
 
 ```bash
-./scripts/singlebox.sh status baas
-./scripts/singlebox.sh status bcs
+./singlebox/singlebox.sh status baas
+./singlebox/singlebox.sh status bcs
 rg -n "WORKSPACE_ENV_FOLDER.*aidesktop_singlebox" \
   scripts/modules/backend.sh \
   src/baas/packages/community/scripts/app.sh
@@ -1079,7 +1079,7 @@ Expected: corp_test still gets test HTTP clients, never `SingleboxAccessModule`,
 Run:
 
 ```bash
-./scripts/singlebox.sh stop all
+./singlebox/singlebox.sh stop all
 git status --short
 git diff --check
 git log --oneline --decorate -5

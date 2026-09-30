@@ -1,0 +1,326 @@
+# Community deploy-profile configuration — the community OVERLAY.
+#
+# Loaded as the overlay ON TOP OF the neutral ``application.yaml`` base when
+# DEPLOY_PROFILE=community (see core/config/yaml_provider.py). The base is now
+# corp-free (every corp-specific block lives only in the corp env overlays), so
+# merging it is safe — it contributes neutral structural defaults and empty
+# placeholders for corp blocks the community never reads. Keep every value here
+# vendor-neutral: no company endpoints, no secret-store references, no
+# company-internal identifiers (enforced by the shipped-surface guard test).
+#
+# Anything a community operator must set per-deployment (DB URL, Redis, S3,
+# secrets) comes from environment variables where noted; this file carries only
+# safe, non-secret defaults.
+app_name: "agentclaw"
+
+user_config:
+  # ── Neutral application policy ────────────────────────────────────────────
+
+  # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral
+  # local paths; a community host can point these anywhere it mounts bot files.
+  workspace:
+    openclaw_root: "./data/workspace/openclaw"
+    claude_code_root: "./data/workspace/claude_code"
+    aicoding_root: "./data/workspace/aicoding"
+    hermes_root: "./data/workspace/hermes"
+
+  # Operator whitelist gating admin endpoints. Empty = no privileged operators
+  # by default; a community deployment lists its own admin subject ids.
+  whitelist:
+    operator_names: []
+
+  # Browser CORS allow-list. Inherits the neutral base (localhost origins) so a
+  # local dev UI works out of the box.
+  # TODO(community): add your deployed frontend origin(s) here so browsers there
+  # can call the API — allow_credentials=True forbids a "*" wildcard, e.g.:
+  #   cors:
+  #     allow_origins:
+  #       - "https://your-frontend.example.com"
+
+  # Skill scan — community build has no scanner SDK, so disable it.
+  skill_scan:
+    enabled: false
+
+  # Community has no corp git skills repo, so disable skill sync entirely.
+  git_sync:
+    enable_skill_sync: false
+
+  # Per-owner device allocation policy (neutral knobs only).
+  device_allocation:
+    mode: "multi"
+    max_devices_per_entity: 5
+
+  # OSS↔NAS migration mount roots (host-side paths, deployment-neutral).
+  # NOTE: the OssToNasConfig provider reads these as FLAT user_config keys
+  # (not nested) — keep them top-level.
+  oss_mount_root: "./data/oss"
+  nas_mount_root: "./data/nas"
+
+  # Bot-data object-store location embedded in the composed bot config artifact.
+  # Object-storage CREDENTIALS are not here — they come from the active
+  # SecretResolver / AWS env chain (see the object_storage block below).
+  bot_oss_config:
+    endpoint: ""
+    bucket_name: "agentclaw"
+
+  # Outbound HTTP transport policy for the HttpClient plugins.
+  # Omit the whole block to take the defaults shown below.
+  # http_client:
+  #   # Shared defaults — apply to every binding that has no override.
+  #   max_connections: 100            # hard ceiling on open connections, PER
+  #                                   # BINDING and pool-wide (not per origin).
+  #                                   # Past it a request waits, then fails with
+  #                                   # HttpClientTimeoutError (httpx.PoolTimeout).
+  #   max_keepalive_connections: 20   # how many of those stay open once idle
+  #   keepalive_expiry: 5.0           # seconds an idle connection is kept. Keep
+  #                                   # BELOW the upstream's own idle timeout, or
+  #                                   # a connection it already closed surfaces as
+  #                                   # RemoteProtocolError on the next request.
+  #   http2: false                    # negotiated via TLS ALPN only: engages on
+  #                                   # https:// upstreams offering h2, and stays
+  #                                   # on HTTP/1.1 for http:// ones (there is no
+  #                                   # cleartext h2c upgrade).
+  #
+  #   # Optional per-binding overrides. Valid keys are exactly the four
+  #   # HttpClient qualifiers: baas, bcn, general, masa_agent_eval. An override
+  #   # names only the keys it changes and inherits the rest from the defaults
+  #   # above. An unrecognised key FAILS STARTUP, naming the typo and the
+  #   # valid set: it cannot be honoured by any binding, so accepting it would
+  #   # mean the ceiling you set silently never applied. The per-binding
+  #   # "HttpClient[<qualifier>]: ..." boot log line shows what resolved.
+  #   overrides:
+  #     baas:
+  #       http2: true                 # single origin, plain request/response —
+  #                                   # the safest binding to enable h2 on first
+  #     general:
+  #       max_connections: 200        # base_url="" — this one pool is shared
+  #                                   # across the agentclaw proxy, LLM endpoints
+  #                                   # and container IPs, and its SSE streams
+  #                                   # each hold a slot for the whole response
+
+  # Device backend (BaaS) the community runtime talks to. The container runtime
+  # itself is owned/operated separately; point api_base_url at that backend.
+  # tenant/template are neutral placeholders — set per deployment.
+  baas:
+    api_base_url: "${BASS_URL:-}"
+    tenant: "${BAAS_TENANT:-}"
+    template_uuid: "${BAAS_TEMPLATE_ID:-}"
+    # ACK/ECI deployment — run the open-source engine image on managed
+    # Kubernetes via AckDeployConfigComposer, not the managed bot image.
+    deploy_runtime: "ack"
+
+  # Bot-discovery backend URL (empty = discovery inert).
+  bcsfuse:
+    base_url: "${BCS_FUSE_URL:-}"
+
+  # ECB downstream-sync URL (empty = the ECB sync leg is inert).
+  ecb:
+    base_url: "${ECB_URL:-}"
+
+  # Public API gateway host, published to tenants by the connection endpoint
+  # (empty = this deployment fronts no gateway, so that endpoint reports so).
+  gateway:
+    base_url: "${GATEWAY_URL:-}"
+
+  # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
+  dormant:
+    dry_run: true
+
+  # task_queue_worker: enabled at the base (application.yaml) so the publish flow
+  # runs its durable stage tasks; community inherits that (no override here).
+
+  # Desktop-bot periodic scan: off by default (safe — no background mutation).
+  desktop_bot_periodic_scan:
+    enabled: false
+    apply_owner_whitelist: []
+    global_dry_run: false
+
+  # ── Community infrastructure plugin config (B3/B4) ────────────────────────
+
+  # BCS unified-auth delegation — consumed by the community OidcAuthPlugin
+  # (class name retained; it no longer verifies OIDC JWTs locally). The plugin
+  # forwards inbound cookies to BCS ``GET {base_url}{user_path}`` and maps the
+  # returned user. ``operator_subjects`` lists the BCS user_ids allowed through
+  # require_operator. Omit this block entirely to accept code defaults.
+  #
+  # Prerequisite: BCS must have OAuth configured ([auth.oauth] with jwt_secret,
+  # a valid base_url, and >=1 provider); otherwise /auth/user returns 404.
+  bcs:
+    base_url: "${BCS_URL:-}"
+    user_path: "/auth/user"
+    timeout: 10
+    operator_subjects: []
+
+  # Relational store — consumed by the community CommunityDatabase.
+  #
+  # The community profile IS the deployed configuration, and that deployment runs
+  # on Aliyun against OceanBase — so this block names a real managed store rather
+  # than a local convenience default.
+  #
+  # `backend` selects the store and drives engine setup (pooling, pragmas):
+  # "mysql" covers OceanBase, which speaks the MySQL wire protocol in MySQL mode
+  # — the same target `apps/gateway/migrations/mysql/` is written against. "sqlite"
+  # and "postgresql" are also accepted. `url` must name the same store; the
+  # provider rejects a mismatch at boot rather than falling back silently.
+  #
+  # `url` has NO inline default on purpose. DATABASE_URL is deployment-supplied
+  # (a k8s Secret), and strict expansion makes a missing one fail the boot
+  # loudly instead of quietly writing production traffic somewhere else:
+  #   DATABASE_URL=mysql+pymysql://user:pass@ob-host:3306/agentclaw?charset=utf8mb4
+  # Anything that merely loads this overlay without deploying — the OSS boot
+  # self-test, the OpenAPI dump — must therefore supply a DSN too; no connection
+  # is opened by config resolution alone.
+  #
+  # `create_schema: true` lets the app emit its own DDL at boot — a container
+  # deployment has nobody to run CREATE TABLE between `kubectl apply` and the
+  # first request. Set it false if you provision the schema out of band or run
+  # migrations yourself.
+  database:
+    backend: "mysql"
+    url: "${DATABASE_URL}"
+    create_schema: false
+
+  # Cache + distributed lock — consumed by the community CommunityCache.
+  # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX
+  # lock). Leave empty for the in-process fallback (single-process only — an
+  # in-process lock is unsafe across workers). The REDIS_URL env var, if set,
+  # takes precedence.
+  cache:
+    redis_url: "${REDIS_URL:-}"
+
+  # Object storage — consumed by the community object-storage impls.
+  # backend = "fs" (local filesystem under fs_root, the zero-dependency default)
+  # or "s3" (S3-compatible: MinIO / AWS S3 / R2 / the Aliyun-OSS S3 endpoint).
+  # S3 credentials come from the standard AWS env chain
+  # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) — never put them here.
+  object_storage:
+    backend: "fs"
+    fs_root: "./data/objstore"
+    s3:
+      endpoint: ""        # e.g. "http://localhost:9000" for MinIO; empty = AWS default
+      bucket: ""
+      region: "us-east-1"
+      secure: true
+
+  # Secret resolution — consumed by the community CommunitySecretResolver.
+  # get_secret(name) reads "{env_prefix}{NAME}_USER" / "{env_prefix}{NAME}_VALUE"
+  # from the environment (NAME upper-cased, '-' → '_').
+  secret:
+    env_prefix: ""
+
+  # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
+  # the dormant-token feature uses a local fallback and git-sync degrades to its
+  # on-disk source when no repo-URL secret name is configured.
+  # TODO(community): if you provision these secrets, register their names here.
+  # A registered name is the BARE key, with no env prefix: CommunitySecretResolver
+  # uppercases it and prepends `secret.env_prefix` itself, so a name already
+  # spelled "AGENTCLAW_SECRET_..." would be looked up as
+  # AGENTCLAW_SECRET_AGENTCLAW_SECRET_..._VALUE and never resolve.
+  #
+  #   secret_names:
+  #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     skill_center_internal_token: "skill_center_internal_token"  # gates /api/internal/skill-center/*
+  #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
+  #
+  # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
+  #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_SKILL_CENTER_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
+  #
+  # The gateway principal signing key needs NO entry here — its name already
+  # defaults in SecretNamesConfig, so a community deployment only exports the
+  # value:
+  #     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE
+  #
+  # That is the HMAC secret the gateway signs the X-Avernet-Principal token
+  # with, so it must match what the gateway resolves for its own
+  # principal_signer.secret_name (since #673 the gateway goes through a
+  # SecretResolver too; its community flavor reads
+  # AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE). The two registries are separate
+  # — only the value has to agree.
+  #
+  # Leaving it unset does NOT fail the same way everywhere:
+  #   SERVER_ENV=pre|prod  -> the process REFUSES TO BOOT. app.py passes
+  #                           strict=True, so init_principal_verifier_config
+  #                           raises and no request is ever served. A missed
+  #                           rollout step fails visibly instead of shipping a
+  #                           surface that 401s while reporting healthy.
+  #   anything else (dev)  -> the process boots and answers 401 on every
+  #                           /openapi/v1 request.
+
+  # MCP catalog — consumed by the community CommunityMCPCenter.
+  # Optional path to a local MCP-server catalog file (same shape as
+  # configs/local-mcp-servers.yaml). Empty = no marketplace catalog; bring-your-own
+  # MCP servers (configured per user) still work, and permission is allow-all.
+  mcp:
+    registry_config_path: ""
+
+  # Outbound-header egress rules — consumed by the community
+  # CommunityOutboundRuleProvider. Each entry maps to one HeaderOperationRule
+  # applied to a bot's egress traffic. An empty header_rules list (the default)
+  # means no egress mutation. Set per-deployment to inject auth headers or route
+  # to internal gateways.
+  #
+  # Example:
+  #   outbound_rules:
+  #     header_rules:
+  #       - domains: ["*.example.com"]
+  #         action: "set"            # "set" or "replace"
+  #         header_name: "X-Custom-Header"
+  #         value: "my-value"
+  #         # placeholder: "old"     # only for "replace": substring replaced by value
+  #         # separator: "; "        # only for "replace": join separator
+  outbound_rules:
+    header_rules:
+      - domains: ["${MODEL_API:-}"]
+        action: "replace"
+        header_name: "Authorization"
+        value: "${MODEL_KEY:-}"
+        placeholder: "${API-KEY}"
+
+  # Harness-internal OpenAI-compatible LLM utility. Empty endpoint/token keeps
+  # the feature disabled. The token value stays outside YAML and is resolved
+  # from LLM_AUTH_TOKEN through the community environment SecretResolver.
+  llm:
+    base_url: "${LLM_BASE_URL:-}"
+    secret_name: "LLM_AUTH_TOKEN"
+    model: "${LLM_BALANCED_MODEL:-glm-5.2}"
+    timeout_ms: "${LLM_DEFAULT_TIMEOUT_MS:-180000}"
+  bcn:
+    base_url: "${BCS_URL}"
+    provider_id: "${BCS_PROVIDER_ID}"
+    provider_admin_token: "${BCS_ADMIN_TOKEN}"
+
+  # ── Task execution ports (task runner integration) ───────────────
+  # openapi_bot  → task ``single_bot`` dispatch (BaaS Open API: Bearer
+  #   ``api_key`` against /openapi/v1/messages + /openapi/v1/api-keys).
+  #   base_url points at the backend serving the BaaS Open API (BASS_URL).
+  #   api_key_secret / api_key_prefix are LITERAL credentials via env (no
+  #   Mist resolution — community has no Mist); empty → OpenApiBotPort None
+  #   (single_bot dispatch degrades; BBS unaffected).
+  # bcs_client   → task ``coop_group`` coordination (BCS HMAC
+  #   X-ECB-Token/Signature). base_url = BCS_URL; token_secret /
+  #   secret_secret are LITERAL HMAC key/secret via env (BOTH required or
+  #   BcsClientPort stays None); task_callback_url = the backend self
+  #   URL BCS posts task results back to (BACKEND_URL). Empty → ports
+  #   degrade to None (no boot failure, task runner falls back to stubs).
+  openapi_bot:
+    base_url: "${BASS_URL:-}"
+    api_key_secret: "${api_key_secret:-}"
+    api_key_prefix: "${api_key_prefix:-}"
+
+  bcs_client:
+    base_url: "${BCS_URL:-}"
+    token_secret: "${token_secret:-}"
+    secret_secret: "${secret_secret:-}"
+    task_callback_url: "${BACKEND_URL:-}"
+
+  # merchant_task_bot_bindings → static-plan template bot binding (role_key ->
+  #   bot uuid). Public profile: a SINGLE env-injected JSON string
+  #   (``${MERCHANT_TASK_BOT_BINDINGS:-}``) so the role<->uuid mapping of our own
+  #   demo bots is NOT carved into this open-source config; the provider decodes
+  #   it. Internal profiles may instead write a structured YAML sub-tree of the
+  #   same keys. Empty -> no resolution -> placeholders stay literal at load
+  #   (content routing/materialize stays green on a bare/CI build); only a real
+  #   dispatch then degrades (BCS rejects a literal ${...}).
+  merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"

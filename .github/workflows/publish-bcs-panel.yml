@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: src/bcs/assets/panel
+        working-directory: apps/bcs/assets/panel
 
     steps:
       - name: Check out repository

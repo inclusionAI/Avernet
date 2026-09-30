@@ -21,12 +21,12 @@ export BCS_BIND="${BCS_BIND:-0.0.0.0}"
 export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1}"
 export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
 
-LOG_DIR="/opt/ocb/scripts/.dependencies/logs"
+LOG_DIR="/opt/ocb/singlebox/.dependencies/logs"
 mkdir -p "${LOG_DIR}"
 touch "${LOG_DIR}/bcs.log" "${LOG_DIR}/bcs_bots_stack.log" "${LOG_DIR}/frontend.log"
 export BCS_LOG="${BCS_LOG:-${LOG_DIR}/bcs.log}"
 
-CONFIG_DIR="/opt/ocb/scripts/.dependencies/configs"
+CONFIG_DIR="/opt/ocb/singlebox/.dependencies/configs"
 mkdir -p "${CONFIG_DIR}"
 export BCS_CONFIG_DIR="${BCS_CONFIG_DIR:-${CONFIG_DIR}}"
 
@@ -38,12 +38,12 @@ cleanup() {
   if [ -n "${frontend_pid:-}" ]; then
     kill "${frontend_pid}" 2>/dev/null || true
   fi
-  ./scripts/singlebox.sh stop bcs >/dev/null 2>&1 || true
+  ./singlebox/singlebox.sh stop bcs >/dev/null 2>&1 || true
 }
 trap cleanup INT TERM EXIT
 
-./scripts/singlebox.sh --local --bcs-env local --bcs-auto-onboard start bcs
-./scripts/singlebox.sh status bcs || true
+./singlebox/singlebox.sh --local --bcs-env local --bcs-auto-onboard start bcs
+./singlebox/singlebox.sh status bcs || true
 
 export FRONTEND_PORT="${FRONTEND_PORT:-8000}"
 export FRONTEND_BCS_TARGET="${FRONTEND_BCS_TARGET:-http://127.0.0.1:${BCS_PORT}}"
@@ -70,11 +70,11 @@ BCS local server is running.
   BCS:      http://127.0.0.1:${BCS_PORT}
   Health:   http://127.0.0.1:${BCS_PORT}/health
 
-5 local test bots are started by src/bcs/scripts/start_bcs_bots.sh and
+5 local test bots are started by apps/bcs/scripts/start_bcs_bots.sh and
 auto-onboarded to BCS with visibility=public.
 
 To connect from outside:
-  - Use bcs-cli (mounted at /opt/ocb/src/bcs/target/debug/bcs-cli)
+  - Use bcs-cli (mounted at /opt/ocb/apps/bcs/target/debug/bcs-cli)
   - Or run OpenClaw on the host with the BCN plugin:
       BCS_URL=ws://127.0.0.1:${BCS_PORT}/ws/bot openclaw gateway run --port 18789
 
