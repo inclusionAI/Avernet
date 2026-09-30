@@ -155,6 +155,10 @@ impl FriendRequestCoreService for FriendRequestCore {
         self.reject_human_human(&request.from_bot, &request.to_bot)
             .await?;
 
+        self.friend_service
+            .add_friendship(&request.from_bot, &request.to_bot)
+            .await?;
+
         self.repo
             .update_request_status(request_id, FriendRequestStatus::Accepted)
             .await?;
@@ -172,10 +176,6 @@ impl FriendRequestCoreService for FriendRequestCore {
                 warn!(from = %request.to_bot, to = %request.from_bot, error = %err, "Failed to auto-accept reverse pending request; B can manually accept later for consistency");
             }
         }
-
-        self.friend_service
-            .add_friendship(&request.from_bot, &request.to_bot)
-            .await?;
 
         info!(request_id = %request_id, from = %request.from_bot, to = %request.to_bot, "Friend request accepted");
         Ok(())
