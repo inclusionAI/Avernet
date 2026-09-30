@@ -14,6 +14,17 @@ const readers = (overrides: Partial<RepairSourceReaders> = {}): RepairSourceRead
 });
 
 describe('trusted workflow repair source adapter', () => {
+  it('bounds source reads to the active window unless history is requested', async () => {
+    const groups = vi.fn(readers().groups);
+    const suggestions = vi.fn(readers().suggestions);
+    const source = createRepairSourcePort(readers({ groups, suggestions }));
+    await source.load(db, 'wf', 'summary');
+    expect(groups).toHaveBeenLastCalledWith(db, 'wf', { sinceMs: expect.any(Number) });
+    expect(suggestions).toHaveBeenLastCalledWith(db, 'wf', { sinceMs: expect.any(Number) });
+    await source.load(db, 'wf', 'summary', { includeHistorical: true });
+    expect(groups).toHaveBeenLastCalledWith(db, 'wf', { sinceMs: undefined });
+    expect(suggestions).toHaveBeenLastCalledWith(db, 'wf', { sinceMs: undefined });
+  });
   it('builds a lightweight inbox without reading evidence payloads', async () => {
     const evidence = vi.fn(readers().evidence);
     const result = await createRepairSourcePort(readers({ evidence })).load(db, 'wf', 'summary');
@@ -108,6 +119,18 @@ describe('trusted workflow repair source adapter', () => {
   it('does not merge independently authored text-only instructions just because their wording matches', async () => {
     const suggestions = [1, 2].map(id => ({ id, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', proposal_json: null, status: 'pending' }));
     expect(await createRepairSourcePort(readers({ groups: async () => [], suggestions: async () => suggestions })).load(db, 'wf')).toHaveLength(2);
+  });
+  it('skips one malformed legacy suggestion without hiding valid repair items', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const suggestions = async () => [
+      { id: 1, workflow_id: 'wf', failure_signature: 'bad', fix_spec: '损坏来源', proposal_json: '{bad', status: 'pending' },
+      { id: 2, workflow_id: 'wf', failure_signature: 'timeout', fix_spec: '增加超时', proposal_json: null, status: 'pending' },
+    ];
+    const result = await createRepairSourcePort(readers({ groups: async () => [], suggestions })).load(db, 'wf');
+    expect(result).toHaveLength(1);
+    expect(result[0].item.instruction).toBe('增加超时');
+    expect(warning).toHaveBeenCalledWith('[workflow-repair] skipped incompatible suggestion source', expect.objectContaining({ workflowId: 'wf', suggestionId: '1' }));
+    warning.mockRestore();
   });
   it('rejects mismatched workflow groups and proposals', async () => {
     await expect(createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'other', signature: 'x', inputDigest: 'a'.repeat(64), sources: [diagnosis()] }] })).load(db, 'wf')).rejects.toMatchObject({ code: 'CONTENT_MISMATCH' });
