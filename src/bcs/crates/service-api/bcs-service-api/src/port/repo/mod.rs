@@ -23,6 +23,7 @@ pub mod edge_grant;
 pub mod event;
 pub mod friend;
 pub mod group;
+pub mod group_context;
 pub mod invite_code;
 pub mod message;
 pub mod message_delivery;

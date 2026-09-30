@@ -81,7 +81,11 @@
       "bcs_route",
       "bcs_assign_task",
       "bcs_send_task_message",
-      "bcs_task_complete"
+      "bcs_task_complete",
+      "bcs_group_context_status",
+      "bcs_group_context_create",
+      "bcs_group_context_update",
+      "bcs_group_context_retrieve"
     ]
   },
   "configSchema": {

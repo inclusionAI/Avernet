@@ -13,6 +13,7 @@ mod caller;
 pub mod discover;
 pub mod ensure;
 pub mod friends;
+pub mod group_contexts;
 pub mod group_messages;
 pub mod group_requests;
 pub mod groups;

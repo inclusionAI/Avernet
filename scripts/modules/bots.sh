@@ -615,7 +615,7 @@ bots_dynamic_config_has_bcs_core_tools() {
     [ -f "$config_file" ] || return 1
     jq -e '
       (.tools.alsoAllow // []) as $tools
-      | ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"]
+      | ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete", "bcs_group_context_status", "bcs_group_context_create", "bcs_group_context_update", "bcs_group_context_retrieve"]
       | all(. as $tool | ($tools | index($tool)) != null)
     ' "$config_file" >/dev/null
 }
@@ -840,7 +840,11 @@ bots_dynamic_write_openclaw_config() {
               "bcs_route",
               "bcs_assign_task",
               "bcs_send_task_message",
-              "bcs_task_complete"
+              "bcs_task_complete",
+              "bcs_group_context_status",
+              "bcs_group_context_create",
+              "bcs_group_context_update",
+              "bcs_group_context_retrieve"
             ]
           },
           messages: {

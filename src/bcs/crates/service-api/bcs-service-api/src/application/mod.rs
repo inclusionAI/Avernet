@@ -10,6 +10,7 @@ pub mod collaboration_runtime;
 pub mod connect;
 pub mod error;
 pub mod friends;
+pub mod group_context;
 pub mod group_management;
 pub mod group_message;
 pub mod group_proposal;
