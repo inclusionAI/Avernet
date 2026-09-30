@@ -190,3 +190,13 @@ with final-run spans and reports nested stage timings separately.
 
 - `cargo test --package bcs-message-flow --manifest-path src/bcs/Cargo.toml`
 - Structure check: scan this crate for adapter/runtime transport symbols before merging.
+
+## Direct A2A queue
+
+Async Direct A2A uses Session registry claims, canonical private messages and the
+shared managed-delivery runtime. The internal A2aChat preparation/projection branch
+uses the same external and downstream session ID. Managed events never enter Group
+reply routing. ChatRun final content is checkpointed before delivery settlement;
+queries and bounded recovery reconcile state. Disablement drains existing lane work.
+See `src/bcs/specs/2026-09-20-direct-a2a-message-queue/spec.md` for storage costs,
+policy readiness, cancellation uncertainty and the v3 HTTP/CLI contract.

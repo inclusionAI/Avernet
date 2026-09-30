@@ -111,6 +111,7 @@ pub fn system_message_visibility(
     };
     let audience = match visibility_domain {
         MessageVisibilityDomain::Chat => None,
+        MessageVisibilityDomain::DirectA2a => Some(MessageAudience::FullOnly),
         MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine => {
             Some(if kind == SystemMessageEventKind::SessionContext {
                 match owner_bot_id {

@@ -9,7 +9,7 @@
 `queue_group_system_switch_mismatch`。启动、master 接管和 5 秒策略校验读取旧 DB 策略时，
 按原 group 值同步 system，通过 CAS 保存版本 +1，记录
 `updated_by=system:group-system-policy-migration`；冲突重读，不覆盖并发管理更新。
-Bot defaults/overrides 仍控制逐 Bot 灰度。Direct A2A、task、state-machine 尚不因此就绪。
+Bot defaults/overrides 仍控制逐 Bot 灰度。Direct A2A 的独立接入见本文末尾；task 和 state-machine 的就绪状态按各自接入契约判断。
 
 System producer 保留 Send/Inject 与可见性决策。Dispatcher 的
 `SystemMessageQueueService::admit` 将同一次事件的多份消息及受管目标交给
@@ -715,3 +715,30 @@ active 接近 max_running 且运行慢，不应仅增加 worker 批次；主要�
 隔离、共享轮转清理、默认及显式 logging.outputs 兼容。编译覆盖默认 feature 和生产 lib
 no-default-features；测试自 dev-dependency 会合并默认 feature，无 Prometheus 以生产
 lib check 为证据。未重启运行 BCS，未验证生产采集器、磁盘故障压测或真实 MySQL/OceanBase。
+
+
+## Direct A2A（chat v3）
+
+Direct A2A 现已接入统一队列。数据库先升级 MySQL 031／SQLite 032，再通过管理 API 设置
+`flow_enabled.direct_a2a=true` 和目标 Bot 的 `mode=enforce`。默认保持关闭。
+
+共享的 `bcs_session_registry` 保证同一环境下 Session ID 只能属于 `group` 或 `direct_a2a`；
+Group 和 Direct 都认领它。每次 ChatRun 可以复用同一个 Direct Session，ID 原样传给下游。
+冲突在创建 ChatRun 前返回 `409 session_type_conflict`。
+
+客户端发送 `X-BCS-CHAT-VERSION: 3` 后，async submit、run status 和 cancel 可返回
+`delivery: {delivery_id, message_id, status, wait_reason, state_version}`。旧版本保持原字段。
+queued 对应 ChatRun pending；不确定的发送／取消状态不会被显示成 completed 或 cancelled。
+
+```bash
+bcs-cli chat --bot-uuid TARGET --message "hello" --session-id SESSION --detach
+bcs-cli chat --bot-uuid TARGET --message "hello" --wait-until running
+bcs-cli chat-run status --run-id RUN
+bcs-cli chat-run cancel --run-id RUN
+```
+
+`--detach` 在持久受理后退出；queued 时 `submitted=true`、`delivered=false`、退出码 0。
+容量拒绝等终态失败退出码 1。默认等待终态，客户端 timeout 不取消服务端 run。
+取消未知时继续查询，Provider 暂不执行 scope-wide abort。
+
+实现、访问成本和回滚约束见 [Direct A2A spec](../specs/2026-09-20-direct-a2a-message-queue/spec.md)。

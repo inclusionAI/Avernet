@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-session-store = { workspace = true }
 async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }

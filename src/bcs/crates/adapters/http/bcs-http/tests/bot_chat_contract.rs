@@ -234,6 +234,7 @@ impl A2aChatRunService for RecordingA2aChat {
             .await
             .push(cmd.run_channel_from);
         Ok(AsyncA2aChatAccepted {
+            delivery: None,
             run_id: cmd.run_id,
             bot_uuid: cmd.target_bot_id,
             session_id: cmd.session_key,

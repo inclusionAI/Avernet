@@ -44,3 +44,6 @@ bcs-message-store = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-cache-local = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
+bcs-group-store = { workspace = true }
