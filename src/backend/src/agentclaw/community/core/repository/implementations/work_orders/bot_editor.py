@@ -229,7 +229,10 @@ class _BotEditorWorkOrderRepository:
             )
             if work_order is None:
                 raise WorkOrderNotFoundError("Bot editor work order not found")
-            if work_order.status != WorkOrderStatus.PENDING.value:
+            if work_order.status not in {
+                WorkOrderStatus.PENDING.value,
+                WorkOrderStatus.PROCESSING.value,
+            }:
                 raise WorkOrderAlreadyProcessedError("work order already processed")
 
             try:

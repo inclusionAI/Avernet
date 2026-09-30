@@ -12,6 +12,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationDetail,
     WorkOrderStatus,
+    WorkOrderApprovalMode,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -60,6 +61,7 @@ class _WorkOrderNotificationRepository:
                 db.flush()
                 db.refresh(row)
             status = None
+            approval_mode = None
             can_approve = False
             if row.work_order_id is not None:
                 work_order = (
@@ -72,6 +74,9 @@ class _WorkOrderNotificationRepository:
                 )
                 if work_order is not None:
                     status = WorkOrderStatus(work_order.status)
+                    approval_mode = WorkOrderApprovalMode(
+                        work_order.approval_mode or WorkOrderApprovalMode.MANUAL.value
+                    )
                     is_approver = (
                         db.query(self._Approver.id)
                         .filter(
@@ -114,6 +119,7 @@ class _WorkOrderNotificationRepository:
             return WorkOrderNotificationDetail(
                 notification=row.to_record(),
                 work_order_status=status,
+                approval_mode=approval_mode,
                 can_approve=can_approve,
             )
 

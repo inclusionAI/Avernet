@@ -7,6 +7,7 @@ from typing import Any
 
 from agentclaw.community.core.work_orders.models import (
     WorkOrderBizType,
+    WorkOrderApprovalMode,
     WorkOrderEventType,
     WorkOrderMessageTitle,
     WorkOrderStatus,
@@ -88,24 +89,29 @@ def display_title(
     event_type: str | None = None,
     biz_type: str | None = None,
     status: WorkOrderStatus | None = None,
+    approval_mode: WorkOrderApprovalMode | None = None,
 ) -> str | None:
     """Resolve canonical titles while retaining legacy persisted values."""
 
     if event_type is not None:
         reviewed_title = _REVIEWED_TITLE_BY_EVENT_STATUS.get((event_type, status))
-        if reviewed_title is not None:
-            return reviewed_title
-        return notification_title_for(event_type, stored_title)
-
-    key = _TITLE_KEY_BY_STORED_VALUE.get(stored_title or "")
-    if key is not None:
-        return _TITLE_BY_KEY[key]
-    derived = _TITLE_BY_BIZ_STATUS.get((biz_type or "", status))
-    if derived is not None:
-        return derived
-    if stored_title and stored_title != "新的系统通知":
-        return stored_title
-    return None
+        if approval_mode is WorkOrderApprovalMode.AUTO and status is WorkOrderStatus.APPROVED:
+            resolved = _TITLE_BY_BIZ_STATUS.get((biz_type or "", status))
+        else:
+            resolved = reviewed_title or notification_title_for(event_type, stored_title)
+    else:
+        key = _TITLE_KEY_BY_STORED_VALUE.get(stored_title or "")
+        if key is not None:
+            resolved = _TITLE_BY_KEY[key]
+        else:
+            resolved = _TITLE_BY_BIZ_STATUS.get((biz_type or "", status))
+            if resolved is None and stored_title and stored_title != "新的系统通知":
+                resolved = stored_title
+    if resolved is None:
+        return None
+    if approval_mode is WorkOrderApprovalMode.AUTO and "自动审批" not in resolved:
+        return f"{resolved}（自动审批）"
+    return resolved
 
 
 def _parse_content(raw: Any) -> Any:

@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS ac_work_order_notification (
 ALTER TABLE ac_work_order
     ADD COLUMN biz_data LONGTEXT NULL COMMENT '业务扩展数据，JSON格式，由业务模块传入';
 
+ALTER TABLE ac_work_order
+    ADD COLUMN approval_mode VARCHAR(16) NULL COMMENT 'MANUAL | AUTO; NULL is treated as MANUAL for legacy rows';
+
 CREATE TABLE IF NOT EXISTS ac_work_order_approver (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     work_order_id BIGINT UNSIGNED NOT NULL,

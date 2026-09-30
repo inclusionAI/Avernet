@@ -22,17 +22,33 @@ class WorkOrderDecision(_DocumentedEnum):
     }
 
 
+class WorkOrderApprovalMode(_DocumentedEnum):
+    """Controls whether an approval work order requires manual review."""
+
+    MANUAL = "MANUAL"
+    AUTO = "AUTO"
+
+    __descriptions__ = {
+        "MANUAL": "Requires a manual approval decision.",
+        "AUTO": "Automatically approved after the business module accepts responsibility.",
+    }
+
+
 class WorkOrderStatus(_DocumentedEnum):
     """Current processing state of a work order."""
 
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
     __descriptions__ = {
         "PENDING": "Awaiting review.",
+        "PROCESSING": "An automatic approval is being processed.",
         "APPROVED": "Approved by an authorized reviewer.",
         "REJECTED": "Rejected by an authorized reviewer.",
+        "FAILED": "Automatic approval processing failed.",
     }
 
 
@@ -68,10 +84,12 @@ class WorkOrderEventStatus(_DocumentedEnum):
     """Persistence state returned after a unified event is accepted."""
 
     PENDING = "PENDING"
+    APPROVED = "APPROVED"
     CREATED = "CREATED"
 
     __descriptions__ = {
         "PENDING": "An approval work order is waiting for review.",
+        "APPROVED": "An approval work order was automatically approved.",
         "CREATED": "A notice notification was created.",
     }
 
@@ -81,6 +99,10 @@ class CreateWorkOrderEventRequest(BaseModel):
 
     event_category: NotificationCategory = Field(
         description="Whether the event requires approval or is informational."
+    )
+    approval_mode: WorkOrderApprovalMode = Field(
+        default=WorkOrderApprovalMode.MANUAL,
+        description="Approval mode for approval events; omitted values keep manual approval compatibility.",
     )
     biz_type: str = Field(
         min_length=1,
