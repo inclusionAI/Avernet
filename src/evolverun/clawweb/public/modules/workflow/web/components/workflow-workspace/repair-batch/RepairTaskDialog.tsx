@@ -23,14 +23,18 @@ export default function RepairTaskDialog({ workflowId, taskId, inputDigest, incl
 
   useEffect(() => {
     let current = true
-    setLoading(true); setError('')
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    setLoading(detail == null); setError('')
     repairBatches.task(taskId).then(result => {
       if (!current) return
       if (result.workflowId !== workflowId) throw new Error('此任务不属于当前工作流')
       setDetail(result)
+      if (['drafting', 'publishing'].includes(result.latestAttempt.phase)) {
+        pollTimer = setTimeout(() => { if (current) setRefresh(value => value + 1) }, 2_000)
+      }
     }).catch(reason => { if (current) setError(message(reason)) })
       .finally(() => { if (current) setLoading(false) })
-    return () => { current = false }
+    return () => { current = false; if (pollTimer) clearTimeout(pollTimer) }
   }, [workflowId, taskId, refresh])
 
   const reload = () => { setRefresh(value => value + 1); onChanged() }
