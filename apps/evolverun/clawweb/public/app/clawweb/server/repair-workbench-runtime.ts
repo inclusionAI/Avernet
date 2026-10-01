@@ -5,7 +5,6 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { Router } from 'express';
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
-import { EvolveRepository } from '@avernet/clawevolve/server/repositories/evolve-repository';
 import { IssueAggregationRepository } from '@avernet/clawevolve/server/repositories/issue-aggregation-repository';
 import { WorkflowEvolutionRepository } from '@avernet/clawevolve/server/repositories/workflow-evolution-repository';
 import { createRepairSourcePort, type RepairSuggestionSource } from '@avernet/workflow/server/repositories/repair-source-adapter';
@@ -21,15 +20,22 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
 }): { service: ReturnType<typeof createRepairWorkbenchService>; router: Router } {
   const sources = createRepairSourcePort({
     groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
-    suggestions: async (tx, workflowId) => {
-      const repo = new EvolveRepository(tx);
+    suggestions: async (tx, workflowId, sourceOptions) => {
       const rows: RepairSuggestionSource[] = [];
+      let afterId = 0;
       for (;;) {
-        const page = await repo.listSuggestions({ workflowId, limit: 200, offset: rows.length });
-        rows.push(...page.rows);
-        if (rows.length >= page.total) return rows;
+        const params: unknown[] = [workflowId];
+        const recent = sourceOptions?.sinceMs === undefined ? ''
+          : " AND (gmt_modified >= ? OR status IN ('applying', 'running', 'dispatching', 'dispatched', 'applied', 'applied_unverified'))";
+        if (sourceOptions?.sinceMs !== undefined) params.push(tx.dialect.epochToDb(Math.floor(sourceOptions.sinceMs / 1000)));
+        params.push(afterId);
+        const page = await tx.query<RepairSuggestionSource>(`SELECT * FROM workflow_healing_suggestions
+          WHERE workflow_id = ?${recent} AND id > ? ORDER BY id ASC LIMIT 200`, params);
+        if (!page.length) return rows;
+        rows.push(...page);
         // An explicit operational limit/error, never an apparently complete first page.
-        if (!page.rows.length || rows.length >= 10_000) throw new RepairBatchError('PAYLOAD_TOO_LARGE', 'Too many repair sources; narrow the workflow history before retrying');
+        if (rows.length >= 10_000) throw new RepairBatchError('PAYLOAD_TOO_LARGE', 'Too many repair sources; narrow the workflow history before retrying');
+        afterId = Number(page.at(-1)!.id);
       }
     },
     evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),

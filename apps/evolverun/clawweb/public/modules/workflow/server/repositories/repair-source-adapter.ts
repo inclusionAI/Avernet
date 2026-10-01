@@ -24,7 +24,7 @@ export type RepairEvidenceSource = {
  * consumes these reads without constructing or extending the old evolution control plane. */
 export interface RepairSourceReaders {
   groups(db: IDatabase, workflowId: string, options?: { sinceMs?: number }): Promise<GroupSource[]>;
-  suggestions(db: IDatabase, workflowId: string): Promise<RepairSuggestionSource[]>;
+  suggestions(db: IDatabase, workflowId: string, options?: { sinceMs?: number }): Promise<RepairSuggestionSource[]>;
   evidence(db: IDatabase, workflowId: string, eventIds: string[]): Promise<RepairEvidenceSource[]>;
 }
 export const REPAIR_ACTIVE_LOOKBACK_DAYS = 30;
@@ -84,7 +84,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
   return { async load(db, workflowId, mode = 'full', scope) {
     const sinceMs = scope?.includeHistorical ? undefined : Date.now() - ACTIVE_LOOKBACK_MS;
     const groups = await readers.groups(db, workflowId, { sinceMs });
-    const suggestions = (await readers.suggestions(db, workflowId)).filter(row => {
+    const suggestions = (await readers.suggestions(db, workflowId, { sinceMs })).filter(row => {
       if (scope?.includeHistorical || lifecycleVisible(row.status)) return true;
       const modifiedAt = timestampMs(row.gmt_modified);
       return modifiedAt === null || modifiedAt >= sinceMs!;
@@ -98,48 +98,57 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length,
     });
     const items = new Map<string, SourceItem>();
-    const get = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string): SourceItem => {
+    const edit = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string): { itemId: string; row: SourceItem } => {
       const groupKey = digestRepairJson([workflowId, signature]);
       const proposalKey = digestRepairJson(proposalIdentity(value, instruction, textSourceId));
       const itemId = digestRepairJson([workflowId, groupKey, proposalKey, 'initial']);
-      let row = items.get(itemId);
-      if (!row) {
-        row = { episodeKey: 'initial', initialState: 'pending', item: { itemId, groupKey, proposalKey,
+      const existing = items.get(itemId);
+      const row = existing ? structuredClone(existing)
+        : { episodeKey: 'initial', initialState: 'pending', item: { itemId, groupKey, proposalKey,
           contentRevision: 1, previousItemId: null, proposal: value, instruction, sources: [],
-          context: { signature, diagnoses: [], suggestions: [] } } };
-        items.set(itemId, row);
-      }
-      return row;
+          context: { signature, diagnoses: [], suggestions: [] } } } as SourceItem;
+      return { itemId, row };
     };
     for (const group of groups) for (const source of [...group.sources]
       .sort((a, b) => b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId))) {
       const value = proposal(source.proposal, workflowId);
       // Diagnoses without actionable suggestions remain in the existing diagnostic view.
       if (!value || typeof value.summary !== 'string' || !value.summary.trim()) continue;
-      const row = get(group.signature, value, value.summary.trim());
+      const { itemId, row } = edit(group.signature, value, value.summary.trim());
       row.item.sources.push({ kind: 'diagnosis_candidate', signature: group.signature, inputDigest: group.inputDigest,
         candidateId: digestRepairJson(value), analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId });
       (row.item.context!.diagnoses as RecordValue[]).push(diagnosisContext(source));
+      validateRepairItem(row.item);
+      items.set(itemId, row);
     }
     for (const suggestion of [...suggestions].sort((a, b) => (timestampMs(b.gmt_modified) ?? 0) - (timestampMs(a.gmt_modified) ?? 0)
       || String(a.id).localeCompare(String(b.id)))) {
-      const value = proposal(suggestion.proposal_json ? parsed(suggestion.proposal_json, 'suggestion proposal') : null, workflowId);
-      const instruction = suggestion.fix_spec?.trim() || (typeof value?.summary === 'string' ? value.summary.trim() : '');
-      if (!value && !instruction) continue;
-      const row = get(suggestion.failure_signature, value, instruction, String(suggestion.id));
-      row.item.sources.push({ kind: 'suggestion', suggestionId: String(suggestion.id),
-        proposalDigest: value ? digestRepairJson(value) : null, instructionDigest: digestRepairJson(instruction) });
-      const diagnosisIds = ids(suggestion.source_diagnosis_ids);
-      const runIds = ids(suggestion.impact_run_ids);
-      const related = groups.filter(group => group.signature === suggestion.failure_signature).flatMap(group => group.sources)
-        .filter(source => diagnosisIds.length ? diagnosisIds.includes(source.diagnosisId) : runIds.includes(source.flowId));
-      (row.item.context!.diagnoses as RecordValue[]).push(...related.map(diagnosisContext));
-      (row.item.context!.suggestions as RecordValue[]).push({ suggestionId: String(suggestion.id), status: suggestion.status,
-        diagnosisIds, runIds, nodeId: suggestion.node_id ?? null,
-        missingDiagnosisIds: diagnosisIds.filter(id => !related.some(source => source.diagnosisId === id)) });
-      // Legacy work in progress is visible but is not silently re-enqueued as a new pending item.
-      const state = legacyState(suggestion.status);
-      if ((legacyPriority[state] ?? 0) > (legacyPriority[row.initialState ?? 'pending'] ?? 0)) row.initialState = state;
+      try {
+        const value = proposal(suggestion.proposal_json ? parsed(suggestion.proposal_json, 'suggestion proposal') : null, workflowId);
+        const instruction = suggestion.fix_spec?.trim() || (typeof value?.summary === 'string' ? value.summary.trim() : '');
+        if (!value && !instruction) continue;
+        const diagnosisIds = ids(suggestion.source_diagnosis_ids);
+        const runIds = ids(suggestion.impact_run_ids);
+        const { itemId, row } = edit(suggestion.failure_signature, value, instruction, String(suggestion.id));
+        row.item.sources.push({ kind: 'suggestion', suggestionId: String(suggestion.id),
+          proposalDigest: value ? digestRepairJson(value) : null, instructionDigest: digestRepairJson(instruction) });
+        const related = groups.filter(group => group.signature === suggestion.failure_signature).flatMap(group => group.sources)
+          .filter(source => diagnosisIds.length ? diagnosisIds.includes(source.diagnosisId) : runIds.includes(source.flowId));
+        (row.item.context!.diagnoses as RecordValue[]).push(...related.map(diagnosisContext));
+        (row.item.context!.suggestions as RecordValue[]).push({ suggestionId: String(suggestion.id), status: suggestion.status,
+          diagnosisIds, runIds, nodeId: suggestion.node_id ?? null,
+          missingDiagnosisIds: diagnosisIds.filter(id => !related.some(source => source.diagnosisId === id)) });
+        // Legacy work in progress is visible but is not silently re-enqueued as a new pending item.
+        const state = legacyState(suggestion.status);
+        if ((legacyPriority[state] ?? 0) > (legacyPriority[row.initialState ?? 'pending'] ?? 0)) row.initialState = state;
+        validateRepairItem(row.item);
+        items.set(itemId, row);
+      } catch (error) {
+        if (!(error instanceof RepairBatchError) || !['INVALID_INPUT', 'PAYLOAD_TOO_LARGE'].includes(error.code)) throw error;
+        console.warn('[workflow-repair] skipped incompatible suggestion source', {
+          workflowId, suggestionId: String(suggestion.id), code: error.code,
+        });
+      }
     }
     if (mode === 'full') {
       const selectedIds = scope?.itemIds ? new Set(scope.itemIds) : null;

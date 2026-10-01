@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
+import { repairSignatureKey } from '../../contracts/repair-workbench.js';
 import { RepairBatchRepository } from '../../repositories/repair-batch-repository.js';
 import { repairFixture } from './repair-batch-fixtures.js';
 
@@ -41,6 +42,18 @@ describe('repair workbench control service', () => {
     expect(first.counts).toMatchObject({ pending: 39, all: 39 });
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
+  });
+  it('returns bounded repair signature keys across every page', async () => {
+    const f = await repairFixture(2); fixtures.push(f);
+    f.items[0].context = { signature: 'timeout:fetch' };
+    const hiddenLongSignature = `retry:${'write'.repeat(20_000)}`;
+    f.items[1].context = { signature: hiddenLongSignature };
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const first = await service.candidates('wf-1', { page: 1, pageSize: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.repairSignatureKeys).toEqual([repairSignatureKey(hiddenLongSignature), repairSignatureKey('timeout:fetch')].sort());
+    expect(first.repairSignatureKeys.every(key => key.length === 32)).toBe(true);
+    expect(JSON.stringify(first.repairSignatureKeys).length).toBeLessThan(100);
   });
   it('uses the historical source scope when disposing an item from the historical inbox', async () => {
     const f = await repairFixture(2); fixtures.push(f);

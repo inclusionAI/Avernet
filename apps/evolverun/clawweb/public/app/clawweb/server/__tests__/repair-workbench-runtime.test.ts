@@ -50,6 +50,13 @@ describe('real repair Host composition', () => {
     expect(body.counts).toMatchObject({ pending: 38, awaiting_verification: 1, all: 39 });
     expect(body).toMatchObject({ canEdit: true, capabilities: { generation: false, publication: false } });
   });
+  it('bounds inactive suggestion history while retaining old active lifecycle rows', async () => {
+    const { db, runtime } = await fixture();
+    await db.exec("UPDATE workflow_healing_suggestions SET gmt_modified = 0 WHERE failure_signature IN ('timeout-0', 'timeout-1')");
+    const result = await runtime.service.candidates('wf', { state: 'all', page: 1, pageSize: 100 });
+    expect(result.items.some(item => item.instruction === '修复 0')).toBe(true);
+    expect(result.items.some(item => item.instruction === '修复 1')).toBe(false);
+  });
   it('connects selection, frozen task dispatch, task reading and cancellation through the real Host', async () => {
     const calls: RepairDispatchRequest[] = [];
     const { base, db } = await fixture(async input => { calls.push(input); return { jobId: 'job-host-1' }; });
