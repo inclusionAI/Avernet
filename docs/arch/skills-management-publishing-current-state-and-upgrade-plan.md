@@ -500,12 +500,12 @@ Backend 负责引用血缘和变更编排，Engine 只负责最终的文件系�
 
 | 层次 | 当前入口 | 在目标架构中的角色 |
 | --- | --- | --- |
-| Git 同步与制品发布 | `src/backend/src/agentclaw/community/api/skill_center/` | 保持 Git 公共 Skill 主链路。 |
-| SkillSet 与映射生成 | `src/backend/src/agentclaw/community/api/skill_set_service_factory.py` | 当前激活编排入口；目标态演进为下发逻辑激活请求。 |
-| HTTP 路由 | `src/backend/src/agentclaw/community/adapters/http/skill_center/` | Skill API 的入口。 |
+| Git 同步与制品发布 | `apps/backend/src/agentclaw/community/api/skill_center/` | 保持 Git 公共 Skill 主链路。 |
+| SkillSet 与映射生成 | `apps/backend/src/agentclaw/community/api/skill_set_service_factory.py` | 当前激活编排入口；目标态演进为下发逻辑激活请求。 |
+| HTTP 路由 | `apps/backend/src/agentclaw/community/adapters/http/skill_center/` | Skill API 的入口。 |
 | Engine 软链接口 | `src/engine/src/engine/community/api/skills/router.py` | 接收统一映射并完成文件系统对账。 |
 | Engine 布局实现 | `src/engine/src/engine/community/plugins/skills_pool/` | Pool 目录解析、准备和激活对账的实现。 |
-| SC Client 适配层 | `src/backend/src/agentclaw/community/plugin_api/skill_center_client.py` | 调用 SC 内容、版本、扫描和发布能力的边界。 |
+| SC Client 适配层 | `apps/backend/src/agentclaw/community/plugin_api/skill_center_client.py` | 调用 SC 内容、版本、扫描和发布能力的边界。 |
 
 ## 8. 结论
 

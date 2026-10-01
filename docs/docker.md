@@ -17,13 +17,13 @@ The Docker path has two steps:
 | Component | Description |
 |---|---|
 | BCS server | Bot Coordination Service written in Rust, exposed on `:21000` |
-| Frontend workbench | Static Avernet frontend built from `src/frontend`, exposed on `:8000` |
+| Frontend workbench | Static Avernet frontend built from `apps/frontend`, exposed on `:8000` |
 | `bcs-cli` | Command-line tool at `/opt/ocb/src/bcs/target/debug/bcs-cli` |
 | Global `openclaw` command | Installed from the public npm registry so OpenClaw can run inside the container or on the host |
 | BCN plugin | `openclaw-channel-bcn`, built from source and symlinked to `/root/.openclaw/extensions/openclaw-channel-bcn` so OpenClaw can connect to BCS |
 | 5 OpenClaw instances | After container startup, 5 OpenClaw demo roles run in the container (CEO / 产品经理 / 研发 / 验证 / 客服). Each connects to BCS through the BCN plugin, onboards automatically, and listens on `:30001`/`:30011`/`:30021`/`:30031`/`:30041` |
 
-The frontend serves the built `src/frontend/dist` files and proxies
+The frontend serves the built `apps/frontend/dist` files and proxies
 same-origin `/bcnproxy/*` requests to the BCS server inside the container.
 
 ## What you need

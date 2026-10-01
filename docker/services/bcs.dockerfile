@@ -27,12 +27,12 @@ RUN mkdir -p /usr/local/cargo \
 # "Pull code": the BCS Rust workspace is brought in from the build context
 # (repo root). docker/build-image.sh sends the repo root as the context, so
 # this COPY is the code-fetch step — there is no in-image git clone. The
-# workspace is self-contained under src/bcs (no path deps outside it).
-COPY src/bcs /build/src/bcs
+# workspace is self-contained under apps/bcs (no path deps outside it).
+COPY apps/bcs /build/src/bcs
 
 # Prefetch dependencies into the registry cache mount. BuildKit retains the
 # cache across builds, so repeated builds reuse already-downloaded crates even
-# though the `COPY src/bcs` layer above busts on any source change.
+# though the `COPY apps/bcs` layer above busts on any source change.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo fetch --locked --manifest-path /build/src/bcs/Cargo.toml
 
@@ -67,7 +67,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /build/bcs /usr/local/bin/bcs
-COPY src/bcs/configs /app/configs
+COPY apps/bcs/configs /app/configs
 
 # Persistence: bots_base_dir and the session-file data_dir must live on a
 # writable volume. The shipped example config uses /var/lib/bcs; mount a

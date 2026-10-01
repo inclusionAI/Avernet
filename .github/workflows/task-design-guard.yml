@@ -106,7 +106,7 @@ jobs:
           fi
 
           set +e
-          python3 scripts/ci/task_design_guard.py \
+          python3 singlebox/ci/task_design_guard.py \
             --base "$BASE_SHA" \
             --head "$HEAD_SHA" \
             --actor "$PR_AUTHOR"

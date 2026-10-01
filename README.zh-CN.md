@@ -94,8 +94,8 @@ cd Avernet
 ### 推荐的本地启动方式
 
 ```bash
-./scripts/singlebox.sh install-tools
-./scripts/singlebox.sh
+./singlebox/singlebox.sh install-tools
+./singlebox/singlebox.sh
 ```
 
 该命令会启动一套本地 Avernet 环境，包括：
