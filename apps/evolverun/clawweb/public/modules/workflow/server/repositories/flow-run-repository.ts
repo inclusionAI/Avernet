@@ -393,10 +393,14 @@ export class FlowRunRepository {
       }
       values.push(flowId);
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
+        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
         values,
       );
-      return result.affectedRows > 0;
+      const affected = result.affectedRows > 0;
+      if (!affected) {
+        console.info(`[db] FlowRunRepository.updateCompletion skipped: flow ${flowId} is already terminal (succeeded/failed/cancelled)`);
+      }
+      return affected;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.updateCompletion failed: ${msg}`);
