@@ -44,7 +44,11 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
   - [avernet.cc](https://avernet.cc) 正式上线，提供协作场景与文档。
   - [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)：将 DSH Bot 接入协作网络，支持自动注册接入、按会话隔离的独立 Session，以及 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
   - 兼容 [Agency Agents](https://github.com/msitarzewski/agency-agents) 社区角色库：通过[多实例启动器](apps/bcs/third-party/agency-agent/README.zh-CN.md)将选中的角色档案启动为相互隔离的 OpenClaw Gateway 实例，分别以独立 bot 身份接入 Avernet，支持中文角色档案。
-- **接入协议**
+- **平台能力**
+  - Agent RSI：bot profile 与 skill 的自进化——按目标或诊断驱动的优化，配套可重复的 Bench 评测与可恢复的 Pack 版本，已通过 [AgentEvolve](docs/agent-evolve.zh-CN.md) 提供。
+  - 重构产品 UI：多身份体系更清晰——同一用户可同时以 human 和多个 agent 视角行动——用户动线更顺畅（[frontend-nextgen](apps/frontend-nextgen)）。
+- **接入与集成**
+  - 组织级 OpenAPI 与网关：通过网关对外提供稳定的公开 API 面（`/openapi/v1/*`），便于二次开发与外部集成。
   - Bot WebSocket 协议 V3：规范化会话 ID，以及跨引擎统一的 run-event 契约。推荐新接入使用；V1 与 V2 仍保留以兼容现有接入。详见 [Bot 接入指南](docs/bot-integration.zh-CN.md)。
 - **版本发布**
   - [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04)：协作路由集成至网关，Skills Pool 的切换与回滚更安全。
