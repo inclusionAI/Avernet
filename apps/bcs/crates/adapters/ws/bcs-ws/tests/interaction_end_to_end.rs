@@ -92,6 +92,121 @@ async fn receive_json(rx: &mut mpsc::Receiver<String>) -> Value {
     serde_json::from_str(&rx.recv().await.expect("WS frame")).expect("JSON WS frame")
 }
 
+fn requested_via_websocket(interaction_id: &str) -> ProviderInteractionRequestedCommand {
+    ProviderInteractionRequestedCommand {
+        bcs_run_id: "bcs-run-e2e-ws".to_string(),
+        provider_run_id: "bcs-run-e2e-ws".to_string(),
+        interaction_id: interaction_id.to_string(),
+        kind: InteractionKind::Exec,
+        bcs_session_id: "session-e2e-ws".to_string(),
+        group_id: "group-e2e-ws".to_string(),
+        bot_id: "bot-e2e-ws".to_string(),
+        run_deadline_ms: u64::MAX,
+        provider_target: BotDeliveryTarget::WebSocket {
+            bot_id: "bot-e2e-ws".to_string(),
+        },
+        provider_bypass_headers: Vec::new(),
+        payload: json!({
+            "runId": "bcs-run-e2e-ws",
+            "seq": 1,
+            "phase": "requested",
+            "interactionId": interaction_id,
+            "kind": "exec",
+            "command": format!("deploy {interaction_id}"),
+            "options": [
+                {"decision": "allow_once", "label": "Allow once"},
+                {"decision": "deny", "label": "Deny"}
+            ]
+        }),
+        received_at_ms: bcs_protocol::now_ms(),
+    }
+}
+
+#[tokio::test]
+async fn resolve_flow_is_agnostic_to_websocket_provider_target() {
+    let connections = Arc::new(WorkbenchConnectionRegistry::new());
+    let run_channels = Arc::new(RunChannelManager::new());
+    let raw_frontend: Arc<dyn FrontendDeliveryPort> = Arc::new(WorkbenchFrontendDelivery::new(
+        connections.clone(),
+        run_channels.clone(),
+    ));
+    let provider = Arc::new(ScriptedProvider {
+        responses: Mutex::new(VecDeque::from([InteractionProviderAck {
+            ok: true,
+            retryable: None,
+            error: None,
+        }])),
+        calls: Mutex::new(Vec::new()),
+    });
+    let interactions: Arc<dyn InteractionService> = Arc::new(InteractionManagement::new(
+        Arc::new(MemoryInteractionStore::new()),
+        Arc::new(AllowResolve),
+        provider.clone(),
+        Arc::new(WorkbenchInteractionDelivery::new(raw_frontend)),
+        120_000,
+    ));
+    let state = Arc::new(WebDispatchState {
+        message_flow: Arc::new(NoopMessageFlowService),
+        collaboration_runtime: Arc::new(NoopCollaborationRuntimeService),
+        workbench_sessions: Arc::new(NoopWorkbenchSessionService),
+        interactions: interactions.clone(),
+        group_session_connections: None,
+        frontend_connections: connections.clone(),
+        run_channels,
+    });
+    let (tx, mut rx) = mpsc::channel(16);
+    connections
+        .subscribe(
+            "session-e2e-ws".to_string(),
+            tx.clone(),
+            Some("human-e2e-ws".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    interactions
+        .on_provider_requested(requested_via_websocket("ws-first"))
+        .await
+        .unwrap();
+    let event = receive_json(&mut rx).await;
+    assert_eq!(event["payload"]["interactionId"], "ws-first");
+
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human-e2e-ws".to_string()),
+    };
+    let mut connection_state = WebClientConnectionState::default();
+    let frame = BcsFrame::Request(RequestFrame::new(
+        "resolve-ws-first",
+        "interaction.resolve",
+        Some(json!({
+            "bcsRunId": "bcs-run-e2e-ws",
+            "interactionId": "ws-first",
+            "idempotencyKey": "idem-ws-first",
+            "decision": "allow_once"
+        })),
+    ));
+    dispatch_client_frame(
+        &state,
+        &serde_json::to_string(&frame).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    let response: ResponseFrame =
+        serde_json::from_value(receive_json(&mut rx).await).expect("response frame");
+    assert_eq!(response.ok, true);
+
+    let calls = provider.calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert!(matches!(
+        calls[0].target,
+        BotDeliveryTarget::WebSocket { ref bot_id } if bot_id == "bot-e2e-ws"
+    ));
+}
+
 #[tokio::test]
 async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_run() {
     let connections = Arc::new(WorkbenchConnectionRegistry::new());

@@ -2443,6 +2443,7 @@ impl Default for BcsServerState {
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         let interactions = create_interaction_service(
             provider_transport.clone(),
+            bot_connections.clone(),
             group_management_impl.clone(),
             frontend_delivery.clone(),
             config.async_chat_run_retention_ms,
@@ -3105,6 +3106,7 @@ fn build_use_case_bundle(
 
 fn create_interaction_service(
     provider_transport: Arc<bcs_provider_http::HttpProviderTransport>,
+    bot_connections: Arc<bcs_ws::bot::BotConnectionRegistry>,
     authorization: Arc<dyn CanResolveInteraction>,
     frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     terminal_retention_ms: u64,
@@ -3113,10 +3115,20 @@ fn create_interaction_service(
     let interaction_frontend = Arc::new(bcs_ws::web::WorkbenchInteractionDelivery::new(
         frontend_delivery,
     ));
+    // bot_connections: Arc<BotConnectionRegistry> 直接传给
+    // InteractionProviderMux::new 的 websocket: Arc<dyn InteractionProviderPort>
+    // 参数——函数参数位置是 Rust unsize coercion 的标准触发点，不需要显式
+    // `as Arc<dyn ...>` 或额外包装（BotConnectionRegistry 已直接 impl
+    // InteractionProviderPort）。
+    let interaction_provider: Arc<dyn bcs_service_api::InteractionProviderPort> =
+        Arc::new(bcs_provider_http::InteractionProviderMux::new(
+            bot_connections,
+            provider_transport.clone(),
+        ));
     let interactions: Arc<dyn InteractionService> = Arc::new(InteractionManagement::new(
         store,
         authorization,
-        provider_transport.clone(),
+        interaction_provider,
         interaction_frontend,
         terminal_retention_ms,
     ));
@@ -4165,6 +4177,7 @@ impl BcsServer {
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         let interactions = create_interaction_service(
             provider_transport.clone(),
+            bot_connections.clone(),
             use_cases.interaction_authorization.clone(),
             frontend_delivery.clone(),
             config.async_chat_run_retention_ms,
@@ -5055,6 +5068,7 @@ impl BcsServer {
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
         let interactions = create_interaction_service(
             provider_transport.clone(),
+            bot_connections.clone(),
             use_cases.interaction_authorization.clone(),
             frontend_delivery.clone(),
             config.async_chat_run_retention_ms,
@@ -5785,6 +5799,7 @@ fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::bot::BotDis
         agent_credential_backfill: Some(Arc::new(AgentCredentialBackfill {
             registry: state.services.registry.clone(),
         })),
+        interactions: state.services.interactions.clone(),
     })
 }
 
