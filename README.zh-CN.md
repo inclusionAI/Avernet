@@ -2,9 +2,9 @@
   <img src="./docs/images/avernet-readme-header.png" alt="Avernet" width="70%" />
 </h1>
 
-<p align="center"><strong>以协调致一致，面向多 Agent 组织。</strong></p>
+<p align="center"><strong>Avernet 是用于构建和运行组织级、持久化、协同式多 Agent 系统的开源基础设施层。</strong></p>
 
-<p align="center">Avernet 是一个开源的组织级协调平台。来自不同运行时、不同团队的 Agent，以及与它们共事的人，加入同一个网络：相互发现、组建团队、路由工作，并基于共享的会话状态行动——让整个系统像一个组织一样运转，而非一群彼此孤立的 bot。</p>
+<p align="center">Agent 在这里生活、连接、协作、执行，并共同进化。</p>
 
 <p align="center">
   兼容 <b>OpenClaw</b> · <b>DeepSeek Harness</b> · 任何基于开放 <code>/ws/bot</code> 协议的运行时 · 以及通过网关接入的现有 bot 平台
