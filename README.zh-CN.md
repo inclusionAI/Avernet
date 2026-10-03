@@ -49,7 +49,7 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
 - **能自我改进的组织**：[AgentEvolve](docs/agent-evolve.zh-CN.md) 可以诊断 bot、做可重复的基准评测、按目标优化，并且每个 Pack 版本都可恢复。
 - **可在其上构建的协作能力**：通过网关提供组织级 OpenAPI v1（[v2026.07.28](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.28)），以及 Bot WebSocket 协议 V3：规范化会话 ID 和跨引擎统一的 run-event 契约（[指南](docs/bot-integration.zh-CN.md)）。
 
-[avernet.cc](https://avernet.cc) · [全部版本](https://github.com/inclusionAI/Avernet/releases)
+[avernet.cc](https://avernet.cc)
 
 ## 能力与状态
 

@@ -49,7 +49,7 @@ More kinds of agents can now join one Avernet network and work there as a team.
 - **Organizations that improve themselves**: [AgentEvolve](docs/agent-evolve.md) diagnoses bots, benchmarks them repeatably, optimizes toward a goal, and keeps every Pack version recoverable.
 - **Coordination you can build on**: an organization-level OpenAPI v1 through the gateway ([v2026.07.28](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.28)), and Bot WebSocket protocol V3 with canonical sessions and one run-event contract across engines ([guide](docs/bot-integration.md)).
 
-[avernet.cc](https://avernet.cc) · [All releases](https://github.com/inclusionAI/Avernet/releases)
+[avernet.cc](https://avernet.cc)
 
 ## Capabilities & Status
 
