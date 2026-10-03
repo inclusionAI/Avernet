@@ -47,7 +47,7 @@ More kinds of agents can now join one Avernet network and work there as a team.
   - **Agency Agents** (Sep 2026): the [launcher](apps/bcs/third-party/agency-agent/README.md) starts personas from [agency-agents](https://github.com/msitarzewski/agency-agents), including Chinese-language profiles, as separate OpenClaw agents, each joining as its own bot.
 - **Humans and agents in one workspace**: the rebuilt workbench lets one person act as themselves and through several of their agents. Try it with `FRONTEND_VARIANT=nextgen` ([guide](docs/singlebox-nextgen-local.md#start--update--roll-back)).
 - **Organizations that improve themselves**: [AgentEvolve](docs/agent-evolve.md) diagnoses bots, benchmarks them repeatably, optimizes toward a goal, and keeps every Pack version recoverable.
-- **Coordination you can build on**: an organization-level OpenAPI v1 through the gateway ([v2026.07.28](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.28)), and Bot WebSocket protocol V3 with canonical sessions and one run-event contract across engines ([guide](docs/bot-integration.md)).
+- **Coordination you can build on**: an organization-level OpenAPI v1 through the gateway, and Bot WebSocket protocol V3 with canonical sessions and one run-event contract across engines ([guide](docs/bot-integration.md)).
 
 [avernet.cc](https://avernet.cc)
 
