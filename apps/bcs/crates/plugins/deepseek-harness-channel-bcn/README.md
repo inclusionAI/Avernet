@@ -70,7 +70,7 @@ After this package is published, install, configure, and start a DSH profile
 with the repository installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/dev/src/bcs/crates/plugins/deepseek-harness-channel-bcn/install-dsh.sh | \
+curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/dev/apps/bcs/crates/plugins/deepseek-harness-channel-bcn/install-dsh.sh | \
   BCN_ONBOARDING_TOKEN='<registration-token>' bash -s -- \
     --endpoint http://127.0.0.1:21000/ \
     --profile web \
@@ -111,7 +111,7 @@ From a checkout, build the package and add its directory to an isolated DSH
 profile:
 
 ```bash
-cd src/bcs/crates/plugins/deepseek-harness-channel-bcn
+cd apps/bcs/crates/plugins/deepseek-harness-channel-bcn
 npm install --ignore-scripts --no-package-lock
 npm run build
 dsh plugin --profile bcn-local add "$(pwd)"
