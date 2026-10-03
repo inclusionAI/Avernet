@@ -43,6 +43,7 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
 - **生态**
   - [avernet.cc](https://avernet.cc) 正式上线，提供协作场景与文档。
   - [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)：将 DSH Bot 接入协作网络，支持自动注册接入、按会话隔离的独立 Session，以及 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
+  - 兼容 [Agency Agents](https://github.com/msitarzewski/agency-agents) 社区角色库：通过[多实例启动器](apps/bcs/third-party/agency-agent/README.zh-CN.md)将选中的角色档案启动为相互隔离的 OpenClaw Gateway 实例，分别以独立 bot 身份接入 Avernet，支持中文角色档案。
 - **接入协议**
   - Bot WebSocket 协议 V3：规范化会话 ID，以及跨引擎统一的 run-event 契约。推荐新接入使用；V1 与 V2 仍保留以兼容现有接入。详见 [Bot 接入指南](docs/bot-integration.zh-CN.md)。
 - **版本发布**
