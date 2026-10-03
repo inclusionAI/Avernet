@@ -27,7 +27,9 @@ use bcs_service_api::{
     TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
     WebSendCommand, WebSendOutcome,
 };
-use bcs_service_api::{InteractionKind, InteractionProviderCommand, InteractionProviderPort};
+use bcs_service_api::{
+    InteractionKind, InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort,
+};
 
 #[tokio::test]
 async fn interaction_resolve_reuses_provider_route_and_expects_json_ack() {
@@ -1987,4 +1989,92 @@ async fn provider_delivery_2_0_inject_propagates_json_rejection() {
     assert!(result.error.is_some());
 
     server.abort();
+}
+
+struct RecordingInteractionProvider {
+    calls: StdMutex<Vec<InteractionProviderCommand>>,
+    ack: InteractionProviderAck,
+}
+
+#[async_trait::async_trait]
+impl InteractionProviderPort for RecordingInteractionProvider {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        self.calls.lock().unwrap().push(command);
+        Ok(self.ack.clone())
+    }
+}
+
+fn mux_websocket_provider() -> Arc<RecordingInteractionProvider> {
+    Arc::new(RecordingInteractionProvider {
+        calls: StdMutex::new(Vec::new()),
+        ack: InteractionProviderAck {
+            ok: true,
+            retryable: None,
+            error: None,
+        },
+    })
+}
+
+#[tokio::test]
+async fn interaction_provider_mux_routes_websocket_target_to_websocket_impl() {
+    let websocket = mux_websocket_provider();
+    let provider = Arc::new(HttpProviderTransport::allowing_private_networks_for_tests());
+    let mux = bcs_provider_http::InteractionProviderMux::new(websocket.clone(), provider.clone());
+
+    let command = InteractionProviderCommand {
+        target: BotDeliveryTarget::WebSocket {
+            bot_id: "bot-mux-1".to_string(),
+        },
+        provider_bypass_headers: Vec::new(),
+        bcs_run_id: "run-mux-1".to_string(),
+        provider_run_id: "run-mux-1".to_string(),
+        bcs_session_id: "group-1:eeeeeeee".to_string(),
+        group_id: "group-1".to_string(),
+        bot_id: "bot-mux-1".to_string(),
+        interaction_id: "int-mux-1".to_string(),
+        kind: InteractionKind::Exec,
+        idempotency_key: "idem-mux-1".to_string(),
+        resolution: serde_json::json!({}),
+    };
+
+    let ack = mux.resolve_interaction(command).await.unwrap();
+    assert!(ack.ok);
+    assert_eq!(websocket.calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn interaction_provider_mux_routes_http_provider_target_to_http_impl() {
+    let websocket = mux_websocket_provider();
+    let provider = Arc::new(HttpProviderTransport::allowing_private_networks_for_tests());
+    let mux = bcs_provider_http::InteractionProviderMux::new(websocket.clone(), provider.clone());
+
+    let command = InteractionProviderCommand {
+        target: BotDeliveryTarget::HttpProvider {
+            bot_id: "bot-mux-2".to_string(),
+            provider_id: "provider-x".to_string(),
+            provider_bot_ref: "ref-1".to_string(),
+            webhook_url: "http://127.0.0.1:9/webhook".to_string(),
+            bcs_to_provider_token: RedactedToken::new("tok"),
+            protocol_version: "2.0".to_string(),
+        },
+        provider_bypass_headers: Vec::new(),
+        bcs_run_id: "run-mux-2".to_string(),
+        provider_run_id: "run-mux-2".to_string(),
+        bcs_session_id: "group-1:ffffffff".to_string(),
+        group_id: "group-1".to_string(),
+        bot_id: "bot-mux-2".to_string(),
+        interaction_id: "int-mux-2".to_string(),
+        kind: InteractionKind::Exec,
+        idempotency_key: "idem-mux-2".to_string(),
+        resolution: serde_json::json!({}),
+    };
+
+    // The HTTP target attempts a real request to an unreachable port and is
+    // expected to fail; the key assertion is that the websocket mock was
+    // never consulted — proving the routing picked the HTTP branch.
+    let _ = mux.resolve_interaction(command).await;
+    assert_eq!(websocket.calls.lock().unwrap().len(), 0);
 }

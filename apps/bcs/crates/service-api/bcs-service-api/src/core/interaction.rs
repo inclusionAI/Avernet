@@ -15,6 +15,19 @@ pub enum InteractionKind {
     ModeSwitch,
 }
 
+impl InteractionKind {
+    /// Wire-level slug used by both the HTTP Provider callback and the Bot
+    /// WebSocket `interaction.resolve` params. Kept in sync with the
+    /// `#[serde(rename_all = "snake_case")]` derive above.
+    pub fn as_slug(&self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::AskUser => "ask_user",
+            Self::ModeSwitch => "mode_switch",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InteractionStatus {

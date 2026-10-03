@@ -299,6 +299,7 @@ async fn start_test_server() -> (SocketAddr, Arc<BotConnectionRegistry>, Arc<Moc
             std::collections::HashMap::new(),
         )),
         agent_credential_backfill: None,
+        interactions: Arc::new(bcs_test_support::NoopInteractionService),
     });
 
     let app_state = AppState {

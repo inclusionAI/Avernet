@@ -1,10 +1,13 @@
 use bcs_protocol::stream::{
-    AgentData, ChatState, StreamEvent, TASK_INTENT_ELIGIBLE_KEY, parse_run_event_v3,
+    AgentData, ChatState, InteractionEvent as WireInteractionEvent,
+    InteractionKind as WireInteractionKind, InteractionPhase, StreamEvent,
+    TASK_INTENT_ELIGIBLE_KEY, parse_run_event_v3,
 };
 use bcs_protocol::{ChatEventState, EventFrame};
 use serde_json::Value;
+use tracing::warn;
 
-use super::dispatcher::{BotWsDispatchError, Result};
+use super::dispatcher::{BotDispatchState, BotWsDispatchError, Result, validate_v3_run_scope};
 
 pub(super) type NormalizedBotEvent = (
     String,
@@ -17,10 +20,17 @@ pub(super) type NormalizedBotEvent = (
     Option<u64>,
 );
 
-/// Adapt the canonical V3 Run Event contract to the existing message-flow
-/// application command. Protocol validation stays at the WS boundary; the
-/// application layer remains transport-agnostic.
-pub(super) fn normalize_v3_event(event: &EventFrame) -> Result<NormalizedBotEvent> {
+pub(super) enum V3RunEvent {
+    Normalized(NormalizedBotEvent),
+    Interaction(WireInteractionEvent),
+}
+
+/// Parse the raw V3 EventFrame payload and separate "flows into the
+/// NormalizedBotEvent pipeline" (agent/chat streaming events) from
+/// "handled independently" (Interaction: request-response semantics,
+/// no terminal_fingerprint replay dedup, no per-run seq reservation —
+/// idempotency is owned entirely by InteractionService).
+pub(super) fn classify_v3_event(event: &EventFrame) -> Result<V3RunEvent> {
     let raw = event
         .payload
         .clone()
@@ -29,15 +39,116 @@ pub(super) fn normalize_v3_event(event: &EventFrame) -> Result<NormalizedBotEven
         BotWsDispatchError::InvalidFrameFormat(format!("invalid V3 run event: {error}"))
     })?;
     match canonical {
-        StreamEvent::Agent(agent) => normalize_agent(agent),
-        StreamEvent::Chat(chat) => normalize_chat(chat),
-        StreamEvent::Interaction(_) => Err(BotWsDispatchError::InvalidFrameFormat(
-            "V3 interaction events are not supported on Bot WebSocket yet".into(),
-        )),
+        StreamEvent::Agent(agent) => normalize_agent(agent).map(V3RunEvent::Normalized),
+        StreamEvent::Chat(chat) => normalize_chat(chat).map(V3RunEvent::Normalized),
+        StreamEvent::Interaction(interaction) => Ok(V3RunEvent::Interaction(interaction)),
         StreamEvent::Ping { .. } | StreamEvent::Unknown { .. } => Err(
             BotWsDispatchError::InvalidFrameFormat("unsupported V3 run event".into()),
         ),
     }
+}
+
+fn to_app_interaction_kind(kind: WireInteractionKind) -> bcs_service_api::InteractionKind {
+    match kind {
+        WireInteractionKind::Exec => bcs_service_api::InteractionKind::Exec,
+        WireInteractionKind::AskUser => bcs_service_api::InteractionKind::AskUser,
+        WireInteractionKind::ModeSwitch => bcs_service_api::InteractionKind::ModeSwitch,
+    }
+}
+
+/// Handle a V3 Interaction event (HITL uplink). Unlike the agent/chat path,
+/// this does not produce a `NormalizedBotEvent`: Interaction is request-response,
+/// not a streaming message, so it never enters the streaming-event pipeline
+/// (no terminal_fingerprint, no reserve_run_event_seq). Idempotency is
+/// entirely owned by `InteractionService`.
+pub(super) async fn handle_interaction_event_v3(
+    state: &BotDispatchState,
+    bot_id: &str,
+    event: WireInteractionEvent,
+    outer_seq: Option<u64>,
+) -> Result<()> {
+    let session_id = event
+        .session_id
+        .as_deref()
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 interaction missing sessionId".into()))?;
+    let seq = event
+        .seq
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 interaction missing seq".into()))?;
+
+    let context = validate_v3_run_scope(state, bot_id, &event.run_id, session_id, seq, outer_seq).await?;
+    if context.terminal {
+        // The terminal event already went through the bot-terminal observer
+        // path, which owns interaction cleanup for normally-finished runs.
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run is terminal or expired".into(),
+        ));
+    }
+    let now_ms = bcs_protocol::now_ms();
+    if context.deadline_ms <= now_ms {
+        // Mirror the HTTP SSE ingest bookkeeping (drive_sse_frame): an
+        // interaction frame arriving after the run deadline invalidates the
+        // run's still-pending interactions, so the workbench stops offering
+        // an approval card that can no longer be resolved. This is internal
+        // store bookkeeping only — no frame is sent to the bot (the spec
+        // forbids downstream notification on run-deadline expiry).
+        if let Err(error) = state
+            .interactions
+            .invalidate_run(&event.run_id, "run_deadline", now_ms)
+            .await
+        {
+            warn!(
+                run_id = %event.run_id,
+                %error,
+                "failed to invalidate expired interactions"
+            );
+        }
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run is terminal or expired".into(),
+        ));
+    }
+
+    match event.phase {
+        InteractionPhase::Requested => {
+            state
+                .interactions
+                .on_provider_requested(bcs_service_api::ProviderInteractionRequestedCommand {
+                    bcs_run_id: event.run_id.clone(),
+                    provider_run_id: event.run_id.clone(),
+                    interaction_id: event.interaction_id.clone(),
+                    kind: to_app_interaction_kind(event.kind),
+                    bcs_session_id: context
+                        .bcs_session_id
+                        .clone()
+                        .expect("validate_v3_run_scope guarantees a session id (identity match)"),
+                    group_id: context.group_id.clone(),
+                    bot_id: bot_id.to_string(),
+                    run_deadline_ms: context.deadline_ms,
+                    provider_target: bcs_service_api::BotDeliveryTarget::WebSocket {
+                        bot_id: bot_id.to_string(),
+                    },
+                    provider_bypass_headers: Vec::new(),
+                    payload: event.raw.clone(),
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map_err(BotWsDispatchError::ServiceError)?;
+        }
+        InteractionPhase::Resolved => {
+            state
+                .interactions
+                .on_provider_resolved(bcs_service_api::ProviderInteractionResolvedCommand {
+                    bcs_run_id: event.run_id.clone(),
+                    provider_run_id: event.run_id.clone(),
+                    interaction_id: event.interaction_id.clone(),
+                    kind: to_app_interaction_kind(event.kind),
+                    payload: event.raw.clone(),
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map_err(BotWsDispatchError::ServiceError)?;
+        }
+    }
+    Ok(())
 }
 
 fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<NormalizedBotEvent> {

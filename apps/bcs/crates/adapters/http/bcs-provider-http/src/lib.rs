@@ -279,7 +279,7 @@ impl InteractionProviderPort for HttpProviderTransport {
         );
         params.insert(
             "kind".to_string(),
-            Value::String(interaction_kind_slug(command.kind).to_string()),
+            Value::String(command.kind.as_slug().to_string()),
         );
         params.insert(
             "idempotencyKey".to_string(),
@@ -320,14 +320,6 @@ impl InteractionProviderPort for HttpProviderTransport {
             retryable: ack.retryable,
             error: ack.error,
         })
-    }
-}
-
-fn interaction_kind_slug(kind: InteractionKind) -> &'static str {
-    match kind {
-        InteractionKind::Exec => "exec",
-        InteractionKind::AskUser => "ask_user",
-        InteractionKind::ModeSwitch => "mode_switch",
     }
 }
 
@@ -961,6 +953,38 @@ impl GroupHistoryBotRequestPort for HistoryRequestMux {
             self.websocket
                 .send_history_request(target, method, params, timeout_ms)
                 .await
+        }
+    }
+}
+
+pub struct InteractionProviderMux {
+    websocket: Arc<dyn InteractionProviderPort>,
+    provider: Arc<HttpProviderTransport>,
+}
+
+impl InteractionProviderMux {
+    pub fn new(
+        websocket: Arc<dyn InteractionProviderPort>,
+        provider: Arc<HttpProviderTransport>,
+    ) -> Self {
+        Self {
+            websocket,
+            provider,
+        }
+    }
+}
+
+#[async_trait]
+impl InteractionProviderPort for InteractionProviderMux {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        match &command.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.resolve_interaction(command).await,
+            BotDeliveryTarget::HttpProvider { .. } => {
+                self.provider.resolve_interaction(command).await
+            }
         }
     }
 }
