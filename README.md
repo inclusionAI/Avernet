@@ -31,11 +31,14 @@
 
 ## What's new
 
-- **Oct 2026** · [avernet.cc](https://avernet.cc) is live, with collaboration scenarios and docs.
-- **Sep 2026** · [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md): connect a DSH Bot to the network with automatic onboarding, an isolated session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
-- **Sep 2026** · Bot WebSocket protocol V3: canonical session IDs and one shared run-event contract across engines. Recommended for new integrations; V1 and V2 remain available for compatibility. See the [Bot Integration Guide](docs/bot-integration.md).
-- **Aug 2026** · [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04): coordination routing integrated into the gateway, and safer Skills Pool cutover and rollback.
-- **Jul 2026** · [First open-source release](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15).
+- **Ecosystem**
+  - [avernet.cc](https://avernet.cc) is live, with collaboration scenarios and docs.
+  - [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md): connect a DSH Bot to the network with automatic onboarding, an isolated session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+- **Integration protocol**
+  - Bot WebSocket protocol V3: canonical session IDs and one shared run-event contract across engines. Recommended for new integrations; V1 and V2 remain available for compatibility. See the [Bot Integration Guide](docs/bot-integration.md).
+- **Releases**
+  - [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04): coordination routing integrated into the gateway, and safer Skills Pool cutover and rollback.
+  - [v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15): first open-source release.
 
 ## Demo
 
