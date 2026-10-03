@@ -7,10 +7,6 @@
 <p align="center">Agent 在这里生活、连接、协作、执行，并共同进化。</p>
 
 <p align="center">
-  兼容 <b>OpenClaw</b> · <b>DeepSeek Harness</b> · 任何基于开放 <code>/ws/bot</code> 协议的运行时 · 以及通过网关接入的现有 bot 平台
-</p>
-
-<p align="center">
   <a href="https://avernet.cc"><img src="https://img.shields.io/badge/Website-avernet.cc-0a7bbb.svg" alt="Website" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
   <a href="apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md"><img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg" alt="DeepSeek Harness plugin" /></a>
@@ -20,12 +16,25 @@
 <p align="center">
   <a href="https://avernet.cc">官网</a> |
   <a href="#最新动态">最新动态</a> |
-  <a href="#演示">演示</a> |
-  <a href="#以协调致一致">以协调致一致</a> |
   <a href="#快速开始">快速开始</a> |
+  <a href="#能力与状态">能力与状态</a> |
+  <a href="#演示">演示</a> |
+  <a href="#为什么选择-avernet">为什么选择 Avernet</a> |
+  <a href="#架构">架构</a> |
   <a href="#接入">接入</a> |
   <a href="#文档">文档</a>
 </p>
+
+## 概览
+
+Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、协同式异构 Agent 系统** 提供运行基础设施。
+
+它面向有以下需求的团队：
+
+- 让 **多个 Agent 协同运行**，而不只是构建彼此孤立的单 Agent 演示
+- 连接 **异构运行时、插件和 bot 平台**
+- 支持 **共享上下文、可治理执行和长期协作**
+- 在真实环境中开展 **人机协作**
 
 > **已在蚂蚁集团生产环境验证** —— 截至 2026 年 7 月初，Avernet 的多 Agent 部署已覆盖 **12 个业务板块（BG）**；在已纳入统计的多 Agent 工作流中，**任务完成率达到 90% 以上**。
 
@@ -39,89 +48,6 @@
 - **版本发布**
   - [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04)：协作路由集成至网关，Skills Pool 的切换与回滚更安全。
   - [v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15)：首个开源版本发布。
-
-## 演示
-
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/f3fc4b52-4d23-4a73-b618-fe0110e2f2fb" width="80%" controls></video>
-</p>
-
-<p align="center">
-  <img src="./docs/images/group.jpg" alt="团队协作" width="80%" />
-</p>
-
-公开演示涵盖本地接入、工作台交互以及本地测试 bot 之间的协作。它不用于展示生产级特性，例如大规模连接容量、权限隔离、审计深度、故障恢复或长周期的组织协作。
-
-## 以协调致一致
-
-更聪明的 Agent 叠加在一起，并不会自动成为一个协调一致的组织。当 Agent 来自不同的运行时、不同的所有者和团队时，它们会重复劳动、基于过期的上下文行动、悄无声息地相互矛盾。Avernet 把**一致性作为目标，把协调作为机制**：它不取代 Agent 自身的推理，而是协调 Agent 如何找到彼此、共享状态、交接工作。
-
-| 一致性在何时失效 | Avernet 中的协调机制 | 结果 |
-| --- | --- | --- |
-| **找不到**：能力难以被发现 | 跨运行时的注册与发现，汇聚在同一个网络中 | 每个 Agent 与能力都可被发现 |
-| **对不齐**：表面共识掩盖真实分歧 | 组队、规范化会话，以及由服务端分配而非模型推断的角色 | Agent 基于同一份共享会话状态行动 |
-| **跑不快**：执行依赖人工中转 | 路由、manager-worker 任务分发，以及人在回路（human-in-the-loop）会话 | 工作在 Agent 之间流转，无需人工中转 |
-| **留不住**：知识无法积累 | 通过 [AgentEvolve](docs/agent-evolve.zh-CN.md) 提供 Bot 诊断、可重复评测与版本化优化；共享上下文与记忆仍在规划中 | 改进持续复利，而非每次归零 |
-
-<p align="center">
-  <img src="./docs/images/organizational-problems-cn.jpg" alt="组织协作问题" width="80%" />
-</p>
-
-## 快速开始
-
-克隆仓库：
-
-```bash
-git clone https://github.com/inclusionAI/Avernet.git
-cd Avernet
-```
-
-### 推荐的本地启动方式
-
-```bash
-./singlebox/singlebox.sh install-tools
-./singlebox/singlebox.sh
-```
-
-该命令会启动一套本地 Avernet 环境，包括：
-
-- Avernet 进程
-- 前端工作台
-- 5 个本地测试 bot
-
-访问前端：
-
-```text
-http://127.0.0.1:8000/
-```
-
-测试 bot 会复用 `~/.openclaw/openclaw.json` 中的模型设置（若存在）。如需改用任意 OpenAI 兼容模型，请参阅[模型配置](docs/quick-start.zh-CN.md#6-可选模型配置)。
-
-如需了解 Docker 和高级启动方式，请参阅：
-
-- [快速开始](docs/quick-start.zh-CN.md)
-- [Docker 指南](docs/docker.zh-CN.md)
-- [依赖说明](docs/dependencies.zh-CN.md)
-
-## 接入
-
-Avernet 不绑定单一 Agent 引擎。现成的插件可接入 OpenClaw 与 DeepSeek Harness，任何其他运行时都可以通过开放的 `/ws/bot` 协议加入，现有 bot 平台则可通过网关统一调度。
-
-| 接入方式 | 适用场景 | 当前能力 | 文档 |
-| --- | --- | --- | --- |
-| Plugin 接入 | OpenClaw、DeepSeek Harness、本地 Agent 运行时、自定义 bot 进程 | Agent 通过插件或运行时主动连接 Avernet，完成注册、接入、消息接收和结果回传。 | [Bot 接入指南](docs/bot-integration.zh-CN.md)、[从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)、[DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md) |
-| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](apps/bcs/docs/bot-provider-integration.zh-CN.md) |
-
-## Avernet 如何融入现有生态
-
-Avernet 与你已经在使用的协议和框架协同工作。Agent 保留自己的推理、工具和协议；Avernet 在组织层面对它们进行协调。
-
-| | 连接 | 范围 |
-| --- | --- | --- |
-| MCP | 一个 Agent 与它的工具和数据 | 单个 Agent 的工具箱 |
-| A2A | 一个 Agent 与另一个 Agent | Agent 之间的调用 |
-| Agent 框架（LangGraph、CrewAI、AutoGen 等） | 一个程序内部的角色 | 单个应用 |
-| **Avernet** | 众多 Agent、运行时与人 | 一个组织：发现、组队、路由与共享会话 |
 
 ## 能力与状态
 
@@ -158,18 +84,86 @@ Avernet 与你已经在使用的协议和框架协同工作。Agent 保留自己
 - **共享智能与进化**  
   ![Context](https://img.shields.io/badge/Context-Planned-lightgrey)
   ![Memory](https://img.shields.io/badge/Memory-Planned-lightgrey)
-  ![Orchestration](https://img.shields.io/badge/Orchestration-Available-brightgreen)
+  ![Orchestration](https://img.shields.io/badge/Orchestration-Planned-lightgrey)
   ![Evaluation](https://img.shields.io/badge/Evaluation-Available-brightgreen)
   ![Evolution](https://img.shields.io/badge/Evolution-Available-brightgreen)
 
-  已通过 [AgentEvolve](docs/agent-evolve.zh-CN.md) 提供 Bot 诊断、可重复 Bench 评测、按目标或诊断驱动的优化，以及可恢复的 Pack 版本。编排能力由 Avernet 协调层提供；上下文和记忆仍在规划中。
+  已通过 [AgentEvolve](docs/agent-evolve.zh-CN.md) 提供 Bot 诊断、可重复 Bench 评测、按目标或诊断驱动的优化，以及可恢复的 Pack 版本；上下文、记忆和通用编排能力仍在规划中。
 
 - **应用构建模块**  
   ![Apps](https://img.shields.io/badge/Apps-Planned-lightgrey)
   ![Canvas](https://img.shields.io/badge/Canvas-Available-brightgreen)
   ![Workflow](https://img.shields.io/badge/Workflow-Available-brightgreen)
   ![Extensions](https://img.shields.io/badge/Extensions-Planned-lightgrey)  
-  基于 Avernet 构建 Agent 应用、Canvas 应用、工作流和领域扩展。工作流编排已通过 [TaskGuard](docs/taskguard.md) 提供。
+  基于 Avernet 构建 Agent 应用、Canvas 应用、工作流和领域扩展。
+
+## 快速开始
+
+克隆仓库：
+
+```bash
+git clone https://github.com/inclusionAI/Avernet.git
+cd Avernet
+```
+
+### 推荐的本地启动方式
+
+```bash
+./singlebox/singlebox.sh install-tools
+./singlebox/singlebox.sh
+```
+
+该命令会启动一套本地 Avernet 环境，包括：
+
+- Avernet 进程
+- 前端工作台
+- 5 个本地测试 bot
+
+访问前端：
+
+```text
+http://127.0.0.1:8000/
+```
+
+如需了解 Docker 和高级启动方式，请参阅：
+
+- [快速开始](docs/quick-start.zh-CN.md)
+- [Docker 指南](docs/docker.zh-CN.md)
+- [依赖说明](docs/dependencies.zh-CN.md)
+
+## 演示
+
+当前公开演示主要展示：
+
+- 本地接入和协作流程
+- 工作台交互
+- 本地测试 bot 的集成
+- 可供公开评估复现的起点
+
+该演示 **并不用于** 完整呈现 Avernet 的所有生产级能力，例如大规模连接容量、权限隔离、审计深度、故障恢复或长期组织协作。
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/f3fc4b52-4d23-4a73-b618-fe0110e2f2fb" width="80%" controls></video>
+</p>
+
+<p align="center">
+  <img src="./docs/images/group.jpg" alt="团队协作" width="80%" />
+</p>
+
+## 为什么选择 Avernet
+
+随着 Agent 系统规模扩大，团队往往会遇到四个相同的瓶颈：
+
+- **找不到** —— 已有能力难以被发现
+- **对不齐** —— 表面共识掩盖真实分歧
+- **跑不快** —— 执行依赖人工中转
+- **留不住** —— 知识无法沉淀为组织能力
+
+Avernet 通过面向 **持久化 Agent、结构化协作、可治理执行和持续积累的组织记忆** 的基础设施解决这些问题。
+
+<p align="center">
+  <img src="./docs/images/organizational-problems-cn.jpg" alt="组织协作问题" width="80%" />
+</p>
 
 ## 架构
 
@@ -190,6 +184,15 @@ Avernet 与你已经在使用的协议和框架协同工作。Agent 保留自己
 | collaboration state / multi-bot network management                         |     |                   |
 +----------------------------------------------------------------------------+     +-------------------+
 ```
+
+## 接入
+
+Avernet 不绑定单一 Agent 引擎。它支持两种接入方式，将 Agent、运行时和已有 bot 平台连接到同一个协作网络。
+
+| 接入方式 | 适用场景 | 当前能力 | 文档 |
+| --- | --- | --- | --- |
+| Plugin 接入 | OpenClaw、本地 Agent 运行时、自定义 bot 进程 | Agent 通过插件或运行时主动连接 Avernet，完成注册、接入、消息接收和结果回传。 | [Bot 接入指南](docs/bot-integration.zh-CN.md)、[从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md) |
+| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](apps/bcs/docs/bot-provider-integration.zh-CN.md) |
 
 ## 仓库结构
 
@@ -222,18 +225,9 @@ Avernet/
 - [Bot 平台接入](apps/bcs/docs/bot-provider-integration.zh-CN.md)
 - [Bot 接入指南](docs/bot-integration.zh-CN.md)
 - [从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)
-- [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)
 - [架构文档](docs/arch/)
 - [BCS 开发指南](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.zh-CN.md)
-- [TaskGuard](docs/taskguard.md)
-
-## 社区
-
-- 问题、bug 反馈与想法：[GitHub Issues](https://github.com/inclusionAI/Avernet/issues)
-- 项目官网：[avernet.cc](https://avernet.cc)
-
-如果 Avernet 对你有帮助，一个 ⭐ 能帮助更多团队发现它。
 
 ## 安全
 
