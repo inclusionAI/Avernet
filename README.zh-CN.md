@@ -31,11 +31,14 @@
 
 ## 最新动态
 
-- **2026 年 10 月** · [avernet.cc](https://avernet.cc) 正式上线，提供协作场景与文档。
-- **2026 年 9 月** · [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)：将 DSH Bot 接入协作网络，支持自动注册接入、按会话隔离的独立 Session，以及 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
-- **2026 年 9 月** · Bot WebSocket 协议 V3：规范化会话 ID，以及跨引擎统一的 run-event 契约。推荐新接入使用；V1 与 V2 仍保留以兼容现有接入。详见 [Bot 接入指南](docs/bot-integration.zh-CN.md)。
-- **2026 年 8 月** · [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04)：协作路由集成至网关，Skills Pool 的切换与回滚更安全。
-- **2026 年 7 月** · [首个开源版本](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15)发布。
+- **生态**
+  - [avernet.cc](https://avernet.cc) 正式上线，提供协作场景与文档。
+  - [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)：将 DSH Bot 接入协作网络，支持自动注册接入、按会话隔离的独立 Session，以及 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
+- **接入协议**
+  - Bot WebSocket 协议 V3：规范化会话 ID，以及跨引擎统一的 run-event 契约。推荐新接入使用；V1 与 V2 仍保留以兼容现有接入。详见 [Bot 接入指南](docs/bot-integration.zh-CN.md)。
+- **版本发布**
+  - [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04)：协作路由集成至网关，Skills Pool 的切换与回滚更安全。
+  - [v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15)：首个开源版本发布。
 
 ## 演示
 
