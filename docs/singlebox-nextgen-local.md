@@ -20,7 +20,7 @@ TEAMCLAW_DIR=~/IdeaProjects/teamClawPre/teamclaw   # path to the internal checko
 # TEAMCLAW_FRONTEND_AUTOUPDATE=0                    # default 1; see below
 ```
 
-Then `bash scripts/singlebox.sh start frontend` (or `start all`) will:
+Then `bash singlebox/singlebox.sh start frontend` (or `start all`) will:
 
 1. **Auto-update the checkout**: `git fetch origin`, then fast-forward the
    current branch to its upstream — only when the tree is clean; a dirty or
@@ -43,7 +43,7 @@ their panels fail visibly at the gateway instead of dangling on a placeholder.
 ### Pull the checkout on demand (`frontend-pull`)
 
 The startup sync is best-effort and never blocks. Its operator-facing twin is
-`bash scripts/singlebox.sh frontend-pull`: it refuses loudly instead of
+`bash singlebox/singlebox.sh frontend-pull`: it refuses loudly instead of
 warning — a dirty tree is never stashed or overwritten, a detached HEAD is
 refused, and a branch without an upstream is a hard refusal (the command
 never guesses a ref to pull toward). The advance is ff-only toward the
@@ -61,8 +61,8 @@ anchored under `refs/heads/`) before any write, and never touches the checkout
 itself:
 
 ```bash
-./scripts/frontend_sprint_branch.sh --list          # declared branch + remote sprint heads
-./scripts/frontend_sprint_branch.sh sprint_teamclaw_S...
+./singlebox/apps/frontend/frontend_sprint_branch.sh --list          # declared branch + remote sprint heads
+./singlebox/apps/frontend/frontend_sprint_branch.sh sprint_teamclaw_S...
 git -C "$TEAMCLAW_DIR" fetch && git -C "$TEAMCLAW_DIR" checkout sprint_teamclaw_S...
 ./singlebox/singlebox.sh frontend-pull
 ```
@@ -111,22 +111,22 @@ From the target Avernet root:
 
 ```bash
 # Frontend only; existing backend services must be available independently.
-HOST=127.0.0.1 FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh start frontend
+HOST=127.0.0.1 FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start frontend
 
 # Full local stack (creates local runtime and bots). In nextgen mode the all
 # group includes Gateway; legacy startup order remains unchanged.
-FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh start all
+FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh start all
 
 # After a validated new export, rebuild the dev-server module graph.
-FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh restart frontend
+FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh restart frontend
 
 # Stop the selected UI BEFORE selecting another one: foreign/other-checkout
 # listeners are deliberately not killed by the frontend launcher. `stop all`
 # always includes the Gateway regardless of the current variant (a stack
 # started as nextgen must stay stoppable from a shell without FRONTEND_VARIANT
 # set), so only the per-service stop needs the selected variant spelled out.
-FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh stop frontend
-FRONTEND_VARIANT=legacy bash scripts/singlebox.sh start frontend
+FRONTEND_VARIANT=nextgen bash singlebox/singlebox.sh stop frontend
+FRONTEND_VARIANT=legacy bash singlebox/singlebox.sh start frontend
 ```
 
 Gateway stop shares the same safety contract: `stop gateway` / `stop all` only
@@ -209,10 +209,10 @@ Verify separately:
 Local regression commands:
 
 ```bash
-bash scripts/test_singlebox_frontend_variant.sh
-bash scripts/test_singlebox_detached_session.sh
-bash scripts/test_singlebox_service_guards.sh
-bash scripts/test_singlebox_default_mode.sh
+bash singlebox/verity/test_singlebox_frontend_variant.sh
+bash singlebox/verity/test_singlebox_detached_session.sh
+bash singlebox/verity/test_singlebox_service_guards.sh
+bash singlebox/verity/test_singlebox_default_mode.sh
 ```
 
 ## Local validation record (2026-09-10)
