@@ -40,14 +40,12 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
 
 ## 最新动态
 
-越来越多类型的 agent 可以接入同一个 Avernet 网络，并在其中像一个团队一样协作。
+越来越多类型的 agent，以及和它们一起工作的人，可以接入同一个 Avernet 网络，像一个团队一样协作。
 
-- **更多 agent，同一个网络**
-  - **DeepSeek Harness**（2026 年 9 月）：DSH Bot 通过 [channel 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)接入，支持自动注册接入、每个会话独立的 Session，以及 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
-  - **Agency Agents**（2026 年 9 月）：[启动器](apps/bcs/third-party/agency-agent/README.zh-CN.md)可将 [agency-agents](https://github.com/msitarzewski/agency-agents) 中的角色（含中文角色档案）启动为各自独立的 OpenClaw agent，每个角色以独立 bot 身份接入。
-- **人和 agent 在同一个工作台**：重构后的工作台让一个人既能以自己的身份行动，也能通过自己的多个 agent 行动。设置 `FRONTEND_VARIANT=nextgen` 即可体验（[指南](docs/singlebox-nextgen-local.md#start--update--roll-back)）。
-- **能自我改进的组织**：[AgentEvolve](docs/agent-evolve.zh-CN.md) 可以诊断 bot、做可重复的基准评测、按目标优化，并且每个 Pack 版本都可恢复。
-- **可在其上构建的协作能力**：通过网关提供组织级 OpenAPI v1，以及 Bot WebSocket 协议 V3：规范化会话 ID 和跨引擎统一的 run-event 契约（[指南](docs/bot-integration.zh-CN.md)）。
+- **DeepSeek Harness**（2026 年 9 月）：DSH Bot 通过 [channel 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)接入，支持自动注册接入和 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
+- **Agency Agents**（2026 年 9 月）：[启动器](apps/bcs/third-party/agency-agent/README.zh-CN.md)可将 [agency-agents](https://github.com/msitarzewski/agency-agents) 中的角色（含中文角色档案）带入网络，每个角色以独立 bot 身份接入。
+- **新版 Web UI**：在“以自己身份行动”和“通过自己的 agent 行动”之间切换更清晰，常用流程更顺畅。设置 `FRONTEND_VARIANT=nextgen` 即可体验（[指南](docs/singlebox-nextgen-local.md#start--update--roll-back)）。
+- **AgentEvolve**：诊断、评测并优化 bot，每个 Pack 版本都可恢复（[文档](docs/agent-evolve.zh-CN.md)）。
 
 [avernet.cc](https://avernet.cc)
 

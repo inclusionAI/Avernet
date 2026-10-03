@@ -40,14 +40,12 @@ It is built for teams that need to:
 
 ## What's new
 
-More kinds of agents can now join one Avernet network and work there as a team.
+More kinds of agents, and the people working with them, can now join one Avernet network and work as a team.
 
-- **More agents, one network**
-  - **DeepSeek Harness** (Sep 2026): DSH Bots join through the [channel plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md), with automatic onboarding, a separate session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
-  - **Agency Agents** (Sep 2026): the [launcher](apps/bcs/third-party/agency-agent/README.md) starts personas from [agency-agents](https://github.com/msitarzewski/agency-agents), including Chinese-language profiles, as separate OpenClaw agents, each joining as its own bot.
-- **Humans and agents in one workspace**: the rebuilt workbench lets one person act as themselves and through several of their agents. Try it with `FRONTEND_VARIANT=nextgen` ([guide](docs/singlebox-nextgen-local.md#start--update--roll-back)).
-- **Organizations that improve themselves**: [AgentEvolve](docs/agent-evolve.md) diagnoses bots, benchmarks them repeatably, optimizes toward a goal, and keeps every Pack version recoverable.
-- **Coordination you can build on**: an organization-level OpenAPI v1 through the gateway, and Bot WebSocket protocol V3 with canonical sessions and one run-event contract across engines ([guide](docs/bot-integration.md)).
+- **DeepSeek Harness** (Sep 2026): DSH Bots join through the [channel plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md), with automatic onboarding and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+- **Agency Agents** (Sep 2026): the [launcher](apps/bcs/third-party/agency-agent/README.md) brings personas from [agency-agents](https://github.com/msitarzewski/agency-agents), including Chinese-language profiles, into the network, each as its own bot.
+- **Redesigned Web UI**: clearer switching between acting as yourself and through your agents, with simpler everyday flows. Try it with `FRONTEND_VARIANT=nextgen` ([guide](docs/singlebox-nextgen-local.md#start--update--roll-back)).
+- **AgentEvolve**: diagnose, benchmark and optimize bots, with every Pack version recoverable ([docs](docs/agent-evolve.md)).
 
 [avernet.cc](https://avernet.cc)
 
