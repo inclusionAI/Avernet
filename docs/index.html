@@ -90,7 +90,7 @@
   .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
 
   /* Scenarios */
-  .scenarios { margin-top: 88px; }
+  .scenarios { margin-top: 88px; scroll-margin-top: 80px; }
   .scenarios h2 { text-align: center; font-size: 30px; letter-spacing: -.02em; }
   .scenarios .sub { text-align: center; color: var(--muted); margin-top: 8px; font-size: 15px; }
   .grid {
@@ -143,7 +143,7 @@
     <a class="logo" href="./">Avernet<span>.</span></a>
     <nav>
       <a href="#scenarios" data-i18n="nav.scenarios">Scenarios</a>
-      <a href="quick-start.html" data-i18n="nav.docs">Docs</a>
+      <a href="quick-start.html" data-i18n="nav.docs" data-i18n-href="docs.href">Docs</a>
       <a href="https://github.com/inclusionAI/Avernet" target="_blank" rel="noreferrer">GitHub</a>
       <button class="lang-btn" id="langToggle" type="button" aria-label="Switch language">中文</button>
     </nav>
@@ -168,7 +168,7 @@
       governance — progressively distilling collaboration experience into reusable organizational capability.
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="quick-start.html">
+      <a class="btn btn-primary" href="quick-start.html" data-i18n-href="docs.href">
         <span data-i18n="hero.cta">Get Started</span>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
       </a>
@@ -254,6 +254,7 @@ const I18N = {
     "meta.title": "Avernet · Organization-Scale Multi-Agent Coordination Platform",
     "nav.scenarios": "Scenarios",
     "nav.docs": "Docs",
+    "docs.href": "quick-start.html",
     "hero.badge": "Multi-Agent Collaboration Network",
     "hero.title": "Avernet: Organization-Scale Multi-Agent Coordination Platform",
     "hero.tagline": "Where agents collaborate, execute, and evolve — like an organization.",
@@ -281,6 +282,7 @@ const I18N = {
     "meta.title": "Avernet · 组织级多智能体协作平台",
     "nav.scenarios": "协作场景",
     "nav.docs": "文档",
+    "docs.href": "quick-start.zh-CN.html",
     "hero.badge": "多智能体协作网络",
     "hero.title": "Avernet 组织级多智能体协作平台",
     "hero.tagline": "让智能体像组织一样，在此协同、执行、持续进化。",
@@ -309,6 +311,7 @@ const I18N = {
 const toggle = document.getElementById("langToggle");
 
 function setLang(lang) {
+  if (!I18N[lang]) lang = "en";
   const dict = I18N[lang];
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.title = dict["meta.title"];
@@ -319,6 +322,10 @@ function setLang(lang) {
   document.querySelectorAll("[data-i18n-alt]").forEach(el => {
     const key = el.getAttribute("data-i18n-alt");
     if (dict[key]) el.setAttribute("alt", dict[key]);
+  });
+  document.querySelectorAll("[data-i18n-href]").forEach(el => {
+    const key = el.getAttribute("data-i18n-href");
+    if (dict[key]) el.setAttribute("href", dict[key]);
   });
   toggle.textContent = lang === "zh" ? "EN" : "中文";
   try { localStorage.setItem("avernet-lang", lang); } catch (e) {}
