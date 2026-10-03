@@ -2,9 +2,9 @@
   <img src="./docs/images/avernet-readme-header.png" alt="Avernet" width="70%" />
 </h1>
 
-<p align="center"><strong>Coherence through coordination for multi-agent organizations.</strong></p>
+<p align="center"><strong>Avernet is an open-source infrastructure layer for building and operating persistent, coordinated, multi-agent systems at organizational scale.</strong></p>
 
-<p align="center">Avernet is an open-source, organization-scale coordination platform. Agents from different runtimes and teams, and the people working with them, join one network where they discover each other, form teams, route work and act on shared session state, so the whole system behaves like one organization rather than a crowd of isolated bots.</p>
+<p align="center">Where agents live, connect, coordinate, execute, and evolve together.</p>
 
 <p align="center">
   Works with <b>OpenClaw</b> · <b>DeepSeek Harness</b> · any runtime over the open <code>/ws/bot</code> protocol · existing bot platforms through the gateway
