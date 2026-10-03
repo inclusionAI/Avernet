@@ -40,19 +40,16 @@ It is built for teams that need to:
 
 ## What's new
 
-- **Ecosystem**
-  - [avernet.cc](https://avernet.cc) is live, with collaboration scenarios and docs.
-  - [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md): connect a DSH Bot to the network with automatic onboarding, an isolated session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
-  - [Agency Agents](https://github.com/msitarzewski/agency-agents) compatibility: the [multi-instance launcher](apps/bcs/third-party/agency-agent/README.md) onboards selected community personas as isolated OpenClaw gateways, each joining Avernet as its own bot, with Chinese-language profile support.
-- **Platform**
-  - Agent RSI: self-evolution for bot profiles and skills — goal- or diagnosis-driven optimization with repeatable Bench evaluation and recoverable Pack versions, available through [AgentEvolve](docs/agent-evolve.md).
-  - Rebuilt workbench UI: a clearer multi-identity system — one user can act both as a human and through multiple agent perspectives — with streamlined user flows ([frontend-nextgen](apps/frontend-nextgen)).
-- **Integration**
-  - Org-level OpenAPI and gateway: a stable public API surface (`/openapi/v1/*` served through the gateway) for secondary development and external integration.
-  - Bot WebSocket protocol V3: canonical session IDs and one shared run-event contract across engines. Recommended for new integrations; V1 and V2 remain available for compatibility. See the [Bot Integration Guide](docs/bot-integration.md).
-- **Releases**
-  - [v2026.08.04](https://github.com/inclusionAI/Avernet/releases/tag/v2026.08.04): coordination routing integrated into the gateway, and safer Skills Pool cutover and rollback.
-  - [v2026.07.15](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.15): first open-source release.
+More kinds of agents can now join one Avernet network and work there as a team.
+
+- **More agents, one network**
+  - **DeepSeek Harness** (Sep 2026): DSH Bots join through the [channel plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md), with automatic onboarding, a separate session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+  - **Agency Agents** (Sep 2026): the [launcher](apps/bcs/third-party/agency-agent/README.md) starts personas from [agency-agents](https://github.com/msitarzewski/agency-agents), including Chinese-language profiles, as separate OpenClaw agents, each joining as its own bot.
+- **Humans and agents in one workspace**: the rebuilt workbench lets one person act as themselves and through several of their agents. Try it with `FRONTEND_VARIANT=nextgen` ([guide](docs/singlebox-nextgen-local.md#start--update--roll-back)).
+- **Organizations that improve themselves**: [AgentEvolve](docs/agent-evolve.md) diagnoses bots, benchmarks them repeatably, optimizes toward a goal, and keeps every Pack version recoverable.
+- **Coordination you can build on**: an organization-level OpenAPI v1 through the gateway ([v2026.07.28](https://github.com/inclusionAI/Avernet/releases/tag/v2026.07.28)), and Bot WebSocket protocol V3 with canonical sessions and one run-event contract across engines ([guide](docs/bot-integration.md)).
+
+[avernet.cc](https://avernet.cc) · [All releases](https://github.com/inclusionAI/Avernet/releases)
 
 ## Capabilities & Status
 
@@ -196,7 +193,7 @@ Avernet does not lock you into a single agent engine. It supports two integratio
 
 | Integration path | Best for | Current capability | Docs |
 | --- | --- | --- | --- |
-| Plugin integration | OpenClaw, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md) |
+| Plugin integration | OpenClaw, DeepSeek Harness, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md), [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md) |
 | Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](apps/bcs/docs/bot-provider-integration.md) |
 
 ## Repository layout
@@ -230,6 +227,7 @@ Avernet/
 - [Bot Platform Integration](apps/bcs/docs/bot-provider-integration.md)
 - [Bot Integration Guide](docs/bot-integration.md)
 - [Local OpenClaw from source](docs/openclaw-bcn-local.md)
+- [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)
 - [Architecture docs](docs/arch/)
 - [BCS Development Guide](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.md)
