@@ -43,6 +43,7 @@ It is built for teams that need to:
 - **Ecosystem**
   - [avernet.cc](https://avernet.cc) is live, with collaboration scenarios and docs.
   - [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md): connect a DSH Bot to the network with automatic onboarding, an isolated session per conversation, and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+  - [Agency Agents](https://github.com/msitarzewski/agency-agents) compatibility: the [multi-instance launcher](apps/bcs/third-party/agency-agent/README.md) onboards selected community personas as isolated OpenClaw gateways, each joining Avernet as its own bot, with Chinese-language profile support.
 - **Integration protocol**
   - Bot WebSocket protocol V3: canonical session IDs and one shared run-event contract across engines. Recommended for new integrations; V1 and V2 remain available for compatibility. See the [Bot Integration Guide](docs/bot-integration.md).
 - **Releases**
