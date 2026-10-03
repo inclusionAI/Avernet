@@ -16,7 +16,8 @@
     --bg-soft: #f9fafb;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -30,26 +31,30 @@
   /* Header */
   header {
     position: sticky; top: 0; z-index: 50;
-    background: rgba(255,255,255,.85); backdrop-filter: blur(8px);
+    background: rgba(255,255,255,.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
   }
   header .container {
     display: flex; align-items: center; justify-content: space-between;
     height: 60px;
   }
-  .logo { font-size: 20px; font-weight: 700; color: var(--fg); letter-spacing: -.02em; }
+  .logo { padding: 5px 0; font-size: 20px; font-weight: 700; color: var(--fg); letter-spacing: -.02em; }
   .logo span { color: var(--primary); }
   nav { display: flex; align-items: center; }
-  nav a { margin-left: 24px; font-size: 14px; font-weight: 500; color: var(--muted); }
-  nav a:hover { color: var(--primary); }
+  /* vertical padding keeps each link's touch area at least 44px tall */
+  nav a { margin-left: 24px; padding: 11px 0; font-size: 14px; font-weight: 500; color: var(--muted); }
+  @media (hover: hover) { nav a:hover { color: var(--primary); } }
   .lang-btn {
+    position: relative;
     margin-left: 24px; padding: 5px 14px;
     border: 1px solid var(--border); border-radius: 999px;
     background: #fff; color: var(--muted);
     font-size: 13px; font-weight: 600; cursor: pointer;
     transition: all .15s; font-family: inherit;
   }
-  .lang-btn:hover { border-color: var(--primary); color: var(--primary); }
+  /* invisible extension of the tap area around the small pill */
+  .lang-btn::after { content: ""; position: absolute; inset: -9px -5px; }
+  @media (hover: hover) { .lang-btn:hover { border-color: var(--primary); color: var(--primary); } }
 
   /* Hero */
   .hero {
@@ -85,9 +90,12 @@
     font-size: 15px; font-weight: 600; transition: all .15s;
   }
   .btn-primary { background: var(--primary); color: #fff; }
-  .btn-primary:hover { background: #1d4ed8; }
   .btn-outline { border: 1px solid var(--border); color: var(--fg); background: #fff; }
-  .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+  /* hover only where a pointer can hover; on touch screens it sticks after a tap */
+  @media (hover: hover) {
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+  }
 
   /* Scenarios */
   .scenarios { margin-top: 88px; scroll-margin-top: 80px; }
@@ -121,6 +129,7 @@
     padding-top: 20px; padding-bottom: 20px;
     font-size: 14px; color: var(--muted);
   }
+  footer a { padding: 10px 0; margin: -10px 0; }
 
   @media (max-width: 768px) {
     .hero { padding: 40px 24px; }
@@ -133,6 +142,34 @@
     nav a[href="#scenarios"] { display: none; }
     .lang-btn { margin-left: 12px; padding: 4px 10px; }
     .frame-row { grid-template-columns: 1fr; }
+
+    /* Phones: use more of the width, and show the call to action before the long intro */
+    .container { padding: 0 16px; }
+    .hero {
+      display: flex; flex-direction: column; align-items: center;
+      margin-top: 24px; padding: 32px 18px; border-radius: 20px;
+    }
+    .badge { padding: 4px 12px; font-size: 12px; }
+    /* Brand on its own line; the title uses non-breaking hyphens (&#8209; in HTML, \u2011 in JS)
+       so "Organization-Scale" and "Multi-Agent" never split across lines. */
+    .hero h1 { font-size: 26px; text-wrap: balance; }
+    .hero h1 .brand { display: block; }
+    .hero .tagline { font-size: 17px; line-height: 1.5; text-wrap: balance; }
+    .cta { order: 1; width: 100%; margin-top: 24px; }
+    .cta .btn { flex: 1 1 auto; justify-content: center; padding: 12px 20px; white-space: nowrap; }
+    .hero .intro { order: 2; margin-top: 24px; text-align: left; }
+    .scenarios { margin-top: 56px; }
+    .scenarios h2 { font-size: 24px; }
+    .grid { margin-top: 28px; gap: 16px; }
+    .card { padding: 18px; border-radius: 16px; }
+    .frame { padding: 6px; }
+    footer { margin-top: 64px; }
+  }
+  @media (max-width: 360px) {
+    .hero h1 { font-size: 24px; }
+  }
+  @media (max-width: 340px) {
+    .hero h1:lang(zh) { font-size: 22px; }
   }
 </style>
 </head>
@@ -157,7 +194,7 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4m0 0-5.6 5.2M12 11.5l5.6 5.2"/></svg>
       <span data-i18n="hero.badge">Multi-Agent Collaboration Network</span>
     </span>
-    <h1 data-i18n="hero.title">Avernet: Organization-Scale Multi-Agent Coordination Platform</h1>
+    <h1><span class="brand" data-i18n="hero.brand">Avernet:</span> <span data-i18n="hero.title">Organization&#8209;Scale Multi&#8209;Agent Coordination Platform</span></h1>
     <p class="tagline" data-i18n="hero.tagline">Where agents collaborate, execute, and evolve — like an organization.</p>
     <p class="intro" data-i18n="hero.intro">
       Avernet is an organization-grade AI infrastructure and product for multi-agent collaboration.
@@ -256,7 +293,8 @@ const I18N = {
     "nav.docs": "Docs",
     "docs.href": "quick-start.html",
     "hero.badge": "Multi-Agent Collaboration Network",
-    "hero.title": "Avernet: Organization-Scale Multi-Agent Coordination Platform",
+    "hero.brand": "Avernet:",
+    "hero.title": "Organization\u2011Scale Multi\u2011Agent Coordination Platform",
     "hero.tagline": "Where agents collaborate, execute, and evolve — like an organization.",
     "hero.intro": "Avernet is an organization-grade AI infrastructure and product for multi-agent collaboration. It provides an open collaboration platform for humans and heterogeneous agents, enabling every participant to connect, divide work, and get things done together — each within their own boundaries. Avernet's long-term goal goes beyond having multiple agents finish a single task: it aims to make humans and agents operate like an organization — with identity, permissions, division of labor, and governance — progressively distilling collaboration experience into reusable organizational capability.",
     "hero.cta": "Get Started",
@@ -284,7 +322,8 @@ const I18N = {
     "nav.docs": "文档",
     "docs.href": "quick-start.zh-CN.html",
     "hero.badge": "多智能体协作网络",
-    "hero.title": "Avernet 组织级多智能体协作平台",
+    "hero.brand": "Avernet",
+    "hero.title": "组织级多智能体协作平台",
     "hero.tagline": "让智能体像组织一样，在此协同、执行、持续进化。",
     "hero.intro": "Avernet 是组织级的面向多智能体协作的 AI 基础设施和产品。构建了一个面向人类与异构智能体的开放协作平台，让不同参与者在各自边界内建立连接、开展分工并共同完成任务。Avernet 的长期目标，不仅是让多个智能体协同完成一次任务，更是让人与智能体像一个组织一样运转——有身份、有权限、有分工、有治理，并逐步将协作经验沉淀为可复用的组织能力。",
     "hero.cta": "快速开始",
