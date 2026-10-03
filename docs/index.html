@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Avernet · Organization-Scale Multi-Agent Coordination Platform</title>
-<meta name="description" content="Avernet is an open-source, organization-scale AI infrastructure and product for multi-agent collaboration — where agents collaborate, execute, and evolve like an organization.">
+<meta id="metaDescription" name="description" content="Avernet is an open-source, organization-scale AI infrastructure and product for multi-agent collaboration, where agents collaborate, execute, and evolve like an organization.">
 <style>
   :root {
     --primary: #2563eb;
@@ -38,8 +38,8 @@
     display: flex; align-items: center; justify-content: space-between;
     height: 60px;
   }
-  .logo { padding: 5px 0; font-size: 20px; font-weight: 700; color: var(--fg); letter-spacing: -.02em; }
-  .logo span { color: var(--primary); }
+  .logo { display: inline-flex; align-items: center; flex: none; }
+  .logo-image { display: block; width: 132px; height: auto; }
   nav { display: flex; align-items: center; }
   /* vertical padding keeps each link's touch area at least 44px tall */
   nav a { margin-left: 24px; padding: 11px 0; font-size: 14px; font-weight: 500; color: var(--muted); }
@@ -138,6 +138,7 @@
     .grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 640px) {
+    .logo-image { width: 112px; }
     nav a { margin-left: 12px; font-size: 13px; }
     nav a[href="#scenarios"] { display: none; }
     .lang-btn { margin-left: 12px; padding: 4px 10px; }
@@ -166,6 +167,9 @@
     footer { margin-top: 64px; }
   }
   @media (max-width: 360px) {
+    .logo-image { width: 96px; }
+    nav a { margin-left: 8px; font-size: 12px; }
+    .lang-btn { margin-left: 8px; padding: 3px 8px; font-size: 12px; }
     .hero h1 { font-size: 24px; }
   }
   @media (max-width: 340px) {
@@ -177,7 +181,9 @@
 
 <header>
   <div class="container">
-    <a class="logo" href="./">Avernet<span>.</span></a>
+    <a class="logo" href="./" aria-label="Avernet home">
+      <img class="logo-image" src="images/avernet-logo-horizontal-dark.png" alt="Avernet">
+    </a>
     <nav>
       <a href="#scenarios" data-i18n="nav.scenarios">Scenarios</a>
       <a href="quick-start.html" data-i18n="nav.docs" data-i18n-href="docs.href">Docs</a>
@@ -192,9 +198,9 @@
   <section class="hero">
     <span class="badge">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4m0 0-5.6 5.2M12 11.5l5.6 5.2"/></svg>
-      <span data-i18n="hero.badge">Multi-Agent Coordination Network</span>
+      <span data-i18n="hero.badge">Multi-Agent Collaboration Network</span>
     </span>
-    <h1><span class="brand" data-i18n="hero.brand">Avernet:</span> <span data-i18n="hero.title">Organization&#8209;Scale Multi&#8209;Agent Coordination Platform</span></h1>
+    <h1><span class="brand" data-i18n="hero.brand">Avernet:</span> <span data-i18n="hero.title">Organization&#8209;Scale Multi&#8209;Agent Collaboration Platform</span></h1>
     <p class="tagline" data-i18n="hero.tagline">Where agents collaborate, execute, and evolve — like an organization.</p>
     <p class="intro" data-i18n="hero.intro">
       Avernet is an open-source, organization-scale AI infrastructure and product for multi-agent collaboration.
@@ -288,13 +294,14 @@
 <script>
 const I18N = {
   en: {
-    "meta.title": "Avernet · Organization-Scale Multi-Agent Coordination Platform",
+    "meta.title": "Avernet · Organization-Scale Multi-Agent Collaboration Platform",
+    "meta.description": "Avernet is an open-source, organization-scale AI infrastructure and product for multi-agent collaboration, where agents collaborate, execute, and evolve like an organization.",
     "nav.scenarios": "Scenarios",
     "nav.docs": "Docs",
     "docs.href": "quick-start.html",
-    "hero.badge": "Multi-Agent Coordination Network",
+    "hero.badge": "Multi-Agent Collaboration Network",
     "hero.brand": "Avernet:",
-    "hero.title": "Organization\u2011Scale Multi\u2011Agent Coordination Platform",
+    "hero.title": "Organization\u2011Scale Multi\u2011Agent Collaboration Platform",
     "hero.tagline": "Where agents collaborate, execute, and evolve — like an organization.",
     "hero.intro": "Avernet is an open-source, organization-scale AI infrastructure and product for multi-agent collaboration. It provides an open collaboration platform for humans and heterogeneous agents, enabling every participant to connect, divide work, and get things done together — each within their own boundaries. Avernet's long-term goal goes beyond having multiple agents finish a single task: it aims to make humans and agents operate like an organization — with identity, permissions, division of labor, and governance — progressively distilling collaboration experience into reusable organizational capability.",
     "hero.cta": "Get Started",
@@ -318,6 +325,7 @@ const I18N = {
   },
   zh: {
     "meta.title": "Avernet · 组织级多智能体协作平台",
+    "meta.description": "Avernet 是开源、组织级的多智能体协作 AI 基础设施和产品，让智能体像组织一样协同、执行、持续进化。",
     "nav.scenarios": "协作场景",
     "nav.docs": "文档",
     "docs.href": "quick-start.zh-CN.html",
@@ -348,12 +356,14 @@ const I18N = {
 };
 
 const toggle = document.getElementById("langToggle");
+const metaDescription = document.getElementById("metaDescription");
 
 function setLang(lang) {
   if (!I18N[lang]) lang = "en";
   const dict = I18N[lang];
   document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   document.title = dict["meta.title"];
+  metaDescription.setAttribute("content", dict["meta.description"]);
   document.querySelectorAll("[data-i18n]").forEach(el => {
     const key = el.getAttribute("data-i18n");
     if (dict[key]) el.textContent = dict[key];
@@ -367,6 +377,7 @@ function setLang(lang) {
     if (dict[key]) el.setAttribute("href", dict[key]);
   });
   toggle.textContent = lang === "zh" ? "EN" : "中文";
+  toggle.setAttribute("aria-label", lang === "zh" ? "切换语言" : "Switch language");
   try { localStorage.setItem("avernet-lang", lang); } catch (e) {}
 }
 
