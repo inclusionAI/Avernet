@@ -27,7 +27,7 @@
   <a href="#documentation">Docs</a>
 </p>
 
-> **Production-tested at Ant Group.** As of early July 2026, Avernet supports more than 10,000 agents and bots across 12 business groups in Ant Group's production environment, with a **90%+ task completion rate in measured multi-agent workflows**.
+> **Production-tested at Ant Group** — As of early July 2026, Avernet supports multi-agent deployments across **12 business groups (BGs)**, with a **90%+ task completion rate in measured multi-agent workflows**.
 
 ## What's new
 
