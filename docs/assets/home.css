@@ -75,7 +75,7 @@ html[lang|="zh"] .en-only { display: none; }
 :lang(zh) h1 { font-weight: 600; letter-spacing: -0.01em; line-height: 1.18; }
 :lang(zh) h2, :lang(zh) h3 { font-weight: 600; letter-spacing: 0; }
 /* Chinese headings break only at spaces and punctuation, never mid-phrase. */
-:lang(zh) h1, :lang(zh) h2 { word-break: keep-all; overflow-wrap: anywhere; }
+:lang(zh) h1, :lang(zh) h2, :lang(zh) .hero-sub { word-break: keep-all; overflow-wrap: anywhere; }
 :lang(zh) p, :lang(zh) li { line-height: 1.8; }
 
 .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 var(--gutter); }
@@ -167,13 +167,16 @@ html[lang|="zh"] .en-only { display: none; }
   gap: 40px;
   align-items: center;
 }
+/* The H1 keeps the official name: the brand large, the category beneath it. */
 .hero h1 {
-  font-size: clamp(42px, 5.6vw, 74px);
-  line-height: 1.02;
-  letter-spacing: -0.035em;
+  font-size: clamp(30px, 3.2vw, 42px);
+  line-height: 1.16;
+  letter-spacing: -0.02em;
   color: var(--paper);
 }
-.hero-sub { margin-top: 26px; max-width: 33em; font-size: 19px; line-height: 1.6; color: #B9C7DB; }
+.hero-brand { display: block; margin-bottom: 0.16em; font-size: 2.3em; line-height: 1; letter-spacing: -0.035em; }
+.hero-category { display: block; max-width: 17em; }
+.hero-sub { margin-top: 24px; max-width: 31em; font: 500 20px/1.55 var(--font-display); color: #C9D5E6; text-wrap: balance; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
 .hero-proof { margin-top: 30px; max-width: 36em; font-size: 14px; line-height: 1.6; color: var(--mist); }
 .hero-net { margin: 0; justify-self: end; width: 100%; max-width: 600px; }
@@ -529,7 +532,7 @@ dialog.demo video { display: block; width: 100%; aspect-ratio: 16 / 9; backgroun
   .nav-anchor { display: none; }
   .section { padding: 72px 0; }
   .hero { padding: 44px 0 150px; }
-  .hero h1 { font-size: clamp(38px, 11vw, 48px); }
+  .hero h1 { font-size: clamp(24px, 6.6vw, 30px); }
   .hero-sub { font-size: 17px; }
   .hero-actions .btn { flex: 1 1 auto; }
   .hero-net { max-width: 420px; }
