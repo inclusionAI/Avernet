@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Avernet</title>
+  <rect width="64" height="64" rx="14" fill="#070C15"/>
+  <g transform="translate(6.8 12.4) scale(0.39)">
+    <g stroke="#F2F7FF" stroke-width="13" stroke-linecap="round" fill="none">
+      <path d="M53.6,12.9 L10,75.4"/>
+      <path d="M53.6,12.9 L80.4,87.7"/>
+      <path d="M15.2,68 L45.8,64.5"/>
+      <path d="M80.4,87.7 L118.3,42"/>
+    </g>
+    <circle cx="53.6" cy="12.9" r="18" fill="#070C15"/>
+    <circle cx="53.6" cy="12.9" r="14.5" fill="#6EE1AA"/>
+    <circle cx="80.4" cy="87.7" r="17.4" fill="#070C15"/>
+    <circle cx="80.4" cy="87.7" r="14" fill="#6EE1AA"/>
+    <circle cx="10" cy="75.4" r="14.5" fill="#070C15"/>
+    <circle cx="10" cy="75.4" r="11.5" fill="#395BF6"/>
+    <circle cx="45.8" cy="64.5" r="14.5" fill="#070C15"/>
+    <circle cx="45.8" cy="64.5" r="11.5" fill="#395BF6"/>
+    <circle cx="118.3" cy="42" r="14.5" fill="#070C15"/>
+    <circle cx="118.3" cy="42" r="11.5" fill="#395BF6"/>
+  </g>
+</svg>
