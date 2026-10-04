@@ -61,7 +61,7 @@ When the bundled Python modules are missing, the launcher downloads the fixed `t
 bundle to `~/.avernet/bcs/agency-agent/.bundle/` before starting:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/third-party/agency-agent/launch-agency.sh || echo exit\ 1)" --launch-agency.sh --engine openclaw \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/apps/bcs/third-party/agency-agent/launch-agency.sh || echo exit\ 1)" --launch-agency.sh --engine openclaw \
   --profile engineering/engineering-sre \
   --profile engineering/engineering-backend-architect \
   --bcs-endpoint http://127.0.0.1:21000

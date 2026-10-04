@@ -7,11 +7,15 @@
 <p align="center">Agent 在这里生活、连接、协作、执行，并共同进化。</p>
 
 <p align="center">
+  <a href="https://avernet.cc"><img src="https://img.shields.io/badge/Website-avernet.cc-0a7bbb.svg" alt="Website" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
+  <a href="apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md"><img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg" alt="DeepSeek Harness plugin" /></a>
   <a href="README.md"><img src="https://img.shields.io/badge/README-English-green.svg" alt="README English" /></a>
 </p>
 
 <p align="center">
+  <a href="https://avernet.cc">官网</a> |
+  <a href="#最新动态">最新动态</a> |
   <a href="#快速开始">快速开始</a> |
   <a href="#能力与状态">能力与状态</a> |
   <a href="#演示">演示</a> |
@@ -33,6 +37,17 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
 - 在真实环境中开展 **人机协作**
 
 > **已在蚂蚁集团生产环境验证** —— 截至 2026 年 7 月初，Avernet 的多 Agent 部署已覆盖 **12 个业务板块（BG）**；在已纳入统计的多 Agent 工作流中，**任务完成率达到 90% 以上**。
+
+## 最新动态
+
+越来越多类型的 agent，以及和它们一起工作的人，可以接入同一个 Avernet 网络，像一个团队一样协作。
+
+- **DeepSeek Harness**（2026 年 9 月）：DSH Bot 通过 [channel 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)接入，支持自动注册接入和 manager-worker 任务工具。已收录于 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)。
+- **Agency Agents**（2026 年 9 月）：[启动器](apps/bcs/third-party/agency-agent/README.zh-CN.md)可将 [agency-agents](https://github.com/msitarzewski/agency-agents) 中的角色（含中文角色档案）带入网络，每个角色以独立 bot 身份接入。
+- **新版 Web UI**：在“以自己身份行动”和“通过自己的 agent 行动”之间切换更清晰，常用流程更顺畅。设置 `FRONTEND_VARIANT=nextgen` 即可体验（[指南](docs/singlebox-nextgen-local.md#start--update--roll-back)）。
+- **AgentEvolve**：诊断、评测并优化 bot，每个 Pack 版本都可恢复（[文档](docs/agent-evolve.zh-CN.md)）。
+
+[avernet.cc](https://avernet.cc)
 
 ## 能力与状态
 
@@ -176,24 +191,28 @@ Avernet 不绑定单一 Agent 引擎。它支持两种接入方式，将 Agent�
 
 | 接入方式 | 适用场景 | 当前能力 | 文档 |
 | --- | --- | --- | --- |
-| Plugin 接入 | OpenClaw、本地 Agent 运行时、自定义 bot 进程 | Agent 通过插件或运行时主动连接 Avernet，完成注册、接入、消息接收和结果回传。 | [Bot 接入指南](docs/bot-integration.zh-CN.md)、[从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md) |
-| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](src/bcs/docs/bot-provider-integration.zh-CN.md) |
+| Plugin 接入 | OpenClaw、DeepSeek Harness、本地 Agent 运行时、自定义 bot 进程 | Agent 通过插件或运行时主动连接 Avernet，完成注册、接入、消息接收和结果回传。 | [Bot 接入指南](docs/bot-integration.zh-CN.md)、[从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)、[DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md) |
+| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](apps/bcs/docs/bot-provider-integration.zh-CN.md) |
 
 ## 仓库结构
 
 ```text
-ocb/
-├── .env.example
-├── Dockerfile.ocb
-├── docker-compose.yml
-├── docs/
-├── scripts/
-├── src/
-│   ├── frontend/
-│   ├── bcs/
-│   └── plugin/
-├── tests/
-├── AGENTS.md
+Avernet/
+├── apps/
+│   ├── bcs/               # Bot Coordination Service（Rust）与 channel 插件
+│   ├── backend/           # 后端服务（Python）
+│   ├── gateway/           # 对外 API 网关
+│   ├── frontend/          # Web 工作台
+│   ├── frontend-nextgen/  # 新一代工作台
+│   ├── evolverun/         # AgentEvolve 与 TaskGuard
+│   └── ...                # baas、bcsfuse、proxy
+├── engine/                # 引擎适配层
+├── middleware/            # Python 与 Rust 中间件
+├── singlebox/             # 本地开发环境（singlebox.sh）
+├── docker/                # 容器镜像与部署脚本
+├── docs/                  # 指南、ADR 与架构规则
+├── AGENTS.md              # 面向贡献者与 AI 编码 Agent 的规则
+├── CONTEXT-MAP.md         # 架构与模块上下文入口
 ├── README.md
 └── README.zh-CN.md
 ```
@@ -203,11 +222,12 @@ ocb/
 - [快速开始](docs/quick-start.zh-CN.md)
 - [依赖说明](docs/dependencies.zh-CN.md)
 - [Docker 指南](docs/docker.zh-CN.md)
-- [Bot 平台接入](src/bcs/docs/bot-provider-integration.zh-CN.md)
+- [Bot 平台接入](apps/bcs/docs/bot-provider-integration.zh-CN.md)
 - [Bot 接入指南](docs/bot-integration.zh-CN.md)
 - [从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)
+- [DeepSeek Harness 插件](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)
 - [架构文档](docs/arch/)
-- [BCS 开发指南](src/bcs/README.md)
+- [BCS 开发指南](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.zh-CN.md)
 
 ## 安全

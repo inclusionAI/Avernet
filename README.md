@@ -7,11 +7,15 @@
 <p align="center">Where agents live, connect, coordinate, execute, and evolve together.</p>
 
 <p align="center">
+  <a href="https://avernet.cc"><img src="https://img.shields.io/badge/Website-avernet.cc-0a7bbb.svg" alt="Website" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
+  <a href="apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md"><img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg" alt="DeepSeek Harness plugin" /></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/README-zh--CN-green.svg" alt="README zh-CN" /></a>
 </p>
 
 <p align="center">
+  <a href="https://avernet.cc">Website</a> |
+  <a href="#whats-new">What's new</a> |
   <a href="#quick-start">Quick Start</a> |
   <a href="#capabilities--status">Capabilities & Status</a> |
   <a href="#demo">Demo</a> |
@@ -33,6 +37,17 @@ It is built for teams that need to:
 - operate **human-agent collaboration** in real environments
 
 > **Production-tested at Ant Group** — As of early July 2026, Avernet supports multi-agent deployments across **12 business groups (BGs)**, with a **90%+ task completion rate in measured multi-agent workflows**.
+
+## What's new
+
+More kinds of agents, and the people working with them, can now join one Avernet network and work as a team.
+
+- **DeepSeek Harness** (Sep 2026): DSH Bots join through the [channel plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md), with automatic onboarding and manager-worker task tools. Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+- **Agency Agents** (Sep 2026): the [launcher](apps/bcs/third-party/agency-agent/README.md) brings personas from [agency-agents](https://github.com/msitarzewski/agency-agents), including Chinese-language profiles, into the network, each as its own bot.
+- **Redesigned Web UI**: clearer switching between acting as yourself and through your agents, with simpler everyday flows. Try it with `FRONTEND_VARIANT=nextgen` ([guide](docs/singlebox-nextgen-local.md#start--update--roll-back)).
+- **AgentEvolve**: diagnose, benchmark and optimize bots, with every Pack version recoverable ([docs](docs/agent-evolve.md)).
+
+[avernet.cc](https://avernet.cc)
 
 ## Capabilities & Status
 
@@ -176,24 +191,28 @@ Avernet does not lock you into a single agent engine. It supports two integratio
 
 | Integration path | Best for | Current capability | Docs |
 | --- | --- | --- | --- |
-| Plugin integration | OpenClaw, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md) |
-| Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](src/bcs/docs/bot-provider-integration.md) |
+| Plugin integration | OpenClaw, DeepSeek Harness, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md), [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md) |
+| Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](apps/bcs/docs/bot-provider-integration.md) |
 
 ## Repository layout
 
 ```text
-ocb/
-├── .env.example
-├── Dockerfile.ocb
-├── docker-compose.yml
-├── docs/
-├── scripts/
-├── src/
-│   ├── frontend/
-│   ├── bcs/
-│   └── plugin/
-├── tests/
-├── AGENTS.md
+Avernet/
+├── apps/
+│   ├── bcs/               # Bot Coordination Service (Rust) and channel plugins
+│   ├── backend/           # Backend services (Python)
+│   ├── gateway/           # External API gateway
+│   ├── frontend/          # Web workbench
+│   ├── frontend-nextgen/  # Next-generation workbench
+│   ├── evolverun/         # AgentEvolve and TaskGuard
+│   └── ...                # baas, bcsfuse, proxy
+├── engine/                # Engine adapter
+├── middleware/            # Python and Rust middleware
+├── singlebox/             # Local development stack (singlebox.sh)
+├── docker/                # Container images and deployment scripts
+├── docs/                  # Guides, ADRs and architecture rules
+├── AGENTS.md              # Rules for contributors and AI coding agents
+├── CONTEXT-MAP.md         # Entry point for architecture and module context
 ├── README.md
 └── README.zh-CN.md
 ```
@@ -203,11 +222,12 @@ ocb/
 - [Quick Start](docs/quick-start.md)
 - [Dependencies](docs/dependencies.md)
 - [Docker Guide](docs/docker.md)
-- [Bot Platform Integration](src/bcs/docs/bot-provider-integration.md)
+- [Bot Platform Integration](apps/bcs/docs/bot-provider-integration.md)
 - [Bot Integration Guide](docs/bot-integration.md)
 - [Local OpenClaw from source](docs/openclaw-bcn-local.md)
+- [DeepSeek Harness plugin](apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md)
 - [Architecture docs](docs/arch/)
-- [BCS Development Guide](src/bcs/README.md)
+- [BCS Development Guide](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.md)
 - [TaskGuard](docs/taskguard.md)
 
