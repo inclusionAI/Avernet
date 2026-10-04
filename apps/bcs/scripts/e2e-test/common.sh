@@ -639,13 +639,10 @@ bcs_cli() {
             command_path="collaboration${command_path#collaborate}"
             ;;
     esac
-    # `session file <leaf>` is a 3-level command tree (session -> file ->
-    # upload/list/download/delete/share/capabilities). The case above only
-    # captures 2 levels ("session file"); promote to the full leaf path so the
-    # CLI coverage gate (which discovers full leaf paths via recursive --help)
-    # records each `session file <leaf>` invocation distinctly.
-    if [[ "$command_path" == "session file" && -n "${third:-}" && "$third" != -* ]]; then
-        command_path="session file $third"
+    # Both command groups have three levels. Promote the path to the leaf
+    # discovered by recursive --help so coverage counts each operation.
+    if [[ ( "$command_path" == "session file" || "$command_path" == "collaboration draft" ) && -n "${third:-}" && "$third" != -* ]]; then
+        command_path="$command_path $third"
     fi
     if [[ -n "${BCS_CLI_COVERAGE_LOG:-}" ]]; then
         printf '%s\n' "$command_path" >> "$BCS_CLI_COVERAGE_LOG"

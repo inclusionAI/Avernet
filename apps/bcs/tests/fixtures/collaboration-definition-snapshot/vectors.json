@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "limits": {
+    "definitionYamlUtf8Bytes": 65536,
+    "messageUtf8Bytes": 262144,
+    "titleCodePoints": 120
+  },
+  "valid": [
+    {
+      "name": "escaped-unicode-and-markup",
+      "snapshot": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "parentSnapshotId": "11111111-2222-4333-8444-555555555555",
+        "title": "内容 流程",
+        "definitionYaml": "name: 流程\r\nnote: \\\"a  b\\\" & <tag> '</AixUI>' \\\\\nemoji: 😀\nspace: end next"
+      },
+      "serializedParams": "{\"schemaVersion\":1,\"documentId\":\"11111111-1111-4111-8111-111111111111\",\"snapshotId\":\"22222222-2222-4222-8222-222222222222\",\"parentSnapshotId\":\"11111111-2222-4333-8444-555555555555\",\"title\":\"内容\\u0020流程\",\"definitionYaml\":\"name:\\u0020流程\\r\\nnote:\\u0020\\\\\\\"a\\u0020\\u0020b\\\\\\\"\\u0020\\u0026\\u0020\\u003ctag\\u003e\\u0020\\u0027\\u003c/AixUI\\u003e\\u0027\\u0020\\\\\\\\\\nemoji:\\u0020😀\\nspace:\\u00a0end\\u2028next\"}",
+      "message": "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{\"schemaVersion\":1,\"documentId\":\"11111111-1111-4111-8111-111111111111\",\"snapshotId\":\"22222222-2222-4222-8222-222222222222\",\"parentSnapshotId\":\"11111111-2222-4333-8444-555555555555\",\"title\":\"内容\\u0020流程\",\"definitionYaml\":\"name:\\u0020流程\\r\\nnote:\\u0020\\\\\\\"a\\u0020\\u0020b\\\\\\\"\\u0020\\u0026\\u0020\\u003ctag\\u003e\\u0020\\u0027\\u003c/AixUI\\u003e\\u0027\\u0020\\\\\\\\\\nemoji:\\u0020😀\\nspace:\\u00a0end\\u2028next\"}' />"
+    },
+    {
+      "name": "canonical-uuid-v7",
+      "snapshot": {
+        "schemaVersion": 1,
+        "documentId": "0191a59c-7e00-7000-8000-000000000001",
+        "snapshotId": "0191a59c-7e00-7000-8000-000000000002",
+        "parentSnapshotId": "0191a59c-7e00-7000-8000-000000000003",
+        "title": "UUIDv7",
+        "definitionYaml": "name: v7\n"
+      },
+      "serializedParams": "{\"schemaVersion\":1,\"documentId\":\"0191a59c-7e00-7000-8000-000000000001\",\"snapshotId\":\"0191a59c-7e00-7000-8000-000000000002\",\"parentSnapshotId\":\"0191a59c-7e00-7000-8000-000000000003\",\"title\":\"UUIDv7\",\"definitionYaml\":\"name:\\u0020v7\\n\"}",
+      "message": "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{\"schemaVersion\":1,\"documentId\":\"0191a59c-7e00-7000-8000-000000000001\",\"snapshotId\":\"0191a59c-7e00-7000-8000-000000000002\",\"parentSnapshotId\":\"0191a59c-7e00-7000-8000-000000000003\",\"title\":\"UUIDv7\",\"definitionYaml\":\"name:\\u0020v7\\n\"}' />"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unsupported-schema",
+      "params": {
+        "schemaVersion": 2,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "definitionYaml": "name: example\n"
+      },
+      "error": "unsupported_schema_version"
+    },
+    {
+      "name": "unknown-field",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "definitionYaml": "name: example\n",
+        "sessionId": "forged-session"
+      },
+      "error": "unknown_field"
+    },
+    {
+      "name": "wrong-field-type",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "definitionYaml": ["not", "a", "string"]
+      },
+      "error": "invalid_field"
+    },
+    {
+      "name": "missing-required-yaml",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222"
+      },
+      "error": "invalid_field"
+    },
+    {
+      "name": "non-standard-uuid",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111111141118111111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "definitionYaml": "name: example\n"
+      },
+      "error": "invalid_uuid"
+    },
+    {
+      "name": "self-parent",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "parentSnapshotId": "22222222-2222-4222-8222-222222222222",
+        "definitionYaml": "name: example\n"
+      },
+      "error": "invalid_parent_snapshot"
+    },
+    {
+      "name": "blank-title",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "title": "   ",
+        "definitionYaml": "name: example\n"
+      },
+      "error": "invalid_title"
+    },
+    {
+      "name": "title-too-long",
+      "params": {
+        "schemaVersion": 1,
+        "documentId": "11111111-1111-4111-8111-111111111111",
+        "snapshotId": "22222222-2222-4222-8222-222222222222",
+        "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "definitionYaml": "name: example\n"
+      },
+      "error": "invalid_title"
+    }
+  ]
+}

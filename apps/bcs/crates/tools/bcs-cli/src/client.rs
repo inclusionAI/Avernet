@@ -6,6 +6,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
+#[path = "draft_client.rs"]
+mod drafts;
+
 use anyhow::{Context, Result, anyhow};
 use reqwest::header::HeaderValue;
 use serde::Deserialize;

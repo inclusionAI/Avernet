@@ -1,4 +1,5 @@
 pub mod collaboration_history;
+pub mod collaboration_draft;
 pub use collaboration_history::*;
 pub mod collaboration_terminal_im;
 mod collaboration_recovery;

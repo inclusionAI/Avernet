@@ -1,0 +1,215 @@
+{
+  "valid": true,
+  "summary": {
+    "participants": 3,
+    "nodes": 7,
+    "initial_nodes": [
+      "ln-3f3fa4c3f70e3133766fa42092f4fb91"
+    ],
+    "final_output_node": "publish"
+  },
+  "participants": [
+    {
+      "binding": "publisher",
+      "display_name": "发表",
+      "description": "负责最终发表通过审核的稿件",
+      "required": true,
+      "assigned": true
+    },
+    {
+      "binding": "reviewer",
+      "display_name": "审稿",
+      "description": "负责审核稿件质量并给出修改意见",
+      "required": true,
+      "assigned": true
+    },
+    {
+      "binding": "writer",
+      "display_name": "写稿",
+      "description": "负责起草和修订稿件",
+      "required": true,
+      "assigned": true
+    }
+  ],
+  "graph": {
+    "loops": {
+      "review_loop": {
+        "display_name": "写稿审稿循环",
+        "max_iterations": 3,
+        "entry_node_id": "writing",
+        "result_node_id": "review",
+        "body_node_ids": [
+          "review",
+          "writing"
+        ],
+        "continue_outcomes": [
+          "complete"
+        ],
+        "break_outcomes": [],
+        "exhausted_outcome": "exhausted"
+      }
+    },
+    "graph_mode": "hierarchical",
+    "execution_graph_mode": "acyclic",
+    "nodes": [
+      {
+        "node_id": "ln-08e608abd857c985b0f4ee0d8336f585",
+        "display_name": "写稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "writing",
+          "loop_id": "review_loop",
+          "iteration": 3,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "ln-2f79369b93cca21042419706fe76513b",
+        "display_name": "审稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "reviewer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "review",
+          "loop_id": "review_loop",
+          "iteration": 3,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "ln-3f3fa4c3f70e3133766fa42092f4fb91",
+        "display_name": "写稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "writing",
+          "loop_id": "review_loop",
+          "iteration": 1,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "ln-7369fd32797ad6a1b50988c370e5d4e2",
+        "display_name": "审稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "reviewer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "review",
+          "loop_id": "review_loop",
+          "iteration": 1,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "ln-c68256758f96d023f0e760da746c07bd",
+        "display_name": "审稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "reviewer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "review",
+          "loop_id": "review_loop",
+          "iteration": 2,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "ln-c6b90be58c0106447adf09038689855a",
+        "display_name": "写稿",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "final_output": false,
+        "judge": false,
+        "execution": {
+          "definition_node_id": "writing",
+          "loop_id": "review_loop",
+          "iteration": 2,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "publish",
+        "display_name": "发表",
+        "kind": "bot_task",
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "publisher"
+        },
+        "final_output": true,
+        "judge": false
+      }
+    ],
+    "edges": [
+      {
+        "source": "ln-08e608abd857c985b0f4ee0d8336f585",
+        "target": "ln-2f79369b93cca21042419706fe76513b",
+        "outcome": "complete"
+      },
+      {
+        "display_name": "审稿轮次结束",
+        "source": "ln-2f79369b93cca21042419706fe76513b",
+        "target": "publish",
+        "outcome": "complete",
+        "loop_route": {
+          "kind": "exhausted",
+          "logical_outcome": "exhausted"
+        }
+      },
+      {
+        "source": "ln-3f3fa4c3f70e3133766fa42092f4fb91",
+        "target": "ln-7369fd32797ad6a1b50988c370e5d4e2",
+        "outcome": "complete"
+      },
+      {
+        "source": "ln-7369fd32797ad6a1b50988c370e5d4e2",
+        "target": "ln-c6b90be58c0106447adf09038689855a",
+        "outcome": "complete",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "complete"
+        }
+      },
+      {
+        "source": "ln-c68256758f96d023f0e760da746c07bd",
+        "target": "ln-08e608abd857c985b0f4ee0d8336f585",
+        "outcome": "complete",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "complete"
+        }
+      },
+      {
+        "source": "ln-c6b90be58c0106447adf09038689855a",
+        "target": "ln-c68256758f96d023f0e760da746c07bd",
+        "outcome": "complete"
+      }
+    ]
+  }
+}

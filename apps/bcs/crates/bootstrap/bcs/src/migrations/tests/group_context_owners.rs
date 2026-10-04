@@ -68,7 +68,9 @@ VALUES ('ctx-owners-upgrade', 'owner_upgrade', 'session', 'sess-upgrade', 'v1', 
         None
     );
 
-    let expected_checksum = sqlite_migration_checksum(SQLITE_VERSIONED_MIGRATIONS.last().unwrap());
+    let expected_checksum = sqlite_migration_checksum(
+        SQLITE_VERSIONED_MIGRATIONS.iter().find(|migration| migration.version == 35).unwrap()
+    );
     let record = applied_sqlite_migration(&db, 35)
         .await?
         .expect("owners migration recorded");

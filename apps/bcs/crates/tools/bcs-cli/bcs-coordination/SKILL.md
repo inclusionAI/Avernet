@@ -35,18 +35,23 @@ allowed-tools:
 
 - `bcs-cli` 已安装并在 `PATH` 中
 - 保留运行环境已有的 `BOT_DATA_DIR`；未设置时优先使用当前 Bot 的 `OPENCLAW_DATA_DIR`，最后才回退到单 Bot 默认目录 `$HOME/.openclaw`
-- `BCS_API_BASE_URL` 指向 BCS HTTP API；未设置时使用本地默认 `http://127.0.0.1:21000`
+- 正常 Bot Runtime 不传全局 `--url`，也不主动为 `BCS_API_BASE_URL` 填充 localhost 默认值
 
 ```bash
 export BOT_DATA_DIR="${BOT_DATA_DIR:-${OPENCLAW_DATA_DIR:-$HOME/.openclaw}}"
-export BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 
 bcs() {
-  BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" "$@"
+  BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli "$@"
 }
 ```
 
 不得把上述回退改写为 `BOT_DATA_DIR="$HOME/.openclaw"`。这种写法会覆盖 singlebox 等多 Bot 运行环境为当前 Bot 注入的隔离目录，导致使用其他 Bot 的身份。
+
+`bcs-cli` 会从当前 `$BOT_DATA_DIR/.bcs/session.json` 的 `api_base_url` 或
+`bcs_url` 发现服务地址，并把 `ws` / `wss` 转换为 `http` / `https`，同时去掉
+WebSocket 连接路径（例如 `/ws/bot`）。只有用户明确指定地址或正在进行人工地址调试时，
+才使用全局 `--url` 或覆盖已有的 `BCS_API_BASE_URL`。不得因为 localhost 端口不可用就判断
+当前 Bot 未连接 BCS；先让 CLI 按当前 session 做地址发现并读取其真实结果。
 
 ### 认证与 Token
 
@@ -61,20 +66,22 @@ bcs() {
 
 ## 命令执行方式
 
-下文所有示例默认已经执行上述准备步骤，使用 `bcs` 作为 `bcs-cli --url "$BCS_API_BASE_URL"` 的简写：
+下文所有示例默认已经执行上述准备步骤，使用 `bcs` 作为保留当前 `BOT_DATA_DIR`、
+且不覆盖 CLI 地址发现的 `bcs-cli` 简写：
 
 ```bash
 bcs health
 bcs list
 bcs request-group-help --topic "数据库死锁排查，需要DBA专家"
 bcs collaboration validate /path/to/workflow.yaml
+bcs collaboration draft create /path/to/workflow.yaml --draft-id "$draft_id" --title "发布评审协作"
 bcs collaborate permission --session "$current_bcs_session_id"
 ```
 
 若不使用 shell 函数，等价写法为：
 
 ```bash
-BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
+BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli health
 ```
 
 ---
@@ -104,6 +111,11 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 - 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
 - 需要循环评审、反复修订或多个阶段分别循环：读取 schema 的 [Fixed Loop](references/custom-collaboration-schema.md#fixed-loop)。支持多个同级 Loop，不支持嵌套；执行取决于服务端能力开关。
 - 当前 session 一次性运行，或校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中对应的 CLI 流程。
+- 生成/修改后分享只读预览：读取 [references/collaboration-drafts.md](references/collaboration-drafts.md)，
+  使用 `collaboration draft create/update` 直接上传文件、校验固定版，再通过当前聊天正常回复返回的短 `message`。
+  可附必要说明，不转抄完整 YAML、不调用 CLI 发最终消息、不要求加入 BCS Session。
+- 修改先 get 固定版，update 必须明确 expected-revision；消息重试重放原引用，保存未知/冲突不自动提高基线。
+- 原 `collaboration preview <file>` 保留离线 schema 1 兼容语义，不用于新帮助交付；它自身不校验也不发送。
 
 ---
 

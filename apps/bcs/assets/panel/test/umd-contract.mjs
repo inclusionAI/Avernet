@@ -50,11 +50,16 @@ if (typeof packageExports.StateMachineRunView !== 'function') {
 // The browser loader resolves both component names from the same global.
 const browser = { React, console };
 vm.runInNewContext(code, browser, { timeout: 1000 });
-for (const name of ['StateMachineRunView', 'UndercoverGamePanel']) {
+for (const name of [
+  'StateMachineRunView',
+  'UndercoverGamePanel',
+  'CollaborationDefinitionCard',
+  'CollaborationDefinitionPreview',
+]) {
   for (const exports of [module.exports, packageExports, browser.bcsPanel]) {
     if (typeof exports?.[name] !== 'function') {
       throw new Error(`UMD contract failed: bcsPanel.${name} is missing.`);
     }
   }
 }
-console.log('UMD contract passed: both bcsPanel components are available.');
+console.log('UMD contract passed: all bcsPanel components are available.');

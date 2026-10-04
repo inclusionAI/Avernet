@@ -51,6 +51,7 @@
 // resolves it identically.
 mod collaboration_output;
 mod agentpass;
+mod collaboration_snapshot;
 // `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
 // resolved via `inventory`). Public builds link no provider and fall back to a
 // stub; internal builds link an Ant provider that performs the real flow.
@@ -1618,6 +1619,33 @@ enum GroupContextCommands {
 
 #[derive(Subcommand)]
 enum CollaborationCommands {
+    /// Store and share immutable collaboration-definition revisions
+    Draft {
+        #[command(subcommand)]
+        command: bcs_cli::collaboration_draft::DraftCommands,
+    },
+    /// Build a read-only collaboration-definition preview message without network access
+    Preview {
+        /// UTF-8 YAML file to include verbatim in the snapshot
+        file: PathBuf,
+
+        /// Optional display title (1..=120 Unicode code points)
+        #[arg(long)]
+        title: Option<String>,
+
+        /// Existing document UUID for a later snapshot, or an explicit first-version UUID
+        #[arg(long)]
+        document_id: Option<String>,
+
+        /// Direct parent snapshot UUID; requires --document-id
+        #[arg(long)]
+        parent_snapshot_id: Option<String>,
+
+        /// Explicit snapshot UUID for replaying the same constructed snapshot
+        #[arg(long)]
+        snapshot_id: Option<String>,
+    },
+
     /// Query whether the authenticated Bot may run a state machine in a session
     Permission {
         /// Current BCS session ID
@@ -2446,6 +2474,40 @@ fn main() -> Result<()> {
 /// `#[tokio::main] async fn main`; only the entry is split out.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // The preview producer is intentionally dispatched before URL resolution,
+    // network probing, authentication, logging setup, or service discovery.
+    if let Commands::Collaboration {
+        command:
+            CollaborationCommands::Preview {
+                file,
+                title,
+                document_id,
+                parent_snapshot_id,
+                snapshot_id,
+            },
+        ..
+    } = &cli.command
+    {
+        let output = collaboration_snapshot::build_preview(
+            collaboration_snapshot::PreviewOptions {
+                file,
+                title: title.as_deref(),
+                document_id: document_id.as_deref(),
+                parent_snapshot_id: parent_snapshot_id.as_deref(),
+                snapshot_id: snapshot_id.as_deref(),
+            },
+        )?;
+        // Unlike network/query commands, preview's primary stdout artifact is
+        // the message itself. Structured output is therefore opt-in with
+        // --json so bots can forward the default output verbatim.
+        if cli.json && !cli.no_json {
+            println!("{}", serde_json::to_string(&output)?);
+        } else {
+            println!("{}", output.message);
+        }
+        return Ok(());
+    }
 
     // Setup logging
     let level = match cli.log_level.to_lowercase().as_str() {
@@ -3460,6 +3522,16 @@ pub async fn run() -> Result<()> {
         }
 
         Commands::Collaboration { token, command } => match command {
+            CollaborationCommands::Draft { command } => {
+                let authentication = get_token(token.as_deref())?;
+                let client = create_client(&bcs_url, &authentication, bcs_cookie.as_deref(), oauth_headers.as_ref());
+                let (output, success) = bcs_cli::collaboration_draft::execute(&client, command).await;
+                println!("{}", serde_json::to_string(&output)?);
+                if !success { anyhow::bail!("draft workflow did not produce a successful result"); }
+            }
+            CollaborationCommands::Preview { .. } => {
+                unreachable!("preview is dispatched before network setup")
+            }
             CollaborationCommands::Permission { session } => {
                 let token = get_token(token.as_deref())?;
                 let client = create_client(

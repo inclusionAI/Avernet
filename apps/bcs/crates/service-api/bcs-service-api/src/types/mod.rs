@@ -4,6 +4,7 @@
 //! and `port` contracts without creating reverse dependencies between those
 //! layers.
 
+pub mod collaboration_draft;
 pub mod bot_control_plane;
 pub mod agent_registration;
 pub mod error;

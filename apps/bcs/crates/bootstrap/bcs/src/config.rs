@@ -610,6 +610,10 @@ fn default_group_session_ws_signing_key_secret() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BcsConfig {
+    /// Optional shared signing-key override. Drafts are always enabled; SQLite
+    /// deployments otherwise initialize persistent keys beside their database.
+    #[serde(default)]
+    pub collaboration_drafts: Option<crate::collaboration_drafts::CollaborationDraftConfig>,
     #[serde(default)]
     pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
     /// Address to bind to.
@@ -1189,6 +1193,7 @@ fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
+            collaboration_drafts: None,
             state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),

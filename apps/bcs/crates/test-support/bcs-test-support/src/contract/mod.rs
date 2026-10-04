@@ -4,6 +4,7 @@
 //! call these functions from `tests/conformance_*.rs`.
 
 pub mod application;
+pub mod collaboration_draft;
 pub mod core;
 pub mod interceptor;
 pub mod lifecycle;

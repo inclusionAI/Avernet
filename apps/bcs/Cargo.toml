@@ -42,6 +42,8 @@ members = [
     "crates/services/bcs-collaboration-template",
     "crates/services/bcs-collaboration-runtime",
     "crates/services/bcs-collaboration-store",
+    "crates/services/bcs-collaboration-draft",
+    "crates/application/bcs-app-collaboration-draft",
     "crates/services/bcs-judge",
     "crates/services/bcs-jwt",
     "crates/services/bcs-fusion",
@@ -262,6 +264,8 @@ bcs-callback   = { path = "crates/services/bcs-callback" }
 bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
 bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }
 bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
+bcs-collaboration-draft = { path = "crates/services/bcs-collaboration-draft" }
+bcs-app-collaboration-draft = { path = "crates/application/bcs-app-collaboration-draft" }
 bcs-judge = { path = "crates/services/bcs-judge" }
 bcs-jwt = { path = "crates/services/bcs-jwt" }
 bcs-group      = { path = "crates/services/bcs-group" }

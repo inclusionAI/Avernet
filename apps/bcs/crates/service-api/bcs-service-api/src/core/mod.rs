@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod collaboration_draft;
 pub mod bot_control_plane;
 pub mod candidate_search;
 pub mod error;

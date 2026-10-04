@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: BCS collaboration drafts
+  version: 1.0.0
+  description: >-
+    BCS-native HTTP adapter contract, independent of Gateway principals and chat
+    sessions. All responses use Cache-Control:no-store. Management requires the
+    authenticated owner Bot. On read/validate, presence of X-BCS-Draft-Read-Token
+    always selects capability authorization, with no fallback to Bot or cookie
+    credentials. Capabilities are transferable, revocable, fixed to one revision
+    and trusted deployment, and never grant management or execution.
+paths:
+  /collaboration/drafts/{draftId}:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+    put:
+      operationId: createCollaborationDraft
+      security: [{BotToken: []}]
+      description: >-
+        Client-selected ID. Creates revision 1 atomically, or returns unchanged
+        revision 1 when its exact bytes/title match, even after head advances.
+        Different content conflicts. Deleted IDs never resurrect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Content'}
+      responses:
+        '201': {$ref: '#/components/responses/Revision'}
+        '200': {$ref: '#/components/responses/Revision'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      operationId: getCollaborationDraftMetadata
+      security: [{BotToken: []}]
+      responses:
+        '200':
+          description: Owner metadata, including tombstone. Not used to open historical messages.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Metadata'}
+        default: {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteCollaborationDraft
+      security: [{BotToken: []}]
+      description: Deletes sources and preserves minimal ID/owner/deployment tombstone. Idempotent.
+      responses:
+        '204': {description: Deleted}
+        default: {$ref: '#/components/responses/Error'}
+  /collaboration/drafts/{draftId}/revisions:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+    post:
+      operationId: appendCollaborationDraftRevision
+      security: [{BotToken: []}]
+      description: >-
+        Atomically append n+1 only when live head equals expected_revision n.
+        No implicit rebase. After uncertain response, inspect only n+1 and
+        compare bytes/hash/title; a match proves content saved, not attribution.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [definition_yaml, expected_revision]
+              properties:
+                definition_yaml: {$ref: '#/components/schemas/Yaml'}
+                title: {$ref: '#/components/schemas/Title'}
+                expected_revision: {$ref: '#/components/schemas/RevisionNumber'}
+      responses:
+        '200': {$ref: '#/components/responses/Revision'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /collaboration/drafts/{draftId}/revisions/{revision}:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+      - $ref: '#/components/parameters/Revision'
+    get:
+      operationId: readCollaborationDraftRevision
+      security: [{RevisionReadToken: []}, {BotToken: []}]
+      responses:
+        '200': {$ref: '#/components/responses/Revision'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /collaboration/drafts/{draftId}/revisions/{revision}/validate:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+      - $ref: '#/components/parameters/Revision'
+    post:
+      operationId: validateCollaborationDraftRevision
+      security: [{RevisionReadToken: []}, {BotToken: []}]
+      description: No request body. Validates the stored source using current BCS capabilities.
+      responses:
+        '200':
+          description: Validation evidence bound to the exact stored revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [draft_id, revision, content_hash, validated_at, validator, validation]
+                properties:
+                  draft_id: {$ref: '#/components/schemas/DraftId'}
+                  revision: {$ref: '#/components/schemas/RevisionNumber'}
+                  content_hash: {$ref: '#/components/schemas/Hash'}
+                  validated_at: {type: string, format: date-time}
+                  validator: {type: string, minLength: 1}
+                  validation:
+                    $ref: '../v1/openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidationOutcome'
+        default: {$ref: '#/components/responses/Error'}
+  /collaboration/drafts/{draftId}/revisions/{revision}/reference:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+      - $ref: '#/components/parameters/Revision'
+    get:
+      operationId: getCollaborationDraftReference
+      security: [{BotToken: []}]
+      description: Recomputes the same active reference. Revoked/deleted versions cannot be re-shared.
+      responses:
+        '200':
+          description: Four-field AixUI payload; no source, title or service URL.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Reference'}
+        default: {$ref: '#/components/responses/Error'}
+  /collaboration/drafts/{draftId}/revisions/{revision}/share:
+    parameters:
+      - $ref: '#/components/parameters/DraftId'
+      - $ref: '#/components/parameters/Revision'
+    delete:
+      operationId: revokeCollaborationDraftRead
+      security: [{BotToken: []}]
+      description: Permanently revokes every copy of this version's read capability. Idempotent.
+      responses:
+        '204': {description: Revoked}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    BotToken:
+      type: http
+      scheme: bearer
+      description: Existing BCS Bot credential and Actor matching; X-BCS-Bot-Token also follows existing auth.
+    RevisionReadToken:
+      type: apiKey
+      in: header
+      name: X-BCS-Draft-Read-Token
+  parameters:
+    DraftId:
+      in: path
+      name: draftId
+      required: true
+      schema: {$ref: '#/components/schemas/DraftId'}
+    Revision:
+      in: path
+      name: revision
+      required: true
+      schema: {$ref: '#/components/schemas/RevisionNumber'}
+  responses:
+    Revision:
+      description: Exact original UTF-8 bytes represented as a JSON string, including CRLF and whitespace.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/StoredRevision'}
+    Error:
+      description: >-
+        400/422 invalid input, 413 oversized transport body, 401 missing Bot
+        authentication, 403 management denied, 409 conflict, 503 service/storage
+        unavailable. Shared missing/mismatched/revoked/deleted resources uniformly
+        return 404 DRAFT_REFERENCE_UNAVAILABLE. No source or credentials in errors.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error]
+            properties:
+              error: {type: string}
+  schemas:
+    DraftId:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    RevisionNumber:
+      type: integer
+      minimum: 1
+      maximum: 9007199254740991
+    Hash:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+    Yaml:
+      type: string
+      description: At most 65536 UTF-8 bytes. Empty and invalid YAML may be saved. Never normalized.
+    Title:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 120
+      description: Omitted/null means no title; strings must not be blank. Unicode code points.
+    Content:
+      type: object
+      additionalProperties: false
+      required: [definition_yaml]
+      properties:
+        definition_yaml: {$ref: '#/components/schemas/Yaml'}
+        title: {$ref: '#/components/schemas/Title'}
+    Metadata:
+      type: object
+      additionalProperties: false
+      required: [draft_id, owner_bot_id, head_revision, created_at, deleted]
+      properties:
+        draft_id: {$ref: '#/components/schemas/DraftId'}
+        owner_bot_id: {type: string}
+        head_revision: {type: integer, minimum: 0, maximum: 9007199254740991, description: Zero for tombstones.}
+        created_at: {type: string, format: date-time}
+        deleted: {type: boolean}
+    StoredRevision:
+      type: object
+      additionalProperties: false
+      required: [draft_id, revision, definition_yaml, title, content_hash, size_bytes, created_by, created_at]
+      properties:
+        draft_id: {$ref: '#/components/schemas/DraftId'}
+        revision: {$ref: '#/components/schemas/RevisionNumber'}
+        definition_yaml: {$ref: '#/components/schemas/Yaml'}
+        title: {$ref: '#/components/schemas/Title'}
+        content_hash: {$ref: '#/components/schemas/Hash'}
+        size_bytes: {type: integer, minimum: 0, maximum: 65536}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+    Reference:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, draftId, revision, readToken]
+      properties:
+        schemaVersion: {const: 2}
+        draftId: {$ref: '#/components/schemas/DraftId'}
+        revision: {$ref: '#/components/schemas/RevisionNumber'}
+        readToken:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$'

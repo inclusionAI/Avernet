@@ -4,6 +4,10 @@
 /bcs-coordination bcs 网络上有哪些 bot
 /bcs-coordination 我要研发可以找哪些 bot
 
+## network address
+
+/bcs-coordination 当前 session 的 bcs_url 是 wss://bcn.example.com/ws/bot，检查 BCS 网络状态
+
 ## access-control
 
 /bcs-coordination 你在 BCS 上的可见性是什么

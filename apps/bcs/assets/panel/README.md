@@ -50,6 +50,40 @@ The chat renderer opens components with names such as:
 />
 ```
 
+### Collaboration definition preview
+
+The bundle exports the inline `CollaborationDefinitionCard` and the side-panel
+`CollaborationDefinitionPreview`. A producer should emit the stable component
+name through the BCS CLI instead of hand-building the escaped payload:
+
+```bash
+bcs-cli collaboration draft create workflow.yaml --draft-id "$draft_id" --title "Release review"
+```
+
+The CLI returns a short `message` using `bcsPanel.CollaborationDefinitionCard`.
+Schema 2 contains only `schemaVersion`, `draftId`, `revision`, and `readToken`.
+The card loads no YAML until opened. The existing host bridge and Agent resource
+binding supply `bcsPanel`; no frontend registration changes are required.
+The preview reads that fixed revision through the host's `/bcnproxy` entry with
+`X-BCS-Draft-Read-Token`, rejects redirects, and verifies UTF-8 length and SHA-256.
+Validation requests use the stored version, never a substituted source body.
+Validation outages preserve already verified source for copying. References are
+transferable and revocable; reopening/refreshing reauthenticates without a
+persistent cache. Tokens never enter tab IDs or URLs.
+
+Opening a card selects the Preview subtab. Source is a separate read-only subtab;
+Copy Source stays in the header and copies the verified original from either
+view. Changing the fixed revision returns to Preview. Both card versions fill
+their host width, including the preview button.
+
+Loop previews show the logical structure used by group creation: one body per
+Loop, a return edge, iteration limits, and distinct exit branches. Nested Loops
+retain their containers. The diagram fits the panel width and supports zoom;
+the projection does not change the stored YAML or validation summary.
+
+Historical schema 1 snapshots and `collaboration preview <file>` retain their
+read-only behavior. The preview never creates groups, drafts, or Runs.
+
 For a failed Run, the panel shows a **Rerun** action. It sends an empty
 `POST /state-machine-runs/{run_id}/reruns` request. The source panel remains on
 the source Run; presentation of the child is driven by the new Run's opening
@@ -76,8 +110,12 @@ GET /assets/bcsPanel/index.umd.js
 The bundle treats `react` and `react-dom` as host-provided globals and bundles
 the panel implementation dependencies needed at runtime.
 
-`test:umd` checks that the generated bundle exports `StateMachineRunView`,
-which is the entry name used by `bcsPanel.StateMachineRunView`.
+`test:umd` checks the public component exports, including
+`StateMachineRunView`, `UndercoverGamePanel`, `CollaborationDefinitionCard`, and
+`CollaborationDefinitionPreview`. The collaboration integration test also
+checks the shared snapshot vectors, click-to-open lifecycle, UMD tab payload,
+UUID v7 compatibility, repeated-tab focus, expanded Loop forward-edge layout,
+and validation rendering.
 
 ## Publishing
 

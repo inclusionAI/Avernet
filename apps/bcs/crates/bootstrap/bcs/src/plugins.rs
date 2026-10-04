@@ -294,7 +294,7 @@ pub fn build_registered_channel_provider(
     Ok(None)
 }
 
-fn resolve_sqlite_path(config: &BcsConfig) -> String {
+pub(crate) fn resolve_sqlite_path(config: &BcsConfig) -> String {
     let raw = config.database.sqlite.path.as_str();
     let p = std::path::Path::new(raw);
     if p.is_relative() {

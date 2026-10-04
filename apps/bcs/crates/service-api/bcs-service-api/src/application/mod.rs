@@ -1,4 +1,5 @@
 pub mod a2a_chat;
+pub mod collaboration_draft;
 pub mod actor_directory;
 pub mod admission;
 pub mod bot_management;

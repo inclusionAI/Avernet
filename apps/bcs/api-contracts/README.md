@@ -21,6 +21,12 @@ uv run --with pytest --with pyyaml --with jsonschema \
 
 ## Collaboration HTTP APIs
 
+`collaboration-drafts/v1.yaml` defines the BCS-native `/collaboration/drafts`
+adapter, immutable revisions, Bot management and revocable revision read
+capabilities. It uses the existing BCS entry/proxy without Gateway principals
+or chat membership. Its schema 2 AixUI payload is exactly four fields; historical
+schema 1 consumers remain supported.
+
 `v1/openapi.yaml` is the source of truth for the versioned public BCN OpenAPI.
 `v1/internal.yaml` is the source of truth for the versioned internal BCN
 collaboration API. Domain models and resource path items live in separate YAML

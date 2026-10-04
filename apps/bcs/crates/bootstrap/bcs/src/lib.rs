@@ -129,6 +129,7 @@ pub use bcs_routing::MessageRouter;
 pub mod auth_wiring;
 mod bot_ws_admission_config;
 mod config;
+mod collaboration_drafts;
 mod config_loader;
 pub mod callback_recovery_scanner;
 mod env;

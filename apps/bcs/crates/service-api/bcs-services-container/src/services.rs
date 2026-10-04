@@ -4,6 +4,7 @@
 //! Noop wiring lives in `test_support`.
 
 use std::sync::Arc;
+use bcs_service_api::application::collaboration_draft::CollaborationDraftService;
 
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, ActorDirectoryService, BotDeliveryPort, BotDiscoveryService,
@@ -31,6 +32,8 @@ pub enum BuilderError {
 /// Bundle of all services.
 #[derive(Clone)]
 pub struct Services {
+    /// Absent when durable draft storage/signing is not configured.
+    pub collaboration_drafts: Option<Arc<dyn CollaborationDraftService>>,
     /// Bot registry service.
     pub registry: Arc<dyn BotRegistryCoreService>,
     /// Group service.
@@ -133,6 +136,7 @@ impl Services {
 /// Builder for constructing services bundle.
 #[derive(Default)]
 pub struct ServicesBuilder {
+    collaboration_drafts: Option<Arc<dyn CollaborationDraftService>>,
     registry: Option<Arc<dyn BotRegistryCoreService>>,
     group: Option<Arc<dyn GroupCoreService>>,
     routing: Option<Arc<dyn RoutingCoreService>>,
@@ -246,6 +250,12 @@ impl ServicesBuilder {
     /// Set the A2A chat run service.
     pub fn a2a_chat_runs(mut self, service: Arc<dyn A2aChatRunService>) -> Self {
         self.a2a_chat_runs = Some(service);
+        self
+    }
+
+    /// Enable durable drafts, or leave absent when not configured.
+    pub fn collaboration_drafts(mut self, service: Option<Arc<dyn CollaborationDraftService>>) -> Self {
+        self.collaboration_drafts = service;
         self
     }
 
@@ -446,6 +456,7 @@ impl ServicesBuilder {
     /// Build the services bundle, failing if any required service is unset.
     pub fn build(self) -> Result<Services, BuilderError> {
         Ok(Services {
+            collaboration_drafts: self.collaboration_drafts,
             registry: required(self.registry, "registry")?,
             group: required(self.group, "group")?,
             routing: required(self.routing, "routing")?,
@@ -519,6 +530,7 @@ impl ServicesBuilder {
         };
 
         Services {
+            collaboration_drafts: self.collaboration_drafts,
             registry: self
                 .registry
                 .unwrap_or_else(|| Arc::new(NoopBotRegistryCoreService)),

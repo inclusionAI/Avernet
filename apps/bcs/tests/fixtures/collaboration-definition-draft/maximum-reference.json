@@ -1,0 +1,11 @@
+{
+  "purpose": "Maximum canonical reference serialization; synthetic non-existent revision, expected reference unavailable. This token is public test data, not a granted capability.",
+  "reference": {
+    "schemaVersion": 2,
+    "draftId": "e5940694-e813-4fb7-a48b-b8b70d05ee12",
+    "revision": 9007199254740991,
+    "readToken": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  },
+  "message": "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{\"schemaVersion\":2,\"draftId\":\"e5940694-e813-4fb7-a48b-b8b70d05ee12\",\"revision\":9007199254740991,\"readToken\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\"}' />",
+  "size_bytes": 234
+}

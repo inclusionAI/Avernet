@@ -259,7 +259,8 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (32, "session_registry".to_string(), "sqlite".to_string()),
             (33, "provider_slug".to_string(), "sqlite".to_string()),
             (34, "group_context".to_string(), "sqlite".to_string()),
-            (35, "group_context_owners".to_string(), "sqlite".to_string())
+            (35, "group_context_owners".to_string(), "sqlite".to_string()),
+            (36, "collaboration_drafts".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())
@@ -271,7 +272,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
 
     let report = check_sqlite_migrations(&db).await?;
 
-    assert_eq!(report.pending_versions.len(), 35);
+    assert_eq!(report.pending_versions.len(), 36);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -721,7 +722,8 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (32, "session_registry".to_string(), "sqlite".to_string()),
             (33, "provider_slug".to_string(), "sqlite".to_string()),
             (34, "group_context".to_string(), "sqlite".to_string()),
-            (35, "group_context_owners".to_string(), "sqlite".to_string())
+            (35, "group_context_owners".to_string(), "sqlite".to_string()),
+            (36, "collaboration_drafts".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())

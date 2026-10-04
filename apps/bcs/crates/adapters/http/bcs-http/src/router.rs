@@ -43,6 +43,7 @@ fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpApp
 
 fn build_api_routes() -> Router<HttpAppState> {
     Router::new()
+        .merge(routes::collaboration_drafts::router())
         .route("/manifest", get(routes::manifest::get_manifest))
         .route(
             "/assets/{bundle_name}/{file_name}",
