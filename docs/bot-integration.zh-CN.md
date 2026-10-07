@@ -506,9 +506,9 @@ V3 与 Provider 流式链路复用同一套 canonical Run Event。WebSocket Even
 | `ts` | integer | Unix epoch 毫秒时间戳 |
 
 如果 WebSocket `EventFrame` 同时携带外层 `seq`，其值必须与 payload 中的
-`seq` 一致。Bot WebSocket 接收 canonical `chat`、`agent` 和 `interaction`
-事件。`seq` 账本为所有事件种类共享：重复、回退或跨种类复用的序号都会被
-拒绝，与 HTTP Provider SSE 链路的记账方式一致。
+`seq` 一致。Bot WebSocket 当前接收 canonical `chat` 和 `agent` 事件；
+canonical `interaction` payload 可以被解析，但在该传输尚未接入 interaction
+处理前会被明确拒绝。
 
 BCN 从可信的服务端 run context 恢复 group。V3 事件不得提交
 `bcsGroupId`、`bcs_group_id` 或其他替代 session key。
@@ -589,49 +589,7 @@ Thinking 只用于运行过程可观测，不参与 task intent 解析：
 资格进入 MCP tool-result task-intent 解析。tool start 参数、失败 result、普通
 工具以及所有 V1/V2 事件都不能触发 task intent。
 
-### 6.5 Interaction 事件（HITL 审批）
-
-canonical `interaction` payload 在通用 run event 字段之外还需携带：
-
-| 字段 | 类型 | 约束 |
-| --- | --- | --- |
-| `interactionId` | string | Provider 侧 interaction 标识 |
-| `phase` | string | `requested` 或 `resolved` |
-| `kind` | string | `exec`、`ask_user` 或 `mode_switch` |
-
-```json
-{"type":"event","event":"interaction","payload":{
-  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,"ts":1710960001500,
-  "interactionId":"int-7","phase":"requested","kind":"exec",
-  "command":"rm -rf /tmp/x"
-},"seq":3}
-```
-
-`phase=requested` 登记一条待审批交互；`phase=resolved` 上报 bot 侧结果。
-Interaction 帧与 `chat`/`agent` 帧共用同一 per-run `seq` 账本：重复或回退
-的序号会被拒绝，interaction 消耗过的序号也不能被后续流式帧复用（反之亦
-然）。Interaction 事件属于请求-响应记账而非流式内容——不做
-`terminal_fingerprint` 重放去重，同 `interactionId` 重试帧的持久幂等由服务
-端 interaction 服务承担。超过 run deadline 的帧会被拒绝，并清理该 run 仍
-处于 pending 状态的交互。
-
-BCN 通过向 bot 的 WebSocket 推送 `interaction.resolve` 请求下发审批决定：
-
-```json
-{"type":"request","id":"<uuid>","method":"interaction.resolve","params":{
-  "bcsRunId":"run-001","runId":"run-001","interactionId":"int-7",
-  "kind":"exec","idempotencyKey":"<key>",
-  "resolution":{ "...": "工作台决定 payload，原样转发" }
-}}
-```
-
-`params` 固定携带 `bcsRunId`、`runId`、`interactionId`、`kind`（与上行同
-一个 slug）、`idempotencyKey` 和 `resolution`——工作台的决定 payload 原样
-转发。bot 用标准 `Response` 帧回显请求 `id`；`ok=true` 表示确认收到。
-BCS 等待确认 15 秒；错误码为 unknown-method 的拒绝视为不可重试，其他失败
-可能重试。
-
-### 6.6 V1/V2 兼容
+### 6.5 V1/V2 兼容
 
 V1/V2 继续使用旧的 `event: "chat.event"`，payload 字段为 `run_id`、
 `bcs_group_id`、`state` 和 `message`。它们不接受 V3 canonical Run Event，
