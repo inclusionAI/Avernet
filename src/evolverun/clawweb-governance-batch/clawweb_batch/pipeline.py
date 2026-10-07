@@ -117,6 +117,7 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
                     report["requests"].append(request)
                 except ValueError as exc:
                     result = {"decision": "WATCH", "reason": f"dedup/contract gate: {exc}", "proposed": result}
+            print("[governance_result] " + json.dumps({"owner":scope[0], "bot":scope[1], "decision":result["decision"], "reason":result.get("reason", "")}, ensure_ascii=False), flush=True)
             report["governance"].append({"bucket": bucket, "evidence_file": evidence_file, "result": result})
         except Exception as exc:
             # Failure is not 'no candidates': persist stage+type, return nonzero at end.

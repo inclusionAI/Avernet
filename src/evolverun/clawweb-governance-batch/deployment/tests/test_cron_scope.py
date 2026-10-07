@@ -62,3 +62,19 @@ class EvidenceBudgetTests(unittest.TestCase):
             a.explain({'tasks':[{'id':'a','session_id':'s','evidence':'x'*300000}]},{'payload':{'improvementId':1,'outcome':'STILL_PRESENT'},'reason':'recurrence','checked_task_ids':['a']})
             t=a.analyze.call_args.args[1]['evidence']['tasks'][0]
             self.assertIn('not reviewed here',t['projection']);self.assertEqual(t['id'],'a')
+
+class GateOwnershipTests(unittest.TestCase):
+    def test_governance_adapter_only_validates_structure(self):
+        from clawweb_batch.core import validate_analysis
+        with tempfile.TemporaryDirectory() as tmp:
+            a=OpenClawAnalysis({},ROOT.parents[1]/'clawweb-skills/clawinsight-skills',Path(tmp),'/unused','/unused',time.monotonic()+1000,{})
+            proposal=dict(decision='CREATE',reason='investigate',signature_id='not-grounded',evidence_ids=['missing'],
+                          title='x',root_cause='x',suggested_action='x',assignment_reason='x',existing_improvement_id=None)
+            bundle={'existing_actions':[],'signatures':[],'tasks':[]}
+            self.assertEqual(a._validate('clawweb-governance',proposal,bundle),proposal)
+            with self.assertRaises(ValueError):validate_analysis(proposal,bundle)
+            with self.assertRaises(ValueError):a._validate('clawweb-governance',{'decision':'CREATE'},bundle)
+    def test_output_budget_is_forwarded(self):
+        from openclaw_analysis import agent_config
+        config=agent_config(Path('/work'),Path('/state'),{'model':'unit','base_url':'https://example.test'},max_tokens=12000)
+        self.assertEqual(config['models']['providers']['ais']['models'][0]['maxTokens'],12000)

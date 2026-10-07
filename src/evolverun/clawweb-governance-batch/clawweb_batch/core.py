@@ -117,7 +117,7 @@ def is_rejected(item: dict) -> bool:
     return str(item.get("status", "")).upper() == "ARCHIVED" and bool(item.get("adminReviewReason"))
 
 
-def validate_analysis(proposal: dict, bundle: dict) -> dict:
+def validate_analysis_shape(proposal: dict, bundle: dict) -> dict:
     required = {"decision", "reason", "signature_id", "evidence_ids", "title", "root_cause",
                 "suggested_action", "assignment_reason", "existing_improvement_id"}
     if not isinstance(proposal, dict) or set(proposal) != required:
@@ -134,6 +134,11 @@ def validate_analysis(proposal: dict, bundle: dict) -> dict:
         ids = {str(x["improvementId"]) for x in bundle["existing_actions"]}
         if str(existing) not in ids or proposal["decision"] != "DROP":
             raise ValueError("analyst invented a dedup record or inconsistent decision")
+    return proposal
+
+
+def validate_analysis(proposal: dict, bundle: dict) -> dict:
+    validate_analysis_shape(proposal, bundle)
     if proposal["decision"] != "CREATE":
         return proposal
     signatures = {s["id"]: s for s in bundle["signatures"]}

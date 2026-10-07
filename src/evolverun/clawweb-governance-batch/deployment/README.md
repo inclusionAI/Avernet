@@ -30,3 +30,10 @@ by token. Outputs and timestamps do not themselves prove a deployed repair worke
 The public runner's previous default remains compatible; this dedicated entrypoint
 requires Cron-only configuration explicitly. Do not enable production writes merely
 to test the deployment. Create no schedules as a side effect of setup.
+
+The configured `analysis_max_tokens` is forwarded to OpenClaw's model output budget
+(including provider reasoning usage); incomplete turns are never accepted as valid.
+The model adapter validates output structure. Evidence eligibility and later-success
+counterevidence remain program gates: a veto yields WATCH, not a model transport
+failure or a retry intended to force CREATE. Both proposed replies and final gated
+results are printed, clearly labeled.

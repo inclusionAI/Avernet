@@ -137,7 +137,7 @@ def main(argv=None):
             transport=ClawWebHTTP(cfg.clawweb_url,JsonHTTP(cfg.timeout_seconds),args.apply and cfg.allow_writes)
             center=JournalCenter(transport,cfg.state_dir/'publication-journal')
             analyst=OpenClawAnalysis(llm,ROOT.parents[1]/'clawweb-skills/clawinsight-skills',output/'openclaw',BINARY,NODE_DIRECTORY,
-                                    started+3600,{})
+                                    started+3600,{},max_tokens=cfg.analysis_max_tokens)
             nas=NASReader(cfg.nas_roots)
             print(json.dumps({'event':'started','mode':'apply' if args.apply else 'dry-run',
                 'data_date':args.date or watermark['end_date'],'run_dir':str(output)},ensure_ascii=False),flush=True)
