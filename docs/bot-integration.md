@@ -557,10 +557,9 @@ event payload must contain these camelCase fields:
 | `ts` | integer | Unix epoch time in milliseconds. |
 
 If the WebSocket `EventFrame` also carries an outer `seq`, it must equal the
-payload `seq`. Bot WebSocket accepts the canonical `chat`, `agent`, and
-`interaction` events. The `seq` ledger is shared across all event kinds:
-duplicate, regressed, or cross-kind-reused sequences are rejected, matching
-the HTTP Provider SSE ingest.
+payload `seq`. Bot WebSocket currently accepts the canonical `chat` and
+`agent` events; canonical `interaction` payloads are parsed but explicitly
+rejected until interaction handling is wired into this transport.
 
 BCN derives the group from trusted server-side run context. V3 events must not
 send `bcsGroupId`, `bcs_group_id`, or a replacement session key.
@@ -643,55 +642,7 @@ tool is eligible for MCP tool-result task-intent parsing, and only when
 arguments, failed results, ordinary tools, and all V1/V2 events cannot trigger
 task intent.
 
-### 6.5 Interaction events (HITL approval)
-
-Canonical `interaction` payloads carry the common run event fields plus:
-
-| Field | Type | Requirement |
-| --- | --- | --- |
-| `interactionId` | string | Provider-scoped interaction identifier. |
-| `phase` | string | `requested` or `resolved`. |
-| `kind` | string | `exec`, `ask_user`, or `mode_switch`. |
-
-```json
-{"type":"event","event":"interaction","payload":{
-  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,"ts":1710960001500,
-  "interactionId":"int-7","phase":"requested","kind":"exec",
-  "command":"rm -rf /tmp/x"
-},"seq":3}
-```
-
-`phase=requested` registers a pending approval; `phase=resolved` reports the
-bot-side outcome. Interaction frames join the per-run `seq` ledger together
-with `chat`/`agent` frames: duplicate or regressed sequences are rejected, and
-a sequence consumed by an interaction cannot be reused by a later streaming
-frame, or vice versa. Interaction events are request-response bookkeeping,
-not streaming content — they are not replay-deduplicated by
-`terminal_fingerprint`, and durable idempotency for retried frames with the
-same `interactionId` is owned by the server's interaction service. Frames
-arriving after the run deadline are rejected and sweep the run's
-still-pending interactions.
-
-BCN delivers an approval decision by pushing an `interaction.resolve` request
-to the bot's WebSocket:
-
-```json
-{"type":"request","id":"<uuid>","method":"interaction.resolve","params":{
-  "bcsRunId":"run-001","runId":"run-001","interactionId":"int-7",
-  "kind":"exec","idempotencyKey":"<key>",
-  "resolution":{ "...": "workbench decision payload, forwarded as-is" }
-}}
-```
-
-`params` always carries `bcsRunId`, `runId`, `interactionId`, `kind` (the
-same slug as the uplink), `idempotencyKey`, and `resolution` — the workbench's
-decision payload forwarded as-is. The bot answers with the standard
-`Response` frame echoing the request `id`; `ok=true` acknowledges receipt.
-BCS waits 15 seconds for the acknowledgment; a rejection whose error code is
-an unknown-method code is treated as non-retryable, while other failures may
-be retried.
-
-### 6.6 Compatibility with V1 and V2
+### 6.5 Compatibility with V1 and V2
 
 V1/V2 continue to use the legacy `event: "chat.event"` payload with
 `run_id`, `bcs_group_id`, `state`, and `message`. They do not accept the V3
