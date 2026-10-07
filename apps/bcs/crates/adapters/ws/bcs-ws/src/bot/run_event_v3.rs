@@ -28,8 +28,8 @@ pub(super) enum V3RunEvent {
 /// Parse the raw V3 EventFrame payload and separate "flows into the
 /// NormalizedBotEvent pipeline" (agent/chat streaming events) from
 /// "handled independently" (Interaction: request-response semantics,
-/// no terminal_fingerprint replay dedup, no per-run seq reservation —
-/// idempotency is owned entirely by InteractionService).
+/// no terminal_fingerprint replay dedup — but the per-run seq ledger is
+/// still enforced, mirroring the HTTP SSE SeqDedup accounting).
 pub(super) fn classify_v3_event(event: &EventFrame) -> Result<V3RunEvent> {
     let raw = event
         .payload
@@ -59,8 +59,13 @@ fn to_app_interaction_kind(kind: WireInteractionKind) -> bcs_service_api::Intera
 /// Handle a V3 Interaction event (HITL uplink). Unlike the agent/chat path,
 /// this does not produce a `NormalizedBotEvent`: Interaction is request-response,
 /// not a streaming message, so it never enters the streaming-event pipeline
-/// (no terminal_fingerprint, no reserve_run_event_seq). Idempotency is
-/// entirely owned by `InteractionService`.
+/// (no terminal_fingerprint replay dedup). The per-run seq ledger IS enforced:
+/// after scope and deadline validation the frame reserves the shared
+/// sequence (same ledger as agent/chat frames), commits on success and
+/// releases on failure — mirroring how the HTTP SSE ingest runs interaction
+/// frames through its SeqDedup so duplicate/regressed sequences and
+/// cross-kind seq reuse are rejected on both transports. Durable
+/// idempotency for retried same-id frames stays with `InteractionService`.
 pub(super) async fn handle_interaction_event_v3(
     state: &BotDispatchState,
     bot_id: &str,
@@ -107,7 +112,19 @@ pub(super) async fn handle_interaction_event_v3(
         ));
     }
 
-    match event.phase {
+    // Reserve the shared per-run sequence only after every rejection path
+    // that returns without releasing (scope/terminal/deadline above), so a
+    // rejected frame never leaves a stuck pending_seq behind.
+    if !state
+        .bot_connections
+        .reserve_run_event_seq(bot_id, &event.run_id, seq)
+        .await
+    {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event seq is duplicate or regressed".into(),
+        ));
+    }
+    let processed = match event.phase {
         InteractionPhase::Requested => {
             state
                 .interactions
@@ -131,7 +148,8 @@ pub(super) async fn handle_interaction_event_v3(
                     received_at_ms: bcs_protocol::now_ms(),
                 })
                 .await
-                .map_err(BotWsDispatchError::ServiceError)?;
+                .map(|_| ())
+                .map_err(BotWsDispatchError::ServiceError)
         }
         InteractionPhase::Resolved => {
             state
@@ -145,10 +163,21 @@ pub(super) async fn handle_interaction_event_v3(
                     received_at_ms: bcs_protocol::now_ms(),
                 })
                 .await
-                .map_err(BotWsDispatchError::ServiceError)?;
+                .map_err(BotWsDispatchError::ServiceError)
         }
+    };
+    if processed.is_ok() {
+        state
+            .bot_connections
+            .commit_run_event_seq(bot_id, &event.run_id, seq, None)
+            .await;
+    } else {
+        state
+            .bot_connections
+            .release_run_event_seq(bot_id, &event.run_id, seq)
+            .await;
     }
-    Ok(())
+    processed
 }
 
 fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<NormalizedBotEvent> {
