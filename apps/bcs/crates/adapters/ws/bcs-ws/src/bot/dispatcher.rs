@@ -880,9 +880,10 @@ fn response_payload_run_id(res: &ResponseFrame) -> Option<&str> {
 /// V3 帳本校验：外层 frame seq 与 payload seq 一致、run 存在、身份匹配。
 /// 不含终态/过期检查——调用方需要在 agent/chat 专属的 terminal_fingerprint
 /// 幂等重放检查之后才做终态/过期判断（否则一个合法的终态重放帧会被误判为
-/// "run已终态"而报错，而不是被静默忽略）。也不含 agent/chat 专属的
-/// reserve_run_event_seq 占用——那一步只服务于流式消息事件的重放语义，
-/// Interaction 事件不应共用。
+/// "run已终态"而报错，而不是被静默忽略）。也不含 reserve_run_event_seq
+/// 占用——agent/chat 在流式管道内提交/回滚，Interaction 在
+/// handle_interaction_event_v3 内对同一 per-run 账本做 reserve/commit/release
+/// （对齐 HTTP SSE 的 SeqDedup 记账），两条路径各自管理占用时机。
 /// pub(super) 可见性:bot 模块下的同级子模块 run_event_v3 需要调用它
 /// (run_event_v3.rs 自身的 pub(super) 函数同属这一可见性约定)。
 pub(super) async fn validate_v3_run_scope(
