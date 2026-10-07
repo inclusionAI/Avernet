@@ -29,14 +29,15 @@ def day_range(start: str, end: str) -> list[str]:
     return [(a + timedelta(days=n)).strftime("%Y%m%d") for n in range((b - a).days + 1)]
 
 
-def select_watermark(rows: list[dict], today: str, max_age: int) -> dict:
+def select_watermark(rows: list[dict], today: str, max_age: int, *, cron_only: bool = False) -> dict:
     by_day: dict[str, dict[int, dict]] = {}
     for row in rows:
         by_day.setdefault(row["dt"], {})[int(row["is_cron"])] = row
     # Both lanes are expected by this pipeline. Genuine zero lanes need an upstream manifest,
     # not a guessed zero substituted for an absent partition.
-    complete = [d for d, lanes in by_day.items() if set(lanes) == {0, 1}
-                and all(int(r["raw_sampled_cnt"]) > 0 for r in lanes.values())]
+    required_lanes = {1} if cron_only else {0, 1}
+    complete = [d for d, lanes in by_day.items() if required_lanes.issubset(lanes)
+                and all(int(lanes[lane]["raw_sampled_cnt"]) > 0 for lane in required_lanes)]
     if not complete:
         raise ValueError("no date with both nonempty data lanes; publication is blocked")
     end = max(complete)
@@ -44,10 +45,29 @@ def select_watermark(rows: list[dict], today: str, max_age: int) -> dict:
     if age < 0 or age > max_age:
         raise ValueError("latest paired data partitions are stale or future-dated")
     return {"end_date": end, "paired_days": sorted(complete), "age_days": age,
-            "readiness": "PAIRED_PARTITIONS_ONLY", "upstream_completeness_verified": False}
+            "readiness": "CRON_PARTITIONS_ONLY" if cron_only else "PAIRED_PARTITIONS_ONLY", "upstream_completeness_verified": False}
 
 
-def rank_counts(rows: list[dict], top: int) -> list[dict]:
+def rank_counts(rows: list[dict], top: int, *, cron_only: bool = False) -> list[dict]:
+    if cron_only:
+        bots = {}
+        for row in rows:
+            if int(row["is_cron"]) != 1:
+                continue
+            w, n = float(row["weighted_cnt"]), int(row["raw_sampled_cnt"])
+            if not math.isfinite(w) or w < 0 or n < 0:
+                raise ValueError("invalid task counts")
+            if row.get("task_complete_cate") in {"COMPLETED", "UNKNOWN"}:
+                continue
+            key = (str(row["user_id"]), str(row["bot_id"]))
+            item = bots.setdefault(key, {"user_id":key[0], "bot_id":key[1], "is_cron":1,
+                "weighted_cnt":0.0, "raw_sampled_cnt":0, "count_kind":"estimate",
+                "ranking_scope":"user_bot_cron", "task_complete_cate":"ALL_FAILURES"})
+            item["weighted_cnt"] += w
+            item["raw_sampled_cnt"] += n
+        selected = sorted((x for x in bots.values() if x["raw_sampled_cnt"] > 0),
+            key=lambda x:(-x["weighted_cnt"],-x["raw_sampled_cnt"],x["user_id"],x["bot_id"]))[:top]
+        return [{**x,"rank":i} for i,x in enumerate(selected,1)]
     merged: dict[tuple, dict] = {}
     for row in rows:
         key = (str(row["user_id"]), str(row["bot_id"]), int(row["is_cron"]), row["task_complete_cate"])
@@ -174,7 +194,7 @@ def make_candidate(proposal: dict, bundle: dict, existing: list[dict], *,
             raise ValueError("same root is inside the rejection cooldown")
     generation = max((int(x["improvementId"]) for x in same), default=0)
     meta = {"schema": 1, "root_id": root, "signature": signature}
-    guidance = {"clawinsight": meta, "counts": {"category_count": bucket["weighted_cnt"],
+    guidance = {"clawinsight": meta, "counts": {("bot_failure_count" if bucket.get("ranking_scope") == "user_bot_cron" else "category_count"): bucket["weighted_cnt"],
                 "count_kind": bucket["count_kind"], "sampled_tasks": bucket["raw_sampled_cnt"],
                 "verified_tasks": len(proposal["evidence_ids"])}, "as_of": bundle["as_of"]}
     tasks = {t["id"]: t for t in bundle["tasks"]}

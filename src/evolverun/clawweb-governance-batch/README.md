@@ -99,3 +99,36 @@ any implicit auto-execution response fails closed.
 stay outside Git. The state directory has an exclusion lock and an analysis cache; a stale
 lock requires operator inspection, not automatic deletion. Apply freezes the exact payload
 before POST. Network ambiguity or conflict stops writes without blind retry.
+
+## Cron-only deployment (2026-10-07)
+
+The maintained OpenClaw composition root is now `deployment/`, not an unversioned
+Downloads-only wrapper. Its independent configuration requires `cron_only=true`.
+It consumes this module and sibling project Skills directly; no copied library or
+personal Skill store is authoritative. The legacy public runner remains compatible
+with configurations without this flag.
+
+Cron-only selection aggregates failure counts by exact Owner + Bot, not by category.
+All failure labels contribute; COMPLETED and UNKNOWN do not. Categories do not select
+investigation slots. Estimated counts still depend on upstream completion labels and
+are not confirmed root-cause counts. Only Cron sessions are queried in this mode;
+non-Cron data is not required for the daily watermark. Verification queues remain
+separate, but missing comparable Cron evidence cannot justify closing an item.
+
+`deployment/run.sh` preserves failure exit codes and writes the same progress and
+visible response text to its console and a unique protected `logs/console-*.log`.
+Model replies appear immediately after each complete CLI turn; this is not token
+streaming. Hidden reasoning and raw session bodies are never printed deliberately.
+The existing CLI captures its final JSON; token streaming has not been established.
+
+Verification with an already-determined INSUFFICIENT_DATA reason does not call the
+model just to paraphrase the reason. Other verification explanations are batched by
+mechanically matched Task IDs below the byte budget. Full evidence stays on disk;
+large individual Tasks use explicitly marked metadata projections, never silent
+truncation or an assertion of complete model review. Program outcomes cannot change.
+An explanation failure is recorded and later items are still attempted, but the
+whole run remains failed and any future publication remains blocked.
+
+`--dry-run` performs actual reads and model analysis but no effect-center writes.
+`--check` performs local preparation checks only. Neither schedules a task. Deployment
+and runtime validation are separate from local tests; no run is authorized by this file.

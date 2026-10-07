@@ -23,7 +23,7 @@ def review_history(items: list[dict]) -> list[dict]:
 
 def representative_tasks(tasks: list[dict], category: str, lane: int) -> list[dict]:
     relevant = [t for t in tasks if int(t["is_cron"]) == lane]
-    failed = [t for t in relevant if t["failure_class"] == category and t["signature_ids"]]
+    failed = [t for t in relevant if (category == "ALL_FAILURES" or t["failure_class"] == category) and t["signature_ids"]]
     failed.sort(key=lambda t: (instant(t["end_time"]), t["id"]), reverse=True)
     chosen = failed[:4]
     chosen += sorted(relevant, key=lambda t: (instant(t["end_time"]), t["id"]), reverse=True)[:2]
@@ -38,7 +38,7 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
     today = now.strftime("%Y%m%d")
     lookup_start = (now - timedelta(days=cfg.lookback_days - 1)).strftime("%Y%m%d")
     daily = source.daily_counts(lookup_start, today)
-    watermark = select_watermark(daily, today, cfg.max_data_age_days)
+    watermark = select_watermark(daily, today, cfg.max_data_age_days, cron_only=cfg.cron_only)
     if end_date:
         if apply and end_date != watermark["end_date"]:
             raise ValueError("historical replay is dry-run only")
@@ -57,7 +57,7 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
     cache_entries = cache_doc.get("entries", {}) if isinstance(cache_doc, dict) else {}
     if not isinstance(cache_entries, dict):
         cache_entries = {}
-    ranked = rank_counts(source.ranking(start, end), top or cfg.top_per_lane)
+    ranked = rank_counts(source.ranking(start, end), top or cfg.top_per_lane, cron_only=cfg.cron_only)
     report = {"schema": 1, "mode": "apply" if apply else "dry-run", "started_at": now.isoformat(),
               "watermark": watermark, "nas": nas.available(), "ranking": ranked,
               "governance": [], "verification": [], "requests": [], "receipts": [],
@@ -67,7 +67,7 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
     cache, planned_roots = {}, set()
     for number, bucket in enumerate(ranked):
         scope = (bucket["user_id"], bucket["bot_id"])
-        print(f"[governance] {number + 1}/{len(ranked)} lane={bucket['is_cron']} category={bucket['task_complete_cate']}", flush=True)
+        print(f"[governance] {number + 1}/{len(ranked)} owner={bucket['user_id']} bot={bucket['bot_id']} cron={bucket['is_cron']} estimated_failures={bucket['weighted_cnt']}", flush=True)
         try:
             if scope not in cache:
                 rows = source.sessions(*scope, start, end, cfg.sessions_per_bot)

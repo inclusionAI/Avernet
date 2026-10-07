@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 outputs/
 state/
+
+# Deployment-local configuration and runtime artifacts are never source files.
+deployment/config.json
+deployment/prepared.json
+deployment/logs/
+deployment/runs/
+deployment/.checks/

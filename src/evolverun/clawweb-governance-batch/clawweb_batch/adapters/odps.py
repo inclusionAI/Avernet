@@ -15,10 +15,11 @@ def literal(value: str) -> str:
 
 
 class PyODPSData:
-    def __init__(self, client, project: str):
+    def __init__(self, client, project: str, cron_only: bool = False):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", project):
             raise ValueError("invalid project")
         self.client, self.project = client, project
+        self.cron_only = cron_only
 
     def _read(self, sql: str) -> list[dict]:
         if not sql.lstrip().upper().startswith(("SELECT ", "WITH ")):
@@ -32,6 +33,15 @@ class PyODPSData:
                           "GROUP BY dt,is_cron ORDER BY dt DESC,is_cron LIMIT 64")
 
     def ranking(self, start: str, end: str) -> list[dict]:
+        if self.cron_only:
+            rows = self._read(f"SELECT user_id,bot_id,1 is_cron,SUM(weighted_cnt) weighted_cnt,"
+                f"SUM(raw_sampled_cnt) raw_sampled_cnt FROM {self.project}.{CATE} "
+                f"WHERE dt BETWEEN {literal(start)} AND {literal(end)} AND is_cron=1 "
+                "AND task_complete_cate NOT IN ('COMPLETED','UNKNOWN') "
+                "GROUP BY user_id,bot_id LIMIT 100001")
+            if len(rows) > 100000:
+                raise ValueError("ranking exceeds complete-read bound")
+            return rows
         rows = self._read(f"SELECT user_id,bot_id,is_cron,task_complete_cate,SUM(weighted_cnt) weighted_cnt,"
                           f"SUM(raw_sampled_cnt) raw_sampled_cnt FROM {self.project}.{CATE} "
                           f"WHERE dt BETWEEN {literal(start)} AND {literal(end)} "
@@ -43,6 +53,7 @@ class PyODPSData:
     def sessions(self, owner: str, bot: str, start: str, end: str, limit: int) -> list[dict]:
         if type(limit) is not int or not 1 <= limit <= 500:
             raise ValueError("invalid session bound")
+        cron_filter = " AND j.sampling_group_key IS NOT NULL AND j.sampling_group_key <> ''" if self.cron_only else ""
         # Deduplicate daily snapshots, retaining the newest complete source record.
         return self._read(f"""WITH candidates AS (
  SELECT j.user_id,j.bot_id,j.session_id,j.dt,j.start_time,j.end_time,j.sampling_group_key,j.llm_tasks_json,
@@ -54,6 +65,6 @@ class PyODPSData:
  AND j.session_id=s.session_id AND j.dt=s.dt
  AND s.dt BETWEEN {literal(start)} AND {literal(end)}
  WHERE j.dt BETWEEN {literal(start)} AND {literal(end)}
- AND j.user_id={literal(owner)} AND j.bot_id={literal(bot)}
+ AND j.user_id={literal(owner)} AND j.bot_id={literal(bot)}{cron_filter}
  ) SELECT user_id,bot_id,session_id,dt,start_time,end_time,sampling_group_key,llm_tasks_json,file_path,bot_name,messages,source_rows
  FROM candidates WHERE rn=1 ORDER BY end_time DESC,session_id LIMIT {limit + 1}""")

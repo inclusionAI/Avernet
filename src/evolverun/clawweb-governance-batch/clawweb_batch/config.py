@@ -25,6 +25,7 @@ class Config:
     timeout_seconds: int = 180
     analysis_max_tokens: int = 12000
     max_message_bytes: int = 2_000_000
+    cron_only: bool = False
     allow_writes: bool = False
     rejection_cooldown_days: int = 15
 
@@ -57,10 +58,12 @@ def load_config(path: Path) -> Config:
     if any(not p.is_absolute() or ".." in p.parts for p in raw["nas_roots"]):
         raise ValueError("nas_roots must be absolute without parent traversal")
     cfg = Config(**raw)
-    for name in allowed - required - {"allow_writes"}:
+    for name in allowed - required - {"allow_writes", "cron_only"}:
         v = getattr(cfg, name)
         if type(v) is not int or v < 1:
             raise ValueError(f"{name} must be a positive integer")
+    if type(cfg.cron_only) is not bool:
+        raise ValueError("cron_only must be boolean")
     if type(cfg.allow_writes) is not bool:
         raise ValueError("allow_writes must be boolean")
     if cfg.window_days > cfg.lookback_days or cfg.lookback_days > 31:

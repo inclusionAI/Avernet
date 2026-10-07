@@ -23,7 +23,7 @@ def build_runtime(cfg, *, apply: bool):
     if apply and not cfg.allow_writes:
         raise PermissionError("apply requires deployment allow_writes=true")
     from pypai.utils import env_utils  # AIStudio identity injection; no exported credentials.
-    source = PyODPSData(env_utils.get_odps_instance(), cfg.project)
+    source = PyODPSData(env_utils.get_odps_instance(), cfg.project, cron_only=cfg.cron_only)
     http = JsonHTTP(cfg.timeout_seconds)
     center = ClawWebHTTP(cfg.clawweb_url, http, apply and cfg.allow_writes)
     analyst = JsonAnalyst(load_llm(cfg.llm_config_file), http, cfg.analysis_max_tokens)
