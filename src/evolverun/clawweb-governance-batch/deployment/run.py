@@ -73,6 +73,7 @@ def cli(argv=None):
     modes.add_argument('--check',action='store_true')
     modes.add_argument('--dry-run',action='store_true')
     modes.add_argument('--apply',action='store_true')
+    parser.add_argument('--governance-only',action='store_true',help='create candidates only; do not query or write verification queues')
     parser.add_argument('--date',help='optional YYYYMMDD historical replay; dry-run only')
     parser.add_argument('--top-bots','--top-per-lane',dest='top_per_lane',type=int,help='maximum Cron user+bot investigation slots')
     args=parser.parse_args(argv)
@@ -135,17 +136,18 @@ def main(argv=None):
                     raise ValueError('formal writes blocked by incomplete dependency window')
             write_json(output/'readiness.json',source.readiness)
             transport=ClawWebHTTP(cfg.clawweb_url,JsonHTTP(cfg.timeout_seconds),args.apply and cfg.allow_writes)
-            center=JournalCenter(transport,cfg.state_dir/'publication-journal')
+            center=JournalCenter(transport,cfg.state_dir/'publication-journal',create_only=args.governance_only)
             analyst=OpenClawAnalysis(llm,ROOT.parents[1]/'clawweb-skills/clawinsight-skills',output/'openclaw',BINARY,NODE_DIRECTORY,
                                     started+3600,{},max_tokens=cfg.analysis_max_tokens)
             nas=NASReader(cfg.nas_roots)
             print(json.dumps({'event':'started','mode':'apply' if args.apply else 'dry-run',
-                'data_date':args.date or watermark['end_date'],'run_dir':str(output)},ensure_ascii=False),flush=True)
+                'data_date':args.date or watermark['end_date'],'run_dir':str(output),'governance_only':args.governance_only},ensure_ascii=False),flush=True)
             # Complete every read and both analysis stages before any allowed effect-center mutation.
             report=run(run_cfg,source,center,analyst,nas,now=now,apply=False,
-                       top=args.top_per_lane,end_date=args.date)
+                       top=args.top_per_lane,end_date=args.date,include_verification=not args.governance_only)
             report['requested_mode']='apply' if args.apply else 'dry-run'
             report['dependency_readiness']=source.readiness
+            report['governance_only']=args.governance_only
             if not report['errors']:
                 for plan in report['verification']:
                     print(f"[verification] lane={plan['lane']} item={plan['payload']['improvementId']} outcome={plan['payload']['outcome']}",flush=True)

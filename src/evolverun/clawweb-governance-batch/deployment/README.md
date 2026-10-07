@@ -37,3 +37,12 @@ The model adapter validates output structure. Evidence eligibility and later-suc
 counterevidence remain program gates: a veto yields WATCH, not a model transport
 failure or a retry intended to force CREATE. Both proposed replies and final gated
 results are printed, clearly labeled.
+
+## Creation-only publication
+
+`--governance-only` skips both verification queue reads and verification writes.
+For an explicitly authorized creation run, use this flag together with `--apply`
+and a separate reviewed configuration with `allow_writes=true`. The publication
+adapter additionally rejects every endpoint/action except pending ASSIGN_OWNER
+creation. Existing dry-run configuration remains unchanged. A zero-candidate run
+is allowed and must not manufacture data merely to prove a POST succeeds.

@@ -32,7 +32,8 @@ def representative_tasks(tasks: list[dict], category: str, lane: int) -> list[di
 
 
 def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst, nas: EvidenceStore,
-        *, now: datetime, apply: bool, top: int | None = None, end_date: str | None = None) -> dict:
+        *, now: datetime, apply: bool, top: int | None = None, end_date: str | None = None,
+        include_verification: bool = True) -> dict:
     if apply and not cfg.allow_writes:
         raise PermissionError("--apply also requires deployment allow_writes=true")
     today = now.strftime("%Y%m%d")
@@ -125,7 +126,8 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
                                       "message": safe_error(exc)})
         write_json(output / "run.json", report)
     write_json(cache_path, {"schema": 1, "entries": cache_entries})
-    for lane in ("standard", "open"):
+    report["verification_enabled"] = include_verification
+    for lane in (("standard", "open") if include_verification else ()):
         try:
             items = center.verification_candidates(lane, cfg.verification_limit)
         except Exception as exc:

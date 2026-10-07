@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 from clawweb_batch.adapters.odps import PyODPSData, CATE, JUDGE, FULL, literal
 from clawweb_batch.artifacts import write_json
+from clawweb_batch.core import API_PREFIX
 
 
 def valid_day(value):
@@ -67,8 +68,9 @@ class ReadyData(PyODPSData):
 
 class JournalCenter:
     """Prevent re-dispatch after an uncertain write, independently of HTTP idempotency."""
-    def __init__(self, center, directory):
+    def __init__(self, center, directory, *, create_only=False):
         self.center, self.directory = center, Path(directory)
+        self.create_only = create_only
 
     def actions(self, owner, bot):
         return self.center.actions(owner, bot)
@@ -77,6 +79,8 @@ class JournalCenter:
         return self.center.verification_candidates(lane, limit)
 
     def write(self, path, payload, key):
+        if self.create_only and (path != API_PREFIX + '/actions' or payload.get('actionType') != 'ASSIGN_OWNER'):
+            raise PermissionError('governance-only publication permits pending owner assignments only')
         if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,220}', key):
             raise ValueError('invalid publication idempotency key')
         digest = hashlib.sha256(json.dumps([path,payload],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
