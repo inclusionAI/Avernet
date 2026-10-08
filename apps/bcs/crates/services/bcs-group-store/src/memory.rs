@@ -78,15 +78,22 @@ impl MemoryGroupRepo {
             .unwrap_or_else(|| "memory".to_string())
     }
 
-    /// Append one ordinary-business audit record under the caller's held
-    /// critical section (spec §12.5): a same-slot record with identical
-    /// content is an idempotent no-op; different content under the same
-    /// `(env, operation_id, step_key)` slot is a conflict that aborts the
-    /// mutation ("失败丢弃暂存状态").
-    async fn append_action_audit_once(
+    /// STAGE one ordinary-business audit row (spec §12.5): every falible
+    /// decision — the armed test failure AND the `(env, operation_id,
+    /// step_key)` slot conflict check — happens HERE, BEFORE any business or
+    /// Event side effect commits, so an audit failure leaves no partial
+    /// success: the state, the Event (and its subscription reconciliation)
+    /// and the audit all publish together or not at all.
+    /// A same-slot record with identical content stages as an idempotent
+    /// no-op; different content under the same slot is a Conflict.
+    ///
+    /// Returns the held write guard so the caller can publish the staged row
+    /// synchronously inside its own critical section (including the event
+    /// store's sync business closure).
+    async fn stage_action_audit(
         &self,
         record: &BotActionAuditRecord,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>> {
         if self.action_audit_failure_armed.swap(false, Ordering::SeqCst) {
             return Err(ServiceError::InternalError(
                 "injected group action audit append failure".to_string(),
@@ -100,10 +107,22 @@ impl MemoryGroupRepo {
                     record.step_key
                 )));
             }
-            return Ok(());
         }
-        audits.push(record.clone());
-        Ok(())
+        Ok(audits)
+    }
+
+    /// Publish a staged audit row synchronously (the event store's business
+    /// closure is `FnOnce() -> Result<_, EventRepoError>` and cannot
+    /// await). Only valid after [`Self::stage_action_audit`] returned Ok and
+    /// while the caller still owns its critical section; a slot already
+    /// carrying identical content stays a no-op.
+    fn publish_staged_action_audit(
+        audits: &mut tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>,
+        record: &BotActionAuditRecord,
+    ) {
+        if !audits.iter().any(|existing| existing.same_slot(record)) {
+            audits.push(record.clone());
+        }
     }
 }
 
@@ -212,9 +231,13 @@ impl GroupRepoPort for MemoryGroupRepo {
         apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
 
         // Same-critical-section ordinary-business audit (spec §12.5, plan
-        // Task 10): the audit row publishes with the business state (and its
-        // Event) or not at all — an audit failure restores the previous
-        // group snapshot, leaving no partial success.
+        // Task 10): the falible audit staging runs BEFORE any business or
+        // Event side effect, and the row is published INSIDE the very
+        // closure that publishes the state (the event store discards its
+        // staged Event — and its subscription reconciliation — when the
+        // closure fails), so state, Event and audit publish together or not
+        // at all. No restore path is needed because nothing else has
+        // committed when staging fails.
         let audit_record = command.operation.as_ref().map(|operation| {
             crate::action_audit::eventful_mutation_audit_record(
                 &command,
@@ -222,6 +245,10 @@ impl GroupRepoPort for MemoryGroupRepo {
                 &self.audit_env(),
             )
         });
+        let mut staged_audit = match audit_record.as_ref() {
+            Some(record) => Some(self.stage_action_audit(record).await?),
+            None => None,
+        };
 
         if let Some(event) = command.event.as_ref() {
             let event_store =
@@ -240,6 +267,11 @@ impl GroupRepoPort for MemoryGroupRepo {
                     } else {
                         groups.insert(command.group_id.clone(), candidate.clone());
                     }
+                    if let (Some(record), Some(audits)) =
+                        (audit_record.as_ref(), staged_audit.as_mut())
+                    {
+                        Self::publish_staged_action_audit(audits, record);
+                    }
                     Ok(())
                 })
                 .await
@@ -257,6 +289,11 @@ impl GroupRepoPort for MemoryGroupRepo {
                 event_store
                     .commit_group_deletion(&command.group_id, env, command.mutated_at_ms, || {
                         groups.remove(&command.group_id);
+                        if let (Some(record), Some(audits)) =
+                            (audit_record.as_ref(), staged_audit.as_mut())
+                        {
+                            Self::publish_staged_action_audit(audits, record);
+                        }
                         Ok(())
                     })
                     .await
@@ -266,16 +303,15 @@ impl GroupRepoPort for MemoryGroupRepo {
                 // embedded callers. Without an Event Store there can be no
                 // subscriptions or pending deliveries to reconcile.
                 groups.remove(&command.group_id);
+                if let (Some(record), Some(audits)) = (audit_record.as_ref(), staged_audit.as_mut())
+                {
+                    Self::publish_staged_action_audit(audits, record);
+                }
             }
         } else {
             groups.insert(command.group_id.clone(), candidate.clone());
-        }
-        if let Some(record) = audit_record.as_ref() {
-            if let Err(audit_error) = self.append_action_audit_once(record).await {
-                // 失败丢弃暂存状态: restore the pre-mutation snapshot so the
-                // business change and its audit publish together or not at all.
-                groups.insert(current.id.clone(), current);
-                return Err(audit_error);
+            if let (Some(record), Some(audits)) = (audit_record.as_ref(), staged_audit.as_mut()) {
+                Self::publish_staged_action_audit(audits, record);
             }
         }
         Ok(candidate)
@@ -483,27 +519,26 @@ impl GroupRepoPort for MemoryGroupRepo {
         operation: BotOperationContext,
     ) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
-        let previous = groups
+        groups
             .get(id)
-            .cloned()
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        let group = groups.get_mut(id).expect("group snapshot exists");
 
+        // Same-critical-section audit (spec §12.5): the falible staging runs
+        // BEFORE the workspace change, and the row publishes right after
+        // the workspace state — together or not at all, with no restore
+        // path because nothing has been mutated when staging fails.
+        let record =
+            crate::action_audit::workspace_audit_record(id, &operation, &self.audit_env());
+        let mut staged_audit = self.stage_action_audit(&record).await?;
+
+        let group = groups.get_mut(id).expect("group checked above");
         group.workspace = workspace;
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
 
-        // Same-critical-section audit (spec §12.5): the workspace change
-        // and its `applied` audit row publish together or not at all.
-        let record =
-            crate::action_audit::workspace_audit_record(id, &operation, &self.audit_env());
-        if let Err(audit_error) = self.append_action_audit_once(&record).await {
-            // 失败丢弃暂存状态: restore the previous workspace snapshot.
-            groups.insert(id.to_string(), previous);
-            return Err(audit_error);
-        }
+        Self::publish_staged_action_audit(&mut staged_audit, &record);
         Ok(())
     }
 

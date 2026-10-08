@@ -22,6 +22,7 @@
     reason = "test assertions intentionally fail fast"
 )]
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
@@ -32,9 +33,7 @@ use bcs_db_api::{
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::{MessageViewScope, ParticipantRole};
-use bcs_service_api::port::repo::{
-    CommitGroupEventfulMutation, GroupEventfulMutation, GroupRepoPort,
-};
+use bcs_service_api::port::repo::{CommitGroupEventfulMutation, GroupEventfulMutation, GroupRepoPort};
 use bcs_service_api::types::bot_operation::{BotOperationActor, BotOperationContext};
 use bcs_service_api::types::{
     BotActionAuditPhase, BotActionAuditRecord, BotActionKind, BotActionResourceKind,
@@ -43,7 +42,17 @@ use bcs_service_api::types::{
 use bcs_service_api::Workspace;
 use bcs_service_api::{GroupStrategy, ServiceError};
 
+use bcs_event_store::MemoryEventStore;
 use bcs_group_store::{GroupBuilder, MemoryGroupRepo, MySqlGroupStore};
+use bcs_service_api::port::NewEvent;
+use bcs_service_api::port::repo::{
+    AppendEventRecord, CreateEventSubscriptionRecord, EventRepoPort, EventSubscriptionRecord,
+    EventSubscriptionRevisionRecord, FinalizeGroupProvisioning,
+};
+use bcs_service_api::types::{
+    EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventPayloadMode, EventScope,
+    EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionStatus,
+};
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 #[allow(dead_code)]
@@ -518,3 +527,258 @@ async fn memory_publishes_state_and_audit_together_or_not_at_all() {
     assert_eq!(audits.len(), before, "the discarded workspace adds no audit row");
 }
 
+// ---------------------------------------------------------------------------
+// Evented memory lanes: audit failure must roll the EVENT back too
+// (spec §12.5: state/Event/audit publish together or not at all). The
+// failure is injected with an armed audit-append failure; observability is
+// the public event-store surface (`get_event` / `get_subscription`), so no
+// private state is peeked.
+// ---------------------------------------------------------------------------
+
+fn audit_suite_event(env: &str, group_id: &str, event_id: &str, event_type: &str) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: event_id.to_string(),
+            event_type: event_type.to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "group-action-audit-test".to_string(),
+            producer_key: format!("{event_type}:{group_id}:{event_id}"),
+            occurred_at: "2026-08-19T00:00:00.000Z".to_string(),
+            subject: EventSubject {
+                subject_type: "group".to_string(),
+                id: group_id.to_string(),
+            },
+            scope: EventScope {
+                group_id: Some(group_id.to_string()),
+                ..EventScope::default()
+            },
+            stream_key: format!("group:{group_id}"),
+            actor: Some(EventActor {
+                actor_type: EventActorType::Human,
+                id: "human_staff-1".to_string(),
+                display_name: None,
+            }),
+            correlation_id: None,
+            causation_event_id: None,
+            trace_id: None,
+            data: BTreeMap::new(),
+        },
+        recorded_at: "2026-08-19T00:00:00.001Z".to_string(),
+        retention_until_ms: 2_000_000_000_000,
+        env: env.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn memory_evented_mutation_failure_rolls_back_state_event_and_audit() {
+    let event_store = Arc::new(MemoryEventStore::new());
+    let repo = Arc::new(
+        MemoryGroupRepo::new().with_event_store(event_store.clone(), AUDIT_ENV.to_string()),
+    );
+    let mut group = GroupBuilder::new("driver").id("memory-evented").build();
+    group.label = None;
+    repo.upsert(group.clone()).await.expect("seed group");
+
+    // Positive control: an event-ful mutation with an audit context commits
+    // the business state, the Event, and the applied audit row together.
+    let committed = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "memory-evented".to_string(),
+            expected_version: group.version,
+            mutated_at_ms: 1_787_028_100_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                label: Some("Committed".to_string()),
+                ..Default::default()
+            }),
+            event: Some(audit_suite_event(
+                AUDIT_ENV,
+                "memory-evented",
+                "evt-audit-1",
+                "group.updated",
+            )),
+            operation: Some(human_operation("staff-1", "memory-evented")),
+        })
+        .await
+        .expect("event-ful mutation with audit commits");
+    assert_ne!(committed.version, group.version);
+    assert!(
+        event_store
+            .get_event("evt-audit-1", AUDIT_ENV)
+            .await
+            .expect("query event")
+            .is_some(),
+        "the committed Event exists"
+    );
+    let version_after_commit = committed.version;
+    assert_eq!(
+        repo.group_action_audit_records().await.expect("audits").len(),
+        1
+    );
+
+    // Inject the audit failure and replay a second, identical-shaped
+    // operation: NO residue may survive — not the state, not the Event, and
+    // no partial audit row (spec §12.5).
+    repo.arm_action_audit_write_failure();
+    let error = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "memory-evented".to_string(),
+            expected_version: version_after_commit,
+            mutated_at_ms: 1_787_028_200_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                label: Some("Must Not Persist".to_string()),
+                ..Default::default()
+            }),
+            event: Some(audit_suite_event(
+                AUDIT_ENV,
+                "memory-evented",
+                "evt-audit-2",
+                "group.updated",
+            )),
+            operation: Some(BotOperationContext {
+                operation_id: "op-memory-evented-2".to_string(),
+                actor: BotOperationActor::Human {
+                    user_id: "staff-1".to_string(),
+                    effective_actor_id: "human_staff-1".to_string(),
+                },
+            }),
+        })
+        .await
+        .expect_err("the armed audit failure must fail the whole mutation");
+    assert!(
+        matches!(error, ServiceError::InternalError(_)),
+        "got: {error:?}"
+    );
+
+    let stored = repo
+        .get("memory-evented")
+        .await
+        .expect("group survived");
+    assert_eq!(stored.version, version_after_commit);
+    assert_ne!(stored.label.as_deref(), Some("Must Not Persist"));
+    assert!(
+        event_store
+            .get_event("evt-audit-2", AUDIT_ENV)
+            .await
+            .expect("query event")
+            .is_none(),
+        "the rolled-back Event must not survive the audit failure"
+    );
+    let audits = repo.group_action_audit_records().await.expect("audits");
+    assert_eq!(
+        audits.len(),
+        1,
+        "no audit row may be added by the discarded attempt: {audits:#?}"
+    );
+}
+
+#[tokio::test]
+async fn memory_evented_deletion_failure_rolls_back_group_subscription_and_audit() {
+    let event_store = Arc::new(MemoryEventStore::new());
+    let repo = Arc::new(
+        MemoryGroupRepo::new().with_event_store(event_store.clone(), AUDIT_ENV.to_string()),
+    );
+    let mut group = GroupBuilder::new("driver").id("memory-delete-audit").build();
+    group.record_status = "provisioning".to_string();
+    repo.upsert(group).await.expect("seed provisioning group");
+    event_store
+        .create_subscription(CreateEventSubscriptionRecord {
+            subscription: EventSubscriptionRecord {
+                subscription_id: "sub-delete-audit".to_string(),
+                name: "deletion audit probe".to_string(),
+                scope: EventSubscriptionScope {
+                    scope_type: EventSubscriptionScopeType::Group,
+                    id: "memory-delete-audit".to_string(),
+                },
+                status: EventSubscriptionStatus::Pending,
+                current_revision: 1,
+                created_by: EventActor {
+                    actor_type: EventActorType::Human,
+                    id: "human_staff-1".to_string(),
+                    display_name: None,
+                },
+                created_at_ms: 1_787_027_999_000,
+                updated_at_ms: 1_787_027_999_000,
+                deleted_at_ms: None,
+                env: AUDIT_ENV.to_string(),
+            },
+            revision: EventSubscriptionRevisionRecord {
+                subscription_id: "sub-delete-audit".to_string(),
+                revision: 1,
+                event_filters: vec!["group.created".to_string()],
+                payload_mode: EventPayloadMode::MetadataOnly,
+                endpoint_url: "https://events.example.com/delete-audit".to_string(),
+                request_timeout_ms: 5_000,
+                activated_at_ms: 0,
+                retired_at_ms: None,
+            },
+            scope_limit: 10,
+        })
+        .await
+        .expect("create pending subscription");
+    repo.finalize_provisioning(FinalizeGroupProvisioning {
+        group_id: "memory-delete-audit".to_string(),
+        env: AUDIT_ENV.to_string(),
+        subscription_ids: vec!["sub-delete-audit".to_string()],
+        events: vec![audit_suite_event(
+            AUDIT_ENV,
+            "memory-delete-audit",
+            "evt-delete-audit-created",
+            "group.created",
+        )],
+        actor: EventActor {
+            actor_type: EventActorType::Human,
+            id: "human_staff-1".to_string(),
+            display_name: None,
+        },
+        finalized_at_ms: 1_787_028_000_000,
+    })
+    .await
+    .expect("finalize provisioning activates the subscription");
+
+    let (subscription, _) = event_store
+        .get_subscription("sub-delete-audit", AUDIT_ENV)
+        .await
+        .expect("load subscription")
+        .expect("subscription exists");
+    assert_eq!(subscription.status, EventSubscriptionStatus::Active);
+
+    // Inject the audit failure on the audited deletion: NO partial success
+    // may survive — Group restored, subscription reconciliation untouched,
+    // zero audit rows (spec §12.5).
+    repo.arm_action_audit_write_failure();
+    let error = repo
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "memory-delete-audit".to_string(),
+            expected_version: 1,
+            mutated_at_ms: 1_787_028_200_000,
+            mutation: GroupEventfulMutation::Delete,
+            event: None,
+            operation: Some(human_operation("staff-1", "memory-delete-audit")),
+        })
+        .await
+        .expect_err("the armed audit failure must fail the whole deletion");
+    assert!(
+        matches!(error, ServiceError::InternalError(_)),
+        "got: {error:?}"
+    );
+
+    assert!(
+        repo.get("memory-delete-audit").await.is_some(),
+        "the rolled-back deletion restores the Group"
+    );
+    let (subscription, _) = event_store
+        .get_subscription("sub-delete-audit", AUDIT_ENV)
+        .await
+        .expect("load subscription after rollback")
+        .expect("subscription survives");
+    assert_eq!(
+        subscription.status,
+        EventSubscriptionStatus::Active,
+        "the deletion's subscription reconciliation (disable+cancel) must roll back too"
+    );
+    let audits = repo.group_action_audit_records().await.expect("audits");
+    assert!(
+        audits.is_empty(),
+        "no audit row may survive the discarded deletion: {audits:#?}"
+    );
+}
