@@ -348,6 +348,7 @@ class TaskModule(Module):
             bot_token_provider=bot_token_provider,
             notify_messages_provider=notify_messages_provider,
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
+            task_sample_count=task_dispatch.sample_count,
             task_settings=task_settings,
             bot_bindings=bot_bindings,
             task_context_service=task_context_svc,

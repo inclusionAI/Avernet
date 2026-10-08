@@ -107,6 +107,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         staff_dept: StaffDeptPlugin | None = None,
         task_auth_gate=None,
         task_search_skill_enabled: bool = False,
+        task_sample_count: int = 1,
         task_settings=None,
         api_base_url: str | None = None,
         bot_token_provider=None,
@@ -133,6 +134,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         self._api_base_url = api_base_url
         self._task_auth_gate = task_auth_gate
         self._task_search_skill_enabled = task_search_skill_enabled
+        self._task_sample_count = task_sample_count
         self._task_settings = task_settings
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
@@ -229,6 +231,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
             bcs_identity=self._bcs_identity,
             auth_gate=self._task_auth_gate,
             task_search_skill_enabled=self._task_search_skill_enabled,
+            task_sample_count=self._task_sample_count,
             task_settings=self._task_settings,
             api_base_url=self._api_base_url,
             bot_token_provider=self._bot_token_provider,

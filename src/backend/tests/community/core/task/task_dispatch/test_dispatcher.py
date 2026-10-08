@@ -154,10 +154,17 @@ class TestExecRetryReplay:
         # 策略本会覆写为 bot_other;命中 replay → 保留原 single_bot/bot_orig 且不搜推
         d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_other"))
         node = _node("c1", run_mode="single_bot", assignee="bot_orig")
-        node.run_info.extend_props["harness_retries"] = 1
+        samples = [
+            {"sample_id": "sample-1", "rank": 1, "bot_id": "bot_orig"},
+            {"sample_id": "sample-2", "rank": 2, "bot_id": "bot_peer"},
+        ]
+        node.run_info.extend_props.update(
+            {"harness_retries": 1, "dispatch_samples": samples}
+        )
         out = _run(d.dispatch([node]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_orig"
+        assert out[0].run_info.extend_props["dispatch_samples"] == samples
         assert len(strat.search_calls) == 0
 
     def test_coop_group_retry_preserves_mode_and_group_id(self, svc):
@@ -179,6 +186,23 @@ class TestExecRetryReplay:
         out = _run(d.dispatch([_node("c1")]))
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
+        assert len(strat.search_calls) == 1
+
+    def test_fresh_dispatch_clears_stale_multi_sample_plan(self, svc):
+        d, strat = _dispatcher(
+            svc,
+            SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"),
+        )
+        node = _node("c1", run_mode="single_bot", assignee="bot_orig")
+        node.run_info.extend_props["dispatch_samples"] = [
+            {"sample_id": "sample-1", "rank": 1, "bot_id": "bot_orig"},
+            {"sample_id": "sample-2", "rank": 2, "bot_id": "bot_peer"},
+        ]
+
+        out = _run(d.dispatch([node]))
+
+        assert out[0].run_info.assignee == "bot_market"
+        assert "dispatch_samples" not in out[0].run_info.extend_props
         assert len(strat.search_calls) == 1
 
     def test_retry_without_assignee_still_searches(self, svc):
@@ -495,3 +519,66 @@ class TestDispatchExceptionCarrier:
         assert result is None
         assert sr.assembly_error is not None
         assert sr.assembly_error.startswith("rationale_assembly_failed")
+
+
+def test_search_strategy_multi_sample_selects_ranked_top_n_without_grouping():
+    """Configured sampling executes ranked Bots independently, not as one coop group."""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {
+                "items": [
+                    {"bot_id": "a", "bot_uuid": "a:1", "recommend": {"score": 0.9}},
+                    {"bot_id": "b", "bot_uuid": "b:2", "recommend": {"score": 0.8}},
+                    {"bot_id": "c", "bot_uuid": "c:3", "recommend": {"score": 0.7}},
+                ]
+            }
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("multi-sampling must use the recommendation ranking directly")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    strategy = SearchBasedDispatchStrategy(
+        _Bot(), _Discover(), use_search_skill=True, sample_count=2
+    )
+
+    result = _run(strategy.apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "a:1"
+    assert [item["bot_id"] for item in result.sample_candidates] == ["a:1", "b:2"]
+    assert [item["sample_id"] for item in result.sample_candidates] == [
+        "sample-1",
+        "sample-2",
+    ]
+    assert result.group_formation is None
+
+
+def test_dispatcher_carries_multi_sample_plan_on_single_bot_node(svc):
+    samples = [
+        {"sample_id": "sample-1", "rank": 1, "bot_id": "a:1", "score": 0.9},
+        {"sample_id": "sample-2", "rank": 2, "bot_id": "b:2", "score": 0.8},
+    ]
+    dispatcher, _ = _dispatcher(
+        svc,
+        SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id="a:1",
+            owner_id="1",
+            sample_candidates=samples,
+        ),
+    )
+
+    node = _run(dispatcher.dispatch([_node("c1")]))[0]
+
+    assert node.run_info.run_mode == "single_bot"
+    assert node.run_info.assignee == "a:1"
+    assert node.run_info.extend_props["dispatch_samples"] == samples

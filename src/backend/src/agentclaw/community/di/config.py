@@ -844,14 +844,14 @@ class TaskQueueConfig:
 class TaskDispatchConfig:
     """Task dispatch policy switches (``task_dispatch`` user_config block).
 
-    The deterministic candidate-count rule is the safe default. Set
-    ``task_search_skill_enabled: true`` only when the owner Bot task-search
-    round-trip should decide the dispatch shape. ``skill_report_enabled``
-    selects the unified task result Push/Pull protocol and defaults to true.
+    The deterministic candidate-count rule is the safe default. ``sample_count``
+    controls ranked independent executions before owner-Bot selection; the
+    remaining switches select search-skill dispatch and result Push/Pull.
     """
 
     task_search_skill_enabled: bool = False
     skill_report_enabled: bool = True
+    sample_count: int = 1
 
 
 # Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved

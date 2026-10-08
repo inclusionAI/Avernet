@@ -76,6 +76,11 @@ user_config:
     enable_metrics: false
     max_connections: 100
 
+  # 中心化动态任务搜推多采样。1 保持既有行为；2..5 并行执行 TopN，
+  # 再由任务 owner Bot 选择一个规范结果。
+  task_dispatch:
+    sample_count: 1
+
   business:
     timeout: 30
     retry_count: 3

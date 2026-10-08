@@ -55,6 +55,7 @@ class CentralizedExecutionAdapter:
         bcs_identity=None,
         auth_gate=None,
         task_search_skill_enabled: bool = False,
+        task_sample_count: int = 1,
         task_settings=None,
         api_base_url: str = "",
         bot_token_provider=None,
@@ -84,6 +85,7 @@ class CentralizedExecutionAdapter:
         self._bcs_identity = bcs_identity
         self._auth_gate = auth_gate
         self._task_search_skill_enabled = task_search_skill_enabled
+        self._task_sample_count = task_sample_count
         self._task_settings = task_settings
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
@@ -271,6 +273,7 @@ class CentralizedExecutionAdapter:
                     self._discover,
                     bcn=self._bcn,
                     use_search_skill=self._task_search_skill_enabled,
+                    sample_count=self._task_sample_count,
                     task_settings=self._task_settings,
                 )
             )

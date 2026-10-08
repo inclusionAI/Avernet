@@ -45,6 +45,9 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs 
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor_relay import (
     TaskExecutorRelayMixin,
 )
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_settings import (
+    TaskExecutorSettingsMixin,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
@@ -70,7 +73,7 @@ def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
 _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 
-class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
+class TaskExecutor(TaskExecutorSettingsMixin, TaskExecutorRelayMixin, TaskExecutorBbsMixin):
     def __init__(
         self,
         *,
@@ -107,6 +110,11 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         self._task_settings = task_settings
         self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 BBS dispatch→notify 走引擎收敛)
         self._task_context_service = task_context_service
+        from agentclaw.community.core.task.task_runner.multi_sample import MultiSampleExecutor
+
+        self._multi_sample = MultiSampleExecutor(
+            bot=bot, graph=graph, context=context, formatter=formatter, sink=sink
+        )
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -138,6 +146,19 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                 )
                 return await self._dispatch_bbs(node, sem)
             if mode == "single_bot":
+                if self._multi_sample.can_handle(node):
+                    logger.info(
+                        "[task][task-executor] >>> 投递 multi_sample task=%s node=%s samples=%s",
+                        node.task_id,
+                        node.node_id,
+                        [
+                            item.get("bot_id")
+                            for item in node.run_info.extend_props.get(
+                                "dispatch_samples", []
+                            )
+                        ],
+                    )
+                    return self._multi_sample.start(node)
                 logger.info(
                     "[task][task-executor] >>> 投递 single_bot task=%s node=%s bot=%s → send_message",
                     node.task_id,
@@ -193,63 +214,6 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
             node, mode, f"{mode}_started" if result else f"{mode}_start_failed",
             details=None if result else {"failure_reason": "dispatch_returned_false"})
         return result
-
-    def _skill_report_enabled(self) -> bool:
-        """统一结果回收开关(默认 True=skill HTTP Push)。
-
-        开启(True)时所有任务模式允许 skill HTTP 上报；关闭(False)时禁止 Bot 主动 callback，由平台负责结果回收。
-        两条链路互斥，未注入或读取失败时按默认值 True 处理。
-        """
-        ts = getattr(self, "_task_settings", None)
-        if ts is None:
-            return True
-        try:
-            return ts.is_enabled("skill_report_enabled")
-        except Exception as exc:  # noqa: BLE001 未知 setting_type / 读取失败 → 使用默认 Push
-            logger.warning(
-                "[task][task-executor] skill_report 读取失败 → 使用默认 Push: %s",
-                exc,
-            )
-            return True
-
-    def _node_skill_report_enabled(self, node: TaskNode) -> bool:
-        graph = node.node_run_graph
-        config = graph.extend_props.get("execution_config", {}) if graph is not None else {}
-        return config.get("orchestration_mode") == "relay" or self._skill_report_enabled()
-
-    def _relay_execution_enabled(self, task_id: str) -> bool:
-        """Return whether the task graph is in distributed Relay mode."""
-        if self._graph is None:
-            return False
-        try:
-            snapshot = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001 graph unavailable means it cannot be Relay here
-            return False
-        config = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
-        return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
-
-    def _singlebot_2_group_enabled(self, task_id: str) -> bool:
-        """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
-        从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
-        if self._graph is None:
-            logger.info("[task][task-executor] singlebot_2_group 开关:graph 未接 → 默认 True(走旁路) task=%s", task_id)
-            return True
-        try:
-            snapshot = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001 graph 不可用 → 默认走旁路
-            logger.warning("[task][task-executor] singlebot_2_group 开关:graph 查询失败 → 默认 True task=%s", task_id)
-            return True
-        cfg = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
-        if not isinstance(cfg, dict):
-            logger.info("[task][task-executor] singlebot_2_group 开关:execution_config 非 dict → 默认 True task=%s", task_id)
-            return True
-        val = cfg.get("singlebot_2_group", True)
-        enabled = val if isinstance(val, bool) else str(val).lower() not in ("false", "0", "no", "none", "")
-        logger.info(
-            "[task][task-executor] singlebot_2_group 开关:execution_config.singlebot_2_group=%s → enabled=%s task=%s",
-            val, enabled, task_id,
-        )
-        return enabled
 
     async def _dispatch_single_bot(
         self, node: TaskNode, sem: asyncio.Semaphore

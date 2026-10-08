@@ -135,6 +135,12 @@ class TaskDispatcher:
                         node.run_info.extend_props["assignee_owner_name"] = (
                             result.owner_name
                         )
+                    if result.sample_candidates:
+                        node.run_info.extend_props["dispatch_samples"] = list(
+                            result.sample_candidates
+                        )
+                    else:
+                        node.run_info.extend_props.pop("dispatch_samples", None)
                 elif result.outcome == SearchOutcome.HIT_GROUP:
                     node.run_info.run_mode = "coop_group"
                     node.run_info.assignee = result.group_id
@@ -366,6 +372,11 @@ class TaskDispatcher:
                         extend_props_patch={
                             "dispatching": True,
                             "dispatching_at": _now_ms(),
+                            "dispatch_samples": (
+                                list(node.run_info.extend_props["dispatch_samples"])
+                                if node.run_info.extend_props.get("dispatch_samples")
+                                else None
+                            ),
                         },
                     )
                 )

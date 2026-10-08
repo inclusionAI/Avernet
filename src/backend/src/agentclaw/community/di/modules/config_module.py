@@ -925,15 +925,8 @@ class ConfigModule(Module):
     def task_dispatch(self) -> cfg.TaskDispatchConfig:
         """Task dispatch policy.
 
-        YAML shape::
-
-            task_dispatch:
-              task_search_skill_enabled: false
-              skill_report_enabled: true              # true=skill HTTP Push, false=poller Pull
-
-        The default keeps dispatch deterministic and avoids depending on the
-        owner Bot's task-search skill. Set it to true to restore the skill
-        round-trip for staged experiments.
+        ``sample_count`` is 1 for legacy dispatch or 2..5 for TopN sampling.
+        Other switches select search-skill dispatch and result Push/Pull.
         """
         block = _block("task_dispatch")
         defaults = cfg.TaskDispatchConfig()
@@ -951,6 +944,10 @@ class ConfigModule(Module):
                 _as_bool,
                 defaults.skill_report_enabled,
                 "task_dispatch",
+            ),
+            sample_count=_coerce(
+                block, "sample_count", _as_int, defaults.sample_count,
+                "task_dispatch", valid=lambda value: 1 <= value <= 5,
             ),
         )
 

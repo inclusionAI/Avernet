@@ -228,3 +228,24 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## 2026-10-08 TopN 多采样执行
+
+中心化动态任务可通过以下配置开启搜推候选多采样：
+
+```yaml
+user_config:
+  task_dispatch:
+    sample_count: 1  # 1=兼容原单次派发；2..5=按搜推顺序执行 TopN
+```
+
+- `sample_count=1` 保持原有派发和执行行为，包括候选数量驱动的单 Bot / 协作群决策。
+- `sample_count>1` 时，Dispatcher 按搜推排序选取最多 N 个不同 Bot，写入
+  `RuntimeInfo.extend_props.dispatch_samples`；这些 Bot 是相互独立的采样执行者，不会被合并为一个协作群。
+- Graph 中仍只有一个逻辑 `TaskNode`。Runner 禁止各采样执行主动回投，等待所有采样结束后由任务 owner Bot
+  根据目标和验收标准选择最佳结果，再经现有 `TaskLoopCallback.report_result` 路径回投一次规范结果。
+- 采样终态继续遵循 `{"success":bool,"data":Any,"gaps":list[str]}` 契约。被选结果的
+  `success/data/gaps` 原样成为节点规范结果，不得把验收失败强制改写为成功。
+- judge 返回非法、选择未知样本或调用失败时，优先回退到搜推排名最高的验收通过结果；若没有通过结果，则回退到排名最高的合法终态。
+- 所有采样均执行失败或终态非法时，统一回投 `exec_error=multi_sample_all_failed`，进入已有 Harness 重试流程。
+- 重试复用节点已持久化的 `dispatch_samples`，避免同一次逻辑节点在重试时漂移到另一组候选。

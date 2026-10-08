@@ -119,6 +119,10 @@ class SearchResult:
     # 在事件 ``ext_info`` 追加可见性备注 —— 非 ``error_type``,不冲击 analyzer failure_reason
     # 派生)。``None`` = 装配成功 / 无降级。派发决策本身不受影响(仅丢 rationale + 留诊断)。
     assembly_error: str | None = None
+    # Configured TopN independent executions. Empty means the legacy single/group
+    # delivery path; entries are JSON-safe because they are persisted in
+    # ``RuntimeInfo.extend_props`` for retry-stable replay.
+    sample_candidates: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DispatchStrategy(Protocol):
@@ -190,6 +194,7 @@ class SearchBasedDispatchStrategy:
         bcn=None,
         *,
         use_search_skill: bool = False,
+        sample_count: int = 1,
         task_settings=None,
     ) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
@@ -202,6 +207,7 @@ class SearchBasedDispatchStrategy:
         self._discover = discover
         self._bcn = bcn
         self._use_search_skill = use_search_skill
+        self._sample_count = max(1, int(sample_count))
         self._task_settings = task_settings
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
@@ -299,7 +305,21 @@ class SearchBasedDispatchStrategy:
         )
         prompt_text: str | None = None
         response_text: str | None = None
-        if use_skill:
+        rationale_use_skill = use_skill
+        if self._sample_count > 1:
+            # Multi-sampling intentionally uses the recommendation order itself:
+            # each selected Bot executes independently, so this is not the
+            # legacy "many Bots collaborate in one group" decision.
+            sr = _multi_sample_result(candidates, self._sample_count)
+            rationale_use_skill = False
+            logger.info(
+                "[task][search] task=%s node=%s multi_sample requested=%d selected=%s",
+                node.task_id,
+                node.node_id,
+                self._sample_count,
+                [item["bot_id"] for item in sr.sample_candidates],
+            )
+        elif use_skill:
             prompt_text = _compose_search_prompt(node, candidates)
             run = await self._bot.send_and_wait_async(
                 bot_id=owner,
@@ -354,7 +374,7 @@ class SearchBasedDispatchStrategy:
         # use_skill 时填 prompt/response digest;rule 模式 None。
         self._set_rationale(
             node, candidates, sr,
-            use_skill=use_skill,
+            use_skill=rationale_use_skill,
             prompt_text=prompt_text,
             response_text=response_text,
         )
@@ -444,6 +464,38 @@ def _candidate_dispatch_ids(candidates: list[dict]) -> list[str]:
             seen.add(identity)
             result.append(identity)
     return result
+
+
+def _multi_sample_result(candidates: list[dict], sample_count: int) -> SearchResult:
+    """Select ranked candidates for independent execution of one logical node."""
+    identities = _candidate_dispatch_ids(candidates)[:sample_count]
+    if not identities:
+        return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+    by_identity: dict[str, dict] = {}
+    for candidate in candidates:
+        identity = _candidate_dispatch_ids([candidate])
+        if identity:
+            by_identity.setdefault(identity[0], candidate)
+    samples = []
+    for rank, identity in enumerate(identities, start=1):
+        candidate = by_identity.get(identity, {})
+        recommend = candidate.get("recommend") if isinstance(candidate, dict) else {}
+        samples.append(
+            {
+                "sample_id": f"sample-{rank}",
+                "rank": rank,
+                "bot_id": identity,
+                "score": (recommend or {}).get("score"),
+            }
+        )
+    bot_id = identities[0]
+    _, _, owner_id = bot_id.partition(":")
+    return SearchResult(
+        outcome=SearchOutcome.HIT_SINGLE,
+        bot_id=bot_id,
+        owner_id=owner_id or None,
+        sample_candidates=samples,
+    )
 
 
 def _build_manager_worker_group(bot_ids: list[str]) -> GroupFormation:
