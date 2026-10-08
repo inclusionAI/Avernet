@@ -36,6 +36,14 @@ The response is `{groups: [...]}`. Each group has `workflowId`, `signature`,
 `inputDigest`, `flowIds`, `sources`, `summarySources`, `summary`, `stale`,
 `aggregationStatus` and `aggregationId`.
 
+Browser eligibility uses the server-supported compact v2 input, not the legacy
+v1 default used by unversioned Bot requests. `not_generated` means eligible but
+not generated, not that a compatible Bot has been deployed. Bot preparation still
+enforces the size bound for the version actually requested. The returned
+`aggregationInputVersion` and `aggregationInputSummary` describe the retained
+completed snapshot (or current job when no completed snapshot exists), never
+projected compaction of the latest sources; unknown metadata stays null.
+
 `summary` is either null or `{summary, causes, unknowns}`; each cause has `title`,
 `conclusion`, `certainty` (`supported|hypothesis|unknown`) and `sourceIds`.
 Every source must be covered; only IDs in the frozen input are accepted. Counts,
@@ -83,7 +91,9 @@ still requires coverage of every source ID, and the browser exposes full/compact
 counts. This is input compaction, not silent source sampling.
 
 Groups exceeding 500 source diagnoses or 180,000 UTF-8 bytes *after compaction*
-report `too_large`. Hierarchical synthesis is not in v1.
+report `too_large` in the browser when no current completed or queued job exists.
+Legacy v1 Bot requests apply the same bounds to the full uncompressed input.
+Hierarchical synthesis is not in v1.
 Historical groups are not automatically backfilled merely by opening a page.
 Run analysis triggers affected groups; reanalyzing an associated run refreshes
 them. There is no separate browser model-dispatch or bulk backfill endpoint in v1.
