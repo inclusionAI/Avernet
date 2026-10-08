@@ -86,6 +86,20 @@ def _validate_single_status(status: str | None) -> str | None:
 
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
+from agentclaw.community.adapters.http.openapi_v1.task.trajectory_replay_router import (  # noqa: E402
+    replay_task_trajectory,
+)
+from agentclaw.community.adapters.http.task.trajectory_replay_schemas import (  # noqa: E402
+    TaskTrajectoryReplayDTO,
+)
+
+router.add_api_route(
+    "/trajectory/replay",
+    replay_task_trajectory,
+    methods=["GET"],
+    response_model=Envelope[TaskTrajectoryReplayDTO],
+)
+
 # Handler-level principal dependency: ``test_public_routes_require_principal`` walks each
 # route's dependant tree, and the ``@envelope_errors`` wrapper keeps handler-level
 # `Depends(...)` params reachable while the router-level ``_PUBLIC_AUTH`` stays on the

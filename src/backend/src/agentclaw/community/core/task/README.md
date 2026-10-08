@@ -249,3 +249,14 @@ user_config:
 - judge 返回非法、选择未知样本或调用失败时，优先回退到搜推排名最高的验收通过结果；若没有通过结果，则回退到排名最高的合法终态。
 - 所有采样均执行失败或终态非法时，统一回投 `exec_error=multi_sample_all_failed`，进入已有 Harness 重试流程。
 - 重试复用节点已持久化的 `dispatch_samples`，避免同一次逻辑节点在重试时漂移到另一组候选。
+
+## 2026-10-08 轨迹重放
+
+轨迹服务提供只读重放投影：`TaskContextServiceProtocol.replay_trajectory` 读取统一的
+`TaskTrajectory.timeline`，按事件原始时间戳生成 `sequence`、`offset_ms` 和
+`delay_ms`，并支持 `playback_rate`、`from_sequence`、`limit`。该能力同时覆盖中心化
+和 Relay 轨迹，因为两条链路均写入同一轨迹时间线。
+
+重放只返回历史事件及播放时钟，不会重新调用 Bot、工具、派发、回调或状态机，也不会
+触发轨迹分析。HTTP 入口为内部和公开面的 `GET .../trajectory/replay`；完整契约见
+`src/backend/specs/2026-10-08-task-trajectory-replay/spec.md`。

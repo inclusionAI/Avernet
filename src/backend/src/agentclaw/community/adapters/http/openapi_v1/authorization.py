@@ -685,6 +685,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"):
         NoCheck("a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"),
+    ("GET", "/openapi/v1/collaboration/tasks/trajectory/replay"):
+        NoCheck("a task, not a bot; read-only playback projection of persisted trajectory events"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
         NoCheck("a task, not a bot; filters records by the named user"),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"):

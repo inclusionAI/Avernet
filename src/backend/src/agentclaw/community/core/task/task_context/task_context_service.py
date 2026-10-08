@@ -21,6 +21,8 @@ Surface — one method per external trajectory operation:
 * ``get_trajectory(task_id, *, do_analysis=False)`` (async) — read / on-demand bot
   analysis. Relays to the inner ``TaskTrajectoryService``; 503 (bot unconfigured) /
   504 (bot failure, no backfill) error semantics propagate unchanged.
+* ``replay_trajectory(...)`` (async) — read the canonical timeline and return a
+  deterministic playback clock; never re-executes task actions or triggers analysis.
 * ``emit_trajectory_event(...)`` (sync) — fire-and-forget event write (decision #14).
   Relays; never raises; no-op when the trajectory repo is unbound (lightweight DI).
 
@@ -42,6 +44,10 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from injector import inject
 
 from agentclaw.community.core.task.task_context.task_trajectory.models import TaskTrajectory
+from agentclaw.community.core.task.task_context.task_trajectory.replay import (
+    TaskTrajectoryReplay,
+    build_trajectory_replay,
+)
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryServiceProtocol,
 )
@@ -95,7 +101,7 @@ class TaskContextServiceProtocol(Protocol):
     ``TaskTrajectoryService``).
 
     Consumers:
-      * 2 HTTP routers → ``get_trajectory``.
+      * trajectory HTTP routers → ``get_trajectory`` / ``replay_trajectory``.
       * ``engine.py`` / ``task_service.py`` / ``callback_adapter.py`` →
         ``emit_trajectory_event`` (fire-and-forget).
     """
@@ -110,6 +116,17 @@ class TaskContextServiceProtocol(Protocol):
         """Read the trajectory for ``task_id``; optionally trigger bot analysis
         (503/504 propagate from the inner service unchanged; ``force_analysis``
         强制重跑,跳过 timeline 版本幂等)."""
+        ...
+
+    async def replay_trajectory(
+        self,
+        task_id: str,
+        *,
+        playback_rate: float = 1.0,
+        from_sequence: int = 0,
+        limit: int | None = None,
+    ) -> TaskTrajectoryReplay:
+        """Return a read-only playback projection without re-executing task actions."""
         ...
 
     def emit_trajectory_event(
@@ -157,6 +174,22 @@ class TaskContextService(TaskContextServiceProtocol):
     ) -> TaskTrajectory:
         return await self._ts.get_trajectory(
             task_id, do_analysis=do_analysis, force_analysis=force_analysis,
+        )
+
+    async def replay_trajectory(
+        self,
+        task_id: str,
+        *,
+        playback_rate: float = 1.0,
+        from_sequence: int = 0,
+        limit: int | None = None,
+    ) -> TaskTrajectoryReplay:
+        trajectory = await self._ts.get_trajectory(task_id, do_analysis=False)
+        return build_trajectory_replay(
+            trajectory,
+            playback_rate=playback_rate,
+            from_sequence=from_sequence,
+            limit=limit,
         )
 
     def emit_trajectory_event(

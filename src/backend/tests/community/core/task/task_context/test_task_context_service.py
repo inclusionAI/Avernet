@@ -30,6 +30,7 @@ from agentclaw.community.core.task.task_context.task_context_service import (
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TaskTrajectory,
     TrajectoryActionType,
+    TrajectoryEvent,
 )
 
 
@@ -96,6 +97,29 @@ def test_get_trajectory_analysis_relays_do_analysis_true():
     svc = TaskContextService(trajectory_service=inner)
     _run(svc.get_trajectory("t9", do_analysis=True))
     assert inner.get_calls == [("t9", True, False)]
+
+
+@pytest.mark.unit
+def test_replay_trajectory_uses_pure_read_and_builds_frames():
+    trajectory = TaskTrajectory(
+        task_id="t1",
+        gmt_create=2000,
+        gmt_modified=2000,
+        timeline=[
+            TrajectoryEvent(
+                "t1", "n1", TrajectoryActionType.SUBMIT, "success", 0, 1000, 1000
+            )
+        ],
+    )
+    inner = _FakeTrajectoryService(trajectory=trajectory)
+    svc = TaskContextService(trajectory_service=inner)
+
+    result = _run(svc.replay_trajectory("t1", playback_rate=2.0, limit=1))
+
+    assert inner.get_calls == [("t1", False, False)]
+    assert result.task_id == "t1"
+    assert result.playback_rate == 2.0
+    assert result.frames[0].event is trajectory.timeline[0]
 
 
 @pytest.mark.unit
