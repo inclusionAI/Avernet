@@ -165,11 +165,13 @@ def _service(
     relay_enabled: bool = True,
     task_context_service=None,
     task_sample_count: int = 1,
+    search_strategies=None,
 ):
     graph = TaskGraphService()
     return TaskService(
         graph,
         discover=discover or _Discover(),
+        search_strategies=search_strategies,
         task_settings=_Settings(relay_enabled),
         task_id_provider=lambda: "relay-task",
         task_context_service=task_context_service,
@@ -271,6 +273,60 @@ def _plan_pending_target(service: TaskService, *, suffix: str = "samples") -> tu
     )
     return planned["target_node_id"], turn
 
+
+
+def test_relay_search_uses_task_frozen_named_provider() -> None:
+    class _NamedDiscover:
+        def __init__(self, bot_id: str) -> None:
+            self.bot_id = bot_id
+            self.calls = 0
+
+        def search_by_keyword(self, **kwargs):
+            self.calls += 1
+            return {
+                "items": [
+                    {
+                        "bot_id": self.bot_id,
+                        "bot_uuid": f"{self.bot_id}:owner-2",
+                    }
+                ]
+            }
+
+    default = _NamedDiscover("default-bot")
+    treatment = _NamedDiscover("treatment-bot")
+    service, _ = _service(
+        discover=default,
+        search_strategies={"catalog-v2": treatment},
+    )
+    request = _request()
+    request.execution_config["runtime_profile"] = {
+        "search_strategy": "catalog-v2"
+    }
+    _run(service.execute(request))
+
+    result = _run(
+        service.search_task_candidates(
+            query="补齐市场研究 gap", task_id="relay-task"
+        )
+    )
+
+    assert result["candidates"][0]["bot_uuid"] == "treatment-bot:owner-2"
+    assert default.calls == 0
+    assert treatment.calls > 0
+
+
+def test_relay_search_rejects_unregistered_task_provider() -> None:
+    service, _ = _service()
+    request = _request()
+    request.execution_config["runtime_profile"] = {"search_strategy": "missing"}
+    _run(service.execute(request))
+
+    with pytest.raises(TaskStateError, match="unknown search_strategy='missing'"):
+        _run(
+            service.search_task_candidates(
+                query="补齐市场研究 gap", task_id="relay-task"
+            )
+        )
 
 def test_relay_search_exposes_configured_sample_count() -> None:
     service, _ = _service(task_sample_count=3)
@@ -1837,3 +1893,30 @@ def test_schedule_relay_bbs_selection_without_background_task_registry() -> None
         await started.wait()
 
     _run(_case())
+
+
+def test_ab_variant_can_select_relay_over_runtime_default() -> None:
+    service, graph_service = _service(relay_enabled=False)
+    request = replace(
+        _request(),
+        execution_config={
+            "task_type": "dynamic",
+            "ab_test": {
+                "experiment_id": "relay-rollout",
+                "variants": [
+                    {"name": "relay-a", "weight": 1, "orchestration_mode": "relay"},
+                    {"name": "relay-b", "weight": 1, "orchestration_mode": "relay"},
+                ],
+            },
+        },
+    )
+
+    result = _run(service.execute(request))
+
+    assert result.success is True
+    graph = graph_service.query_task_dashboard("relay-task")
+    assert graph.is_relay is True
+    assert graph.extend_props["execution_config"]["ab_assignment"]["variant"] in {
+        "relay-a",
+        "relay-b",
+    }

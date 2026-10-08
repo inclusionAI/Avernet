@@ -8,6 +8,11 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.task_dispatch.search_registry import (
+    TaskSearchRegistry,
+    frozen_search_strategy,
+)
+
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -197,6 +202,7 @@ class SearchBasedDispatchStrategy:
         use_search_skill: bool = False,
         sample_count: int = 1,
         task_settings=None,
+        search_registry: TaskSearchRegistry | None = None,
     ) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
 
@@ -206,6 +212,7 @@ class SearchBasedDispatchStrategy:
         """
         self._bot = bot
         self._discover = discover
+        self._search_registry = search_registry or TaskSearchRegistry(discover)
         self._bcn = bcn
         self._use_search_skill = use_search_skill
         self._sample_count = max(1, int(sample_count))
@@ -253,13 +260,17 @@ class SearchBasedDispatchStrategy:
 
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         use_skill = self._resolve_use_skill()
-        if self._bot is None or self._discover is None:
+        search_strategy = frozen_search_strategy(graph)
+        discover = self._search_registry.resolve(search_strategy)
+        if self._bot is None or discover is None:
             logger.warning(
-                "[task][search] task=%s node=%s dispatch unavailable bot_port=%s discover=%s → MISS(no_port_stub)",
+                "[task][search] task=%s node=%s dispatch unavailable bot_port=%s "
+                "discover=%s search_strategy=%s → MISS(no_port_stub)",
                 node.task_id,
                 node.node_id,
                 type(self._bot).__name__ if self._bot is not None else "None",
-                type(self._discover).__name__ if self._discover is not None else "None",
+                type(discover).__name__ if discover is not None else "None",
+                search_strategy,
             )
             sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
             self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
@@ -279,7 +290,7 @@ class SearchBasedDispatchStrategy:
             sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
             self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
             return sr
-        search_result = await _prefetch_candidates(self._discover, node, graph)
+        search_result = await _prefetch_candidates(discover, node, graph)
         candidates = search_result.candidates
         if not candidates:
             logger.info(

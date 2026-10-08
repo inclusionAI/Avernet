@@ -11,6 +11,7 @@ import sys
 
 import pytest
 
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -820,3 +821,80 @@ def test_dispatcher_carries_multi_sample_plan_on_single_bot_node(svc):
     assert node.run_info.run_mode == "single_bot"
     assert node.run_info.assignee == "a:1"
     assert node.run_info.extend_props["dispatch_samples"] == samples
+
+
+def test_search_strategy_uses_frozen_named_provider():
+    class _Discover:
+        def __init__(self, bot_id):
+            self.bot_id = bot_id
+            self.calls = 0
+
+        def search_by_keyword(self, **kwargs):
+            self.calls += 1
+            return {
+                "items": [
+                    {
+                        "bot_id": self.bot_id,
+                        "bot_uuid": f"{self.bot_id}:owner",
+                    }
+                ]
+            }
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule dispatch must not call the search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+    from agentclaw.community.core.task.task_dispatch.search_registry import (
+        TaskSearchRegistry,
+    )
+
+    default = _Discover("default-bot")
+    treatment = _Discover("treatment-bot")
+    registry = TaskSearchRegistry(
+        default, strategies={"catalog-v2": treatment}
+    )
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={
+            "owner_bot_id": "owner",
+            "runtime_profile": {"search_strategy": "catalog-v2"},
+        },
+    )
+
+    result = _run(
+        SearchBasedDispatchStrategy(
+            _Bot(), default, search_registry=registry
+        ).apply(_node("c1"), graph)
+    )
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "treatment-bot:owner"
+    assert default.calls == 0
+    assert treatment.calls > 0
+
+
+def test_search_strategy_rejects_unregistered_frozen_provider():
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+    from agentclaw.community.core.task.task_dispatch.search_registry import (
+        TaskSearchRegistry,
+    )
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={
+            "owner_bot_id": "owner",
+            "runtime_profile": {"search_strategy": "missing"},
+        },
+    )
+
+    with pytest.raises(TaskStateError, match="unknown search_strategy='missing'"):
+        _run(
+            SearchBasedDispatchStrategy(
+                object(), object(), search_registry=TaskSearchRegistry(object())
+            ).apply(_node("c1"), graph)
+        )

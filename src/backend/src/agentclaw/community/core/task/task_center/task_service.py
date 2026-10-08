@@ -40,6 +40,7 @@ from agentclaw.community.core.task.domain.models import (
     task_spec_title,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.domain.ab_testing import apply_ab_test
 from agentclaw.community.core.task.domain.errors import TaskStateError
 
 from agentclaw.community.core.task.repository.types import (
@@ -77,6 +78,7 @@ from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
 )
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
+from agentclaw.community.core.task.task_dispatch.search_registry import TaskSearchRegistry
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 logger = logging.getLogger("task.service")
@@ -96,6 +98,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         bot=None,
         bcs=None,
         discover=None,
+        search_strategies: dict[str, Any] | None = None,
         bcn: BcnService | None = None,
         bcs_identity=None,
         task_info_repo: TaskInfoRepositoryProtocol | None = None,
@@ -136,6 +139,9 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         self._task_search_skill_enabled = task_search_skill_enabled
         self._task_sample_count = task_sample_count
         self._task_settings = task_settings
+        self._search_registry = TaskSearchRegistry(
+            discover, strategies=search_strategies
+        )
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
@@ -157,6 +163,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
                 getattr(self._centralized_adapter, "_discover", None),
             ),
             user_id=str(getattr(self._bcs_identity, "user_id", "") or ""),
+            search_registry=self._search_registry,
         )
         self._wire_semantic_dispatcher()
         # Relay consumes explicit adapter ports; it does not orchestrate through
@@ -227,6 +234,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
             bot=bot,
             bcs=bcs,
             discover=discover,
+            search_registry=self._search_registry,
             bcn=self._bcn,
             bcs_identity=self._bcs_identity,
             auth_gate=self._task_auth_gate,
@@ -443,9 +451,27 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
             config = dict(request.execution_config)
             config["orchestration_mode"] = requested_orchestration_mode
             request = replace(request, execution_config=config)
-        if request.execution_config.get("orchestration_mode") != "relay":
-            request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
+        resolved_config = apply_ab_test(
+            request.execution_config,
+            task_id=task_id,
+            owner_user_id=request.owner_user_id,
+            owner_bot_id=request.owner_bot_id,
+        )
+        selected_orchestration_mode = self._normalize_orchestration_mode(
+            resolved_config.get("orchestration_mode")
+        )
+        task_type = resolved_config.get("task_type", TaskType.DYNAMIC)
+        if selected_orchestration_mode == "relay" and task_type not in {
+            TaskType.DYNAMIC,
+            TaskType.DYNAMIC.value,
+        }:
+            raise TaskStateError(
+                "AB variant cannot select relay orchestration for a non-dynamic task"
+            )
+        request = replace(request, execution_config=resolved_config)
+        if selected_orchestration_mode != "relay":
+            request = self._materialize_static_plan_if_needed(request)
         logger.info(
             "[task][execute][mode] task=%s task_type=%s default_mode=%s "
             "requested_mode=%s selected_mode=%s",

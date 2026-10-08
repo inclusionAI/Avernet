@@ -7,6 +7,10 @@ import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.task_dispatch.search_registry import (
+    DEFAULT_SEARCH_STRATEGY,
+    TaskSearchRegistry,
+)
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     search_candidates,
 )
@@ -23,28 +27,37 @@ class TaskSearch:
     centralized dispatcher or the Relay Skill.
     """
 
-    def __init__(self, discover: Any, *, user_id: str = "") -> None:
-        self._discover = discover
+    def __init__(
+        self,
+        discover: Any = None,
+        *,
+        user_id: str = "",
+        registry: TaskSearchRegistry | None = None,
+    ) -> None:
+        self._registry = registry or TaskSearchRegistry(discover)
         self._user_id = user_id
 
     @property
     def available(self) -> bool:
-        return self._discover is not None
+        return self._registry.resolve() is not None
 
     @property
     def backend_name(self) -> str:
-        return type(self._discover).__name__ if self._discover is not None else "None"
+        return self._registry.backend_name()
 
-    async def search(self, query: str) -> Any:
+    async def search(
+        self, query: str, *, strategy: str = DEFAULT_SEARCH_STRATEGY
+    ) -> Any:
         normalized = str(query or "").strip()
         if not normalized:
             raise ValueError("search query is required")
-        if self._discover is None:
+        discover = self._registry.resolve(strategy)
+        if discover is None:
             # Keep the existing search result shape for callers that already
             # project .candidates/.tokens/.failed_keywords.
             return await search_candidates(None, normalized, user_id=self._user_id)
         return await search_candidates(
-            self._discover,
+            discover,
             normalized,
             user_id=self._user_id,
         )
@@ -61,28 +74,34 @@ class TaskSearch:
             candidate["recommend"] = item["recommend"]
         return candidate
 
-    async def search_catalog(self, query: str) -> dict[str, Any]:
+    async def search_catalog(
+        self, query: str, *, strategy: str = DEFAULT_SEARCH_STRATEGY
+    ) -> dict[str, Any]:
         """Return the public query-only candidate catalog with diagnostics."""
         started_at = time.monotonic()
+        discover = self._registry.resolve(strategy)
+        backend_name = (
+            type(discover).__name__ if discover is not None else "None"
+        )
         normalized = str(query or "").strip()
         if not normalized:
             logger.debug("query_rejected reason=empty_query")
             raise TaskStateError("search query is required")
         logger.debug(
             "search_start discover=%s query=%r query_length=%d filters=%s",
-            self.backend_name,
+            backend_name,
             normalized[:500],
             len(normalized),
             {"runtime_state": ["online"]},
         )
-        if not self.available:
+        if discover is None:
             logger.warning(
                 "search_empty reason=discover_unavailable discover=%s elapsed_ms=%.1f",
-                self.backend_name,
+                backend_name,
                 (time.monotonic() - started_at) * 1000,
             )
             return self._response([], result=None)
-        result = await self.search(normalized)
+        result = await self.search(normalized, strategy=strategy)
         candidates = [
             self._project_candidate(item)
             for item in result.candidates
@@ -91,7 +110,7 @@ class TaskSearch:
         logger.debug(
             "search_complete discover=%s query=%r tokens=%s raw_item_count=%d projected=%d "
             "failed_keywords=%s candidate_ids=%s elapsed_ms=%.1f",
-            self.backend_name,
+            backend_name,
             normalized[:500],
             result.tokens,
             result.raw_item_count,
@@ -104,7 +123,7 @@ class TaskSearch:
             logger.info(
                 "search_empty reason=no_matching_candidates discover=%s query=%r tokens=%s "
                 "raw_item_count=%d failed_keywords=%s elapsed_ms=%.1f",
-                self.backend_name,
+                backend_name,
                 normalized[:500],
                 result.tokens,
                 result.raw_item_count,

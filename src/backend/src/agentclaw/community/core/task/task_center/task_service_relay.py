@@ -35,6 +35,9 @@ from agentclaw.community.core.task.task_center.task_service_relay_dispatch impor
 )
 from agentclaw.community.core.task.task_center import relay_sampling
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_dispatch.search_registry import (
+    task_search_strategy,
+)
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
 )
@@ -656,7 +659,10 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
         node_id: str | None = None,
     ) -> dict[str, Any]:
         """Search candidates and optionally emit task-attributed diagnostics."""
-        result = await self._relay_adapter.search.search_catalog(query)
+        search_strategy = task_search_strategy(self._graph, task_id)
+        result = await self._relay_adapter.search.search_catalog(
+            query, strategy=search_strategy
+        )
         if task_id:
             try:  # 决策 #14:旁路观测,采样任何失败绝不影响检索结果返回
                 slim_candidates = [

@@ -749,12 +749,14 @@ def test_runtime_profile_is_frozen_at_graph_creation(svc: TaskGraphService):
     info.execution_config["runtime_profile"] = {
         "planner_strategy": "gap_based",
         "dispatcher_strategy": "search",
+        "search_strategy": "catalog-v2",
         "runner_strategy": "default",
         "allowed_run_modes": ["single_bot"],
     }
     graph = svc.initialize_graph(info)
     info.execution_config["runtime_profile"]["allowed_run_modes"].append("bbs")
     assert graph.extend_props["runtime_profile"]["allowed_run_modes"] == ["single_bot"]
+    assert graph.extend_props["runtime_profile"]["search_strategy"] == "catalog-v2"
     with pytest.raises(TaskStateError, match="not allowed"):
         svc.update_task_node_info(
             _patch("profile-task", "profile-task", run_mode="bbs")

@@ -260,3 +260,11 @@ user_config:
 重放只返回历史事件及播放时钟，不会重新调用 Bot、工具、派发、回调或状态机，也不会
 触发轨迹分析。HTTP 入口为内部和公开面的 `GET .../trajectory/replay`；完整契约见
 `src/backend/specs/2026-10-08-task-trajectory-replay/spec.md`。
+
+## 2026-10-08 任务 AB 测试
+
+任务提交可通过 `execution_config.ab_test` 声明加权变体。TaskService 在落库、建图和选择中心化/Relay 链路前，以稳定 SHA-256 分桶选择一次变体，并将结果写入 `execution_config.ab_assignment`。运行中、重试和恢复不重新分桶。
+
+变体仅可覆盖受治理的 `runtime_profile` 字段和 `orchestration_mode`；分桶单元支持 `task`、`owner_user`、`owner_bot`。细粒度能力槽包括：`orchestration_mode` 控制中心化/Relay 分流，`search_strategy` 在两条链路中选择同一个具名搜推接口，`planner_strategy` 和 `dispatcher_strategy` 分别选择中心化规划、派发策略。具名搜推实现由 composition root 注册，未注册策略明确失败而不静默回退。
+
+Relay 的规划和派发由 Relay Skill/event protocol 决策，不复用中心化策略池；观测元数据只保存分桶键摘要，不复制原始用户或 Bot 标识。完整契约见 `src/backend/specs/2026-10-08-task-ab-testing/spec.md`。

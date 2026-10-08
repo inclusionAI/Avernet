@@ -659,3 +659,31 @@ class TestProtocolConformance:
         from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
         assert isinstance(inj.get(TaskServiceProtocol), TaskServiceProtocol)
         assert isinstance(inj.get(TaskLoopCallbackProtocol), TaskLoopCallbackProtocol)
+
+
+def test_execute_http_contract_preserves_ab_test_config_for_core_validation():
+    from agentclaw.community.adapters.http.task.schemas import (
+        TaskInfoRequestDTO,
+        task_info_request_from_dto,
+    )
+
+    payload = _task_info_dict()
+    payload["execution_config"]["ab_test"] = {
+        "experiment_id": "dispatch-v2",
+        "unit": "owner_bot",
+        "variants": [
+            {"name": "control", "weight": 90},
+            {
+                "name": "treatment",
+                "weight": 10,
+                "runtime_profile": {
+                    "dispatcher_strategy": "search-v2",
+                    "allowed_run_modes": ["single_bot", "bbs"],
+                },
+            },
+        ],
+    }
+    request = task_info_request_from_dto(TaskInfoRequestDTO.model_validate(payload))
+
+    assert request.execution_config["ab_test"]["experiment_id"] == "dispatch-v2"
+    assert request.execution_config["ab_test"]["variants"][1]["weight"] == 10

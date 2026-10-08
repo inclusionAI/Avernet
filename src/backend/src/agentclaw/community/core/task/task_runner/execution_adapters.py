@@ -30,6 +30,7 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
 from agentclaw.community.core.task.task_plan.planner import TaskPlanner
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
+from agentclaw.community.core.task.task_dispatch.search_registry import TaskSearchRegistry
 from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
@@ -51,6 +52,7 @@ class CentralizedExecutionAdapter:
         bot=None,
         bcs=None,
         discover=None,
+        search_registry: TaskSearchRegistry | None = None,
         bcn: BcnService | None = None,
         bcs_identity=None,
         auth_gate=None,
@@ -81,6 +83,7 @@ class CentralizedExecutionAdapter:
         self._bot = bot
         self._bcs = bcs
         self._discover = discover
+        self._search_registry = search_registry or TaskSearchRegistry(discover)
         self._bcn = bcn
         self._bcs_identity = bcs_identity
         self._auth_gate = auth_gate
@@ -266,19 +269,17 @@ class CentralizedExecutionAdapter:
         )
 
         pool = [DirectDispatchStrategy()]
-        if self._bot is not None and self._discover is not None:
-            pool.append(
-                SearchBasedDispatchStrategy(
-                    self._bot,
-                    self._discover,
-                    bcn=self._bcn,
-                    use_search_skill=self._task_search_skill_enabled,
-                    sample_count=self._task_sample_count,
-                    task_settings=self._task_settings,
-                )
+        pool.append(
+            SearchBasedDispatchStrategy(
+                self._bot,
+                self._discover,
+                bcn=self._bcn,
+                use_search_skill=self._task_search_skill_enabled,
+                sample_count=self._task_sample_count,
+                task_settings=self._task_settings,
+                search_registry=self._search_registry,
             )
-        else:
-            pool.append(SearchBasedDispatchStrategy())
+        )
         return TaskDispatcher(self._graph, pool=pool)
 
     def _build_runner(self):
@@ -760,9 +761,18 @@ class CentralizedExecutionAdapter:
 class RelayExecutionAdapter:
     """Relay delivery/search boundary over stable TaskRunner APIs."""
 
-    def __init__(self, *, runner: Any, discover: Any, user_id: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        runner: Any,
+        discover: Any,
+        user_id: str = "",
+        search_registry: TaskSearchRegistry | None = None,
+    ) -> None:
         self._runner = runner
-        self._search = TaskSearch(discover, user_id=user_id)
+        self._search = TaskSearch(
+            discover, user_id=user_id, registry=search_registry
+        )
 
     @property
     def runner(self) -> Any:

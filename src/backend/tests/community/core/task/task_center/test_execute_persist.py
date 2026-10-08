@@ -138,3 +138,54 @@ def test_execute_persist_failure_returns_failure(repo):
     assert result.success is False
     assert result.task_id == "persist-tid"
     assert result.error is not None
+
+
+def test_execute_freezes_and_persists_ab_assignment(repo):
+    request = _request()
+    request.execution_config["runtime_profile"] = {"runner_strategy": "base"}
+    request.execution_config["ab_test"] = {
+        "experiment_id": "runtime-profile-v2",
+        "unit": "owner_user",
+        "variants": [
+            {"name": "control", "weight": 1},
+            {
+                "name": "treatment",
+                "weight": 1,
+                "runtime_profile": {"runner_strategy": "treatment"},
+            },
+        ],
+    }
+    facade = _service(repo, task_id="ab-task")
+
+    result = _exec(facade, request)
+
+    assert result.success is True
+    row = repo.get("ab-task")
+    assignment = row.execution_config["ab_assignment"]
+    assert assignment["experiment_id"] == "runtime-profile-v2"
+    assert assignment["variant"] in {"control", "treatment"}
+    graph = facade.get_task_dashboard("ab-task")
+    assert graph.extend_props["execution_config"]["ab_assignment"] == assignment
+    expected_runner = "treatment" if assignment["variant"] == "treatment" else "base"
+    assert graph.extend_props["runtime_profile"]["runner_strategy"] == expected_runner
+
+
+def test_ab_variant_rejects_relay_for_non_dynamic_task(repo):
+    from dataclasses import replace
+
+    request = replace(_request(), execution_config={
+        "task_type": TaskType.WORKFLOW,
+        "workflow_id": "wf-1",
+        "ab_test": {
+            "experiment_id": "mode-test",
+            "variants": [
+                {"name": "relay-a", "weight": 1, "orchestration_mode": "relay"},
+                {"name": "relay-b", "weight": 1, "orchestration_mode": "relay"},
+            ],
+        },
+    })
+    facade = _service(repo, task_id="ab-invalid-mode")
+
+    with pytest.raises(Exception, match="cannot select relay"):
+        _exec(facade, request)
+    assert repo.get("ab-invalid-mode") is None

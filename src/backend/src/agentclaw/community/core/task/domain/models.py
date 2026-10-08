@@ -168,6 +168,7 @@ class TaskRuntimeProfile:
 
     planner_strategy: str = "default"
     dispatcher_strategy: str = "default"
+    search_strategy: str = "default"
     runner_strategy: str = "default"
     allowed_run_modes: tuple[str, ...] = ("single_bot", "coop_group", "bbs")
 
@@ -185,6 +186,7 @@ class TaskRuntimeProfile:
         return cls(
             planner_strategy=str(raw.get("planner_strategy") or "default"),
             dispatcher_strategy=str(raw.get("dispatcher_strategy") or "default"),
+            search_strategy=str(raw.get("search_strategy") or "default"),
             runner_strategy=str(raw.get("runner_strategy") or "default"),
             allowed_run_modes=normalized or cls.allowed_run_modes,
         )
@@ -193,6 +195,7 @@ class TaskRuntimeProfile:
         return {
             "planner_strategy": self.planner_strategy,
             "dispatcher_strategy": self.dispatcher_strategy,
+            "search_strategy": self.search_strategy,
             "runner_strategy": self.runner_strategy,
             "allowed_run_modes": list(self.allowed_run_modes),
         }
