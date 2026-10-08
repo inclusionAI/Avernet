@@ -325,19 +325,18 @@ fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
 
 /// Collect the caller actor_id plus any bots owned by that human (for Humans),
 /// or just the bot_uuid (for Bots). Used to feed mutate-authz into the service.
+/// §12.4 (plan Task 12 fix round): the identities a Human may act for come
+/// from the CURRENT mine union (live owner/manager role facts) through the
+/// application `BotQueryService` — the retired `list_bots_by_creator`
+/// creation listing is no Long an authority answer here either.
 async fn caller_identities(state: &HttpAppState, caller: &GroupChatCaller) -> Vec<String> {
     match caller {
         GroupChatCaller::Bot { bot_uuid } => vec![bot_uuid.clone()],
         GroupChatCaller::Human(h) => {
             let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
-            }
+            ids.extend(
+                super::sessions::current_controllable_bot_ids(state, &h.staff_no).await,
+            );
             ids
         }
     }

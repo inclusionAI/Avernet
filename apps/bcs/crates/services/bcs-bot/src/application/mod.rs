@@ -1,5 +1,7 @@
 mod actor_directory;
 mod bot;
+mod runtime;
+mod discovery;
 mod human_actor;
 mod onboarding;
 mod provider;

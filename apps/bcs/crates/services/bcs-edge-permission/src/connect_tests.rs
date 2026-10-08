@@ -5,6 +5,7 @@
 #[cfg(test)]
 
     use crate::*;
+use bcs_user_directory_api::UserDirectoryLookupContext;
     use bcs_db_api::{DbPlugin, DbStatement, DbValue};
 
     /// Honest test operation context (plan Task 12): the test lanes seed

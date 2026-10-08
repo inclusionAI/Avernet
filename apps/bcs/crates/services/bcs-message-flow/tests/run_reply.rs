@@ -79,7 +79,8 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
                 max_queued: 100, semantic_projection_json: json!({"version":1}) }], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap().deliveries.remove(0);
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,
-            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
+            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX),
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests") }).await.unwrap();
         let mut terminal = BotEventCommand { bot_id: "bot-driver".into(), run_id: started.run_id.clone().unwrap(), group_id: "group-1".into(),
             bcs_session_id: Some("group-1:retry".into()), state: ChatEventState::Delta, event_type: "chat".into(), event_payload: json!({"delta_text":"保留的正文"}) };
         flow.handle_bot_event(terminal.clone()).await.unwrap();
@@ -159,7 +160,8 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
         let input = &source.deliveries[0];
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,
-            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
+            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX),
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests") }).await.unwrap();
         let run = started.run_id.as_ref().unwrap();
         let event = |state, event_type: &str, payload| BotEventCommand { bot_id: "bot-driver".into(), run_id: run.clone(), group_id: "group-1".into(),
             bcs_session_id: Some("group-1:reply".into()), state, event_type: event_type.into(), event_payload: payload };
@@ -217,7 +219,8 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
         for delivery in deliveries.iter().filter(|d| d.source_message_id == summary.message_id && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued) {
             service.transition(DeliveryTransitionCommand { delivery_id: delivery.delivery_id.clone(), expected_state_version: delivery.state.state_version,
                 event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested, now_ms: delivery.created_at_ms,
-                request_id: None, actor_id: Some("test".into()), reply: None, transport_context_json: None, deadline_at_ms: None }).await.unwrap();
+                request_id: None, actor_id: Some("test".into()), reply: None, transport_context_json: None, deadline_at_ms: None ,
+                operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
         }
     }
 }

@@ -188,7 +188,10 @@ async fn sqlite_eventful_notify_mode_patch_round_trips_and_bumps_version() {
             }),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -298,7 +301,10 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
             }),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -318,7 +324,10 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
             }),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -412,7 +421,10 @@ async fn sqlite_transactional_delivery_patch_rejects_stringified_routing_policy_
             }),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -754,7 +766,10 @@ async fn sqlite_group_member_add_commits_version_event_and_target_atomically() {
                 None,
             )),
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -806,7 +821,10 @@ async fn sqlite_group_member_add_rolls_back_when_event_append_fails() {
                 Some("missing-cause"),
             )),
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -856,7 +874,10 @@ async fn memory_group_member_add_rolls_back_when_event_append_fails() {
                 Some("missing-cause"),
             )),
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),
@@ -1021,7 +1042,10 @@ fn group_deletion() -> CommitGroupEventfulMutation {
         mutation: GroupEventfulMutation::Delete,
         event: None,
 operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-group-repo".to_string(),
+            // §12.5 slot ruling: each logical commit takes a fresh operation identity
+            // so the store cannot classify it as a same-slot replay of the
+            // previous completed mutation.
+            operation_id: format!("op-conformance-group-repo:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-group-repo".to_string(),
                 effective_actor_id: "conformance-group-repo".to_string(),

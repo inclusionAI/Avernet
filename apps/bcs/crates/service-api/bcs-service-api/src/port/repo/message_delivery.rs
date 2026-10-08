@@ -111,6 +111,19 @@ pub struct DeliveryCompareAndSet {
     pub delivery: PersistedMessageDelivery,
 }
 
+/// §12.5 (plan Task 12 fix round): ONE externally initiated control
+/// transition's audit carrier. `operation` is the DERIVED per-delivery
+/// sub-operation of the verified caller's command (Task 1 ruling: one
+/// operation slot covers one logical step); the owning store resolves its
+/// env, derives the step key from (action, resource kind, phase) and commits
+/// the record with the changed row in the same transaction.
+#[derive(Debug, Clone)]
+pub struct DeliveryControlAudit {
+    pub operation: crate::types::BotOperationContext,
+    pub resource_id: String,
+    pub phase: crate::types::BotActionAuditPhase,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MessageDeliveryRepoError {
     #[error("delivery state changed")]
@@ -211,9 +224,19 @@ pub trait MessageDeliveryRepoPort: Send + Sync {
     /// Commit the primary transition and context changes together. If a Bot
     /// terminal has a canonical reply, its insertion/target admission belongs
     /// to this same transaction. Any version mismatch rolls everything back.
+    ///
+    /// `control_audits` (plan Task 12 fix round): §12.5 carriers of the
+    /// externally initiated control command driving this transition (abort/
+    /// cancel requested, manual resolution). Each carrier binds ONE changed
+    /// delivery row to ITS derived per-row sub-operation and phase: the store
+    /// builds the `bcs_bot_action_audits` record with its own env and appends
+    /// it in the SAME transaction as the row update — an audit failure rolls
+    /// the whole transition back. Engine-internal transitions pass an empty
+    /// list (their committed rows write no control audit).
     async fn commit_transition(
         &self,
         changes: Vec<DeliveryCompareAndSet>,
         reply: Option<AdmitMessageDeliveries>,
+        control_audits: Vec<DeliveryControlAudit>,
     ) -> Result<Option<DeliveryAdmissionResult>, MessageDeliveryRepoError>;
 }

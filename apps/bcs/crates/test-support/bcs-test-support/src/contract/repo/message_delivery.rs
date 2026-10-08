@@ -185,6 +185,7 @@ pub async fn message_delivery_repo_port_contract_tests<
                 },
             ],
             Some(command("rollback-reply", &[("E", DeliveryType::Send)])),
+            Vec::new(),
         )
         .await;
     assert!(matches!(failure, Err(MessageDeliveryRepoError::Conflict)));
@@ -218,6 +219,7 @@ pub async fn message_delivery_repo_port_contract_tests<
                 },
             ],
             Some(command("committed-reply", &[("A", DeliveryType::Send)])),
+            Vec::new(),
         )
         .await?
         .ok_or("missing reply")?;
@@ -246,7 +248,7 @@ pub async fn message_delivery_repo_port_contract_tests<
         row.cancel_deadline_at_ms = Some(500);
         if category == 3 { row.abort_request_id = Some("abort-control".into()); }
         control_ids.push(row.delivery_id.clone());
-        repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version, delivery: row }], None).await?;
+        repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version, delivery: row }], None, Vec::new()).await?;
     }
     let due = repo.work_batch(DeliveryWorkBatch::Control, 500, "ignored-cursor", 4).await?;
     assert_eq!(due.iter().map(|d| d.delivery_id.clone()).collect::<Vec<_>>(), control_ids);
@@ -262,7 +264,7 @@ pub async fn message_delivery_repo_port_contract_tests<
     uncertain.state.may_have_been_sent = true;
     uncertain.expire_at_ms = Some(600);
     uncertain.transport_context_json = Some(serde_json::json!({"connection_id":"provider-1"}));
-    repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version, delivery: uncertain.clone() }], None).await?;
+    repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version, delivery: uncertain.clone() }], None, Vec::new()).await?;
     let due = repo.work_batch(DeliveryWorkBatch::Expired, 600, "ignored-cursor", 200).await?;
     let due = due.iter().find(|row| row.delivery_id == uncertain.delivery_id).ok_or("missing uncertain expiry")?;
     assert_eq!(due.transport_context_json, uncertain.transport_context_json);
@@ -296,10 +298,10 @@ async fn chat_error_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo:
     let mut terminal = source.deliveries[0].clone();
     terminal.state.status = Status::Failed;
     terminal.state.state_version += 1;
-    assert!(repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 99, delivery: terminal.clone() }], Some(error.clone())).await.is_err());
+    assert!(repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 99, delivery: terminal.clone() }], Some(error.clone()), Vec::new()).await.is_err());
     assert_eq!(repo.get_current_seq(&error.message.session_id).await?, before);
     assert!(repo.get_message_by_id(&error.message.session_id, "error-partial").await?.is_none());
-    let committed = repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 1, delivery: terminal }], Some(error.clone())).await?.unwrap();
+    let committed = repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 1, delivery: terminal }], Some(error.clone()), Vec::new()).await?.unwrap();
     assert!(committed.deliveries.is_empty());
     assert_eq!(committed.message.session_seq, before + 2);
     let partial = repo.get_message_by_id(&error.message.session_id, "error-partial").await?.unwrap();
@@ -358,11 +360,11 @@ async fn run_reply_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: 
     assert!(repo.admit(collision).await.is_err());
     assert!(repo.get_message_by_id(&summary.message.session_id, "failed-display").await?.is_none());
     assert_eq!(repo.get_current_seq(&summary.message.session_id).await?, before);
-    assert!(repo.commit_transition(vec![stale], Some(summary.clone())).await.is_err());
+    assert!(repo.commit_transition(vec![stale], Some(summary.clone()), Vec::new()).await.is_err());
     assert!(repo.get_message_by_id(&summary.message.session_id, "run-display").await?.is_none());
     assert!(repo.get_message_by_id(&summary.message.session_id, "run-summary").await?.is_none());
     assert_eq!(repo.get_current_seq(&summary.message.session_id).await?, before);
-    let committed = repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 1, delivery: finished }], Some(summary.clone())).await?.unwrap();
+    let committed = repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 1, delivery: finished }], Some(summary.clone()), Vec::new()).await?.unwrap();
     assert_eq!(committed.message.session_seq, before + 2);
     assert_eq!(committed.deliveries.len(), 1);
     assert_eq!(committed.deliveries[0].source_message_id, "run-summary");

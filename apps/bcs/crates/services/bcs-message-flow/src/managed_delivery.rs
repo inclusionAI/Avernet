@@ -1,5 +1,6 @@
 //! One-process orchestration of durable state and causal context changes.
 //! No network operation is issued while holding Bot mutation guards.
+use bcs_service_api::port::repo::message_delivery::{DeliveryControlAudit, MessageDeliveryRepoError};
 use crate::message_delivery::MessageDeliveryCore;
 use async_trait::async_trait;
 use bcs_domain::DeliveryType;
@@ -118,6 +119,23 @@ impl ManagedMessageDelivery {
         &self,
         mut command: DeliveryTransitionCommand,
     ) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {
+        // §12.5 (plan Task 12 fix round): abort, queued-message cancel and
+        // manual send-resolution are EXTERNALLY initiated new commands —
+        // their verified-caller operation context is REQUIRED. Empty context
+        // stops the command fail-closed; it is never recorded as a forged
+        // System. Engine-initiated transitions (dispatch/recovery/timeouts)
+        // run honest System lanes and carry their own labelled contexts.
+        let mut externally_initiated = matches!(
+            command.event,
+            Event::ScopeAbortRequested | Event::CancelRequested | Event::ResolveNotSent
+                | Event::ResolveStopped
+        );
+        if externally_initiated && command.operation.operation_id.trim().is_empty() {
+            return Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Invalid(
+                "externally initiated delivery control requires its BotOperationContext \
+                 (empty operation id)".into(),
+            )));
+        }
         // Only discover immutable ownership before locking. State is reloaded
         // and validated below after all source/reply-target locks are held.
         let initial = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
@@ -449,10 +467,54 @@ impl ManagedMessageDelivery {
             .iter()
             .map(|update| update.delivery.clone())
             .collect();
+        // §12.5 (plan Task 12 fix round): the durable control command derives
+        // ONE sub-operation per changed delivery row (Task 1 slot ruling:
+        // one operation slot covers one logical step), persists its
+        // operation_id on that row, and the owning store commits the derived
+        // `abort/message/*` audit record in the SAME transaction as the row
+        // update. `ScopeAbortRequested` precedes the external abort I/O, so
+        // it is `admitted`; queued-cancel and manual resolution mutate only
+        // durable rows, so they are `applied`. The Inject-carrier withdraw
+        // path (CancelRequested escalates to WithdrawBoundContext) stays in
+        // the same externally initiated audit family under its own event.
+        externally_initiated = externally_initiated
+            || (command.event == Event::CancelRequested && event == Event::WithdrawBoundContext)
+;
+        let primary_id = primary.delivery_id.clone();
+        let mut primary_operation_id = None;
+        let control_audits: Vec<DeliveryControlAudit> = if externally_initiated {
+            let phase = if event == Event::ScopeAbortRequested {
+                bcs_service_api::types::BotActionAuditPhase::Admitted
+            } else {
+                bcs_service_api::types::BotActionAuditPhase::Applied
+            };
+            let prefix = if event == Event::ScopeAbortRequested { "abort" } else { "control" };
+            let mut audits = Vec::with_capacity(updates.len());
+            for update in &mut updates {
+                let sub = command
+                    .operation
+                    .for_sub_record(&format!("{prefix}-{}", update.delivery.delivery_id));
+                update.delivery.operation_id = Some(sub.operation_id.clone());
+                if update.delivery.delivery_id == primary_id {
+                    primary_operation_id = Some(sub.operation_id.clone());
+                }
+                audits.push(DeliveryControlAudit {
+                    operation: sub,
+                    resource_id: update.delivery.delivery_id.clone(),
+                    phase,
+                });
+            }
+            audits
+        } else {
+            Vec::new()
+        };
+        if let Some(operation_id) = primary_operation_id {
+            primary.operation_id = Some(operation_id);
+        }
         let (committed_reply, _guards) = {
             let _timing = crate::reply_timing::Timer::new("delivery.commit_repository");
             let repo = self.repo.clone();
-            persist_with_guards(_guards, async move { repo.commit_transition(updates, command.reply).await }).await?
+            persist_with_guards(_guards, async move { repo.commit_transition(updates, command.reply, control_audits).await }).await?
         };
         if let Some(reply) = committed_reply {
             if !reply.duplicate {
@@ -573,7 +635,7 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         if !updates.is_empty() {
             let notifications = updates.iter().map(|u| u.delivery.clone()).collect();
             let repo = self.repo.clone();
-            let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None).await }).await?;
+            let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None, Vec::new()).await }).await?;
             let _ = self.changes.send(notifications);
         }
         Ok(())
@@ -662,7 +724,7 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                     delivery: next.clone(),
                 }];
         let repo = self.repo.clone();
-        let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None).await }).await?;
+        let (_, _guards) = persist_with_guards(_guards, async move { repo.commit_transition(updates, None, Vec::new()).await }).await?;
         let _ = self.changes.send(vec![next.clone()]);
         Ok(Some(next))
     }
@@ -751,6 +813,8 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 reply: None,
                 transport_context_json: None,
                 deadline_at_ms: None,
+                // Independent recovery sweep: honest System lane (§12.5).
+                operation: bcs_service_api::types::system_lane_operation("delivery-recovery"),
             })
             .await?;
         }

@@ -42,6 +42,44 @@ pub(crate) fn bot_event_actor(bot_id: &str) -> bcs_service_api::types::EventActo
     }
 }
 
+/// Verified-caller §12.5 operation context for the externally initiated
+/// message-control lanes (plan Task 12 fix round): a Human caller keeps its
+/// trusted staff number and human actor as effective actor, a Bot-only
+/// caller its verified Bot id, and the non-principal integration/admin/public
+/// identities map to their own honest operator (never a forged Human).
+pub(crate) fn caller_operation_context(
+    caller: &bcs_service_api::CallerContext,
+    label: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    use bcs_service_api::CallerContext;
+    use bcs_service_api::types::{BotOperationActor, BotOperationContext};
+    let actor = match caller {
+        CallerContext::Human(human) => BotOperationActor::Human {
+            user_id: human.staff_no.clone(),
+            effective_actor_id: human.actor_id.clone(),
+        },
+        CallerContext::Bot(bot) => BotOperationActor::Bot {
+            bot_id: bot.bot_uuid.clone(),
+        },
+        CallerContext::Integration(client) => BotOperationActor::System {
+            system_id: format!("integration:{}", client.client_id),
+            effective_actor_id: format!("integration:{}", client.client_id),
+        },
+        CallerContext::Admin(admin) => BotOperationActor::System {
+            system_id: format!("admin:{}", admin.actor_id),
+            effective_actor_id: format!("admin:{}", admin.actor_id),
+        },
+        CallerContext::Public => BotOperationActor::System {
+            system_id: "public".to_string(),
+            effective_actor_id: "public".to_string(),
+        },
+    };
+    BotOperationContext {
+        operation_id: format!("message-control-{label}:{}", uuid::Uuid::new_v4()),
+        actor,
+    }
+}
+
 pub(crate) fn caller_event_actor(
     caller: &bcs_service_api::CallerContext,
 ) -> bcs_service_api::types::EventActor {

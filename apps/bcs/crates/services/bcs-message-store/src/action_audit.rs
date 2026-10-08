@@ -81,3 +81,76 @@ pub(crate) fn action_audit_insert(record: &BotActionAuditRecord) -> DbStatement 
         ],
     )
 }
+/// The `abort/message/admitted` record of one externally initiated abort:
+/// the durable cancellation-intent row (with `abort_request_id` and the
+/// given per-delivery operation id) and this record commit together,
+/// BEFORE the external abort I/O runs.
+pub(crate) fn abort_admitted_audit_record(
+    operation: &BotOperationContext,
+    env: &str,
+    delivery_id: &str,
+) -> BotActionAuditRecord {
+    BotActionAuditRecord::new(
+        delivery_action_audit_id(
+            env,
+            &operation.operation_id,
+            "abort/message/admitted",
+        ),
+        env,
+        operation.operation_id.clone(),
+        operation.actor.clone(),
+        BotActionResourceKind::Message,
+        delivery_id,
+        BotActionKind::Abort,
+        BotActionAuditPhase::Admitted,
+        None,
+    )
+}
+
+/// The `abort/message/applied` record of a control transition that mutates
+/// ONLY durable rows (queued-message cancel, manual not-sent/stopped
+/// resolution): the record commits with the row update in the same
+/// transaction, no external I/O follows from it.
+pub(crate) fn control_applied_audit_record(
+    operation: &BotOperationContext,
+    env: &str,
+    delivery_id: &str,
+) -> BotActionAuditRecord {
+    BotActionAuditRecord::new(
+        delivery_action_audit_id(
+            env,
+            &operation.operation_id,
+            "abort/message/applied",
+        ),
+        env,
+        operation.operation_id.clone(),
+        operation.actor.clone(),
+        BotActionResourceKind::Message,
+        delivery_id,
+        BotActionKind::Abort,
+        BotActionAuditPhase::Applied,
+        None,
+    )
+}
+
+/// §12.5 record built from one control-audit carrier (plan Task 12 fix
+/// round): the store owns the env and the channel derives step keys from
+/// the controlled vocabulary, so the carrier never carries env text.
+pub(crate) fn control_audit_record(
+    carrier: &bcs_service_api::port::repo::message_delivery::DeliveryControlAudit,
+    env: &str,
+    action: BotActionKind,
+) -> BotActionAuditRecord {
+    let step_key = stable_step_key(action, BotActionResourceKind::Message, carrier.phase);
+    BotActionAuditRecord::new(
+        delivery_action_audit_id(env, &carrier.operation.operation_id, &step_key),
+        env,
+        carrier.operation.operation_id.clone(),
+        carrier.operation.actor.clone(),
+        BotActionResourceKind::Message,
+        carrier.resource_id.clone(),
+        action,
+        carrier.phase,
+        None,
+    )
+}

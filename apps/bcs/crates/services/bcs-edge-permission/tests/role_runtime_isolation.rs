@@ -767,7 +767,15 @@ async fn acting_actor_authorization_requires_live_role_facts() {
         .await
         .unwrap();
     let verdict = fx.connect.authorize_acting_actor(FORMER_CREATOR, "bot-v0").await;
-    let _ = verdict;
+    // Uninitialized (version 0) authority surfaces as an error branch
+    // (`OwnershipNotInitialized`), never an inferred allow — fail-closed,
+    // and a former creator gets no control over the object either way.
+    let verdict = verdict.unwrap_err();
+    assert_eq!(
+        verdict.to_string(),
+        "bot ownership is not initialized: bot 'bot-v0' (env local)",
+        "the v0/uninitialized verdict must surface the fail-closed error branch"
+    );
 }
 
 #[tokio::test]

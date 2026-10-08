@@ -655,7 +655,7 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     }
 
     async fn admit_batch(&self, commands: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
-        self.delivery_transaction(Vec::new(), commands).await
+        self.delivery_transaction(Vec::new(), commands, Vec::new()).await
     }
 
     async fn list_deliveries(&self, session_id: Option<&str>) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>,
@@ -670,9 +670,10 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     async fn commit_transition(&self,
         changes: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>,
         reply: Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
+        control_audits: Vec<bcs_service_api::port::repo::message_delivery::DeliveryControlAudit>,
     ) -> Result<Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
-        Ok(self.delivery_transaction(changes, reply.into_iter().collect()).await?.pop())
+        Ok(self.delivery_transaction(changes, reply.into_iter().collect(), control_audits).await?.pop())
     }
 }
 
@@ -680,6 +681,7 @@ impl MemoryMessageRepo {
     async fn delivery_transaction(&self,
         changes: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>,
         admission: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
+        control_audits: Vec<bcs_service_api::port::repo::message_delivery::DeliveryControlAudit>,
     ) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::{DeliveryAdmissionResult, MessageDeliveryRepoError as Error};
@@ -692,7 +694,16 @@ impl MemoryMessageRepo {
         super::delivery::apply_changes(&mut rows, &changes)?;
         let mut result = Vec::new();
         let mut events = Vec::new();
-        let mut audit_records = Vec::new();
+        let mut audit_records = control_audits
+            .iter()
+            .map(|carrier| {
+                crate::action_audit::control_audit_record(
+                    carrier,
+                    env,
+                    bcs_service_api::types::BotActionKind::Abort,
+                )
+            })
+            .collect::<Vec<_>>();
         for command in admission {
             super::delivery::validate_admission(&command)?;
             let entry = staged.entry(command.message.session_id.clone()).or_default();

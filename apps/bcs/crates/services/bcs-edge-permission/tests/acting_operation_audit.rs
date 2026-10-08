@@ -42,7 +42,7 @@ use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
-use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort as _;
+use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort;
 use bcs_service_api::port::{NoopFriendConnectNotificationPort, NoopFriendAuthSyncPort};
 use bcs_service_api::types::{
     BotActionAuditPhase, BotActionKind, BotOperationActor, BotOperationContext,
@@ -514,6 +514,102 @@ async fn delivery_admission_persists_operation_id_and_admitted_snapshot_together
     assert!(stored.is_empty(), "no residue of the rejected admission");
     let _ = BotActionKind::Send;
     let _ = BotActionAuditPhase::Admitted;
+}
+
+// ---------------------------------------------------------------------------
+// Message abort/cancel lane (§12.5 fix round)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn abort_cancel_requires_context_and_audits_in_the_same_transaction() {
+    use bcs_message_flow::managed_delivery::ManagedMessageDelivery;
+    use bcs_service_api::ManagedMessageDeliveryService as _;
+
+    let db = full_chain_sqlite().await;
+    for message in ["abort-m1"] {
+        create_session_row(&db, &format!("session-{message}")).await;
+    }
+    let store = bcs_message_store::mysql::MySqlMessageStore::sqlite(db.clone(), ENV.to_string());
+    let repo: Arc<dyn MessageDeliveryRepoPort> = Arc::new(store.clone());
+    let service = Arc::new(ManagedMessageDelivery::new(repo));
+    let admitted = service
+        .admit(delivery_command(
+            "abort-m1",
+            human_operation("abort", "1001"),
+        ))
+        .await
+        .expect("queued admission");
+
+    // Missing context on an externally initiated control command: rejected
+    // fail-closed, no state change, no audit rows.
+    let mut contextless = human_operation("abort", "1001");
+    contextless.operation_id = " ".to_string();
+    let refused = service
+        .transition(bcs_service_api::DeliveryTransitionCommand {
+            delivery_id: admitted.message.message_id.clone(),
+            expected_state_version: 1,
+            event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+            now_ms: 200,
+            request_id: None,
+            actor_id: Some("human_1001".into()),
+            reply: None,
+            transport_context_json: None,
+            deadline_at_ms: None,
+            operation: contextless,
+        })
+        .await;
+    assert!(refused.is_err(), "empty operation context must stop the cancel");
+
+    // With the required context: the queue-cancel commits the row update
+    // (`operation_id` persisted) and its `abort/message/applied` audit in
+    // the SAME store transaction (real SQL over the full migration chain).
+    let operation = human_operation("abort", "1001");
+    let operation_id = operation.operation_id.clone();
+    let delivery_id = admitted.deliveries[0].delivery_id.clone();
+    let updated = service
+        .transition(bcs_service_api::DeliveryTransitionCommand {
+            delivery_id: delivery_id.clone(),
+            expected_state_version: 1,
+            event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+            now_ms: 200,
+            request_id: None,
+            actor_id: Some("human_1001".into()),
+            reply: None,
+            transport_context_json: None,
+            deadline_at_ms: None,
+            operation,
+        })
+        .await
+        .expect("cancel commits");
+    assert_eq!(
+        updated.operation_id.as_deref().map(str::to_string),
+        Some(format!("{operation_id}:control-{delivery_id}")),
+        "the changed row persists its derived per-delivery sub-operation id"
+    );
+    assert_eq!(
+        updated.state.status,
+        bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled
+    );
+    let audits = db
+        .query(DbStatement::with_params(
+            "SELECT step_key, action, phase, operator_kind, operator_user_id, resource_id \
+             FROM bcs_bot_action_audits WHERE env = ? AND operation_id LIKE ?",
+            vec![
+                DbValue::from(ENV),
+                DbValue::from(format!("{operation_id}:%")),
+            ],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(audits.len(), 1, "one audit row for the one changed delivery");
+    assert_eq!(
+        audits[0].get_string("step_key").ok().flatten().as_deref(),
+        Some("abort/message/applied")
+    );
+    assert_eq!(audits[0].get_string("action").ok().flatten().as_deref(), Some("abort"));
+    assert_eq!(audits[0].get_string("phase").ok().flatten().as_deref(), Some("applied"));
+    assert_eq!(audits[0].get_string("operator_user_id").ok().flatten().as_deref(), Some("1001"));
+    assert_eq!(audits[0].get_string("resource_id").ok().flatten().as_deref(), Some(delivery_id.as_str()));
 }
 
 // ---------------------------------------------------------------------------

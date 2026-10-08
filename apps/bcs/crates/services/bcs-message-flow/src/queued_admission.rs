@@ -383,6 +383,12 @@ pub(crate) async fn commit_routed_reply(
                 _ => DeliveryLifecycleEvent::Completed,
             },
             now_ms, request_id: None, actor_id: None, reply: Some(reply.clone()), transport_context_json: None,
+            // §12.5: the bot event lane settles as the responding Bot's own
+            // verified lane (same operator identity as the reply admission).
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("bot-event-delivery:{}:{}", row.delivery_id, uuid::Uuid::new_v4()),
+                actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: reply.message.sender_id.clone() },
+            },
             deadline_at_ms: None };
             // Keep reply IDs, normalized text and expected version stable. If
             // commit succeeded but its response was lost, CAS conflicts and the

@@ -4,7 +4,11 @@ use axum::{
 };
 use bcs_auth_api::{AuthError, AuthPluginChain, AuthPrincipal, UserIdentityInfo};
 use bcs_auth_local::StaticAuthPlugin;
-use bcs_bot::BotCore;
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
+use bcs_bot_store::provider::{
+    MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection,
+};
+use bcs_bot_store::MemoryBotRepo;
 use bcs_domain::{AttachmentType, MessageAttachment};
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_http::{
@@ -84,6 +88,31 @@ impl UserIdentityPort for NoUserIdentity {
     ) -> Result<(), AuthError> {
         Ok(())
     }
+}
+
+/// Control-plane core over a memory bot repo; the strict mine union needs
+/// the store-internal control plane, so fixtures build it here.
+fn closure_control_plane(
+    bot_repo: Arc<MemoryBotRepo>,
+) -> Arc<dyn bcs_service_api::BotControlPlaneCoreService> {
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
+    let bindings = Arc::new(ProviderBindingProjection::new(
+        provider_store.clone(),
+        bot_providers.clone(),
+        bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+    ));
+    Arc::new(
+        BotControlPlaneCore::new(
+            bot_repo as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>,
+            provider_store,
+            bindings,
+        )
+        .with_bot_provider_repo(bot_providers),
+    )
 }
 
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
@@ -804,7 +833,24 @@ async fn build_group_app_with_identity_and_session_status(
     Arc<RecordingGroupMessageHistory>,
 ) {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
+    let memory_control_plane = || -> Arc<dyn bcs_service_api::BotControlPlaneCoreService> {
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            bot_repo.clone(),
+            provider_store.clone(),
+        ));
+        let bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Arc::new(
+            BotControlPlaneCore::new(bot_repo.clone() as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>, provider_store, bindings)
+                .with_bot_provider_repo(bot_providers),
+        )
+    };
     for (bot_id, name) in [
         ("owner-bot", "Owner"),
         ("target-bot", "Target"),
@@ -825,6 +871,13 @@ async fn build_group_app_with_identity_and_session_status(
     registry
         .store_token_mapping("intruder-token".to_string(), "intruder-bot".to_string())
         .await;
+    // Live authority fixtures of the Task-12 cutover: the message-history
+    // view-actor gate reads the CURRENT owner/manager union, not created_by.
+    bot_repo.seed_authority_owned("owner-bot", "123").await.unwrap();
+    // task target-bot's owner is a different Human; the manager edge for
+    // caller 123 is intentionally NOT seeded (only the strict owner grant
+    // exists in this fixture's message-history scenarios).
+    bot_repo.seed_authority_owned("target-bot", "999").await.unwrap();
     registry
         .save_created_by("owner-bot", "123", true)
         .await
@@ -876,7 +929,7 @@ async fn build_group_app_with_identity_and_session_status(
         Arc::new(NoopFriendCoreService),
     ));
     let services = Services::builder()
-        .bot_query(Arc::new(bcs_bot::Bot::new(registry.clone())))
+        .bot_query(Arc::new(bcs_bot::Bot::new(registry.clone()).with_control_plane(memory_control_plane())))
         .registry(registry)
         .group(group_store.clone())
         .routing(routing.clone())
@@ -1541,13 +1594,18 @@ async fn scoped_session_history_app(
     TempDir,
 ) {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
+    let memory_control_plane = closure_control_plane(bot_repo.clone());
+    // Live authority fixtures of the Task-12 cutover: the view-actor gate
+    // reads the CURRENT owner union, not the historical creation fact.
     for (bot_id, owner) in [
         ("owner-bot", "123"),
         ("other-bot", "456"),
-        ("outside-bot", "123"),
+        ("outside-bot", "1234"),
     ] {
-        registry.register(bot_id.to_string(), BotCapabilities::default()).await.unwrap();
+        registry.register(bot_id.to_string(), BotCapabilities { name: Some(bot_id.to_string()), ..BotCapabilities::default() }).await.unwrap();
+        bot_repo.seed_authority_owned(bot_id, owner).await.unwrap();
         registry.save_created_by(bot_id, owner, true).await.unwrap();
     }
     let mut human = Participant::human("human_123", ParticipantRole::Observer);
@@ -1577,7 +1635,9 @@ async fn scoped_session_history_app(
         },
     });
     let mut services = Services::noop();
-    services.bot_query = Arc::new(bcs_bot::Bot::new(registry.clone()));
+    services.bot_query = Arc::new(
+        bcs_bot::Bot::new(registry.clone()).with_control_plane(memory_control_plane.clone()),
+    );
     services.registry = registry;
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
@@ -1754,7 +1814,24 @@ async fn state_machine_session_messages_non_session_human_returns_forbidden() {
 #[tokio::test]
 async fn state_machine_session_messages_group_only_bot_returns_forbidden() {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
+    let memory_control_plane = || -> Arc<dyn bcs_service_api::BotControlPlaneCoreService> {
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            bot_repo.clone(),
+            provider_store.clone(),
+        ));
+        let bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Arc::new(
+            BotControlPlaneCore::new(bot_repo.clone() as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>, provider_store, bindings)
+                .with_bot_provider_repo(bot_providers),
+        )
+    };
     registry
         .register(
             "driver-bot".to_string(),

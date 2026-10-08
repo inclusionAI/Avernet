@@ -78,7 +78,10 @@ async fn commit(
             mutation,
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            // §12.5 slot ruling: one operation slot covers ONE logical
+            // commit; a second commit takes a fresh identity so the store
+            // cannot classify it as a same-slot replay of the first.
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -380,7 +383,7 @@ async fn add_participant_eventful_mutation_refuses_non_public_bot_on_public_grou
             },
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -413,7 +416,7 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Closed),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -434,7 +437,7 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Closed),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -455,7 +458,7 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch::default()),
             event: None,
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -492,7 +495,7 @@ async fn eventful_event_checks_reject_env_mismatch_and_deletion_events() {
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Completed),
             event: Some(cross_env),
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),
@@ -514,7 +517,7 @@ async fn eventful_event_checks_reject_env_mismatch_and_deletion_events() {
             mutation: GroupEventfulMutation::Delete,
             event: Some(deletion_event),
     operation: bcs_service_api::types::BotOperationContext {
-            operation_id: "op-conformance-eventful".to_string(),
+            operation_id: format!("op-conformance-eventful:{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "conformance-eventful".to_string(),
                 effective_actor_id: "conformance-eventful".to_string(),

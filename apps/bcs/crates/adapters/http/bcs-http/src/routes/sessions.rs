@@ -78,6 +78,38 @@ fn session_to_json_with_state_machine_run(
 /// (seeded from the group at creation, then evolving independently); this
 /// mirrors `human_has_group_access` but judges membership against
 /// `session.participants` rather than `group.participants`.
+/// Bot ids the Human currently CONTROLS, resolved through the application
+/// `BotQueryService::list_my_bots` (the Task-12 mine projection: live
+/// owner/manager union, never the historical `created_by` listing — plan
+/// Task 12 fix round, spec §12.4).
+pub(crate) async fn current_controllable_bot_ids(
+    state: &HttpAppState,
+    staff_no: &str,
+) -> Vec<String> {
+    match state
+        .services
+        .bot_query
+        .list_my_bots(bcs_service_api::MyBotsCommand {
+            staff_no: staff_no.to_string(),
+            offset: 0,
+            limit: 500,
+            active_only: false,
+        })
+        .await
+    {
+        Ok(page) => page.items.into_iter().map(|bot| bot.bot_uuid).collect(),
+        Err(error) => {
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %error,
+                staff_no,
+                "legacy session route failed to resolve the controllable Bot union; failing closed"
+            );
+            Vec::new()
+        }
+    }
+}
+
 pub(crate) async fn human_has_session_access(
     state: &HttpAppState,
     session: &bcs_service_api::Session,
@@ -87,12 +119,12 @@ pub(crate) async fn human_has_session_access(
     if session.participants.iter().any(|p| p.bot_uuid == actor_id) {
         return true;
     }
-    let owned = state.services.registry.list_bots_by_creator(staff_no).await;
-    owned.iter().any(|b| {
+    let controlled = current_controllable_bot_ids(state, staff_no).await;
+    controlled.iter().any(|bot_id| {
         session
             .participants
             .iter()
-            .any(|p| p.bot_uuid == b.bot_uuid)
+            .any(|p| p.bot_uuid == *bot_id)
     })
 }
 
@@ -426,22 +458,17 @@ pub async fn list_sessions_for_group(
     // added only to a session, not to group.participants) can only see
     // sessions they themselves are in. Formal group members see all.
     //
-    // Bug fix #11: Human caller must be expanded to {actor_id, ...owned bots}
-    // so a Human who owns a driver-bot in the group is treated as formal
-    // (legacy server.rs:12767-12782).
+    // Bug fix #11 (+ plan Task 12 fix round): a Human caller expands to
+    // {actor_id, ...currently controlled bots} so a Human controlling a
+    // participant Bot in the group is treated as formal. The set comes from
+    // the live mine union (owner/manager role facts) through the application
+    // `BotQueryService`, not the retired creation listing.
     let caller_actor = resolve_group_chat_caller(&state, &headers, &uri).await.ok();
     let caller_ids: Vec<String> = match &caller_actor {
         Some(GroupChatCaller::Bot { bot_uuid }) => vec![bot_uuid.clone()],
         Some(GroupChatCaller::Human(h)) => {
             let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
-            }
+            ids.extend(current_controllable_bot_ids(&state, &h.staff_no).await);
             ids
         }
         None => Vec::new(),
@@ -666,18 +693,16 @@ pub async fn complete_session(
         }
     };
 
-    // 5. Caller must be driver (bot itself, or Human who owns the driver bot)
+    // 5. Caller must be driver (bot itself, or a Human who CURRENTLY owns or
+    // manages the driver Bot — live mine union, not the creation listing).
     let is_driver = match &caller {
         GroupChatCaller::Bot { bot_uuid } => group.driver_bot == *bot_uuid,
         GroupChatCaller::Human(h) => {
             h.actor_id == group.driver_bot
-                || state
-                    .services
-                    .registry
-                    .list_bots_by_creator(&h.staff_no)
+                || current_controllable_bot_ids(&state, &h.staff_no)
                     .await
                     .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot)
+                    .any(|bot_id| *bot_id == group.driver_bot)
         }
     };
     if !is_driver {
@@ -928,20 +953,18 @@ pub async fn remove_session_participant(
         })
         .unwrap_or((None, None, None));
 
-    // Authorization: self, owner, session creator/caller_principal, or coordinator.
+    // Authorization: self, owner, session creator/caller_principal, or
+    // coordinator.
     let is_self = caller_id == bot_uuid;
-    // COSEC: Human authority includes only Bots owned by the authenticated
-    // staff identity. This lets a Human act as a Bot-valued Session manager
-    // without trusting any caller-supplied actor id.
+    // COSEC (plan Task 12 fix round): a Human may act only for Bots the
+    // CURRENT owner/manager live-role facts place under their control — the
+    // mine union through the application `BotQueryService`, never the
+    // historical `list_bots_by_creator` creation listing and never a
+    // caller-supplied actor id.
     let owned_bot_ids = match &caller {
-        GroupChatCaller::Human(h) => state
-            .services
-            .registry
-            .list_bots_by_creator(&h.staff_no)
-            .await
-            .into_iter()
-            .map(|b| b.bot_uuid)
-            .collect::<Vec<_>>(),
+        GroupChatCaller::Human(h) => {
+            current_controllable_bot_ids(&state, &h.staff_no).await
+        }
         GroupChatCaller::Bot { .. } => Vec::new(),
     };
     let human_owns_actor = |actor_id: &str| owned_bot_ids.iter().any(|id| id == actor_id);
@@ -1787,10 +1810,8 @@ async fn resolve_session_history_view(
                 }) {
                     return Err(forbidden());
                 }
-                let owned = state.services.bot_query.list_bots_by_creator(&human.staff_no)
-                    .await
-                    .map_err(|error| super::bots::bot_use_case_error_to_http(error).into_response())?;
-                if !owned.iter().any(|bot| bot.bot_uuid == requested) {
+                let controlled = current_controllable_bot_ids(state, &human.staff_no).await;
+                if !controlled.iter().any(|bot_id| bot_id == requested) {
                     return Err(forbidden());
                 }
                 return Ok(ResolvedSessionHistoryView {
@@ -1984,14 +2005,17 @@ pub async fn delete_session(
 
     // The session creator, the driver bot, or a human who owns the creator or
     // driver bot may delete the session.
+    // A former creator keeps delete rights only while a CURRENT owner or
+    // manager role fact for the creator/driver Bot survives (plan Task 12
+    // fix round: the creation listing is not an authority answer).
     let authorized = if caller_id == session_creator || caller_id == driver_bot {
         true
     } else if caller_id.starts_with("human_") {
         let staff_no = caller_id.trim_start_matches("human_");
-        let owned_bots = state.services.registry.list_bots_by_creator(staff_no).await;
-        owned_bots
+        let controlled = current_controllable_bot_ids(&state, staff_no).await;
+        controlled
             .iter()
-            .any(|b| b.bot_uuid == session_creator || b.bot_uuid == driver_bot)
+            .any(|bot_id| bot_id == session_creator || bot_id == driver_bot)
     } else {
         false
     };
@@ -2056,8 +2080,8 @@ pub async fn delete_session(
 //
 // Mark / unmark a session as collected by a bot. Caller resolves via
 // resolve_group_chat_caller (bot token -> that bot; human cookie -> must
-// supply an owned bot via the `participant` body/query field, ownership
-// checked via registry.list_bots_by_creator).
+// supply a controlled bot via the `participant` body/query field; control
+// is judged from the CURRENT mine union (owner/manager live roles).
 // ---------------------------------------------------------------
 
 #[derive(Debug, Deserialize, Default)]
@@ -2190,13 +2214,10 @@ async fn resolve_collector_bot(
                 )
                     .into_response()
             })?;
-            let owns = state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
+            let owns = current_controllable_bot_ids(&state, &h.staff_no)
                 .await
                 .iter()
-                .any(|b| b.bot_uuid == bot_uuid);
+                .any(|bot_id| bot_id == &bot_uuid);
             if !owns {
                 return Err((
                     StatusCode::FORBIDDEN,

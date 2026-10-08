@@ -11,7 +11,11 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
 };
 use bcs_auth_api::{AuthError, UserIdentityInfo};
-use bcs_bot::BotCore;
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
+use bcs_bot_store::provider::{
+    MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection,
+};
+use bcs_bot_store::MemoryBotRepo;
 use bcs_group::GroupStore;
 use bcs_http::{
     router::build_router,
@@ -156,12 +160,35 @@ async fn bot_app() -> (axum::Router, TempDir) {
 /// Human-caller app: alice owns driver-bot; session created_by = creator-bot.
 async fn human_app(staff: &str) -> (axum::Router, TempDir) {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
     register_bot(&registry, "driver-bot", "Driver").await;
     register_bot(&registry, "creator-bot", "Creator").await;
     if staff == "alice" {
+        // Live-owner fixture (plan Task 12 fix round): delete authority reads
+        // the CURRENT owner edge, not the created_by fact.
+        bot_repo.seed_authority_owned("driver-bot", "alice").await.unwrap();
         registry.save_created_by("driver-bot", "alice", true).await.unwrap();
     }
+    // Control-plane wiring for the mine-union lane.
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
+    let bindings = Arc::new(ProviderBindingProjection::new(
+        provider_store.clone(),
+        bot_providers.clone(),
+        bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+    ));
+    let control_plane: Arc<dyn bcs_service_api::BotControlPlaneCoreService> = Arc::new(
+        BotControlPlaneCore::new(
+            bot_repo.clone() as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>,
+            provider_store,
+            bindings,
+        )
+        .with_bot_provider_repo(bot_providers),
+    );
 
     let group_store = Arc::new(GroupStore::new());
     let mut group = Group::new(
@@ -209,6 +236,11 @@ async fn human_app(staff: &str) -> (axum::Router, TempDir) {
 
     let mut services = Services::noop();
     services.registry = registry.clone();
+    // Mine-union lane (plan Task 12 fix round): the delete route resolves a
+    // Human's cross-acting rights through this bot_query projection.
+    services.bot_query = Arc::new(
+        Bot::new(registry.clone()).with_control_plane(control_plane),
+    );
     services.group = group_store;
     services.session_management = sessions;
 

@@ -56,6 +56,7 @@ fn transition(
         reply: None,
         transport_context_json: None,
         deadline_at_ms: None,
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
     }
 }
 

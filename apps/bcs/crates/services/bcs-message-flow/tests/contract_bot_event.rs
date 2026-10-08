@@ -214,11 +214,11 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     let failed = service.transition(DeliveryTransitionCommand { delivery_id: running.delivery_id.clone(), expected_state_version: running.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::Failed,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     assert_eq!(failed.last_error_code.as_deref(), Some("bot_terminal_error"));
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a terminal chat error has its own safe channel feedback and must not also emit a generic delivery hint");
@@ -233,11 +233,11 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let rejected = service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::TransportRejected,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
@@ -248,7 +248,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 4 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
@@ -301,7 +301,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a queued target keeps the actionable queue reaction visible");
     let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
@@ -309,7 +309,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();

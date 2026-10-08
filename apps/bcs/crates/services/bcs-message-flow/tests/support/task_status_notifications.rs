@@ -225,7 +225,8 @@ async fn callback_and_control_race_commit_one_result() {
     let row = f.start(&row).await;
     let command = DeliveryTransitionCommand { delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
         event:Event::Aborted, now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None,
-        reply:None, transport_context_json:None, deadline_at_ms:None };
+        reply:None, transport_context_json:None, deadline_at_ms:None,
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests") };
     let (_, callback) = tokio::join!(f.service.transition(command), f.flow.handle_bot_event(final_event(&row)));
     callback.unwrap();
     let rows = f.rows().await;

@@ -18,7 +18,11 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
 };
 use bcs_auth_api::{AuthError, UserIdentityInfo};
-use bcs_bot::BotCore;
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
+use bcs_bot_store::provider::{
+    MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection,
+};
+use bcs_bot_store::MemoryBotRepo;
 use bcs_group::GroupStore;
 use bcs_http::{
     router::build_router,
@@ -1132,23 +1136,50 @@ async fn human_app(
     Arc<BotCore>,
 ) {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
 
-    // Register the human's owned bots and set created_by.
+    // Live authority fixtures of the Task-12 cutover: cross-acting rights
+    // come from the seeded OWNER edges (the mine union), not created_by.
     for bot_id in owned_bot_ids {
         register_bot(&registry, bot_id, bot_id).await;
+        bot_repo.seed_authority_owned(bot_id, staff_no).await.unwrap();
         registry
             .save_created_by(bot_id, staff_no, true)
             .await
             .unwrap();
     }
 
-    // Register an unauthorized bot (not owned by this human).
+    // Register an unauthorized bot (owned by a different human).
     register_bot(&registry, "unauthorized-bot", "Unauthorized").await;
+    bot_repo
+        .seed_authority_owned("unauthorized-bot", "someone-else")
+        .await
+        .unwrap();
     registry
         .save_created_by("unauthorized-bot", "someone-else", true)
         .await
         .unwrap();
+
+    // Control-plane wiring for the mine-union lane (plan Task 12 fix round).
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
+    let bindings = Arc::new(ProviderBindingProjection::new(
+        provider_store.clone(),
+        bot_providers.clone(),
+        bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+    ));
+    let control_plane: Arc<dyn bcs_service_api::BotControlPlaneCoreService> = Arc::new(
+        BotControlPlaneCore::new(
+            bot_repo as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>,
+            provider_store,
+            bindings,
+        )
+        .with_bot_provider_repo(bot_providers),
+    );
 
     let group_store = Arc::new(GroupStore::new());
     let driver = owned_bot_ids.first().copied().unwrap_or("owned-bot");
@@ -1178,6 +1209,11 @@ async fn human_app(
 
     let mut services = Services::noop();
     services.registry = registry.clone();
+    // The mine-union lane of the Task-12 cutover: the collect routes resolve
+    // a Human's cross-acting rights through THIS bot_query projection.
+    services.bot_query = Arc::new(
+        Bot::new(registry.clone()).with_control_plane(control_plane),
+    );
     services.group = group_store;
     services.session_management = sessions.clone();
 

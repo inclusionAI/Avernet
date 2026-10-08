@@ -2252,6 +2252,11 @@ impl Default for BcsServerState {
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_uplink_config(config.uplink.clone())
             .with_bot_core(bot_core_arc.clone())
+            // Task 12 fix round: `/bots/my` reads the controllable union
+            // through the control plane, so the production bot_query MUST be
+            // control-plane-wired (the missing wiring made the prod route
+            // fail with "requires .with_control_plane").
+            .with_control_plane(provider_control_plane.clone())
             .with_organization(organization_core.clone())
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(
@@ -3907,6 +3912,11 @@ impl BcsServer {
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_uplink_config(config.uplink.clone())
             .with_bot_core(bot_core_arc.clone())
+            // Task 12 fix round: `/bots/my` reads the controllable union
+            // through the control plane, so the production bot_query MUST be
+            // control-plane-wired (the missing wiring made the prod route
+            // fail with "requires .with_control_plane").
+            .with_control_plane(provider_control_plane.clone())
             .with_organization(organization_core.clone())
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(

@@ -28,16 +28,16 @@ use crate::core::BotCore;
 /// Bot query and management application service backed by the registry port.
 #[derive(Clone)]
 pub struct Bot {
-    registry: Arc<dyn BotRegistryCoreService>,
-    friend: Arc<dyn FriendCoreService>,
-    edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
-    bot_core: Option<Arc<BotCore>>,
-    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
-    relation: Option<Arc<dyn RelationCoreService>>,
-    user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
-    connection_control: Option<Arc<dyn BotConnectionControlPort>>,
-    organization: Option<Arc<dyn OrganizationCoreService>>,
-    uplink: bcs_config_api::UplinkConfig,
+    pub(crate) registry: Arc<dyn BotRegistryCoreService>,
+    pub(crate) friend: Arc<dyn FriendCoreService>,
+    pub(crate) edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
+    pub(crate) bot_core: Option<Arc<BotCore>>,
+    pub(crate) control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
+    pub(crate) relation: Option<Arc<dyn RelationCoreService>>,
+    pub(crate) user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
+    pub(crate) connection_control: Option<Arc<dyn BotConnectionControlPort>>,
+    pub(crate) organization: Option<Arc<dyn OrganizationCoreService>>,
+    pub(crate) uplink: bcs_config_api::UplinkConfig,
 }
 
 impl Bot {
@@ -468,171 +468,8 @@ impl BotQueryService for Bot {
 }
 
 impl Bot {
-    async fn search_bots_via_control_plane(
-        &self,
-        control_plane: &dyn BotControlPlaneCoreService,
-        command: SearchBotsCommand,
-    ) -> Result<BotSearchResult, BotUseCaseError> {
-        let viewer_actor_id = command.viewer_actor_id.as_deref();
-        let friend_ids = if let Some(viewer_actor_id) = viewer_actor_id {
-            if let Some(edge_grants) = self.edge_grants.as_ref() {
-                edge_grants
-                    .list_friends(viewer_actor_id, &bcs_config::resolve_env_str())
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            } else {
-                self.friend
-                    .list_friends(viewer_actor_id)
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            }
-        } else {
-            HashSet::new()
-        };
-        let friendship = command.friendship.unwrap_or(BotSearchFriendshipFilter::All);
-        if !matches!(friendship, BotSearchFriendshipFilter::All) && viewer_actor_id.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "friendship filter requires viewer_actor_id".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-
-        let query = BotSearchCandidateQuery {
-            acting_bot_id: command.requester_actor_id.clone().unwrap_or_default(),
-            env: bcs_config::resolve_env_str(),
-            visibility: bcs_service_api::BotCandidateVisibility::Discovery,
-            friend_ids,
-            bot_uuids: command.bot_uuids.clone(),
-            name: command.q.clone(),
-            q: command.q.clone(),
-            visibility_filter: command.visibility.clone(),
-            user_visibility: command.user_visibility.clone(),
-            status: command.status,
-            friendship: Some(friendship),
-            tc_bot: command.tc_bot,
-            offset: command.offset,
-            limit: command.limit,
-        };
-        let (candidates, total) = control_plane.search_candidates(query).await?;
-        let candidate_bot_ids = candidates
-            .iter()
-            .map(|candidate| candidate.bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
-        let active_bot_ids = self
-            .registry
-            .list_runtime_active_bot_ids(&candidate_bot_ids)
-            .await
-            .into_iter()
-            .collect::<HashSet<_>>();
-
-        let mut items = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
-            let record = candidate.bot.record;
-            let capabilities = bot_capabilities_from_record(&record);
-            let bot_uuid = record.bot_id;
-            let dynamic_status = if record.status == ActorStatus::Online
-                && active_bot_ids.contains(&bot_uuid)
-            {
-                DynamicStatusResponse {
-                    status: "active".to_string(),
-                }
-            } else {
-                DynamicStatusResponse {
-                    status: "offline".to_string(),
-                }
-            };
-            items.push(BotQueryEntry {
-                bot_uuid,
-                capabilities,
-                visibility: record.visibility,
-                status: record.status,
-                actor_kind: record.kind,
-                env: Some(record.env),
-                dynamic_status,
-                created_by: record.created_by,
-                user_visibility: user_visibility_to_wire(record.user_visibility).to_string(),
-                friend_ext: record.friend_ext,
-                friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                    record.friend_check_in_strategy,
-                )
-                .to_string(),
-                is_friend: viewer_actor_id.map(|_| candidate.is_friend),
-                access_relation: None,
-            });
-        }
-
-        Ok(BotSearchResult { items, total })
-    }
 
 
-}
-
-#[async_trait]
-impl BotDiscoveryService for Bot {
-    async fn discover_bots(
-        &self,
-        command: BotDiscoveryCommand,
-    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
-        if command.role.is_some() && command.organization_code.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "role_requires_organization_code".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-        if command.organization_code.is_some() {
-            let code = command.organization_code.clone().unwrap_or_default();
-            return self.discover_organization_bots(&code, command).await;
-        }
-
-        let bots = self.discover_candidates(&command).await;
-
-        if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            let collaborate_bot_is_private = self
-                .registry
-                .get(collaborate_bot)
-                .await
-                .map(|bot| !is_discover_visible(&bot.capabilities.visibility))
-                .unwrap_or(false);
-            if collaborate_bot_is_private {
-                return Ok(BotDiscoveryResult {
-                    bots: Vec::new(),
-                    count: 0,
-                });
-            }
-        }
-
-        let friend_uuids = if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            Some(self.friend.list_friends(collaborate_bot).await)
-        } else {
-            None
-        };
-
-        let entries = bots
-            .into_iter()
-            .filter(|candidate| {
-                command.requester_bot_id.as_deref() != Some(candidate.bot.bot_uuid.as_str())
-            })
-            .filter(|candidate| matches_discovery_selector(&candidate.bot, &command))
-            .filter_map(|candidate| discover_entry(candidate, &command, friend_uuids.as_ref()))
-            .collect::<Vec<_>>();
-        let mut entries_with_agent_code = Vec::with_capacity(entries.len());
-        for mut entry in entries {
-            entry.agent_code = self
-                .registry
-                .get_agent_credentials(&entry.bot_uuid)
-                .await
-                .and_then(|credentials| credentials.agent_code);
-            entries_with_agent_code.push(entry);
-        }
-        Ok(BotDiscoveryResult {
-            count: entries_with_agent_code.len(),
-            bots: entries_with_agent_code,
-        })
-    }
 }
 
 #[async_trait]
@@ -899,433 +736,11 @@ impl BotManagementService for Bot {
     }
 }
 
-#[async_trait]
-impl BotRuntimeConnectionService for Bot {
-    async fn connect_streaming(
-        &self,
-        command: BotRuntimeConnectCommand,
-    ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
-        let BotRuntimeConnectCommand {
-            caller_actor_id: _,
-            token,
-            bot_id,
-            protocol_version,
-            client_kind,
-        } = command;
-
-        if let Some(bot_id) = bot_id.as_deref() {
-            self.validate_connect_bot_id(bot_id).await?;
-        }
-
-        let requested_client_kind = client_kind
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase());
-
-        let params = BotConnectParams {
-            token,
-            bot_id,
-            protocol_version,
-            client_kind: None,
-        };
-        let result = self
-            .registry
-            .connect_bot(params, ConnectionKind::Streaming)
-            .await
-            .map_err(BotUseCaseError::Connect)?;
-
-        if let Some(version) = protocol_version {
-            self.registry
-                .set_protocol_version(&result.bot_uuid, version)
-                .await;
-        }
-        let negotiated_client_kind = self.uplink.negotiate(protocol_version, requested_client_kind);
-        self.registry
-            .set_bot_info(
-                &result.bot_uuid,
-                "client_kind",
-                negotiated_client_kind.clone(),
-            )
-            .await;
-
-        let mut outcome = BotRuntimeConnectOutcome::from_connect_result(result);
-        outcome.negotiated_client_kind = negotiated_client_kind;
-        Ok(outcome)
-    }
-
-    async fn update_runtime_status(
-        &self,
-        command: BotRuntimeStatusCommand,
-    ) -> Result<BotRuntimeStatusOutcome, BotUseCaseError> {
-        let BotRuntimeStatusCommand {
-            caller_actor_id,
-            bot_id,
-            status,
-        } = command;
-
-        match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
-            None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
-            None => return Err(ServiceError::BotNotFound(bot_id).into()),
-        }
-
-        let updated = self.registry.update_status(&bot_id).await;
-
-        Ok(BotRuntimeStatusOutcome {
-            updated,
-            bot_uuid: bot_id,
-            status,
-        })
-    }
-
-    async fn disconnect_streaming(
-        &self,
-        command: BotRuntimeDisconnectCommand,
-    ) -> Result<(), BotUseCaseError> {
-        // Clear the active profile before releasing the streaming slot. Once
-        // the slot is released a reconnect may negotiate a new profile, which
-        // an older connection's cleanup must never erase.
-        self.registry
-            .set_bot_info(&command.bot_id, "client_kind", None)
-            .await;
-        self.registry.disconnect_streaming(&command.bot_id).await;
-        Ok(())
-    }
-
-    async fn is_provider_downlink_bot(&self, bot_id: &str) -> ServiceResult<bool> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Ok(false);
-        };
-        let Some(bindings) = bot_core.provider_bindings_repo() else {
-            return Ok(false);
-        };
-        let binding = bindings.get_binding_by_bot_uuid(bot_id).await?;
-        Ok(binding.is_some_and(|binding| !binding.disabled))
-    }
-
-    async fn resolve_delivery_target(&self, bot_id: &str) -> ServiceResult<BotDeliveryTarget> {
-        self.registry.resolve_delivery_target(bot_id).await
-    }
-}
-
 impl Bot {
-    async fn discover_organization_bots(
-        &self,
-        organization_code: &str,
-        command: BotDiscoveryCommand,
-    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
-        let requester = command.requester_bot_id.as_deref().ok_or_else(|| {
-            BotUseCaseError::Forbidden("organization discovery requires a bot caller".to_string())
-        })?;
-        let organization = self.organization.as_ref().ok_or_else(|| {
-            ServiceError::InvalidOperation {
-                message: "organization service is not configured".to_string(),
-                request_id: None,
-            }
-        })?;
-        organization
-            .require_runtime_member(organization_code, requester)
-            .await?;
-        let (member_by_bot, bots) = match organization
-            .list_runtime_discovery_bots(organization_code, command.role.as_deref())
-            .await?
-        {
-            Some(discovery_bots) => {
-                let member_by_bot = discovery_bots
-                    .iter()
-                    .map(|bot| (bot.bot_uuid.clone(), bot.role.clone()))
-                    .collect::<BTreeMap<_, _>>();
-                let bots = discovery_bots
-                    .into_iter()
-                    .map(|bot| RegisteredBot {
-                        bot_uuid: bot.bot_uuid,
-                        capabilities: bot.capabilities,
-                        env: None,
-                        created_by: None,
-                        actor_kind: bot.actor_kind,
-                        status: ActorStatus::Online,
-                    })
-                    .collect();
-                (member_by_bot, bots)
-            }
-            None => {
-                let members = organization
-                    .list_runtime_members(organization_code, command.role.as_deref())
-                    .await?;
-                let member_by_bot = members
-                    .iter()
-                    .map(|member| (member.bot_uuid.clone(), member.role.clone()))
-                    .collect::<BTreeMap<_, _>>();
-                let bot_ids = members.into_iter().map(|member| member.bot_uuid).collect::<Vec<_>>();
-                (member_by_bot, self.registry.get_by_ids(&bot_ids).await)
-            }
-        };
-        let friend_ids = self.friend.list_friends(requester).await;
-        let friend_ids = friend_ids.into_iter().collect::<std::collections::HashSet<_>>();
-        let mut entries = Vec::new();
-        for bot in bots {
-            if bot.actor_kind != ActorKind::Bot || bot.capabilities.name.is_none() {
-                continue;
-            }
-            if bot.bot_uuid.as_str() == requester {
-                continue;
-            }
-            if !matches_discovery_selector(&bot, &command) {
-                continue;
-            }
-            let visibility = bot.capabilities.visibility.clone();
-            if let Some(visibility_filter) = command.visibility.as_deref() {
-                if visibility != visibility_filter {
-                    continue;
-                }
-            }
-            let is_friend = friend_ids.contains(&bot.bot_uuid);
-            if !is_organization_discover_visible(&visibility) && !is_friend {
-                continue;
-            }
-            let Some(role) = member_by_bot.get(&bot.bot_uuid) else {
-                continue;
-            };
-            let agent_code = bot.capabilities.agent_code.clone();
-            entries.push(BotDiscoveryEntry {
-                bot_uuid: bot.bot_uuid,
-                capabilities: bot.capabilities,
-                visibility,
-                is_friend: Some(is_friend),
-                agent_code,
-                provider_info: None,
-                organization_member: Some(OrganizationMemberSummary {
-                    organization_code: organization_code.to_string(),
-                    role: role.clone(),
-                }),
-            });
-        }
-        Ok(BotDiscoveryResult {
-            count: entries.len(),
-            bots: entries,
-        })
-    }
 
-    async fn validate_connect_bot_id(&self, bot_id: &str) -> Result<(), BotUseCaseError> {
-        if !bot_id.starts_with("human_") {
-            return Ok(());
-        }
-
-        match self.registry.get(bot_id).await {
-            Some(existing) if existing.actor_kind == ActorKind::Human => Ok(()),
-            _ => Err(BotUseCaseError::InvalidBotId(
-                "human_ 前缀仅用于 Human Actor".to_string(),
-            )),
-        }
-    }
-
-    async fn is_provider_managed_bot(&self, bot_id: &str) -> Result<bool, BotUseCaseError> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Ok(false);
-        };
-        let Some(bindings) = bot_core.provider_bindings_repo() else {
-            return Ok(false);
-        };
-        Ok(bindings.get_binding_by_bot_uuid(bot_id).await?.is_some())
-    }
-
-    async fn bot_to_detail(&self, bot: RegisteredBot) -> BotDetailResult {
-        let visibility = bot.capabilities.visibility.clone();
-        let created_by = bot.created_by.clone();
-        let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
-
-        BotDetailResult {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
-            status: bot.status,
-            visibility,
-            owner_actor_id: owner_actor_id(created_by.clone()),
-            created_by,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
-            dynamic_status,
-        }
-    }
-
-    async fn bot_page_from_registered(
-        &self,
-        bots: Vec<RegisteredBot>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let total = bots.len() as u64;
-        let page = bots
-            .into_iter()
-            .skip(to_usize(offset))
-            .take(to_usize(limit))
-            .collect::<Vec<_>>();
-        let mut items = Vec::with_capacity(page.len());
-        for bot in page {
-            items.push(self.bot_to_query_entry(bot).await);
-        }
-        Ok(BotPagedListResult {
-            items,
-            total,
-            offset,
-            limit,
-        })
-    }
-
-    /// Project one controllable control-plane record into the legacy
-    /// `/bots/my` item shape, carrying the mine access-relation label.
-    fn record_to_my_query_entry(
-        record: BotControlPlaneRecord,
-        is_active: bool,
-        access_relation: String,
-    ) -> BotQueryEntry {
-        let capabilities = BotCapabilities {
-            name: (!record.name.is_empty()).then(|| record.name.clone()),
-            summary: (!record.descriptor.summary.is_empty())
-                .then(|| record.descriptor.summary.clone()),
-            domains: record.descriptor.domains.clone(),
-            skills: record.descriptor.skills.clone(),
-            scopes: record.descriptor.scopes.clone(),
-            ..BotCapabilities::default()
-        };
-        let visibility = record.visibility.clone();
-        BotQueryEntry {
-            bot_uuid: record.bot_id,
-            capabilities,
-            visibility,
-            status: record.status,
-            actor_kind: record.kind,
-            env: Some(record.env),
-            dynamic_status: DynamicStatusResponse {
-                status: if is_active { "active" } else { "offline" }.to_string(),
-            },
-            created_by: record.created_by,
-            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-            friend_ext: record.friend_ext,
-            friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                FriendCheckInStrategy::Approval,
-            )
-            .to_string(),
-            is_friend: None,
-            access_relation: Some(access_relation),
-        }
-    }
-
-    async fn bot_to_query_entry(&self, bot: RegisteredBot) -> BotQueryEntry {
-        let visibility = bot.capabilities.visibility.clone();
-        let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
-        BotQueryEntry {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
-            visibility,
-            status: bot.status,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
-            dynamic_status,
-            created_by: bot.created_by,
-            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-            friend_ext: serde_json::Map::new(),
-            friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                FriendCheckInStrategy::Approval,
-            )
-            .to_string(),
-            is_friend: None,
-            access_relation: None,
-        }
-    }
-
-    async fn discover_candidates(&self, command: &BotDiscoveryCommand) -> Vec<DiscoveryCandidate> {
-        let mut merged = BTreeMap::new();
-        for bot in self.registry.list_active().await {
-            merged.insert(
-                bot.bot_uuid.clone(),
-                DiscoveryCandidate {
-                    bot,
-                    provider_info: None,
-                },
-            );
-        }
-
-        for candidate in self.discover_provider_bots(command).await {
-            merged.insert(candidate.bot.bot_uuid.clone(), candidate);
-        }
-
-        merged.into_values().collect()
-    }
-
-    async fn discover_provider_bots(&self, command: &BotDiscoveryCommand) -> Vec<DiscoveryCandidate> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Vec::new();
-        };
-        let Some(provider_bindings) = bot_core.provider_bindings_repo() else {
-            return Vec::new();
-        };
-        let selector = provider_discovery_selector(command);
-        let query_started_at = std::time::Instant::now();
-        let records_result = provider_bindings
-            .list_discoverable_provider_bot_records(&selector)
-            .await;
-        let elapsed_ms = query_started_at.elapsed().as_millis();
-        let records = match records_result {
-            Ok(records) => {
-                tracing::info!(
-                    elapsed_ms = %elapsed_ms,
-                    record_count = records.len(),
-                    selector = ?selector,
-                    "discover_provider_bots: listed provider bot records"
-                );
-                records
-            }
-            Err(error) => {
-                tracing::warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    elapsed_ms = %elapsed_ms,
-                    selector = ?selector,
-                    error = %error,
-                    "discover_provider_bots: failed to list provider bot records"
-                );
-                return Vec::new();
-            }
-        };
-        if records.is_empty() {
-            return Vec::new();
-        }
-
-        let bot_ids = records
-            .iter()
-            .map(|record| record.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let mut provider_info_by_bot = records
-            .into_iter()
-            .map(|record| {
-                (
-                    record.bot_uuid,
-                    BotDiscoveryProviderInfo {
-                        provider_id: record.provider_id,
-                        provider_name: record.provider_name,
-                    },
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-
-        self.registry
-            .get_by_ids(&bot_ids)
-            .await
-            .into_iter()
-            .filter(|bot| bot.actor_kind == ActorKind::Bot)
-            .filter_map(|bot| {
-                provider_info_by_bot
-                    .remove(&bot.bot_uuid)
-                    .map(|provider_info| DiscoveryCandidate {
-                        bot,
-                        provider_info: Some(provider_info),
-                    })
-            })
-            .collect()
-    }
 }
 
-fn is_in_list_bots_scope(bot: &RegisteredBot, onboarded: Option<bool>) -> bool {
+pub(crate) fn is_in_list_bots_scope(bot: &RegisteredBot, onboarded: Option<bool>) -> bool {
     match onboarded {
         Some(false) => bot.capabilities.name.is_none(),
         _ => {
@@ -1359,116 +774,11 @@ fn bot_to_list_entry(bot: RegisteredBot) -> BotListEntry {
     }
 }
 
-struct DiscoveryCandidate {
-    bot: RegisteredBot,
-    provider_info: Option<BotDiscoveryProviderInfo>,
-}
-
-fn discover_entry(
-    candidate: DiscoveryCandidate,
-    command: &BotDiscoveryCommand,
-    friend_uuids: Option<&Vec<String>>,
-) -> Option<BotDiscoveryEntry> {
-    let DiscoveryCandidate { bot, provider_info } = candidate;
-    let visibility = bot.capabilities.visibility.clone();
-    if !is_discover_visible(&visibility) {
-        return None;
-    }
-
-    if let Some(visibility_filter) = command.visibility.as_deref() {
-        if visibility != visibility_filter {
-            return None;
-        }
-    }
-
-    let is_friend = if let Some(friends) = friend_uuids {
-        let is_friend = friends.contains(&bot.bot_uuid);
-        if command.visibility.is_none() && visibility != "public" && !is_friend {
-            return None;
-        }
-        Some(is_friend)
-    } else {
-        None
-    };
-
-    Some(BotDiscoveryEntry {
-        bot_uuid: bot.bot_uuid,
-        capabilities: bot.capabilities,
-        visibility,
-        is_friend,
-        agent_code: None,
-        provider_info,
-        organization_member: None,
-    })
-}
-
-fn is_discover_visible(visibility: &str) -> bool {
-    matches!(visibility, "public" | "protected")
-}
-
-fn is_organization_discover_visible(visibility: &str) -> bool {
-    matches!(visibility, "public" | "protected")
-}
-
-fn provider_discovery_selector(command: &BotDiscoveryCommand) -> ProviderBotDiscoverySelector {
-    if let Some(q) = command.q.as_deref() {
-        ProviderBotDiscoverySelector::Query(q.to_string())
-    } else if !command.skills.is_empty() {
-        ProviderBotDiscoverySelector::RequiredSkills(command.skills.clone())
-    } else {
-        ProviderBotDiscoverySelector::All
-    }
-}
-
-fn matches_discovery_selector(bot: &RegisteredBot, command: &BotDiscoveryCommand) -> bool {
-    let matches_q = command
-        .q
-        .as_deref()
-        .is_none_or(|query| matches_query(bot, query));
-    let matches_skills = command.skills.iter().all(|skill| {
-        bot
-            .capabilities
-            .skills
-            .iter()
-            .any(|candidate| candidate.name.eq_ignore_ascii_case(skill))
-    });
-
-    matches_q && matches_skills
-}
-
-fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
-    bot.capabilities
-        .name
-        .as_deref()
-        .is_some_and(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .summary
-            .as_deref()
-            .is_some_and(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .domains
-            .iter()
-            .any(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .skills
-            .iter()
-            .any(|skill| contains_ignore_case(&skill.name, query))
-        || bot
-            .capabilities
-            .scopes
-            .iter()
-            .any(|value| contains_ignore_case(value, query))
-        || contains_ignore_case(&bot.bot_uuid, query)
-}
-
-fn contains_ignore_case(value: &str, query: &str) -> bool {
+pub(crate) fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(&query.to_lowercase())
 }
 
-fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabilities {
+pub(crate) fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabilities {
     BotCapabilities {
         name: non_empty_text(Some(record.name.as_str())),
         summary: non_empty_text(Some(record.descriptor.summary.as_str())),
@@ -1480,7 +790,7 @@ fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabiliti
     }
 }
 
-fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
+pub(crate) fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
     match value {
         UserVisibility::Public => "public",
         UserVisibility::Protected => "protected",
@@ -1488,7 +798,7 @@ fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
     }
 }
 
-fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
+pub(crate) fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
     match value {
         FriendCheckInStrategy::Open => "OPEN",
         FriendCheckInStrategy::Approval => "APPROVAL",
@@ -1519,7 +829,7 @@ fn owner_from_provider_bot_ref(provider_bot_ref: &str) -> Result<String, BotUseC
     })
 }
 
-async fn effective_dynamic_status(
+pub(crate) async fn effective_dynamic_status(
     registry: &dyn BotRegistryCoreService,
     bot: &RegisteredBot,
 ) -> DynamicStatusResponse {
@@ -1530,7 +840,7 @@ async fn effective_dynamic_status(
     }
 }
 
-fn owner_actor_id(created_by: Option<String>) -> Option<String> {
+pub(crate) fn owner_actor_id(created_by: Option<String>) -> Option<String> {
     created_by.map(|owner| {
         if owner.starts_with("human_") {
             owner
@@ -1603,9 +913,7 @@ fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
         .is_some_and(|(_, suffix)| suffix == staff_no)
 }
 
-
-
-fn authorize_bot_management(
+pub(crate) fn authorize_bot_management(
     caller_actor_id: Option<&str>,
     bot: &RegisteredBot,
 ) -> Result<(), BotUseCaseError> {
@@ -1639,7 +947,7 @@ fn authorize_bot_management(
     )))
 }
 
-fn to_usize(value: u64) -> usize {
+pub(crate) fn to_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 
