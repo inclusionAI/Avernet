@@ -4,6 +4,9 @@
 
 > 状态：DRAFT（讨论稿）。拟议决策：
 > [DR-2](decisions/0002-promotion-is-platform-owned.zh-CN.md)。
+> 范围：**谁**可以决定什么，以及围绕晋升的规则（门禁、风险等级、审批、沙箱、
+> 发布、预算、审计）。候选**如何**被衡量（测试套件、评分器、统计方法、判定）见
+> [03-verification.zh-CN.md](03-verification.zh-CN.md)。
 
 让改进者自己给自己打分的自改进，就是规模化的自欺。文献在这一点上结论一致
 （DGM 删除了自己的幻觉标记；自评分的 Hermes 循环过于宽松；由 LLM 编写的

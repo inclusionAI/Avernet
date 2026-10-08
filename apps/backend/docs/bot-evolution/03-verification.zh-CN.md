@@ -3,7 +3,11 @@
 > English version: [03-verification.md](03-verification.md)
 
 > 状态：DRAFT（讨论稿）。这是每个改进循环中的「验证与接纳（verify & accept）」
-> 环节。它由平台拥有（DR-2），是递归不可移动的锚点
+> 环节。
+> 范围：平台**如何**衡量一个候选是否更好（测试套件、评分器、统计方法、判定）。
+> 谁可以决定什么，以及围绕晋升的规则（门禁、风险等级、审批、沙箱、发布、预算、
+> 审计），见 [08-governance.zh-CN.md](08-governance.zh-CN.md)。
+> 它由平台拥有（DR-2），是递归不可移动的锚点
 > （[04-recursion.md §6](04-recursion.zh-CN.md#6-边界递归不可触碰的部分)）。
 
 ## 1. 角色

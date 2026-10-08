@@ -11,12 +11,17 @@
    ClawEvolve、其他团队的优化器以及平台自己的组合策略，都实现同一个端口。
 2. **只有一扇门通向外部。** 策略只能通过交给它的上下文接触平台。它不能晋升、
    不能读取封存的测试、不能触碰线上 Bot，也不能读取平台存储。因此无论策略是
-   什么，隔离与预算都在同一处强制执行。
+   什么，隔离与预算都在同一处强制执行。（**预算**是在 Bot 的绑定中设置的每次
+   运行的支出上限：以美元计的模型开销、挂钟时间以及评估 rollout 次数。每一次
+   模型调用和评估都通过 `ctx.budget` 计费，预算耗尽时运行即停止。）
 3. **策略提议；平台决定。** 策略提交候选。记录、验证、门禁和晋升始终归平台
    所有（DR-2）。
-4. **关于代码的事实被注册；关于 Bot 的选择被配置。** 一个策略版本需要什么是
-   固定的，并随该版本一起注册。一个 Bot 使用哪些策略、如何使用，是按 Bot 的
-   配置，随时可以变更。
+4. **关于代码的事实被注册；关于 Bot 的选择被配置。** 有些信息对一个策略版本
+   而言是成立的，无论哪个 Bot 使用它。例如，「ClawEvolve 2.0 驱动 OpenClaw
+   智能体并读取对话历史」。这类信息在该版本注册时记录一次（§3）。另一些信息是
+   针对某一个 Bot 的决定。例如，「bot_123 每晚运行 ClawEvolve，可以修改人设和
+   技能，预算为 20 美元」。这类信息存放在该 Bot 的绑定中（§5），所有者可以随时
+   修改，而无需触碰策略。
 5. **概念少，且只定义一次。** 下文每个术语只有一个定义；没有字段重复表达另一个
    字段（例如，引擎兼容性由 `needs` 推导，而不单独声明）。
 
@@ -42,9 +47,11 @@ class EvolutionStrategy(Protocol):
     async def run(self, ctx: StrategyContext) -> RunSummary: ...
 ```
 
-注册记录在某个版本注册时存入策略注册表（Strategy Registry，C3）。它是数据而
-不是方法，因为平台需要在不运行策略代码的情况下读取它（例如，在作业 worker 容器
-尚不存在时）：
+**注册**一个策略版本，就是告诉平台它的存在：它的代码在哪里运行（`runtime`），
+以及它需要哪些能力（`needs`）。只有已注册且通过一致性测试套件（§11）的版本才能
+绑定到 Bot。注册会产生下面的记录，存入策略注册表（Strategy Registry，C3）。它是
+数据而不是方法，因为平台需要在不运行策略代码的情况下读取它（例如，在作业 worker
+容器尚不存在时）：
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -78,8 +85,50 @@ class EvolutionStrategy(Protocol):
 | `agents@1` `{engines}` | `ctx.agents.run(engine, …)` | 在沙箱工作区中运行引擎智能体 | 引擎列表必须包含该 Bot 的引擎 |
 | `evaluate.train@1` | `ctx.evaluate.train(…)`、`ctx.evaluate.add_train_cases(…)` | 仅在**训练集**上进行平台评估，返回分数与评语；添加训练用例 | 验证集、封存集、回归集和安全集保持隐藏 |
 
-新增条目是一项经评审的平台变更。破坏性变更会发布新版本（`@2`），使已注册的策略
-继续可用。
+**`@1` 的含义。** `@` 后面的数字是*能力契约*（其方法和数据结构）的版本，而不是
+策略的版本。策略会声明它是针对哪个契约版本编写的。如果平台之后以不兼容的方式修改
+`experience.sessions`（例如采用不同的片段（episode）格式），它会发布
+`experience.sessions@2`，并继续向针对 `@1` 注册的策略提供 `@1`。新增条目或版本
+是一项经评审的平台变更。
+
+### 4.1 能力是什么样子的
+
+每个能力都是上下文上一个小型、带类型的 API。两个例子：
+
+```python
+# experience.sessions@1
+async def sessions(self, *, days: int, limit: int = 500,
+                   revision: str | None = None) -> list[Episode]: ...
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// One Episode returned by ctx.experience.sessions(days=7)
+{
+  "episode_id": "ep_91",
+  "revision_id": "sha256:a90b…",            // the genome revision the bot was running
+  "started_at": "2026-10-07T09:12:00Z",
+  "turns": [
+    {"role": "user", "text": "Can I get a refund for half of my order?"},
+    {"role": "assistant", "text": "…", "tool_calls": [{"name": "order_lookup", "args": {"id": "A17"}}]},
+    {"role": "tool", "name": "order_lookup", "result": "…"}
+  ],
+  "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed"},
+  "redactions": ["email", "phone"]           // personal data removed before the strategy sees it
+}
+```
+
+```python
+# agents@1 — registered as {"agents@1": {"engines": ["openclaw"]}}
+async def run(self, engine: str, *, agent: str, workspace: Workspace,
+              prompt: str, timeout_s: int = 1800) -> AgentResult: ...
+```
+
+`engines` 列出该策略可以驱动的引擎。使用任何其他引擎的调用都会被拒绝，绑定到
+引擎不在列表中的 Bot 也会被拒绝（§5）。例如，ClawEvolve 的调优步骤会调用
+`ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws, prompt=…)`。
+平台在沙箱 `ws` 内启动该智能体，而不是在线上 Bot 上，并返回它的对话记录和退出
+状态。它修改的文件留在 `ws` 中，直到策略把它们转成补丁。
 
 ## 5. 绑定：Bot 使用哪些策略
 
@@ -167,12 +216,19 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 | 层级 | 团队编写什么 | 何时使用 |
 | --- | --- | --- |
-| **黑盒** | 一个完整策略：`run(ctx)` 加上注册记录 | 已有自带内循环的引擎（ClawEvolve、GEPA 风格优化器、编码智能体循环）。这是默认的接入方式 |
-| **组合** | 为 `platform/composed` 编写一个步骤；`platform/composed` 是内置策略，其参数是由小步骤组成的流程（例如：分析 → 提议） | 复用现有策略的大部分，只替换其中一块（例如只换一个更好的失败分析器） |
+| **黑盒** | 一个完整策略：`run(ctx)`，并向平台注册（§3） | 已有自带内循环的引擎（ClawEvolve、GEPA 风格优化器、编码智能体循环）。这是默认的接入方式，也是第一轮迭代中唯一的层级 |
+| **组合** *（之后）* | 一个接入 `platform/composed` 的小步骤 | 复用现有策略的大部分，只替换其中一块 |
 
-两个层级在编排器看来完全相同。组合层的步骤类型（分析器、提议器等）只有在第二个
-团队确实需要替换某一块时才会定义（R19：有两个例子后再抽象）。在那之前，
-ClawEvolve 和其他策略都以黑盒方式接入。
+组合层是为那些拥有更好的*某一块*、而不是完整策略的团队准备的。`platform/composed`
+本身就是平台提供的一个普通策略。它的参数列出一系列小步骤，并依次调用每个步骤。
+例如，假设某个团队有一种更好的方法来找出失败的根因，但没有自己的调优循环。它不必
+编写完整的策略，只需编写一个「分析」步骤。然后，一个绑定会以如下参数运行
+`platform/composed`：
+`{"steps": ["team-x/root-cause-analyzer@1", "clawevolve/tune@2"]}`，从而复用
+ClawEvolve 的调优。对编排器而言，这只是另一个策略。
+
+步骤类型（分析、提议等）只有在第二个团队确实需要替换某一块时才会定义（R19：有
+两个例子后再抽象）。在那之前，ClawEvolve 和其他策略都以黑盒方式接入。
 
 ## 9. 运行时
 
