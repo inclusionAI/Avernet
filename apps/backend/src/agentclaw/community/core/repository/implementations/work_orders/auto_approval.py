@@ -113,11 +113,86 @@ class _AutoApprovalWorkOrderRepository:
             )
 
     def apply_auto_skill_editor_request(
-        self, *, work_order_id: int, env: str
+        self, *, work_order_id: int, source_event_type: str, env: str
     ) -> None:
-        self._skill_editor.apply_auto_skill_editor_request(
-            work_order_id=work_order_id, env=env
-        )
+        """Atomically grant Skill access and complete its AUTO work order."""
+        with self._db.transactional_orm_session() as db:
+            order = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderNotFoundError("AUTO Skill work order not found")
+            if (
+                order.biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
+                or order.approval_mode != WorkOrderApprovalMode.AUTO.value
+            ):
+                raise WorkOrderAccessDeniedError(
+                    "work order is not an AUTO Skill request"
+                )
+            if order.status != WorkOrderStatus.PROCESSING.value:
+                raise WorkOrderAlreadyProcessedError(
+                    "AUTO Skill work order is not processing"
+                )
+
+            self._skill_editor.apply_auto_skill_editor_request(
+                session=db, work_order_id=work_order_id, env=env
+            )
+
+            now = db.execute(select(func.now())).scalar_one()
+            updated = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.env == env,
+                    self._WorkOrder.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
+                    self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
+                )
+                .update(
+                    {
+                        self._WorkOrder.status: WorkOrderStatus.APPROVED.value,
+                        self._WorkOrder.reviewer_user_id: SYSTEM_REVIEWER_USER_ID,
+                        self._WorkOrder.review_remark: None,
+                        self._WorkOrder.reviewed_at: now,
+                        self._WorkOrder.gmt_modified: now,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated != 1:
+                raise WorkOrderAlreadyProcessedError(
+                    "AUTO Skill work order is not processing"
+                )
+
+            event_type = reviewed_event_type_for(
+                source_event_type=source_event_type,
+                biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            )
+            db.add(
+                self._Notification(
+                    work_order_id=work_order_id,
+                    recipient_user_id=order.applicant_user_id,
+                    notification_category=NotificationCategory.NOTICE.value,
+                    event_type=event_type,
+                    biz_type=order.biz_type,
+                    biz_id=order.biz_id,
+                    title=notification_title_for(event_type, "自动审批已通过"),
+                    content=json.dumps(
+                        {
+                            "text": "自动审批已通过。",
+                            "status": WorkOrderStatus.APPROVED.value,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    env=env,
+                )
+            )
 
     def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None:
         self._bot_editor.apply_auto_bot_editor_request(work_order_id=work_order_id, env=env)

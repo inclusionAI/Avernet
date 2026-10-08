@@ -91,7 +91,9 @@ class WorkOrderRepositoryProtocol(Protocol):
     def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None: ...
 
     @abstractmethod
-    def apply_auto_skill_editor_request(self, *, work_order_id: int, env: str) -> None: ...
+    def apply_auto_skill_editor_request(
+        self, *, work_order_id: int, source_event_type: str, env: str
+    ) -> None: ...
 
     @abstractmethod
     def create_auto_result_notifications(

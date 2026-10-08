@@ -253,7 +253,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 env=get_current_env(),
             )
             try:
-                if self._decision_callbacks.requires_callback(event_type):
+                if (
+                    biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
+                    and self._decision_callbacks.requires_callback(event_type)
+                ):
                     context = self._repository.get_approval_context(
                         work_order_id=result.work_order_id,
                         reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
@@ -284,15 +287,11 @@ class WorkOrderService(WorkOrderServiceProtocol):
                             bot_id, owner_id, get_current_env()
                         )
                 elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
-                    # Skill owns the atomic grant + WorkOrder approval + applicant notice.
-                    # Keep the returned result as evidence that the Skill transaction completed.
-                    skill_review = self._skill_collaborator_approval_handler.process_auto(
-                        work_order_id=result.work_order_id
+                    self._repository.apply_auto_skill_editor_request(
+                        work_order_id=result.work_order_id,
+                        source_event_type=event_type,
+                        env=get_current_env(),
                     )
-                    if skill_review.status is not WorkOrderStatus.APPROVED:
-                        raise WorkOrderInvalidEventError(
-                            "AUTO Skill handler did not approve the work order"
-                        )
                 elif biz_type == WorkOrderBizType.BOT_FRIEND.value:
                     if not self._decision_callbacks.requires_callback(event_type):
                         raise WorkOrderInvalidEventError(
@@ -324,16 +323,16 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     work_order_id=result.work_order_id,
                     env=get_current_env(),
                 )
-            self._repository.create_auto_result_notifications(
-                work_order_id=result.work_order_id,
-                recipient_user_ids=approvers,
-                biz_type=biz_type,
-                biz_id=biz_id,
-                source_event_type=event_type,
-                status=WorkOrderStatus.APPROVED,
-                review_remark=None,
-                env=get_current_env(),
-            )
+                self._repository.create_auto_result_notifications(
+                    work_order_id=result.work_order_id,
+                    recipient_user_ids=approvers,
+                    biz_type=biz_type,
+                    biz_id=biz_id,
+                    source_event_type=event_type,
+                    status=WorkOrderStatus.APPROVED,
+                    review_remark=None,
+                    env=get_current_env(),
+                )
             result = result.model_copy(update={"status": WorkOrderEventStatus.APPROVED})
         return result
 
