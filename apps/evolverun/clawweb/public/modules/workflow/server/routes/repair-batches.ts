@@ -81,6 +81,9 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
     if (actor) res.json({ ...await service.candidates(workflowId, { state: state as RepairInboxFilter,
       page: positive(req.query.page, 'page', 1), pageSize: positive(req.query.pageSize, 'pageSize', 20, 200),
+      nodeId: req.query.nodeId === undefined ? undefined : text(req.query.nodeId, 'nodeId'),
+      failureMode: req.query.failureMode === undefined ? undefined : text(req.query.failureMode, 'failureMode'),
+      signature: req.query.signature === undefined ? undefined : text(req.query.signature, 'signature'),
       includeHistorical: boolean(req.query.includeHistorical, 'includeHistorical') }), canEdit: actor.canEdit });
   }));
   router.get('/items/:itemId', handle(async (req, res) => {

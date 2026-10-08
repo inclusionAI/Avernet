@@ -107,6 +107,14 @@ describe("evolve knowledge endpoints", () => {
     const response = await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf`);
     expect(response.status).toBe(200);
     expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
+    const light = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&view=summary`)).json() as { groups: Array<{ presentation: string; sources: Array<Record<string, unknown>> }> };
+    expect(light.groups[0].presentation).toBe('summary');
+    expect(light.groups[0].sources[0].reasoning).toBe('');
+    expect(light.groups[0].sources[0]).not.toHaveProperty('proposal');
+    const detail = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=timeout`)).json() as { groups: Array<{ sources: Array<{ proposal: { summary: string } }> }> };
+    expect(detail.groups[0].sources[0].proposal.summary).toMatch(/timeout/);
+    const missing = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=missing`)).json() as { groups: unknown[] };
+    expect(missing.groups).toHaveLength(0);
     expect((await fetch(`${baseUrl}/api/evolve/issue-groups`)).status).toBe(400);
   });
   it('bounds repair sources by recent activity and skips one incompatible historical analysis', async () => {

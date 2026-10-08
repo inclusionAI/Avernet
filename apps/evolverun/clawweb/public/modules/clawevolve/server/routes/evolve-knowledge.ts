@@ -73,7 +73,16 @@ export function createEvolveKnowledgeRouter(
     if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view')) return;
     try {
       // Browser eligibility uses supported compaction; Bot preparation still negotiates its version.
-      res.json({ groups: await new IssueAggregationRepository(_db).list(workflowId, ISSUE_AGGREGATION_INPUT_V2) });
+      const signature = textOrNull(req.query.signature);
+      const groups = await new IssueAggregationRepository(_db).list(workflowId, ISSUE_AGGREGATION_INPUT_V2, signature ?? undefined);
+      // Opt-in presentation keeps full-source consumers unchanged.
+      res.json({ groups: req.query.view === 'summary' ? groups.map(group => ({ ...group,
+        presentation: 'summary',
+        sources: group.sources.map(({ proposal: _proposal, reasoning: _reasoning, evidenceEventIds: _evidence, ...source }) => ({
+          ...source, reasoning: '', evidenceEventIds: [],
+        })), summarySources: [],
+        summary: group.summary ? { summary: group.summary.summary.slice(0, 240), causes: [], unknowns: [] } : null,
+      })) : groups });
     } catch {
       res.status(500).json({ error: 'issue_groups_unavailable' });
     }

@@ -78,13 +78,14 @@ export class IssueAggregationRepository {
     return buildIssueGroups(workflowId, [...analyses, ...legacyByRun.values()]);
   }
 
-  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1): Promise<PresentedIssueGroup[]> {
+  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1, signature?: string): Promise<PresentedIssueGroup[]> {
     // Do not transfer every historical frozen input/result just to locate the displayed revision.
     // Multi-path JSON_EXTRACT works in SQLite and MySQL/OceanBase without dialect-specific unquoting.
-    const [groups, rows] = await Promise.all([this.groups(workflowId), this.db.query<SnapshotIndexRow>(
+    const [allGroups, rows] = await Promise.all([this.groups(workflowId), this.db.query<SnapshotIndexRow>(
       `SELECT analysis_id, status, requested_at_ms,
          JSON_EXTRACT(scope_json, '$.input.signature', '$.input.inputDigest') AS input_key
        FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND scope_type = ? ORDER BY id DESC`, [workflowId, SCOPE])]);
+    const groups = signature ? allGroups.filter(group => group.signature === signature) : allGroups;
     const selected = new Map(groups.map(group => [group.signature, {
       digest: group.inputDigest, current: undefined as SnapshotIndexRow | undefined, completed: undefined as SnapshotIndexRow | undefined,
     }]));

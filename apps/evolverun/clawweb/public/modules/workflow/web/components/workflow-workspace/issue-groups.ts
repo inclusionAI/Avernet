@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import type { EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client';
 import { readOnlyJson } from '../../api/read-only-json';
 
 export type IssueGroupView = {
+  presentation?: 'summary';
   workflowId: string; signature: string; inputDigest: string; flowIds: string[];
   aggregationStatus: string; aggregationId: string | null; stale: boolean;
   aggregationInputVersion?: 'workflow-issue-summary-input/v1' | 'workflow-issue-summary-input/v2' | null;
@@ -17,11 +19,34 @@ export type IssueGroupView = {
 
 export function useIssueGroups(workflowId: string) {
   return useQuery({ queryKey: ['evolve-issue-groups', workflowId],
-    queryFn: ({ signal }) => readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?workflowId=${encodeURIComponent(workflowId)}`, signal),
+    queryFn: ({ signal }) => readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?workflowId=${encodeURIComponent(workflowId)}&view=summary`, signal),
     retry: false,
     enabled: !!workflowId,
     refetchInterval: query => query.state.data?.groups.some(group => group.aggregationStatus === 'queued') ? 15_000 : 60_000,
   });
+}
+
+export function useIssueGroupDetail(group: IssueGroupView | undefined) {
+  const [data, setData] = useState<IssueGroupView>();
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const compact = group?.presentation === 'summary';
+  useEffect(() => {
+    if (!compact || !group) return;
+    const controller = new AbortController();
+    setLoading(true); setData(undefined); setError('');
+    const params = new URLSearchParams({ workflowId: group.workflowId, signature: group.signature });
+    readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, controller.signal)
+      .then(result => { if (!controller.signal.aborted) {
+        const detail = result.groups.find(value => value.signature === group.signature);
+        if (!detail) throw new Error('该问题已更新，请刷新问题列表');
+        setData(detail);
+      } }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [compact, group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus, refresh]);
+  return { group: compact ? data : group, loading: compact && (loading || !data && !error), error: compact ? error : '', retry: () => setRefresh(value => value + 1) };
 }
 
 export function groupDiagnoses(group: IssueGroupView): EvolveRunDiagnosis[] {

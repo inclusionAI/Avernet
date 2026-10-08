@@ -14,6 +14,12 @@ const readers = (overrides: Partial<RepairSourceReaders> = {}): RepairSourceRead
 });
 
 describe('trusted workflow repair source adapter', () => {
+  it('retains group filter metadata for legacy suggestions without attaching uncited diagnoses', async () => {
+    const result = await createRepairSourcePort(readers({ suggestions: async () => [{ id: 9, workflow_id: 'wf',
+      failure_signature: 'output-contract|llm', fix_spec: 'Legacy suggestion', status: 'pending' }] })).load(db, 'wf', 'summary');
+    const legacy = result.find(row => row.item.instruction === 'Legacy suggestion')!;
+    expect(legacy.item.context).toMatchObject({ nodeId: 'llm', failureMode: 'output-contract', diagnoses: [] });
+  });
   it('bounds source reads to the active window unless history is requested', async () => {
     const groups = vi.fn(readers().groups);
     const suggestions = vi.fn(readers().suggestions);
