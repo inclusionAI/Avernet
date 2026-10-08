@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 fn admission(id: &str, text: serde_json::Value, kind: DeliveryType) -> AdmitMessageDeliveries {
     AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: id.into(), flow_kind: DeliveryFlowKind::Group, now_ms: 1,
         expire_at_ms: None, event: None,

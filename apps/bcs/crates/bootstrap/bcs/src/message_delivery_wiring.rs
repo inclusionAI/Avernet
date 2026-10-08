@@ -379,6 +379,7 @@ mod tests {
         let seed = ManagedMessageDelivery::new(repo.clone());
         let row = seed
             .admit(AdmitMessageDeliveries {
+            operation: bcs_service_api::types::system_lane_operation("message-flow-test-seed"),
                 display_message: None,
                 message_id: "before-crash".into(),
                 flow_kind: DeliveryFlowKind::Group,

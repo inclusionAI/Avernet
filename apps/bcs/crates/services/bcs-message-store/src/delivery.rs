@@ -142,6 +142,7 @@ const COLS: &[&str] = &[
     "abort_started_at_ms",
     "cancel_deadline_at_ms",
     "last_error_code",
+    "operation_id",
     "semantic_projection_json",
     "transport_context_json",
     "downstream_run_id",
@@ -162,6 +163,15 @@ pub(crate) fn unfinished(d: &PersistedMessageDelivery) -> bool {
 pub(crate) fn validate_admission(
     command: &AdmitMessageDeliveries,
 ) -> Result<(), MessageDeliveryRepoError> {
+    // §12.5 required context: a NEW command arriving without its operation
+    // context stops fail-closed here — never a forged System downgrade.
+    // Pre-cutover history rows carry NULL operation ids and stay legal on
+    // reads; this gate applies to newly admitted commands only.
+    if command.operation.operation_id.trim().is_empty() {
+        return Err(MessageDeliveryRepoError::Invalid(
+            "message admission is missing its required BotOperationContext (empty operation id)".into(),
+        ));
+    }
     crate::mysql::serialize_visibility(&command.message).map_err(|e| MessageDeliveryRepoError::Invalid(e.to_string()))?;
     if let Some(display) = &command.display_message {
         let m = &display.message;
@@ -348,6 +358,7 @@ pub(crate) fn plan_admission(
             abort_started_at_ms: None,
             cancel_deadline_at_ms: None,
             last_error_code: target.rejection.map(|r| r.code().to_owned()),
+            operation_id: Some(command.operation.operation_id.clone()),
             semantic_projection_json: target.semantic_projection_json.clone(),
             transport_context_json: None,
             context_selection_json: None,
@@ -719,6 +730,14 @@ impl MySqlMessageStore {
             }
             rows.extend(deliveries.clone());
             staged_messages.push(message.clone());
+            // §12.5: one admitted identity snapshot per real admission joins
+            // the SAME transaction as the message/delivery rows (idempotent
+            // duplicates above never reach here, so no phantom events).
+            steps.push(DbTransactionStep::Execute(
+                crate::action_audit::action_audit_insert(&crate::action_audit::admission_audit_record(
+                    &command.operation, &self.env, command.message_id.as_str(),
+                )),
+            ));
             if let Some(event) = command.event.clone().or_else(|| command.display_message.as_ref().and_then(|d| d.event.clone())) { events.push(event); }
             admitted.push(DeliveryAdmissionResult {
                 message,

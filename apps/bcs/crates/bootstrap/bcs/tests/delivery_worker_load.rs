@@ -151,6 +151,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
                 let id = format!("message{bot:03}-{session:03}-{n:03}");
                 let now = chrono::Utc::now().timestamp_millis();
                 service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
                     display_message: None,
                     message_id: id.clone(), flow_kind: DeliveryFlowKind::Group, now_ms: now,
                     expire_at_ms: None, event: None,

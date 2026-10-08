@@ -53,6 +53,7 @@ async fn cancel_latest_queued_selects_the_calling_humans_latest_im_message() {
     ] {
         service
             .admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
                 display_message: None,
                 message_id: id.into(),
                 flow_kind: DeliveryFlowKind::Group,
@@ -170,6 +171,7 @@ async fn queue_status_respects_participant_message_audience() {
         ("directed", MessageAudience::directed(["human_1"]).unwrap(), true),
     ] {
         service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None, message_id: id.into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
             now_ms: 100, expire_at_ms: None, event: None,
             message: NewMessage { group_id: "group-1".into(), session_id: "group-1:visibility".into(),
@@ -393,6 +395,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
     assert!(!projection.to_string().contains("请查看文件"));
     let row = service
         .admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None,
             message_id: "queued-source".into(),
             flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,

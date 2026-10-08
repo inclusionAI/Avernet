@@ -29,6 +29,12 @@ pub struct MemoryChatRunRepo {
 struct Inner {
     runs: HashMap<String, ChatRunRecord>,
     cap: usize,
+    /// §12.5 ordinary-business audit lane: appended under the SAME write
+    /// lock that inserts the run row, so the business row and its audit
+    /// publish together or not at all.
+    action_audits: Vec<bcs_service_api::types::BotActionAuditRecord>,
+    /// Test lever: the NEXT create's audit append fails (whole create aborts).
+    audit_failure: bool,
 }
 
 fn now_ms() -> u64 {
@@ -72,11 +78,24 @@ impl MemoryChatRunRepo {
         Self::with_capacity(100_000)
     }
 
+    /// Test lever: the NEXT create's audit append fails, aborting the whole
+    /// create (business + audit all-or-nothing).
+    pub async fn arm_action_audit_write_failure(&self) {
+        self.inner.write().await.audit_failure = true;
+    }
+
+    /// §12.5 test read: the published run-creation audits.
+    pub async fn action_audit_records(&self) -> Vec<bcs_service_api::types::BotActionAuditRecord> {
+        self.inner.read().await.action_audits.clone()
+    }
+
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             inner: Arc::new(RwLock::new(Inner {
                 runs: HashMap::new(),
                 cap,
+                action_audits: Vec::new(),
+                audit_failure: false,
             })),
         }
     }
@@ -86,6 +105,16 @@ impl MemoryChatRunRepo {
 impl ChatRunRepoPort for MemoryChatRunRepo {
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         let mut guard = self.inner.write().await;
+        // §12.5 required context of the new create command; a pre-cutover
+        // history row read back later keeps None. Missing context fails
+        // closed — never a forged System downgrade.
+        let operation = record.operation.clone().ok_or_else(|| {
+            ChatRunRepoError::Backend(
+                "chat run create requires its BotOperationContext: refusing to \
+                 record the run without an operator"
+                    .to_string(),
+            )
+        })?;
         if guard.cap > 0 && guard.runs.len() >= guard.cap {
             return Err(ChatRunRepoError::Capacity {
                 max_entries: guard.cap,
@@ -93,6 +122,32 @@ impl ChatRunRepoPort for MemoryChatRunRepo {
         }
         if guard.runs.contains_key(&record.run_id) {
             return Err(ChatRunRepoError::DuplicateRunId(record.run_id.clone()));
+        }
+        if guard.audit_failure {
+            guard.audit_failure = false;
+            return Err(ChatRunRepoError::Backend(
+                "test-injected chat run audit write failure".into(),
+            ));
+        }
+        // Same critical section as the business insert: audit append and run
+        // row publish together; same-slot retries are idempotent.
+        let audit = crate::action_audit::run_creation_audit_record(
+            &operation,
+            "local",
+            record.run_id.as_str(),
+        );
+        if let Some(existing) = guard
+            .action_audits
+            .iter()
+            .find(|existing| existing.same_slot(&audit))
+        {
+            if existing.content_conflicts(&audit) {
+                return Err(ChatRunRepoError::Backend(
+                    "chat run audit slot content conflict".into(),
+                ));
+            }
+        } else {
+            guard.action_audits.push(audit);
         }
         guard.runs.insert(record.run_id.clone(), record);
         Ok(())

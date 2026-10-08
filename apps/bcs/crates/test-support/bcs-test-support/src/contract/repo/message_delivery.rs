@@ -5,6 +5,7 @@ use bcs_service_api::port::repo::message_delivery::*;
 
 fn command(id: &str, targets: &[(&str, DeliveryType)]) -> AdmitMessageDeliveries {
     AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-test-seed"),
         display_message: None,
         message_id: id.into(),
         flow_kind: DeliveryFlowKind::Group,

@@ -1168,66 +1168,11 @@ async fn bot_status_route_accepts_payload_without_retaining_it() {
     assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
 }
 
-#[tokio::test]
-async fn my_bots_route_uses_mock_user_identity_and_creator_filter() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for bot_id in ["bot-owned", "bot-other"] {
-        registry
-            .register(
-                bot_id.to_string(),
-                BotCapabilities {
-                    name: Some(bot_id.to_string()),
-                    summary: Some("Test bot".to_string()),
-                    skills: vec![Skill::new("ops")],
-                    visibility: "protected".to_string(),
-                    ..BotCapabilities::default()
-                },
-            )
-            .await
-            .unwrap();
-    }
-    registry
-        .save_created_by("bot-owned", "alice", true)
-        .await
-        .unwrap();
-    registry
-        .save_created_by("bot-other", "bob", true)
-        .await
-        .unwrap();
-    registry
-        .register_streaming_connection("bot-owned".to_string())
-        .await
-        .unwrap();
-    let services = services_builder_with_bot_use_cases(registry).build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/my?offset=0&limit=10")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 1);
-    assert_eq!(json["items"][0]["bot_uuid"], "bot-owned");
-    assert_eq!(json["items"][0]["created_by"], "alice");
-    assert_eq!(json["items"][0]["visibility"], "protected");
-    assert_eq!(
-        json["items"][0]["capabilities"]["skills"],
-        serde_json::json!(["ops"])
-    );
-    assert_eq!(json["items"][0]["dynamic_status"]["status"], "active");
-}
+// Plan Task 12: the former `my_bots_route_uses_mock_user_identity_and_
+// creator_filter` test pinned the retired creator-only mine semantics. Its
+// successor coverage lives in `tests/current_authority.rs`, which drives
+// the REAL authority union over `/bots/my` (mine labels, `active_only`
+// filter and the [active-first, id ASC] sort on a live authority store).
 
 #[tokio::test]
 async fn me_route_returns_mock_user_identity() {

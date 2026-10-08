@@ -356,14 +356,78 @@ impl BotQueryService for Bot {
         &self,
         command: bcs_service_api::MyBotsCommand,
     ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let bots = self.registry.list_bots_by_creator(&command.staff_no).await;
-        self.my_bot_page_from_registered(
-            bots,
-            command.offset,
-            command.limit,
-            command.active_only,
-        )
+        // Plan Task 12 (spec §7 mine projection + §12.4 cutover): the legacy
+        // `/bots/my` lane serves the SAME mine union the v1 facade serves —
+        // physical owner ∪ manager edges (deduplicated, `owner` label wins)
+        // plus the caller's own Human self row — while keeping ITS legacy
+        // client contract: the `active_only` filter and the active-first,
+        // id-ascending sort and the exact `/bots/my` item shape (now with
+        // the `access_relation` label). `list_bots_by_creator` stays a
+        // literal creation-source query and is no longer the permission
+        // source: a bot the user merely CREATED (and later lost) does not
+        // appear; a bot they currently MANAGE does.
+        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InvalidOperation {
+                message: "Bot is missing BotControlPlaneCoreService wiring; \
+                 list_my_bots requires .with_control_plane(...)"
+                    .to_string(),
+                request_id: None,
+            })
+        })?;
+        let views = control_plane
+            .list_controllable(bcs_service_api::BotControllableQuery {
+                user_id: command.staff_no.clone(),
+                env: bcs_config::resolve_env_str(),
+                kind: None,
+                name: None,
+                status: None,
+            })
             .await
+            .map_err(|error| BotUseCaseError::Service(error))?;
+
+        // Same legacy reachability semantics: one batched runtime-activity
+        // read, then filter/sort/paginate like the old lane.
+        let bot_ids = views.iter().map(|view| view.bot.record.bot_id.clone()).collect::<Vec<_>>();
+        let active_bot_ids = self
+            .registry
+            .list_runtime_active_bot_ids(&bot_ids)
+            .await
+            .into_iter()
+            .collect::<HashSet<String>>();
+        let mut entries: Vec<(bool, String, BotQueryEntry)> = Vec::with_capacity(views.len());
+        for view in views {
+            let access_relation = match view.access_relation {
+                bcs_service_api::types::BotAccessRelation::Owner => "owner".to_string(),
+                bcs_service_api::types::BotAccessRelation::Manager => "manager".to_string(),
+            };
+            let record = &view.bot.record;
+            let bot_uuid = record.bot_id.clone();
+            let is_active = active_bot_ids.contains(&record.bot_id);
+            if command.active_only && !is_active {
+                continue;
+            }
+            entries.push((
+                is_active,
+                bot_uuid,
+                Self::record_to_my_query_entry(record.clone(), is_active, access_relation),
+            ));
+        }
+        // Preserve the legacy ordering exactly: active entries first, then
+        // ascending bot uuid.
+        entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let total = entries.len() as u64;
+        let items = entries
+            .into_iter()
+            .skip(to_usize(command.offset))
+            .take(to_usize(command.limit))
+            .map(|(_, _, entry)| entry)
+            .collect();
+        Ok(BotPagedListResult {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
     }
 
     async fn query_bots_by_ids(
@@ -496,6 +560,7 @@ impl Bot {
                 )
                 .to_string(),
                 is_friend: viewer_actor_id.map(|_| candidate.is_friend),
+                access_relation: None,
             });
         }
 
@@ -1107,69 +1172,42 @@ impl Bot {
         })
     }
 
-    async fn my_bot_page_from_registered(
-        &self,
-        bots: Vec<RegisteredBot>,
-        offset: u64,
-        limit: u64,
-        active_only: bool,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let mut entries = Vec::with_capacity(bots.len());
-        let bot_uuids = bots
-            .iter()
-            .map(|bot| bot.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let active_bot_ids = self
-            .registry
-            .list_runtime_active_bot_ids(&bot_uuids)
-            .await
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        for bot in bots {
-            let is_active = active_bot_ids.contains(&bot.bot_uuid);
-            if active_only && !is_active {
-                continue;
-            }
-            let bot_uuid = bot.bot_uuid.clone();
-            entries.push((is_active, bot_uuid, Self::bot_to_my_query_entry(bot, is_active)));
-        }
-        entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        let total = entries.len() as u64;
-        let items = entries
-            .into_iter()
-            .skip(to_usize(offset))
-            .take(to_usize(limit))
-            .map(|(_, _, entry)| entry)
-            .collect();
-
-        Ok(BotPagedListResult {
-            items,
-            total,
-            offset,
-            limit,
-        })
-    }
-
-    fn bot_to_my_query_entry(bot: RegisteredBot, is_active: bool) -> BotQueryEntry {
-        let visibility = bot.capabilities.visibility.clone();
+    /// Project one controllable control-plane record into the legacy
+    /// `/bots/my` item shape, carrying the mine access-relation label.
+    fn record_to_my_query_entry(
+        record: BotControlPlaneRecord,
+        is_active: bool,
+        access_relation: String,
+    ) -> BotQueryEntry {
+        let capabilities = BotCapabilities {
+            name: (!record.name.is_empty()).then(|| record.name.clone()),
+            summary: (!record.descriptor.summary.is_empty())
+                .then(|| record.descriptor.summary.clone()),
+            domains: record.descriptor.domains.clone(),
+            skills: record.descriptor.skills.clone(),
+            scopes: record.descriptor.scopes.clone(),
+            ..BotCapabilities::default()
+        };
+        let visibility = record.visibility.clone();
         BotQueryEntry {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
+            bot_uuid: record.bot_id,
+            capabilities,
             visibility,
-            status: bot.status,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
+            status: record.status,
+            actor_kind: record.kind,
+            env: Some(record.env),
             dynamic_status: DynamicStatusResponse {
                 status: if is_active { "active" } else { "offline" }.to_string(),
             },
-            created_by: bot.created_by,
+            created_by: record.created_by,
             user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-            friend_ext: serde_json::Map::new(),
+            friend_ext: record.friend_ext,
             friend_check_in_strategy: friend_check_in_strategy_to_wire(
                 FriendCheckInStrategy::Approval,
             )
             .to_string(),
             is_friend: None,
+            access_relation: Some(access_relation),
         }
     }
 
@@ -1192,6 +1230,7 @@ impl Bot {
             )
             .to_string(),
             is_friend: None,
+            access_relation: None,
         }
     }
 

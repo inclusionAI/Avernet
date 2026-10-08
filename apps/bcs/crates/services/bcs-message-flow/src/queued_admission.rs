@@ -346,6 +346,12 @@ pub(crate) async fn commit_routed_reply(
         Some(bcs_service_api::port::repo::message_delivery::DeliveryDisplayMessage { message_id: id, message: display, event })
     } else { None };
     let record = if successful || failed { None } else { prepare_message_event(flow, &message_id, &message)? };
+    let reply_operation = bcs_service_api::types::BotOperationContext {
+        operation_id: format!("group-routed-reply:{message_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: message.sender_id.clone(),
+        },
+    };
     let reply = AdmitMessageDeliveries {
         display_message,
         message_id,
@@ -356,6 +362,10 @@ pub(crate) async fn commit_routed_reply(
         expire_at_ms: policy.as_ref().map_or(flow.delivery_queue_ttl_ms, |p| p.policy.queue_ttl_ms.map(|v| v as i64))
             .map(|ttl| now_ms.saturating_add(ttl)),
         event: record,
+        // §12.5: the reply is the DRIVER bot's own routed answer — the
+        // operator is that verified Bot; the awaited external send follows
+        // the committed admitted snapshot.
+        operation: reply_operation,
     };
     drop(build_timing);
     let reply_message_id = reply.message_id.clone();
@@ -540,6 +550,12 @@ pub async fn prepare_group_admission(
         run_id: String::new(),
     };
     let event = prepare_message_event(flow, &message_id, &message)?;
+    let admission_operation = bcs_service_api::types::BotOperationContext {
+        operation_id: format!("group-persisted-send:{message_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: message.sender_id.clone(),
+        },
+    };
     Ok(Some(AdmitMessageDeliveries {
         display_message: None,
         message_id,
@@ -550,6 +566,8 @@ pub async fn prepare_group_admission(
         expire_at_ms: policy.as_ref().map_or(flow.delivery_queue_ttl_ms, |p| p.policy.queue_ttl_ms.map(|v| v as i64))
             .map(|ttl| now_ms.saturating_add(ttl)),
         event,
+        // §12.5: driver bot's persisted message admission (verified Bot).
+        operation: admission_operation,
     }))
 }
 

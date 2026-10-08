@@ -608,17 +608,28 @@ mod tests {
     use bcs_service_api::ChatResponseMode;
 
     fn record(run_id: &str) -> ChatRunRecord {
-        ChatRunRecord::new(
-            run_id.to_string(),
-            "bot".to_string(),
-            "from".to_string(),
-            "sk".to_string(),
-            0,
-            u64::MAX,
-            Some("http-chat-async".to_string()),
-            ChatResponseMode::Full,
-            ChatRunCompletionPolicy::WaitForFinal,
-        )
+        {
+            let mut record = ChatRunRecord::new(
+                run_id.to_string(),
+                "bot".to_string(),
+                "from".to_string(),
+                "sk".to_string(),
+                0,
+                u64::MAX,
+                Some("http-chat-async".to_string()),
+                ChatResponseMode::Full,
+                ChatRunCompletionPolicy::WaitForFinal,
+            );
+            // §12.5: every new create command carries its operation context
+            // (verified Bot lane in these notifier fixtures).
+            record.operation = Some(bcs_service_api::types::BotOperationContext {
+                operation_id: format!("run-store-tests:{run_id}"),
+                actor: bcs_service_api::types::BotOperationActor::Bot {
+                    bot_id: "from".to_string(),
+                },
+            });
+            record
+        }
     }
 
     #[test]

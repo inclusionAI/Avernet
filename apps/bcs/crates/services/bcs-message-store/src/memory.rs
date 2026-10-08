@@ -24,6 +24,13 @@ pub struct MemoryMessageRepo {
     sessions: RwLock<HashMap<String, SessionMessages>>,
     event_store: Option<Arc<MemoryEventStore>>,
     env: String,
+    /// §12.5 ordinary-business audit lane of the admission path: appended
+    /// in the SAME critical section that publishes the staged deliveries,
+    /// so the business state and its audit publish together or not at all.
+    action_audits: std::sync::Mutex<Vec<bcs_service_api::types::BotActionAuditRecord>>,
+    /// Test lever: fail the NEXT admission's audit append (rolls the whole
+    /// staged admission back) — proves business/audit all-or-nothing.
+    admission_audit_failure: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -110,6 +117,18 @@ impl MemoryMessageRepo {
     pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
         self.event_store = Some(event_store);
         self
+    }
+
+    /// Test lever: the NEXT admission's audit append fails, aborting the
+    /// whole staged admission (business + audit all-or-nothing).
+    pub fn arm_admission_audit_write_failure(&self) {
+        self.admission_audit_failure
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// §12.5 test read: the admission audits published so far.
+    pub fn admission_audit_records(&self) -> Vec<bcs_service_api::types::BotActionAuditRecord> {
+        self.action_audits.lock().unwrap().clone()
     }
 }
 
@@ -673,6 +692,7 @@ impl MemoryMessageRepo {
         super::delivery::apply_changes(&mut rows, &changes)?;
         let mut result = Vec::new();
         let mut events = Vec::new();
+        let mut audit_records = Vec::new();
         for command in admission {
             super::delivery::validate_admission(&command)?;
             let entry = staged.entry(command.message.session_id.clone()).or_default();
@@ -706,6 +726,31 @@ impl MemoryMessageRepo {
             entry.messages.push(message.clone());
             if let Some(event) = command.event.clone().or_else(|| command.display_message.as_ref().and_then(|d| d.event.clone())) { events.push(event); }
             result.push(DeliveryAdmissionResult { message, deliveries, duplicate: false });
+            audit_records.push(crate::action_audit::admission_audit_record(
+                &command.operation, env, command.message_id.as_str(),
+            ));
+        }
+        // §12.5 memory twin: append the admitted identity snapshot of every
+        // real admission in the SAME critical section; an armed failure (or
+        // any conflict) aborts the whole staged set — no partial publish.
+        {
+            let mut audits = self.action_audits.lock().unwrap();
+            if self.admission_audit_failure.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return Err(Error::Storage(
+                    "test-injected admission audit write failure".into(),
+                ));
+            }
+            for record in audit_records.drain(..) {
+                if let Some(existing) = audits.iter().find(|existing: &&bcs_service_api::types::BotActionAuditRecord| existing.same_slot(&record)) {
+                    if existing.content_conflicts(&record) {
+                        return Err(Error::Storage(
+                            "admission audit slot content conflict".into(),
+                        ));
+                    }
+                    continue;
+                }
+                audits.push(record);
+            }
         }
         for admission in &mut result {
             for delivery in &mut admission.deliveries {

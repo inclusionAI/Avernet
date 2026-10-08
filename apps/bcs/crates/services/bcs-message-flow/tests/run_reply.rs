@@ -70,7 +70,8 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
             .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]))
             .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:retry", "group-1", group.participants)))));
         flow.retain_terminal_events();
-        let input = service.admit(AdmitMessageDeliveries { display_message: None, message_id: "input".into(),
+        let input = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"), display_message: None, message_id: "input".into(),
             message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:retry".into(), sender_id: "human".into(),
                 sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some("input".into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
@@ -148,7 +149,8 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
         (3, "", "工具前工具后", "工具后"),
         (4, "", "工具前", ""),
     ] {
-        let source = service.admit(AdmitMessageDeliveries { display_message: None,
+        let source = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"), display_message: None,
             message_id: format!("input-{index}"), message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:reply".into(),
                 sender_id: "human".into(), sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some(format!("input-{index}")), owner_bot_id: None, created_at: 1, run_id: String::new() },

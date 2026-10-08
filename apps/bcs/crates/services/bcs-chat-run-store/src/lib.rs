@@ -12,6 +12,7 @@
 //! `docs/superpowers/specs/2026-08-27-bcs-run-governance-design.md`.
 
 pub mod memory;
+mod action_audit;
 pub mod sql;
 
 pub use memory::MemoryChatRunRepo;

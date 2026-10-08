@@ -72,6 +72,14 @@ pub struct DeliveryDisplayMessage {
 
 #[derive(Debug, Clone)]
 pub struct AdmitMessageDeliveries {
+    /// REQUIRED §12.5 operation context of this admission: implementations
+    /// persist `operation_id` on the admitted rows and append the
+    /// `send/message/admitted` business-audit row in the SAME transaction.
+    /// A new command with an empty operation id is rejected fail-closed —
+    /// never silently recorded as a forged System operator. Pre-cutover
+    /// history rows read back with `operation_id: None` and stay legal on
+    /// reads (spec §12.5 history row is explicitly allowed to have no context).
+    pub operation: crate::types::BotOperationContext,
     /// Optional final visible chat segment, written immediately before an
     /// internal run_reply or a chat_error projection in the same transaction.
     /// For chat_error this is the partial reply, not the error text; the primary

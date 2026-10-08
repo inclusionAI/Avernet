@@ -194,6 +194,14 @@ fn record(run_id: &str, version: u64) -> ChatRunRecord {
         ChatRunCompletionPolicy::WaitForFinal,
     );
     record.version = version;
+    // §12.5: new create commands carry their operation context (verified
+    // Bot lane in these persisted-run fixtures).
+    record.operation = Some(bcs_service_api::types::BotOperationContext {
+        operation_id: format!("chat-run-sql-tests:{run_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "from".to_string(),
+        },
+    });
     record
 }
 
@@ -235,8 +243,16 @@ impl DbPlugin for RecordingDb {
 
     async fn transaction(
         &self,
-        _steps: Vec<DbTransactionStep>,
+        steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        for step in &steps {
+            if let DbTransactionStep::Execute(statement) = step {
+                self.executed_sql
+                    .lock()
+                    .expect("recording db lock")
+                    .push(statement.sql().to_string());
+            }
+        }
         Ok(Vec::new())
     }
 
@@ -260,8 +276,11 @@ async fn mysql_create_does_not_issue_runtime_ddl() {
     repo.create(record("remote", 1)).await.unwrap();
 
     let sql = db.executed_sql();
-    assert_eq!(sql.len(), 1, "remote create must issue only the INSERT");
+    // MySQL delegates the ONE row INSERT + its §12.5 admitted audit INSERT
+    // through the SAME transaction; neither is runtime DDL.
+    assert_eq!(sql.len(), 2, "remote create issues the row INSERT plus its §12.5 admitted audit INSERT");
     assert!(sql[0].starts_with("INSERT INTO bcs_chat_runs"));
+    assert!(sql[1].starts_with("INSERT INTO bcs_bot_action_audits"));
     assert!(
         sql.iter()
             .all(|statement| !statement.starts_with("CREATE "))
@@ -741,6 +760,24 @@ impl CachePlugin for NoDeleteCache {
     }
 }
 
+/// §12.5: the round-trip keeps everything except the write-time operation
+/// snapshot (deliberately `#[serde(skip)]` like original_request; recovery
+/// reads it from the audit lane by operation_id).
+fn assert_rest_eq_ignoring_operation(stored: &ChatRunRecord, original: &ChatRunRecord) {
+    assert_eq!(stored.run_id, original.run_id);
+    assert_eq!(stored.state, original.state);
+    assert_eq!(stored.accumulated_content, original.accumulated_content);
+    assert_eq!(stored.error_message, original.error_message);
+    assert_eq!(stored.completed_at_ms, original.completed_at_ms);
+    assert_eq!(stored.expires_at_ms, original.expires_at_ms);
+    assert_eq!(stored.version, original.version);
+    assert_eq!(stored.content_truncated, original.content_truncated);
+    assert_eq!(stored.client, original.client);
+    assert_eq!(stored.response_mode, original.response_mode);
+    assert_eq!(stored.completion_policy, original.completion_policy);
+    assert_eq!(stored.delivery_ack_at_ms, original.delivery_ack_at_ms);
+}
+
 #[tokio::test]
 async fn overlay_roundtrips_every_record_field() {
     // The overlay value must round-trip the WHOLE record — including the two
@@ -758,9 +795,21 @@ async fn overlay_roundtrips_every_record_field() {
     full.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
     full.delivery_ack_at_ms = Some(0);
     repo.create(full.clone()).await.unwrap();
-    // Create seeds the overlay, so this `get` is served cache-first.
+    // Create seeds the overlay, so this `get` is served cache-first. The
+    // §12.5 operation context is a write-time snapshot (deliberately
+    // `#[serde(skip)]` like original_request); recovery reads it through the
+    // audit lane by operation_id, so the round-tripped record carries None
+    // here — the identities stay durable in bcs_bot_action_audits.
+    let expected_operationless = bcs_service_api::types::BotOperationContext {
+        operation_id: "chat-run-sql-tests:full".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "from".to_string(),
+        },
+    };
+    assert_eq!(full.operation.as_ref().unwrap(), &expected_operationless);
     let stored = repo.get("full").await.unwrap().unwrap();
-    assert_eq!(stored, full);
+    assert_eq!(stored.operation, None);
+    assert_rest_eq_ignoring_operation(&stored, &full);
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ use bcs_service_api::{
     OrganizationMemberAuth,
     ProviderOrganizationManagementConfig, PutOrganizationMemberCommand, ServiceError, ServiceResult,
 };
-use bcs_bot_store::provider::MemoryProviderStore;
+use bcs_bot_store::provider::{MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection};
 use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::types::{Organization, OrganizationMember};
@@ -25,33 +25,64 @@ use bcs_bot::{Bot, BotCore, ProviderCore};
 
 struct RegistryFixture {
     registry: Arc<BotCore>,
+    /// The memory bot authority repo behind `registry`, so tests can seed the
+    /// live owner/manager rows the Task-12 mine lane reads (the creation
+    /// fact alone no longer decides `/bots/my`).
+    repo: Arc<MemoryBotRepo>,
     _data_dir: TempDir,
 }
 
 impl RegistryFixture {
     fn new() -> Self {
         let data_dir = tempfile::tempdir().expect("temp data dir");
-        let registry = Arc::new(BotCore::with_base_dir(data_dir.path().to_path_buf()));
+        let repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+        let registry = Arc::new(BotCore::with_repo(repo.clone()));
         Self {
             registry,
+            repo,
             _data_dir: data_dir,
         }
     }
 
+    fn control_plane(&self) -> Arc<dyn bcs_service_api::BotControlPlaneCoreService> {
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            self.repo.clone(),
+            provider_store.clone(),
+        ));
+        let provider_bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Arc::new(
+            bcs_bot::BotControlPlaneCore::new(
+                self.repo.clone(),
+                provider_store,
+                provider_bindings,
+            )
+            .with_bot_provider_repo(bot_providers),
+        )
+    }
+
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_control_plane(self.control_plane())
     }
 
     fn service_with_friends(&self, friends: Vec<(&str, &str)>) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
         Bot::new_with_friend(registry, Arc::new(StaticFriendCoreService::new(friends)))
+            .with_control_plane(self.control_plane())
     }
 }
 
 struct ProviderRegistryFixture {
     registry: Arc<BotCore>,
     provider: ProviderCore,
+    repo: Arc<MemoryBotRepo>,
     _data_dir: TempDir,
 }
 
@@ -64,7 +95,7 @@ impl ProviderRegistryFixture {
         let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
         let registry = Arc::new(BotCore::with_provider_repos(
-            bot_repo,
+            bot_repo.clone(),
             provider_repo.clone(),
             provider_credentials.clone(),
             provider_bindings.clone(),
@@ -78,13 +109,33 @@ impl ProviderRegistryFixture {
         Self {
             registry,
             provider,
+            repo: bot_repo,
             _data_dir: data_dir,
         }
     }
 
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            self.repo.clone(),
+            provider_store.clone(),
+        ));
+        let provider_bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_control_plane(Arc::new(
+                bcs_bot::BotControlPlaneCore::new(
+                    self.repo.clone(),
+                    provider_store,
+                    provider_bindings,
+                )
+                .with_bot_provider_repo(bot_providers),
+            ))
     }
 
     async fn register_provider_bot(&self, owner: &str) -> String {
@@ -548,6 +599,10 @@ async fn provider_http_bot_query_views_are_active_without_ws_connection() {
     let fixture = ProviderRegistryFixture::new();
     let service = fixture.service();
     let bot_id = fixture.register_provider_bot("11111111").await;
+    // Task-12 mine rules: the provider-bot registration owner must hold the
+    // CURRENT owner edge for `/bots/my` (the pure ProviderCore test lane does
+    // not run the v2 registration's ownership-initialization contract).
+    fixture.repo.seed_authority_owned(&bot_id, "11111111").await.unwrap();
 
     assert!(!fixture.registry.is_connected(&bot_id).await);
 
@@ -624,6 +679,12 @@ async fn extended_query_methods_page_creator_and_query_by_ids() {
         Some("alice"),
     )
     .await;
+    // Task-12 mine rules: bob must hold the CURRENT owner edge of his bot.
+    fixture
+        .repo
+        .seed_authority_owned("agent:bob", "bob")
+        .await
+        .unwrap();
     fixture
         .registry
         .register_streaming_connection("agent:alice".to_string())
@@ -691,6 +752,17 @@ async fn my_bots_active_only_filters_runtime_active_and_ignores_hidden() {
         Some("alice"),
     )
     .await;
+    // Task-12 mine rules: alice must hold the CURRENT owner edges.
+    fixture
+        .repo
+        .seed_authority_owned("connected-hidden", "alice")
+        .await
+        .unwrap();
+    fixture
+        .repo
+        .seed_authority_owned("disconnected", "alice")
+        .await
+        .unwrap();
     fixture
         .registry
         .register_streaming_connection("connected-hidden".to_string())

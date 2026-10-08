@@ -33,7 +33,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use bcs_cache_api::{CacheError, CachePlugin, CacheSetMode};
-use bcs_db_api::{db_get_column, db_get_column_opt, DbPlugin, DbSqlFlavor, DbStatement, DbValue};
+use bcs_db_api::{
+    db_get_column, db_get_column_opt, DbPlugin, DbSqlFlavor, DbStatement, DbTransactionStep,
+    DbValue,
+};
 use bcs_service_api::port::repo::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
     ChatRunState,
@@ -166,6 +169,31 @@ impl SqlChatRunRepo {
         if self.flavor != DbSqlFlavor::Sqlite {
             return Ok(());
         }
+        // §12.5 ordinary-business audit lane table for the same SQLite
+        // fixture/self-built deploys where this store also self-builds the
+        // run table (production uses the migration chain).
+        self.db
+            .execute(DbStatement::new(
+                "CREATE TABLE IF NOT EXISTS bcs_bot_action_audits (\
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                    audit_id TEXT NOT NULL,\
+                    env TEXT NOT NULL,\
+                    operation_id TEXT NOT NULL,\
+                    step_key TEXT NOT NULL,\
+                    operator_kind TEXT NOT NULL,\
+                    operator_id TEXT NOT NULL,\
+                    operator_user_id TEXT,\
+                    effective_actor_id TEXT NOT NULL,\
+                    resource_kind TEXT NOT NULL,\
+                    resource_id TEXT NOT NULL,\
+                    action TEXT NOT NULL,\
+                    phase TEXT NOT NULL,\
+                    reason_code TEXT,\
+                    gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
+                    gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            ))
+            .await
+            .map_err(backend)?;
         let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
             id INTEGER PRIMARY KEY AUTOINCREMENT,\
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
@@ -187,6 +215,7 @@ impl SqlChatRunRepo {
             response_mode TEXT NOT NULL,\
             completion_policy TEXT NOT NULL,\
             delivery_ack_at_ms INTEGER,\
+            operation_id TEXT,\
             CONSTRAINT uk_env_run_id UNIQUE (env, run_id))";
         self.db
             .execute(DbStatement::new(create))
@@ -501,6 +530,10 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
         response_mode: parse_response_mode(&response_mode),
         completion_policy: parse_completion_policy(&completion_policy),
         delivery_ack_at_ms,
+        // The operation context is a §12.5 write-time snapshot read through
+        // the audit lane by operation_id, never re-materialized into the
+        // lazily decoded runtime record.
+        operation: None,
     })
 }
 
@@ -582,11 +615,21 @@ async fn read_full(
 impl ChatRunRepoPort for SqlChatRunRepo {
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         self.ensure_schema().await?;
+        // §12.5 required context of the new create command (history rows
+        // keep NULL operation ids and stay legal on reads) — a missing
+        // context fails closed and is never downgraded to a System actor.
+        let operation = record.operation.clone().ok_or_else(|| {
+            ChatRunRepoError::Backend(
+                "chat run create requires its BotOperationContext: refusing to \
+                 record the run without an operator"
+                    .to_string(),
+            )
+        })?;
         let stmt = DbStatement::with_params(
             "INSERT INTO bcs_chat_runs (env, run_id, bot_uuid, from_bot_id, session_key, state, \
              accumulated_content, error_message, original_request, completed_at_ms, expires_at_ms, \
              version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             delivery_ack_at_ms, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(self.env.clone()),
                 DbValue::from(record.run_id.clone()),
@@ -605,9 +648,23 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 DbValue::from(response_mode_str(record.response_mode)),
                 DbValue::from(completion_policy_str(record.completion_policy)),
                 record.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
+                DbValue::from(operation.operation_id.as_str()),
             ],
         );
-        match self.db.execute(stmt).await {
+        // The run row and its `launch/message/admitted` identity snapshot
+        // commit in ONE DbPlugin transaction (§12.5): an audit failure fails
+        // the create with the business row rolled back.
+        let audit = crate::action_audit::action_audit_insert(
+            &crate::action_audit::run_creation_audit_record(&operation, &self.env, record.run_id.as_str()),
+        );
+        let results = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(stmt),
+                DbTransactionStep::Execute(audit),
+            ])
+            .await;
+        match results {
             Ok(_) => {
                 // Seed the whole-record overlay so `get` can serve this run
                 // cache-first from the very first poll; a write blip is

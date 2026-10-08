@@ -180,6 +180,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     let now = chrono::Utc::now().timestamp_millis();
     service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-young".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
@@ -189,6 +190,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(channel.outbound().await.is_empty(), "queued hints wait ten seconds");
     let admitted = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
         targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
@@ -221,6 +223,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a terminal chat error has its own safe channel feedback and must not also emit a generic delivery hint");
     let rejected = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-rejected".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now, expire_at_ms: None, event: None,
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
@@ -280,6 +283,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
     let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     let now = chrono::Utc::now().timestamp_millis();
     let admitted = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-expiring".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: Some(now + 1_000), event: None,
         targets: ["bot-driver", "bot-observer"].into_iter().map(|bot| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
@@ -336,6 +340,7 @@ async fn reaction_delivery_is_bounded_to_one_provider_call_per_tick() {
     let now = chrono::Utc::now().timestamp_millis();
     for index in 1..=2 {
         service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None,
             message_id: format!("im-bounded-{index}"), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
             targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],

@@ -170,13 +170,26 @@ pub async fn register_bot(
         })
         .await;
 
+    // Plan Task 12 (Task 6 carry-forward): the legacy `/register` route no
+    // longer swallows onboarding failures behind a 200 — the v1 lane stopped
+    // faking success (Task 6), and this lane now fails the same way with a
+    // tracing::error! diagnostic per Task 6's pattern. A half-registered bot
+    // without credentials would leak an unusable record and a false success
+    // receipt, so the whole registration fails.
     if let Err(e) = onboard_result {
-        tracing::warn!(
+        tracing::error!(
             request_id = %bcs_observability::CurrentRequestId,
             bot_uuid = %connect_result.bot_uuid,
             error = %e,
             "register: admin_onboard_bot failed after connect"
         );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": "internal",
+                "message": format!("bot onboarding failed: {}", e)
+            })),
+        ).into_response();
     }
 
     // 7. Return credentials

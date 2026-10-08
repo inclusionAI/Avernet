@@ -468,6 +468,7 @@ impl BotDeliveryPort for RecordingIo {
 
 fn command(id: &str, session: &str) -> AdmitMessageDeliveries {
     AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: id.into(),
         flow_kind: DeliveryFlowKind::Group,
@@ -567,6 +568,11 @@ async fn bot_pages_advance_past_blocked_bot_and_session_pages_do_not_starve() ->
         if n == 0 {
             service.transition(event(&row, Event::StartSend)).await?;
             c.message_id = "blocked-successor".into(); c.message.client_msg_id = Some(c.message_id.clone());
+            // §12.5: the mutated admission is a DISTINCT logical command, so
+            // it takes a fresh operation identity (one operation slot covers
+            // one logical step; a mutated message id under the same operation
+            // would be a same-slot content conflict).
+            c.operation = bcs_service_api::types::system_lane_operation("message-flow-tests");
             service.admit(c).await?;
         }
     }
