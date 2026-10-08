@@ -58,23 +58,23 @@ use super::{MemoryBotRepo, RegisteredBotInner, resolve_env};
 /// the strict decoder is exercised exactly like the SQL store (driver-
 /// injected corrupt shapes must behave identically in both stores).
 #[derive(Debug, Clone)]
-pub(super) struct MemoryRoleEdgeRow {
+pub(crate) struct MemoryRoleEdgeRow {
     /// Mirrors the SQL autoincrement `id`: revoked rows RESTORE under the
     /// same id, and audit rows reference their edge by it.
-    pub(super) id: i64,
-    pub(super) env: String,
+    pub(crate) id: i64,
+    pub(crate) env: String,
     /// Human ACTOR id (`human_<user_id>`), per the shared port encoding.
-    pub(super) from_id: String,
-    pub(super) to_id: String,
+    pub(crate) from_id: String,
+    pub(crate) to_id: String,
     /// Raw `grant_kind` column text (`owner` / `manager` / anything corrupt).
-    pub(super) grant_kind: String,
-    pub(super) grant_ref_id: i64,
+    pub(crate) grant_kind: String,
+    pub(crate) grant_ref_id: i64,
     /// Inline rules; role rows must carry `None` (SQL: `NULL`).
-    pub(super) rules: Option<serde_json::Value>,
+    pub(crate) rules: Option<serde_json::Value>,
     /// Raw `status` column text; only `approved` rows are effective.
-    pub(super) status: String,
-    pub(super) management_source_kind: String,
-    pub(super) management_source_id: String,
+    pub(crate) status: String,
+    pub(crate) management_source_kind: String,
+    pub(crate) management_source_id: String,
 }
 
 /// One `bot_manager_changes` audit row projection: appended only for actual
@@ -88,33 +88,84 @@ pub(super) struct MemoryRoleEdgeRow {
 /// field-level allow.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(super) struct MemoryManagerChangeRecord {
-    pub(super) audit_id: String,
-    pub(super) subject_user_id: String,
-    pub(super) edge_id: i64,
-    pub(super) management_source_kind: String,
-    pub(super) management_source_id: String,
-    pub(super) action: String,
-    pub(super) actor_kind: String,
-    pub(super) actor_id: String,
-    pub(super) operation_id: String,
+pub(crate) struct MemoryManagerChangeRecord {
+    pub(crate) audit_id: String,
+    pub(crate) subject_user_id: String,
+    pub(crate) edge_id: i64,
+    pub(crate) management_source_kind: String,
+    pub(crate) management_source_id: String,
+    pub(crate) action: String,
+    pub(crate) actor_kind: String,
+    pub(crate) actor_id: String,
+    pub(crate) operation_id: String,
 }
 
 /// Authority state inside [`MemoryBotRepo`]: ownership versions and role
 /// edge rows on the same state boundary as the bot lifecycle.
 #[derive(Debug, Default)]
-pub(super) struct MemoryAuthorityState {
+pub(crate) struct MemoryAuthorityState {
     /// `bot_id -> ownership_version`. Absent = historical default 0
     /// (uninitialized), mirroring `bcs_bots.ownership_version`.
-    pub(super) ownership_versions: HashMap<String, u64>,
-    pub(super) role_rows: Vec<MemoryRoleEdgeRow>,
+    pub(crate) ownership_versions: HashMap<String, u64>,
+    pub(crate) role_rows: Vec<MemoryRoleEdgeRow>,
     /// Mirror of the SQL autoincrement: every role row gets a unique id.
-    pub(super) next_edge_id: i64,
+    pub(crate) next_edge_id: i64,
     /// Mirror of the `bot_manager_changes` audit table; the counter
     /// projection `authority_audit_count` reports its length.
-    pub(super) audit_records: Vec<MemoryManagerChangeRecord>,
+    pub(crate) audit_records: Vec<MemoryManagerChangeRecord>,
     /// Test-only: armed one-shot failure of the next authority write lever.
-    pub(super) fail_next_write: bool,
+    pub(crate) fail_next_write: bool,
+    /// Mirror of `bot_ownership_initializations` (plan Task 5): one row per
+    /// committed first-ownership initialization; the projection lever
+    /// `authority_ownership_initialization_count` reports per-bot counts.
+    pub(crate) initialization_records: Vec<MemoryOwnershipInitRecord>,
+    /// Mirror of the `permission_profiles` default row (plan Task 5):
+    /// `(env, bot)`-keyed profile id, INSERT-OR-IGNORE semantics — an
+    /// existing default is never recreated or bumped (D12 rule 2).
+    pub(crate) default_profiles: HashMap<(String, String), u64>,
+    /// Mirror of the `permission_profiles` autoincrement ids.
+    pub(crate) next_default_profile_id: u64,
+    /// Mirror of `bcs_bot_action_audits` (plan Task 5 deletion boundary):
+    /// typed records appended in the same critical section as the
+    /// lifecycle mutation they audit.
+    pub(crate) action_audit_records: Vec<bcs_service_api::types::BotActionAuditRecord>,
+    /// Mirror of `bot_ownership_transfers` rows visible to the Task 5
+    /// deletion boundary. Only the columns the retirement needs are
+    /// mirrored (transfer id, status, terminal_reason, decided_by).
+    pub(crate) transfer_rows: Vec<MemoryOwnershipTransferRow>,
+}
+
+/// One `bot_ownership_initializations` row projection (plan Task 5).
+///
+/// Same situation as [`MemoryManagerChangeRecord`]: the row count is what
+/// the tests assert today; the recording pair keeps the rest for the
+/// audit-listing follow-ups, hence the field-level allow.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MemoryOwnershipInitRecord {
+    pub(crate) audit_id: String,
+    pub(crate) env: String,
+    pub(crate) bot_id: String,
+    pub(crate) owner_user_id: String,
+    pub(crate) source: String,
+    pub(crate) actor_kind: String,
+    pub(crate) actor_id: String,
+    pub(crate) operation_id: String,
+}
+
+/// One `bot_ownership_transfers` row projection (plan Task 5): pending rows
+/// are seeded through the test lever; retirement invalidates them.
+/// `decided_by` exists to mirror the schema's decision-column CHECK; only
+/// the status/terminal-reason pair is asserted today.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MemoryOwnershipTransferRow {
+    pub(crate) transfer_id: String,
+    pub(crate) env: String,
+    pub(crate) bot_id: String,
+    pub(crate) status: String,
+    pub(crate) terminal_reason: Option<String>,
+    pub(crate) decided_by: Option<String>,
 }
 
 fn corrupt(bot_id: &str, env: &str, detail: impl Into<String>) -> ServiceError {
@@ -195,7 +246,7 @@ impl MemoryAuthorityState {
     }
 
     /// Allocate the next edge-row id (the SQL autoincrement mirror).
-    fn allocate_edge_id(&mut self) -> i64 {
+    pub(crate) fn allocate_edge_id(&mut self) -> i64 {
         let id = self.next_edge_id;
         self.next_edge_id += 1;
         id
@@ -957,8 +1008,93 @@ impl MemoryBotRepo {
         Ok(authority.audit_records.len() as u64)
     }
 
+    /// Test-only: seed one PENDING `bot_ownership_transfers`-shaped row for
+    /// the Task 5 deletion-boundary tests (transfer creation is a later
+    /// task's production contract; retirement must terminate the pending
+    /// slot). Returns the seeded `transfer_id`.
+    pub async fn seed_authority_pending_transfer(
+        &self,
+        bot_id: &str,
+        from_user_id: &str,
+        to_user_id: &str,
+    ) -> ServiceResult<String> {
+        let transfer_id = uuid::Uuid::new_v4().to_string();
+        let mut authority = self.authority.write().await;
+        authority.transfer_rows.push(MemoryOwnershipTransferRow {
+            transfer_id: transfer_id.clone(),
+            env: resolve_env(),
+            bot_id: bot_id.to_string(),
+            status: "pending".to_string(),
+            terminal_reason: None,
+            decided_by: None,
+        });
+        let _ = (from_user_id, to_user_id);
+        Ok(transfer_id)
+    }
+
+    /// Test-only projection of one Bot's `bot_ownership_transfers` rows as
+    /// `(transfer_id, status, terminal_reason)` snapshots, id-stable.
+    pub async fn authority_transfer_statuses(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<Vec<(String, String, Option<String>)>> {
+        let env = resolve_env();
+        let authority = self.authority.read().await;
+        let mut rows: Vec<(String, String, Option<String>)> = authority
+            .transfer_rows
+            .iter()
+            .filter(|row| row.env == env && row.bot_id == bot_id)
+            .map(|row| {
+                (
+                    row.transfer_id.clone(),
+                    row.status.clone(),
+                    row.terminal_reason.clone(),
+                )
+            })
+            .collect();
+        rows.sort();
+        Ok(rows)
+    }
+
+    /// Test-only projection of the Bot's default permission-profile id
+    /// (`permission_profiles` unique active default): `None` when no default
+    /// profile row exists for the Bot yet.
+    pub async fn authority_default_profile_id(&self, bot_id: &str) -> ServiceResult<Option<u64>> {
+        let env = resolve_env();
+        let authority = self.authority.read().await;
+        Ok(authority
+            .default_profiles
+            .get(&(env, bot_id.to_string()))
+            .copied())
+    }
+
+    /// Test-only projection of the committed `bot_ownership_initializations`
+    /// row count of one Bot (plan Task 5: exactly one per committed
+    /// initialization; failed attempts append nothing).
+    pub async fn authority_ownership_initialization_count(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<u64> {
+        let env = resolve_env();
+        let authority = self.authority.read().await;
+        Ok(authority
+            .initialization_records
+            .iter()
+            .filter(|record| record.env == env && record.bot_id == bot_id)
+            .count() as u64)
+    }
+
+    /// Test-only projection of the appended `bcs_bot_action_audits` records
+    /// (lifecycle deletion audit, plan Task 5).
+    pub async fn authority_action_audit_records(
+        &self,
+    ) -> ServiceResult<Vec<bcs_service_api::types::BotActionAuditRecord>> {
+        let authority = self.authority.read().await;
+        Ok(authority.action_audit_records.clone())
+    }
+
     /// Consume the armed one-shot write failure inside the authority lock.
-    async fn take_authority_write_failure(&self) -> bool {
+    pub(crate) async fn take_authority_write_failure(&self) -> bool {
         let mut authority = self.authority.write().await;
         if authority.fail_next_write {
             authority.fail_next_write = false;

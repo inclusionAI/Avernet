@@ -5,7 +5,7 @@
 #[path = "memory_registration_create.rs"]
 mod registration_create;
 #[path = "memory_authority.rs"]
-mod memory_authority;
+pub(crate) mod memory_authority;
 #[path = "memory_bot_repo.rs"]
 mod bot_repo;
 #[path = "memory_token_storage.rs"]
@@ -97,24 +97,24 @@ pub struct BotConnection {
 /// In-memory implementation of [`BotRepoPort`].
 #[derive(Debug)]
 pub struct MemoryBotRepo {
-    bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
+    pub(crate) bots: RwLock<BTreeMap<String, RegisteredBotInner>>,
     /// Serializes control-plane snapshot merges through persistence and memory.
     control_plane_patch_lock: Mutex<()>,
     /// Audit timestamps for the local control-plane projection.
     control_plane_audit: RwLock<HashMap<String, (u64, u64)>>,
     /// Token to bot_uuid mapping for authentication.
     /// Tokens persist across streaming disconnects for reconnection.
-    token_to_bot: RwLock<HashMap<String, String>>,
+    pub(crate) token_to_bot: RwLock<HashMap<String, String>>,
     /// Soft-deleted bot IDs hidden from default read/token paths.
-    deleted_bot_ids: RwLock<HashSet<String>>,
+    pub(crate) deleted_bot_ids: RwLock<HashSet<String>>,
     /// Channel binding index: (channel, binding_key) -> bot_uuid
     /// Derived from bot capabilities for fast lookup.
-    binding_channel_index: RwLock<HashMap<(String, String), String>>,
+    pub(crate) binding_channel_index: RwLock<HashMap<(String, String), String>>,
     /// Process-local runtime info, including the active negotiated client kind
     /// and server-owned coordination profile.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
     /// Base directory for bot files (from BCS_DATA_DIR).
-    bots_base_dir: PathBuf,
+    pub(crate) bots_base_dir: PathBuf,
     /// Pending one-shot request-response channels: request_id -> oneshot sender.
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
     /// Control-plane task-mode toggles: (`task_claim_mode`, `task_dream_mode`).
@@ -124,7 +124,7 @@ pub struct MemoryBotRepo {
     /// maps live inside this repo so bot deletion and authority state
     /// can never diverge through a second, unshared memory store
     /// (plan Task 3).
-    authority: RwLock<MemoryAuthorityState>,
+    pub(crate) authority: RwLock<MemoryAuthorityState>,
 }
 
 /// Persisted capabilities format.
@@ -192,32 +192,32 @@ impl From<&PersistedCapabilities> for BotCapabilities {
 
 /// Internal representation with last heartbeat and optional streaming connection.
 #[derive(Debug)]
-struct RegisteredBotInner {
+pub(crate) struct RegisteredBotInner {
     /// Bot unique identifier (UUID).
-    bot_id: String,
+    pub(crate) bot_id: String,
     /// Last heartbeat timestamp.
-    last_heartbeat: Instant,
+    pub(crate) last_heartbeat: Instant,
     /// Bot capabilities for discovery.
-    capabilities: BotCapabilities,
+    pub(crate) capabilities: BotCapabilities,
     /// Active streaming connection (if connected).
-    ws_connection: Option<BotConnection>,
+    pub(crate) ws_connection: Option<BotConnection>,
     /// Session token (persists across connections for reconnection).
-    session_token: Option<String>,
+    pub(crate) session_token: Option<String>,
     /// Server environment (prod, gray, pre, dev).
-    env: Option<String>,
+    pub(crate) env: Option<String>,
     /// Actor-level lifecycle status (`Online` / `Hidden`) — Task P.2 / Requirement 3.16.
-    status: bcs_service_api::ActorStatus,
+    pub(crate) status: bcs_service_api::ActorStatus,
     /// Actor kind (Bot / Human) — Human Actor V1 / Requirement 3.1.
     /// Code-Review fix #1: persist actor kind in the in-memory registry so
     /// `to_registered_bot()` can propagate it to callers (O.5 / P.3 / F.3).
-    actor_kind: bcs_service_api::ActorKind,
+    pub(crate) actor_kind: bcs_service_api::ActorKind,
     /// Creator's staff_no (set during onboard, immutable).
-    created_by: Option<String>,
+    pub(crate) created_by: Option<String>,
     /// Protocol version negotiated during bot.connect.
-    protocol_version: u32,
-    user_visibility: UserVisibility,
-    friend_ext: serde_json::Map<String, serde_json::Value>,
-    friend_check_in_strategy: FriendCheckInStrategy,
+    pub(crate) protocol_version: u32,
+    pub(crate) user_visibility: UserVisibility,
+    pub(crate) friend_ext: serde_json::Map<String, serde_json::Value>,
+    pub(crate) friend_check_in_strategy: FriendCheckInStrategy,
 }
 
 impl RegisteredBotInner {
@@ -324,7 +324,7 @@ impl MemoryBotRepo {
     }
 
     /// Get the path to the bot info file for a bot.
-    fn bot_info_path(&self, bot_id: &str) -> PathBuf {
+    pub(crate) fn bot_info_path(&self, bot_id: &str) -> PathBuf {
         self.bots_base_dir.join(bot_id).join(BOT_INFO_FILE)
     }
 

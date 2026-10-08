@@ -3,6 +3,11 @@ use super::*;
 use bcs_db_api::{DbTransactionParam, DbTransactionStep};
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::types::OwnershipInitialization;
+
+use crate::ownership_initialization::{
+    SOURCE_REGISTRATION, ownership_initialization_steps, validate_initialization,
+};
 
 pub(super) fn validate_record(record: &BotProviderRecord) -> ServiceResult<()> {
     if record.bot_uuid.trim().is_empty() || record.provider_id.trim().is_empty()
@@ -55,6 +60,34 @@ impl DbProviderStore {
         }
         Ok(record)
     }
+}
+
+
+/// The strict Provider Bot INSERT shared by both creation paths (identical
+/// SQL so create-once and ref-tombstone semantics cannot drift between
+/// them).
+fn provider_bot_insert_statement(
+    record: &BotProviderRecord,
+    capabilities: &BotCapabilities,
+    env: &str,
+    owner: &str,
+    token: &str,
+) -> ServiceResult<DbStatement> {
+    let info = serde_json::to_string(capabilities)
+        .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
+    let mode = record.connection_mode.as_str();
+    Ok(DbStatement::with_params(
+        "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \
+         visibility, status, actor_kind, is_deleted, registered_at, updated_at, agent_code, \
+         provider_id, provider_bot_ref, connection_mode, webhook_url) \
+         SELECT ?, ?, ?, ?, ?, ?, ?, 'online', 'bot', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ? \
+         WHERE NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ?)",
+        vec![record.bot_uuid.as_str().into(), env.into(), capabilities.name.as_deref().unwrap_or(&record.bot_uuid).into(),
+            info.into(), token.into(), owner.into(), capabilities.visibility.as_str().into(),
+            capabilities.agent_code.clone().into(),
+            record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
+            env.into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()],
+    ))
 }
 
 #[async_trait]
@@ -149,23 +182,46 @@ impl BotProviderRepoPort for DbProviderStore {
             return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
         }
         let env = resolve_env();
-        let info = serde_json::to_string(&capabilities)
-            .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
-        let mode = record.connection_mode.as_str();
+        let insert = provider_bot_insert_statement(&record, &capabilities, &env, owner, token)?;
         let mut steps = vec![DbTransactionStep::ExecuteChecked {
-            statement: DbStatement::with_params(
-                "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \
-                 visibility, status, actor_kind, is_deleted, registered_at, updated_at, agent_code, \
-                 provider_id, provider_bot_ref, connection_mode, webhook_url) \
-                 SELECT ?, ?, ?, ?, ?, ?, ?, 'online', 'bot', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ? \
-                 WHERE NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ?)",
-                vec![record.bot_uuid.as_str().into(), env.as_str().into(), capabilities.name.as_deref().unwrap_or(&record.bot_uuid).into(),
-                    info.into(), token.into(), owner.into(), capabilities.visibility.as_str().into(),
-                    capabilities.agent_code.clone().into(),
-                    record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
-                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]),
+            statement: insert,
             expected_affected_rows: 1,
         }];
+        if record.connection_mode == BotConnectionMode::Gateway {
+            steps.push(DbTransactionStep::Execute(DbStatement::with_params(
+                Self::insert_binding_sql(), vec![record.bot_uuid.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(),
+                    env.as_str().into(), false.into(), record.webhook_url.clone().into()])));
+        }
+        self.db.transaction(steps).await.map_err(storage_error)?;
+        self.bindings.invalidate(&format!("{env}:{}", record.bot_uuid));
+        Ok(())
+    }
+
+    async fn create_provider_bot_with_initialization(&self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: OwnershipInitialization) -> ServiceResult<()> {
+        validate_initialization(&initialization)?;
+        validate_record(&record)?;
+        if owner.trim().is_empty() || token.is_empty() {
+            return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
+        }
+        let env = resolve_env();
+        // The Bot INSERT is proven first, the authority steps commit with it
+        // in the SAME one transaction, and the gateway projection lands
+        // after both: a failure at any later step rolls the whole creation
+        // back, so a Provider/ref tombstone never replays credentials or
+        // initializes twice (plan Task 5).
+        let insert = provider_bot_insert_statement(&record, &capabilities, &env, owner, token)?;
+        let mut steps = vec![DbTransactionStep::ExecuteChecked {
+            statement: insert,
+            expected_affected_rows: 1,
+        }];
+        steps.extend(ownership_initialization_steps(
+            &self.flavor,
+            &env,
+            &record.bot_uuid,
+            &initialization,
+            SOURCE_REGISTRATION,
+        )?);
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
                 Self::insert_binding_sql(), vec![record.bot_uuid.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(),

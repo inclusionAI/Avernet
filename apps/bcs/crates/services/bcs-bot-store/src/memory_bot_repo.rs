@@ -21,6 +21,49 @@ impl BotRepoPort for MemoryBotRepo {
         self.create_registration_once(bot_id, capabilities, created_by, token).await
     }
 
+    async fn create_registration_if_absent_with_initialization(
+        &self,
+        bot_id: String,
+        capabilities: BotCapabilities,
+        created_by: &str,
+        token: &str,
+        initialization: bcs_service_api::types::OwnershipInitialization,
+    ) -> ServiceResult<bool> {
+        self.create_registration_once_with_initialization(
+            bot_id,
+            capabilities,
+            created_by,
+            token,
+            &initialization,
+        )
+        .await
+    }
+
+    async fn initialize_existing_ownership(
+        &self,
+        bot_id: &str,
+        initialization: bcs_service_api::types::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::OwnershipState> {
+        self.initialize_existing_ownership_impl(bot_id, &initialization)
+            .await
+    }
+
+    async fn retire_bot_lifecycle(
+        &self,
+        bot_id: &str,
+        operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<bool> {
+        self.retire_bot_lifecycle_impl(bot_id, &operation).await
+    }
+
+    async fn delete_human_actor(
+        &self,
+        staff_no: &str,
+        operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<bool> {
+        self.delete_human_actor_impl(staff_no, &operation).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.deleted_bot_ids.write().await.remove(&bot_id);
 

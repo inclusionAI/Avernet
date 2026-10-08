@@ -1,9 +1,10 @@
 use async_trait::async_trait;
+use bcs_domain::OwnershipState;
 
 use crate::core::registry::ConnectStreamError;
 use crate::types::{
-    ActorStatus, AgentCredentials, BotCapabilities, EnsureHumanResult,
-    RegisteredBot, ServiceResult,
+    ActorStatus, AgentCredentials, BotCapabilities, BotOperationContext, EnsureHumanResult,
+    OwnershipInitialization, RegisteredBot, ServiceResult,
 };
 
 /// Transitional repository contract for bot registry state implementations.
@@ -39,6 +40,109 @@ pub trait BotRepoPort: Send + Sync {
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
+
+    /// Atomically create a registration identity only if no active OR deleted
+    /// record exists, consuming the trusted first-ownership
+    /// [`OwnershipInitialization`] in the SAME single commit as the Bot
+    /// INSERT (plan Task 5): the exact CAS
+    /// `UPDATE bcs_bots SET ownership_version = 1
+    ///  WHERE env = ? AND bot_uuid = ? AND ownership_version = 0 AND is_deleted = 0`,
+    /// the unique approved owner edge insert, the Human actor
+    /// materialization (`ensure_human`), the default permission-profile
+    /// ensure and the initialization audit row (`bot_ownership_initializations`,
+    /// source `registration`) commit together or roll back together.
+    ///
+    /// Store rule: an initialization supplied for a create must carry a
+    /// `Human` or `System` `AuditActor` with a non-empty trusted owner User
+    /// ID (a `Service` actor is rejected fail-closed before any write).
+    /// The still-plain [`create_registration_if_absent`](Self::create_registration_if_absent)
+    /// path never initializes: a bare runtime connect registers with
+    /// `ownership_version = 0` (runtime semantics), and no store method
+    /// auto-claims ownership.
+    async fn create_registration_if_absent_with_initialization(
+        &self,
+        _bot_id: String,
+        _capabilities: BotCapabilities,
+        _created_by: &str,
+        _token: &str,
+        _initialization: OwnershipInitialization,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError(
+            "atomic registration creation with ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// Governed entry for an EXISTING live Bot whose ownership is still
+    /// uninitialized (`ownership_version = 0`): atomically CAS-initialize
+    /// the ownership slot (version 0 -> 1) and write the unique owner
+    /// edge, the Human actor row, the default permission-profile ensure
+    /// and the initialization audit row (source
+    /// `governed_repair`) in ONE transaction (plan Task 5).
+    ///
+    /// Branches: missing or soft-deleted Bot -> `BotNotFound`; already
+    /// initialized Bot -> `AuthorityError::Conflict` (never auto-claim,
+    /// never idempotent re-claim); a `Service` actor or an empty owner
+    /// User ID -> fail-closed before any write. Any step failure rolls
+    /// the whole initialization back: pre-existing Bot registration
+    /// fields MUST survive untouched.
+    async fn initialize_existing_ownership(
+        &self,
+        bot_id: &str,
+        initialization: OwnershipInitialization,
+    ) -> ServiceResult<OwnershipState> {
+        let _ = (bot_id, initialization);
+        Err(crate::types::ServiceError::InternalError(
+            "governed ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// Atomically retire one Bot (plan Task 5 deletion boundary): inside
+    /// ONE transaction under the same first lock every authority flow
+    /// takes (the Bot's `bcs_bots` row), withdraw every authority role
+    /// edge of the Bot (owner and manager, all management sources),
+    /// terminate its PENDING ownership transfers
+    /// (`status = 'invalidated'`, `terminal_reason = 'bot_deleted'`) and
+    /// mark the row soft-deleted, appending the lifecycle audit record
+    /// (`bcs_bot_action_audits`, `delete/bot/applied`) in the same commit.
+    ///
+    /// Returns `Ok(true)` when this call retired the Bot;
+    /// `Ok(false)` for a missing, already-retired or Human row (Human
+    /// actors use [`delete_human_actor`](Self::delete_human_actor)).
+    /// Committed state means a later acceptance can never resurrect the
+    /// Bot: any acquirable lock sees `is_deleted = 1` and the pending
+    /// slot is gone.
+    async fn retire_bot_lifecycle(
+        &self,
+        bot_id: &str,
+        operation: BotOperationContext,
+    ) -> ServiceResult<bool> {
+        let _ = (bot_id, operation);
+        Err(crate::types::ServiceError::InternalError(
+            "atomic bot authority retirement is not configured".into(),
+        ))
+    }
+
+    /// Atomically delete one Human actor row, under locked related Bots
+    /// in stable-ID order coordinated with the Human's own availability
+    /// check (plan Task 5): forbidden while the Human is the LIVE owner
+    /// of any Bot (the check is re-proved in the write transaction);
+    /// otherwise the Human row is soft-deleted, every remaining role
+    /// edge held by the Human is withdrawn (no orphan edges) and the
+    /// lifecycle audit record (`delete/bot/applied`) is appended in the
+    /// same commit.
+    ///
+    /// Returns `Ok(true)` when this call deleted the Human;
+    /// `Ok(false)` for a missing or already-deleted Human.
+    async fn delete_human_actor(
+        &self,
+        staff_no: &str,
+        operation: BotOperationContext,
+    ) -> ServiceResult<bool> {
+        let _ = (staff_no, operation);
+        Err(crate::types::ServiceError::InternalError(
+            "atomic human actor deletion is not configured".into(),
+        ))
+    }
 
     async fn register_with_owner_and_token(
         &self,

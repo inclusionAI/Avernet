@@ -1,5 +1,6 @@
 //! Bot-owned Provider metadata and its gateway-only compatibility projection.
 use async_trait::async_trait;
+use crate::types::OwnershipInitialization;
 use crate::{BotCapabilities, ServiceResult};
 use crate::bot_provider::{BotConnectionMode, BotProviderRecord};
 
@@ -29,6 +30,28 @@ pub trait BotProviderRepoPort: Send + Sync {
         &self, record: BotProviderRecord, capabilities: BotCapabilities,
         owner: &str, token: &str,
     ) -> ServiceResult<()>;
+
+    /// Strict create consuming the trusted first-ownership
+    /// [`OwnershipInitialization`] in the SAME single commit as the Bot
+    /// and gateway-projection INSERTs (plan Task 5): the plain
+    /// [`create_provider_bot`](Self::create_provider_bot) SQL steps are
+    /// extended with the ownership CAS (version 0 -> 1), the unique
+    /// approved owner edge, the Human actor materialization, the default
+    /// permission-profile ensure and the initialization audit row
+    /// (`bot_ownership_initializations`, source `registration`). Any step
+    /// failure rolls the Bot, its binding and the authority state back
+    /// together; a successful retry must not replay credentials or
+    /// duplicate authority rows.
+    async fn create_provider_bot_with_initialization(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities,
+        owner: &str, token: &str,
+        initialization: OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        let _ = (record, capabilities, owner, token, initialization);
+        Err(crate::ServiceError::InternalError(
+            "Bot Provider creation with ownership initialization is not configured".into(),
+        ))
+    }
 
     /// Atomically update the gateway Bot override and compatibility binding.
     /// Authorization and effective-endpoint validation belong to the core.

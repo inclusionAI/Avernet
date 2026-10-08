@@ -13,6 +13,11 @@
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 
+use bcs_service_api::types::OwnershipInitialization;
+
+use crate::ownership_initialization::{
+    SOURCE_REGISTRATION, memory_apply_initialization,
+};
 use super::{
     BotCapabilities, Instant, MemoryBotRepo, PersistedCapabilities, RegisteredBotInner,
     ServiceError, ServiceResult, resolve_env, unix_millis,
@@ -56,9 +61,57 @@ impl MemoryBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<bool> {
-        // Existing nested lock order is bots -> tokens -> deleted IDs. Retain
-        // these guards across persistence and publication so another create or
-        // soft-delete cannot pass the absence check before publication finishes.
+        self.create_registration_once_inner(bot_id, capabilities, created_by, token, None)
+            .await
+    }
+
+    /// The same create-once contract extended with the trusted first-ownership
+    /// initialization: file persistence, registration publication and every
+    /// authority row (version CAS, owner edge, Human ensure, default profile,
+    /// audit) install under ONE critical section guard set — the armed test
+    /// failure or any file error aborts before any state is mutated, so a
+    /// failed attempt leaves NO Bot, NO authority row and NO replayable
+    /// credential (plan Task 5).
+    pub(super) async fn create_registration_once_with_initialization(
+        &self,
+        bot_id: String,
+        capabilities: BotCapabilities,
+        created_by: &str,
+        token: &str,
+        initialization: &OwnershipInitialization,
+    ) -> ServiceResult<bool> {
+        self.create_registration_once_inner(
+            bot_id,
+            capabilities,
+            created_by,
+            token,
+            Some(initialization),
+        )
+        .await
+    }
+
+    async fn create_registration_once_inner(
+        &self,
+        bot_id: String,
+        capabilities: BotCapabilities,
+        created_by: &str,
+        token: &str,
+        initialization: Option<&OwnershipInitialization>,
+    ) -> ServiceResult<bool> {
+        if let Some(initialization) = initialization {
+            crate::ownership_initialization::validate_initialization(initialization)?;
+            if self.take_authority_write_failure().await {
+                return Err(ServiceError::InternalError(
+                    "test-injected authority write failure".into(),
+                ));
+            }
+        }
+        // Existing nested lock order is bots -> tokens -> deleted IDs, and
+        // the authority state joins the guard set LAST. Retain these guards
+        // across persistence and publication so another create or
+        // soft-delete cannot pass the absence check before publication
+        // finishes — and so the initialization installs with the same
+        // serialization boundary.
         let mut bots = self.bots.write().await;
         if bots.contains_key(&bot_id) {
             return Ok(false);
@@ -78,6 +131,10 @@ impl MemoryBotRepo {
         }
         let mut bindings = self.binding_channel_index.write().await;
         let mut audit = self.control_plane_audit.write().await;
+        // The authority state joins the guard set on every create (owned by
+        // the same bots-before-authority order as every other flow).
+        let mut authority = self.authority.write().await;
+        let env = resolve_env();
         let now = unix_millis();
         let persisted = PersistedCapabilities {
             bot_id: bot_id.clone(),
@@ -126,12 +183,12 @@ impl MemoryBotRepo {
         bots.insert(
             bot_id.clone(),
             RegisteredBotInner {
-                bot_id,
+                bot_id: bot_id.clone(),
                 last_heartbeat: Instant::now(),
                 capabilities,
                 ws_connection: None,
                 session_token: Some(token.into()),
-                env: Some(resolve_env()),
+                env: Some(env.clone()),
                 status: bcs_service_api::ActorStatus::Online,
                 actor_kind: bcs_service_api::ActorKind::Bot,
                 created_by: Some(created_by.into()),
@@ -141,6 +198,16 @@ impl MemoryBotRepo {
                 friend_check_in_strategy: Default::default(),
             },
         );
+        if let Some(initialization) = initialization {
+            memory_apply_initialization(
+                &mut bots,
+                &mut authority,
+                &env,
+                &bot_id,
+                initialization,
+                SOURCE_REGISTRATION,
+            )?;
+        }
         Ok(true)
     }
 }

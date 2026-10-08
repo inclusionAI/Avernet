@@ -3,6 +3,7 @@
 use super::*;
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::{BotRepoPort, bot_provider::BotProviderRepoPort};
+use bcs_service_api::types::OwnershipInitialization;
 
 pub struct MemoryBotProviderStore {
     bots: Arc<dyn BotRepoPort>,
@@ -89,6 +90,39 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if !self.bots.create_registration_if_absent(record.bot_uuid.clone(), capabilities, owner, token).await? {
             return Err(conflict());
         }
+        if record.connection_mode == BotConnectionMode::Gateway {
+            bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
+                bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
+                webhook_url: record.webhook_url.clone(), disabled: false, created_at: now, updated_at: now,
+            });
+            refs.insert(key, record.bot_uuid.clone());
+        }
+        records.insert(record.bot_uuid.clone(), record);
+        Ok(())
+    }
+
+    async fn create_provider_bot_with_initialization(&self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: OwnershipInitialization) -> ServiceResult<()> {
+        bot_storage::validate_record(&record)?;
+        if owner.trim().is_empty() || token.is_empty() {
+            return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
+        }
+        let mut records = self.records.write().await;
+        let mut bindings = self.bindings.bindings_by_bot.write().await;
+        let mut refs = self.bindings.binding_ref_index.write().await;
+        let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
+        if records.contains_key(&record.bot_uuid) || refs.contains_key(&key)
+            || bindings.contains_key(&record.bot_uuid)
+            || records.values().any(|existing| existing.provider_id == record.provider_id && existing.provider_bot_ref == record.provider_bot_ref)
+        { return Err(conflict()); }
+        // The bots repo performs the atomic registration + initialization in
+        // ITS one critical section; only a successful creation continues to
+        // install the Provider membership and gateway projection here.
+        if !self.bots.create_registration_if_absent_with_initialization(
+            record.bot_uuid.clone(), capabilities, owner, token, initialization).await? {
+            return Err(conflict());
+        }
+        let now = binding_now_ms()?;
         if record.connection_mode == BotConnectionMode::Gateway {
             bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
