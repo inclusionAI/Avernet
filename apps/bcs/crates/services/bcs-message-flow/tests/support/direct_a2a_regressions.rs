@@ -175,3 +175,103 @@ async fn reconciliation_cleans_expired_active_entries_and_partial_terminal_clean
         assert_eq!(h.status("cleanup").await["state"], "completed");
     }
 }
+
+
+#[derive(Default)]
+struct TerminalObserver {
+    events: tokio::sync::Mutex<Vec<BotTerminalEvent>>,
+    runs: tokio::sync::Mutex<Option<Arc<ChatRunStore>>>,
+}
+
+#[async_trait::async_trait]
+impl BotTerminalObserverPort for TerminalObserver {
+    async fn observe(&self, event: BotTerminalEvent) {
+        let runs = self.runs.lock().await.clone().unwrap();
+        let record = runs.get(&event.run_id).await.unwrap();
+        assert!(record.state.is_terminal(), "observer must see the committed ChatRun");
+        assert_eq!(record.bot_uuid, event.bot_uuid);
+        self.events.lock().await.push(event);
+    }
+}
+
+#[tokio::test]
+async fn direct_terminal_observer_runs_after_reconciliation_with_canonical_identity() {
+    for sql in [false, true] {
+        for (state, expected) in [(ChatEventState::Final, BotTerminalState::Final),
+            (ChatEventState::Error, BotTerminalState::Error),
+            (ChatEventState::Aborted, BotTerminalState::Aborted)] {
+            let observer = Arc::new(TerminalObserver::default());
+            let h = Harness::with_observer(sql, None, Some(observer.clone())).await;
+            *observer.runs.lock().await = Some(h.direct.run_store().clone());
+            h.submit("observed", "observer-session").await.unwrap();
+            let row = start(&h, "observed").await;
+            let event = BotEventCommand {
+                bot_id: "bot-observer".into(), run_id: row.request_id.clone().unwrap(), group_id: String::new(),
+                bcs_session_id: Some("observer-session".into()), event_type: "chat".into(), state,
+                event_payload: json!({"message":{"role":"assistant","content":[{"type":"text","text":"answer"}]}}),
+            };
+            h.flow.handle_bot_event(event.clone()).await.unwrap();
+            let events = observer.events.lock().await;
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].run_id, "observed");
+            assert_eq!(events[0].state, expected);
+            assert_eq!(events[0].text, "answer");
+            drop(events);
+            // A canonical duplicate may replay notification for idempotent observers.
+            let mut duplicate = event;
+            duplicate.run_id = "observed".into();
+            h.flow.handle_bot_event(duplicate).await.unwrap();
+            assert_eq!(observer.events.lock().await.len(), 2);
+        }
+    }
+}
+
+#[tokio::test]
+async fn direct_observer_ignores_nonterminal_and_conflicting_late_events() {
+    let observer = Arc::new(TerminalObserver::default());
+    let h = Harness::with_observer(false, None, Some(observer.clone())).await;
+    *observer.runs.lock().await = Some(h.direct.run_store().clone());
+    h.submit("late", "late-session").await.unwrap();
+    start(&h, "late").await;
+    let mut event = BotEventCommand {
+        bot_id: "bot-observer".into(), run_id: "late".into(), group_id: String::new(),
+        bcs_session_id: Some("late-session".into()), event_type: "chat".into(), state: ChatEventState::Delta,
+        event_payload: json!({"delta":"partial"}),
+    };
+    h.flow.handle_bot_event(event.clone()).await.unwrap();
+    assert!(observer.events.lock().await.is_empty());
+    event.state = ChatEventState::Aborted;
+    h.flow.handle_bot_event(event.clone()).await.unwrap();
+    assert_eq!(observer.events.lock().await.len(), 1);
+    event.state = ChatEventState::Final;
+    h.flow.handle_bot_event(event).await.unwrap();
+    assert_eq!(observer.events.lock().await.len(), 1, "late Final must not report success");
+}
+
+#[tokio::test]
+async fn direct_observer_waits_for_response_checkpoint_and_terminal_commit() {
+    let observer = Arc::new(TerminalObserver::default());
+    let h = Harness::with_observer(true, None, Some(observer.clone())).await;
+    *observer.runs.lock().await = Some(h.direct.run_store());
+    h.submit("checkpoint-observer", "checkpoint-session").await.unwrap();
+    start(&h, "checkpoint-observer").await;
+    let gate = Arc::new(Pause::default());
+    let db = h.db.as_ref().unwrap();
+    *db.checkpoint_gate.lock().unwrap() = Some(gate.clone());
+    db.fail_checkpoint_once.store(true, SeqCst);
+    let flow = h.flow.clone();
+    let task = tokio::spawn(async move {
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".into(), run_id: "checkpoint-observer".into(), group_id: String::new(),
+            bcs_session_id: Some("checkpoint-session".into()), event_type: "chat.event".into(), state: ChatEventState::Final,
+            event_payload: json!({"message":{"role":"assistant","content":[{"type":"text","text":"persisted answer"}]}}),
+        }).await
+    });
+    gate.entered().await;
+    assert!(observer.events.lock().await.is_empty());
+    assert!(!h.direct.run_store().get("checkpoint-observer").await.unwrap().state.is_terminal());
+    gate.release.notify_one();
+    task.await.unwrap().unwrap();
+    assert_eq!(observer.events.lock().await.len(), 1);
+    assert_eq!(h.direct.run_store().get("checkpoint-observer").await.unwrap().accumulated_content, "persisted answer");
+}

@@ -36,6 +36,10 @@ impl Harness {
     }
 
     async fn with_db(sql: bool, shared: Option<Arc<ObservedDb>>) -> Self {
+        Self::with_observer(sql, shared, None).await
+    }
+
+    async fn with_observer(sql: bool, shared: Option<Arc<ObservedDb>>, observer: Option<Arc<dyn BotTerminalObserverPort>>) -> Self {
         let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
         support.registry.set_visibility("bot-observer", "public").await;
         let mut observed_db = None;
@@ -69,6 +73,7 @@ impl Harness {
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
             .with_message_repo(messages.clone()).with_managed_deliveries(service.clone()).with_session_management(session_service)
             .with_bot_run_context(Arc::new(MemoryBotRunContextStore::new())).with_direct_chat(direct.clone());
+        if let Some(observer) = observer { flow = flow.with_bot_terminal_observer(observer); }
         flow.delivery_policy = Some(policy.clone());
         let flow = Arc::new(flow);
         flow.retain_terminal_events();

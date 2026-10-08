@@ -430,7 +430,7 @@ pub async fn handle_bot_event(
     })
 }
 
-async fn notify_terminal_observer(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
+pub(crate) async fn notify_terminal_observer(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
     if !matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
         return;
     }

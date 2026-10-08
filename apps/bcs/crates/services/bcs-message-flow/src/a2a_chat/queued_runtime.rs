@@ -118,6 +118,21 @@ impl A2aChat {
         let fresh = self.managed_row(&record).await?.ok_or_else(|| invalid("direct delivery missing"))?;
         self.reconcile_direct(&fresh).await?;
         let terminal = fresh.state.status.is_terminal();
+        // Notify only after durable reconciliation, and only when this event
+        // agrees with the committed result. A late Final must not turn a
+        // cancelled/expired delivery into a successful admin callback.
+        use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+        if fresh.state.may_have_been_sent && matches!((fresh.state.status, &cmd.state),
+            (Status::Completed, ChatEventState::Final)
+                | (Status::Failed, ChatEventState::Error)
+                | (Status::Cancelled, ChatEventState::Aborted)) {
+            let mut canonical = cmd.clone();
+            canonical.run_id = run.into();
+            canonical.bot_id = fresh.target_bot_id.clone();
+            // Duplicate matching events intentionally reach the observers:
+            // their idempotent terminal handling can recover a missed notification.
+            crate::bot_event::notify_terminal_observer(flow, &canonical).await;
+        }
         Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(), unregistered_run_ids: if terminal { vec![run.into()] } else { Vec::new() },
             mentions: Vec::new(), delivered_count: 0, failed_count: 0, delivery_results: Vec::new() })
     }
