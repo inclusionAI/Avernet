@@ -14,6 +14,7 @@ from engine.community.api.tests.transport.test_ws_server import (
 )
 from engine.community.core.adapters.openclaw.chat import OpenClawChatAdapter
 from engine.community.kernel.frames import ErrorShape, EventFrame, ResponseFrame
+from engine.community.manager import EngineManager
 from engine.community.local.openclaw.plugin_impl import LocalOpenClawPluginImpl
 from engine.community.openclaw.client.tests.test_gateway_client import _fire_event, _make_client
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
@@ -25,8 +26,12 @@ def setup(server, fake_engine, auth_gate_service, monkeypatch):
         "engine.community.core.adapters.openclaw.chat.IntentEvalObserver", MagicMock()
     )
     client = _make_client()
-    port = OpenClawPluginImpl(pool=SimpleNamespace(get=AsyncMock(return_value=client)))
+    port = OpenClawPluginImpl(
+        pool=SimpleNamespace(get=AsyncMock(return_value=client)),
+        center_content_adapter=MagicMock(),
+    )
     fake_engine.chat = OpenClawChatAdapter(port)
+    EngineManager.get_instance()._engine = "openclaw"
     server._subscribe_conn_to_session = AsyncMock(return_value=True)
     auth_gate_service.enabled = False
     websocket = SimpleNamespace(send_text=AsyncMock())
@@ -189,3 +194,167 @@ async def test_inject_delivery_does_not_stop_foreground_stream(server, live):
     assert websocket.send_text.await_count == (1 if live else 2)
     assert json.loads(websocket.send_text.call_args.args[0])["payload"]["runId"] == "r"
     error.assert_not_awaited()
+
+
+async def _start_resume(server, websocket, auth_gate_service):
+    params = {
+        "sessionKey": "sk", "message": "hello", "idempotencyKey": "new",
+        "resumeEnabled": True,
+    }
+    response = await server._handle_chat_send(
+        websocket, "conn-1", _req("chat.send", params), params,
+        auth_gate_service=auth_gate_service,
+    )
+    assert response is None
+    return next(iter(server._openclaw_resume._runs.values()))
+
+
+@pytest.mark.parametrize("ok,status", [(True, "ok"), (False, "error")])
+async def test_resumable_terminal_ack_does_not_fabricate_terminal_event(
+    setup, server, auth_gate_service, fake_engine, ok, status,
+):
+    client, websocket, _ = setup
+    client.send_request = AsyncMock(return_value=ResponseFrame(
+        id="upstream", ok=ok, payload={"runId": "old", "status": status},
+        error=None if ok else ErrorShape("DENIED", "denied"),
+    ))
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(run.task, 1)
+    frames = [json.loads(call.args[0]) for call in websocket.send_text.await_args_list]
+    assert len(frames) == 1
+    assert frames[0]["type"] == "res"
+    assert frames[0]["ok"] is ok
+    assert frames[0]["payload"]["status"] == status
+    assert frames[0]["payload"]["runId"] == "old"
+    ticket = frames[0]["payload"]["resumeTicket"]
+    assert server._openclaw_resume.lookup(session_key="sk", ticket=ticket) is run
+    assert run.state == ("final" if ok else "error")
+    assert run.finished_at is not None
+    assert not run._events
+    assert not any(client._event_listeners.values())
+    fake_engine.on_connection_close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("ack_write_fails", [False, True])
+async def test_reused_run_survives_resume_disconnect_with_actual_identity(
+    setup, server, auth_gate_service, fake_engine, ack_write_fails,
+):
+    client, websocket, _ = setup
+    received_ack = asyncio.Event()
+
+    async def write(_text):
+        received_ack.set()
+        if ack_write_fails:
+            raise ConnectionError("closed")
+
+    websocket.send_text.side_effect = write
+    client.send_request = AsyncMock(return_value=ResponseFrame.ok_response(
+        "upstream", {"runId": "old", "status": "in_flight"},
+    ))
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(received_ack.wait(), 1)
+    ack = json.loads(websocket.send_text.await_args_list[0].args[0])
+    assert ack["payload"]["cached"] is True
+    assert ack["payload"]["runId"] == run.run_id == "old"
+    await server._release_conn("conn-1")
+    assert not run.task.done()
+    _fire_event(client, "chat", {
+        "runId": "old", "sessionKey": "sk", "state": "final", "text": "answer",
+    })
+    await asyncio.wait_for(run.task, 1)
+    assert run.state == "final"
+    new_socket = SimpleNamespace(send_text=AsyncMock())
+    result = await server._handle_chat_resume(
+        new_socket, "conn-2", _req("chat.resume", {}),
+        {"sessionKey": "sk", "resumeTicket": ack["payload"]["resumeTicket"]},
+    )
+    assert result.payload["runId"] == "old"
+    await asyncio.sleep(0)
+    frame = json.loads(new_socket.send_text.await_args_list[0].args[0])
+    assert frame["payload"]["state"] == "final"
+    assert frame["payload"]["resumeSeq"] == 1
+    assert not any(client._event_listeners.values())
+    assert fake_engine.on_connection_close.await_count == 2
+
+
+async def test_resumable_startup_failure_is_only_failed_ack(setup, server, auth_gate_service):
+    client, websocket, _ = setup
+    client.send_request = AsyncMock(side_effect=TimeoutError("private upstream detail"))
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(run.task, 1)
+    frames = [json.loads(call.args[0]) for call in websocket.send_text.await_args_list]
+    assert len(frames) == 1
+    assert frames[0]["ok"] is False
+    assert frames[0]["error"]["message"] == "Chat stream failed."
+    assert run.state == "error"
+    assert run.finished_at is not None
+    assert not run._events
+
+
+async def test_resumable_missing_ack_finishes_record(setup, server, auth_gate_service, fake_engine):
+    _, websocket, _ = setup
+    server._stream_chat_events = AsyncMock()
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(run.task, 1)
+    frame = json.loads(websocket.send_text.await_args.args[0])
+    assert frame["ok"] is False
+    assert frame["payload"]["accepted"] is False
+    assert run.state == "error"
+    assert run.finished_at is not None
+    fake_engine.on_connection_close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("after_ack", [False, True])
+async def test_cancelled_resume_keeps_ack_order_and_releases_upstream(
+    setup, server, auth_gate_service, fake_engine, after_ack,
+):
+    client, websocket, _ = setup
+    ready = asyncio.Event()
+
+    async def send(*args, **kwargs):
+        if after_ack:
+            return ResponseFrame.ok_response("upstream", {"runId": "old", "status": "in_flight"})
+        ready.set()
+        await asyncio.Event().wait()
+
+    async def write(_text):
+        ready.set()
+
+    client.send_request = send
+    websocket.send_text.side_effect = write
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(ready.wait(), 1)
+    run.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run.task
+    await asyncio.sleep(0)
+    frames = [json.loads(call.args[0]) for call in websocket.send_text.await_args_list]
+    assert frames[0]["type"] == "res"
+    assert frames[0]["ok"] is after_ack
+    if after_ack:
+        assert frames[-1]["payload"]["state"] == "aborted"
+        assert frames[-1]["payload"]["runId"] == "old"
+    else:
+        assert len(frames) == 1
+    assert run.state == "aborted"
+    assert run.finished_at is not None
+    assert not any(client._event_listeners.values())
+    fake_engine.on_connection_close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("engine", ["claude_code", "hermes", "deepseek_harness", "aicoding", "teclaw"])
+async def test_other_engines_keep_immediate_ack(server, fake_engine, auth_gate_service, engine):
+    EngineManager.get_instance()._engine = engine
+    server._subscribe_conn_to_session = AsyncMock(return_value=False)
+    server._stream_chat_events = AsyncMock()
+    auth_gate_service.enabled = False
+    params = {"sessionKey": "sk", "message": "hello"}
+    response = await server._handle_chat_send(
+        SimpleNamespace(send_text=AsyncMock()), "conn-1", _req("chat.send", params), params,
+        auth_gate_service=auth_gate_service,
+    )
+    assert response.payload == {"accepted": True}
+    assert not server._ack_chat_tasks
+    await asyncio.sleep(0)
+    server._stream_chat_events.assert_awaited_once()
+    assert "on_ack" not in server._stream_chat_events.call_args.kwargs

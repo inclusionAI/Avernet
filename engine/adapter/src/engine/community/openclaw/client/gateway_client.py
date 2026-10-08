@@ -627,7 +627,7 @@ class OpenClawGatewayClient:
             raise ConnectionError("Not connected")
 
         event_queue: asyncio.Queue[Optional[EventFrame]] = asyncio.Queue()
-        ack_pending = True
+        ack_pending = on_ack is not None
         early_events: list[tuple[Callable[[EventFrame], None], EventFrame]] = []
         early_bytes = 0
         early_overflow = False
@@ -636,6 +636,18 @@ class OpenClawGatewayClient:
             nonlocal early_bytes, early_overflow
             if not ack_pending:
                 return False
+            payload = event.payload or {}
+            event_session = payload.get("sessionKey")
+            # COSEC: Reject known foreign sessions before charging this request's
+            # buffer. Keep same-session runs: their actual ID may arrive in ACK.
+            if (
+                payload.get("runId") != expected_run_id
+                and isinstance(event_session, str)
+                and event_session
+                and event_session.strip().lower().removeprefix("agent:main:")
+                != session_key.strip().lower().removeprefix("agent:main:")
+            ):
+                return True
             # COSEC: Bound uncorrelated events until the upstream run identity is known.
             early_bytes += len(event.to_json().encode("utf-8"))
             if early_bytes > _MAX_PRE_ACK_BYTES:

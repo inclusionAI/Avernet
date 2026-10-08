@@ -35,9 +35,17 @@ do not prove a replay. Consumers should retain the original status and runId.
 
 For an active run the Adapter relays subsequent events. Events arriving before
 the ACK are buffered (up to 1.5 MiB per request) and filtered using the returned
-runId before delivery. Buffer overflow fails explicitly instead of silently
-dropping a terminal event. Disconnects release that request's listeners; they
-do not abort the upstream run.
+runId before delivery. Known foreign sessions are excluded before counting
+bytes; same-session and unidentified events are retained until ACK correlation.
+Buffer overflow fails explicitly instead of silently dropping a terminal event.
+Without resume, disconnects release that request's listeners without aborting
+the upstream run.
+
+With `resumeEnabled=true`, the same ACK includes `resumeTicket` and `recovery`.
+The resume record adopts the actual upstream runId. Its background task and
+replay cache survive disconnects, including failure to deliver the initial ACK.
+Failed or completed-replay ACKs finish the resume record as error or final,
+respectively, without generating a chat terminal event.
 
 Failed ACKs and completed-replay ACKs end this request's event subscription.
 The Adapter does **not** synthesize a final event or fetch conversation history.

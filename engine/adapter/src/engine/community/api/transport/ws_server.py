@@ -40,7 +40,6 @@ from pydantic import ValidationError
 from engine.community.config import load_max_connections, load_mcp_token_settings
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 from engine.community.core.chat.models import ChatAbortRequest, ChatRequest
-from engine.community.core.adapters.openclaw.chat import OpenClawChatAdapter
 from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatAck
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.resource_references.service import ResourceReferenceService
@@ -1246,6 +1245,8 @@ class EngineWebSocketServer:
                     params.get("timeoutMs"),
                     run_id,
                     auth,
+                    request_id=request.id,
+                    resume_ticket=ticket,
                     attachments=attachments,
                     chat_attachment_requests=chat_attachment_requests,
                     chat_image_requests=chat_image_requests,
@@ -1253,15 +1254,7 @@ class EngineWebSocketServer:
                     prompt_file_refs=prompt_file_refs,
                 )
             )
-            return ResponseFrame.ok_response(
-                request.id,
-                {
-                    "accepted": True,
-                    "runId": run_id,
-                    "resumeTicket": ticket,
-                    "recovery": "process_local_v1",
-                },
-            )
+            return None
 
         # The browser only sends chat.send. Bind this connection before starting
         # the stream so OpenClaw-originated inject events can reach the session.
@@ -1271,7 +1264,7 @@ class EngineWebSocketServer:
             # Listener binding is best-effort and must not reject a valid chat.send.
             log.warning("chat.send: failed to bind inject listener: %s", e)
 
-        if isinstance(EngineManager.get_instance().chat, OpenClawChatAdapter):
+        if manager.engine == "openclaw":
             task = asyncio.create_task(self._run_ack_chat(
                 websocket, conn_id, request.id, session_key, message,
                 params.get("timeoutMs"), params.get("idempotencyKey"),
@@ -1317,9 +1310,36 @@ class EngineWebSocketServer:
         timeout_ms: Optional[int],
         run_id: str,
         auth: AuthContext,
+        *,
+        request_id: str,
+        resume_ticket: str,
         **stream_kwargs: Any,
     ) -> None:
         run.state = "running"
+        acknowledged = False
+
+        async def acknowledge(ack: OpenClawChatAck) -> None:
+            nonlocal acknowledged
+            acknowledged = True
+            actual_run_id = ack.payload.get("runId")
+            if isinstance(actual_run_id, str) and actual_run_id:
+                run.run_id = actual_run_id
+            if not ack.ok:
+                run.state = "error"
+            elif ack.payload.get("status") == "ok":
+                run.state = "final"
+            response = ack.response(request_id)
+            response.payload.update(
+                resumeTicket=resume_ticket, recovery="process_local_v1"
+            )
+            paths = self._conn_materialized_redaction_paths.get(conn_id, ())
+            wire = _redact_materialized_paths(response.to_dict(), paths)
+            try:
+                await websocket.send_text(json.dumps(wire))
+            except Exception:
+                # Resume owns the run, not the original socket. Keep collecting.
+                log.debug("chat recovery: initial ACK could not be delivered")
+
         try:
             await self._stream_chat_events(
                 websocket,
@@ -1330,28 +1350,39 @@ class EngineWebSocketServer:
                 run_id,
                 auth_override=auth,
                 resume_run=run,
+                on_ack=acknowledge,
                 **stream_kwargs,
             )
         except asyncio.CancelledError:
-            await self._emit_stream_event(
-                websocket,
-                "chat",
-                {
-                    "sessionKey": session_key,
-                    "runId": run_id,
-                    "state": "aborted",
-                },
-                resume_run=run,
-            )
+            if not acknowledged:
+                await acknowledge(OpenClawChatAck(
+                    False, {}, ErrorShape(ErrorCodes.UNAVAILABLE, "OpenClaw chat startup cancelled")
+                ))
+                run.state = "aborted"
+            else:
+                await self._emit_stream_event(
+                    websocket,
+                    "chat",
+                    {
+                        "sessionKey": session_key,
+                        "runId": run.run_id,
+                        "state": "aborted",
+                    },
+                    resume_run=run,
+                )
             raise
         finally:
+            if not acknowledged:
+                await acknowledge(OpenClawChatAck(
+                    False, {}, ErrorShape(ErrorCodes.UNAVAILABLE, "OpenClaw chat startup failed")
+                ))
             if run.state not in ("final", "error", "aborted"):
                 await self._emit_stream_event(
                     websocket,
                     "chat",
                     {
                         "sessionKey": session_key,
-                        "runId": run_id,
+                        "runId": run.run_id,
                         "state": "error",
                         "errorMessage": "Chat stream ended without a terminal event.",
                     },
@@ -1436,9 +1467,12 @@ class EngineWebSocketServer:
 
         async def send_error(payload: dict[str, Any], **event_options: Any) -> None:
             if on_ack is not None and not acknowledged:
+                message = payload.get("errorMessage", "OpenClaw chat startup failed")
+                if resume_run is not None and not payload.get("errorCode"):
+                    message = "Chat stream failed."
                 await acknowledge(OpenClawChatAck(False, {}, ErrorShape(
                     payload.get("errorCode", ErrorCodes.UNAVAILABLE),
-                    payload.get("errorMessage", "OpenClaw chat startup failed"),
+                    message,
                 )))
             else:
                 await self._emit_stream_event(websocket, "chat", payload, **event_options)
@@ -1489,7 +1523,7 @@ class EngineWebSocketServer:
                 await send_error(
                     {
                         "sessionKey": session_key,
-                        **({"runId": idempotency_key} if resume_run is not None else {}),
+                        **({"runId": resume_run.run_id} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": code,
                         "errorMessage": "The attached image could not be prepared.",
@@ -1566,7 +1600,7 @@ class EngineWebSocketServer:
                 await send_error(
                     {
                         "sessionKey": session_key,
-                        **({"runId": idempotency_key} if resume_run is not None else {}),
+                        **({"runId": resume_run.run_id} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": exc.code,
                         "errorMessage": exc.user_message,
@@ -1683,7 +1717,7 @@ class EngineWebSocketServer:
             try:
                 await send_error({
                     "sessionKey": session_key,
-                    **({"runId": idempotency_key} if resume_run is not None else {}),
+                    **({"runId": resume_run.run_id} if resume_run is not None else {}),
                     "state": "error",
                     "errorMessage": (
                         "Chat stream failed." if resume_run is not None else str(e)

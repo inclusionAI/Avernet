@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from engine.community.openclaw.client import gateway_client as module
-from engine.community.openclaw.client.tests.test_gateway_client import _fire_event, _make_client
+from engine.community.openclaw.client.tests.test_gateway_client import (
+    _fire_compaction_end, _fire_event, _fire_lifecycle_end, _fire_text_chat, _make_client,
+)
 from engine.community.openclaw.protocol import ErrorShape, ResponseFrame
 from engine.community.plugin_api.openclaw.chat import OpenClawChatAck
 
@@ -128,4 +130,86 @@ async def test_downstream_ack_failure_releases_listeners():
     client.send_request = AsyncMock(return_value=ResponseFrame.ok_response("id", {"status": "started"}))
     with pytest.raises(ConnectionError):
         await anext(client.chat_stream("sk", "hello", on_ack=AsyncMock(side_effect=ConnectionError())))
+    assert not any(client._event_listeners.values())
+
+
+@pytest.mark.parametrize("with_ack", [False, True])
+@pytest.mark.parametrize("event_name", ["chat", "agent", "approval.requested", "approval.resolved"])
+async def test_foreign_session_does_not_consume_pending_ack_budget(monkeypatch, with_ack, event_name):
+    client = _make_client()
+    monkeypatch.setattr(module, "_MAX_PRE_ACK_BYTES", 1024)
+
+    async def send(*args, **kwargs):
+        _fire_event(client, event_name, {
+            "runId": "foreign", "sessionKey": "agent:other:sk",
+            "state": "delta", "text": "x" * 4096,
+        })
+        _fire_event(client, "chat", {
+            "runId": "mine", "sessionKey": "sk", "state": "final", "text": "answer",
+        })
+        return ResponseFrame.ok_response("upstream", {"runId": "mine", "status": "started"})
+
+    client.send_request = send
+    ack = AsyncMock()
+    kwargs = {"on_ack": ack} if with_ack else {}
+    events = [event async for event in client.chat_stream("sk", "hello", idempotency_key="mine", **kwargs)]
+    assert [event["state"] for event in events] == ["final"]
+    assert ack.await_count == int(with_ack)
+    assert not any(client._event_listeners.values())
+
+
+@pytest.mark.parametrize("event_session", [None, "sk", "agent:main:SK"])
+async def test_reused_run_early_event_survives_session_prefilter(event_session):
+    client = _make_client()
+
+    async def send(*args, **kwargs):
+        payload = {"runId": "old", "state": "final", "text": "answer"}
+        if event_session is not None:
+            payload["sessionKey"] = event_session
+        _fire_event(client, "chat", payload)
+        return ResponseFrame.ok_response("upstream", {"runId": "old", "status": "in_flight"})
+
+    client.send_request = send
+    ack = AsyncMock()
+    events = [event async for event in client.chat_stream("sk", "hello", idempotency_key="new", on_ack=ack)]
+    assert events[0]["runId"] == "old"
+    ack.assert_awaited_once()
+
+
+async def test_legacy_stream_does_not_acquire_ack_buffer_limit(monkeypatch):
+    client = _make_client()
+    monkeypatch.setattr(module, "_MAX_PRE_ACK_BYTES", 1)
+
+    async def send(*args, **kwargs):
+        _fire_event(client, "chat", {"runId": "mine", "state": "final", "text": "answer"})
+        return ResponseFrame.ok_response("upstream", {"runId": "mine", "status": "started"})
+
+    client.send_request = send
+    events = [event async for event in client.chat_stream("sk", "hello", idempotency_key="mine")]
+    assert events[0]["text"] == "answer"
+
+
+async def test_ack_buffer_preserves_compaction_terminal_suppression(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    order = []
+
+    async def send(*args, **kwargs):
+        _fire_text_chat(client, text="Before ", state="delta")
+        _fire_compaction_end(client)
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="Before ", state="final")
+        _fire_text_chat(client, text="after", state="delta")
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="after", state="final")
+        return ResponseFrame.ok_response("upstream", {"runId": "run-1", "status": "in_flight"})
+
+    async def ack(response):
+        order.append("ack")
+
+    client.send_request = send
+    async for event in client.chat_stream("sk-1", "hello", idempotency_key="new", on_ack=ack):
+        if event.get("state") in ("delta", "final"):
+            order.append(event["state"])
+    assert order == ["ack", "delta", "delta", "final"]
     assert not any(client._event_listeners.values())
