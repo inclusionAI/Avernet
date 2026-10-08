@@ -104,11 +104,41 @@ class ForumRepository(ForumRepositoryProtocol):
         offset: int,
         limit: int,
         topic_type: str | None = None,
+        author_id: str | None = None,
     ) -> ForumTopicPage:
         with self._db.orm_session() as db:
-            query = db.query(ForumTopicModel).filter(
-                ForumTopicModel.env == get_current_env(),
-                ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+            # Per-Topic reply count and latest reply time, joined onto the
+            # Topic row so the catalogue can show reply_count + latest_activity
+            # without an N+1 walk over posts.
+            # ForumPostModel carries no env/avernet_tenant columns; posts are
+            # scoped by Topic id, and the Topic query below already filters by
+            # env/tenant, so this per-Topic aggregate needs no env filter.
+            post_stats = (
+                db.query(
+                    ForumPostModel.topic_id.label("topic_id"),
+                    func.count().label("reply_count"),
+                    func.max(ForumPostModel.gmt_create).label("latest_post_at"),
+                )
+                .group_by(ForumPostModel.topic_id)
+                .subquery()
+            )
+            query = (
+                db.query(
+                    ForumTopicModel,
+                    func.coalesce(post_stats.c.reply_count, 0).label(
+                        "reply_count"
+                    ),
+                    post_stats.c.latest_post_at,
+                )
+                .outerjoin(
+                    post_stats,
+                    ForumTopicModel.topic_id == post_stats.c.topic_id,
+                )
+                .filter(
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
             )
             if status is not None:
                 query = query.filter(ForumTopicModel.status == status)
@@ -121,6 +151,8 @@ class ForumRepository(ForumRepositoryProtocol):
                         ForumTopicModel.body.contains(keyword, autoescape=True),
                     )
                 )
+            if author_id is not None:
+                query = query.filter(ForumTopicModel.author_id == author_id)
             total = query.count()
             rows = (
                 query.order_by(
@@ -130,9 +162,25 @@ class ForumRepository(ForumRepositoryProtocol):
                 .limit(limit)
                 .all()
             )
-            return ForumTopicPage(
-                total=total, items=tuple(row.to_record() for row in rows)
+            items = tuple(
+                ForumTopicRecord(
+                    topic_id=row[0].topic_id,
+                    author_type=row[0].author_type,
+                    author_id=row[0].author_id,
+                    title=row[0].title,
+                    body=row[0].body,
+                    status=row[0].status,
+                    created_at=row[0].gmt_create,
+                    updated_at=row[0].gmt_modified,
+                    topic_type=row[0].topic_type,
+                    reply_count=int(row[1] or 0),
+                    latest_activity_at=(
+                        row[2] if row[2] is not None else row[0].gmt_modified
+                    ),
+                )
+                for row in rows
             )
+            return ForumTopicPage(total=total, items=items)
 
     def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
         with self._db.orm_session() as db:
@@ -434,6 +482,7 @@ class ForumRepository(ForumRepositoryProtocol):
         offset: int,
         limit: int,
         mode: str | None = None,
+        owner_user_id: str | None = None,
     ) -> BrowseSubscriptionPage:
         with self._db.orm_session() as db:
             query = db.query(ForumBrowseSubscriptionModel).filter(
@@ -443,6 +492,10 @@ class ForumRepository(ForumRepositoryProtocol):
             )
             if mode is not None:
                 query = query.filter(ForumBrowseSubscriptionModel.mode == mode)
+            if owner_user_id is not None:
+                query = query.filter(
+                    ForumBrowseSubscriptionModel.owner_user_id == owner_user_id
+                )
             total = query.count()
             rows = (
                 query.order_by(

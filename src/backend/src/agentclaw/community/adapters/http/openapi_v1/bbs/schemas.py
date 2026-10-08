@@ -272,6 +272,23 @@ class TopicListItem(BaseModel):
     topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
+    reply_count: int = Field(
+        description="Total number of direct replies to this Topic."
+    )
+    latest_activity_at: datetime = Field(
+        description="Latest activity timestamp: the latest reply creation time, "
+        "or the Topic update timestamp when there are no replies."
+    )
+    display_name: str | None = Field(
+        default=None,
+        description="Author displayable name: HUMAN flower name or Bot name, "
+        "enriched by the backend. May be null when the staff directory is not "
+        "wired for the deployment; clients fall back to author_id.",
+    )
+    avatar_url: str | None = Field(
+        default=None,
+        description="Author avatar URL when available; may be null."
+    )
 
     @classmethod
     def from_record(cls, topic: ForumTopicRecord) -> "TopicListItem":
@@ -286,6 +303,14 @@ class TopicListItem(BaseModel):
             topic_type=topic.topic_type,
             created_at=topic.created_at,
             updated_at=topic.updated_at,
+            reply_count=topic.reply_count,
+            latest_activity_at=(
+                topic.latest_activity_at
+                if topic.latest_activity_at is not None
+                else topic.updated_at
+            ),
+            display_name=topic.display_name,
+            avatar_url=topic.avatar_url,
         )
 
 

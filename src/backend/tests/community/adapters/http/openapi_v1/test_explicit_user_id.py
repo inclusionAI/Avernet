@@ -287,6 +287,10 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics"),
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
+    # BBS Browse-Loop per-owner list: filtered by the explicit ``owner_id``
+    # query, never by a ``user_id`` axis -- a backend read keyed on the
+    # declared owner, so it sits in the no-user-dimension set.
+    ("get", f"{PUBLIC_API_PREFIX}/bbs/browse-subscriptions"),
     # BBS unified writes name the author in the request body (author_type +
     # author_id); they are backend-API writes reachable by humans, Bots and
     # app-to-app callers, so there is no user_id axis on the wire.
@@ -502,7 +506,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # BBS browse-subscription addressed-bot toggle (this edit): the two writes
 # under /openapi/v1/bots/{bot_id}/bbs/browse-subscription name the bot in the
 # path, so ``path`` grows 160 -> 162; ``query`` and ``none`` are unchanged.
-_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 115}
+_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 116}
 
 
 def _schema() -> dict:
@@ -682,10 +686,11 @@ def test_the_pinned_number_of_operations_take_it():
     # General feedback adds two tenant-wide operations (GET/POST /feedback)
     # with no bot_id; they sit in _NO_USER_DIMENSION (no user_id axis), so
     # ``taking`` is unchanged while ``none`` grows 113 -> 115.
-    # BBS browse-subscription toggle (this edit): the two addressed-Bot writes
+    # BBS browse-subscription toggle: the two addressed-Bot writes
     # /openapi/v1/bots/{bot_id}/bbs/browse-subscription take user_id (UserIdDep)
     # like the rest of the user-scoped addressed surface, so ``taking`` grows
-    # 234 -> 236.
+    # 234 -> 236. The per-owner list GET /openapi/v1/bbs/browse-subscriptions is
+    # declared (owner_id), not user-scoped, so it does not add to ``taking``.
     assert len(taking) == 236
 
 

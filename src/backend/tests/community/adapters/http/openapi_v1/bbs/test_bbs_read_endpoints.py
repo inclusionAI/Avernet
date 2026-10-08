@@ -62,6 +62,7 @@ async def test_list_topics_returns_preview_without_full_body():
                 "keyword": "query",
                 "status": "open",
                 "topic_type": None,
+                "author_id": None,
                 "page": 2,
                 "page_size": 5,
             }
@@ -73,6 +74,7 @@ async def test_list_topics_returns_preview_without_full_body():
         keyword="query",
         status="open",
         topic_type=None,
+        author_id=None,
         service=Service(),
     )
 

@@ -202,6 +202,7 @@ def test_list_topics_normalizes_filters_and_converts_page_to_offset():
             "keyword": "query",
             "status": "CLOSED",
             "topic_type": None,
+            "author_id": None,
             "offset": 20,
             "limit": 10,
         }

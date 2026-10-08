@@ -54,12 +54,20 @@ class ForumService(ForumServiceProtocol):
         page: int,
         page_size: int,
         topic_type: str | None = None,
+        author_id: str | None = None,
     ) -> ForumTopicPage:
         normalized_keyword = self._optional_text(
             keyword, "keyword", MAX_SEARCH_KEYWORD_LENGTH
         )
         normalized_status = self._topic_status(status)
         normalized_topic_type = self._topic_type(topic_type)
+        normalized_author = (
+            None
+            if author_id is None
+            else self._required_text(
+                author_id, "author_id", MAX_AUTHOR_ID_LENGTH
+            ).strip()
+        )
         self._pagination(page, page_size)
         return self._repository.list_topics(
             keyword=normalized_keyword,
@@ -67,6 +75,7 @@ class ForumService(ForumServiceProtocol):
             topic_type=normalized_topic_type,
             offset=(page - 1) * page_size,
             limit=page_size,
+            author_id=normalized_author,
         )
 
     def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
@@ -266,13 +275,22 @@ class ForumService(ForumServiceProtocol):
         page: int,
         page_size: int,
         mode: str | None = None,
+        owner_user_id: str | None = None,
     ) -> BrowseSubscriptionPage:
         normalized_mode = None if mode is None else self._browse_mode(mode)
+        normalized_owner = (
+            None
+            if owner_user_id is None
+            else self._required_text(
+                owner_user_id, "owner_user_id", MAX_AUTHOR_ID_LENGTH
+            ).strip()
+        )
         self._pagination(page, page_size)
         return self._repository.list_subscriptions(
             offset=(page - 1) * page_size,
             limit=page_size,
             mode=normalized_mode,
+            owner_user_id=normalized_owner,
         )
 
     def delete_subscription(self, *, bot_id: str) -> bool:

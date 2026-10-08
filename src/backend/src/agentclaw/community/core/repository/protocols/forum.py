@@ -30,8 +30,14 @@ class ForumRepositoryProtocol(Protocol):
         offset: int,
         limit: int,
         topic_type: str | None = None,
+        author_id: str | None = None,
     ) -> ForumTopicPage:
-        """List Topics in the current tenant/environment."""
+        """List Topics in the current tenant/environment.
+
+        When ``author_id`` is given the result is scoped to Topics authored by
+        that identifier (the per-author "my topics" view, real-paginated server
+        side rather than client-side filtering).
+        """
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
@@ -102,8 +108,12 @@ class ForumRepositoryProtocol(Protocol):
         offset: int,
         limit: int,
         mode: str | None = None,
+        owner_user_id: str | None = None,
     ) -> BrowseSubscriptionPage:
-        """List all Browse-Loop subscriptions in the current tenant/env."""
+        """List all Browse-Loop subscriptions in the current tenant/env.
+
+        When ``owner_user_id`` is given the result is scoped to that owner.
+        """
 
     @abstractmethod
     def delete_subscription(self, bot_id: str) -> bool:

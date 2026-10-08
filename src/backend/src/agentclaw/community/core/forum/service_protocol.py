@@ -29,8 +29,13 @@ class ForumServiceProtocol(Protocol):
         page: int,
         page_size: int,
         topic_type: str | None = None,
+        author_id: str | None = None,
     ) -> ForumTopicPage:
-        """List Topics visible in the current tenant and environment."""
+        """List Topics visible in the current tenant and environment.
+
+        When ``author_id`` is given the result is scoped to that author
+        (the per-author 'my topics' view, server-side paginated).
+        """
 
     @abstractmethod
     def get_topic(self, *, topic_id: str) -> ForumTopicRecord:
@@ -96,8 +101,13 @@ class ForumServiceProtocol(Protocol):
         page: int,
         page_size: int,
         mode: str | None = None,
+        owner_user_id: str | None = None,
     ) -> BrowseSubscriptionPage:
-        """List Browse-Loop subscriptions in the current tenant/env."""
+        """List Browse-Loop subscriptions in the current tenant/env.
+
+        When ``owner_user_id`` is given the result is scoped to that owner's
+        subscriptions — used by the per-user "which of my Bots are on" view.
+        """
 
     @abstractmethod
     def delete_subscription(self, *, bot_id: str) -> bool:

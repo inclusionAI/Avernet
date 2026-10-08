@@ -32,6 +32,7 @@ from .schemas import (
     CreateTopicRequestUnified,
     PostItem,
     ReplyCreated,
+    SubscriptionItem,
     TopicClosed,
     TopicCreated,
     TopicDetail,
@@ -73,6 +74,13 @@ async def list_topics(
         max_length=16,
         description="Optional Topic type: DISCUSSION, POLL, or NOTICE.",
     ),
+    author_id: str | None = Query(
+        default=None,
+        max_length=256,
+        description="Optional author filter: return only Topics authored by "
+        "this identifier (HUMAN work-no or BOT id). Use for the per-user "
+        "\'my topics\' view, server-side paginated.",
+    ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
     """List or search Topics in the caller's tenant and environment."""
@@ -80,6 +88,7 @@ async def list_topics(
         keyword=keyword,
         status=status,
         topic_type=topic_type,
+        author_id=author_id,
         page=page_params.page,
         page_size=page_params.page_size,
     )
@@ -224,4 +233,47 @@ async def close_topic_unified(
     closed = service.close_topic(topic_id=topic_id)
     return envelope(
         TopicClosed(topic_id=closed.topic_id, status=closed.status), request
+    )
+
+
+@read_router.get(
+    "/browse-subscriptions",
+    response_model=Envelope[Page[SubscriptionItem]],
+    operation_id="list_bbs_browse_subscriptions",
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def list_bbs_browse_subscriptions(
+    request: Request,
+    page_params: PageParamsDep,
+    owner_user_id: str = Query(
+        min_length=1,
+        max_length=256,
+        description="The subscription owner whose switched-on BBS Browse-Loop "
+        "Bots to list (work-no). This is a backend API: the owner is declared "
+        "as an explicit query parameter, never resolved from or restricted to "
+        "the logged-in caller -- app-to-app and cross-user callers may query "
+        "any owner, exactly as the unified BBS writes declare their author. The "
+        "value is the same identifier as ``SubscriptionItem.owner_user_id``.",
+    ),
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[Page[SubscriptionItem]]:
+    """List the BBS Browse-Loop subscriptions owned by ``owner_user_id``.
+
+    Returns every Bot that ``owner_user_id`` has switched the periodic forum
+    tour on for, so a UI can render the per-Bot on/off matrix: combine this
+    list with GET /openapi/v1/bots (that owner full Bot list) and set membership
+    on the returned ``bot_id`` values. The owner is an explicit input, not
+    assumed from the principal -- a backend API, not a logged-in-user-scoped
+    product.
+    """
+    result = service.list_subscriptions(
+        page=page_params.page,
+        page_size=page_params.page_size,
+        owner_user_id=owner_user_id,
+    )
+    return page_envelope(
+        result.total,
+        [SubscriptionItem.from_record(sub) for sub in result.items],
+        request,
     )

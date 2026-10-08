@@ -168,6 +168,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/bbs/browse-subscription",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # BBS Browse-Loop per-owner list: a backend read keyed by the explicit
+    # ``owner_id`` query (subscription owner), not the logged-in user, so an
+    # application caller may query any owner just like the unified BBS writes.
+    ("GET", "/openapi/v1/bbs/browse-subscriptions"): AdmissionMode.OPEN,
     # General feedback: tenant-wide, no addressed bot; reporter declared in body.
     ("GET", "/openapi/v1/feedback"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/feedback"): AdmissionMode.OPEN,

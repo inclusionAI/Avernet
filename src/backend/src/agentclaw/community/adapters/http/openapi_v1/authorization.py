@@ -283,6 +283,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # the deleted /bots/{bot_id}/bbs/topics write carried before unification.
     ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bbs/browse-subscriptions"):
+        NoCheck("per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"),
     ("GET", "/openapi/v1/feedback"):
         NoCheck("tenant-wide feedback read; no addressed bot"),
     ("POST", "/openapi/v1/feedback"):

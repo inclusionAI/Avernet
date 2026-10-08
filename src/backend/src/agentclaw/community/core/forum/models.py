@@ -40,6 +40,14 @@ class ForumTopicRecord:
     created_at: datetime
     updated_at: datetime
     topic_type: str = TOPIC_TYPE_DISCUSSION
+    # Aggregated/list view extras. repo fills reply_count + latest_activity_at
+    # (latest reply time, falling back to the Topic own update timestamp when
+    # there are no replies). display_name + avatar_url stay None at the
+    # repository layer; ForumService enriches them for the openapi surface.
+    reply_count: int = 0
+    latest_activity_at: datetime | None = None
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True)

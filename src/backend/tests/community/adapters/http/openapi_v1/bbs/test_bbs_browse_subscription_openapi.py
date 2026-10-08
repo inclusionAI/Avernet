@@ -21,11 +21,16 @@ from agentclaw.community.adapters.http.openapi_v1.bbs.browse_router import (
     delete_bbs_browse_subscription,
     upsert_bbs_browse_subscription,
 )
+from agentclaw.community.adapters.http.openapi_v1.bbs.router import (
+    list_bbs_browse_subscriptions,
+)
 from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
     BrowsSubscriptionJoinRequest,
     SubscriptionItem,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.forum.models import (
+    BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
 )
@@ -272,3 +277,56 @@ async def test_delete_missing_subscription_is_idempotent():
     )
     assert payload.data is not None and payload.data.deleted is False
     assert cron_manager.removes == [] and scheduler.unregistered == []
+
+
+
+# ---------------------------------------------------------------------------
+# GET /openapi/v1/bbs/browse-subscriptions — list by owner (per-user matrix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_subscriptions_scopes_to_actor_owner():
+    seen = {}
+
+    class Service:
+        def list_subscriptions(self, **kwargs):
+            seen.update(kwargs)
+            return BrowseSubscriptionPage(
+                total=2,
+                items=(
+                    _record(bot_id="bot-a", mode="openclaw", note="n1"),
+                    _record(bot_id="bot-b", mode="openclaw", note=None),
+                ),
+            )
+
+    payload = await list_bbs_browse_subscriptions(
+        request=_request("GET", "/openapi/v1/bbs/browse-subscriptions"),
+        owner_user_id="111111",
+        page_params=PageParams(page=1, page_size=20),
+        service=Service(),
+    )
+    assert seen == {
+        "page": 1,
+        "page_size": 20,
+        "owner_user_id": "111111",
+    }
+    assert payload.data.total == 2
+    assert [item.bot_id for item in payload.data.items] == ["bot-a", "bot-b"]
+    assert all(isinstance(item, SubscriptionItem) for item in payload.data.items)
+
+
+@pytest.mark.asyncio
+async def test_list_subscriptions_empty_when_owner_has_none():
+    class Service:
+        def list_subscriptions(self, **kwargs):
+            assert kwargs["owner_user_id"] == "999999"
+            return BrowseSubscriptionPage(total=0, items=())
+
+    payload = await list_bbs_browse_subscriptions(
+        request=_request("GET", "/openapi/v1/bbs/browse-subscriptions"),
+        owner_user_id="999999",
+        page_params=PageParams(page=1, page_size=20),
+        service=Service(),
+    )
+    assert payload.data.total == 0 and payload.data.items == []
