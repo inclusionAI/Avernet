@@ -331,7 +331,7 @@ def test_coordinator_grant_rejects_second_holder_while_turn_active() -> None:
 def test_require_accepts_legacy_single_digest_token() -> None:
     service, graph_service = _service()
     _grant_root_turn(service)
-    legacy_token = "legacy-bearer-token"
+    legacy_turn_value = "test-relay-turn"
     graph_service.update_task_graph_info(
         "relay-task",
         TaskGraphPatch(
@@ -342,7 +342,7 @@ def test_require_accepts_legacy_single_digest_token() -> None:
                     "status": "GRANTED",
                     "expires_at_ms": int(time.time() * 1000) + 60_000,
                     "token_digest": hashlib.sha256(
-                        legacy_token.encode("utf-8")
+                        legacy_turn_value.encode("utf-8")
                     ).hexdigest(),
                 }
             }
@@ -351,7 +351,7 @@ def test_require_accepts_legacy_single_digest_token() -> None:
 
     coordinator = RelayCoordinator(graph_service)
     assert (
-        coordinator.require("relay-task", "relay-task", "main-bot", legacy_token)
+        coordinator.require("relay-task", "relay-task", "main-bot", legacy_turn_value)
         == "relay-task"
     )
 
@@ -1137,7 +1137,7 @@ class _PerPairBotSvc:
     def get_bot_by_id(self, bot_id):
         if bot_id in self.hostile_ids:
             raise RuntimeError("bot store down")
-        return {"bot_id": bot_id, "owner_id": "u1", "bot_name": f"{bot}-name"}
+        return {"bot_id": bot_id, "owner_id": "u1", "bot_name": f"{bot_id}-name"}
 
 
 def test_attach_assignee_bot_info_enriches_and_degrades_per_node() -> None:

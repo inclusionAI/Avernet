@@ -463,7 +463,7 @@ class TestGraphVersionRetry:
         svc = TaskGraphService(repo)
         svc.initialize_graph(_task_info("t1"))
         record = SimpleNamespace(run_id="t1", event_id="evt-x")
-        token = _PENDING_CALLBACK_AUDIT.set(record)
+        reset_handle = _PENDING_CALLBACK_AUDIT.set(record)
         try:
             svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING))
             # 审计记录随同一事务移交仓储
@@ -471,7 +471,7 @@ class TestGraphVersionRetry:
             # 成功提交后 contextvar 清空
             assert _PENDING_CALLBACK_AUDIT.get() is None
         finally:
-            _PENDING_CALLBACK_AUDIT.reset(token)
+            _PENDING_CALLBACK_AUDIT.reset(reset_handle)
 
 
 class TestActionEventAndOutbox:
