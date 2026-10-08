@@ -16,6 +16,7 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   // matching the legacy evolution HTTP fixtures; this is not a new migration.
   await db.exec(`CREATE TABLE workflow_evolution_analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id TEXT, status TEXT, scope_type TEXT,
+    analysis_id TEXT, flow_id TEXT, scope_json TEXT, result_json TEXT,
     requested_at_ms INTEGER, completed_at_ms INTEGER
   )`);
   await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json) VALUES ('wf', '{}')");
