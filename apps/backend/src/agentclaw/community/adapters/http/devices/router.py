@@ -17,7 +17,11 @@ import asyncio
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
+from agentclaw.community.adapters.http.auth.dependencies import (
+    get_current_user,
+    get_device_connection_user,
+    require_operator,
+)
 
 # Auth dependencies (core layer)
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -386,7 +390,7 @@ async def get_device_connection(
     ttl: int | None = None,
     device_uuid: str | None = Query(None, description="锁定多实例中的特定实例；不传则自动选活跃实例"),
     ws_conn_mode: str | None = Query(None, description="WebSocket connection mode: 'direct'(default)/'relay'"),
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(get_device_connection_user),
     service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
 ) -> ApiResponse[DeviceConnectionResponse]:
     """Get device connection info.
