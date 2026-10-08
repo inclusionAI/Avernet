@@ -107,11 +107,20 @@ impl SessionService for SessionServiceImpl {
         let session_caller = self
             .resolve_launch_caller(&command.caller)
             .await?;
+        // The VERIFIED Human operator rides along so the create-lane audit
+        // keeps the dual identity (spec §12.1(6)): present for pure-Human
+        // and mixed Human+Bot callers, None for Bot-only launches.
+        let operator_user_id = command
+            .caller
+            .user
+            .as_ref()
+            .map(|user| user.id.clone());
         let outcome = self
             .launch
             .create(CreateSessionLaunch {
                 request: SessionLaunchRequest {
                     caller: session_caller,
+                    operator_user_id,
                     group_id: command.group_id,
                     requested_creator: command.acting_bot_id,
                     title: command.title,

@@ -389,18 +389,24 @@ impl SessionLaunchApplication {
         let context_delivery = request.context_delivery;
         // REQUIRED audit identity (spec §12.5, plan Task 11): the launch
         // records the VERIFIED operator with the resolved creator as the
-        // effective actor — a Human creator keeps the trusted User ID, a
-        // Bot creator is a Bot acting as itself, and the original Human
-        // stays recorded when acting through a managed Bot, so background
-        // work never replays in a system identity's name.
+        // effective actor. A mixed Human+Bot caller that the authority
+        // authorized keeps the Human `operator_user_id` (the anti-case of
+        // "only recording the proxied Bot loses the manager identity",
+        // spec §12.1(6)); a Human caller keeps the trusted User ID; a
+        // Bot-only launch records the Bot as itself and never fabricates
+        // a Human.
         let operation = BotOperationContext {
             operation_id: format!("session-launch:{}", uuid::Uuid::new_v4()),
-            actor: match &caller {
-                SessionCaller::Human { owner_id, .. } => BotOperationActor::Human {
+            actor: match (&caller, request.operator_user_id.as_deref()) {
+                (_, Some(user_id)) => BotOperationActor::Human {
+                    user_id: user_id.to_string(),
+                    effective_actor_id: creator.clone(),
+                },
+                (SessionCaller::Human { owner_id, .. }, None) => BotOperationActor::Human {
                     user_id: owner_id.clone(),
                     effective_actor_id: creator.clone(),
                 },
-                SessionCaller::Bot { bot_uuid } => BotOperationActor::Bot {
+                (SessionCaller::Bot { bot_uuid }, None) => BotOperationActor::Bot {
                     bot_id: bot_uuid.clone(),
                 },
             },

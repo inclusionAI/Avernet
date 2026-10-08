@@ -244,6 +244,10 @@ pub async fn create_session_for_group(
     let session_id = body.session_id;
     let request = SessionLaunchRequest {
         caller,
+        // Legacy lane: no AuthenticatedCaller flows through here, so the
+        // launch audit falls back to the SessionCaller-derived identity
+        // (Human launches keep the Human; Bot-only stay Bot-only).
+        operator_user_id: None,
         group_id,
         requested_creator: body.created_by,
         title: body.session_title,

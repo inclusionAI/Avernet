@@ -43,10 +43,10 @@ use bcs_service_api::application::session_files::{
 };
 use bcs_service_api::application::v1::session_file::SessionFileApplicationService;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
-    BotAuthorityHook, CollectSession, DeleteResult, DeleteSessionFile, GetSession,
-    ListSessionMessages, Page, SessionMessageService, SessionService, UncollectSession,
-    resolve_authorized_principal,
+    resolve_authorized_principal, ApplicationError, AuthenticatedBotIdentity,
+    AuthenticatedCaller, AuthenticatedUserIdentity, BotAuthorityHook, CollectSession,
+    CreateSession, DeleteResult, DeleteSessionFile, GetSession, ListSessionMessages, Page,
+    SessionMessageService, SessionService, UncollectSession,
 };
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::application::v1::SessionFileInternalContentUrlProjector;
@@ -787,4 +787,70 @@ impl Fixture {
     fn as_dyn_authority(&self) -> Arc<dyn BotAuthorityHook> {
         self.authority.clone()
     }
+}
+
+#[tokio::test]
+async fn mixed_identity_launch_keeps_the_human_operator_in_the_create_audit() {
+    // Spec §12.1(6)/§12.5: a verified Human creating a Session through an
+    // owned/managed Bot must NOT be recorded as a Bot-only operation — the
+    // create audit row carries the Human user_id AND the resolved Bot as the
+    // effective actor, exactly like every other mixed-identity lane.
+    let fixture = Fixture::new().await;
+    fixture.register_public_bot("bot-x").await;
+    fixture.register_public_bot("driver-bot").await
+    ;
+    // Bob MANAGES bot-x: the live authority facts authorize the mixed caller
+    // regardless of the (stale) signed owner_id claim.
+    fixture.authority.seed_manager("bot-x", "bob").await;
+    fixture
+        .seed_chat_group_with_participants("parity-launch", &[])
+        .await;
+
+    let outcome = SessionService::create(
+        &fixture.service,
+        CreateSession {
+            caller: mixed_caller("bob", "bot-x", "someone-else"),
+            group_id: "parity-launch".into(),
+            title: Some("managed bot creates".into()),
+            kind: None,
+            acting_bot_id: None,
+            creator_role: None,
+            message_view_scope: None,
+            input: None,
+            meta: None,
+            context_delivery: None,
+        },
+    )
+    .await
+    .expect("the managed-Bot launch create succeeds");
+
+    let audits = fixture
+        .session_repo
+        .session_action_audit_records()
+        .await
+        .expect("session audits");
+    let create_rows: Vec<_> = audits
+        .iter()
+        .filter(|record| record.step_key == "create/session/applied")
+        .collect();
+    assert_eq!(
+        create_rows.len(),
+        1,
+        "the launch create writes exactly one applied row: {create_rows:#?}"
+    );
+    assert_eq!(
+        create_rows[0].operator.operator_user_id(),
+        Some("bob"),
+        "the verified Human operator must survive the mixed launch lane: {:?}",
+        create_rows[0].operator
+    );
+    assert_eq!(
+        create_rows[0].operator.effective_actor_id(),
+        outcome.session.caller_principal.as_deref().unwrap_or("bot-x"),
+        "the effective actor is the resolved acting Bot"
+    );
+    assert_eq!(
+        create_rows[0].phase,
+        bcs_service_api::types::BotActionAuditPhase::Applied
+    );
 }

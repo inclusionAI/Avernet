@@ -279,6 +279,7 @@ fn request(
 ) -> SessionLaunchRequest {
     SessionLaunchRequest {
         caller,
+        operator_user_id: None,
         group_id: group_id.to_string(),
         requested_creator: requested_creator.map(str::to_string),
         title: None,
