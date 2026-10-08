@@ -1,94 +1,93 @@
-# Ordinary coding restart: OCB-owned preparation, backup and submission
+# Ordinary coding restart: strategy-owned execution
 
 Base: private OCB `REL20261009` / `39357e3e9b`, Avernet
 `4b57661dcbb85c78a2892326c6ddc934dee3ac7a`.
 
 ## Problem
 
-The coding worker fenced mutation immediately after backup verification, before
-local BaaS restart preparation. A preparation error was therefore treated as an
-ambiguous remote submission. The task waited in RESTARTING although no update
-had been submitted. Admission and the legacy BaaS path also both wrote PENDING.
-An update returning None was interpreted as a missing Bot; the exact reason for
-the production database return value has not been established.
+The coding worker marked mutation as started immediately after backup, before
+local submission preparation. A preparation failure therefore entered ambiguous
+submission recovery and waited even though no remote request was made. Admission
+and the reused old restart function also both wrote PENDING. The exact database
+reason for the observed update returning None has not been established.
 
-## Solution and boundaries
+## Ownership / shared-path boundary
 
-BaaS remains responsible only for its existing device lifecycle. There are NO
-changes to BaaS server code, `/status`, frontend, schema, or Repository APIs.
-The earlier unconnected BaaS backup-policy prototype has been removed.
+All newly introduced restart policy lives in `engines/aicoding/`:
 
-The OCB aicoding strategy:
+- `restart_task.py`: synchronous admission/preflight, durable dispatch, failure
+  persistence and observation; only coding/BaaS takes the separate executor.
+- `restart_request.py`: coding-owned configuration/request preparation, reusing
+  existing template, BCN, image policy and BaaS payload-building helpers.
+- `restart_baas.py`: backup -> short restart lock -> prepare -> durable provider
+  polling intent -> final receipt verification -> submit -> persist publish id.
+- `restart_submission.py`: final fence and explicit-rejection classification.
+- Existing `restart_backup.py` and `restart_state.py`: runtime backup protocol,
+  generation/identity verification, timing, operation journal and public errors.
 
-1. Validates admission and persists requested template changes synchronously.
-2. Calls the engine-neutral BaaS preparation collaborator before queue admission.
-   Configuration resolution, provider registration and workflow-baseline lookup
-   fail through the original HTTP boundary. No backup, remote update or provider
-   polling task is started by this preflight.
-3. Persists the existing coding task/journal and writes Bot PENDING once.
-4. Runs backup in that task with a shared 300-second budget (including queue time
-   and redeliveries), then invokes the existing restart lifecycle. Direct exec
-   calls still use their transport timeout: the budget prevents authorization
-   after expiry; it does not forcibly kill an in-flight exec or helper process.
-5. Revalidates the current configuration/target on the worker. Prepared requests
-   are NOT serialized into the task because they may contain credentials. Local
-   preparation may run again; this is intentional, not a second PENDING write.
-6. Rechecks the backup receipt and fences exactly at the OCB BaaS client's
-   `before_submit` callback, after request-body construction and before POST.
-7. Handles known pre-submission errors as terminal failure. Explicit HTTP
-   400/401/403/404/422 rejection clears the provider polling intent and persists
-   a sanitized failure. Timeouts, connection loss, HTTP 409 and server errors
-   after fencing remain ambiguous and observe the existing durable provider
-   intent; they do not automatically issue another update.
+There are no added hooks in the shared restart function or BaaS client. Compared
+with the base, BotService has only `lifecycle=self` added to the existing strategy
+collaborators. RestartServices carries that instance instead of a new preflight
+callback. Default strategies ignore it and still invoke the original restart.
+`engines/provisioning.py`, the OCB BaaS client and its API protocol are restored to
+the base. The shared `restart_preparation.py` extraction is removed.
 
-Failure uses the existing Bot FAILED + ext.start_status/start_message contract.
-The operation observer budget is 900 seconds (backup 300 + existing provider
-polling 600); task-row retention remains 86400 seconds, not a business deadline.
-Existing in-flight handlers stay registered. RESTARTING redelivery attempts to
-capture the stored provider handoff without reissuing mutation. Ambiguous legacy
-operations without a provable handoff still expire rather than replay mutation.
+The coding adapter reads the injected collaborators; it never monkey-patches a
+shared object, intercepts repository calls, or installs per-request callbacks in
+the BaaS client. Request preparation is deliberately separate from the old
+restart wrapper. Its private helper dependencies are centralized in this adapter
+and covered by payload-parity tests to detect future shared-helper drift.
 
-### Neutral shared-path changes
+BaaS server, frontend, `/status`, schema and Repository APIs are unchanged.
+Published/Caller backup entrypoints and direct-provider restart remain on their
+existing paths; they do not enter the new ordinary coding/BaaS executor.
 
-- Keep the original provider preparation in BotService; expose a default-off
-  `prepare_only` boundary before task creation/status writes/remote submission.
-  Aicoding alone opts into this preflight via the passed RestartServices callback.
-  The previously extracted `restart_preparation.py` and mixin are removed.
-- Let strategy policy decide whether admission already wrote PENDING. The default
-  returns True and preserves every other engine's original write AND rollback;
-  only an owned coding/BaaS task suppresses the duplicate write.
-- Add default-no-op submission-policy hooks; no coding engine literals or backup
-  decisions in BotService.
-- Add optional `before_submit` to the OCB BaaS client and its protocol. This is an
-  internal callable, NOT a new HTTP field and NOT logic in the BaaS server.
-- Aicoding-specific fences, failure classification and timing remain in its
-  strategy modules. Published/Caller pre-backup and noncoding admission are not
-  switched to a different execution model.
+## Execution
 
-## Validation / rollout
+1. The coding strategy validates admission, saves requested template changes and
+   runs its preflight synchronously. This builds the complete request but does
+   not submit it, start backup, enqueue provider polling or change lifecycle
+   status. An existing provider intent joins existing work rather than creating
+   another coding task.
+2. Admission persists the coding task/journal and writes Bot PENDING once.
+3. The worker verifies operation/target ownership and runs backup, outside the
+   short restart lock. One 300-second budget includes queue time and redelivery.
+4. With the original restart lock, it verifies the receipt and rebuilds the
+   current request. Credentials/configuration payloads remain process-local;
+   they are never copied into the persistent task queue. Service-draft default
+   image selection continues to use the existing helper.
+5. It persists the original provider poll task and binding intent. It does NOT
+   write Bot PENDING again. It verifies the binding/physical target and backup
+   receipt, fences mutation, then directly calls the existing public
+   `post_bots_api` with the prepared update payload. No call to shared
+   `restart_bot`, `_restart_bot_baas` or `upgrade_bot` is needed on this path.
+6. A known pre-submission failure terminates the coding task; explicit HTTP
+   400/401/403/404/422 rejection clears its own provider intent and records a
+   sanitized failure. Connection loss, timeout, HTTP 409 and server errors after
+   fencing remain ambiguous and are observed, never automatically reissued.
+7. The existing provider poller and coding observer finish the operation.
 
-Regression tests cover the actual BotService lifecycle with mocked transport:
-only one PENDING write, synchronous preflight rejection before task creation,
-backup failure, preparation failure after backup, intent persistence failure,
-HTTP 404 failure, final receipt failure, and ambiguous-response observation.
-Real-client tests prove payload -> fence -> POST order and no POST on failure.
-Existing restart, published/Caller, status-error and protocol suites are run.
-No live deployment or online Bot recovery is performed by this patch.
+Failure uses Bot FAILED and ext.start_status/start_message. Other engines retain
+ALL original writes and rollback behavior, including an already-PENDING Bot.
+A missing helper is accepted only for confirmed legacy absence without upgrade
+residue; helper-confirmed not_mounted skips backup. Probe failure never means
+unmounted. Noncoding engines do not enter the probe or task.
 
-Large-file debt: BotService and the OCB BaaS client already exceed the repository
-1000-line source guideline in the base revision. Preserve existing code placement
-and restrict changes to generic policy/phase hooks; the client receives only a
-generic callback. Splitting
-these whole services is intentionally deferred to a dedicated refactor rather
-than mixed into this lifecycle fix. New source modules stay below 1000 lines;
-no CI allowlist or gate is weakened. This existing size debt remains a rollout
-review item, not a claim that all repository gates passed.
+The coding observer budget is 900 seconds (backup 300 + provider observation
+600). Queue retention is 86400 seconds, not a business deadline. Exec transport
+calls retain their own timeout: the budget prevents authorization after expiry;
+it cannot forcibly kill an in-flight exec or runtime worker. Old in-flight task
+handlers remain registered; no online state is rewritten by deployment.
 
-Validated locally on 2026-10-08 with Python 3.12 and the locked Backend
-workspace dependencies: **2717 tests passed** (bot_management, service_bot
-services, Caller restart backup, service API conformance and protocol-base
-ordering). Targeted undefined-name checks and `git diff --check` passed.
-The additional isolation regressions assert default-engine PENDING writes and
-rollback remain exactly as before and preparation-only calls do not enqueue or
-mutate lifecycle status.
-Full-repository CI / Singlebox E2E and a live pre-environment restart were not run.
+## Validation and limits
+
+Tests cover task/SQLite persistence, exactly one PENDING write, synchronous
+configuration errors, backup and post-backup failures, explicit HTTP rejection,
+ambiguous results, stale target/receipt, no shared lifecycle/client invocation,
+request-builder parity and unchanged other-engine writes/rollback. Published,
+Caller and service API/protocol-ordering regressions are included.
+
+No live deployment, online Bot recovery, or full Singlebox E2E is performed.
+The existing main BotService exceeds the source-size guideline; this patch only
+passes a collaborator and does not refactor that unrelated large file. New
+strategy modules remain under 1000 lines and no CI gate is weakened.

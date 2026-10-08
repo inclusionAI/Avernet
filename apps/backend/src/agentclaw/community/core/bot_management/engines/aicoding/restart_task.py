@@ -144,10 +144,9 @@ class AicodingDurableRestartMixin:
         # Run the existing provider preparation BEFORE accepting the task or
         # stopping business processes. Do not persist credential-bearing requests.
         if binding.get("device_provider") == "baas":
-            in_progress = services.preflight_restart(
-                bot_id=bot_id, user_id=owner_id,
-                binding_id=bot["binding_id"], bot=bot, prepare_only=True,
-            )
+            from .restart_baas import AicodingBaasRestart
+
+            in_progress = AicodingBaasRestart(services.lifecycle).preflight(bot, owner_id)
             if in_progress is not None:
                 return in_progress
         payload = {
@@ -278,11 +277,16 @@ class AicodingRestartHandler:
                 source_request_id=props.get("restart_request_id"),
                 source_publish_id=props.get("restart_publish_id"),
             )
-            result = service.restart_bot(
-                bot_id=state.bot_id,
-                user_id=state.owner_id,
-                nick_name=payload.get("nick_name"),
-            )
+            if payload["provider"] == "baas":
+                from .restart_baas import AicodingBaasRestart
+
+                result = AicodingBaasRestart(service).execute(bot, execution)
+            else:
+                result = service.restart_bot(
+                    bot_id=state.bot_id,
+                    user_id=state.owner_id,
+                    nick_name=payload.get("nick_name"),
+                )
             if not execution.fenced:
                 # Existing lock/activation guards may return without handing off.
                 # They are not proof that this operation restarted a container.

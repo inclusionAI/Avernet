@@ -4629,7 +4629,7 @@ class BotService(BotServiceProtocol):
                 task_queue=self._task_queue_service,
                 get_bot=self.get_bot,
                 template_service=self._template_service,
-                preflight_restart=self._restart_bot_baas,
+                lifecycle=self,
             ),
             **kwargs,
         )
@@ -4970,7 +4970,7 @@ class BotService(BotServiceProtocol):
             if not handed_off:
                 self._restart_lock_repo.release(env, entity_id, bot_id, lock.lock_token)
 
-    def _restart_bot_baas(self, *, bot_id: str, user_id: str, binding_id: int, bot: Dict[str, Any], prepare_only: bool = False) -> Dict[str, Any] | None:
+    def _restart_bot_baas(self, *, bot_id: str, user_id: str, binding_id: int, bot: Dict[str, Any]) -> Dict[str, Any]:
         """BaaS 原地重启：调 BaasService.upgrade_bot（走 /update）不 destroy、不 release binding。
 
         bot_uuid/device_uuid 不变 → session NAS 目录复用 → 历史 session 留存。
@@ -5171,10 +5171,6 @@ class BotService(BotServiceProtocol):
                 f"Failed to snapshot BaaS restart workflow baseline: {e}"
             ) from e
 
-        # Optional preparation-only call: no task, status write or remote update.
-        if prepare_only:
-            return None
-
         from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
             BAAS_RESTART_PUBLISH_POLL_TASK,
             build_restart_publish_poll_payload,
@@ -5211,8 +5207,6 @@ class BotService(BotServiceProtocol):
                 f"could not be persisted: {e}"
             ) from e
 
-        ctx, strategy = resolve_restart_strategy(bot)
-        mark_pending = strategy.should_mark_restart_pending(ctx, bot)
         previous_binding_status = (
             binding.get("status")
             if isinstance(binding, dict)
@@ -5232,11 +5226,10 @@ class BotService(BotServiceProtocol):
             self._device_binding_repo.update_status(
                 binding_id=binding_id, status=DeviceBindingStatus.PENDING
             )
-            if mark_pending:
-                if self._repository.update_by_owner(
-                    bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
-                ) is None:
-                    raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
+            if self._repository.update_by_owner(
+                bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         except Exception as e:
             # No BaaS call has happened yet. Invalidate the queued task's request
             # identity and restore the previous visible lifecycle state.
@@ -5253,10 +5246,9 @@ class BotService(BotServiceProtocol):
                     binding_id=binding_id,
                     status=previous_binding_status or DeviceBindingStatus.ACTIVE.value,
                 )
-                if mark_pending:
-                    self._repository.update_by_owner(
-                        bot_id, user_id, {"status": previous_bot_status}
-                    )
+                self._repository.update_by_owner(
+                    bot_id, user_id, {"status": previous_bot_status}
+                )
             except Exception:
                 logger.exception(
                     "[bot_service._restart_bot_baas] failed to roll back restart preparation"
@@ -5266,26 +5258,7 @@ class BotService(BotServiceProtocol):
         # From this point on, every ambiguous failure is recoverable by the
         # pre-existing task. It either reads the stored publish id or adopts the
         # single workflow issued after workflow_baseline.
-        def clear_restart_intent():
-            self._device_binding_repo.update_device_props(
-                binding_id=binding_id,
-                props={
-                    RESTART_REQUEST_ID_KEY: None,
-                    RESTART_WORKFLOW_BASELINE_KEY: None,
-                    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
-                },
-            )
-
-        try:
-            result = baas_service.upgrade_bot(
-                **upgrade_kwargs, **strategy.restart_submission_options(ctx),
-            )
-        except Exception as error:
-            strategy.on_restart_submission_error(
-                ctx, error,
-                clear_intent=clear_restart_intent,
-            )
-            raise
+        result = baas_service.upgrade_bot(**upgrade_kwargs)
         publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
         if publish_id is not None:
             restart_publish_id = str(publish_id)

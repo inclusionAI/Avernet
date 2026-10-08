@@ -87,9 +87,9 @@ def lifecycle():
     binding_repo.update_status.side_effect = update_status
     platform = Mock()
     platform.list_bot_publishes.return_value = [{"id": 10}]
-    platform.upgrade_bot.side_effect = lambda **kwargs: (
-        kwargs.get("before_submit", lambda: None)() or {"publish_id": 12}
-    )
+    platform.upgrade_bot.return_value = {"publish_id": 12}  # unchanged other engines
+    platform.post_bots_api.return_value = {"publish_id": 12}
+    platform._build_create_bot_payload.return_value = {"config": {}}
     service = _make_service(
         bot_repository=repo,
         device_binding_repo=binding_repo,
@@ -127,10 +127,9 @@ async def test_real_baas_restart_observes_existing_intent_after_platform_call(li
     s = lifecycle
     accepted = await s.service.restart_bot_async(bot_id="b", user_id="o")
     assert accepted["status"] == "PENDING"
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
 
     def upgrade(**kwargs):
-        kwargs["before_submit"]()
         record = journal(s.repo.bot)
         assert record["phase"] == "RESTARTING"
         assert "handoff" not in record
@@ -140,7 +139,7 @@ async def test_real_baas_restart_observes_existing_intent_after_platform_call(li
         assert len(s.queue.provider_tasks) == 1
         return {"publish_id": 12}
 
-    s.platform.upgrade_bot.side_effect = upgrade
+    s.platform.post_bots_api.side_effect = upgrade
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
     with patch.object(
         AicodingRestartBackupMixin, "_prepare_restart", return_value=lambda: None
@@ -157,7 +156,7 @@ async def test_real_baas_restart_observes_existing_intent_after_platform_call(li
     s.binding["device_props"]["restart_request_id"] = None
     s.progress.return_value = {"status": "SUCCESS"}
     assert isinstance(s.handler.handle(task.payload), Complete)
-    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_called_once()
     assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
 
 
@@ -172,7 +171,7 @@ async def test_real_backup_failure_never_reaches_platform(lifecycle):
         side_effect=RestartBackupError("backup_failed", "secret"),
     ):
         assert isinstance(s.handler.handle(task.payload), Fail)
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
     assert not s.queue.provider_tasks
     assert s.repo.bot["binding_id"] == 7
     assert s.service.get_bot("b", "o")["status"] == "FAILED"
@@ -184,10 +183,9 @@ async def test_real_lost_baas_response_uses_existing_recovery_intent(lifecycle):
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
     def lose_response(**kwargs):
-        kwargs["before_submit"]()
         raise ConnectionError("accepted but response lost")
 
-    s.platform.upgrade_bot.side_effect = lose_response
+    s.platform.post_bots_api.side_effect = lose_response
     with patch.object(
         AicodingRestartBackupMixin, "_prepare_restart", return_value=lambda: None
     ):
@@ -202,7 +200,7 @@ async def test_real_lost_baas_response_uses_existing_recovery_intent(lifecycle):
     s.binding["device_props"]["restart_request_id"] = None
     s.progress.return_value = {"status": "SUCCESS"}
     assert isinstance(s.handler.handle(task.payload), Complete)
-    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -238,7 +236,7 @@ async def test_real_stop_start_path_records_handoff_and_keeps_backup_first(lifec
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
     assert isinstance(s.handler.handle(task.payload), Complete)
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
     s.service.start_bot.assert_called_once()
 
 
@@ -250,7 +248,7 @@ async def test_sync_preflight_failure_does_not_accept_or_stop_runtime(lifecycle)
         with pytest.raises(Exception, match="snapshot BaaS restart"):
             await s.service.restart_bot_async(bot_id="b", user_id="o")
     backup.assert_not_called()
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
     assert s.repo.bot["status"] == "ACTIVE"
     assert not s.queue.tasks
     assert not s.queue.provider_tasks
@@ -270,7 +268,7 @@ async def test_pending_is_written_once_for_successful_baas_restart(lifecycle):
                       if c.args[2].get("status") == "PENDING"]
     assert len(pending_writes) == 1
     assert receipt.call_count == 2
-    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -285,9 +283,9 @@ async def test_backup_success_then_preparation_failure_is_terminal(lifecycle):
     assert journal(s.repo.bot)["phase"] == "FAILED"
     assert "提交前准备失败" in s.repo.bot["ext"]["start_message"]
     assert "private provider output" not in s.repo.bot["ext"]["start_message"]
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
     assert isinstance(s.handler.handle(task.payload), Fail)
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -299,23 +297,22 @@ async def test_definitive_404_marks_failed_and_clears_poll_intent(lifecycle):
     request = httpx.Request("POST", "https://provider.invalid/update")
     response = httpx.Response(404, request=request)
     def reject(**kwargs):
-        kwargs["before_submit"]()
         raise httpx.HTTPStatusError(
             "private upstream response", request=request, response=response,
         )
 
-    s.platform.upgrade_bot.side_effect = reject
+    s.platform.post_bots_api.side_effect = reject
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert s.repo.bot["status"] == "FAILED"
     assert "HTTP 404" in s.repo.bot["ext"]["start_message"]
     assert "private upstream response" not in s.repo.bot["ext"]["start_message"]
-    assert s.binding["device_props"]["restart_request_id"] is None
+    assert s.binding["device_props"].get("restart_request_id") is None
     assert s.binding["device_props"]["restart_workflow_baseline"] is None
-    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_called_once()
     assert isinstance(s.handler.handle(task.payload), Fail)
-    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -327,9 +324,8 @@ async def test_final_receipt_failure_clears_intent_without_remote_submit(lifecyc
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=receipt):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert s.repo.bot["status"] == "FAILED"
-    assert s.binding["device_props"]["restart_request_id"] is None
-    # Entered the local client, but its before_submit fence rejected POST.
-    s.platform.upgrade_bot.assert_called_once()
+    assert s.binding["device_props"].get("restart_request_id") is None
+    s.platform.post_bots_api.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -351,70 +347,20 @@ async def test_persisting_provider_intent_failure_ends_without_waiting(lifecycle
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert s.repo.bot["status"] == "FAILED"
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_request_body_build_failure_is_not_ambiguous_submission(lifecycle):
     s = lifecycle
     await s.service.restart_bot_async(bot_id="b", user_id="o")
-    # Real upgrade_bot builds its payload before invoking before_submit.
-    s.platform.upgrade_bot.side_effect = ValueError("invalid request configuration")
+    s.platform._build_create_bot_payload.side_effect = ValueError("invalid request configuration")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert journal(s.repo.bot)["phase"] == "FAILED"
-    assert s.binding["device_props"]["restart_request_id"] is None
+    assert s.binding["device_props"].get("restart_request_id") is None
     assert "提交前准备失败" in s.repo.bot["ext"]["start_message"]
-
-
-def test_real_client_fence_runs_after_payload_and_before_post():
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
-    service = object.__new__(BaasService)
-    events = []
-    service._build_create_bot_payload = Mock(
-        side_effect=lambda **_: events.append("prepare") or {"config": {}},
-    )
-    service._post_bots_api = Mock(
-        side_effect=lambda **_: events.append("post") or {"publish_id": 12},
-    )
-    result = service.upgrade_bot(
-        bot_uuid="target", bot={}, owner_id="o", request_id="r",
-        migration_path=None, before_submit=lambda: events.append("fence"),
-    )
-    assert result == {"publish_id": 12}
-    assert events == ["prepare", "fence", "post"]
-
-
-def test_real_client_preparation_failure_never_fences_or_posts():
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
-    service = object.__new__(BaasService)
-    service._build_create_bot_payload = Mock(side_effect=ValueError("bad configuration"))
-    service._post_bots_api = Mock()
-    fence = Mock()
-    with pytest.raises(ValueError):
-        service.upgrade_bot(
-            bot_uuid="target", bot={}, owner_id="o", request_id="r",
-            migration_path=None, before_submit=fence,
-        )
-    fence.assert_not_called()
-    service._post_bots_api.assert_not_called()
-
-
-def test_real_client_failed_final_fence_never_posts():
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
-    service = object.__new__(BaasService)
-    service._build_create_bot_payload = Mock(return_value={"config": {}})
-    service._post_bots_api = Mock()
-    with pytest.raises(RuntimeError, match="receipt changed"):
-        service.upgrade_bot(
-            bot_uuid="target", bot={}, owner_id="o", request_id="r",
-            migration_path=None, before_submit=Mock(side_effect=RuntimeError("receipt changed")),
-        )
-    service._post_bots_api.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -451,18 +397,142 @@ async def test_other_engines_keep_original_preparation_rollback(lifecycle, engin
     assert not s.queue.tasks
 
 
-def test_prepare_only_preserves_original_preparation_without_execution(lifecycle):
+def test_coding_preflight_does_not_call_shared_restart_or_mutate_status(lifecycle):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+
     s = lifecycle
     update = s.repo.update_by_owner
     s.repo.update_by_owner = Mock(side_effect=update)
-    result = s.service._restart_bot_baas(
-        bot_id="b", user_id="o", binding_id=7, bot=deepcopy(s.repo.bot),
-        prepare_only=True,
-    )
+    with patch.object(s.service, "_restart_bot_baas", side_effect=AssertionError("shared restart called")):
+        result = AicodingBaasRestart(s.service).preflight(s.service.get_bot("b", "o"), "o")
     assert result is None
     s.platform.list_bot_publishes.assert_called_once()
-    s.platform.upgrade_bot.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
     s.repo.update_by_owner.assert_not_called()
     s.service._device_binding_repo.update_status.assert_not_called()
     s.service._device_binding_repo.update_device_props.assert_not_called()
     assert not s.queue.provider_tasks
+
+
+@pytest.mark.asyncio
+async def test_coding_worker_never_calls_shared_restart_or_upgrade(lifecycle):
+    s = lifecycle
+    with patch.object(s.service, "restart_bot", side_effect=AssertionError("legacy restart")), \
+         patch.object(s.service, "_restart_bot_baas", side_effect=AssertionError("legacy baas")), \
+         patch.object(s.platform, "upgrade_bot", side_effect=AssertionError("legacy client")):
+        await s.service.restart_bot_async(bot_id="b", user_id="o")
+        task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
+        with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
+            assert isinstance(s.handler.handle(task.payload), Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_coding_policy_builds_request_then_verifies_then_posts(lifecycle):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id="b", user_id="o")
+    events = []
+    s.platform._build_create_bot_payload.side_effect = lambda **_: events.append("build") or {"config": {}}
+
+    def post(**kwargs):
+        assert journal(s.repo.bot)["phase"] == "RESTARTING"
+        assert kwargs["payload"] == {"config": {}}
+        events.append("post")
+        return {"publish_id": 12}
+
+    s.platform.post_bots_api.side_effect = post
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
+    with patch.object(AicodingRestartBackupMixin, "_prepare_restart",
+                      return_value=lambda: events.append("verify")):
+        assert isinstance(s.handler.handle(task.payload), Reschedule)
+    assert events == ["verify", "build", "verify", "post"]
+
+
+@pytest.mark.asyncio
+async def test_sync_payload_failure_never_enqueues_or_backs_up(lifecycle):
+    s = lifecycle
+    s.platform._build_create_bot_payload.side_effect = ValueError("invalid configuration")
+    with patch.object(AicodingRestartBackupMixin, "_prepare_restart") as backup:
+        with pytest.raises(ValueError, match="invalid configuration"):
+            await s.service.restart_bot_async(bot_id="b", user_id="o")
+    backup.assert_not_called()
+    s.platform.post_bots_api.assert_not_called()
+    assert not s.queue.tasks
+    assert s.repo.bot["status"] == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_binding_target_changed_during_request_build_never_posts(lifecycle):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id="b", user_id="o")
+
+    def build(**kwargs):
+        s.binding["device_id"] = "replacement"
+        return {"config": {}}
+
+    s.platform._build_create_bot_payload.side_effect = build
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
+    with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=Mock()):
+        assert isinstance(s.handler.handle(task.payload), Fail)
+    s.platform.post_bots_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "moltis", "hermes"])
+async def test_other_engines_never_enter_coding_pipeline(lifecycle, engine):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+
+    s = lifecycle
+    s.repo.bot["active_engine"] = engine
+    with patch.object(AicodingBaasRestart, "preflight", side_effect=AssertionError("coding preflight")), \
+         patch.object(AicodingBaasRestart, "execute", side_effect=AssertionError("coding executor")):
+        await s.service.restart_bot_async(bot_id="b", user_id="o")
+    s.platform.upgrade_bot.assert_called_once()
+    s.platform.post_bots_api.assert_not_called()
+    assert not s.queue.tasks
+
+
+@pytest.mark.asyncio
+async def test_strategy_request_matches_existing_upgrade_payload_defaults(lifecycle):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id="b", user_id="o")
+    kwargs = s.platform._build_create_bot_payload.call_args.kwargs
+    assert kwargs["device_count"] == 1
+    assert kwargs["migration_path"] == ""
+    assert kwargs["version"] == "1"
+    assert kwargs["auto_approve_publish"] is True
+    assert kwargs["mount_home_dir_storage"] is True
+    assert kwargs["in_place"] is False
+    assert kwargs["ext_info"] is None
+    assert kwargs["owner_id"] == "o"
+    assert "bot_uuid" not in kwargs
+    # Credentials/configurations are deliberately NOT serialized into queue data.
+    payload = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o")).payload
+    assert "request_payload" not in payload and "template_config" not in payload
+
+
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
+def test_engine_preparation_matches_legacy_payload_builder_arguments(lifecycle, bot_type):
+    import inspect
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+
+    s = lifecycle
+    s.repo.bot["bot_type"] = bot_type
+    bot = s.service.get_bot("b", "o")
+    AicodingBaasRestart(s.service).preflight(deepcopy(bot), "o")
+    coding_arguments = dict(s.platform._build_create_bot_payload.call_args.kwargs)
+    s.platform._post_bots_api.return_value = {"publish_id": 12}
+    s.platform.upgrade_bot.side_effect = lambda **kwargs: BaasService.upgrade_bot(s.platform, **kwargs)
+    s.service._restart_bot_baas(bot_id="b", user_id="o", binding_id=7, bot=deepcopy(bot))
+    legacy_arguments = dict(s.platform._build_create_bot_payload.call_args.kwargs)
+    signature = inspect.signature(BaasService._build_create_bot_payload)
+
+    def normalized(arguments):
+        bound = signature.bind(None, **arguments)
+        bound.apply_defaults()
+        values = dict(bound.arguments)
+        values.pop("request_id")  # Independent operations must not share an id.
+        return values
+
+    assert normalized(coding_arguments) == normalized(legacy_arguments)

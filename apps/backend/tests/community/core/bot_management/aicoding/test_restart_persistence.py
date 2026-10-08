@@ -35,7 +35,9 @@ from agentclaw.community.plugin_api.models import BotModel
 
 
 @pytest.fixture
-def persisted(tmp_path):
+def persisted(tmp_path, monkeypatch):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+    monkeypatch.setattr(AicodingBaasRestart, "preflight", lambda *args: None)
     engine = create_engine(
         f"sqlite:///{tmp_path / 'restart.db'}",
         connect_args={"check_same_thread": False},
@@ -93,7 +95,7 @@ def persisted(tmp_path):
         }
 
     ctx, strategy = resolve_restart_strategy(bot)
-    services = RestartServices(repo, queue, get_bot, Mock(), Mock(return_value=None))
+    services = RestartServices(repo, queue, get_bot, Mock(), Mock())
     yield SimpleNamespace(
         repo=repo, queue=queue, strategy=strategy, ctx=ctx, services=services
     )

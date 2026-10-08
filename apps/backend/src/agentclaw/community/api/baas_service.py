@@ -14,7 +14,6 @@ imports them so there's exactly one source of truth.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.service_bot.baas_service_errors import (
@@ -257,7 +256,6 @@ class BaasServiceProtocol(Protocol):
         device_count: int = 1,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
-        before_submit: Callable[[], None] | None = None,
     ) -> Dict[str, Any]:
         """Upgrade an existing BaaS bot (POST /bots/{uuid}/update)."""
         ...

@@ -114,7 +114,16 @@ class Queue:
 
 
 @pytest.fixture
-def setup():
+def setup(monkeypatch):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+
+    # These are task-state-machine tests. Actual strategy-owned orchestration
+    # and shared-service isolation are exercised by test_restart_service.py.
+    monkeypatch.setattr(AicodingBaasRestart, "preflight", lambda *args: None)
+    monkeypatch.setattr(AicodingBaasRestart, "execute", lambda self, bot, execution:
+        self.service.restart_bot(bot_id=execution.state.bot_id,
+                                 user_id=execution.state.owner_id,
+                                 nick_name=execution.payload.get("nick_name")))
     repo, queue = Repository(), Queue()
     binding = {
         "status": "ACTIVE",
@@ -131,7 +140,7 @@ def setup():
     service._template_service = Mock()
     service._restart_bot_baas = Mock(return_value=None)
     ctx, strategy = resolve_restart_strategy(repo.bot)
-    services = RestartServices(repo, queue, service.get_bot, service._template_service, Mock(return_value=None))
+    services = RestartServices(repo, queue, service.get_bot, service._template_service, service)
     progress = Mock(return_value={"status": "PENDING"})
     handler = AicodingRestartHandler(
         repository=repo,

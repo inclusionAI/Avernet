@@ -19,7 +19,7 @@ The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
 import re
 import time
@@ -2935,7 +2935,6 @@ class BaasService:  # pragma: no cover
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
         in_place: bool = False,
-        before_submit: Callable[[], None] | None = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 升级 Bot。
 
@@ -3006,11 +3005,6 @@ class BaasService:  # pragma: no cover
             f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, "
             f"request_id={request_id}, payload={_redact_payload_for_log(payload)}"
         )
-
-        # Optional caller-owned precondition/fence, after payload construction
-        # and immediately before the remote mutation. No engine policy here.
-        if before_submit is not None:
-            before_submit()
 
         # 调用 BaaS 层 API
         try:

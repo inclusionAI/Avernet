@@ -10,4 +10,4 @@ class RestartServices:
     task_queue: Any
     get_bot: Callable[[str, str], dict]
     template_service: Any
-    preflight_restart: Callable[..., dict | None]
+    lifecycle: Any
