@@ -5,7 +5,7 @@ member-level collaborators, for the stage the request names (``?stage=``,
 draft by default), and device-wide — see ``engine_runtime/gating.py`` and
 ``core/engine_runtime/gate.py``.
 
-Three reads, one write:
+Three reads, one write, plus the defaults anchor for restoring one:
 
 - ``switch`` is deliberately **not** wrapped: it would be a back door around the
   rule that a bot's engine is fixed at creation (``PUT /openapi/v1/bots/{bot_id}``
@@ -21,6 +21,12 @@ Three reads, one write:
   frontend reached the engine daemon directly via the agentclawproxy proxypass to
   ``<binding>:20003/api/engine/restart``; the public openapi surface wraps that same
   device call behind ``EngineRuntimeRelay``.
+- ``default-config`` wraps the engine adapter's ``GET
+  /api/openclaw/default-config`` — the read the legacy console made through the
+  same proxypass (``<binding>:20003/api/openclaw/default-config``) to let its
+  "restore defaults" put the shipped configuration back. The public surface
+  keeps it a plain read: restoring is the caller writing the answer back with
+  ``PUT /openapi/v1/bots/{bot_id}/engine/config``.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas import (
     EngineCapabilities,
+    EngineDefaultConfig,
     EngineInfo,
     EngineRestartResult,
     EngineStatus,
@@ -156,6 +163,48 @@ async def get_engine_capabilities(
             # internal text, so only the names cross the boundary.
             unavailable=_names(raw.get("fallback")),
         ),
+        request,
+    )
+
+
+@router.get("/default-config", response_model=Envelope[EngineDefaultConfig])
+@envelope_errors
+async def get_engine_default_config(
+    bot_id: BotIdPath,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[EngineDefaultConfig]:
+    """Factory-default configuration of the bot's engine.
+
+    The read half of restoring a bot to its defaults: write the returned
+    configuration back with the engine-config endpoint and the bot runs on
+    exactly what it shipped with. Not every engine ships a default config —
+    one that does not answers 501.
+    """
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
+    # The path lives under /api/openclaw, not /api/engine: default-config is a
+    # plugin capability of the openclaw adapter rather than a daemon route —
+    # the same endpoint the legacy console reached through the proxypass.
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        method="GET", path="/api/openclaw/default-config",
+    )
+    raw = result.data if isinstance(result.data, dict) else {}
+    # The engine answers {"path": ..., "config": ...}; the path names a file
+    # inside the device and stays behind the boundary.
+    config = raw.get("config")
+    return envelope(
+        EngineDefaultConfig(config=config if isinstance(config, dict) else {}),
         request,
     )
 

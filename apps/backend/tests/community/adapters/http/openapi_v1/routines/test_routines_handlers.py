@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_CREATED,
@@ -167,6 +168,51 @@ def test_map_routine_bot_metadata_defaults_to_none():
     assert r_blank.bot_name is None
     assert r_blank.owner_id is None
     assert r_blank.runtime_stage is None
+
+
+def test_map_routine_carries_execution_environment_fields():
+    """Model and per-firing timeout read off the adapter item, as set at create.
+
+    Both live in the item payload — ``device_adapter_transport._build_item``
+    stores them there, and the production adapters read ``payload.model`` /
+    ``payload.timeout_secs`` back; nothing in the produce chain reports them
+    at the item top level.
+    """
+    r = _map_routine(
+        _adapter_dict(
+            payload={
+                "kind": "message",
+                "message": "echo hi",
+                "timeout_secs": 3600,
+                "model": "qwen-max",
+            }
+        )
+    )
+    assert r.model == "qwen-max"
+    assert r.timeout_secs == 3600
+
+
+def test_map_routine_environment_fields_default_to_none():
+    """Absent environment settings surface as null, per the published schema."""
+    r = _map_routine(_adapter_dict())
+    assert r.model is None
+    assert r.timeout_secs is None
+
+
+def test_map_routine_ignores_unusable_environment_values():
+    """Unparsable or non-positive timeouts read as "not reported" (None)."""
+    r = _map_routine(
+        _adapter_dict(
+            payload={"kind": "message", "message": "x", "timeout_secs": "soon"}
+        )
+    )
+    assert r.timeout_secs is None
+    r_non_positive = _map_routine(
+        _adapter_dict(
+            payload={"kind": "message", "message": "x", "timeout_secs": -5}
+        )
+    )
+    assert r_non_positive.timeout_secs is None
 
 
 # ── list_routines handler wiring (Phase 1 Task 2) ──────────────────────
@@ -454,6 +500,83 @@ async def test_create_routine_defaults_timezone_when_null():
 
 
 @pytest.mark.asyncio
+async def test_create_routine_passes_model_and_timeout_secs():
+    """The execution-environment settings flow through to the engine adapter,
+    the way the legacy internal cron create always carried them."""
+    service = _StubCronCreateService(_adapter_dict())
+    body = RoutineSpec(
+        name="cron1",
+        trigger=ScheduleTrigger(cron="0 9 * * *"),
+        command="echo hi",
+        model="qwen-max",
+        timeout_secs=3600,
+    )
+
+    await create_routine(
+        bot_id="bot-x",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    sent_body = service.last_call_kwargs["body"]
+    assert sent_body["model"] == "qwen-max"
+    assert sent_body["timeout_secs"] == 3600
+
+
+@pytest.mark.asyncio
+async def test_create_routine_defaults_environment_fields():
+    """No model override means no ``model`` key (the engine picks the bot's
+    default); no timeout means the published 86400s default."""
+    service = _StubCronCreateService(_adapter_dict())
+    body = RoutineSpec(
+        name="cron1",
+        trigger=ScheduleTrigger(cron="0 9 * * *"),
+        command="echo hi",
+    )
+
+    await create_routine(
+        bot_id="bot-x",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    sent_body = service.last_call_kwargs["body"]
+    assert "model" not in sent_body
+    assert sent_body["timeout_secs"] == 86400
+
+
+@pytest.mark.asyncio
+async def test_create_routine_explicit_null_timeout_secs_falls_back_to_default():
+    """The read model legitimately answers ``timeout_secs: null`` (engine
+    reported none), so a caller copying a read routine back into a create
+    must not trip a 422 — explicit null lands on the same 86400 default."""
+    service = _StubCronCreateService(_adapter_dict())
+    body = RoutineSpec(
+        name="cron1",
+        trigger=ScheduleTrigger(cron="0 9 * * *"),
+        command="echo hi",
+        timeout_secs=None,
+    )
+
+    await create_routine(
+        bot_id="bot-x",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    assert service.last_call_kwargs["body"]["timeout_secs"] == 86400
+
+
+@pytest.mark.asyncio
 async def test_create_routine_reads_x_trace_id_from_request():
     service = _StubCronCreateService(_adapter_dict())
     request = _request_with_trace("trace-create-1")
@@ -673,6 +796,63 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
     assert service.last_call_kwargs["bot_id"] == "bot-x"
     assert service.last_call_kwargs["user_id"] == "u1"
     assert service.last_call_kwargs["nick_name"] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_update_routine_passes_model_and_timeout_secs():
+    """Environment updates flow when set and are omitted when left None —
+    the omitted case is also held by ``..._omits_unset_fields_from_body``,
+    which asserts the whole sent body."""
+    service = _StubCronUpdateService(_adapter_dict())
+    body = RoutineUpdate(model="qwen-max", timeout_secs=1800)
+
+    await update_routine(
+        routine_id="t1",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    sent_body = service.last_call_kwargs["body"]
+    assert sent_body == {"model": "qwen-max", "timeout_secs": 1800}
+
+
+@pytest.mark.asyncio
+async def test_update_routine_ignores_empty_string_model():
+    """An empty-string model update is skipped like on create: the engine
+    would store ``payload.model = ""`` only for every read to fold it back to
+    null — a value set that cannot be seen nor cleared is not a setting."""
+    service = _StubCronUpdateService(_adapter_dict())
+    body = RoutineUpdate(model="")
+
+    await update_routine(
+        routine_id="t1",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    assert service.last_call_kwargs["body"] == {}
+
+
+def test_spec_rejects_non_positive_timeout_secs():
+    """A timeout must be a positive whole number of seconds, on create and
+    update alike."""
+    with pytest.raises(ValidationError):
+        RoutineSpec(
+            name="cron1",
+            trigger=ScheduleTrigger(cron="0 9 * * *"),
+            command="echo hi",
+            timeout_secs=0,
+        )
+    with pytest.raises(ValidationError):
+        RoutineUpdate(timeout_secs=-1)
 
 
 @pytest.mark.asyncio

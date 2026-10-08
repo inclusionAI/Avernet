@@ -27,6 +27,36 @@ _TIMEZONE_DESC = (
     "schedule to its default zone."
 )
 
+# The two execution-environment settings the retiring internal cron contract
+# (adapters/http/cron) always carried: which model the firing session runs
+# with, and how long one firing may run before it is cut off. Published once,
+# on the create body — the retiring address inherits this shape by
+# subclassing, while read and update carry their own wording because their
+# field semantics genuinely differ (nullable readback, omit-to-keep).
+_MODEL_DESC = (
+    "Model override for the fresh sessions this routine starts — the firing "
+    "sessions run on this model instead of the bot's default. Omit or let "
+    "it be null to keep using the bot's default model."
+)
+
+_TIMEOUT_SECS_DESC = (
+    "How long a single firing of the routine may run, in seconds — a run "
+    "that exceeds it is cut off. Positive; null or omitted falls back to "
+    "86400 (a full day), so a read-back value copies back safely."
+)
+
+
+def _coerce_timeout_secs(value: object) -> int | None:
+    # The engine reports timeouts as bare numbers; anything unparsable reads
+    # as "not reported" rather than failing the whole read.
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
 
 class ScheduleTrigger(BaseModel):
     """A schedule trigger. Modeled as a typed nested object so other trigger
@@ -68,6 +98,8 @@ class Routine(BaseModel):
                 "command": "Summarize yesterday's tickets and post the brief.",
                 "enabled": True,
                 "timezone": "Asia/Shanghai",
+                "model": "qwen-max",
+                "timeout_secs": 3600,
                 "gmt_create": "2026-08-01T02:00:00+00:00",
                 "gmt_modified": "2026-08-10T02:00:00+00:00",
             }
@@ -107,6 +139,17 @@ class Routine(BaseModel):
         "its definition but never fires."
     )
     timezone: str | None = Field(default=None, description=_TIMEZONE_DESC)
+    model: str | None = Field(
+        default=None,
+        description="Model the firing sessions run on; null when the routine "
+        "has no override or the engine reports none — the bot's default "
+        "model then applies.",
+    )
+    timeout_secs: int | None = Field(
+        default=None,
+        description="How long a single firing may run (seconds); null when "
+        "the engine reports none.",
+    )
     gmt_create: str = Field(
         description="When the routine was created (ISO 8601 UTC); empty when "
         "the engine reports none."
@@ -143,6 +186,8 @@ class RoutineSpec(BaseModel):
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",
                 "timezone": "Asia/Shanghai",
+                "model": "qwen-max",
+                "timeout_secs": 3600,
                 "enabled": True,
             }
         }
@@ -152,6 +197,13 @@ class RoutineSpec(BaseModel):
     trigger: ScheduleTrigger = Field(description="When the routine fires.")
     command: str = Field(description=_COMMAND_DESC)
     timezone: str | None = Field(default=None, description=_TIMEZONE_DESC)
+    model: str | None = Field(default=None, description=_MODEL_DESC)
+    # Optional rather than plain int: a read-back ``null`` (engine reported no
+    # timeout) must copy back into a create without tripping a 422 — the read
+    # model legitimately answers null, so the create model has to accept it.
+    timeout_secs: int | None = Field(
+        default=86400, ge=1, description=_TIMEOUT_SECS_DESC
+    )
     enabled: bool = Field(
         default=True,
         description="Whether the schedule starts armed; defaults to true.",
@@ -166,6 +218,8 @@ class RoutineUpdate(BaseModel):
             "example": {
                 "trigger": {"type": "schedule", "cron": "30 8 * * 1-5"},
                 "timezone": "Asia/Shanghai",
+                "model": "qwen-max",
+                "timeout_secs": 1800,
             }
         }
     )
@@ -180,6 +234,17 @@ class RoutineUpdate(BaseModel):
         default=None, description="New instruction; omit to keep."
     )
     timezone: str | None = Field(default=None, description=_TIMEZONE_DESC)
+    model: str | None = Field(
+        default=None,
+        description="New model override; omit to keep. Clearing a previously "
+        "set override means sending a new, different model — this partial "
+        "update cannot express 'back to the bot's default'.",
+    )
+    timeout_secs: int | None = Field(
+        default=None,
+        ge=1,
+        description="New per-firing timeout (seconds); omit to keep.",
+    )
     enabled: bool | None = Field(
         default=None,
         description="Arm (true) or disarm (false) the schedule; omit to keep.",

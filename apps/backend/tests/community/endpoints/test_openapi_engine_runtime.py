@@ -4,7 +4,8 @@ Ten operations across four routers — approvals, connection, engine and
 models — sat on ``coverage_baseline.txt`` as frozen debt for the reason the
 sibling files record: the case runner authenticates with ``x-user-id``,
 ``require_principal`` accepts only a gateway-signed token, and the harness had
-no minter, so a case could assert nothing but a 401.
+no minter, so a case could assert nothing but a 401. The engine's
+default-config read joined later and comes with its cases from the start.
 
 ``test_openapi_session_files.py`` retired that reason by minting a principal
 inside the test tree — ``init_principal_verifier_config`` is pointed at a local
@@ -149,6 +150,12 @@ _ENGINE_PAYLOADS: dict[str, object] = {
         {"name": "claude_code", "version": "0.9.0", "active": False},
     ],
     "/api/engine/restart": {"status": "restarting"},
+    # The adapter's openclaw-plugin read the legacy console used for "restore
+    # defaults"; the handler publishes the config and drops the device path.
+    "/api/openclaw/default-config": {
+        "path": "local://default-config",
+        "config": {"model": "claude-sonnet-5", "permissions": {"allow": []}},
+    },
     # The engine wraps its model listing rather than answering a bare list.
     "/api/models": {
         "models": [{"id": _MODEL_ID, "name": "GPT-5.3", "provider": "openai"}],
@@ -218,7 +225,7 @@ def _seed_happy_services(world) -> None:
 _MODE_BODY = {"mode": "never"}
 
 #: ``(method, path, input, success_status)``. The status is the router's real
-#: one: none of these eleven declare ``status_code=``, so all answer 200.
+#: one: none of these twelve declare ``status_code=``, so all answer 200.
 _HAPPY_CASES = (
     (
         "GET",
@@ -252,6 +259,14 @@ _HAPPY_CASES = (
     (
         "GET",
         f"{_BOTS}/connection",
+        CaseInput(
+            path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS
+        ),
+        200,
+    ),
+    (
+        "GET",
+        f"{_BOTS}/engine/default-config",
         CaseInput(
             path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS
         ),
@@ -327,6 +342,9 @@ _HAPPY_BODIES: dict[tuple[str, str], dict] = {
     },
     ("GET", f"{_BOTS}/connection"): {
         "data": {"engine": "openclaw", "sockets": [{"kind": "chat"}]}
+    },
+    ("GET", f"{_BOTS}/engine/default-config"): {
+        "data": {"config": {"model": "claude-sonnet-5", "permissions": {"allow": []}}}
     },
     ("GET", f"{_BOTS}/engine/available"): {
         "data": [{"engine": "openclaw", "version": "1.2.3", "active": True}]
