@@ -284,9 +284,15 @@ class WorkOrderService(WorkOrderServiceProtocol):
                             bot_id, owner_id, get_current_env()
                         )
                 elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
-                    self._skill_collaborator_approval_handler.process_auto(
+                    # Skill owns the atomic grant + WorkOrder approval + applicant notice.
+                    # Keep the returned result as evidence that the Skill transaction completed.
+                    skill_review = self._skill_collaborator_approval_handler.process_auto(
                         work_order_id=result.work_order_id
                     )
+                    if skill_review.status is not WorkOrderStatus.APPROVED:
+                        raise WorkOrderInvalidEventError(
+                            "AUTO Skill handler did not approve the work order"
+                        )
                 elif biz_type == WorkOrderBizType.BOT_FRIEND.value:
                     if not self._decision_callbacks.requires_callback(event_type):
                         raise WorkOrderInvalidEventError(
@@ -313,10 +319,11 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     env=get_current_env(),
                 )
                 return result.model_copy(update={"status": WorkOrderEventStatus.FAILED})
-            self._repository.finalize_auto_approval(
-                work_order_id=result.work_order_id,
-                env=get_current_env(),
-            )
+            if biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value:
+                self._repository.finalize_auto_approval(
+                    work_order_id=result.work_order_id,
+                    env=get_current_env(),
+                )
             self._repository.create_auto_result_notifications(
                 work_order_id=result.work_order_id,
                 recipient_user_ids=approvers,

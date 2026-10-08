@@ -1428,3 +1428,86 @@ def test_friend_approval_rejects_missing_or_unsupported_source_event(
 
     callbacks.dispatch.assert_not_called()
     repository.process_approval.assert_not_called()
+
+
+def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize():
+    service, repo, *_ = _service()
+    repo.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=19,
+        work_order_no="WO-19",
+        notification_ids=[],
+        status=WorkOrderEventStatus.PENDING,
+    )
+    service._skill_collaborator_approval_handler.process_auto.return_value = (
+        WorkOrderReviewResult(
+            work_order_id=19,
+            status=WorkOrderStatus.APPROVED,
+            reviewer_user_id="SYSTEM",
+            review_remark=None,
+            reviewed_at=NOW,
+        )
+    )
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="skill-1",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor",
+        approver_user_ids=["notify-user"],
+        recipient_user_ids=[],
+        title="AUTO request",
+        content=None,
+        apply_reason=None,
+        biz_data={},
+        actor_id="actor",
+    )
+
+    assert result.status is WorkOrderEventStatus.APPROVED
+    service._skill_collaborator_approval_handler.process_auto.assert_called_once_with(
+        work_order_id=19
+    )
+    repo.finalize_auto_approval.assert_not_called()
+    repo.create_auto_result_notifications.assert_called_once()
+
+
+def test_auto_skill_non_approved_handler_result_marks_order_failed():
+    service, repo, *_ = _service()
+    repo.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=20,
+        work_order_no="WO-20",
+        notification_ids=[],
+        status=WorkOrderEventStatus.PENDING,
+    )
+    service._skill_collaborator_approval_handler.process_auto.return_value = (
+        WorkOrderReviewResult(
+            work_order_id=20,
+            status=WorkOrderStatus.FAILED,
+            reviewer_user_id="SYSTEM",
+            review_remark="failed",
+            reviewed_at=NOW,
+        )
+    )
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="skill-2",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor",
+        approver_user_ids=["notify-user"],
+        recipient_user_ids=[],
+        title="AUTO request",
+        content=None,
+        apply_reason=None,
+        biz_data={},
+        actor_id="actor",
+    )
+
+    assert result.status is WorkOrderEventStatus.FAILED
+    repo.mark_auto_approval_failed.assert_called_once()
+    repo.finalize_auto_approval.assert_not_called()
