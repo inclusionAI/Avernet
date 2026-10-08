@@ -33,18 +33,23 @@ self-improvement (RSI) loops over any Avernet bot, where
 
 ## Reading order
 
+These files are one design, split by topic, and meant to be read together in
+this order. They are not separate work sessions: follow-up sessions are the
+work items RSI-01…RSI-24 in [10-work-items.md](10-work-items.md), each of which
+names the documents to read first.
+
 | # | Document | Answers |
 | --- | --- | --- |
-| 1 | [design.md](design.md) | The architecture: three levels, components, loop, ownership, module placement, phasing |
-| 2 | [genome.md](genome.md) | What an evolved bot *is*: the Bot Genome, and how it extends the Manifest |
-| 3 | [verification.md](verification.md) | How we know a change is good: bot verification (S′ vs S) and mechanism verification (M′ vs M), and what eval code already exists |
-| 4 | [recursion.md](recursion.md) | Level 3: improving the improvement mechanism from the Experiment Ledger H, safely |
-| 5 | [strategy-sdk.md](strategy-sdk.md) | How evolution is pluggable: plugin kinds, strategy manifests, execution bindings |
-| 6 | [interfaces.md](interfaces.md) | API vs SDK vs CLI, and how bots drive evolution |
-| 7 | [default-strategy.md](default-strategy.md) | How ClawEvolve and the other existing pipelines are onboarded as defaults |
-| 8 | [governance.md](governance.md) | Gating, risk tiers, anti-reward-hacking, sandboxing, rollout, budgets |
-| 9 | [research.md](research.md) | Industry survey and codebase evidence these decisions rest on |
-| 10 | [work-items.md](work-items.md) | Numbered work items for follow-up sessions, with dependencies |
+| 1 | [01-design.md](01-design.md) | The architecture: three levels, components, loop, ownership, module placement, phasing |
+| 2 | [02-genome.md](02-genome.md) | What an evolved bot *is*: the Bot Genome, and how it extends the Manifest |
+| 3 | [03-verification.md](03-verification.md) | How we know a change is good: bot verification (S′ vs S) and mechanism verification (M′ vs M), and what eval code already exists |
+| 4 | [04-recursion.md](04-recursion.md) | Level 3: improving the improvement mechanism from the Experiment Ledger H, safely |
+| 5 | [05-strategy-sdk.md](05-strategy-sdk.md) | How evolution is pluggable: plugin kinds, strategy manifests, execution bindings |
+| 6 | [06-interfaces.md](06-interfaces.md) | API vs SDK vs CLI, and how bots drive evolution |
+| 7 | [07-default-strategy.md](07-default-strategy.md) | How ClawEvolve and the other existing pipelines are onboarded as defaults |
+| 8 | [08-governance.md](08-governance.md) | Gating, risk tiers, anti-reward-hacking, sandboxing, rollout, budgets |
+| 9 | [09-research.md](09-research.md) | Industry survey and codebase evidence these decisions rest on |
+| 10 | [10-work-items.md](10-work-items.md) | Numbered work items for follow-up sessions, with dependencies |
 
 Draft decision records (status `proposed`). They live here while under
 discussion; once accepted, each is promoted to `docs/adr/` with the next free
@@ -77,7 +82,7 @@ ADR number:
 ## Non-goals for this design set
 
 - Weight training / fine-tuning. The Experience Store is kept training-ready
-  (see [design.md §9](design.md#9-bridge-to-weight-training)), but the
+  (see [01-design.md §9](01-design.md#9-bridge-to-weight-training)), but the
   platform evolves the harness, not the model.
 - Evolving team topology and BCS routing. Genome is per-bot in v1; a
   team-level genome is listed as future work.

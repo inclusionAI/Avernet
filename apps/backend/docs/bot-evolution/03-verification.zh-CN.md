@@ -1,10 +1,10 @@
 # 验证——判断一项变更是否真的更好
 
-> English version: [verification.md](verification.md)
+> English version: [03-verification.md](03-verification.md)
 
 > 状态：DRAFT（讨论稿）。这是每个改进循环中的「验证与接纳（verify & accept）」
 > 环节。它由平台拥有（DR-2），是递归不可移动的锚点
-> （[recursion.md §6](recursion.zh-CN.md#6-边界递归不可触碰的部分)）。
+> （[04-recursion.md §6](04-recursion.zh-CN.md#6-边界递归不可触碰的部分)）。
 
 ## 1. 角色
 
@@ -83,7 +83,7 @@
 当进化策略提交带有父版本 S1 的候选 S′ 时运行。
 
 1. **静态底线**（便宜，最先执行）：schema、锁定基因、密钥/PII、改写阈值
-   （[governance.md §2](governance.zh-CN.md#2-门禁)）。
+   （[08-governance.md §2](08-governance.zh-CN.md#2-门禁)）。
 2. **健全性检查**：一个快速失败用例，类似 ClawBench 的 `task_00_sanity`。
 3. **成对执行**：在相同用例上、以相同种子和模拟用户脚本、在相同执行器中运行
    S1 和 S′。默认每个用例 *k* = 3 个种子，当结果接近阈值时自动增加（这是
@@ -132,7 +132,7 @@ inconclusive ⇔ otherwise  → strategy may spend more budget (more seeds/cases
 
 ## 6. 机制验证（第 3 层）
 
-完整协议见 [recursion.md §5](recursion.zh-CN.md#5-机制验证)。
+完整协议见 [04-recursion.md §5](04-recursion.zh-CN.md#5-机制验证)。
 用验证的术语来说：
 
 - **主体**是一个机制修订版。一个**用例**是一个*改进问题*（冻结的 bot 基因组

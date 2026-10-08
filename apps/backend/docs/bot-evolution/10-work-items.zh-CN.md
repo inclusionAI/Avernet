@@ -1,6 +1,6 @@
 # 工作项
 
-> English version: [work-items.md](work-items.md)
+> English version: [10-work-items.md](10-work-items.md)
 
 > 状态：DRAFT（讨论稿）。每个工作项的规模按一次后续会话来划定：该会话可将其按
 > SDD（spec → plan → tasks → implement）推进完成；对于仅涉及设计的工作项，则
@@ -26,10 +26,10 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：arch
 - **目标**：由所有者决定 DR-1（基因组 = 进化单位，构建于 Manifest 之上）、
   DR-2（晋升由平台所有）、DR-3（进化接口面使用 Bot 主体）。同时决定
-  [design.zh-CN.md §5](design.zh-CN.md#5-归属与模块放置) 中的待决事项 D-1
+  [01-design.zh-CN.md §5](01-design.zh-CN.md#5-归属与模块放置) 中的待决事项 D-1
   （控制面模块放置）。
-- **先读**：[design.zh-CN.md](design.zh-CN.md)、[genome.zh-CN.md](genome.zh-CN.md)、
-  [governance.zh-CN.md](governance.zh-CN.md)、[interfaces.zh-CN.md §6](interfaces.zh-CN.md#6-认证与授权)。
+- **先读**：[01-design.zh-CN.md](01-design.zh-CN.md)、[02-genome.zh-CN.md](02-genome.zh-CN.md)、
+  [08-governance.zh-CN.md](08-governance.zh-CN.md)、[06-interfaces.zh-CN.md §6](06-interfaces.zh-CN.md#6-认证与授权)。
 - **交付物**：DR-1..DR-3 被接受（以下一个可用编号晋升到 `docs/adr/`）或被修订；
   记录 D-1。
 - **完成标准**：每份 ADR 都有所有者，且引擎所有者已明确签字认可 DR-1 中关于
@@ -41,7 +41,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   元数据）和基因组补丁（Genome Patch）（操作、风险等级映射、重写阈值）制定
   规范性 JSON Schema，制定内容哈希的规范化规则，以及与 Manifest schema v1 之间
   的双向映射。
-- **先读**：[genome.zh-CN.md](genome.zh-CN.md)；`manifest-schema.zh-CN.md`；
+- **先读**：[02-genome.zh-CN.md](02-genome.zh-CN.md)；`manifest-schema.zh-CN.md`；
   `schema/validator.py`。
 - **交付物**：`apps/backend/specs/<date>-bot-genome-schema/`，包含 schema 文件、
   示例，以及与 Manifest v1 的兼容性对照表。
@@ -55,7 +55,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   Evaluator、AcceptancePolicy、Curator、MetaProposer）、生命周期与失败语义（R11）、
   隔离/能力声明（R13），以及作业协议（Job Protocol）的线上契约
   （claim/lease/fencing/heartbeat/complete/fail、artifact 上传）。
-- **先读**：[strategy-sdk.zh-CN.md](strategy-sdk.zh-CN.md)；ClawEvolve
+- **先读**：[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)；ClawEvolve
   `official-stage-catalog.json`、`routes/internal/evolve.ts`；
   `docs/arch/protocol-contract-tests.md`。
 - **交付物**：契约文档 + schema 文件；策略清单 schema。
@@ -66,7 +66,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：evolution、backend、gateway
 - **目标**：Genome 与 Evolution 资源的 OpenAPI（异步模式、幂等性、ETag、与
   OpenAPI v1 一致的错误信封），以及带 JSON 输出 schema 与退出码的 `avn` 命令树。
-- **先读**：[interfaces.zh-CN.md](interfaces.zh-CN.md)；
+- **先读**：[06-interfaces.zh-CN.md](06-interfaces.zh-CN.md)；
   `apps/backend/docs/openapi-v1/README.md`；`apps/bcs/crates/tools/bcs-cli/CONTEXT.md`。
 - **交付物**：OpenAPI 草案 + CLI 参考文档；对 Q1（新的 `avn` 二进制或其他方案）
   做出决定。
@@ -80,7 +80,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、将钉住的源
   解析进内容存储、谱系查询。提供晋升 API：移动 `active` 并调用 Manifest apply。
 - **依赖**：RSI-02。
-- **先读**：[genome.zh-CN.md §2–§4](genome.zh-CN.md#2-结构)；`core/bot_config_manifest/`。
+- **先读**：[02-genome.zh-CN.md §2–§4](02-genome.zh-CN.md#2-结构)；`core/bot_config_manifest/`。
 - **完成标准**：可从 manifest、从补丁创建修订版；可对任意两个修订版做 diff；
   移动引用时能检测冲突；一致性测试 + 单元测试；singlebox 验收故事「编辑 →
   修订版 → apply → 回滚到两个版本之前」。
@@ -128,14 +128,14 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ### RSI-11 验证服务（Bot 验证）
 - **模块**：evolution、backend（`eval_publish`、`eval_env`）
-- **目标**：实现 [verification.zh-CN.md §3–§4](verification.zh-CN.md#3-验证模型)：
+- **目标**：实现 [03-verification.zh-CN.md §3–§4](03-verification.zh-CN.md#3-验证模型)：
   以 ClawWeb Bench 模型和 ClawBench 用例格式为种子的用例集注册表；由平台分配的
   划分，包括密封的封存集与必过的回归集/安全集；从 `lib_grading` 中抽取的
   `platform/clawbench` 评分器；本地沙箱与已部署沙箱（eval env）执行器；带重复
   种子与置信区间的配对比较器；评审模型集成；将 ClawEvolve 的 `full_opt_gate` /
   `candidate_opt_gate` 变为阻断式的判定策略；验证 profile。
-- **先读**：[verification.zh-CN.md](verification.zh-CN.md)（§2 列出了可复用的
-  现有代码）；[governance.zh-CN.md §2、§4](governance.zh-CN.md#2-门禁)。
+- **先读**：[03-verification.zh-CN.md](03-verification.zh-CN.md)（§2 列出了可复用的
+  现有代码）；[08-governance.zh-CN.md §2、§4](08-governance.zh-CN.md#2-门禁)。
 - **完成标准**：候选在沙箱中完成验证，带配对基线与按划分的判定；可证明提议器
   作业输入不包含封存集、回归集和安全集；同一批用例文件无需修改即可在 ClawBench
   和平台评分器下运行。
@@ -151,7 +151,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ### RSI-13 将 ClawEvolve 接入为默认进化策略
 - **模块**：evolverun、evolution
 - **目标**：执行
-  [default-strategy.zh-CN.md §4](default-strategy.zh-CN.md#4-迁移计划绞杀者模式不做一次性切换)
+  [07-default-strategy.zh-CN.md §4](07-default-strategy.zh-CN.md#4-迁移计划绞杀者模式不做一次性切换)
   中的绞杀者步骤 1–3：影子记录修订版 → 适配器进化策略 → 原生进化策略。Tune 在
   沙箱 `GenomeWorkspace` 上工作；接纳规则变为 `clawevolve/acceptance` 策略；
   从流程中移除 pack/restore；决定 D-2、D-3。
@@ -167,7 +167,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ### RSI-21 实验记录 H
 - **模块**：evolution
-- **目标**：按 [recursion.zh-CN.md §3](recursion.zh-CN.md#3-实验记录h) 中的
+- **目标**：按 [04-recursion.zh-CN.md §3](04-recursion.zh-CN.md#3-实验记录h) 中的
   schema 记录每一次第 2 层实验（包括被拒绝的候选及其后续的线上结果）；派生的
   机制指标；面向提议器的文件系统导出；验证器版本标记。
 - **依赖**：RSI-08。尽早开始记录 —— 第 3 层的效果取决于它所学习的历史。
@@ -186,7 +186,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **目标**：(a) 基于 H 的离线重放工具，用于接纳策略的变更，泛化
   `calibrate_evolution_gates.py` / `replay_candidate_gate.py`；
   (b) 从 H 冻结得到的改进问题基准，以及
-  [recursion.zh-CN.md §5](recursion.zh-CN.md#5-机制验证) 中的机制验证协议，
+  [04-recursion.zh-CN.md §5](04-recursion.zh-CN.md#5-机制验证) 中的机制验证协议，
   首先用于**人工编写**的进化策略变更。
 - **依赖**：RSI-11、RSI-13、RSI-21。
 - **完成标准**：对 ClawEvolve tune prompt 的一次修改，通过在留出问题上将已验证
@@ -196,7 +196,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：evolution
 - **目标**：一个读取 H 并提议机制补丁（阈值、prompt、算子、步骤顺序）的元进化
   策略，只能经由 RSI-23 与人工批准才被采纳；由静态检查强制执行
-  [recursion.zh-CN.md §6](recursion.zh-CN.md#6-边界递归不可触碰的部分) 中的边界。
+  [04-recursion.zh-CN.md §6](04-recursion.zh-CN.md#6-边界递归不可触碰的部分) 中的边界。
 - **依赖**：RSI-23。
 
 ### RSI-20 运行、评审队列与谱系的 UI
@@ -227,7 +227,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ### RSI-15 记忆整合进化策略
 - **模块**：evolution
 - **目标**：按
-  [default-strategy.zh-CN.md §5](default-strategy.zh-CN.md#5-第二个非-clawevolve-默认策略记忆整合)
+  [07-default-strategy.zh-CN.md §5](07-default-strategy.zh-CN.md#5-第二个非-clawevolve-默认策略记忆整合)
   实现 `platform/consolidate-memory` —— 第二个非 ClawEvolve 的默认进化策略，
   用以证明可插拔性（R19）。
 - **依赖**：RSI-05（或过渡方案）、RSI-13、RSI-14。
@@ -250,10 +250,10 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 | ID | 决策 | 位置 |
 | --- | --- | --- |
-| D-1 | 控制面模块放置 | design.md §5 → RSI-01 |
-| D-2 | 默认进化策略执行器的长期宿主（TS 还是 Python） | default-strategy.md §6 → RSI-13 |
-| D-3 | 将 ClawBench 作为平台默认评分器 | default-strategy.md §6 → RSI-11 |
-| D-4 | Workflow YAML 作为基因还是独立 artifact | default-strategy.md §6 |
-| D-5 | ClawMind 分析器契约；休眠的分析器要么接入要么移除 | default-strategy.md §6 |
-| D-6 | 基因组存储：DB + 内容存储（推荐）还是每个 Bot 一个 git 仓库 | genome.md；RSI-03 |
-| Q1–Q3 | CLI 二进制、默认 Bot 运行请求、事件投递 | interfaces.md §8 |
+| D-1 | 控制面模块放置 | 01-design.md §5 → RSI-01 |
+| D-2 | 默认进化策略执行器的长期宿主（TS 还是 Python） | 07-default-strategy.md §6 → RSI-13 |
+| D-3 | 将 ClawBench 作为平台默认评分器 | 07-default-strategy.md §6 → RSI-11 |
+| D-4 | Workflow YAML 作为基因还是独立 artifact | 07-default-strategy.md §6 |
+| D-5 | ClawMind 分析器契约；休眠的分析器要么接入要么移除 | 07-default-strategy.md §6 |
+| D-6 | 基因组存储：DB + 内容存储（推荐）还是每个 Bot 一个 git 仓库 | 02-genome.md；RSI-03 |
+| Q1–Q3 | CLI 二进制、默认 Bot 运行请求、事件投递 | 06-interfaces.md §8 |

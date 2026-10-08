@@ -1,6 +1,6 @@
 # 接口——API、SDK、CLI 与 bot 驱动的进化
 
-> English version: [interfaces.md](interfaces.md)
+> English version: [06-interfaces.md](06-interfaces.md)
 
 > 状态：DRAFT（讨论稿）。回答「用 API/SDK 还是 CLI，以及 bot 如何驱动递归自改进
 > （RSI）？」
@@ -71,7 +71,7 @@ GET    /bots/{bot}/evolution/inbox
 GET    /evolution/suites/{suite}                   cases visible per caller role
 POST   /bots/{bot}/evolution/evaluations           evaluate a revision on a suite (operator only)
 
-# Jobs (runner protocol) — see strategy-sdk.md §5
+# Jobs (runner protocol) — see 05-strategy-sdk.md §5
 ```
 
 异步模式：POST 返回 `202` + 资源；客户端轮询或订阅（webhook / SSE）。CLI 通过

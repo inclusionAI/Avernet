@@ -31,7 +31,7 @@ Manifest 内容存储中；Skill Center 的 skill 以钉住的 Center 版本引�
 记忆投影契约，并修订当前「apply 从不触碰 `MEMORY.md` 和 `IDENTITY.md`」的规则：
 由引擎而不是 Backend 决定策展条目如何投影。
 
-设计：[`../genome.zh-CN.md`](../genome.zh-CN.md)。
+设计：[`../02-genome.zh-CN.md`](../02-genome.zh-CN.md)。
 
 ## 影响
 

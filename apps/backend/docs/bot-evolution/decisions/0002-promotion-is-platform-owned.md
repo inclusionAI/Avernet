@@ -27,7 +27,7 @@ proposed by the meta-loop is adopted only after mechanism verification and
 human approval. Proposer inputs never include
 holdout, regression, or safety cases.
 
-Design: [`../governance.md`](../governance.md).
+Design: [`../08-governance.md`](../08-governance.md).
 
 ## Consequences
 

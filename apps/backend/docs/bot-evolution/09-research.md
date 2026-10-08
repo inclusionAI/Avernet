@@ -1,6 +1,6 @@
 # Research — industry survey and codebase evidence
 
-> 中文版：[research.zh-CN.md](research.zh-CN.md)
+> 中文版：[09-research.zh-CN.md](09-research.zh-CN.md)
 
 > Collected 2026-10-08. Industry items marked **[V]** were verified against a
 > fetched page or search result in this session; **[K]** are well-known papers
@@ -148,7 +148,7 @@ All under `apps/evolverun/`; nothing equivalent elsewhere in the repo.
 ### 2.3 Existing bot-quality evaluation code
 
 Full inventory, reuse plan, and gaps in
-[verification.md §2](verification.md#2-what-already-exists-in-the-codebase).
+[03-verification.md §2](03-verification.md#2-what-already-exists-in-the-codebase).
 Summary: ClawBench (case format, automated / rubric / hybrid graders) plus
 the ClawWeb Bench store is the only working bot grader, and it is OpenClaw-local.
 The backend eval env + Quality Task deploys isolated service-bot copies but

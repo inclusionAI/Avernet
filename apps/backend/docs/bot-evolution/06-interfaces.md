@@ -1,6 +1,6 @@
 # Interfaces — API, SDK, CLI, and bot-driven evolution
 
-> 中文版：[interfaces.zh-CN.md](interfaces.zh-CN.md)
+> 中文版：[06-interfaces.zh-CN.md](06-interfaces.zh-CN.md)
 
 > Status: DRAFT. Answers "API/SDK or CLI, and how does a bot drive RSI?"
 
@@ -72,7 +72,7 @@ GET    /bots/{bot}/evolution/inbox
 GET    /evolution/suites/{suite}                   cases visible per caller role
 POST   /bots/{bot}/evolution/evaluations           evaluate a revision on a suite (operator only)
 
-# Jobs (runner protocol) — see strategy-sdk.md §5
+# Jobs (runner protocol) — see 05-strategy-sdk.md §5
 ```
 
 Async pattern: POST returns `202` + resource; clients poll or subscribe

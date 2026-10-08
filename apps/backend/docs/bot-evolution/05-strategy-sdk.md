@@ -1,6 +1,6 @@
 # Strategy SDK — making evolution pluggable
 
-> 中文版：[strategy-sdk.zh-CN.md](strategy-sdk.zh-CN.md)
+> 中文版：[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)
 
 > Status: DRAFT. How another team plugs a new evolution approach into the
 > platform without changing platform code.
@@ -10,7 +10,7 @@
 1. **The platform owns the loop skeleton and retention; strategies own
    variation and contribute to selection.** A strategy can decide *what to
    try* and *what counts as better*; it can never decide *what goes live*
-   on its own (see [governance.md](governance.md)).
+   on its own (see [08-governance.md](08-governance.md)).
 2. **Small plugin kinds, composed by a manifest.** Instead of one giant
    "Strategy" interface, a strategy is a declared composition of narrow
    plugins. Teams can replace one piece (e.g. a better Evaluator) and reuse
@@ -34,10 +34,10 @@
 | **Analyzer** | episodes, feedback, inbox items | `Findings` (`plan-source/v2`-compatible) | Optional |
 | **SuiteBuilder** | findings | candidate eval cases (platform assigns splits) | Optional |
 | **Proposer** | parent genome (read-only sandbox), findings, train-split failures with critiques, history | `GenomePatch[]` + rationale | **Required** |
-| **Evaluator** (Executor + Grader) | genome revision, case set, budget | per-case scores + critiques + traces | **Verifier-owned**: strategies select a verification profile and may contribute train-split cases, but graders and executors are registered and versioned by the verifier, not by strategies ([verification.md §3](verification.md#3-verification-model)) |
+| **Evaluator** (Executor + Grader) | genome revision, case set, budget | per-case scores + critiques + traces | **Verifier-owned**: strategies select a verification profile and may contribute train-split cases, but graders and executors are registered and versioned by the verifier, not by strategies ([03-verification.md §3](03-verification.md#3-verification-model)) |
 | **AcceptancePolicy** | parent vs candidate eval results | accept / reject / continue + reason | Optional (default: no-regression + improvement on validation) |
 | **Curator** | whole genome + usage stats | `GenomePatch` (dedupe, retire, merge) | Optional; is a Proposer specialisation run on schedule |
-| **MetaProposer** | Experiment Ledger H (export), parent mechanism | mechanism patch | Level 3 only; may never target its own family or the verifier ([recursion.md](recursion.md)) |
+| **MetaProposer** | Experiment Ledger H (export), parent mechanism | mechanism patch | Level 3 only; may never target its own family or the verifier ([04-recursion.md](04-recursion.md)) |
 
 What is deliberately **not** a plugin: recording revisions, static checks,
 the platform floor of the gate, promotion, rollout, apply. These are

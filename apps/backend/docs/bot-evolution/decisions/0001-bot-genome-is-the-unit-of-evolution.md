@@ -36,7 +36,7 @@ engine-owned. This requires an engine memory projection contract and
 amends the current rule that `MEMORY.md` and `IDENTITY.md` are never touched
 by apply: the engine, not Backend, decides how curated items are projected.
 
-Design: [`../genome.md`](../genome.md).
+Design: [`../02-genome.md`](../02-genome.md).
 
 ## Consequences
 

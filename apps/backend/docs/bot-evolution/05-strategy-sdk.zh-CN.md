@@ -1,6 +1,6 @@
 # 进化策略 SDK——让进化可插拔
 
-> English version: [strategy-sdk.md](strategy-sdk.md)
+> English version: [05-strategy-sdk.md](05-strategy-sdk.md)
 
 > 状态：DRAFT（讨论稿）。说明其他团队如何在不修改平台代码的前提下，将一种新
 > 的进化方法接入平台。
@@ -9,7 +9,7 @@
 
 1. **平台拥有循环骨架与保留权；进化策略（Strategy）拥有变异，并参与选择。**
    进化策略可以决定*尝试什么*以及*什么算更好*；但它永远不能独自决定*什么上线*
-   （见 [governance.zh-CN.md](governance.zh-CN.md)）。
+   （见 [08-governance.zh-CN.md](08-governance.zh-CN.md)）。
 2. **小粒度插件（plugin）种类，由清单组合。** 进化策略不是一个庞大的
    「Strategy」接口，而是若干窄插件的声明式组合。团队可以替换其中一块（例如更
    好的 Evaluator），并复用其余部分（例如默认的 Analyzer）。
@@ -30,10 +30,10 @@
 | **Analyzer** | 片段（episode）、反馈、收件箱条目 | `Findings`（兼容 `plan-source/v2`） | 可选 |
 | **SuiteBuilder** | 发现项（findings） | 候选评测用例（由平台分配划分） | 可选 |
 | **Proposer** | 父基因组（只读沙箱）、发现项、训练集失败用例及评语、历史 | `GenomePatch[]` + 理由 | **必需** |
-| **Evaluator**（Executor + Grader） | 基因组修订版、用例集合、预算 | 逐用例得分 + 评语 + 轨迹 | **由验证器拥有**：进化策略选择一个验证配置（verification profile），并可贡献训练集用例，但评分器与执行器由验证器注册并做版本管理，而非由进化策略管理（[verification.zh-CN.md §3](verification.zh-CN.md#3-验证模型)） |
+| **Evaluator**（Executor + Grader） | 基因组修订版、用例集合、预算 | 逐用例得分 + 评语 + 轨迹 | **由验证器拥有**：进化策略选择一个验证配置（verification profile），并可贡献训练集用例，但评分器与执行器由验证器注册并做版本管理，而非由进化策略管理（[03-verification.zh-CN.md §3](03-verification.zh-CN.md#3-验证模型)） |
 | **AcceptancePolicy** | 父版本与候选的评测结果对比 | 接纳 / 拒绝 / 继续 + 原因 | 可选（默认：无回归 + 在验证集上有提升） |
 | **Curator** | 完整基因组 + 使用统计 | `GenomePatch`（去重、退役、合并） | 可选；是按计划运行的一种 Proposer 特化 |
-| **MetaProposer** | 实验记录 H（导出）、父改进机制 | 改进机制补丁 | 仅限第 3 层；永远不能以其自身所属族或验证器为目标（[recursion.zh-CN.md](recursion.zh-CN.md)） |
+| **MetaProposer** | 实验记录 H（导出）、父改进机制 | 改进机制补丁 | 仅限第 3 层；永远不能以其自身所属族或验证器为目标（[04-recursion.zh-CN.md](04-recursion.zh-CN.md)） |
 
 刻意**不**作为插件的部分：记录修订版、静态检查、门禁的平台底线、晋升、
 rollout、apply。这些是平台代码（DR-2）。

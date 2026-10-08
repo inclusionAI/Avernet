@@ -1,13 +1,13 @@
 # Bot 进化平台 —— 架构
 
-> English version: [design.md](design.md)
+> English version: [01-design.md](01-design.md)
 
 > 状态：DRAFT。术语表见 [README.zh-CN.md](README.zh-CN.md)。
 
 ## 1. 问题
 
 代码库中的三个事实界定了问题（证据见
-[research.zh-CN.md §2](research.zh-CN.md#2-代码库证据)）：
+[09-research.zh-CN.md §2](09-research.zh-CN.md#2-代码库证据)）：
 
 1. **已经存在一个可用的自改进循环，但它是一个产品，而不是平台。** ClawEvolve
    （`apps/evolverun/`）执行 diagnose → plan → tune/review → bench → accept →
@@ -23,7 +23,7 @@
 3. **bot 无法就其自身调用平台。** OpenAPI v1 按设计拒绝 `bot` 主体，因此
    「bot 自我改进」目前没有任何被认可的接口面。
 
-业界证据（见 [research.zh-CN.md §1](research.zh-CN.md#1-业界调研)）补充了三条
+业界证据（见 [09-research.zh-CN.md §1](09-research.zh-CN.md#1-业界调研)）补充了三条
 设计从第一天起就必须遵守的约束：
 
 - 没有**独立的、封存的、归平台所有的评估**的自改进，要么会奖励投机
@@ -61,10 +61,10 @@
    部分所描述的进化策略运行。
 3. **递归自改进** —— 所有改进实验的记录（H）被用来改进**改进机制本身**。一个
    候选 M2 在接管后续轮次之前，要被**验证**能比 M1 产生更好的、经过验证的
-   改进。见 [recursion.zh-CN.md](recursion.zh-CN.md)。
+   改进。见 [04-recursion.zh-CN.md](04-recursion.zh-CN.md)。
 
 验证是这三个层次的不动点：每一次变更都会被验证，拒绝是正常结果，验证器永远
-不会被任何循环修改（[verification.zh-CN.md](verification.zh-CN.md)）。
+不会被任何循环修改（[03-verification.zh-CN.md](03-verification.zh-CN.md)）。
 
 ### 第 2 层循环
 
@@ -94,12 +94,12 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身——都可以归结为在一
 拥有 Bot 基因组修订版、具名引用（ref）（`active`、`previous`、`canary`、
 `candidate/<run>/<n>`）、补丁以及按内容寻址的 blob。它是**长大了的
 Manifest**：一个修订版*编译成*一份钉住的 Manifest 文档加上一份记忆投影，晋升
-通过现有的 apply 管线应用该文档。完整模型见 [genome.zh-CN.md](genome.zh-CN.md)。
+通过现有的 apply 管线应用该文档。完整模型见 [02-genome.zh-CN.md](02-genome.zh-CN.md)。
 
 放置位置：**Backend**（`core/bot_genome/`），与 `core/bot_config_manifest/`
 相邻，因为 Backend 拥有期望状态，而 Manifest 已经在那里。blob 复用 Manifest
 内容存储（`ManifestContentService` 背后的按内容寻址 blob 目录，来源记录在
-`ac_manifest_content` 中）；见 [genome.zh-CN.md §7](genome.zh-CN.md#7-存储)。
+`ac_manifest_content` 中）；见 [02-genome.zh-CN.md §7](02-genome.zh-CN.md#7-存储)。
 
 ### C2 经验库
 
@@ -120,14 +120,14 @@ Manifest**：一个修订版*编译成*一份钉住的 Manifest 文档加上一�
 归属：AGENTS.md 把聊天历史划归面向引擎的服务。因此**原始会话的真相来源仍在
 引擎中**；引擎暴露一份有版本的导出契约（`session-export/v1` 已存在于
 ClawEvolve 中，是起点），C2 保存规范化、带索引、有保留期限的副本供进化使用。
-隐私 / 保留规则挂在 C2 上（见 [governance.zh-CN.md §7](governance.zh-CN.md#7-数据处理)）。
+隐私 / 保留规则挂在 C2 上（见 [08-governance.zh-CN.md §7](08-governance.zh-CN.md#7-数据处理)）。
 
 ### C3 进化策略注册表
 
 存储**策略清单**（用哪些插件、以什么 flow、带什么参数和预算）以及**插件实现**
 （有版本，带声明的能力、隔离等级和一致性状态）。一次运行会记录它所使用的确切
 进化策略版本。它泛化了 ClawEvolve 的 `official-stage-catalog.json` +
-`ce_stage_skill_implementations`。详见 [strategy-sdk.zh-CN.md](strategy-sdk.zh-CN.md)。
+`ce_stage_skill_implementations`。详见 [05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)。
 
 ### C4 运行编排器
 
@@ -157,11 +157,11 @@ Protocol）把步骤分派给插件，按摘要持久化每一个输入和输出
 ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评分器和
 用例集构建器（SuiteBuilder）实现；backend 评测环境（`eval_publish`）成为
 部署式沙箱执行器。完整协议、现有评测代码的清单及其缺口见
-[verification.zh-CN.md](verification.zh-CN.md)。
+[03-verification.zh-CN.md](03-verification.zh-CN.md)。
 
 ### C6 门禁与晋升
 
-唯一能移动 bot `active` 引用的组件。见 [governance.zh-CN.md](governance.zh-CN.md)。
+唯一能移动 bot `active` 引用的组件。见 [08-governance.zh-CN.md](08-governance.zh-CN.md)。
 简而言之：
 
 1. **平台底线**（进化策略不可覆盖）：schema 有效、锁定基因未被改动、无密钥、
@@ -176,7 +176,7 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 ### C7 实验记录 H 与归档
 
 每一次改进实验（改进机制、父版本、候选、证据、判定、成本、后续线上结果），
-包括被拒绝的实验——schema 见 [recursion.zh-CN.md §3](recursion.zh-CN.md#3-实验记录h)。
+包括被拒绝的实验——schema 见 [04-recursion.zh-CN.md §3](04-recursion.zh-CN.md#3-实验记录h)。
 它是 C1 + C5 之上的一个读模型：某个 bot 的基因组树、每个候选在各划分上的分数、
 由哪个进化策略和模型产生、基于哪些证据、由谁批准。选择器查询它（latest-best、
 按用例的 Pareto 前沿、MAP-Elites 生态位、Huxley-Gödel Machine 式的考虑后代的
@@ -189,7 +189,7 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 循环：元提议器读取 H，提出一个改进机制补丁，候选改进机制在被采用之前，要在
 封存的改进问题上与当前 active 的改进机制进行比较（默认需人工批准）。改进机制
 在 C3 中以与基因组相同的修订版 / 引用模型进行版本管理。见
-[recursion.zh-CN.md](recursion.zh-CN.md)。
+[04-recursion.zh-CN.md](04-recursion.zh-CN.md)。
 
 ## 5. 归属与模块放置
 
@@ -271,7 +271,7 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 | P5 bot 驱动 + 机制验证 | bot 主体作用域、作为 bot 工具的 `avn` + SKILL.md、提议收件箱、记忆投影契约、整合（「dream」）进化策略；用于验证改进机制变更的改进问题基准 | 快循环；进化策略的回归测试 |
 | P6 开放式 | 自动化的元提议器（第 3 层）、归档选择器（Pareto/MAP-Elites/clade）、通过 Skill Center 的跨 bot skill 迁移、训练数据导出、更多引擎 | 研究级 |
 
-带依赖关系的工作项：[work-items.zh-CN.md](work-items.zh-CN.md)。
+带依赖关系的工作项：[10-work-items.zh-CN.md](10-work-items.zh-CN.md)。
 
 ## 9. 通往权重训练的桥梁
 

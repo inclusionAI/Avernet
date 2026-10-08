@@ -1,6 +1,6 @@
 # 调研：业界调研与代码库证据
 
-> English version: [research.md](research.md)
+> English version: [09-research.md](09-research.md)
 
 > 收集于 2026-10-08。标记为 **[V]** 的业界条目已在本次会话中对照抓取的页面或
 > 搜索结果核实；**[K]** 为以标准 arXiv id 引用、未重新抓取的知名论文；**[U]**
@@ -142,7 +142,7 @@ OpenAI cookbook ↔ GEPA 的关联；ShinkaEvolve；LangMem 版本。上文中 2
 ### 2.3 现有 Bot 质量评估代码
 
 完整清单、复用计划与缺口见
-[verification.zh-CN.md §2](verification.zh-CN.md#2-代码库中已有的部分)。
+[03-verification.zh-CN.md §2](03-verification.zh-CN.md#2-代码库中已有的部分)。
 概要：ClawBench（用例格式，自动化 / 评分细则 / 混合评分器）加上 ClawWeb Bench
 存储，是唯一可用的 Bot 评分器，并且仅限 OpenClaw 本地。后端 eval env +
 Quality Task 会部署隔离的服务型 Bot 副本，但把评分委托给外部服务。服务型 Bot

@@ -1,10 +1,10 @@
 # Default strategies — onboarding the existing pipelines
 
-> 中文版：[default-strategy.zh-CN.md](default-strategy.zh-CN.md)
+> 中文版：[07-default-strategy.zh-CN.md](07-default-strategy.zh-CN.md)
 
 > Status: DRAFT. How ClawEvolve and the other self-improvement code in
 > `apps/evolverun/` become the platform's default, replaceable strategies.
-> Evidence and file references: [research.md §2.2](research.md#22-existing-self-improvement-pipelines).
+> Evidence and file references: [09-research.md §2.2](09-research.md#22-existing-self-improvement-pipelines).
 
 ## 1. What exists today
 
@@ -42,7 +42,7 @@ a review firewall, and offline gate calibration. The onboarding is mostly
 | `skill-decision` human approval + `BotSkillGateway.replaceLocalSkill` (CAS) | Platform review queue + promotion | Human approval generalizes to all T2 patches |
 
 The resulting default strategy is the manifest example in
-[strategy-sdk.md §4](strategy-sdk.md#4-strategy-manifest).
+[05-strategy-sdk.md §4](05-strategy-sdk.md#4-strategy-manifest).
 
 ## 3. Decoupling from OpenClaw
 

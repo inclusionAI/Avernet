@@ -1,10 +1,10 @@
 # 默认进化策略——接入现有管线
 
-> English version: [default-strategy.md](default-strategy.md)
+> English version: [07-default-strategy.md](07-default-strategy.md)
 
 > 状态：DRAFT（讨论稿）。说明 ClawEvolve 以及 `apps/evolverun/` 中其他自改进代
 > 码如何成为平台默认的、可替换的进化策略。
-> 证据与文件引用：[research.zh-CN.md §2.2](research.zh-CN.md#22-现有自改进管线)。
+> 证据与文件引用：[09-research.zh-CN.md §2.2](09-research.zh-CN.md#22-现有自改进管线)。
 
 ## 1. 现状
 
@@ -41,7 +41,7 @@ claim/report 步骤协议、与生产者无关的 `plan-source/v2` 交接、带�
 | `skill-decision` 人工审批 + `BotSkillGateway.replaceLocalSkill`（CAS） | 平台评审队列 + 晋升 | 人工审批推广到所有 T2 补丁 |
 
 由此得到的默认进化策略即
-[strategy-sdk.zh-CN.md §4](strategy-sdk.zh-CN.md#4-策略清单) 中的清单示例。
+[05-strategy-sdk.zh-CN.md §4](05-strategy-sdk.zh-CN.md#4-策略清单) 中的清单示例。
 
 ## 3. 与 OpenClaw 解耦
 

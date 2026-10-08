@@ -29,18 +29,22 @@ self-improvement，RSI）循环，其中：
 
 ## 阅读顺序
 
+这些文件是同一份设计按主题拆分而成，应按以下顺序一起阅读。它们不是各自独立的
+工作会话：后续会话对应 [10-work-items.zh-CN.md](10-work-items.zh-CN.md) 中的
+工作项 RSI-01…RSI-24，每个工作项都注明了需要先阅读哪些文档。
+
 | # | 文档 | 回答的问题 |
 | --- | --- | --- |
-| 1 | [design.zh-CN.md](design.zh-CN.md) | 架构：三个层次、组件、循环、归属、模块放置、分期 |
-| 2 | [genome.zh-CN.md](genome.zh-CN.md) | 一个被进化的 bot *是*什么：Bot 基因组，以及它如何扩展 Manifest |
-| 3 | [verification.zh-CN.md](verification.zh-CN.md) | 如何判断一次变更是好的：Bot 验证（S′ 对比 S）与机制验证（M′ 对比 M），以及已有哪些评测代码 |
-| 4 | [recursion.zh-CN.md](recursion.zh-CN.md) | 第 3 层：基于实验记录 H 安全地改进改进机制 |
-| 5 | [strategy-sdk.zh-CN.md](strategy-sdk.zh-CN.md) | 进化如何做到可插拔：插件类型、策略清单、执行绑定 |
-| 6 | [interfaces.zh-CN.md](interfaces.zh-CN.md) | API、SDK 与 CLI 的区别，以及 bot 如何驱动进化 |
-| 7 | [default-strategy.zh-CN.md](default-strategy.zh-CN.md) | ClawEvolve 及其他现有管线如何作为默认策略接入 |
-| 8 | [governance.zh-CN.md](governance.zh-CN.md) | 门禁、风险等级、反奖励投机、沙箱、发布、预算 |
-| 9 | [research.zh-CN.md](research.zh-CN.md) | 这些决策所依据的业界调研与代码库证据 |
-| 10 | [work-items.zh-CN.md](work-items.zh-CN.md) | 供后续会话使用的编号工作项及其依赖关系 |
+| 1 | [01-design.zh-CN.md](01-design.zh-CN.md) | 架构：三个层次、组件、循环、归属、模块放置、分期 |
+| 2 | [02-genome.zh-CN.md](02-genome.zh-CN.md) | 一个被进化的 bot *是*什么：Bot 基因组，以及它如何扩展 Manifest |
+| 3 | [03-verification.zh-CN.md](03-verification.zh-CN.md) | 如何判断一次变更是好的：Bot 验证（S′ 对比 S）与机制验证（M′ 对比 M），以及已有哪些评测代码 |
+| 4 | [04-recursion.zh-CN.md](04-recursion.zh-CN.md) | 第 3 层：基于实验记录 H 安全地改进改进机制 |
+| 5 | [05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md) | 进化如何做到可插拔：插件类型、策略清单、执行绑定 |
+| 6 | [06-interfaces.zh-CN.md](06-interfaces.zh-CN.md) | API、SDK 与 CLI 的区别，以及 bot 如何驱动进化 |
+| 7 | [07-default-strategy.zh-CN.md](07-default-strategy.zh-CN.md) | ClawEvolve 及其他现有管线如何作为默认策略接入 |
+| 8 | [08-governance.zh-CN.md](08-governance.zh-CN.md) | 门禁、风险等级、反奖励投机、沙箱、发布、预算 |
+| 9 | [09-research.zh-CN.md](09-research.zh-CN.md) | 这些决策所依据的业界调研与代码库证据 |
+| 10 | [10-work-items.zh-CN.md](10-work-items.zh-CN.md) | 供后续会话使用的编号工作项及其依赖关系 |
 
 决策草案（状态为 `proposed`）。讨论期间它们存放在这里；一旦被接受，每一份
 都会以下一个可用的 ADR 编号晋升到 `docs/adr/`：
@@ -72,7 +76,7 @@ self-improvement，RSI）循环，其中：
 ## 本设计集的非目标
 
 - 权重训练 / 微调。经验库保持可用于训练的状态（见
-  [design.zh-CN.md §9](design.zh-CN.md#9-通往权重训练的桥梁)），但平台进化的是
+  [01-design.zh-CN.md §9](01-design.zh-CN.md#9-通往权重训练的桥梁)），但平台进化的是
   harness，而不是模型。
 - 进化团队拓扑和 BCS 路由。v1 中基因组按 bot 划分；团队级基因组列为未来
   工作。

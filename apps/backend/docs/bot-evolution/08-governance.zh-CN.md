@@ -1,6 +1,6 @@
 # 治理：门禁、安全与发布
 
-> English version: [governance.md](governance.md)
+> English version: [08-governance.md](08-governance.md)
 
 > 状态：DRAFT（讨论稿）。拟议决策：
 > [DR-2](decisions/0002-promotion-is-platform-owned.zh-CN.md)。
@@ -19,7 +19,7 @@ skill 若没有评估引导的修订往往毫无增益；harness 进化带来的
 | 定义一次运行中「更好」的含义 | 进化策略（AcceptancePolicy） | — |
 | 定义什么绝不能变差 | **平台 + 所有者**（回归集、安全集、封存集（holdout）；平台底线（platform floor）） | 进化策略、Bot |
 | 执行评估 | **平台**（验证服务（Verification Service），使用验证器所属的执行器与评分器） | 提议器、进化策略 |
-| 修改验证器（用例集、评分器、profile、协议、阈值） | **人类**，通过经评审的变更（[verification.zh-CN.md §7](verification.zh-CN.md#7-验证器完整性)） | 任何自动化循环，包括第 3 层 |
+| 修改验证器（用例集、评分器、profile、协议、阈值） | **人类**，通过经评审的变更（[03-verification.zh-CN.md §7](03-verification.zh-CN.md#7-验证器完整性)） | 任何自动化循环，包括第 3 层 |
 | 采纳新的改进机制（第 3 层） | 平台机制门禁 + 人工批准 | 元提议器 |
 | 决定晋升 | **平台门禁** + 按风险等级由所有者/评审者决定 | 进化策略、Bot |
 | 修改锁定基因 / 策略 | 所有者、租户管理员 | 进化策略、Bot |

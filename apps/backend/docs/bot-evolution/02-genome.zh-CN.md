@@ -1,6 +1,6 @@
 # Bot 基因组——进化后 bot 的形态
 
-> English version: [genome.md](genome.md)
+> English version: [02-genome.md](02-genome.md)
 
 > 状态：DRAFT（讨论稿）。建立在 Bot Config Manifest
 > （`apps/backend/docs/bot-config-manifest/`）之上。拟议决策：
@@ -14,7 +14,7 @@ apply，并且已经具备能力矩阵和仅追加（append-only）的 apply 报
 进化可以免费获得面向所有引擎的交付能力。
 
 但作为一个进化中 bot 的产物，它缺少进化所需的东西（代码库证据见
-[research.md §2.1](research.zh-CN.md#21-bot-config-manifest)）：
+[09-research.md §2.1](09-research.zh-CN.md#21-bot-config-manifest)）：
 
 | Manifest v1 的缺口 | 进化为什么需要它 |
 | --- | --- |
@@ -179,7 +179,7 @@ evidence: [finding:f_12]                 # required for non-trivial ops
 - 针对锁定基因或钉住条目的 op 会被拒绝。
 - 改动超过文件可配置比例（默认 40%）的 `file.edit` 会被标记为 `rewrite`，
   并提升风险等级。
-- 每个 op 都映射到一个**风险等级**（[governance.md §3](governance.zh-CN.md#3-风险等级)）。
+- 每个 op 都映射到一个**风险等级**（[08-governance.md §3](08-governance.zh-CN.md#3-风险等级)）。
 - 补丁大小、文件数量和 blob 大小限制与 Manifest 的限制保持一致。
 
 补丁可以组合：一次包含多个已接纳迭代的运行可以压缩（squash）为一个补丁供审查，

@@ -1,6 +1,6 @@
 # Governance — gating, safety, rollout
 
-> 中文版：[governance.zh-CN.md](governance.zh-CN.md)
+> 中文版：[08-governance.zh-CN.md](08-governance.zh-CN.md)
 
 > Status: DRAFT. Proposed decision:
 > [DR-2](decisions/0002-promotion-is-platform-owned.md).
@@ -20,7 +20,7 @@ platform trustworthy regardless of which strategy runs.
 | Define what "better" means for a run | Strategy (AcceptancePolicy) | — |
 | Define what must never get worse | **Platform + owner** (regression, safety, holdout suites; platform floor) | Strategies, bots |
 | Run evaluations | **Platform** (Verification Service, with verifier-owned executors and graders) | Proposers, strategies |
-| Change the verifier (suites, graders, profiles, protocols, thresholds) | **Humans**, through reviewed changes ([verification.md §7](verification.md#7-verifier-integrity)) | Any automated loop, including level 3 |
+| Change the verifier (suites, graders, profiles, protocols, thresholds) | **Humans**, through reviewed changes ([03-verification.md §7](03-verification.md#7-verifier-integrity)) | Any automated loop, including level 3 |
 | Adopt a new mechanism (level 3) | Platform mechanism gate + human approval | Meta-proposers |
 | Decide promotion | **Platform gate** + owner/reviewer per risk tier | Strategies, bots |
 | Change locked genes / policy | Owner, tenant admin | Strategies, bots |

@@ -22,7 +22,7 @@
 验证并获得人工批准后才会被采用。提议器的输入永远不包含封存集（holdout）、
 回归集或安全集的用例。
 
-设计：[`../governance.zh-CN.md`](../governance.zh-CN.md)。
+设计：[`../08-governance.zh-CN.md`](../08-governance.zh-CN.md)。
 
 ## 影响
 

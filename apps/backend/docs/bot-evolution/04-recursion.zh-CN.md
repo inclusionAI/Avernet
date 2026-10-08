@@ -1,9 +1,9 @@
 # 递归——改进「改进机制」本身
 
-> English version: [recursion.md](recursion.md)
+> English version: [04-recursion.md](04-recursion.md)
 
 > 状态：DRAFT（讨论稿）。正是这一点让平台成为*递归*自改进（RSI），而不是重复的
-> 单次改进。请先阅读 [verification.md](verification.zh-CN.md)；递归的可信程度
+> 单次改进。请先阅读 [03-verification.md](03-verification.zh-CN.md)；递归的可信程度
 > 取决于其验证器。
 
 ## 1. 三个层次
@@ -13,7 +13,7 @@
 | 层次 | 循环 | 什么发生变化 | 由谁验证 | 在本设计中 |
 | --- | --- | --- | --- | --- |
 | **1. 最小形态：Agent** | 任务 → bot S1 ⇄ 环境 → 结果 | 没有持久变化；bot 完成当前任务 | 任务结果 | 表型；产出**经验** |
-| **2. 单次系统改进** | S1 + 任务反馈 → 改进机制 **M1** 提议变更 → 候选 S′ 在环境中运行 → **验证与接纳** → S2 | **系统**（bot 基因组）。后续任务使用 S2 | **Bot 验证**（S′ 对比 S1） | 基于 Bot 基因组的进化策略运行——[design.md](design.zh-CN.md) |
+| **2. 单次系统改进** | S1 + 任务反馈 → 改进机制 **M1** 提议变更 → 候选 S′ 在环境中运行 → **验证与接纳** → S2 | **系统**（bot 基因组）。后续任务使用 S2 | **Bot 验证**（S′ 对比 S1） | 基于 Bot 基因组的进化策略运行——[01-design.md](01-design.zh-CN.md) |
 | **3. 递归自改进** | 实验记录 **H** → 改进 M1 → **验证与采纳** M2 → M2 运行之后的第 2 层轮次 | **改进机制**本身。M2 运行下一轮 | **机制验证**（M2 对比 M1） | 本文档 |
 
 ![第 3 层：改进「改进机制」](images/recursion.zh-CN.svg)
@@ -23,7 +23,7 @@
 
 ## 2. 「机制」是什么
 
-M 是一个**进化策略版本**（[strategy-sdk.md](strategy-sdk.zh-CN.md)），连同
+M 是一个**进化策略版本**（[05-strategy-sdk.md](05-strategy-sdk.zh-CN.md)），连同
 决定其行为的一切：
 
 | 机制组成部分 | 当前 ClawEvolve 中的示例 |
@@ -55,7 +55,7 @@ target_kind: bot_genome | mechanism   # the loop is generic over what it improve
 
 ## 3. 实验记录（H）
 
-H 是**第 3 层的证据库**，也是第 2 层的选择池。它把归档（[design.md](design.zh-CN.md#c7-实验记录-h-与归档) 中的 C7）
+H 是**第 3 层的证据库**，也是第 2 层的选择池。它把归档（[01-design.md](01-design.zh-CN.md#c7-实验记录-h-与归档) 中的 C7）
 扩展为一份显式的、可查询的**改进实验**记录。
 
 一个实验就是一次第 2 层尝试：
@@ -179,10 +179,10 @@ ImprovementProblem = {
 | 基因组注册表（C1） | 对 `target_kind` 通用。机制使用同一套修订版 / 引用 / 补丁机制存储 |
 | 进化策略注册表（C3） | 进化策略版本即带谱系的机制修订版。按家族划分引用；bot 策略跟随或钉住某个引用 |
 | 归档（C7） | 成为具有 §3 schema 和派生机制指标的**实验记录 H** |
-| 评估（C5） | 在 Bot 验证之上增加**机制验证**（[verification.md](verification.zh-CN.md)） |
+| 评估（C5） | 在 Bot 验证之上增加**机制验证**（[03-verification.md](03-verification.zh-CN.md)） |
 | 门禁（C6） | 为机制采纳单独设置门禁配置（默认 T3，要求附带比较报告） |
 | 插件类型 | 新增 **MetaProposer**（一种输入为 H、输出为机制补丁的 Proposer）。其他类型复用 |
-| 治理 | 验证器边界（[governance.md](governance.zh-CN.md#1-权力分离)） |
+| 治理 | 验证器边界（[08-governance.md](08-governance.zh-CN.md#1-权力分离)） |
 
 ## 8. 分阶段实施
 

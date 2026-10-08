@@ -1,10 +1,10 @@
 # Verification — deciding whether a change is actually better
 
-> 中文版：[verification.zh-CN.md](verification.zh-CN.md)
+> 中文版：[03-verification.zh-CN.md](03-verification.zh-CN.md)
 
 > Status: DRAFT. This is the "verify & accept" box in every improvement loop.
 > It is platform-owned (DR-2) and is the anchor that recursion may not move
-> ([recursion.md §6](recursion.md#6-bounds-what-recursion-may-not-touch)).
+> ([04-recursion.md §6](04-recursion.md#6-bounds-what-recursion-may-not-touch)).
 
 ## 1. Role
 
@@ -90,7 +90,7 @@ safety.
 Run when a strategy submits candidate S′ with parent S1.
 
 1. **Static floor** (cheap, first): schema, locked genes, secrets/PII,
-   rewrite thresholds ([governance.md §2](governance.md#2-the-gate)).
+   rewrite thresholds ([08-governance.md §2](08-governance.md#2-the-gate)).
 2. **Sanity**: a fail-fast case, as ClawBench's `task_00_sanity` does.
 3. **Paired execution**: run S1 and S′ on the same cases, with the same
    seeds and simulated-user scripts, in the same executor. Default *k* = 3
@@ -149,7 +149,7 @@ Offline suites never cover everything. After promotion:
 
 ## 6. Mechanism verification (level 3)
 
-Full protocol in [recursion.md §5](recursion.md#5-mechanism-verification).
+Full protocol in [04-recursion.md §5](04-recursion.md#5-mechanism-verification).
 In verification terms:
 
 - The **subject** is a mechanism revision. A **case** is an *improvement

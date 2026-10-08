@@ -1,13 +1,13 @@
 # Bot Evolution Platform — architecture
 
-> 中文版：[design.zh-CN.md](design.zh-CN.md)
+> 中文版：[01-design.zh-CN.md](01-design.zh-CN.md)
 
 > Status: DRAFT. Read [README.md](README.md) for the glossary.
 
 ## 1. Problem
 
 Three facts from the codebase frame the problem (evidence in
-[research.md §2](research.md#2-codebase-evidence)):
+[09-research.md §2](09-research.md#2-codebase-evidence)):
 
 1. **There is already a working self-improvement loop, but it is a product,
    not a platform.** ClawEvolve (`apps/evolverun/`) runs diagnose → plan →
@@ -28,7 +28,7 @@ Three facts from the codebase frame the problem (evidence in
    `bot` principals by design, so "the bot improves itself" has no sanctioned
    surface today.
 
-Industry evidence (see [research.md §1](research.md#1-industry-survey)) adds
+Industry evidence (see [09-research.md §1](09-research.md#1-industry-survey)) adds
 three constraints that the design has to respect from day one:
 
 - Self-improvement without an **independent, held-out, platform-owned
@@ -68,11 +68,11 @@ The platform is built around three nested levels:
 3. **Recursive self-improvement** — the record of all improvement
    experiments (H) is used to improve the **mechanism itself**. A candidate
    M2 is **verified** to produce better verified improvements than M1 before
-   it takes over later rounds. See [recursion.md](recursion.md).
+   it takes over later rounds. See [04-recursion.md](04-recursion.md).
 
 Verification is the fixed point of all three levels: every change is
 verified, rejection is a normal outcome, and the verifier is never modified
-by any loop ([verification.md](verification.md)).
+by any loop ([03-verification.md](03-verification.md)).
 
 ### The level-2 loop
 
@@ -106,13 +106,13 @@ Owns Bot Genome revisions, named refs (`active`, `previous`, `canary`,
 `candidate/<run>/<n>`), patches, and content-addressed blobs. It is the
 **Manifest grown up**: a revision *compiles to* a pinned Manifest document
 plus a memory projection, and promotion applies that document through the
-existing apply pipeline. Full model in [genome.md](genome.md).
+existing apply pipeline. Full model in [02-genome.md](02-genome.md).
 
 Placement: **Backend** (`core/bot_genome/`), next to
 `core/bot_config_manifest/`, because Backend owns desired state and the
 Manifest already lives there. Blobs reuse the manifest content store (a
 content-addressed blob directory behind `ManifestContentService`, with
-provenance in `ac_manifest_content`); see [genome.md §7](genome.md#7-storage).
+provenance in `ac_manifest_content`); see [02-genome.md §7](02-genome.md#7-storage).
 
 ### C2 Experience Store
 
@@ -136,7 +136,7 @@ Ownership: AGENTS.md assigns chat history to engine-facing services. So the
 a versioned export contract (`session-export/v1` already exists in
 ClawEvolve and is the starting point), and C2 holds the normalized, indexed,
 retention-bounded copy used for evolution. Privacy/retention rules attach to
-C2 (see [governance.md §7](governance.md#7-data-handling)).
+C2 (see [08-governance.md §7](08-governance.md#7-data-handling)).
 
 ### C3 Strategy Registry
 
@@ -145,7 +145,7 @@ parameters and budgets) and **plugin implementations** (versioned, with
 declared capabilities, isolation tier, and conformance status). A run
 records the exact strategy version it used. Generalizes ClawEvolve's
 `official-stage-catalog.json` + `ce_stage_skill_implementations`. Details in
-[strategy-sdk.md](strategy-sdk.md).
+[05-strategy-sdk.md](05-strategy-sdk.md).
 
 ### C4 Run Orchestrator
 
@@ -180,12 +180,12 @@ ClawBench (`clawbench-base`) and ClawEvolve's plan stage become the default
 grader and SuiteBuilder implementations; the backend eval env
 (`eval_publish`) becomes the deployed-sandbox executor. The full protocol,
 the inventory of existing eval code, and its gaps are in
-[verification.md](verification.md).
+[03-verification.md](03-verification.md).
 
 ### C6 Gate & Promotion
 
 The only component that can move a bot's `active` ref. See
-[governance.md](governance.md). In short:
+[08-governance.md](08-governance.md). In short:
 
 1. **Platform floor** (not overridable by strategies): schema valid, locked
    genes untouched, no secrets, no permission escalation, no regression on
@@ -201,7 +201,7 @@ The only component that can move a bot's `active` ref. See
 
 Every improvement experiment (mechanism, parent, candidate, evidence,
 verdict, cost, later online outcome), including rejected ones — schema in
-[recursion.md §3](recursion.md#3-experiment-ledger-h). It is a read model over
+[04-recursion.md §3](04-recursion.md#3-experiment-ledger-h). It is a read model over
 C1 + C5: the genome tree for a bot, every candidate's
 scores per split, which strategy and model produced it, what evidence it was
 based on, and who approved it. Selectors query it (latest-best, Pareto front
@@ -217,7 +217,7 @@ Runs the same loop with a **mechanism** (strategy version) as the target and
 a mechanism patch, and the candidate mechanism is compared against the active
 one on held-out improvement problems before adoption (human-approved by
 default). Mechanisms are versioned in C3 with the same revision/ref model as
-genomes. See [recursion.md](recursion.md).
+genomes. See [04-recursion.md](04-recursion.md).
 
 ## 5. Ownership and module placement
 
@@ -306,7 +306,7 @@ schedule because the failure-rate signal crossed a threshold.
 | P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
 | P6 Open-ended | Automated meta-proposer (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
 
-Work items with dependencies: [work-items.md](work-items.md).
+Work items with dependencies: [10-work-items.md](10-work-items.md).
 
 ## 9. Bridge to weight training
 

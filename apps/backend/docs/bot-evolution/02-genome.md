@@ -1,6 +1,6 @@
 # Bot Genome — the form of an evolved bot
 
-> 中文版：[genome.zh-CN.md](genome.zh-CN.md)
+> 中文版：[02-genome.zh-CN.md](02-genome.zh-CN.md)
 
 > Status: DRAFT. Builds on the Bot Config Manifest
 > (`apps/backend/docs/bot-config-manifest/`). Proposed decision:
@@ -15,7 +15,7 @@ matrix and append-only apply reports. Reusing it means evolution gets
 delivery to every engine for free.
 
 But as the artifact of an evolving bot it is missing the things evolution
-needs (codebase evidence in [research.md §2.1](research.md#21-bot-config-manifest)):
+needs (codebase evidence in [09-research.md §2.1](09-research.md#21-bot-config-manifest)):
 
 | Gap in Manifest v1 | Why evolution needs it |
 | --- | --- |
@@ -195,7 +195,7 @@ Rules enforced by the platform when recording a candidate:
 - Ops on locked genes or pinned items are rejected.
 - A `file.edit` that changes more than a configurable fraction of a file
   (default 40%) is flagged `rewrite` and raises the risk tier.
-- Each op maps to a **risk tier** ([governance.md §3](governance.md#3-risk-tiers)).
+- Each op maps to a **risk tier** ([08-governance.md §3](08-governance.md#3-risk-tiers)).
 - Patch size, file count, and blob size limits mirror Manifest limits.
 
 Patches compose: a run with several accepted iterations can be squashed into

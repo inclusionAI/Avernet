@@ -1,9 +1,9 @@
 # Recursion — improving the improvement mechanism
 
-> 中文版：[recursion.zh-CN.md](recursion.zh-CN.md)
+> 中文版：[04-recursion.zh-CN.md](04-recursion.zh-CN.md)
 
 > Status: DRAFT. This is what makes the platform *recursive* self-improvement
-> rather than repeated single improvements. Read [verification.md](verification.md)
+> rather than repeated single improvements. Read [03-verification.md](03-verification.md)
 > first; recursion is only as trustworthy as its verifier.
 
 ## 1. Three levels
@@ -14,7 +14,7 @@ before it.
 | Level | Loop | What changes | Verified by | In this design |
 | --- | --- | --- | --- | --- |
 | **1. Agent** | task → bot S1 ⇄ environment → result | Nothing persistent; the bot finishes the current task | Task outcome | Phenotype; produces **Experience** |
-| **2. Single system improvement** | S1 + task feedback → mechanism **M1** proposes change → candidate S′ runs in environment → **verify & accept** → S2 | The **system** (bot genome). Later tasks use S2 | **Bot verification** (S′ vs S1) | Strategy runs over Bot Genome — [design.md](design.md) |
+| **2. Single system improvement** | S1 + task feedback → mechanism **M1** proposes change → candidate S′ runs in environment → **verify & accept** → S2 | The **system** (bot genome). Later tasks use S2 | **Bot verification** (S′ vs S1) | Strategy runs over Bot Genome — [01-design.md](01-design.md) |
 | **3. Recursive self-improvement** | experiment records **H** → improve M1 → **verify & adopt** M2 → M2 runs the following level-2 rounds | The **improvement mechanism** itself. M2 runs the next round | **Mechanism verification** (M2 vs M1) | This document |
 
 ![Level 3: improving the improvement mechanism](images/recursion.svg)
@@ -24,7 +24,7 @@ candidate is a normal, recorded outcome. That outcome is evidence for H.
 
 ## 2. What the "mechanism" is
 
-M is a **strategy version** ([strategy-sdk.md](strategy-sdk.md)) together with
+M is a **strategy version** ([05-strategy-sdk.md](05-strategy-sdk.md)) together with
 everything that determines its behaviour:
 
 | Mechanism component | Example in ClawEvolve today |
@@ -60,7 +60,7 @@ tenants follow or pin through their evolution policy.
 ## 3. Experiment Ledger (H)
 
 H is the **evidence base for level 3** and the selection pool for level 2.
-It extends the Archive (C7 in [design.md](design.md#c7-experiment-ledger-h-and-archive)) into
+It extends the Archive (C7 in [01-design.md](01-design.md#c7-experiment-ledger-h-and-archive)) into
 an explicit, queryable record of **improvement experiments**.
 
 An experiment is one level-2 attempt:
@@ -202,10 +202,10 @@ Rules:
 | Genome Registry (C1) | Generic over `target_kind`. Mechanisms are stored with the same revision / ref / patch machinery |
 | Strategy Registry (C3) | Strategy versions are mechanism revisions with lineage. Per-family refs; bot policy follows or pins a ref |
 | Archive (C7) | Becomes the **Experiment Ledger H** with the schema of §3 and derived mechanism metrics |
-| Evaluation (C5) | Adds **mechanism verification** on top of bot verification ([verification.md](verification.md)) |
+| Evaluation (C5) | Adds **mechanism verification** on top of bot verification ([03-verification.md](03-verification.md)) |
 | Gate (C6) | Separate gate profile for mechanism adoption (T3 default, comparison report required) |
 | Plugin kinds | Adds **MetaProposer** (a Proposer whose input is H and output a mechanism patch). The other kinds are reused |
-| Governance | Verifier boundary ([governance.md](governance.md#1-separation-of-powers)) |
+| Governance | Verifier boundary ([08-governance.md](08-governance.md#1-separation-of-powers)) |
 
 ## 8. Phasing
 
