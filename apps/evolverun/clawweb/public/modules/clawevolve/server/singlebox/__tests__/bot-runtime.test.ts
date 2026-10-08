@@ -35,14 +35,14 @@ afterEach(async () => {
 
 it("uses the in-tree skills root exported by the launcher when YAML omits skillsRoot", () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "ce-config-")));
-  const data = join(root, "scripts/.dependencies/data"); mkdirSync(data, { recursive: true });
+  const data = join(root, "singlebox/.dependencies/data"); mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "backend.db"), "");
   const skillsRoot = join(root, "public-skills"); mkdirSync(skillsRoot); createSkillEntries(skillsRoot);
   process.env.CLAWEVOLVE_SKILLS_ROOT = skillsRoot;
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({
     userId: "owner", model: "local/model",
-    backendDb: "scripts/.dependencies/data/backend.db", dataDirectory: "data",
+    backendDb: "singlebox/.dependencies/data/backend.db", dataDirectory: "data",
   }));
   const config = loadSingleboxConfig(configFile);
   expect(config.skillsRoot).toBe(realpathSync(skillsRoot));
@@ -64,14 +64,14 @@ it("uses an existing OpenClaw home without an Avernet Backend database", async (
 });
 it("loads service-only config and resolves owned Bots without a fixed binding, rejecting symlink escapes", async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "ce-resolver-")));
-  const data = join(root, "scripts/.dependencies/data"); mkdirSync(data, { recursive: true });
+  const data = join(root, "singlebox/.dependencies/data"); mkdirSync(data, { recursive: true });
   const raw = new Database(join(data, "backend.db")); db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE ac_bots(id INTEGER, bot_id TEXT, env TEXT, owner_id TEXT, entity_id TEXT, entity_type TEXT,
     active_engine TEXT, bot_type TEXT, is_delete INTEGER);
     INSERT INTO ac_bots VALUES(1,'bot','dev','owner','owner','staff','openclaw','personal',0)`);
   const configFile = join(root, "config.yaml");
   createSkillEntries(root);
-  writeFileSync(configFile, JSON.stringify({ userId: "owner", model: "local/model", backendDb: "scripts/.dependencies/data/backend.db", skillsRoot: ".", dataDirectory: "data" }));
+  writeFileSync(configFile, JSON.stringify({ userId: "owner", model: "local/model", backendDb: "singlebox/.dependencies/data/backend.db", skillsRoot: ".", dataDirectory: "data" }));
   const config = loadSingleboxConfig(configFile);
   expect(config).not.toHaveProperty("botId");
   const home = join(config.botsRoot, "staff_owner/bot/openclaw"); const workspace = join(home, "workspace");

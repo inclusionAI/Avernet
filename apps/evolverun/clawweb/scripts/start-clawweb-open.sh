@@ -6,7 +6,8 @@ avernet_root="$(cd "${workspace}/../../.." && pwd -P)"
 bot_source=""
 config=""
 openclaw_home="${HOME}/.openclaw"
-backend_db="${avernet_root}/scripts/.dependencies/data/backend.db"
+backend_db="${avernet_root}/singlebox/.dependencies/data/backend.db"
+backend_db_explicit=0
 data_directory=""
 user_id=""
 model=""
@@ -39,7 +40,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --bot-source) bot_source="${2:-}"; shift 2 ;;
     --openclaw-home) openclaw_home="${2:-}"; shift 2 ;;
-    --backend-db) backend_db="${2:-}"; shift 2 ;;
+    --backend-db) backend_db="${2:-}"; backend_db_explicit=1; shift 2 ;;
     --data-dir) data_directory="${2:-}"; shift 2 ;;
     --user-id) user_id="${2:-}"; shift 2 ;;
     --model) model="${2:-}"; shift 2 ;;
@@ -49,6 +50,11 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# Existing Singlebox installations may retain their database at the pre-move path.
+if [[ "$backend_db_explicit" -eq 0 && ! -f "$backend_db" && -f "${avernet_root}/scripts/.dependencies/data/backend.db" ]]; then
+  backend_db="${avernet_root}/scripts/.dependencies/data/backend.db"
+fi
 
 if [[ -n "$config" ]]; then
   [[ -z "$bot_source" ]] || { echo "--config cannot be combined with --bot-source" >&2; exit 2; }
