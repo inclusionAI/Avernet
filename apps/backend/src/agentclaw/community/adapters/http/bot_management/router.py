@@ -2346,6 +2346,18 @@ async def update_bot(
         resolved_owner_id = owner_id or operator_id
 
         # Get cookie for potential memoryos API call (when yuque_kb_repos changes)
+        # COSEC: generic legacy ext updates must not bypass the Owner-only policy.
+        if (
+            ext
+            and "editor_request_auto_approve" in ext
+            and operator_id != resolved_owner_id
+        ):
+            return ApiResponse(
+                success=False,
+                message="Only the Bot owner can change editor request policy",
+                error_code=403,
+                data=None,
+            )
         cookie = request.headers.get("cookie", "")
 
         # 兼容历史请求字段 name，统一走 bot_name 的校验和更新链路，避免旧客户端

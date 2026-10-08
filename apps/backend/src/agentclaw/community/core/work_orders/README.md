@@ -57,6 +57,40 @@ that transaction; a transport error, non-success HTTP response, malformed respon
 without an exact `success: true` aborts local processing and leaves the work order pending.
 Unregistered event types keep the existing local-only approval behavior.
 
+## Bot editor request auto-approval
+
+`GET/PATCH /openapi/v1/bots/{bot_id}/editor-request-policy` reads or replaces
+`{"auto_approve": true|false}`. Both operations require the authenticated Bot
+Owner and an available Team Space Bot. Address the owner with `entity_id`
+(`owner_id` remains a deprecated alias); omission selects the authenticated user.
+The PATCH body requires a strict boolean and rejects unknown fields. App-only
+callers without user delegation are refused.
+
+The policy is stored in `ac_bots.ext.editor_request_auto_approve`, defaults to
+false, and needs no database migration. Only the JSON boolean `true` enables
+auto-approval. Writes merge with existing ext fields under the Bot row lock.
+The legacy generic Bot update also prevents collaborators from setting this
+Owner-only field; unrelated legacy updates keep their current behavior.
+
+`POST /openapi/v1/bots/{bot_id}/editor-requests` retains its eligibility checks:
+the applicant must be an active member of the Team Space, must not be the
+Owner or an existing editor, and must have no pending request for this Bot.
+The policy is evaluated inside the creation transaction under the same Bot row
+lock. If enabled, creation atomically writes an APPROVED order, a MEMBER
+collaborator relation, and a result NOTICE to the applicant. It creates no
+pending approver or Owner approval notification. `biz_data.approval_mode="auto"`
+and the review remark identify a policy decision; `reviewer_user_id` is null,
+not a fabricated human approval. The collaborator operator is the authorizing
+Bot Owner. The existing collaboration-changed callback runs after commit.
+No edit lock is acquired, stolen, or released by this operation.
+
+The existing response shape is unchanged (`work_order_id`, `work_order_no`,
+`status`); clients must handle both PENDING and APPROVED. Existing pending
+orders remain pending when enabled, and disabling the policy does not revoke
+any granted access. Repeated applications continue to return the existing
+already-pending/already-editor errors. Manual review and other work-order
+business types are unchanged.
+
 ## Stable enum contract
 
 The following values are wire or persistence contracts. They must not be

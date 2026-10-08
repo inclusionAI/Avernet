@@ -121,6 +121,109 @@ def client(work_order_service, notification_service):
     return user_scoped_client(app, "owner-1")
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_editor_policy_get_and_patch(client, work_order_service, enabled):
+    work_order_service.get_bot_editor_request_policy.return_value = enabled
+    work_order_service.update_bot_editor_request_policy.return_value = enabled
+    path = "/openapi/v1/bots/bot-1/editor-request-policy?entity_id=target-owner"
+    assert client.get(path).json()["data"] == {"auto_approve": enabled}
+    work_order_service.get_bot_editor_request_policy.assert_called_once_with(
+        bot_id="bot-1",
+        owner_id="target-owner",
+        actor_id="owner-1",
+    )
+    response = client.patch(path, json={"auto_approve": enabled})
+    assert response.status_code == 200
+    assert response.json()["data"] == {"auto_approve": enabled}
+    work_order_service.update_bot_editor_request_policy.assert_called_once_with(
+        bot_id="bot-1",
+        owner_id="target-owner",
+        actor_id="owner-1",
+        auto_approve=enabled,
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"auto_approve": "true"},
+        {"auto_approve": 1},
+        {"auto_approve": None},
+        {"auto_approve": True, "role": "admin"},
+    ],
+)
+def test_editor_policy_strict_input(client, work_order_service, body):
+    response = client.patch("/openapi/v1/bots/bot-1/editor-request-policy", json=body)
+    assert response.status_code == 422
+    work_order_service.update_bot_editor_request_policy.assert_not_called()
+
+
+@pytest.mark.parametrize("method", ["get", "patch"])
+def test_editor_policy_refuses_app_without_delegation(
+    client, work_order_service, method
+):
+    from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+    from agentclaw.community.adapters.http.openapi_v1.principal import (
+        require_acting_caller,
+    )
+
+    client.app.dependency_overrides[require_acting_caller] = lambda: ActingCaller(
+        user_id="owner-1", app_id=123
+    )
+    kwargs = {"json": {"auto_approve": True}} if method == "patch" else {}
+    response = getattr(client, method)(
+        "/openapi/v1/bots/bot-1/editor-request-policy", **kwargs
+    )
+    assert response.status_code == 404
+    work_order_service.get_bot_editor_request_policy.assert_not_called()
+    work_order_service.update_bot_editor_request_policy.assert_not_called()
+
+
+def test_editor_policy_rejects_forged_actor_query(client, work_order_service):
+    work_order_service.update_bot_editor_request_policy.return_value = True
+    response = client.patch(
+        "/openapi/v1/bots/bot-1/editor-request-policy?user_id=forged&entity_id=target",
+        json={"auto_approve": True},
+    )
+    assert response.status_code == 403
+    work_order_service.update_bot_editor_request_policy.assert_not_called()
+
+
+def test_editor_policy_owner_denial_is_mapped(client, work_order_service):
+    from agentclaw.community.core.work_orders.errors import WorkOrderAccessDeniedError
+
+    work_order_service.update_bot_editor_request_policy.side_effect = (
+        WorkOrderAccessDeniedError("private")
+    )
+    response = client.patch(
+        "/openapi/v1/bots/bot-1/editor-request-policy", json={"auto_approve": True}
+    )
+    assert response.status_code == 403
+    assert "private" not in response.text
+
+
+def test_editor_policy_rejects_conflicting_owner_aliases(client, work_order_service):
+    response = client.patch(
+        "/openapi/v1/bots/bot-1/editor-request-policy?entity_id=a&owner_id=b",
+        json={"auto_approve": True},
+    )
+    assert response.status_code == 422
+    work_order_service.update_bot_editor_request_policy.assert_not_called()
+
+
+def test_editor_application_returns_auto_approved_status(client, work_order_service):
+    work_order_service.create_bot_editor_request.return_value = _work_order(
+        status=WorkOrderStatus.APPROVED
+    )
+    response = client.post(
+        "/openapi/v1/bots/bot-1/editor-requests?entity_id=other-owner",
+        json={"reason": "edit"},
+    )
+    assert response.status_code == 201
+    assert response.json()["data"]["status"] == "APPROVED"
+
+
 def test_process_approval_forwards_only_callback_identity_headers(
     client, work_order_service
 ):

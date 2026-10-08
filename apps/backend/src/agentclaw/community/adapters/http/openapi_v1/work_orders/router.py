@@ -33,6 +33,7 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderEventCreated,
     CreateBotEditorRequest,
     BotEditorRequestCreated,
+    BotEditorRequestPolicy,
     NotificationDetailResponse,
     NotificationReadResponse,
     NotificationsReadAllResponse,
@@ -214,6 +215,66 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         gmt_created=created,
         gmt_modified=modified,
     )
+
+
+def _editor_policy_identity(
+    caller: ActingCallerDep,
+    entity_id: Annotated[
+        str | None,
+        Query(
+            max_length=256,
+            description="Owner of the Bot. Defaults to the current user.",
+        ),
+    ] = None,
+    owner_id: Annotated[
+        str | None,
+        Query(max_length=256, deprecated=True, description=OWNER_ID_DESCRIPTION),
+    ] = None,
+) -> tuple[str, str]:
+    actor_id = _require_user_delegation(caller)
+    return actor_id, addressed_owner(entity_id or None, owner_id or None) or actor_id
+
+
+@router.get(
+    "/openapi/v1/bots/{bot_id}/editor-request-policy",
+    response_model=Envelope[BotEditorRequestPolicy],
+)
+@envelope_errors
+async def get_bot_editor_request_policy(
+    bot_id: BotIdPath,
+    request: Request,
+    identity: Annotated[tuple[str, str], Depends(_editor_policy_identity)],
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[BotEditorRequestPolicy]:
+    """Read the new-request approval policy as the Bot Owner."""
+    actor_id, owner_id = identity
+    enabled = service.get_bot_editor_request_policy(
+        bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+    )
+    return envelope(BotEditorRequestPolicy(auto_approve=enabled), request)
+
+
+@router.patch(
+    "/openapi/v1/bots/{bot_id}/editor-request-policy",
+    response_model=Envelope[BotEditorRequestPolicy],
+)
+@envelope_errors
+async def update_bot_editor_request_policy(
+    bot_id: BotIdPath,
+    body: BotEditorRequestPolicy,
+    request: Request,
+    identity: Annotated[tuple[str, str], Depends(_editor_policy_identity)],
+    service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
+) -> Envelope[BotEditorRequestPolicy]:
+    """Owner-only switch. Does not approve pending requests or revoke existing editors."""
+    actor_id, owner_id = identity
+    enabled = service.update_bot_editor_request_policy(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        actor_id=actor_id,
+        auto_approve=body.auto_approve,
+    )
+    return envelope(BotEditorRequestPolicy(auto_approve=enabled), request)
 
 
 @router.post(

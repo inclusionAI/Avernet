@@ -86,6 +86,31 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def get_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        env: str,
+    ) -> bool:
+        """Read the Team Space Bot policy; only the addressed Owner may read it."""
+        ...
+
+    @abstractmethod
+    def update_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        auto_approve: bool,
+        env: str,
+    ) -> bool:
+        """Owner-only atomic ext merge, serialized with new requests. No retroactive approvals."""
+        ...
+
+    @abstractmethod
     def create_bot_editor_request(
         self,
         *,

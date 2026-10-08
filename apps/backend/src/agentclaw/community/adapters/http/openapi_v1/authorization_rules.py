@@ -660,6 +660,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/editor-requests"): NoCheck(
         "Team Space membership and Bot eligibility, adjudicated by the work-order service"
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/editor-request-policy"): NoCheck(
+        "Bot Owner and Team Space eligibility, enforced by the work-order policy repository"
+    ),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/editor-request-policy"): NoCheck(
+        "Bot Owner and Team Space eligibility, enforced by the work-order policy repository"
+    ),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): NoCheck(
         "Space membership, adjudicated by the Space service"
     ),

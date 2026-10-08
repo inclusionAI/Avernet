@@ -74,6 +74,29 @@ class WorkOrderServiceProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def get_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+    ) -> bool:
+        """Read the auto-approval switch as the Bot Owner (default false)."""
+        ...
+
+    @abstractmethod
+    def update_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        auto_approve: bool,
+    ) -> bool:
+        """Owner-only policy change applying to new requests, not pending orders."""
+        ...
+
+    @abstractmethod
     def create_bot_editor_request(
         self,
         *,

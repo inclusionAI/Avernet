@@ -425,6 +425,38 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             env=env,
         )
 
+    def get_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        env: str,
+    ) -> bool:
+        return self._bot_editor.get_bot_editor_request_policy(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            env=env,
+        )
+
+    def update_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        auto_approve: bool,
+        env: str,
+    ) -> bool:
+        return self._bot_editor.update_bot_editor_request_policy(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            auto_approve=auto_approve,
+            env=env,
+        )
+
     def create_bot_editor_request(
         self,
         *,
