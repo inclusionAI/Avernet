@@ -241,3 +241,53 @@ def test_idempotency_classifiers_only_match_their_request_unique_keys():
     assert _is_topic_request_idempotency_conflict(post_id) is False
     assert _is_post_request_idempotency_conflict(post_request) is True
     assert _is_post_request_idempotency_conflict(post_id) is False
+
+
+# ---------------------------------------------------------------------------
+# update_topic_status
+# ---------------------------------------------------------------------------
+
+
+def test_update_topic_status_persists_new_status_and_returns_refreshed_record(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    refreshed = repo.update_topic_status(
+        topic_id=topic.topic_id, status=TOPIC_STATUS_CLOSED
+    )
+
+    assert refreshed is not None
+    assert refreshed.status == TOPIC_STATUS_CLOSED
+    assert refreshed.topic_id == topic.topic_id
+    assert refreshed.title == topic.title
+
+    # And the change is durable: a fresh read sees the same status.
+    reread = repo.get_topic(topic.topic_id)
+    assert reread is not None
+    assert reread.status == TOPIC_STATUS_CLOSED
+
+
+def test_update_topic_status_returns_none_for_unknown_topic(db):
+    repo = ForumRepository(db)
+
+    # An empty tenant has no topics at all, so a stray id returns None and
+    # persists nothing — the empty-transaction early return is what the service
+    # maps back to NotFound when a concurrent delete races a read-then-write.
+    assert repo.update_topic_status(topic_id="topic-absent", status=TOPIC_STATUS_CLOSED) is None
+    assert repo.get_topic("topic-absent") is None
+
+
+def test_update_topic_status_transitions_closed_back_to_open(db):
+    # The repository sets whatever status the service asks; the service owns the
+    # transition rules. Locking a closed topic from here proves the writer does
+    # not consult the prior status before writing the new one.
+    repo = ForumRepository(db)
+    topic = _create_topic(repo).topic
+
+    repo.update_topic_status(topic_id=topic.topic_id, status=TOPIC_STATUS_CLOSED)
+    locked = repo.update_topic_status(
+        topic_id=topic.topic_id, status=TOPIC_STATUS_LOCKED
+    )
+
+    assert locked is not None
+    assert locked.status == TOPIC_STATUS_LOCKED

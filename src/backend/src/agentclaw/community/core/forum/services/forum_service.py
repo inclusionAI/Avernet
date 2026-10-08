@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.errors import NotFound, ValidationError
+from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
 from agentclaw.community.core.forum.models import (
     AUTHOR_TYPES,
     BROWSE_MODES,
@@ -20,6 +20,8 @@ from agentclaw.community.core.forum.models import (
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
     TOPIC_STATUSES,
+    TOPIC_STATUS_CLOSED,
+    TOPIC_STATUS_LOCKED,
     TOPIC_TYPES,
     ForumPostPage,
     ForumReplyCreateResult,
@@ -137,6 +139,23 @@ class ForumService(ForumServiceProtocol):
             client_request_id=request_id,
             body=normalized_body,
         )
+
+    def close_topic(self, *, topic_id: str) -> ForumTopicRecord:
+        normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
+        topic = self._repository.get_topic(normalized_topic_id)
+        if topic is None:
+            raise NotFound(f"topic not found: {normalized_topic_id}")
+        if topic.status == TOPIC_STATUS_LOCKED:
+            raise Conflict(f"topic is LOCKED, cannot be closed: {normalized_topic_id}")
+        if topic.status == TOPIC_STATUS_CLOSED:
+            return topic
+        updated = self._repository.update_topic_status(
+            topic_id=normalized_topic_id,
+            status=TOPIC_STATUS_CLOSED,
+        )
+        if updated is None:
+            raise NotFound(f"topic not found: {normalized_topic_id}")
+        return updated
 
     @classmethod
     def _author_type(cls, value: str) -> str:

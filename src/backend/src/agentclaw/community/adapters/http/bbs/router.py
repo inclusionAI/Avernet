@@ -20,10 +20,14 @@ from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
     ReplyCreated,
     SubscriptionDeleted,
     SubscriptionItem,
+    TopicClosed,
     TopicCreated,
     TopicDetail,
     TopicListItem,
     UpsertSubscriptionRequest,
+    CloseTopicRequestInternal,
+    CreateHumanTopicRequestInternal,
+    CreateReplyRequestInternal,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
@@ -38,8 +42,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.core.forum.models import (
     AUTHOR_TYPE_BOT,
+    AUTHOR_TYPE_HUMAN,
     MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
+    TOPIC_TYPE_DISCUSSION,
 )
 from agentclaw.community.core.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.core.forum.browsing import BbsBrowseLoopScheduler
@@ -48,7 +54,7 @@ from agentclaw.community.core.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
 )
-from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.errors import Forbidden, NotFound
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -192,6 +198,33 @@ async def create_reply_internal(
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@router.post(
+    "/topics/{topic_id}/close",
+    response_model=Envelope[TopicClosed],
+)
+@envelope_errors
+async def close_topic_as_bot_internal(
+    bot_id: BotIdPath,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicClosed]:
+    """Close an open Topic authored by the addressed Bot.
+
+    Internal mirror of ``POST /openapi/v1/bots/{bot_id}/bbs/topics/{id}/close``.
+    The trusted caller addresses the Bot in the path; the engine still verifies
+    the topic was authored by that Bot (403 otherwise) and surfaces ``409``
+    (Conflict) when the topic is ``LOCKED``.
+    """
+    topic = service.get_topic(topic_id=topic_id)
+    if topic.author_type != AUTHOR_TYPE_BOT or topic.author_id != bot_id:
+        raise Forbidden("only the bot author may close the topic")
+    closed = service.close_topic(topic_id=topic_id)
+    return envelope(
+        TopicClosed(topic_id=closed.topic_id, status=closed.status), request
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +468,91 @@ async def trigger_cron_remove_internal(
     """通知 openclaw 订阅的 Bot 移除其本地 bbs-browse cron(退出/降级)。"""
     result = await runner.push_cron_event(bot_id=bot_id, action="remove")
     return envelope(dict(result), request)
+
+
+# ---------------------------------------------------------------------------
+# BBS Human-Write — 公开面镜像 (POST /api/v1/bbs/topics, /topics/{id}/posts, /topics/{id}/close)
+# ---------------------------------------------------------------------------
+# 与 ``adapters/http/openapi_v1/bbs/router.py`` 的三个 Human 写路由委托同一
+# ``ForumServiceProtocol`` 实现,语义一致 —— 内部调用方走此副本免 gateway spanner。
+# 公开面用 ``ActingCallerDep`` 取 author_id,内部面没有 caller dep,author_id 由可
+# 信调用方在 body 里显式声明。改其一须同步。
+
+
+@read_router.post("/topics", response_model=Envelope[TopicCreated])
+@envelope_errors
+async def create_human_topic_internal(
+    body: CreateHumanTopicRequestInternal,
+    request: Request,
+    response: Response,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicCreated]:
+    """Create a Human-authored Topic (internal mirror of POST /openapi/v1/bbs/topics).
+
+    The trusted caller declares the author via ``body.author_id``; the engine
+    does not re-verify because /api/v1 callers are gateway-signed.
+    """
+    result = service.create_topic(
+        author_type=AUTHOR_TYPE_HUMAN,
+        author_id=body.author_id,
+        client_request_id=body.client_request_id,
+        title=body.title,
+        body=body.body,
+        topic_type=TOPIC_TYPE_DISCUSSION,
+    )
+    payload = TopicCreated(
+        topic_id=result.topic.topic_id, topic_type=result.topic.topic_type
+    )
+    response.status_code = 201 if result.created else 200
+    return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.post(
+    "/topics/{topic_id}/posts",
+    response_model=Envelope[ReplyCreated],
+)
+@envelope_errors
+async def create_human_reply_internal(
+    body: CreateReplyRequestInternal,
+    topic_id: TopicIdPath,
+    request: Request,
+    response: Response,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[ReplyCreated]:
+    """Append a Human-authored reply (internal mirror of POST /openapi/v1/bbs/topics/{id}/posts)."""
+    result = service.create_reply(
+        topic_id=topic_id,
+        author_type=AUTHOR_TYPE_HUMAN,
+        author_id=body.author_id,
+        client_request_id=body.client_request_id,
+        body=body.body,
+    )
+    payload = ReplyCreated(post_id=result.post.post_id)
+    response.status_code = 201 if result.created else 200
+    return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.post(
+    "/topics/{topic_id}/close",
+    response_model=Envelope[TopicClosed],
+)
+@envelope_errors
+async def close_topic_internal(
+    topic_id: TopicIdPath,
+    body: CloseTopicRequestInternal,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicClosed]:
+    """Close an open Topic authored by a human (internal mirror of POST /openapi/v1/bbs/topics/{id}/close).
+
+    The trusted caller declares the owner via ``body.author_id``; the engine
+    still verifies it matches the topic's stored human author (403 otherwise)
+    and surfaces ``409`` (Conflict) when the topic is ``LOCKED``.
+    """
+    topic = service.get_topic(topic_id=topic_id)
+    if topic.author_type != AUTHOR_TYPE_HUMAN or topic.author_id != body.author_id:
+        raise Forbidden("only the human author may close the topic")
+    closed = service.close_topic(topic_id=topic_id)
+    return envelope(
+        TopicClosed(topic_id=closed.topic_id, status=closed.status), request
+    )

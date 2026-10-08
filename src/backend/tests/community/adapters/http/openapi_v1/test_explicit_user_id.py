@@ -287,6 +287,17 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics"),
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
+    # BBS unified writes name the author in the request body (author_type +
+    # author_id); they are backend-API writes reachable by humans, Bots and
+    # app-to-app callers, so there is no user_id axis on the wire.
+    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics"),
+    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
+    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/close"),
+    # General feedback is tenant-wide; the reporter is declared in the body
+    # (POST) or used as an optional caller-selected filter (GET), so there is
+    # no user_id axis on the wire.
+    ("get", f"{PUBLIC_API_PREFIX}/feedback"),
+    ("post", f"{PUBLIC_API_PREFIX}/feedback"),
     # The department directory is a tenant-wide catalogue — not the caller's.
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
@@ -478,7 +489,20 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: Task trajectory (GET /collaboration/tasks/trajectory) is a task_id-keyed read
 #: with no bot_id dimension — adds one to ``none`` (104→105).
-_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 108}
+# Addressed-Bot BBS Topic close carries ``bot_id`` in the path like the bot
+#: write routes beside it: ``path`` 162 → 163.
+# BBS unify (this commit): three addressed-Bot writes deprecated (path -3),
+# three Human writes folded into unified routes whose bot_id is a *query*
+# parameter (query +3); the prev刀's three account-level Human writes that
+# showed up in ``none`` left with them (none 113 -> 110).
+# BBS explicit-author (this edit): the three unified writes no longer take
+# ``bot_id`` as a query parameter -- the author is declared in the request
+# body -- so they drop from ``query`` and land in ``none`` (query 4 -> 1,
+# none 110 -> 113).
+# BBS browse-subscription addressed-bot toggle (this edit): the two writes
+# under /openapi/v1/bots/{bot_id}/bbs/browse-subscription name the bot in the
+# path, so ``path`` grows 160 -> 162; ``query`` and ``none`` are unchanged.
+_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 115}
 
 
 def _schema() -> dict:
@@ -633,6 +657,35 @@ def test_the_pinned_number_of_operations_take_it():
     # one more user-scoped operation: 233 → 234. The two addressed-Bot BBS
     # write routes add two more user-scoped operations; the three tenant-wide
     # BBS reads deliberately have no user dimension: 234 → 236.
+    # The three public Human BBS write routes (Topic create, reply, close) also
+    # name an end user — the principal seam (``ActingCallerDep`` → ``UserIdDep``)
+    # exposes ``user_id`` as a query param, and the handler authors Topic and
+    # reply through that caller — bringing the count to 239. The addressed-Bot
+    # BBS Topic close route shares the same owner→user_id seam (``OwnerIdDep``
+    # depends on ``ActingCallerDep``), so it also names the operating user:
+    # 239 → 240.
+    # The BBS unify (this commit) deprecated the three addressed-Bot BBS writes
+    # beneath /bots/{bot_id}/bbs and folded the three Human writes into three
+    # unified routes under /openapi/v1/bbs that all declare caller + optional
+    # bot_id; the user_id seam still names an end user, so the three unified
+    # writes stay counted, but the three deprecated routes drop out of
+    # _current_operations: 240 -> 237.
+    # BBS explicit-author (this edit): the three unified writes now declare
+    # the author in the body instead of carrying ``ActingCallerDep``, so
+    # they no longer expose ``user_id`` as a query parameter and drop out
+    # of ``taking`` (237 -> 234); they moved to ``_NO_USER_DIMENSION``.
+    # BBS legacy removal: the three deprecated /bots/{bot_id}/bbs writes
+    # were later deleted entirely from the openapi surface -- every write
+    # now goes through /openapi/v1/bbs/* with the author in the body.
+    # Counts are unchanged here: _current_operations already excluded
+    # those routes via ``deprecated=True`` before deletion.
+    # General feedback adds two tenant-wide operations (GET/POST /feedback)
+    # with no bot_id; they sit in _NO_USER_DIMENSION (no user_id axis), so
+    # ``taking`` is unchanged while ``none`` grows 113 -> 115.
+    # BBS browse-subscription toggle (this edit): the two addressed-Bot writes
+    # /openapi/v1/bots/{bot_id}/bbs/browse-subscription take user_id (UserIdDep)
+    # like the rest of the user-scoped addressed surface, so ``taking`` grows
+    # 234 -> 236.
     assert len(taking) == 236
 
 

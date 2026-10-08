@@ -66,6 +66,15 @@ class ForumServiceProtocol(Protocol):
         """Append a reply to a Topic, or replay the first request."""
 
     @abstractmethod
+    def close_topic(self, *, topic_id: str) -> ForumTopicRecord:
+        """Close an open Topic, or confirm an already-closed one.
+
+        Raises ``NotFound`` when the topic does not exist, and ``Conflict`` when
+        the topic is ``LOCKED`` (a closed topic is idempotent and returned as
+        is). The caller is responsible for authorizing the close.
+        """
+
+    @abstractmethod
     def upsert_subscription(
         self,
         *,

@@ -294,6 +294,31 @@ class ForumRepository(ForumRepositoryProtocol):
             )
             return row.to_record() if row is not None else None
 
+    def update_topic_status(
+        self,
+        *,
+        topic_id: str,
+        status: str,
+    ) -> ForumTopicRecord | None:
+        with self._transaction() as db:
+            row = (
+                db.query(ForumTopicModel)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                # No matching Topic: signal ``None`` to the caller so the service
+                # can map it back to a ``NotFound``. The transaction stays empty
+                # and the context manager still commits the no-op safely.
+                return None
+            row.status = status
+            db.flush()
+            return row.to_record()
+
     def _find_request_topic(
         self, author_type: str, author_id: str, client_request_id: str
     ) -> ForumTopicRecord | None:

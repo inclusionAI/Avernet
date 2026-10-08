@@ -271,10 +271,22 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-wide BBS Topic read; no addressed bot"),
     ("GET", "/openapi/v1/bbs/topics/{topic_id}/posts"):
         NoCheck("tenant-wide BBS reply read; no addressed bot"),
-    ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics"):
-        Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies"):
-        Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bbs/topics"):
+        NoCheck("public BBS write; author declared in the body, no addressed bot"),
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/posts"):
+        NoCheck("public BBS reply write; author declared in the body, no addressed bot"),
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/close"):
+        NoCheck("public BBS Topic close; author declared in the body, handler verifies the stored author"),
+    # BBS Browse-Loop toggle: addressed-Bot writes. The bot is named in the
+    # path, so the gate adjudicates the addressed owner (OwnerIdDep) and a
+    # MEMBER-level Check admits any collaborator managing the bot -- the bar
+    # the deleted /bots/{bot_id}/bbs/topics write carried before unification.
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/feedback"):
+        NoCheck("tenant-wide feedback read; no addressed bot"),
+    ("POST", "/openapi/v1/feedback"):
+        NoCheck("public feedback write; reporter declared in the body, no addressed bot"),
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),

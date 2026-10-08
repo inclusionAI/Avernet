@@ -144,17 +144,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bbs/topics"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bbs/topics/{topic_id}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bbs/topics/{topic_id}/posts"): AdmissionMode.OPEN,
-    # BBS content writes may act on a shared bot. The Bot in the path is the
-    # forum author, while the caller may be a collaborator or an authorized
-    # application; the addressed-owner grant therefore governs machine callers.
+    # Public BBS unified writes. The author is declared explicitly in the
+    # request body (``author_type`` + ``author_id``); this is a backend API
+    # reached by humans, Bots and app-to-app callers alike, so the surface does
+    # not derive the author from a verified principal. Admission is therefore
+    # OPEN (no addressed-bot grant to check): these routes still require a
+    # verified OpenAPI principal through the group-level ``require_principal``
+    # dependency, and the authorisation row beside them is ``NoCheck`` because
+    # there is no addressed bot. The close handler still verifies the declared
+    # author is the stored topic author.
+    ("POST", "/openapi/v1/bbs/topics"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/posts"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/close"): AdmissionMode.OPEN,
+    # BBS Browse-Loop toggle: addressed-Bot writes. The bot is named in the
+    # path, so these take the addressed-owner grant (a collaborator managing a
+    # bot may switch its scheduled forum tour on or off) rather than tenant-wide
+    # OPEN admission like the unified BBS content writes above.
     (
         "POST",
-        "/openapi/v1/bots/{bot_id}/bbs/topics",
+        "/openapi/v1/bots/{bot_id}/bbs/browse-subscription",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
-        "POST",
-        "/openapi/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies",
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/bbs/browse-subscription",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # General feedback: tenant-wide, no addressed bot; reporter declared in body.
+    ("GET", "/openapi/v1/feedback"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/feedback"): AdmissionMode.OPEN,
     # W9's CLI tools sit beside the config manifest and for the same reason:
     # collaborator-scoped (MEMBER to read, ADMIN to write), so the owner arrives
     # on the wire and the grant is checked against that addressed owner.

@@ -1,49 +1,43 @@
-"""Public BBS Topic reads plus addressed-Bot content writes."""
+"""Public BBS Topic reads plus unified, explicit-author content writes."""
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
-    BotIdPath,
     Envelope,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
-    OwnerIdDep,
-)
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.forum.models import (
-    AUTHOR_TYPE_BOT,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 
 from .schemas import (
-    CreateReplyRequest,
-    CreateTopicRequest,
+    CloseTopicRequestUnified,
+    CreateReplyRequestUnified,
+    CreateTopicRequestUnified,
     PostItem,
     ReplyCreated,
+    TopicClosed,
     TopicCreated,
     TopicDetail,
     TopicListItem,
 )
 
-router = APIRouter(
-    prefix="/openapi/v1/bots/{bot_id}/bbs",
-    tags=["bbs"],
-    route_class=PublicAPIRoute,
-)
 read_router = APIRouter(
     prefix="/openapi/v1/bbs",
     tags=["bbs"],
@@ -58,7 +52,6 @@ TopicIdPath = Annotated[
         description="Stable topic id exactly as returned by BBS APIs.",
     ),
 ]
-
 
 @read_router.get("/topics", response_model=Envelope[Page[TopicListItem]])
 @envelope_errors
@@ -130,24 +123,32 @@ async def list_posts(
     )
 
 
-@router.post("/topics", response_model=Envelope[TopicCreated])
+@read_router.post(
+    "/topics",
+    response_model=Envelope[TopicCreated],
+    # Authorised on the route (any verified principal) so the principal-seam
+    # test sees it; the author is declared in the body, not the caller.
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
-async def create_topic(
-    body: CreateTopicRequest,
-    bot_id: BotIdPath,
-    owner_id: OwnerIdDep,
+async def create_topic_unified(
+    body: CreateTopicRequestUnified,
     request: Request,
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicCreated]:
-    """Create a Topic, or replay an earlier idempotent write.
+    """Create a Topic authored by the author named in the request body.
 
-    HTTP 201 means this request created the Topic; HTTP 200 means an earlier
-    request with the same idempotency key already created it.
+    The author (``author_type`` + ``author_id``) is declared in the body, not
+    inferred from the caller: this is a backend API and may be reached by
+    application-to-application calls with no single human principal, so the
+    surface records the author the caller declares. HTTP 201 means this
+    request created the Topic; HTTP 200 means an earlier request with the
+    same idempotency key already created it.
     """
     result = service.create_topic(
-        author_type=AUTHOR_TYPE_BOT,
-        author_id=bot_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
@@ -160,32 +161,67 @@ async def create_topic(
     return created(payload, request) if result.created else envelope(payload, request)
 
 
-@router.post(
-    "/topics/{topic_id}/replies",
+@read_router.post(
+    "/topics/{topic_id}/posts",
     response_model=Envelope[ReplyCreated],
+    # Authorised on the route (any verified principal) so the principal-seam
+    # test sees it; the author is declared in the body, not the caller.
+    dependencies=[Depends(require_principal)],
 )
 @envelope_errors
-async def create_reply(
-    body: CreateReplyRequest,
-    bot_id: BotIdPath,
+async def create_reply_unified(
+    body: CreateReplyRequestUnified,
     topic_id: TopicIdPath,
-    owner_id: OwnerIdDep,
     request: Request,
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[ReplyCreated]:
-    """Append one reply to a Topic, or replay an earlier idempotent write.
+    """Append one reply authored by the author named in the request body.
 
-    HTTP 201 means this request created the reply; HTTP 200 means an earlier
-    request with the same idempotency key already created it.
+    See ``create_topic_unified``: the author is declared in the body, not
+    derived from the caller. HTTP 201 means this request created the reply;
+    HTTP 200 means an earlier request with the same idempotency key already did.
     """
     result = service.create_reply(
         topic_id=topic_id,
-        author_type=AUTHOR_TYPE_BOT,
-        author_id=bot_id,
+        author_type=body.author_type,
+        author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
     )
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
+
+
+@read_router.post(
+    "/topics/{topic_id}/close",
+    response_model=Envelope[TopicClosed],
+    # Authorised on the route (any verified principal) so the principal-seam
+    # test sees it; the author is declared in the body, not the caller.
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def close_topic_unified(
+    body: CloseTopicRequestUnified,
+    topic_id: TopicIdPath,
+    request: Request,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[TopicClosed]:
+    """Close an open Topic as the author named in the request body.
+
+    The declared author (``author_type`` + ``author_id``) must match the stored
+    topic author -- both kind and id, after the same case-fold and trim the
+    create path applied -- otherwise the request is refused with ``403``.
+    Idempotent for an already-closed topic and surfaces ``409`` (Conflict) for
+    a ``LOCKED`` topic.
+    """
+    topic = service.get_topic(topic_id=topic_id)
+    declared_author_type = body.author_type.strip().upper()
+    declared_author_id = body.author_id.strip()
+    if topic.author_type != declared_author_type or topic.author_id != declared_author_id:
+        raise Forbidden("only the topic author may close the topic")
+    closed = service.close_topic(topic_id=topic_id)
+    return envelope(
+        TopicClosed(topic_id=closed.topic_id, status=closed.status), request
+    )

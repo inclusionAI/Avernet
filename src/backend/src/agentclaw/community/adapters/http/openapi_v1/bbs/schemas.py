@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from agentclaw.community.core.forum.models import (
     BROWSE_MODE_FRAMEWORK,
+    MAX_AUTHOR_ID_LENGTH,
+    MAX_AUTHOR_TYPE_LENGTH,
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_ID_LENGTH,
@@ -44,6 +46,32 @@ class CreateTopicRequest(BaseModel):
     )
 
 
+class CreateHumanTopicRequest(BaseModel):
+    """Create a Topic as the calling human user.
+
+    The public human contract does not expose ``topic_type``: the product
+    surface does not distinguish topic kinds, so the published topic always
+    reads as the default ``DISCUSSION``. The author is the calling principal —
+    never accepted from the body — so the route carries no author field.
+    """
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Write idempotency key scoped to this author and action target.",
+    )
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Topic title. Leading and trailing whitespace is removed.",
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=MAX_BODY_LENGTH,
+        description="Topic description. Leading and trailing whitespace is removed.",
+    )
+
+
 class CreateReplyRequest(BaseModel):
     """Append one reply to a Topic under the addressed Bot."""
 
@@ -57,6 +85,96 @@ class CreateReplyRequest(BaseModel):
         max_length=MAX_BODY_LENGTH,
         description="Reply body. Leading and trailing whitespace is removed.",
     )
+
+
+class AuthorRefRequest(BaseModel):
+    """Explicit author reference carried in the body of a public BBS write.
+
+    The ``/openapi/v1/bbs/*`` unified write routes declare the author of the
+    content in the request body rather than inferring it from a verified caller:
+    this surface is a backend API and may be reached by application-to-
+    application calls with no single human principal. The engine records the
+    declared author verbatim; the close route additionally compares it to the
+    stored topic author.
+
+    ``author_type`` is a free string here so the case-insensitive normalisation
+    in ``ForumService._author_type`` (``.upper()`` then membership in
+    ``AUTHOR_TYPES``) still applies: sending ``human`` is as valid as ``HUMAN``.
+    """
+
+    author_type: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description="Author kind to attribute the write to: HUMAN or BOT.",
+    )
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_ID_LENGTH,
+        description=(
+            "Stable identifier of the human work-no or Bot that authors the "
+            "write. The engine records it as declared; it is not re-verified "
+            "against a principal on this surface."
+        ),
+    )
+
+
+class CreateTopicRequestUnified(AuthorRefRequest):
+    """Body for ``POST /openapi/v1/bbs/topics``: create a Topic as a declared author.
+
+    The author is named explicitly (``author_type`` + ``author_id``); the
+    declared author may be a human or a Bot. The product surface does not
+    distinguish topic kinds, so ``topic_type`` defaults to ``DISCUSSION``.
+    """
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Write idempotency key scoped to this author and action target.",
+    )
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Topic title. Leading and trailing whitespace is removed.",
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=MAX_BODY_LENGTH,
+        description="Topic description. Leading and trailing whitespace is removed.",
+    )
+    topic_type: str = Field(
+        default=TOPIC_TYPE_DISCUSSION,
+        description="Topic type: DISCUSSION, POLL, or NOTICE.",
+    )
+
+
+class CreateReplyRequestUnified(AuthorRefRequest):
+    """Body for ``POST /openapi/v1/bbs/topics/{topic_id}/posts``: reply as a
+    declared author.
+
+    See ``CreateTopicRequestUnified``: the author is named in the body, not
+    derived from the caller.
+    """
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Write idempotency key scoped to this author and action target.",
+    )
+    body: str = Field(
+        min_length=1,
+        max_length=MAX_BODY_LENGTH,
+        description="Reply body. Leading and trailing whitespace is removed.",
+    )
+
+
+class CloseTopicRequestUnified(AuthorRefRequest):
+    """Body for ``POST /openapi/v1/bbs/topics/{topic_id}/close``: close a
+    Topic as a declared author.
+
+    The engine verifies the declared author matches the stored topic author
+    (after the same case-fold and trim the create path applied) before
+    closing, so a mismatch surfaces as ``403``.
+    """
 
 
 class TopicCreated(BaseModel):
@@ -74,6 +192,64 @@ class ReplyCreated(BaseModel):
     post_id: str = Field(
         description="Stable reply post id, returned unchanged on an idempotent replay."
     )
+
+
+class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
+    """Internal-surface body for human Topic creation.
+
+    Mirrors ``POST /openapi/v1/bbs/topics`` for trusted backend/agent callers that
+    bypass the gateway Spanner admission. The trusted caller declares which
+    human it is acting as via ``author_id``: the engine does NOT re-verify the
+    principal here because the ``/api/v1/*`` surface is gateway-signed. See
+    ``adapters/http/openapi_v1/task/router.py`` for the same pattern where
+    ``TaskInfoRequestDTO.owner_user_id`` rides in the body on both surfaces.
+    """
+
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Trusted-declared human work-no this Topic is authored as. The "
+            "internal /api/v1 surface does not invoke ActingCallerDep; the "
+            "engine trusts the upstream caller for the identity."
+        ),
+    )
+
+
+class CreateReplyRequestInternal(CreateReplyRequest):
+    """Internal-surface body for human reply creation.
+
+    See ``CreateHumanTopicRequestInternal`` for the auth model: ``author_id``
+    comes from the body, not a verified caller principal.
+    """
+
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Trusted-declared human work-no this reply is authored as.",
+    )
+
+
+class CloseTopicRequestInternal(BaseModel):
+    """Internal-surface body for closing a Human-authored Topic.
+
+    ``author_id`` names the human who owns the topic; the engine still verifies
+    it matches the topic's stored author before closing (mirroring the public
+    close contract), so mismatches surface as ``403``.
+    """
+
+    author_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Trusted-declared human owner work-no of the topic to close.",
+    )
+
+
+class TopicClosed(BaseModel):
+    """Outcome of closing a Topic — idempotent for an already-closed topic."""
+
+    topic_id: str = Field(description="Stable topic id that was closed.")
+    status: str = Field(description="Resulting topic state: CLOSED.")
 
 
 TOPIC_BODY_PREVIEW_LENGTH = 500
@@ -198,6 +374,23 @@ class SubscriptionDeleted(BaseModel):
     """Outcome of DELETE subscription."""
 
     deleted: bool = Field(description="本次实际删除与否；false=此前不存在。")
+
+
+class BrowsSubscriptionJoinRequest(BaseModel):
+    """Body for joining or refreshing a Bot BBS Browse-Loop subscription (openapi).
+
+    Openapi is B-scheme only: the periodic forum tour is always driven by the
+    OpenClaw cron, so this body carries no trigger-mode selector. The addressed
+    owner arrives from the gate (OwnerIdDep) rather than the request body, so
+    the only product-supplied field is an optional remark; a request with no
+    body is a plain join with no remark.
+    """
+
+    note: str | None = Field(
+        default=None,
+        max_length=MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
+        description="订阅备注，可省略；省略或空体表示无备注。",
+    )
 
 
 class BrowseFeedTopicItem(BaseModel):

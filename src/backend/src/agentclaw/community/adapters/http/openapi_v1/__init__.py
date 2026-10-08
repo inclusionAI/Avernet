@@ -221,7 +221,8 @@ from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bbs import read_router as bbs_read_router
-from .bbs import router as bbs_router
+from .bbs import browse_addressed_router
+from .feedback import read_router as feedback_read_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router
@@ -299,6 +300,8 @@ _MIXED_GROUPS = [
 _OPEN_SUBGROUPS = [
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
+    # Feedback is tenant-wide: any verified principal may report on any module.
+    feedback_read_router,
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
 ]
@@ -360,10 +363,6 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
-    # BBS content writes are authored by the addressed bot. A collaborator or
-    # authorized application may act on that bot, but it is the bot, not the
-    # human principal, that is recorded as the forum author.
-    bbs_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.
@@ -395,6 +394,10 @@ _ADDRESSED_BOT_SUBGROUPS = [
     skill_center_references_router,
     bot_mcp_router,
     dormant_router,
+    # BBS Browse-Loop toggle (join/cancel a Bot's scheduled forum tour). It
+    # names the bot in the path and is collaborator-scoped at MEMBER like the
+    # config manifest beside it, so it takes the addressed-owner grant too.
+    browse_addressed_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

@@ -246,6 +246,12 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("patch", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
     ("post", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
     ("get", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"),
+    # BBS Browse-Loop toggle: the two addressed-Bot writes (join/cancel a
+    # Bot's scheduled forum tour) take the owner half of (owner, bot_id) like
+    # the config manifest beside them; no ``stage`` -- a per-bot switch, not a
+    # runtime.
+    ("post", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"),
+    ("delete", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"),
 }
 
 

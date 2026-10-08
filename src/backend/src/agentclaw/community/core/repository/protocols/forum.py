@@ -67,6 +67,20 @@ class ForumRepositoryProtocol(Protocol):
         """Return one Topic in the current tenant/environment, or ``None``."""
 
     @abstractmethod
+    def update_topic_status(
+        self,
+        *,
+        topic_id: str,
+        status: str,
+    ) -> Optional[ForumTopicRecord]:
+        """Set one Topic's status in the current tenant and environment.
+
+        Returns the refreshed record, or ``None`` when no Topic matches. The
+        caller (the service layer) decides which transitions are legal and maps
+        the ``None`` result back to a domain ``NotFound``.
+        """
+
+    @abstractmethod
     def upsert_subscription(
         self,
         *,
