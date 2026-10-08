@@ -112,24 +112,12 @@ POST /groupcontext/update
 
 行为：
 1. 根据 `scope_level` 计算出 `scope`
-2. 查 `(name, scope)` 的活跃版本（`valid_to IS NULL`）：
-   - 0 条 → `not_found`
-   - >1 条 → `not_found`（属不变量破坏，正常路径不应出现，需同时告警）
-3. 校验 `actor_id` 是否在该活跃版本 `collect_from` 中 → 否则 `permission_denied`
-4. 单 DB 事务内原子 supersede：
-   a. CAS 回填旧版本：
-      `UPDATE ... SET valid_to = :tx_time WHERE context_id = :old_id AND valid_to IS NULL`
-      影响行数 = 0 → 旧版本已被并发 update 抢先 supersede，回滚并返回 `conflict`
-   b. 写入新条目（`supersedes = :old_id`，记录 `change_reason`），提交
+2. 按 `(name, scope)` 查旧条目 → 不存在或没有唯一活跃版本则 `not_found`
+3. 校验 `actor_id` 是否在旧条目活跃版本的 `collect_from` 中 → 否则 `permission_denied`
+4. 原子操作：回填旧条目 `valid_to = tx_time` → 写入新条目（`supersedes` 指向旧 `context_id`，记录 change_reason）
 5. 返回成功
 
-> **并发与唯一活跃版本保证**
-> - 并发 **add** 写同 `(name, scope)` 的第二条活跃版本 → 由部分唯一索引
->   `UNIQUE (name, scope) WHERE valid_to IS NULL` 拒绝，返回 `conflict`。
-> - 并发 **update** 抢同一活跃版本 → 回填用的 `valid_to IS NULL` CAS 让其中一方影响 0 行而回滚，
->   返回 `conflict`；抢赢的一方正常 supersede。最终同一 `(name, scope)` 永远只有一条活跃版本，
->   不会出现双活跃或静默成功。
-> - `(name, scope, valid_to)` 建联合索引以支撑上述查询与 CAS。
+> 如果并发 update，使用数据库锁保障，并发 update 时只有一条请求成功，其他返回 `conflict` 失败。
 
 响应：
 ```json
@@ -242,7 +230,7 @@ POST /groupcontext/setsystemprompt
 | 400 | `invalid_param` | 全部 | 参数校验失败 |
 | 403 | `permission_denied` | add / update / setsystemprompt | 调用方不在 collect_from 中 |
 | 404 | `not_found` | update | 没有可以被更新的context |
-| 409 | `conflict` | add / update | add：同 (name, scope) 已有活跃版本；update：并发 supersede 抢败（CAS 影响 0 行） |
+| 409 | `conflict` | add / update | add：同 (name, scope) 已有活跃版本；update：并发 update 抢败 |
 | 413 | `payload_too_large` | add / update / setsystemprompt | content 超上限（默认 4KB） |
 | 500 | `internal_error` | 全部 | 服务端内部错误 |
 
