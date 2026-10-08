@@ -82,7 +82,34 @@ const legacyPriority: Partial<Record<RepairItemState, number>> = {
 };
 
 export function createRepairSourcePort(readers: RepairSourceReaders): RepairSourcePort {
-  return { async load(db, workflowId, mode = 'full', scope) {
+  const hydrate: NonNullable<RepairSourcePort['hydrate']> = async (db, workflowId, input) => {
+    const selected = structuredClone(input);
+    const eventIds = [...new Set(selected.flatMap(item => ((item.context?.diagnoses ?? []) as RecordValue[])
+      .flatMap(diagnosis => (diagnosis.evidenceEventIds ?? []) as string[])))].sort();
+    const evidence = new Map<string, RepairEvidenceSource>();
+    for (let offset = 0; offset < eventIds.length; offset += 200) {
+      for (const row of await repairStage('source_evidence', () => readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200)))) {
+        if (row.workflow_id === workflowId) evidence.set(row.event_id, row);
+      }
+    }
+    for (const item of selected) {
+      if (!item.context || !Array.isArray(item.context.diagnoses)) continue;
+      item.context.diagnoses = (item.context.diagnoses as RecordValue[]).map(diagnosis => {
+        // Persisted historical items may already carry their frozen evidence.
+        if (!Array.isArray(diagnosis.evidenceEventIds)) return diagnosis;
+        const { evidenceEventIds, evidenceCount: _count, ...summary } = diagnosis;
+        return { ...summary, evidence: (evidenceEventIds as string[]).map(eventId => {
+          const entry = evidence.get(eventId);
+          if (!entry || entry.flow_id !== diagnosis.flowId) return { eventId, missing: true };
+          return { eventId, flowId: entry.flow_id, nodeId: entry.node_id ?? null, eventType: entry.event_type,
+            payloadDigest: entry.payload_digest ?? null, occurredAtMs: entry.occurred_at_ms ?? null,
+            payload: parsed(entry.payload_json, 'evidence payload') };
+        }) };
+      });
+    }
+    return selected;
+  };
+  return { hydrate, async load(db, workflowId, mode = 'full', scope) {
     const sinceMs = scope?.includeHistorical ? undefined : Date.now() - ACTIVE_LOOKBACK_MS;
     const groups = await repairStage('source_groups', () => readers.groups(db, workflowId, { sinceMs }));
     const suggestions = (await repairStage('source_suggestions', () => readers.suggestions(db, workflowId, { sinceMs }))).filter(row => {
@@ -99,15 +126,19 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length,
     });
     const items = new Map<string, SourceItem>();
+    const groupMetadata = new Map(groups.map(group => [group.signature, group.sources[0]]));
     const edit = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string): { itemId: string; row: SourceItem } => {
       const groupKey = digestRepairJson([workflowId, signature]);
       const proposalKey = digestRepairJson(proposalIdentity(value, instruction, textSourceId));
       const itemId = digestRepairJson([workflowId, groupKey, proposalKey, 'initial']);
       const existing = items.get(itemId);
-      const row = existing ? structuredClone(existing)
+      // Only legacy suggestion validation needs a rollback copy. Diagnosis merging must
+      // not repeatedly clone and validate an ever-growing evidence array (quadratic cost).
+      const row = existing ? textSourceId ? structuredClone(existing) : existing
         : { episodeKey: 'initial', initialState: 'pending', item: { itemId, groupKey, proposalKey,
           contentRevision: 1, previousItemId: null, proposal: value, instruction, sources: [],
-          context: { signature, diagnoses: [], suggestions: [] } } } as SourceItem;
+          context: { signature, nodeId: groupMetadata.get(signature)?.nodeId ?? null,
+            failureMode: groupMetadata.get(signature)?.failureMode ?? null, diagnoses: [], suggestions: [] } } } as SourceItem;
       return { itemId, row };
     };
     for (const group of groups) for (const source of [...group.sources]
@@ -119,7 +150,6 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       row.item.sources.push({ kind: 'diagnosis_candidate', signature: group.signature, inputDigest: group.inputDigest,
         candidateId: digestRepairJson(value), analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId });
       (row.item.context!.diagnoses as RecordValue[]).push(diagnosisContext(source));
-      validateRepairItem(row.item);
       items.set(itemId, row);
     }
     for (const suggestion of [...suggestions].sort((a, b) => (timestampMs(b.gmt_modified) ?? 0) - (timestampMs(a.gmt_modified) ?? 0)
@@ -154,27 +184,8 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
     if (mode === 'full') {
       const selectedIds = scope?.itemIds ? new Set(scope.itemIds) : null;
       const selected = [...items.values()].filter(row => !selectedIds || selectedIds.has(row.item.itemId));
-      const eventIds = [...new Set(selected.flatMap(row => (row.item.context!.diagnoses as RecordValue[])
-        .flatMap(diagnosis => diagnosis.evidenceEventIds as string[])))].sort();
-      const evidence = new Map<string, RepairEvidenceSource>();
-      // Avoid database parameter limits; never silently discard citations after the requested item set.
-      for (let offset = 0; offset < eventIds.length; offset += 200) {
-        for (const row of await repairStage('source_evidence', () => readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200)))) {
-          if (row.workflow_id === workflowId) evidence.set(row.event_id, row);
-        }
-      }
-      for (const row of selected) {
-        row.item.context!.diagnoses = (row.item.context!.diagnoses as RecordValue[]).map(diagnosis => {
-          const { evidenceEventIds, evidenceCount: _evidenceCount, ...summary } = diagnosis;
-          return { ...summary, evidence: (evidenceEventIds as string[]).map(eventId => {
-            const entry = evidence.get(eventId);
-            if (!entry || entry.flow_id !== diagnosis.flowId) return { eventId, missing: true };
-            return { eventId, flowId: entry.flow_id, nodeId: entry.node_id ?? null, eventType: entry.event_type,
-              payloadDigest: entry.payload_digest ?? null, occurredAtMs: entry.occurred_at_ms ?? null,
-              payload: parsed(entry.payload_json, 'evidence payload') };
-          }) };
-        });
-      }
+      const hydrated = await hydrate(db, workflowId, selected.map(row => row.item));
+      selected.forEach((row, index) => { row.item = hydrated[index]; });
     }
     for (const row of items.values()) {
       row.item.sources = [...new Map(row.item.sources.map(source => [canonicalRepairJson(source), source])).values()]

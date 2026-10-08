@@ -19,10 +19,12 @@ export const REMEDY_KIND: Record<string, string> = {
 }
 
 export default function RemediesPanel({ workflowId }: { workflowId: string }) {
-  const { data, isLoading } = useEvolveLessons({ workflowId, limit: 100 })
+  const { data, isLoading, isError, refetch } = useEvolveLessons({ workflowId, limit: 100 })
   const lessons = data?.lessons ?? []
 
   if (isLoading) return <div className="p-4 text-xs text-gray-500">加载经验库...</div>
+  if (isError) return <div role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">经验加载失败，暂时无法确认是否有可复用经验。
+    <button type="button" className="ml-2 underline" onClick={() => void refetch()}>重试经验</button></div>
 
   return <div className="space-y-3">
     <div><p className="text-xs text-slate-500">经验是经过复用边界审核的知识，不由建议应用自动生成。</p></div>

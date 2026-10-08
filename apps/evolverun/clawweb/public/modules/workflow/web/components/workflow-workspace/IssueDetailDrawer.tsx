@@ -5,6 +5,7 @@ import { useRunEvolutionAnalysis } from '../../api/hooks'
 import RunEvolutionAnalysis from '../evolution/RunEvolutionAnalysis'
 import { diffWorkflowPatchOperations, type DiagnosisCluster } from './evolution-utils'
 import IssueSummary from './IssueSummary'
+import { useIssueGroupDetail } from './issue-groups'
 import IssueIdentity from './IssueIdentity'
 import DetailDrawer from './DetailDrawer'
 import { REMEDY_KIND } from './RemediesPanel'
@@ -60,6 +61,7 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
   onClose: () => void
 }) {
   const [tab, setTab] = useState<'causes' | 'repairs' | 'evidence'>(initialTab ?? (selectedFlowId || selectedAnalysisId ? 'evidence' : 'causes'))
+  const groupDetail = useIssueGroupDetail(cluster.aggregation)
   const summary = cluster.latest.error_text ?? cluster.latest.reasoning ?? cluster.mode
   const proposalDiff = suggestion?.proposal && previousTask?.proposal
     ? diffWorkflowPatchOperations(previousTask.proposal, suggestion.proposal)
@@ -77,7 +79,9 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
       </nav>} footer={tab === 'evidence' && suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
         <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
       </footer>}>
-        {tab === 'causes' && (cluster.aggregation ? <IssueSummary group={cluster.aggregation} /> : <section>
+        {tab === 'causes' && (groupDetail.loading ? <p role="status" className="text-sm text-slate-600">正在加载问题原因…</p>
+          : groupDetail.error ? <div role="alert" className="text-sm text-red-700">问题原因加载失败<button className="ml-2 underline" onClick={groupDetail.retry}>重试原因</button></div>
+          : groupDetail.group ? <IssueSummary group={groupDetail.group} /> : <section>
           <p className="text-xs font-semibold text-slate-900">最新诊断结论</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{summary}</p>
           <p className="mt-2 truncate font-mono text-[10px] text-slate-400" title={cluster.signature}>{cluster.signature}</p>
@@ -123,6 +127,8 @@ function IssueEvidence({ cluster, selectedFlowId, selectedAnalysisId }: {
   )
   const selectedInstance = cluster.instances.find((instance) =>
     `${instance.analysisId}\u0000${instance.diagnosisId}\u0000${instance.flowId}` === selectedInstanceKey) ?? initialInstance
+  const [evidencePage, setEvidencePage] = useState(() => Math.floor(Math.max(0, cluster.instances.indexOf(initialInstance)) / 10) + 1)
+  const totalEvidencePages = Math.max(1, Math.ceil(cluster.instances.length / 10))
   const instanceAnalysis = useRunEvolutionAnalysis(
     selectedInstance?.flowId ?? '',
     selectedInstance?.analysisId === 'legacy' ? undefined : selectedInstance?.analysisId,
@@ -135,7 +141,7 @@ function IssueEvidence({ cluster, selectedFlowId, selectedAnalysisId }: {
             <span className="text-[10px] text-slate-400">{cluster.instances.length} 条</span>
           </div>
           <div className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-            {cluster.instances.slice(0, 10).map((instance) => {
+            {cluster.instances.slice((evidencePage - 1) * 10, evidencePage * 10).map((instance) => {
               const params = new URLSearchParams({ from: 'workspace', workspaceView: 'diagnosis', issueSignature: cluster.signature })
               if (instance.analysisId !== 'legacy') params.set('analysisId', instance.analysisId)
               const active = selectedInstance?.flowId === instance.flowId && selectedInstance?.analysisId === instance.analysisId
@@ -157,7 +163,11 @@ function IssueEvidence({ cluster, selectedFlowId, selectedAnalysisId }: {
               </div>
             })}
           </div>
-          {cluster.instances.length > 10 && <p className="mt-2 text-[10px] text-slate-400">仅展示最近 10 条分析记录</p>}
+          {totalEvidencePages > 1 && <nav aria-label="分析记录分页" className="mt-3 flex items-center justify-between text-sm text-slate-600">
+            <button disabled={evidencePage <= 1} onClick={() => setEvidencePage(page => page - 1)}>上一页分析</button>
+            <span>第 {evidencePage} / {totalEvidencePages} 页 · 共 {cluster.instances.length} 条</span>
+            <button disabled={evidencePage >= totalEvidencePages} onClick={() => setEvidencePage(page => page + 1)}>下一页分析</button>
+          </nav>}
         </section>
 
         {selectedInstance && selectedInstance.analysisId !== 'legacy' && <details open className="mt-6 border-t border-slate-100 pt-5">
@@ -166,7 +176,7 @@ function IssueEvidence({ cluster, selectedFlowId, selectedAnalysisId }: {
             <p className="font-mono text-[10px] text-slate-400">{selectedInstance.analysisId}</p>
           </summary>
           {instanceAnalysis.isLoading && <p className="mt-2 text-xs text-slate-500">加载所选分析...</p>}
-          {instanceAnalysis.isError && <p className="mt-2 text-xs text-red-600">分析结果加载失败</p>}
+          {instanceAnalysis.isError && <p role="alert" className="mt-2 text-sm text-red-600">分析结果加载失败<button className="ml-2 underline" onClick={() => void instanceAnalysis.refetch()}>重试分析</button></p>}
           {!instanceAnalysis.isLoading && !instanceAnalysis.isError && !instanceAnalysis.data?.analysis && (
             <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
               未找到所选分析详情，请重试或打开关联运行查看。

@@ -14,7 +14,8 @@ export function repairSignatureKey(signature: string): string {
   return hash(0xcbf29ce484222325n) + hash(0x84222325cbf29ce4n);
 }
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
-export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean };
+export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
+  nodeId?: string; failureMode?: string; signature?: string };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
@@ -46,6 +47,10 @@ export type RepairDiff = {
 /** Trusted server source read. Never accept proposal, evidence, baseline or actor from the browser. */
 export interface RepairSourcePort {
   load(db: IDatabase, workflowId: string, mode?: 'summary' | 'full', scope?: { itemIds?: readonly string[]; includeHistorical?: boolean }): Promise<Array<{ item: RepairItem; episodeKey: string; initialState?: RepairItemState }>>;
+  /** Hydrate only trusted server-side summaries, without rebuilding unrelated sources. */
+  hydrate?(db: IDatabase, workflowId: string, items: RepairItem[]): Promise<RepairItem[]>;
+  /** Cheap revision of all source and disposition tables. Only GET snapshots may reuse it. */
+  readVersion?(db: IDatabase, workflowId: string): Promise<string>;
 }
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
 export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };

@@ -13,6 +13,9 @@ export const repairBatches = {
     if (query.page) params.set('page', String(query.page))
     if (query.pageSize) params.set('pageSize', String(query.pageSize))
     if (query.includeHistorical) params.set('includeHistorical', 'true')
+    if (query.nodeId) params.set('nodeId', query.nodeId)
+    if (query.failureMode) params.set('failureMode', query.failureMode)
+    if (query.signature) params.set('signature', query.signature)
     return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),

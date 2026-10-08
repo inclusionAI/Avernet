@@ -56,6 +56,15 @@ function preferredStored(left: StoredRepairItem, right: StoredRepairItem): Store
 function inboxMatch(item: RepairInboxItem, state: RepairInboxFilter): boolean {
   return state === 'all' || (state === 'closed' ? item.state === 'verified' || item.state === 'ineffective' : item.state === state);
 }
+function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
+  if (query.signature && item.context?.signature !== query.signature) return false;
+  const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses as Record<string, unknown>[] : [];
+  const suggestions = Array.isArray(item.context?.suggestions) ? item.context.suggestions as Record<string, unknown>[] : [];
+  const node = item.context?.nodeId ?? diagnoses[0]?.nodeId ?? suggestions[0]?.nodeId;
+  const mode = item.context?.failureMode ?? diagnoses[0]?.failureMode;
+  return (!query.nodeId || node === query.nodeId || query.nodeId === '未知节点' && !node)
+    && (!query.failureMode || mode === query.failureMode);
+}
 function sourceDigest(current: Awaited<ReturnType<RepairSourcePort['load']>>): string {
   return digestRepairJson(current.map(({ item, episodeKey, initialState }) => ({
     episodeKey, initialState: initialState ?? 'pending',
@@ -71,13 +80,34 @@ export type TrustedRepairReport = {
   | { status: 'failed'; error: Record<string, unknown> });
 
 class WorkflowRepairWorkbench implements RepairWorkbenchService {
+  private readonly readSnapshots = new Map<string, { version: string; at: number; value: Awaited<ReturnType<WorkflowRepairWorkbench['snapshot']>> }>();
   constructor(private readonly db: IDatabase, private readonly sources: RepairSourcePort, private readonly execution?: RepairExecutionPort) {}
   private capabilities(): RepairCapabilities {
     return { generation: !!this.execution, diff: !!this.execution?.diff, publication: false,
       reason: this.execution ? null : 'Repair generation provider is unavailable' };
   }
-  private tx<T>(fn: (tx: IDatabase) => Promise<T>): Promise<T> { return serial(this.db, () => this.db.transaction(fn)); }
+  private tx<T>(fn: (tx: IDatabase) => Promise<T>): Promise<T> {
+    this.readSnapshots.clear();
+    return serial(this.db, () => this.db.transaction(fn)).finally(() => this.readSnapshots.clear());
+  }
   private actor(actorId: string): void { if (!requiredText(actorId, 128)) fail('INVALID_INPUT', 'Actor identity is required'); }
+
+  private async readSnapshot(workflowId: string, includeHistorical: boolean) {
+    if (!identity(workflowId, 190)) fail('INVALID_INPUT', 'Invalid workflowId');
+    const version = this.sources.readVersion ? await this.sources.readVersion(this.db, workflowId) : null;
+    const key = `${workflowId}:${includeHistorical}`;
+    const cached = this.readSnapshots.get(key);
+    if (version !== null && cached?.version === version && Date.now() - cached.at < 10_000) return cached.value;
+    this.readSnapshots.delete(key);
+    const value = await this.snapshot(this.db, workflowId, 'summary', { includeHistorical });
+    // A small, version-checked read projection, never the input authority for writes.
+    // TTL also bounds clock-based lookback changes and legacy second-resolution timestamps.
+    if (version !== null && Buffer.byteLength(JSON.stringify(value.items), 'utf8') <= 8 * 1024 * 1024) {
+      if (this.readSnapshots.size >= 4) this.readSnapshots.delete(this.readSnapshots.keys().next().value!);
+      this.readSnapshots.set(key, { version, at: Date.now(), value });
+    }
+    return value;
+  }
 
   private async snapshot(db: IDatabase, workflowId: string, mode: 'summary' | 'full' = 'full', scope?: { itemIds?: readonly string[]; includeHistorical?: boolean }) {
     if (!identity(workflowId, 190)) fail('INVALID_INPUT', 'Invalid workflowId');
@@ -95,7 +125,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       shadowed.add(preferred.itemId === previous.itemId ? item.itemId : previous.itemId);
     }
     let sourceScope = scope;
-    if (mode === 'full' && scope?.itemIds?.length) {
+    if (mode === 'full' && scope?.itemIds?.length && !this.sources.hydrate) {
       const selected = new Set(scope.itemIds);
       const summaries = await repairStage('sources_summary', () => this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical }));
       sourceScope = { ...scope, itemIds: summaries.filter(source => {
@@ -103,7 +133,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         return selected.has(existing?.itemId ?? source.item.itemId);
       }).map(source => source.item.itemId) };
     }
-    const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, mode, sourceScope));
+    const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, this.sources.hydrate ? 'summary' : mode, sourceScope));
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -124,6 +154,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       items.set(itemId, preview);
       if (sourceAvailable) materializable.set(itemId, { ...source, item: refreshed });
     }
+    if (mode === 'full' && this.sources.hydrate) {
+      const selected = [...items.values()].filter(item => !scope?.itemIds || scope.itemIds.includes(item.itemId));
+      const hydrated = await this.sources.hydrate(db, workflowId, selected);
+      for (const item of hydrated) {
+        items.set(item.itemId, { ...items.get(item.itemId)!, ...item });
+        const source = materializable.get(item.itemId);
+        if (source) materializable.set(item.itemId, { ...source, item });
+      }
+    }
     return { items: [...items.values()], inputDigest, materializable };
   }
   async candidates(workflowId: string, query: RepairCandidatesQuery = {}): Promise<Omit<RepairCandidatesResponse, 'canEdit'>> {
@@ -134,10 +173,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       if (!['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)
         || !safeInteger(page, 1) || !safeInteger(pageSize, 1) || pageSize > 200) fail('INVALID_INPUT', 'Invalid inbox pagination');
       if (query.includeHistorical !== undefined && typeof query.includeHistorical !== 'boolean') fail('INVALID_INPUT', 'Invalid history scope');
+      for (const value of [query.nodeId, query.failureMode, query.signature]) {
+        if (value !== undefined && !requiredText(value, 4096)) fail('INVALID_INPUT', 'Invalid repair scope');
+      }
       const includeHistorical = query.includeHistorical === true;
-      const snapshot = await this.snapshot(this.db, workflowId, 'summary', { includeHistorical });
-      const scopedItems = includeHistorical ? snapshot.items : snapshot.items.filter(item =>
-        item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification');
+      const snapshot = await this.readSnapshot(workflowId, includeHistorical);
+      const scopedItems = snapshot.items.filter(item => matchesScope(item, query) && (includeHistorical ||
+        item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
@@ -162,8 +204,15 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   async item(workflowId: string, itemId: string): Promise<RepairInboxItem> {
     return serial(this.db, async () => {
       if (!requiredText(itemId, 64)) fail('INVALID_INPUT', 'Invalid itemId');
-      const snapshot = await this.snapshot(this.db, workflowId, 'full', { itemIds: [itemId], includeHistorical: true });
-      const item = snapshot.items.find(candidate => candidate.itemId === itemId);
+      let item: RepairInboxItem | undefined;
+      if (this.sources.hydrate) {
+        const recent = await this.readSnapshot(workflowId, false);
+        item = recent.items.find(candidate => candidate.itemId === itemId);
+        if (!item) item = (await this.readSnapshot(workflowId, true)).items.find(candidate => candidate.itemId === itemId);
+        if (item) item = { ...item, ...(await this.sources.hydrate(this.db, workflowId, [item]))[0] };
+      } else {
+        item = (await this.snapshot(this.db, workflowId, 'full', { itemIds: [itemId], includeHistorical: true })).items.find(candidate => candidate.itemId === itemId);
+      }
       if (!item) fail('ITEM_NOT_FOUND', 'Repair item does not exist');
       boundedRepairJson(item, MAX_TASK_READ_BYTES);
       return item;
