@@ -166,6 +166,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
   - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols
   - agentclaw.community.core.skill_center            # Local Skill desired-state query service DTOs
+  - agentclaw.community.core.mcp.scoped_config_contract  # MCP Header-group Service API re-export
   - agentclaw.community.core.skill_center            # Local Skill upload lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill desired-state lifecycle contract
   - agentclaw.community.core.skill_center            # Local Skill recoverable deletion lifecycle contract

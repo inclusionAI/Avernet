@@ -343,6 +343,48 @@ class McpConfig(BaseModel):
     )
 
 
+class McpHeaderGroup(BaseModel):
+    """One explicit Header value and its Bot scope; empty means user default."""
+
+    model_config = _STRICT
+
+    key: str = Field(description="Case-insensitive HTTP Header name.")
+    value: str = Field(description="Literal Header value; an empty string is explicit.")
+    bots: list[str] = Field(
+        default_factory=list,
+        description="Owned Bot IDs receiving this explicit value; empty means user default.",
+    )
+
+
+class McpScopedConfig(BaseModel):
+    """Editable user-default and owned-Bot Header groups for one MCP."""
+
+    server_code: str = Field(description="Registered MCP Center server code.")
+    endpoint_env: Literal["PROD", "PRE"] = Field(description="User-default endpoint environment.")
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None = Field(
+        description="User-default transport preference; null selects the Center default."
+    )
+    params: list[McpHeaderGroup] = Field(description="Explicit user and Bot Header groups, without inherited copies.")
+    sync_results: list[dict[str, Any]] | None = Field(
+        default=None, description="Best-effort per-Bot delivery results after a write."
+    )
+    sync_summary: dict[str, int] | None = Field(
+        default=None, description="Counts of affected, synced, offline, drifted and failed Bots."
+    )
+
+
+class McpScopedConfigWrite(BaseModel):
+    """Complete editable Header-group snapshot for the caller's owned Bots."""
+
+    model_config = _STRICT
+
+    endpoint_env: Literal["PROD", "PRE"] = Field(description="Required user-default endpoint environment.")
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None = Field(
+        description="Required nullable user-default transport preference."
+    )
+    params: list[McpHeaderGroup] = Field(description="Complete Header-group snapshot; empty clears all explicit Header rules.")
+
+
 class McpConfigWrite(BaseModel):
     """Write the unified config. An omitted (null) field means "leave unchanged".
 

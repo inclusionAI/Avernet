@@ -599,7 +599,8 @@ async def _validation_error_handler(
         # "Invalid request" is all the caller gets, so which field failed is
         # only knowable from here. ``loc``/``type``/``msg`` only — the ``input``
         # each error carries is the caller's raw value, which is exactly the
-        # payload this surface must not copy into a log file.
+        # payload this surface must not copy into a log file. Do not attach
+        # ``exc_info``: RequestValidationError's traceback prints that input.
         logger.warning(
             "[Public 422] validation failed on %s %s: %s",
             request.method, request.url.path,
@@ -607,7 +608,6 @@ async def _validation_error_handler(
                 {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
                 for e in exc.errors()
             ],
-            exc_info=exc,
         )
         message = "缺少必填字段text" if any(
             "缺少必填字段text" in str(error.get("msg", "")) for error in exc.errors()
@@ -616,7 +616,8 @@ async def _validation_error_handler(
     # Internal routes keep FastAPI's ``{"detail": [...]}`` body, whose default
     # handler logs nothing. Same treatment as above: log, then delegate. The
     # ``input`` each error carries is the caller's raw payload, so only
-    # ``loc``/``type``/``msg`` are recorded here too.
+    # ``loc``/``type``/``msg`` are recorded here too. Its traceback also
+    # contains ``input``, so do not attach ``exc_info`` to this expected 422.
     logger.warning(
         "[422] validation failed on %s %s: %s",
         request.method, request.url.path,
@@ -624,7 +625,6 @@ async def _validation_error_handler(
             {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
             for e in exc.errors()
         ],
-        exc_info=exc,
     )
     return await request_validation_exception_handler(request, exc)
 

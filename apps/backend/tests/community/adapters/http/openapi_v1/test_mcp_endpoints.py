@@ -31,6 +31,18 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
+from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
+from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
+    EffectiveMCPStateReaderProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    BotRepository,
+)
+from agentclaw.community.core.repository.protocols.bot.mcp import (
+    ScopedMCPConfigRepositoryProtocol,
+)
 
 
 def _server(**ov):
@@ -94,13 +106,40 @@ def sync():
 
 
 @pytest.fixture
-def client(market, auth, config, sync):
+def scoped_dependencies():
+    bots = MagicMock()
+    bots.list_live_bot_ids_by_owner.return_value = []
+    bot_configs = MagicMock()
+    bot_configs.list_by_owner_and_server_code.return_value = {}
+    return bots, bot_configs, MagicMock(), MagicMock()
+
+
+@pytest.fixture
+def client(market, auth, config, sync, scoped_dependencies):
+    bots, bot_configs, command_repo, capability = scoped_dependencies
+
     class _M(Module):
         def configure(self, binder):
             binder.bind(MCPMarketServiceProtocol, to=market)
             binder.bind(MCPAuthServiceProtocol, to=auth)
             binder.bind(MCPConfigServiceProtocol, to=config)
             binder.bind(MCPSyncServiceProtocol, to=sync)
+            binder.bind(BotRepository, to=bots)
+            binder.bind(BotMCPConfigRepositoryProtocol, to=bot_configs)
+            binder.bind(ScopedMCPConfigRepositoryProtocol, to=command_repo)
+            binder.bind(EffectiveMCPStateReaderProtocol, to=capability)
+            binder.bind(
+                MCPScopedConfigServiceProtocol,
+                to=MCPScopedConfigService(
+                    config_service=config,
+                    bot_config_repo=bot_configs,
+                    bot_repo=bots,
+                    command_repo=command_repo,
+                    market_service=market,
+                    sync_service=sync,
+                    capability_reader=capability,
+                ),
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -531,6 +570,145 @@ def test_permission_is_fail_open_by_decision(client, auth):
 
 
 # ── config read ─────────────────────────────────────────────────────
+
+
+def test_get_scoped_config_returns_only_declared_user_and_bot_groups(
+    client, config, scoped_dependencies
+):
+    bots, bot_configs, _, _ = scoped_dependencies
+    bots.list_live_bot_ids_by_owner.return_value = ["bot-x"]
+    config.get_user_unified_config.return_value = {
+        "headers": {"B": "2"}, "endpoint_env": "PROD",
+        "transport_protocol": "SSE",
+    }
+    bot_configs.list_by_owner_and_server_code.return_value = {
+        "bot-x": {"headers": {"A": "3"}}
+    }
+
+    data = _ok(client.get(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups"
+    ))
+
+    assert data == {
+        "server_code": "mcp.weather",
+        "endpoint_env": "PROD",
+        "transport_protocol": "SSE",
+        "params": [
+            {"key": "B", "value": "2", "bots": []},
+            {"key": "A", "value": "3", "bots": ["bot-x"]},
+        ],
+        "sync_results": None,
+        "sync_summary": None,
+    }
+
+
+def test_put_scoped_config_accepts_full_group_snapshot_and_returns_reread(
+    client, config, market, scoped_dependencies
+):
+    bots, bot_configs, command_repo, capability = scoped_dependencies
+    bots.list_live_bot_ids_by_owner.return_value = ["bot-x"]
+    bots.get_by_id_and_owner.return_value = {"bot_id": "bot-x", "active_engine": "openclaw"}
+    bot_configs.list_by_owner_and_server_code.return_value = {
+        "bot-x": {"headers": {"A": "3"}}
+    }
+    config.get_user_unified_config.return_value = {
+        "headers": {"B": "2"}, "endpoint_env": "PROD",
+        "transport_protocol": "SSE",
+    }
+    config.validate_effective_scoped_config.return_value = {"valid": True}
+    capability.effective_mcp_server_codes.return_value = {"mcp.weather"}
+    market.get_mcp_detail.return_value = _server(endpoints=[
+        {"env": "PROD", "networkType": "OFFICE", "transportProtocol": "SSE"}
+    ])
+
+    data = _ok(client.put(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+        json={
+            "endpoint_env": "PROD", "transport_protocol": "SSE",
+            "params": [
+                {"key": "B", "value": "2", "bots": []},
+                {"key": "A", "value": "3", "bots": ["bot-x"]},
+            ],
+        },
+    ))
+
+    assert data["params"] == [
+        {"key": "B", "value": "2", "bots": []},
+        {"key": "A", "value": "3", "bots": ["bot-x"]},
+    ]
+    assert "api_key" not in data
+    assert command_repo.replace.call_args.kwargs["user_id"] == "u1"
+
+
+def test_put_scoped_config_requires_params(client):
+    response = client.put(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+        json={"endpoint_env": "PROD", "transport_protocol": "SSE"},
+    )
+    assert response.status_code == 422
+
+
+def test_put_scoped_config_failure_does_not_log_header_value(client, market, caplog):
+    import logging
+
+    marker = "Bearer TEST_HEADER_CREDENTIAL"
+    market.get_mcp_detail.return_value = None
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+            json={
+                "endpoint_env": "PROD",
+                "transport_protocol": "SSE",
+                "params": [{"key": "Authorization", "value": marker, "bots": []}],
+            },
+        )
+
+    assert response.status_code == 404
+    assert marker not in caplog.text
+    assert "credential_body='***redacted***'" in caplog.text
+
+
+def test_put_scoped_config_validation_does_not_log_header_value(client, caplog):
+    import logging
+
+    marker = "Bearer TEST_INVALID_HEADER_CREDENTIAL"
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+            json={
+                "endpoint_env": "PROD",
+                "transport_protocol": "SSE",
+                "params": [{"key": "Authorization", "value": {"secret": marker}, "bots": []}],
+            },
+        )
+
+    assert response.status_code == 422
+    assert marker not in caplog.text
+
+
+@pytest.mark.parametrize("params", [
+    [{"key": "A", "value": "3", "bots": ["foreign-bot"]}],
+    [
+        {"key": "A", "value": "3", "bots": ["bot-x"]},
+        {"key": "a", "value": "4", "bots": ["bot-x"]},
+    ],
+])
+def test_put_scoped_config_rejects_foreign_or_overlapping_bot_rules(
+    client, market, scoped_dependencies, params
+):
+    bots, _, command_repo, _ = scoped_dependencies
+    bots.list_live_bot_ids_by_owner.return_value = ["bot-x"]
+    market.get_mcp_detail.return_value = _server(endpoints=[
+        {"env": "PROD", "networkType": "OFFICE", "transportProtocol": "SSE"}
+    ])
+
+    response = client.put(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+        json={"endpoint_env": "PROD", "transport_protocol": "SSE", "params": params},
+    )
+
+    assert response.status_code == 400
+    command_repo.replace.assert_not_called()
 
 
 def test_get_config_absent_reports_no_config(client):

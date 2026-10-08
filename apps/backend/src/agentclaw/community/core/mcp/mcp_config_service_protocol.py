@@ -22,6 +22,10 @@ class MCPConfigServiceProtocol(Protocol):
         self, server_code: str, headers: dict[str, str]
     ) -> dict[str, Any]: ...
 
+    def validate_scoped_headers(
+        self, *, server_code: str, entries: tuple[tuple[str, str], ...]
+    ) -> dict[str, Any]: ...
+
     def validate_bot_override(
         self,
         *,
@@ -31,6 +35,18 @@ class MCPConfigServiceProtocol(Protocol):
         engine_type: str | None = None,
     ) -> dict[str, Any]:
         """Validate the effective Center endpoint without persisting it."""
+        ...
+
+    def validate_effective_scoped_config(
+        self,
+        *,
+        server_code: str,
+        detail: dict[str, Any],
+        bot_config: dict[str, Any],
+        user_config: dict[str, Any],
+        engine_type: str | None,
+    ) -> dict[str, Any]:
+        """Validate a prospective user/Bot aggregate against Center detail."""
         ...
 
     def validate_user_config_update(

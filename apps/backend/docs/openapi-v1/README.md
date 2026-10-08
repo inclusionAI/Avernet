@@ -1625,7 +1625,7 @@ regenerated `bots.openapi.json` plus matching route/security configuration to
 the independently managed OCB/Sofapy Gateway. Avernet's broad
 `/openapi/v1/bots/**` forwarding/security rule already covers these paths.
 
-### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
+### ✅ totalfrank · P1 — mcp (8 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED**
 Marketplace + tenants + the caller's unified per-server config. All 6 wired to
 the internal MCP services through the shared `core/mcp/` flow (extracted from the
 internal router so both surfaces answer identically); owner-scoped via
@@ -1638,6 +1638,18 @@ internal router so both surfaces answer identically); owner-scoped via
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+| GET | `/openapi/v1/bots/mcp/servers/{server_code}/config-groups` | Read explicit user-default and owned-Bot Header groups | `Envelope[McpScopedConfig]` |
+| PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config-groups` | Atomically replace the caller's full Header-group snapshot, then best-effort project | `Envelope[McpScopedConfig]` |
+
+The config-groups write requires `endpoint_env` (`PROD`/`PRE`), a nullable
+`transport_protocol` (`SSE`/`STREAMABLE_HTTP` or null to clear the preference),
+and `params: [{key, value, bots}]`. Empty `bots` denotes the caller's user
+default; selected Bot IDs must be owned by that caller and need not currently
+install the MCP. `params` is required; `[]` clears all user and Bot explicit
+Headers without clearing API key, Bot URL, or Bot-specific endpoint choices.
+Normal Center endpoints resolve user and Bot Headers by case-insensitive name,
+with Bot values winning; custom Bot URLs do not inherit user credentials.
+The existing `/config` routes remain user-only and retain their wire contracts.
 
 The unified marketplace search also exposes
 `POST /openapi/v1/bots/market/mcp-servers`. Its JSON request supports the full

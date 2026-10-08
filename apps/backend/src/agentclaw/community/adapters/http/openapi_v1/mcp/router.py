@@ -56,6 +56,7 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
@@ -64,6 +65,10 @@ from agentclaw.community.core.mcp.config_flow import (
     list_marketplace_tenants,
     read_unified_config,
     write_unified_config,
+)
+from agentclaw.community.core.mcp.scoped_config_contract import (
+    HeaderGroup,
+    ScopedMCPConfig,
 )
 from agentclaw.community.core.mcp.errors import McpServerNotFoundError
 from agentclaw.community.core.mcp.presentation import (
@@ -77,6 +82,9 @@ from agentclaw.community.di import Injected
 
 from .schemas import (
     McpConfig,
+    McpHeaderGroup,
+    McpScopedConfig,
+    McpScopedConfigWrite,
     McpConfigWrite,
     BotMcpItem,
     McpPermission,
@@ -468,6 +476,66 @@ async def check_mcp_permission(
 
 
 # ── Unified config ──────────────────────────────────────────────────
+
+
+def _to_scoped_config(config: ScopedMCPConfig) -> McpScopedConfig:
+    return McpScopedConfig(
+        server_code=config.server_code,
+        endpoint_env=config.endpoint_env,
+        transport_protocol=config.transport_protocol,
+        params=[
+            McpHeaderGroup(key=group.key, value=group.value, bots=list(group.bots))
+            for group in config.params
+        ],
+        sync_results=list(config.sync_results) if config.sync_results is not None else None,
+        sync_summary=config.sync_summary,
+    )
+
+
+@router.get(
+    "/servers/{server_code}/config-groups",
+    response_model=Envelope[McpScopedConfig],
+    responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_scoped_mcp_config(
+    server_code: ServerCodePath,
+    request: Request,
+    owner_id: UserIdDep,
+    scoped_service: MCPScopedConfigServiceProtocol = Injected(MCPScopedConfigServiceProtocol),
+) -> Envelope[McpScopedConfig]:
+    config = scoped_service.read(user_id=owner_id, server_code=server_code)
+    return envelope(_to_scoped_config(config), request)
+
+
+@router.put(
+    "/servers/{server_code}/config-groups",
+    response_model=Envelope[McpScopedConfig],
+    responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def update_scoped_mcp_config(
+    server_code: ServerCodePath,
+    credential_body: McpScopedConfigWrite,
+    request: Request,
+    owner_id: UserIdDep,
+    scoped_service: MCPScopedConfigServiceProtocol = Injected(MCPScopedConfigServiceProtocol),
+) -> Envelope[McpScopedConfig]:
+    # The shared error logger redacts credential-named handler arguments before
+    # logging failures; group.value may contain a token under a generic name.
+    config = await scoped_service.replace(
+        user_id=owner_id,
+        server_code=server_code,
+        endpoint_env=credential_body.endpoint_env,
+        transport_protocol=credential_body.transport_protocol,
+        params=tuple(
+            HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
+            for group in credential_body.params
+        ),
+    )
+    return envelope(_to_scoped_config(config), request)
 
 
 @router.get(
