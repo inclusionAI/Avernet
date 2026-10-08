@@ -32,7 +32,7 @@ provides:
 consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
-  - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned approval policy and atomic Grant transition"
+  - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned manual policy and staged AUTO completion with atomic Grant transition"
   - "Qualified BCN HttpClient Plugin API — required friend-request approval callbacks"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
