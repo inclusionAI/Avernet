@@ -317,7 +317,7 @@ impl MemoryAuthorityState {
 
     /// Strict merge for one (env, from_id, to_id) subject pair: Any approved
     /// matching row must decode; owner takes priority over any manager.
-    fn relation_for(
+    pub(crate) fn relation_for(
         &self,
         env: &str,
         from_id: &str,

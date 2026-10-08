@@ -2602,6 +2602,13 @@ async fn set_task_modes(
                 task_dream_mode,
                 ..Default::default()
             },
+            bcs_service_api::types::BotOperationContext {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "test_task_modes".to_string(),
+                    effective_actor_id: bot_uuid.to_string(),
+                },
+            },
         )
         .await
         .expect("patch control-plane toggles")

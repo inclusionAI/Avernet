@@ -15,9 +15,9 @@ use bcs_db_api::{
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities, BotSearchCandidateQuery, BotSearchFriendshipFilter,
-    BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControllableQuery, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery,
-    FriendCheckInStrategy, TaskModeMatch, UserVisibility,
+    ControllableBotRecord, FriendCheckInStrategy, TaskModeMatch, UserVisibility,
 };
 use bcs_service_api::types::ServiceError;
 use tokio::sync::Barrier;
@@ -123,6 +123,7 @@ async fn memory_control_plane_supports_both_kinds_candidates_and_patch_timestamp
                 }),
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "acting-memory"),
         )
         .await
         .expect("patch memory")
@@ -161,7 +162,8 @@ async fn memory_control_plane_restores_internal_attributes_from_persisted_capabi
             friend_check_in_strategy: Some(FriendCheckInStrategy::Open),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "memory-attributes"),
+        )
     .await
     .expect("patch memory bot");
 
@@ -217,7 +219,8 @@ async fn memory_control_plane_concurrent_partial_patches_preserve_both_changes()
                     user_visibility: Some(UserVisibility::Private),
                     ..Default::default()
                 },
-            )
+            test_patch_operation("conformance-staff", "memory-concurrent-attributes"),
+        )
             .await
     });
     let strategy_repo = repo.clone();
@@ -233,7 +236,8 @@ async fn memory_control_plane_concurrent_partial_patches_preserve_both_changes()
                     friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
                     ..Default::default()
                 },
-            )
+            test_patch_operation("conformance-staff", "memory-concurrent-attributes"),
+        )
             .await
     });
     start.wait().await;
@@ -562,6 +566,7 @@ async fn persistent_control_plane_owned_filters_and_patch_replace_descriptor_arr
                 task_dream_mode: None,
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "owned"),
         )
         .await
         .expect("patch row")
@@ -605,6 +610,7 @@ async fn persistent_control_plane_patch_returns_existing_row_when_mysql_changes_
                 name: Some("Unchanged".to_string()),
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "unchanged"),
         )
         .await
         .expect("unchanged patch must not fail")
@@ -655,6 +661,7 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
                 friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "attributes"),
         )
         .await
         .expect("patch internal attributes")
@@ -715,6 +722,7 @@ async fn persistent_control_plane_internal_attributes_round_trip_and_clear_frien
                 friend_ext: Some(serde_json::Map::new()),
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "attributes"),
         )
         .await
         .expect("clear friend extension")
@@ -817,7 +825,8 @@ async fn persistent_capability_save_preserves_patched_internal_attributes() {
             friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "lifecycle-attributes"),
+        )
     .await
     .expect("patch internal attributes")
     .expect("patched bot exists");
@@ -886,7 +895,8 @@ async fn persistent_control_plane_concurrent_partial_patches_preserve_both_chang
                     user_visibility: Some(UserVisibility::Private),
                     ..Default::default()
                 },
-            )
+            test_patch_operation("conformance-staff", "persistent-concurrent-attributes"),
+        )
             .await
     });
     let strategy_repo = repo.clone();
@@ -899,7 +909,8 @@ async fn persistent_control_plane_concurrent_partial_patches_preserve_both_chang
                     friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
                     ..Default::default()
                 },
-            )
+            test_patch_operation("conformance-staff", "persistent-concurrent-attributes"),
+        )
             .await
     });
     visibility_patch
@@ -1005,6 +1016,19 @@ async fn fixture() -> (PersistentBotRepo, Arc<dyn DbPlugin>) {
     (repo, db)
 }
 
+/// One test operation context for control-plane patch conformance calls
+/// (the audit lane requires one; identity values are asserted in the
+/// dedicated `bot_action_audit` suite).
+fn test_patch_operation(human: &str, bot_id: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Human {
+            user_id: human.to_string(),
+            effective_actor_id: bot_id.to_string(),
+        },
+    }
+}
+
 async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
@@ -1031,6 +1055,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             user_visibility TEXT NOT NULL DEFAULT 'protected',
             friend_ext JSON,
             friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL',
+            ownership_version INTEGER NOT NULL DEFAULT 0,
             UNIQUE (bot_uuid, env)
         )",
     ))
@@ -1048,8 +1073,23 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
     ))
     .await
     .expect("create friendships table");
+    // The frozen Task 2 authority chain (edge_grants + the bot action
+    // audit table): the control-plane store's union read and same-commit
+    // patch audit run against the shipped table shapes.
+    for statement in SQLITE_AUTHORITY_MIGRATION
+        .split(';')
+        .map(str::trim)
+        .filter(|statement| !statement.is_empty())
+    {
+        db.execute(DbStatement::new(statement))
+            .await
+            .expect("apply authority migration statement");
+    }
     db
 }
+
+const SQLITE_AUTHORITY_MIGRATION: &str =
+    include_str!("../../../../migrations/sqlite/032_bot_authority.sql");
 
 #[allow(clippy::too_many_arguments)]
 async fn seed_bot(
@@ -1141,6 +1181,7 @@ async fn persistent_control_plane_task_modes_patch_persists_and_reads_back() {
                 task_dream_mode: Some(false),
                 ..Default::default()
             },
+            test_patch_operation("conformance-staff", "claim-bot"),
         )
         .await
         .expect("patch claim")
@@ -1157,7 +1198,8 @@ async fn persistent_control_plane_task_modes_patch_persists_and_reads_back() {
             task_dream_mode: Some(true),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "dream-bot"),
+        )
     .await
     .expect("patch dream")
     .expect("dream row");
@@ -1251,7 +1293,8 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_dream_mode: Some(false),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "claim-bot"),
+        )
     .await
     .expect("patch claim-bot")
     .expect("claim-bot row");
@@ -1263,7 +1306,8 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_dream_mode: Some(true),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "dream-bot"),
+        )
     .await
     .expect("patch dream-bot")
     .expect("dream-bot row");
@@ -1275,7 +1319,8 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_dream_mode: Some(true),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "both-bot"),
+        )
     .await
     .expect("patch both-bot")
     .expect("both-bot row");
@@ -1484,7 +1529,8 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             user_visibility: Some(UserVisibility::Private),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "friend-memory"),
+        )
     .await
     .expect("patch friend visibility")
     .expect("friend bot exists");
@@ -1757,7 +1803,8 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             user_visibility: Some(UserVisibility::Private),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "friend-persistent"),
+        )
     .await
     .expect("patch friend visibility")
     .expect("friend bot exists");
@@ -2034,7 +2081,8 @@ async fn persistent_control_plane_list_by_task_modes_filters_visibility_status_u
             user_visibility: Some(UserVisibility::Public),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "pub-online"),
+        )
     .await
     .expect("patch pub-online user_visibility")
     .expect("pub-online row");
@@ -2045,7 +2093,8 @@ async fn persistent_control_plane_list_by_task_modes_filters_visibility_status_u
             user_visibility: Some(UserVisibility::Protected),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "prot-hidden"),
+        )
     .await
     .expect("patch prot-hidden user_visibility")
     .expect("prot-hidden row");
@@ -2056,7 +2105,8 @@ async fn persistent_control_plane_list_by_task_modes_filters_visibility_status_u
             user_visibility: Some(UserVisibility::Private),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "priv-online"),
+        )
     .await
     .expect("patch priv-online user_visibility")
     .expect("priv-online row");
@@ -2241,7 +2291,8 @@ async fn memory_control_plane_list_by_task_modes_filters_visibility_status_user_
             user_visibility: Some(UserVisibility::Public),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "pub-online"),
+        )
     .await
     .expect("patch pub-online")
     .expect("pub-online row");
@@ -2253,7 +2304,8 @@ async fn memory_control_plane_list_by_task_modes_filters_visibility_status_user_
             user_visibility: Some(UserVisibility::Protected),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "prot-hidden"),
+        )
     .await
     .expect("patch prot-hidden")
     .expect("prot-hidden row");
@@ -2264,7 +2316,8 @@ async fn memory_control_plane_list_by_task_modes_filters_visibility_status_user_
             user_visibility: Some(UserVisibility::Private),
             ..Default::default()
         },
-    )
+            test_patch_operation("conformance-staff", "priv-online"),
+        )
     .await
     .expect("patch priv-online")
     .expect("priv-online row");
@@ -2393,4 +2446,239 @@ async fn memory_control_plane_list_by_task_modes_filters_visibility_status_user_
         ),
         vec!["priv-online".to_string()]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Task 9: the controllable union read (memory + sqlite drivers).
+// ---------------------------------------------------------------------------
+
+fn controllable_query(env: &str) -> BotControllableQuery {
+    BotControllableQuery {
+        user_id: "conformance-staff".to_string(),
+        env: env.to_string(),
+        kind: None,
+        name: None,
+        status: None,
+    }
+}
+
+fn controllable_ids(records: &[ControllableBotRecord]) -> Vec<(String, &'static str)> {
+    records
+        .iter()
+        .map(|record| {
+            let relation = match record.access_relation {
+                bcs_service_api::types::BotAccessRelation::Owner => "owner",
+                bcs_service_api::types::BotAccessRelation::Manager => "manager",
+            };
+            (record.record.bot_id.clone(), relation)
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn memory_list_controllable_unions_owner_manager_and_the_self_row() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    let env = bcs_config::resolve_env_str();
+    repo.register_with_owner_and_token(
+        "union-owned".to_string(),
+        BotCapabilities {
+            name: Some("Union Owned".to_string()),
+            ..Default::default()
+        },
+        "conformance-staff",
+        "token-owned",
+    )
+    .await
+    .expect("register union-owned");
+    repo.seed_authority_owned("union-owned", "conformance-staff")
+        .await
+        .expect("seed owner edge");
+    repo.register_with_owner_and_token(
+        "union-managed".to_string(),
+        BotCapabilities {
+            name: Some("Union Managed".to_string()),
+            ..Default::default()
+        },
+        "conformance-other",
+        "token-managed",
+    )
+    .await
+    .expect("register union-managed");
+    repo.seed_authority_owned("union-managed", "conformance-owner")
+        .await
+        .expect("seed the other owner");
+    // The ASKING user manages the second bot through TWO different
+    // manager sources — still ONE row, labeled manager.
+    repo.seed_authority_manager_source("union-managed", "conformance-staff", "direct", "manual")
+        .await
+        .expect("seed direct manager edge");
+    repo.seed_authority_manager_source("union-managed", "conformance-staff", "team", "team-9")
+        .await
+        .expect("seed team manager edge");
+    repo.ensure_human_actor("conformance-staff", "Conformance Human")
+        .await
+        .expect("ensure human");
+
+    let records = repo
+        .list_controllable(controllable_query(&env))
+        .await
+        .expect("memory controllable union");
+    assert_eq!(
+        controllable_ids(&records),
+        vec![
+            ("human_conformance-staff".to_string(), "owner"),
+            ("union-managed".to_string(), "manager"),
+            ("union-owned".to_string(), "owner"),
+        ],
+        "one row per Bot (multi-source manager dedupe), owner label wins,          the self Human row projects as an explicit owner-labeled row"
+    );
+
+    // kind=bot applies the unified filter to the union (self row drops).
+    let mut bots_only = controllable_query(&env);
+    bots_only.kind = Some(ActorKind::Bot);
+    let records = repo
+        .list_controllable(bots_only)
+        .await
+        .expect("kind=bot union");
+    assert_eq!(
+        controllable_ids(&records),
+        vec![
+            ("union-managed".to_string(), "manager"),
+            ("union-owned".to_string(), "owner"),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn memory_list_controllable_fails_closed_on_uninitialized_authority() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+    let env = bcs_config::resolve_env_str();
+    repo.register_with_owner_and_token(
+        "union-uninitialized".to_string(),
+        BotCapabilities {
+            name: Some("Union Uninitialized".to_string()),
+            ..Default::default()
+        },
+        "conformance-staff",
+        "token-uninitialized",
+    )
+    .await
+    .expect("register union-uninitialized");
+    // Approved manager edge of the asking user on a version-0 bot.
+    repo.seed_authority_manager_source("union-uninitialized", "conformance-staff", "direct", "manual")
+        .await
+        .expect("seed manager edge");
+    match repo
+        .list_controllable(controllable_query(&env))
+        .await
+        .expect_err("uninitialized union member fails closed")
+    {
+        ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { bot_id, .. },
+        ) => assert_eq!(bot_id, "union-uninitialized"),
+        other => panic!("expected OwnershipNotInitialized, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_list_controllable_unions_owner_manager_and_the_self_row() {
+    let (repo, db) = sqlite_control_plane_repo().await;
+    // The seeded rows live in env "dev" like every other SQL conformance
+    // fixture; the union query is env-bound.
+    let env = "dev".to_string();
+    seed_bot(db.as_ref(), "sqlite-union-owned", "SQLite Union Owned", "bot", "public", "online", Some("conformance-staff"), "2020-01-01 00:00:00").await;
+    seed_bot(db.as_ref(), "sqlite-union-managed", "SQLite Union Managed", "bot", "public", "online", Some("conformance-other"), "2020-01-02 00:00:00").await;
+    seed_bot(db.as_ref(), "human_conformance-staff", "Conformance Human", "human", "protected", "online", None, "2020-01-03 00:00:00").await;
+    seed_role_edge(db.as_ref(), "sqlite-union-owned", "conformance-staff", "owner").await;
+    seed_role_edge(db.as_ref(), "sqlite-union-managed", "conformance-owner", "owner").await;
+    seed_role_edge(db.as_ref(), "sqlite-union-managed", "conformance-staff", "manager").await;
+    // The user ALSO holds a second manager source on the same bot: one row.
+    seed_manager_source_edge(db.as_ref(), "sqlite-union-managed", "conformance-staff", "team", "team-9").await;
+
+    let records = repo
+        .list_controllable(controllable_query(&env))
+        .await
+        .expect("sqlite controllable union");
+    assert_eq!(
+        controllable_ids(&records),
+        vec![
+            ("human_conformance-staff".to_string(), "owner"),
+            ("sqlite-union-managed".to_string(), "manager"),
+            ("sqlite-union-owned".to_string(), "owner"),
+        ],
+        "order: created_at DESC, bot_uuid ASC — one row per Bot, \
+         human self row projects owner"
+    );
+
+    // name filter applies uniformly.
+    let mut named = controllable_query(&env);
+    named.name = Some("UNION OWNED".to_string());
+    let records = repo
+        .list_controllable(named)
+        .await
+        .expect("name-filtered union");
+    assert_eq!(
+        controllable_ids(&records),
+        vec![("sqlite-union-owned".to_string(), "owner")]
+    );
+}
+
+async fn sqlite_control_plane_repo() -> (PersistentBotRepo, Arc<dyn DbPlugin>) {
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite);
+    (repo, db)
+}
+
+async fn seed_role_edge(db: &dyn DbPlugin, bot_id: &str, user_id: &str, kind: &'static str) {
+    let env = "dev".to_string();
+    db.execute(DbStatement::with_params(
+        "INSERT INTO edge_grants (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+         status, originator_policy_type, originator_policy_data, management_source_kind, \
+         management_source_id) \
+         VALUES (?, ?, ?, ?, 0, NULL, 'approved', 'same_as_from', NULL, ?, ?)",
+        vec![
+            Value::from(env.as_str()),
+            Value::from(format!("human_{user_id}")),
+            Value::from(bot_id),
+            Value::from(kind),
+            Value::from(if kind == "owner" { "owner" } else { "direct" }),
+            Value::from(if kind == "owner" { "owner" } else { "manual" }),
+        ],
+    ))
+    .await
+    .expect("seed role edge");
+    // Role-bearing bots must be initialized ownership objects.
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET ownership_version = 1 WHERE bot_uuid = ?",
+        vec![Value::from(bot_id)],
+    ))
+    .await
+    .expect("initialize ownership version");
+}
+
+async fn seed_manager_source_edge(
+    db: &dyn DbPlugin,
+    bot_id: &str,
+    user_id: &str,
+    kind: &str,
+    id: &str,
+) {
+    let env = "dev".to_string();
+    db.execute(DbStatement::with_params(
+        "INSERT INTO edge_grants (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+         status, originator_policy_type, originator_policy_data, management_source_kind, \
+         management_source_id) \
+         VALUES (?, ?, ?, 'manager', 0, NULL, 'approved', 'same_as_from', NULL, ?, ?)",
+        vec![
+            Value::from(env.as_str()),
+            Value::from(format!("human_{user_id}")),
+            Value::from(bot_id),
+            Value::from(kind),
+            Value::from(id),
+        ],
+    ))
+    .await
+    .expect("seed manager source edge");
 }

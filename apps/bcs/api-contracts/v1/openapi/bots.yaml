@@ -539,21 +539,32 @@ MyBotsPath:
   get:
     operationId: list_my_bots
     tags: ["Collaboration / Bots"]
-    summary: List Bot rows created by the current Human.
+    summary: List the Bot rows the current Human controls, with an explicit access relation.
     description: >-
-      Human control-plane operation. Ownership is selected by comparing the
-      current Human staff_no with created_by, without kind-specific handling.
-      Both physical Bot and Human rows can be returned. Omitting kind means all
-      kinds; reachability only matches physical Bots, so combining kind=human
-      with reachability produces an empty page.
+      Human control-plane operation. The result is the physical Bot
+      union of the caller's CURRENT approved owner and manager role
+      edges (deduplicated per Bot: owner wins when both exist), plus the
+      caller's own Human self row as an explicit `owner`-labeled
+      self-identity compatibility projection (it carries no
+      transferrable authority). `created_by` is creation provenance only
+      and never decides membership or the label: a self-created Bot
+      whose authority was transferred away (without a retained manager
+      edge) is NOT returned, while someone else's creation transferred
+      TO the caller is. Every item carries the REQUIRED
+      `access_relation` label (`owner` | `manager`) computed from the
+      current edges; the label is a per-read permission snapshot. Omitting
+      kind means all kinds; reachability only matches physical Bots, so
+      combining kind=human with reachability produces an empty page.
     x-avernet-security:
       user: required
       app: required
     x-avernet-behavior:
-      owner_field: created_by
-      owner_value: current_staff_no
+      ownership_source: current_owner_manager_union
+      deduplicate: per_bot_owner_priority
+      human_self_row: explicit_owner_compat_projection
       omitted_kind: all
       reachability_applies_to: bot
+      strictness: fail_closed_on_uninitialized_or_corrupt_authority
       ordering:
         - created_at_desc
         - bot_id_asc
@@ -598,12 +609,15 @@ MyBotsPath:
     responses:
       "200":
         description: >-
-          Owned rows ordered by created_at descending with bot_id ascending as
-          the deterministic tie-breaker, then paginated.
+          Controllable rows (owner ∪ manager union plus the Human self
+          row, one item per Bot) ordered by created_at descending with
+          bot_id ascending as the deterministic tie-breaker, then
+          paginated. Each item carries the REQUIRED access_relation
+          label; it is never null, omitted, or defaulted.
         content:
           application/json:
             schema:
-              $ref: ../domain-models.yaml#/BotPageEnvelope
+              $ref: ../domain-models.yaml#/MyBotPageEnvelope
       "400":
         description: Invalid filter or pagination parameter.
         x-error-codes:

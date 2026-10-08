@@ -22,12 +22,14 @@ use tracing::{debug, info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{
-    DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue as Value, db_get_column, db_get_column_opt,
+    DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue as Value,
+    db_get_column, db_get_column_opt,
 };
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControllableQuery, ControllableBotRecord,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
     BotMetricCount,
     BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
@@ -46,6 +48,8 @@ pub mod provider;
 pub mod provider_cache;
 mod registration_create;
 mod agent_registration;
+mod controllable_bots;
+mod action_audit;
 mod ownership_initialization;
 mod ownership_deletion;
 
@@ -3363,6 +3367,15 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         rows.iter().map(control_plane_record_from_row).collect()
     }
 
+    async fn list_controllable(
+        &self,
+        query: BotControllableQuery,
+    ) -> ServiceResult<Vec<ControllableBotRecord>> {
+        // The union engine lives in `crate::controllable_bots` next to its
+        // memory twin; this arm only carries the contract endpoint.
+        self.list_controllable_impl(&query).await
+    }
+
     async fn list_control_plane_by_task_modes(
         &self,
         query: BotTaskModesQuery,
@@ -3432,6 +3445,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         bot_id: &str,
         env: &str,
         patch: BotControlPlanePatch,
+        operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
         if patch.user_visibility.is_some()
             || patch.friend_ext.is_some()
@@ -3521,12 +3535,33 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
              AND COALESCE(is_deleted, 0) = 0",
             assignments.join(", ")
         );
-        let affected = self
-            .db_execute_affected(&sql, params)
-            .await
-            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-        if affected == 0 && self.get_control_plane(bot_id, env).await?.is_none() {
-            return Ok(None);
+        // One-transaction contract (spec §12.5): the actual UPDATE and its
+        // `update/bot/applied` audit row commit together; an audit INSERT
+        // failure rolls the business change back. The ONLY case a failed
+        // attempt still surfaces success is a byte-identical same-slot
+        // replay of an operation whose previous attempt fully committed
+        // (the first row keeps its DB timestamps) — the business UPDATE
+        // is then re-applied alone; any DIFFERENT slot content is a
+        // conflict, and anything else is the genuine failure.
+        let audit_record = action_audit::patch_audit_record(&operation, env, bot_id);
+        let transaction_outcome = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(&sql, params.clone())),
+                DbTransactionStep::Execute(action_audit::action_audit_insert(&audit_record)),
+            ])
+            .await;
+        match transaction_outcome {
+            Ok(_) => {}
+            Err(ref transaction_error) => {
+                self.retry_identical_patch_if_slot_matches(
+                    &transaction_error.to_string(),
+                    &audit_record,
+                    &sql,
+                    params,
+                )
+                .await?;
+            }
         }
 
         if let Some(bot) = self.bots.write().await.get_mut(bot_id) {

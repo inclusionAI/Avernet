@@ -467,12 +467,14 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

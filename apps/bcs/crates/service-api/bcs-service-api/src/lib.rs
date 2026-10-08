@@ -258,6 +258,7 @@ pub use workbench_use_cases::{
 
 pub use types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotControllableQuery, ControllableBotRecord,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
     BotTaskModesQuery, TaskModeMatch,
@@ -283,6 +284,7 @@ pub use core::{
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
+    ControllableBotView,
     BotRegistryCoreService,
     BotAuthorityCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,

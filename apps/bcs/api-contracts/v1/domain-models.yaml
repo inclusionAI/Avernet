@@ -363,6 +363,60 @@ BotPage:
       type: integer
       minimum: 1
 
+BotAccessRelation:
+  type: string
+  description: >-
+    The current authenticated Human's highest effective control-plane
+    relation on ONE Bot row of the mine result (spec §7). It is a
+    per-read permission snapshot for THIS caller, never a global Bot
+    property and never a replacement for the server-side authorization
+    of a subsequent request. `owner` marks the current effective owner;
+    `manager` marks a caller who is not the owner but holds an approved
+    manager edge. The caller's own Human self row displays `owner` as
+    an explicit self-identity compatibility label only.
+  enum:
+    - owner
+    - manager
+
+MyBot:
+  description: >-
+    One `GET /bots/mine` item: the (flattened) Bot fields plus the
+    REQUIRED access_relation label. The label is computed from the
+    CURRENT authority edges — created_by never decides it — and may not
+    be defaulted or omitted. The generic Bot schema never carries this
+    field.
+  allOf:
+    - $ref: "#/Bot"
+    - type: object
+      required:
+        - access_relation
+      properties:
+        access_relation:
+          $ref: "#/BotAccessRelation"
+
+MyBotPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/MyBot"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
 BotCandidatePage:
   type: object
   additionalProperties: false
@@ -430,6 +484,24 @@ BotPageEnvelope:
       type: string
     data:
       $ref: "#/BotPage"
+    request_id:
+      type: string
+
+MyBotPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/MyBotPage"
     request_id:
       type: string
 

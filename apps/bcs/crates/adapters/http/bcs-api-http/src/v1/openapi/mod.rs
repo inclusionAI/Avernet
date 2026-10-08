@@ -11,6 +11,9 @@ pub use dto::session_file::{
     ListSessionFilesQuery, PrepareSessionFileRequest, ProtectedFileContentQuery,
     ShareSessionFileRequest, SharedFileContentQuery, UploadSessionFileQuery,
 };
+/// Task 9: the strict mine-item decode DTO (required `access_relation`
+/// label over the flattened Bot fields) — exported for contract tests.
+pub use dto::bot::MyBot;
 
 pub fn protected_router() -> Router<ApiState> {
     Router::new().nest(

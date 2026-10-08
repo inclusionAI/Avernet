@@ -216,6 +216,13 @@ async fn patch_returns_the_hydrated_updated_view() {
                 name: Some("Renamed".to_string()),
                 ..Default::default()
             },
+            bcs_service_api::types::BotOperationContext {
+                operation_id: uuid::Uuid::new_v4().to_string(),
+                actor: bcs_service_api::types::BotOperationActor::Human {
+                    user_id: "staff-1".to_string(),
+                    effective_actor_id: "owned".to_string(),
+                },
+            },
         )
         .await
         .expect("patch record")

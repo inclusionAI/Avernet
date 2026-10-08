@@ -38,6 +38,7 @@ use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControllableQuery, ControllableBotRecord,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotMetricCount,
     BotMetricsSnapshotPort, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
@@ -448,6 +449,21 @@ fn metrics_visibility_label(visibility: &str) -> String {
         "public" | "protected" | "private" => visibility.to_string(),
         "" => "private".to_string(),
         _ => "other".to_string(),
+    }
+}
+
+impl MemoryBotRepo {
+    /// TEST-ONLY fixture lever: pin one Bot's control-plane `created_at`
+    /// timestamp so mine/controllable fixtures get deterministic
+    /// `created_at DESC, bot_id ASC` ordering. Nothing outside the test
+    /// harness ever calls this.
+    pub async fn set_control_plane_created_at(&self, bot_id: &str, created_at: u64) {
+        let mut audit = self.control_plane_audit.write().await;
+        let entry = audit.entry(bot_id.to_string()).or_insert((created_at, 0));
+        entry.0 = created_at;
+        if entry.1 < created_at {
+            entry.1 = created_at;
+        }
     }
 }
 

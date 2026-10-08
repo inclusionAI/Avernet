@@ -142,6 +142,22 @@ pub enum BotActionResourceKind {
     Invitation,
 }
 
+impl BotActionResourceKind {
+    /// Wire/step-key label (snake_case, matches the serde encoding).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Bot => "bot",
+            Self::Group => "group",
+            Self::Session => "session",
+            Self::SessionFile => "session_file",
+            Self::Workspace => "workspace",
+            Self::Message => "message",
+            Self::Friend => "friend",
+            Self::Invitation => "invitation",
+        }
+    }
+}
+
 impl BotActionKind {
     /// Whether this action performs an external/runtime side effect
     /// AFTER a persisted `admitted` record (spec §12.5).
@@ -205,6 +221,19 @@ pub enum BotActionAuditPhase {
     Unknown,
 }
 
+impl BotActionAuditPhase {
+    /// Wire/column label (snake_case, matches the serde encoding).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Admitted => "admitted",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Stable in-operation step key composed of the controlled
 /// action/resource/phase vocabulary (e.g. `send/message/admitted`).
 ///
@@ -226,27 +255,12 @@ pub fn stable_step_key(
 }
 
 fn resource_kind_label(kind: BotActionResourceKind) -> &'static str {
-    match kind {
-        BotActionResourceKind::Bot => "bot",
-        BotActionResourceKind::Group => "group",
-        BotActionResourceKind::Session => "session",
-        BotActionResourceKind::SessionFile => "session_file",
-        BotActionResourceKind::Workspace => "workspace",
-        BotActionResourceKind::Message => "message",
-        BotActionResourceKind::Friend => "friend",
-        BotActionResourceKind::Invitation => "invitation",
-    }
+    kind.as_str()
 }
 
 /// Wire/step-key label of the audit phase (serde name).
 fn phase_label(phase: BotActionAuditPhase) -> &'static str {
-    match phase {
-        BotActionAuditPhase::Applied => "applied",
-        BotActionAuditPhase::Admitted => "admitted",
-        BotActionAuditPhase::Completed => "completed",
-        BotActionAuditPhase::Failed => "failed",
-        BotActionAuditPhase::Unknown => "unknown",
-    }
+    phase.as_str()
 }
 
 /// One audit record of an ordinary business operation

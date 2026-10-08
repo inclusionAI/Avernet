@@ -296,6 +296,16 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         Ok(records)
     }
 
+    async fn list_controllable(
+        &self,
+        query: BotControllableQuery,
+    ) -> ServiceResult<Vec<ControllableBotRecord>> {
+        // The controllable union engine lives in `crate::controllable_bots`
+        // next to its SQL twin; the memory contract here only carries the
+        // endpoint.
+        self.list_controllable_impl(&query).await
+    }
+
     async fn list_control_plane_by_task_modes(
         &self,
         query: BotTaskModesQuery,
@@ -349,6 +359,7 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         bot_id: &str,
         env: &str,
         patch: BotControlPlanePatch,
+        operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
         let _patch_guard = self.control_plane_patch_lock.lock().await;
         if patch.user_visibility.is_some()
@@ -459,7 +470,27 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         fs::write(&path, serde_json::to_string_pretty(&persisted)?).await?;
 
         {
+            // One critical section (the memory twin of the SQL store's
+            // one-transaction contract, spec §12.5): the business-state
+            // publications and the `update/bot/applied` audit row commit
+            // together. The audit append resolves FIRST and any slot
+            // conflict aborts BEFORE a single mutation is published; an
+            // armed test write failure discards the staged state the
+            // same way (failure drops the staged mutation, never a
+            // half-published one). A vanished target row publishes
+            // nothing at all — no mutation and no audit row.
+            if self.take_authority_write_failure().await {
+                return Err(ServiceError::InternalError(
+                    "test-injected authority write failure".into(),
+                ));
+            }
+            let audit_record = crate::action_audit::patch_audit_record(&operation, env, bot_id);
             let mut bots = self.bots.write().await;
+            let mut authority = self.authority.write().await;
+            if !bots.contains_key(bot_id) {
+                return Ok(None);
+            }
+            authority.append_action_audit_once(&audit_record)?;
             let Some(bot) = bots.get_mut(bot_id) else {
                 return Ok(None);
             };

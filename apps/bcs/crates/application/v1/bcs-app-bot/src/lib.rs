@@ -2,6 +2,7 @@
 
 mod authority;
 mod bot_self;
+mod mine;
 pub use authority::BotAuthorityHookImpl;
 pub use bot_self::BotSelfServiceImpl;
 
@@ -13,17 +14,20 @@ use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
     BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
     BotKind, BotProvider, BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot,
-    HumanBot, InternalBotAttributesService, ListBotCandidates, ListMyBots, Page,
+    HumanBot, InternalBotAttributesService, ListBotCandidates, ListMyBots, MyBot, Page,
     PatchBotInternalAttributes, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
     require_authenticated_user,
 };
 use bcs_service_api::application::ConnectService;
+use bcs_service_api::application::v1::BotAuthorityHook;
+use bcs_service_api::port::repo::bot_authority::human_actor_id;
+use bcs_service_api::types::BotOperationActor;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
     BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
-    BotRegistryCoreService, FriendCoreService, ServiceError,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
+    FriendCoreService, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -37,6 +41,7 @@ pub struct BotServiceImpl {
     friends: Arc<dyn FriendCoreService>,
     connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    authority: Arc<dyn BotAuthorityHook>,
     config: BotServiceConfig,
 }
 
@@ -126,6 +131,11 @@ impl InternalBotAttributesService for InternalBotAttributesServiceImpl {
                     friend_check_in_strategy: command.friend_check_in_strategy,
                     ..Default::default()
                 },
+                // The internal Bot-attributes lane is a machine interface
+                // with no verified Human: the System branch records that
+                // honestly ("no Human was involved") — never a fabricated
+                // Human and never a silently skipped audit (spec §12.5).
+                bot_internal_attributes_operation(&command.bot_id),
             )
             .await
             .map_err(map_service_error)?
@@ -146,6 +156,7 @@ impl BotServiceImpl {
         friends: Arc<dyn FriendCoreService>,
         connect_service: Arc<dyn ConnectService>,
         candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+        authority: Arc<dyn BotAuthorityHook>,
         config: BotServiceConfig,
     ) -> Self {
         Self {
@@ -154,6 +165,7 @@ impl BotServiceImpl {
             friends,
             connect_service,
             candidate_search,
+            authority,
             config,
         }
     }
@@ -336,11 +348,36 @@ impl BotServiceImpl {
     ) -> Result<BotControlPlaneRecord, ApplicationError> {
         let acting = self.load_record(bot_id).await?;
         match acting.kind {
-            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no) => Ok(acting),
-            ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => Ok(acting),
-            _ => Err(ApplicationError::forbidden(format!(
-                "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
-            ))),
+            // The current Human's own Human actor row stays a valid
+            // perspective (self identity compatibility); other Humans
+            // never become one.
+            ActorKind::Human => {
+                if acting.bot_id == human_actor_id(staff_no) {
+                    Ok(acting)
+                } else {
+                    Err(ApplicationError::forbidden(format!(
+                        "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+                    )))
+                }
+            }
+            // Physical Bot perspectives follow the CURRENT authority edges
+            // (spec §12.4 cutover): created_by is creation provenance,
+            // never a permission. Strict-read failures (uninitialized or
+            // corrupt authority) propagate with their typed branches.
+            ActorKind::Bot => {
+                if self
+                    .authority
+                    .can_manage(staff_no, bot_id)
+                    .await
+                    .map_err(map_service_error)?
+                {
+                    Ok(acting)
+                } else {
+                    Err(ApplicationError::forbidden(format!(
+                        "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+                    )))
+                }
+            }
         }
     }
 
@@ -565,9 +602,22 @@ impl BotService for BotServiceImpl {
             ));
         }
         let record = self.load_record(&command.bot_id).await?;
-        if record.created_by.as_deref() != Some(staff_no.as_str()) {
+        // Control-plane cutover (spec §12.4): authority comes from the
+        // CURRENT owner/manager edges through the hook — `created_by` is
+        // creation provenance and never a permission. The caller's own
+        // Human row stays patchable as explicit self identity
+        // (compatibility projection); every other Human row is denied.
+        let authorized = match record.kind {
+            ActorKind::Human => record.bot_id == human_actor_id(&staff_no),
+            ActorKind::Bot => self
+                .authority
+                .can_manage(&staff_no, &command.bot_id)
+                .await
+                .map_err(map_service_error)?,
+        };
+        if !authorized {
             return Err(ApplicationError::forbidden(format!(
-                "Current Human does not own Bot '{}'",
+                "Current Human does not control Bot '{}'",
                 command.bot_id
             )));
         }
@@ -624,6 +674,14 @@ impl BotService for BotServiceImpl {
                 })
             })
             .transpose()?;
+        // REQUIRED audit identity (spec §12.5): built HERE after
+        // authentication and authorization — the store commits the
+        // UPDATE and its `update/bot/applied` audit row together; the
+        // operator never comes from a transport request body.
+        let operation = bot_patch_operation(
+            &staff_no,
+            &command.bot_id,
+        );
         let updated = self
             .control_plane
             .patch(
@@ -641,6 +699,7 @@ impl BotService for BotServiceImpl {
                     friend_check_in_strategy: command.patch.friend_check_in_strategy,
                     ..Default::default()
                 },
+                operation,
             )
             .await
             .map_err(map_service_error)?
@@ -653,45 +712,39 @@ impl BotService for BotServiceImpl {
         self.project_one(updated).await
     }
 
-    async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
-        let human = require_authenticated_user(&command.caller)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let staff_no = human.id.clone();
-        let display_name = Self::human_display_name(human);
-        self.registry
-            .ensure_human_actor(&staff_no, &display_name)
-            .await
-            .map_err(map_service_error)?;
-        let records = self
-            .control_plane
-            .list_by_creator(BotControlPlaneOwnedQuery {
-                created_by: staff_no,
-                env: self.config.env.clone(),
-                kind: command.kind.map(|kind| match kind {
-                    BotKind::Bot => ActorKind::Bot,
-                    BotKind::Human => ActorKind::Human,
-                }),
-                name: normalize_optional_name(command.name),
-                status: command.status.map(domain_status),
-            })
-            .await
-            .map_err(map_service_error)?;
-        let mut bots = self.project_records(records).await?;
-        if let Some(reachability) = command.reachability {
-            bots.retain(|bot| {
-                matches!(bot, Bot::Physical(physical) if physical.reachability == reachability)
-            });
-        }
-        let total = bots.len() as u64;
-        let offset = usize::try_from(command.offset).unwrap_or(usize::MAX);
-        let limit = usize::try_from(command.limit).unwrap_or(usize::MAX);
-        let items = bots.into_iter().skip(offset).take(limit).collect();
-        Ok(Page {
-            items,
-            total,
-            offset: command.offset,
-            limit: command.limit,
-        })
+    async fn list_mine(&self, command: ListMyBots) -> Result<Page<MyBot>, ApplicationError> {
+        // The union-projection use case lives in `mine.rs` (plan Task 9):
+        // owner ∪ manager via the controllable read, one item per Bot
+        // with the REQUIRED access_relation label, plus the Human self
+        // row as an explicit `Owner`-labeled compatibility projection.
+        self.list_mine_impl(command).await
+    }
+}
+
+/// REQUIRED audit identity of one Human-issued Bot PATCH (spec §12.5).
+/// `effective_actor_id` is the Bot the authorization selected for the
+/// operation; the trusted operator stays the Human.
+fn bot_patch_operation(staff_no: &str, bot_id: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        actor: BotOperationActor::Human {
+            user_id: staff_no.to_string(),
+            effective_actor_id: bot_id.to_string(),
+        },
+    }
+}
+
+/// Audit identity of the internal Bot-attributes lane: a machine
+/// interface with no verified Human — the System branch records "no
+/// Human was involved" honestly; the selected effective actor is the
+/// patched Bot.
+fn bot_internal_attributes_operation(bot_id: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        actor: BotOperationActor::System {
+            system_id: "internal_bot_attributes_api".to_string(),
+            effective_actor_id: bot_id.to_string(),
+        },
     }
 }
 
@@ -735,5 +788,15 @@ fn domain_status(value: BotStatus) -> ActorStatus {
 }
 
 fn map_service_error(error: ServiceError) -> ApplicationError {
-    ApplicationError::internal(error.to_string())
+    match error {
+        // Strict authority branches surface their fixed spec codes
+        // (ownership_not_initialized / corrupt_authority / forbidden …) —
+        // they are business failures, not storage noise.
+        ServiceError::Authority(authority) => ApplicationError::authority(authority),
+        ServiceError::BotNotFound(bot_id) => ApplicationError::not_found(
+            "bot_not_found",
+            format!("Bot '{bot_id}' was not found"),
+        ),
+        other => ApplicationError::internal(other.to_string()),
+    }
 }
