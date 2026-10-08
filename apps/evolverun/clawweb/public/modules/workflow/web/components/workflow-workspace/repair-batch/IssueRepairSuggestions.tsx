@@ -1,49 +1,76 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../server/contracts/repair-workbench'
+import type { RepairCandidatesResponse, RepairInboxItem, RepairInboxFilter } from '../../../../server/contracts/repair-workbench'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
-import { itemTitle } from './repair-view'
+import { exclusion, itemTitle, states } from './repair-view'
+import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
-/** Issue-scoped navigation, independent of the outer list's page and state filter. */
-export default function IssueRepairSuggestions({ workflowId, signature, includeHistorical, initialItemId, onResult, renderItem }: {
-  workflowId: string; signature: string; includeHistorical: boolean; initialItemId?: string | null
+/** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
+export default function IssueRepairSuggestions({ workflowId, signature, includeHistorical, initialItemId, onResult, renderItem,
+  selected = [], onToggle, canEdit = false, limit = 100 }: {
+  workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
+  selected?: string[]; onToggle?: (id: string) => void; canEdit?: boolean; limit?: number
   onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode
 }) {
   const [page, setPage] = useState(1)
+  const [state, setState] = useState<RepairInboxFilter>('all')
   const [refresh, setRefresh] = useState(0)
   const [data, setData] = useState<RepairCandidatesResponse | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState(initialItemId ?? '')
+  const [expanded, setExpanded] = useState(initialItemId ?? '')
   const resultCallback = useRef(onResult)
   resultCallback.current = onResult
   useEffect(() => {
     let current = true
     setLoading(true); setError(''); setData(null)
-    repairBatches.candidates(workflowId, { signature, state: 'all', page, pageSize: 20, includeHistorical }).then(result => {
+    repairBatches.candidates(workflowId, { signature, state, page, pageSize: 20, includeHistorical }).then(result => {
       if (!current) return
       setData(result); resultCallback.current(result)
-      setSelected(previous => result.items.some(item => item.itemId === previous) ? previous : result.items[0]?.itemId ?? '')
     }).catch(reason => { if (current) setError(repairReadError(reason)) })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
-  }, [workflowId, signature, includeHistorical, page, refresh])
-  if (loading) return <p role="status" className="text-sm text-slate-600">正在加载此问题的修复建议…</p>
-  if (error) return <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => setRefresh(n => n + 1)}>重试建议</button></div>
-  if (!data?.items.length) return <p className="text-sm text-slate-600">此问题在当前历史范围内没有修复建议。可在“证据与历史”查看分析依据。</p>
-  const item = data.items.find(value => value.itemId === selected) ?? data.items[0]
-  return <>
-    <label className="mb-4 block text-sm font-medium text-slate-700">此问题的修复建议 · 共 {data.page.total} 条
-      <select aria-label="切换建议" value={item.itemId} onChange={event => setSelected(event.target.value)}
-        className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm">
-        {data.items.map(value => <option key={value.itemId} value={value.itemId}>{itemTitle(value)}</option>)}
+  }, [workflowId, signature, includeHistorical, state, page, refresh])
+  return <section aria-label="选择修复建议" className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h4 className="text-sm font-semibold text-slate-900">{signature ? '此问题的修复建议' : '全部修复建议'}{data ? ` · 共 ${data.page.total} 条` : ''}</h4>
+      <select aria-label="建议状态" value={state} onChange={event => { setState(event.target.value as RepairInboxFilter); setPage(1); setExpanded('') }}
+        className="rounded border border-slate-200 bg-white px-2 py-1 text-sm">
+        {Object.entries({ all: '全部状态', pending: '待处理', processing: '处理中', awaiting_verification: '待验证', closed: '已关闭', no_action: '暂不处理' })
+          .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
-    </label>
-    {data.page.totalPages > 1 && <nav aria-label="此问题的建议分页" className="mb-4 flex items-center justify-between text-sm">
-      <button disabled={page <= 1} onClick={() => setPage(n => n - 1)}>上一页建议</button>
-      <span>{data.page.page} / {data.page.totalPages}</span>
-      <button disabled={page >= data.page.totalPages} onClick={() => setPage(n => n + 1)}>下一页建议</button>
+    </div>
+    <p className="text-xs leading-5 text-slate-500">可多选，选择跨问题保留；生成前统一确认范围。同一字段的不同方案需先取舍。</p>
+    {loading ? <p role="status" className="text-sm text-slate-600">正在加载修复建议…</p>
+      : error ? <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => setRefresh(n => n + 1)}>重试建议</button></div>
+      : !data?.items.length ? <p className="text-sm text-slate-600">当前范围没有匹配的修复建议。可调整状态或历史范围，分析依据仍可查看。</p>
+      : <div className="space-y-3">{data.items.map(item => {
+        const reason = exclusion(item)
+        const checked = selected.includes(item.itemId)
+        const runs = sourceRunCount(item)
+        return <article key={item.itemId} className={`rounded-lg border p-3 ${checked ? 'border-blue-300 bg-blue-50/30' : 'border-slate-200'}`}>
+          <div className="flex items-start gap-3">
+            <input type="checkbox" aria-label={`选择 ${itemTitle(item)}`} checked={checked}
+              disabled={!canEdit || !data.canEdit || !!reason || !checked && selected.length >= limit}
+              onChange={() => onToggle?.(item.itemId)} className="mt-1 h-4 w-4 shrink-0 accent-blue-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-6 text-slate-900">{itemTitle(item)}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-600">{changeSummary(item)}</p>
+              <p className="mt-1 text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `依据覆盖 ${runs} 个运行`}</p>
+              {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}
+              <button type="button" aria-expanded={expanded === item.itemId} className="mt-2 text-xs font-medium text-blue-700 hover:underline focus-visible:outline"
+                onClick={() => setExpanded(value => value === item.itemId ? '' : item.itemId)}>
+                {expanded === item.itemId ? '收起修改与依据' : '查看修改与依据'}
+              </button>
+            </div>
+          </div>
+          {expanded === item.itemId && <div className="mt-3 border-t border-slate-200 pt-3">{renderItem(item, data.canEdit)}</div>}
+        </article>
+      })}</div>}
+    {data && data.page.totalPages > 1 && <nav aria-label="此问题的建议分页" className="flex items-center justify-between text-sm">
+      <button disabled={data.page.page <= 1} onClick={() => { setPage(data.page.page - 1); setExpanded('') }}>上一页建议</button>
+      <span>建议第 {data.page.page} / {data.page.totalPages} 页</span>
+      <button disabled={data.page.page >= data.page.totalPages} onClick={() => { setPage(data.page.page + 1); setExpanded('') }}>下一页建议</button>
     </nav>}
-    {renderItem(item, data.canEdit)}
-  </>
+  </section>
 }
