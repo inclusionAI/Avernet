@@ -1,4 +1,5 @@
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
+import { readOnlyJson } from './read-only-json'
 import type { RepairCandidatesQuery, RepairCandidatesResponse, RepairDiff, RepairFeedbackRequest, RepairInboxItem, RepairSelectionRequest, RepairTaskDetail } from '../../server/contracts/repair-workbench'
 import type { RepairRevision, StoredRepairItem } from '../../server/contracts/repair-batch'
 
@@ -12,9 +13,9 @@ export const repairBatches = {
     if (query.page) params.set('page', String(query.page))
     if (query.pageSize) params.set('pageSize', String(query.pageSize))
     if (query.includeHistorical) params.set('includeHistorical', 'true')
-    return fetchJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
+    return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
-  item: (workflowId: string, itemId: string) => fetchJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),
+  item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),
   task: (taskId: string) => fetchJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
