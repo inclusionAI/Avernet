@@ -20,8 +20,8 @@ All newly introduced restart policy lives in `engines/aicoding/`:
 - `restart_request.py`: coding-owned configuration/request preparation, reusing
   existing template, BCN, image policy and BaaS payload-building helpers.
 - `restart_baas.py`: backup -> short restart lock -> prepare -> durable provider
-  polling intent -> final receipt verification -> submit -> persist publish id.
-- `restart_submission.py`: final fence and explicit-rejection classification.
+  polling intent -> final receipt verification -> submit -> persist publish id;
+  also owns the final fence and explicit-rejection classification.
 - Existing `restart_backup.py` and `restart_state.py`: runtime backup protocol,
   generation/identity verification, timing, operation journal and public errors.
 
@@ -51,7 +51,7 @@ existing paths; they do not enter the new ordinary coding/BaaS executor.
    another coding task.
 2. Admission persists the coding task/journal and writes Bot PENDING once.
 3. The worker verifies operation/target ownership and runs backup, outside the
-   short restart lock. One 300-second budget includes queue time and redelivery.
+   short restart lock. One 1500-second budget includes queue time and redelivery.
 4. With the original restart lock, it verifies the receipt and rebuilds the
    current request. Credentials/configuration payloads remain process-local;
    they are never copied into the persistent task queue. Service-draft default
@@ -73,7 +73,7 @@ A missing helper is accepted only for confirmed legacy absence without upgrade
 residue; helper-confirmed not_mounted skips backup. Probe failure never means
 unmounted. Noncoding engines do not enter the probe or task.
 
-The coding observer budget is 900 seconds (backup 300 + provider observation
+The coding observer budget is 2100 seconds (backup 1500 + provider observation
 600). Queue retention is 86400 seconds, not a business deadline. Exec transport
 calls retain their own timeout: the budget prevents authorization after expiry;
 it cannot forcibly kill an in-flight exec or runtime worker. Old in-flight task

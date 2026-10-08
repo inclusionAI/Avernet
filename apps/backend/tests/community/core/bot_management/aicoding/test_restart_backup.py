@@ -649,7 +649,7 @@ def test_ordinary_backup_budget_includes_time_already_spent_in_queue():
         BACKUP_TIMEOUT, current_restart,
     )
 
-    assert BACKUP_TIMEOUT == 300
+    assert BACKUP_TIMEOUT == backup.DEADLINE_SECONDS == 1500
     context_reset_handle = current_restart.set(SimpleNamespace(payload={
         "started_at": time.time() - BACKUP_TIMEOUT - 1,
     }))

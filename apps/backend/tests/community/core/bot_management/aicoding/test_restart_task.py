@@ -668,7 +668,7 @@ async def test_reclaimed_submission_adopts_handoff_without_reissuing(setup):
 
 @pytest.mark.parametrize("fenced", [False, True])
 def test_submission_error_cleanup_never_clears_a_newer_operation(fenced):
-    from agentclaw.community.core.bot_management.engines.aicoding.restart_submission import (
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import (
         AicodingSubmissionMixin,
     )
     import httpx

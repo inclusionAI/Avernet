@@ -42,7 +42,7 @@ from ..provisioning import (
 from ...services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
 from .restart_backup import AicodingRestartBackupMixin
 from .restart_task import AicodingDurableRestartMixin
-from .restart_submission import AicodingSubmissionMixin
+from .restart_baas import AicodingSubmissionMixin
 from .hosted_workspace_mixin import AicodingHostedWorkspaceMixin
 
 

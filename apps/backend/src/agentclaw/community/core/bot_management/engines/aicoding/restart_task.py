@@ -44,7 +44,7 @@ from .restart_state import (
     task_key,
 )
 
-from .restart_submission import find_rejection
+from .restart_baas import find_rejection
 
 logger = get_logger()
 POLL_SECONDS = 3

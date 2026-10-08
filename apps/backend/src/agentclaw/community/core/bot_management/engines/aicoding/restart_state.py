@@ -19,9 +19,9 @@ TASK_TYPE = "aicoding.bot.restart"
 ENGINES = frozenset({"aicoding", "claude_code"})
 IN_PROGRESS = frozenset({"QUEUED", "BACKING_UP", "RESTARTING", "WAITING_READY"})
 TERMINAL = frozenset({"SUCCEEDED", "FAILED"})
-# Ordinary restart budget: five-minute backup plus the existing ten-minute
+# Ordinary restart budget: original 25-minute backup plus the existing ten-minute
 # provider observation window. Queue retention is not the business timeout.
-BACKUP_TIMEOUT = 300
+BACKUP_TIMEOUT = 1500
 BUSINESS_TIMEOUT = BACKUP_TIMEOUT + 600
 TASK_DEADLINE = 86400
 
