@@ -1,0 +1,325 @@
+use bcs_protocol::stream::{
+    AgentData, ChatState, InteractionEvent as WireInteractionEvent,
+    InteractionKind as WireInteractionKind, InteractionPhase, StreamEvent,
+    TASK_INTENT_ELIGIBLE_KEY, parse_run_event_v3,
+};
+use bcs_protocol::{ChatEventState, EventFrame};
+use serde_json::Value;
+use tracing::warn;
+
+use super::dispatcher::{BotDispatchState, BotWsDispatchError, Result, validate_v3_run_scope};
+
+pub(super) type NormalizedBotEvent = (
+    String,
+    String,
+    String,
+    Value,
+    ChatEventState,
+    bool,
+    Option<String>,
+    Option<u64>,
+);
+
+pub(super) enum V3RunEvent {
+    Normalized(NormalizedBotEvent),
+    Interaction(WireInteractionEvent),
+}
+
+/// Parse the raw V3 EventFrame payload and separate "flows into the
+/// NormalizedBotEvent pipeline" (agent/chat streaming events) from
+/// "handled independently" (Interaction: request-response semantics,
+/// no terminal_fingerprint replay dedup — but the per-run seq ledger is
+/// still enforced, mirroring the HTTP SSE SeqDedup accounting).
+pub(super) fn classify_v3_event(event: &EventFrame) -> Result<V3RunEvent> {
+    let raw = event
+        .payload
+        .clone()
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event payload is required".into()))?;
+    let canonical = parse_run_event_v3(&event.event, raw).map_err(|error| {
+        BotWsDispatchError::InvalidFrameFormat(format!("invalid V3 run event: {error}"))
+    })?;
+    match canonical {
+        StreamEvent::Agent(agent) => normalize_agent(agent).map(V3RunEvent::Normalized),
+        StreamEvent::Chat(chat) => normalize_chat(chat).map(V3RunEvent::Normalized),
+        StreamEvent::Interaction(interaction) => Ok(V3RunEvent::Interaction(interaction)),
+        StreamEvent::Ping { .. } | StreamEvent::Unknown { .. } => Err(
+            BotWsDispatchError::InvalidFrameFormat("unsupported V3 run event".into()),
+        ),
+    }
+}
+
+fn to_app_interaction_kind(kind: WireInteractionKind) -> bcs_service_api::InteractionKind {
+    match kind {
+        WireInteractionKind::Exec => bcs_service_api::InteractionKind::Exec,
+        WireInteractionKind::AskUser => bcs_service_api::InteractionKind::AskUser,
+        WireInteractionKind::ModeSwitch => bcs_service_api::InteractionKind::ModeSwitch,
+    }
+}
+
+/// Handle a V3 Interaction event (HITL uplink). Unlike the agent/chat path,
+/// this does not produce a `NormalizedBotEvent`: Interaction is request-response,
+/// not a streaming message, so it never enters the streaming-event pipeline
+/// (no terminal_fingerprint replay dedup). The per-run seq ledger IS enforced:
+/// after scope and deadline validation the frame reserves the shared
+/// sequence (same ledger as agent/chat frames), commits on success and
+/// releases on failure — mirroring how the HTTP SSE ingest runs interaction
+/// frames through its SeqDedup so duplicate/regressed sequences and
+/// cross-kind seq reuse are rejected on both transports. Durable
+/// idempotency for retried same-id frames stays with `InteractionService`.
+pub(super) async fn handle_interaction_event_v3(
+    state: &BotDispatchState,
+    bot_id: &str,
+    event: WireInteractionEvent,
+    outer_seq: Option<u64>,
+) -> Result<()> {
+    let session_id = event
+        .session_id
+        .as_deref()
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 interaction missing sessionId".into()))?;
+    let seq = event
+        .seq
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 interaction missing seq".into()))?;
+
+    let context = validate_v3_run_scope(state, bot_id, &event.run_id, session_id, seq, outer_seq).await?;
+    if context.terminal {
+        // The terminal event already went through the bot-terminal observer
+        // path, which owns interaction cleanup for normally-finished runs.
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run is terminal or expired".into(),
+        ));
+    }
+    let now_ms = bcs_protocol::now_ms();
+    if context.deadline_ms <= now_ms {
+        // Mirror the HTTP SSE ingest bookkeeping (drive_sse_frame): an
+        // interaction frame arriving after the run deadline invalidates the
+        // run's still-pending interactions, so the workbench stops offering
+        // an approval card that can no longer be resolved. This is internal
+        // store bookkeeping only — no frame is sent to the bot (the spec
+        // forbids downstream notification on run-deadline expiry).
+        if let Err(error) = state
+            .interactions
+            .invalidate_run(&event.run_id, "run_deadline", now_ms)
+            .await
+        {
+            warn!(
+                run_id = %event.run_id,
+                %error,
+                "failed to invalidate expired interactions"
+            );
+        }
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run is terminal or expired".into(),
+        ));
+    }
+
+    // Reserve the shared per-run sequence only after every rejection path
+    // that returns without releasing (scope/terminal/deadline above), so a
+    // rejected frame never leaves a stuck pending_seq behind.
+    if !state
+        .bot_connections
+        .reserve_run_event_seq(bot_id, &event.run_id, seq)
+        .await
+    {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event seq is duplicate or regressed".into(),
+        ));
+    }
+    let processed = match event.phase {
+        InteractionPhase::Requested => {
+            state
+                .interactions
+                .on_provider_requested(bcs_service_api::ProviderInteractionRequestedCommand {
+                    bcs_run_id: event.run_id.clone(),
+                    provider_run_id: event.run_id.clone(),
+                    interaction_id: event.interaction_id.clone(),
+                    kind: to_app_interaction_kind(event.kind),
+                    bcs_session_id: context
+                        .bcs_session_id
+                        .clone()
+                        .expect("validate_v3_run_scope guarantees a session id (identity match)"),
+                    group_id: context.group_id.clone(),
+                    bot_id: bot_id.to_string(),
+                    run_deadline_ms: context.deadline_ms,
+                    provider_target: bcs_service_api::BotDeliveryTarget::WebSocket {
+                        bot_id: bot_id.to_string(),
+                    },
+                    provider_bypass_headers: Vec::new(),
+                    payload: event.raw.clone(),
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map(|_| ())
+                .map_err(BotWsDispatchError::ServiceError)
+        }
+        InteractionPhase::Resolved => {
+            state
+                .interactions
+                .on_provider_resolved(bcs_service_api::ProviderInteractionResolvedCommand {
+                    bcs_run_id: event.run_id.clone(),
+                    provider_run_id: event.run_id.clone(),
+                    interaction_id: event.interaction_id.clone(),
+                    kind: to_app_interaction_kind(event.kind),
+                    payload: event.raw.clone(),
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map_err(BotWsDispatchError::ServiceError)
+        }
+    };
+    if processed.is_ok() {
+        state
+            .bot_connections
+            .commit_run_event_seq(bot_id, &event.run_id, seq, None)
+            .await;
+    } else {
+        state
+            .bot_connections
+            .release_run_event_seq(bot_id, &event.run_id, seq)
+            .await;
+    }
+    processed
+}
+
+fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<NormalizedBotEvent> {
+    let run_id = agent.run_id;
+    let session_id = agent.session_id;
+    let seq = agent.seq;
+    let ts = agent.ts.unwrap_or_default();
+    let (stream, data, task_intent_eligible) = match agent.data {
+        AgentData::Tool(data) => {
+            let eligible = matches!(data.phase, bcs_protocol::stream::ToolPhase::Result)
+                && data.is_error == Some(false);
+            ("tool", serde_json::to_value(data)?, eligible)
+        }
+        AgentData::Thinking(data) => ("thinking", serde_json::to_value(data)?, false),
+        AgentData::Assistant { raw } => ("assistant", raw, false),
+        AgentData::Error { raw } => {
+            return Ok(normalize_agent_error(run_id, session_id, seq, ts, raw));
+        }
+        AgentData::Approval(data) => ("approval", serde_json::to_value(data)?, false),
+        AgentData::Lifecycle(data) => ("lifecycle", serde_json::to_value(data)?, false),
+        AgentData::Phase(data) => ("phase", serde_json::to_value(data)?, false),
+        AgentData::Unknown { .. } => {
+            return Err(BotWsDispatchError::InvalidFrameFormat(
+                "unknown V3 agent stream".into(),
+            ));
+        }
+    };
+    let mut payload = serde_json::json!({
+        "run_id": run_id,
+        "bcs_group_id": "",
+        "stream": stream,
+        "ts": ts,
+        "data": data,
+    });
+    if task_intent_eligible {
+        payload[TASK_INTENT_ELIGIBLE_KEY] = Value::Bool(true);
+    }
+    Ok((
+        run_id,
+        String::new(),
+        "agent".to_string(),
+        payload,
+        ChatEventState::Delta,
+        false,
+        session_id,
+        seq,
+    ))
+}
+
+fn normalize_agent_error(
+    run_id: String,
+    session_id: Option<String>,
+    seq: Option<u64>,
+    ts: u64,
+    raw: Value,
+) -> NormalizedBotEvent {
+    let mut payload = serde_json::json!({
+        "run_id": run_id,
+        "bcs_group_id": "",
+        "state": "error",
+        "ts": ts,
+    });
+    for key in ["message", "errorMessage", "errorKind", "errorCode"] {
+        if let Some(value) = raw.get(key) {
+            payload[key] = value.clone();
+        }
+    }
+    (
+        run_id,
+        String::new(),
+        "chat.event".to_string(),
+        payload,
+        ChatEventState::Error,
+        true,
+        session_id,
+        seq,
+    )
+}
+
+fn normalize_chat(chat: bcs_protocol::stream::ChatEvent) -> Result<NormalizedBotEvent> {
+    let run_id = chat.run_id.clone();
+    let state = match chat.state {
+        ChatState::Delta => ChatEventState::Delta,
+        ChatState::Final => ChatEventState::Final,
+        ChatState::Aborted => ChatEventState::Aborted,
+        ChatState::Error => ChatEventState::Error,
+    };
+    let is_final = matches!(
+        state,
+        ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
+    );
+    let message = chat.message.clone().or_else(|| {
+        chat.content.as_ref().map(|content| {
+            serde_json::json!({
+                "role": "assistant",
+                "content": [{"type": "text", "text": content}],
+                "timestamp": chat.ts.unwrap_or_default(),
+            })
+        })
+    });
+    let mut payload = serde_json::json!({
+        "run_id": run_id,
+        "bcs_group_id": "",
+        "state": match state {
+            ChatEventState::Delta => "delta",
+            ChatEventState::Final => "final",
+            ChatEventState::Aborted => "aborted",
+            ChatEventState::Error => "error",
+            ChatEventState::ToolCallStart => "tool_call_start",
+            ChatEventState::ToolCallEnd => "tool_call_end",
+        },
+    });
+    if let Some(message) = message {
+        payload["message"] = message;
+    }
+    if let Some(delta) = chat.delta_text.or_else(|| {
+        matches!(state, ChatEventState::Delta)
+            .then(|| chat.content.clone())
+            .flatten()
+    }) {
+        payload["delta_text"] = Value::String(delta);
+    }
+    for (legacy_key, raw_key) in [
+        ("stop_reason", "stopReason"),
+        ("errorMessage", "errorMessage"),
+        ("errorKind", "errorKind"),
+        ("errorCode", "errorCode"),
+        ("usage", "usage"),
+        ("routing", "routing"),
+    ] {
+        if let Some(value) = chat.raw.get(raw_key) {
+            payload[legacy_key] = value.clone();
+        }
+    }
+    Ok((
+        run_id,
+        String::new(),
+        "chat.event".to_string(),
+        payload,
+        state,
+        is_final,
+        chat.session_id,
+        chat.seq,
+    ))
+}

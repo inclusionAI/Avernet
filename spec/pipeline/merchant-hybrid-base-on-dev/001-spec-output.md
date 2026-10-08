@@ -10,7 +10,7 @@ all existing singlebox targets keep their behaviour.
 ```bash
 SINGLEBOX_MODEL_CONFIG_MODE=home \
 SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1 \
-./scripts/singlebox.sh start merchant_hybrid \
+./singlebox/singlebox.sh start merchant_hybrid \
   --profile-dir scripts/4bots_merchant_operations_profile \
   --exclusive-profile-dir platform-data \
   --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude

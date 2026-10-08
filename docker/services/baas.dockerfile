@@ -15,14 +15,14 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
 
 # Install dependencies first (without the project) for better layer caching.
-# The default uv index is the Aliyun PyPI mirror (see src/baas/pyproject.toml).
-COPY src/baas/pyproject.toml src/baas/uv.lock src/baas/README.md ./
+# The default uv index is the Aliyun PyPI mirror (see apps/baas/pyproject.toml).
+COPY apps/baas/pyproject.toml apps/baas/uv.lock apps/baas/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # Then install the project itself — main.py discovers the runner through the
 # package's installed entry points, so this step is required, not optional.
-COPY src/baas/src ./src
+COPY apps/baas/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -53,9 +53,9 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /app/.venv /app/.venv
-COPY src/baas/src /app/src
-COPY src/baas/configs /app/configs
-COPY src/baas/singlebox-configs /app/singlebox-configs
+COPY apps/baas/src /app/src
+COPY apps/baas/configs /app/configs
+COPY apps/baas/singlebox-configs /app/singlebox-configs
 
 # tmp/: scratch space used by scripts/app.sh conventions.
 # ~/logs/: default SOFAPy-style log location ($HOME/logs/secbaas).

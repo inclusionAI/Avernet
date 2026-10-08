@@ -63,7 +63,7 @@ AgentEvolve 不只是调用一次模型，而是把进化拆成可检查的阶�
 在 Avernet 仓库根目录执行：
 
 ```bash
-cd src/evolverun/clawweb
+cd apps/evolverun/clawweb
 npm ci
 cd ../../..
 ```
@@ -71,7 +71,7 @@ cd ../../..
 ### 2. 启动 AgentEvolve
 
 ```bash
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
 ![通过命令行启动 AgentEvolve](images/agent-evolve/agent-evolve-cli-start.png)
@@ -88,16 +88,16 @@ bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
 
 ```bash
 # 直接使用 ~/.openclaw
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source openclaw
 
 # 复用 Avernet Singlebox 的 Bot 与数据库
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source singlebox \
   --user-id mock-user
 
 # 指定模型和端口
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source openclaw \
   --model provider/model \
   --port 5173
@@ -246,7 +246,7 @@ Pack 文件实际存储在 `dataDirectory/artifacts`。协议中仍保留 `oss:/
 
 ## 开发与安全边界
 
-公开实现位于 `src/evolverun/clawweb`，公开运行 Skills 位于 `src/evolverun/clawweb-skills/clawevolve-skills`。新增公开能力应满足：
+公开实现位于 `apps/evolverun/clawweb`，公开运行 Skills 位于 `apps/evolverun/clawweb-skills/clawevolve-skills`。新增公开能力应满足：
 
 - 不依赖内部服务、内部域名或内部凭据；
 - 环境差异通过参数、配置或环境变量传入；
@@ -257,8 +257,8 @@ Pack 文件实际存储在 `dataDirectory/artifacts`。协议中仍保留 `oss:/
 常用检查：
 
 ```bash
-bash src/evolverun/clawweb-skills/clawevolve-skills/scripts/verify_public_skills.sh
-cd src/evolverun/clawweb
+bash apps/evolverun/clawweb-skills/clawevolve-skills/scripts/verify_public_skills.sh
+cd apps/evolverun/clawweb
 npm run check
 npm run build
 npm test
