@@ -7,6 +7,11 @@ import type { WorkflowEvolutionAnalysisRow } from './workflow-evolution-reposito
 const SCOPE = 'issue_aggregate';
 type AggregationInputSummary = IssueAggregationModelInput['inputSummary'];
 type Snapshot = { parentAnalysisId: string; input: IssueGroup; inputVersion?: IssueAggregationInputVersion; inputSummary?: AggregationInputSummary };
+type SnapshotIndexRow = Pick<WorkflowEvolutionAnalysisRow, 'analysis_id' | 'status' | 'requested_at_ms'> & {
+  // SQLite returns JSON text; mysql2 can return an already-decoded JSON array.
+  input_key: string | [string, string];
+};
+type SnapshotBodyRow = Pick<WorkflowEvolutionAnalysisRow, 'analysis_id' | 'scope_json' | 'result_json'>;
 export type PresentedIssueGroup = IssueGroup & { summary: IssueSummary | null; summarySources: IssueGroup['sources']; stale: boolean; aggregationStatus: string; aggregationId: string | null;
   aggregationInputVersion: IssueAggregationInputVersion | null; aggregationInputSummary: AggregationInputSummary | null };
 
@@ -34,7 +39,8 @@ export class IssueAggregationRepository {
     let afterId = 0;
     for (;;) {
       const rows = await this.db.query<WorkflowEvolutionAnalysisRow>(
-        `SELECT * FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND status = 'completed'
+        `SELECT id, analysis_id, flow_id, scope_json, result_json, completed_at_ms, requested_at_ms
+         FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND status = 'completed'
          AND scope_type <> ?${options.sinceMs === undefined ? '' : ' AND COALESCE(completed_at_ms, requested_at_ms) >= ?'}
          AND id > ? ORDER BY id ASC LIMIT 200`, options.sinceMs === undefined
           ? [workflowId, SCOPE, afterId] : [workflowId, SCOPE, options.sinceMs, afterId]);
@@ -73,25 +79,54 @@ export class IssueAggregationRepository {
   }
 
   async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1): Promise<PresentedIssueGroup[]> {
-    const [groups, rows] = await Promise.all([this.groups(workflowId), this.db.query<WorkflowEvolutionAnalysisRow>(
-      `SELECT * FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND scope_type = ? ORDER BY id DESC`, [workflowId, SCOPE])]);
+    // Do not transfer every historical frozen input/result just to locate the displayed revision.
+    // Multi-path JSON_EXTRACT works in SQLite and MySQL/OceanBase without dialect-specific unquoting.
+    const [groups, rows] = await Promise.all([this.groups(workflowId), this.db.query<SnapshotIndexRow>(
+      `SELECT analysis_id, status, requested_at_ms,
+         JSON_EXTRACT(scope_json, '$.input.signature', '$.input.inputDigest') AS input_key
+       FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND scope_type = ? ORDER BY id DESC`, [workflowId, SCOPE])]);
+    const selected = new Map(groups.map(group => [group.signature, {
+      digest: group.inputDigest, current: undefined as SnapshotIndexRow | undefined, completed: undefined as SnapshotIndexRow | undefined,
+    }]));
+    for (const row of rows) {
+      const key: unknown = typeof row.input_key === 'string' ? JSON.parse(row.input_key) : row.input_key;
+      if (!Array.isArray(key) || key.length !== 2 || key.some(value => typeof value !== 'string')) throw new Error('invalid aggregation snapshot key');
+      const entry = selected.get(key[0]);
+      if (!entry) continue;
+      if (!entry.current && key[1] === entry.digest) entry.current = row;
+      if (!entry.completed && row.status === 'completed') entry.completed = row;
+    }
+    const ids = [...new Set([...selected.values()].flatMap(entry => {
+      if (entry.current?.status === 'completed') entry.completed = entry.current;
+      const displayed = entry.completed ?? entry.current;
+      return displayed ? [displayed.analysis_id] : [];
+    }))];
+    const bodies = new Map<string, { snapshot: Snapshot; result: string | null }>();
+    // Bound bind parameters without imposing a limit on the number of groups/history entries.
+    for (let offset = 0; offset < ids.length; offset += 100) {
+      const batch = ids.slice(offset, offset + 100);
+      const loaded = await this.db.query<SnapshotBodyRow>(
+        `SELECT analysis_id, scope_json, result_json FROM workflow_evolution_analysis_runs
+         WHERE workflow_id = ? AND scope_type = ? AND analysis_id IN (${batch.map(() => '?').join(',')})`, [workflowId, SCOPE, ...batch]);
+      for (const row of loaded) bodies.set(row.analysis_id, { snapshot: JSON.parse(row.scope_json) as Snapshot, result: row.result_json });
+    }
     return groups.map(group => {
-      const matches = rows.filter(row => (JSON.parse(row.scope_json) as Snapshot).input.signature === group.signature);
-      const current = matches.find(row => (JSON.parse(row.scope_json) as Snapshot).input.inputDigest === group.inputDigest);
-      const completed = (current?.status === 'completed' ? current : matches.find(row => row.status === 'completed'));
-      const frozen = completed ? (JSON.parse(completed.scope_json) as Snapshot).input : null;
-      const completedSnapshot = completed ? JSON.parse(completed.scope_json) as Snapshot : null;
-      const currentSnapshot = current ? JSON.parse(current.scope_json) as Snapshot : null;
-      const requested = aggregationPayload(group, inputVersion);
-      const tooLarge = Buffer.byteLength(canonicalJson(requested.input), 'utf8') > 180_000 || group.sources.length > 500;
+      const { current, completed } = selected.get(group.signature)!;
+      const displayed = completed ?? current;
+      const body = displayed ? bodies.get(displayed.analysis_id) : undefined;
+      if (displayed && !body) throw new Error('aggregation snapshot unavailable');
+      const frozen = completed ? body!.snapshot.input : null;
       const currentStatus = current?.status === 'queued' && Date.now() - current.requested_at_ms > 600_000 ? 'failed' : current?.status;
-      return { ...group, summary: completed && frozen ? validateIssueSummary(JSON.parse(completed.result_json!), frozen) : null,
+      const settled = currentStatus === 'completed' || currentStatus === 'queued';
+      const tooLarge = !settled && (group.sources.length > 500
+        || Buffer.byteLength(canonicalJson(aggregationPayload(group, inputVersion).input), 'utf8') > 180_000);
+      return { ...group, summary: completed && frozen ? validateIssueSummary(JSON.parse(body!.result!), frozen) : null,
         summarySources: frozen?.sources ?? [],
         stale: !!completed && frozen?.inputDigest !== group.inputDigest,
         aggregationStatus: currentStatus === 'completed' || currentStatus === 'queued' ? currentStatus
           : tooLarge ? 'too_large' : currentStatus ?? 'not_generated', aggregationId: current?.analysis_id ?? null,
-        aggregationInputVersion: completedSnapshot?.inputVersion ?? (completed ? null : currentSnapshot?.inputVersion ?? null),
-        aggregationInputSummary: completedSnapshot?.inputSummary ?? (completed ? null : currentSnapshot?.inputSummary ?? null),
+        aggregationInputVersion: body?.snapshot.inputVersion ?? null,
+        aggregationInputSummary: body?.snapshot.inputSummary ?? null,
       };
     });
   }

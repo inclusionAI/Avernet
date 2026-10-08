@@ -22,6 +22,15 @@ signature. Run-set scopes include their declared flow IDs even for empty results
 Legacy diagnoses are fallback only for runs without completed managed analyses.
 History is scanned with database pagination, not a frontend 100-record sample.
 
+Reads project only analysis identity, scope, result and completion timestamps;
+evidence manifests and other unused large columns are not transferred. Aggregation
+history is scanned as lightweight identity/status/signature/digest metadata using
+multi-path `JSON_EXTRACT` (SQLite and MySQL/OceanBase). A single pass selects the
+current attempt and retained completed revision. Only the displayed snapshots'
+scope/result bodies are fetched, in bounded bind-parameter batches, and each is
+decoded once. Selection order, full source history and stale-summary semantics are
+unchanged; this is not a historical cutoff, a cache, or source sampling.
+
 A source binds an analysis ID, diagnosis ID, flow ID, diagnosis text, proposal and
 evidence event IDs. Its deterministic source ID is a SHA-256 identity. Group input
 digests include the full ordered source snapshot. Affected-run counts are distinct
@@ -123,6 +132,10 @@ treated as verified merely because the latest analysis removed its diagnosis.
 distinct causes, stable inputs and invalid/missing references.
 `evolve-knowledge.test.ts`: real SQLite persistence, HTTP permission isolation,
 Bot binding, cached results, stale snapshots and expired-job recovery.
+`issue-aggregation-read.test.ts`: bounded snapshot-body retrieval, no unused
+evidence transfer, one decode per selected snapshot, pagination and driver JSON
+representations. The historical workload reports local read time and serialized
+database-result bytes; these measurements are not a production latency guarantee.
 Workflow `IssueSummary` and `EvolutionIssueFlow` tests: cause/source display,
 failure states and existing run navigation/actions.
 ClawMind routing/helper tests: two model phases and single-analysis preservation.
