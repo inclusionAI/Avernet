@@ -200,6 +200,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): Check(
         PermissionLevel.MEMBER
     ),
+    # The restore-defaults read: same operator bar as the other engine reads,
+    # so the write-back path (engine/config, OWNER_SCOPED) stays the stricter
+    # of the two halves.
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/default-config"): Check(
+        PermissionLevel.MEMBER
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER),

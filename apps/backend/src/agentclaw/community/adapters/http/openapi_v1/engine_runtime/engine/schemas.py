@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -106,8 +108,40 @@ class EngineRestartResult(BaseModel):
     )
 
 
+class EngineDefaultConfig(BaseModel):
+    """The engine's factory-default configuration.
+
+    The read half of "restore defaults": write the returned configuration back
+    with the engine-config endpoint and the bot's engine configuration is
+    exactly what it shipped with. The engine also reports where it read the
+    defaults from; that names a file inside the device, is not actionable by a
+    caller, and is deliberately not published.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "config": {
+                    "model": "claude-sonnet-5",
+                    "permissions": {"allow": [], "deny": []},
+                }
+            }
+        }
+    )
+
+    # Free-form JSON on purpose: it is whatever the engine ships as its
+    # defaults, and this surface is not the place to model each engine's
+    # internal configuration vocabulary.
+    config: dict[str, Any] = Field(
+        description="The engine's factory-default configuration, free-form "
+        "JSON. Write it back unchanged via the engine-config endpoint to "
+        "restore a bot to its defaults."
+    )
+
+
 __all__ = [
     "EngineCapabilities",
+    "EngineDefaultConfig",
     "EngineInfo",
     "EngineRestartResult",
     "EngineStatus",
