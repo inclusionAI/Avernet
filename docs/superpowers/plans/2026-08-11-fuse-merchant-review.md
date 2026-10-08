@@ -55,7 +55,7 @@
 
 **Files:**
 - Modify: `scripts/modules/bots.sh`
-- Test: Local `./scripts/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile`
+- Test: Local `./singlebox/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile`
 
 **Interfaces:**
 - Consumes:
@@ -135,14 +135,14 @@
 
   Run:
   ```bash
-  ./scripts/singlebox.sh --standalone start bcs_frontend
-  ./scripts/singlebox.sh --standalone start bcsfuse
-  ./scripts/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
+  ./singlebox/singlebox.sh --standalone start bcs_frontend
+  ./singlebox/singlebox.sh --standalone start bcsfuse
+  ./singlebox/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
   ```
 
   Then verify each bot has fusion enabled:
   ```bash
-  for uuid in $(./scripts/singlebox.sh --standalone status bots --profile-dir scripts/4bots_merchant_operations_profile | grep bot_uuid | awk '{print $2}'); do
+  for uuid in $(./singlebox/singlebox.sh --standalone status bots --profile-dir scripts/4bots_merchant_operations_profile | grep bot_uuid | awk '{print $2}'); do
     curl -s "http://127.0.0.1:8765/v1/workers/${uuid}/config" \
       -H "Authorization: Bearer dev-opencore-token" | jq '.fusion_enable'
   done

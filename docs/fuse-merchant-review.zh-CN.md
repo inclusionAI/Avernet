@@ -63,9 +63,9 @@ Fuse 结论**不自动写回群聊**，只作为店主本人的参考浮窗；�
 确保已启动 BCS、前端、bcsfuse 和 4 个经营 Bot：
 
 ```bash
-./scripts/singlebox.sh --standalone start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile
-./scripts/singlebox.sh --standalone start bcsfuse
-./scripts/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh --standalone start bcs_frontend --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh --standalone start bcsfuse
+./singlebox/singlebox.sh --standalone start bots --profile-dir scripts/4bots_merchant_operations_profile
 ```
 
 > `--profile-dir` 需要同时传给 `bcs_frontend` 和 `bots`：BCS 启动时会把它作为 `bots_base_dir` 写进运行时配置，这样 bcs-fusion 才能找到 `IDENTITY.md`、`SOUL.md` 等 profile 文件并同步给 bcsfuse。
@@ -77,7 +77,7 @@ Fuse 结论**不自动写回群聊**，只作为店主本人的参考浮窗；�
 检查 fuse 是否就绪：
 
 ```bash
-./scripts/singlebox.sh --standalone status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh --standalone status bots --profile-dir scripts/4bots_merchant_operations_profile
 ```
 
 4 个 Bot 都应为 `Running` 状态。然后进入前端：
@@ -198,7 +198,7 @@ curl -s -X POST "http://127.0.0.1:8765/api/v1/groups/${GROUP_ID}/fuse" \
 
 ### Q1：浮窗提示「协作群内无 Bot 公开画像，融合模式暂不可用」
 
-1. 确认 bcsfuse 已启动：`./scripts/singlebox.sh --standalone status`。
+1. 确认 bcsfuse 已启动：`./singlebox/singlebox.sh --standalone status`。
 2. 确认 bots 启动日志里有 `Profile fusion enabled for ...`。
 3. 如果仍不可用，手动检查并开启：
    ```bash

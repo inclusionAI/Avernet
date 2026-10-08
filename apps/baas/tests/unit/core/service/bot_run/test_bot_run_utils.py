@@ -1,0 +1,880 @@
+"""Unit tests for bot_run_utils.
+
+Covers:
+- resolve_user_id: 从 metadata 中解析 user_id
+- extract_lifecycle_stage: 从 metadata 中提取 lifecycle_stage
+- parse_bot_id: 解析 bot_id 为 real_bot_id 和 entity_id
+- resolve_bot_id: 根据 binding_info 解析实际 bot_id
+- extract_session_id_from_record: 从运行记录中提取 session_id
+- parse_wait_result: 从 metadata 解析 ignore_content / ignore_result 标志
+"""
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from secbaas.community.api.bot_runtime import BotBindingInfo
+from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
+    binding_data_to_info,
+    extract_lifecycle_stage,
+    extract_session_id_from_record,
+    parse_bot_id,
+    parse_wait_result,
+    resolve_bot_id,
+    resolve_user_id,
+)
+from secbaas.community.core.service.bot_run._bot_run_utils import (
+    build_caller_binding,
+    build_chat_metadata,
+    is_caller_mode,
+)
+from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
+from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
+from secbaas.community.spi.bot_service import BotBindingData
+
+BOT_ID = "test-bot-000001"
+ENTITY_ID = "test-entity-001"
+APP_ID_BAAS = "301516dd13a942639420174eaa63190e"
+
+
+# ==================== Mock helpers ====================
+
+
+class MockBotBindingInfo:
+    """Mock BotBindingInfo for testing."""
+
+    def __init__(self, entity_id: str = "entity123", bot_type: str = "team"):
+        self.entity_id = entity_id
+        self.bot_type = bot_type
+
+
+class MockBotChatContext:
+    """Mock BotChatContext for testing."""
+
+    def __init__(
+        self,
+        app_id: str = "app123",
+        app_type: str = "app",
+    ):
+        self.app_id = app_id
+        self.app_type = app_type
+
+
+# ==================== Tests: resolve_user_id ====================
+
+
+class TestResolveUserId:
+    """测试 resolve_user_id 函数"""
+
+    def test_from_sender_options_owner(self):
+        """优先级1: sender_options.from = owner 时，取 binding_info.entity_id"""
+        metadata = {"sender_options": {"from": "owner"}}
+        binding_info = MockBotBindingInfo(entity_id="entity456")
+        context = MockBotChatContext(app_id="app123")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "entity456"
+
+    def test_from_sender_options_other(self):
+        """优先级1: sender_options.from 非 owner 时，回退到 context.app_id"""
+        metadata = {"sender_options": {"from": "other"}}
+        binding_info = MockBotBindingInfo(entity_id="entity456")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_from_context_app_id(self):
+        """优先级2: 取 context.app_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app456")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app456"
+
+    def test_fallback_to_bot_id(self):
+        """优先级3: fallback 到 bot_id"""
+        metadata = {}
+        binding_info = None
+        context = None
+        bot_id = "bot_default"
+
+        result = resolve_user_id(metadata, binding_info, context, bot_id)
+        assert result == "bot_default"
+
+    def test_none_sender_options(self):
+        """sender_options 为 None 时，回退到 context"""
+        metadata = {"sender_options": None}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_empty_sender_options(self):
+        """sender_options 为空时，回退到 context"""
+        metadata = {"sender_options": {}}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_sender_options_without_from(self):
+        """sender_options 没有 from 字段时，回退到 context"""
+        metadata = {"sender_options": {"other_field": "value"}}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_none_binding_info_with_owner_flag(self):
+        """binding_info 为 None 但 from=owner 时，回退到 context"""
+        metadata = {"sender_options": {"from": "owner"}}
+        binding_info = None
+        context = MockBotChatContext(app_id="app789")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app789"
+
+    def test_none_context(self):
+        """context 为 None 时，回退到 bot_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = None
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_fallback")
+        assert result == "bot_fallback"
+
+    def test_empty_metadata(self):
+        """空 metadata 时，回退到 context"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(app_id="app123")
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app123"
+
+    def test_bot_app_type_extracts_entity_id_from_app_id(self):
+        """优先级3: app_type='bot' 时，从 app_id（bot_id:entity_id）解析 entity_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(
+            app_id="bot-abc:user-xyz",
+            app_type="bot",
+        )
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "user-xyz"
+
+    def test_bot_app_type_app_id_no_colon_falls_back_to_app_id(self):
+        """app_type='bot' 但 app_id 不含冒号时，回退到 context.app_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(
+            app_id="no-colon-value",
+            app_type="bot",
+        )
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "no-colon-value"
+
+    def test_bot_app_type_empty_app_id_falls_back_to_bot_id(self):
+        """app_type='bot' 但 app_id 为空时，回退到 bot_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(
+            app_id="",
+            app_type="bot",
+        )
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_fallback")
+        assert result == "bot_fallback"
+
+    def test_non_bot_app_type_uses_app_id(self):
+        """app_type 非 'bot' 时，使用 context.app_id"""
+        metadata = {}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(
+            app_id="app456",
+            app_type="app",
+        )
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "app456"
+
+    def test_bot_app_type_overrides_sender_options_non_owner(self):
+        """app_type='bot' 在 sender_options 非 owner 时生效"""
+        metadata = {"sender_options": {"from": "other"}}
+        binding_info = MockBotBindingInfo(entity_id="entity123")
+        context = MockBotChatContext(
+            app_id="bot-abc:user-from-app-id",
+            app_type="bot",
+        )
+
+        result = resolve_user_id(metadata, binding_info, context, "bot_id")
+        assert result == "user-from-app-id"
+
+
+# ==================== Tests: extract_lifecycle_stage ====================
+
+
+class TestExtractLifecycleStage:
+    def test_extracts_from_metadata(self):
+        """Extracts lifecycle_stage from metadata.bot_options."""
+        metadata = {"bot_options": {"lifecycle_stage": "draft"}}
+        assert extract_lifecycle_stage(metadata) == "draft"
+
+    def test_defaults_to_online_when_missing(self):
+        """Defaults to 'online' when bot_options has no lifecycle_stage."""
+        metadata = {"bot_options": {}}
+        assert extract_lifecycle_stage(metadata) == "online"
+
+    def test_defaults_to_online_when_no_bot_options(self):
+        """Defaults to 'online' when metadata has no bot_options."""
+        metadata = {}
+        assert extract_lifecycle_stage(metadata) == "online"
+
+    def test_defaults_to_online_when_none(self):
+        """Defaults to 'online' when metadata is None."""
+        assert extract_lifecycle_stage(None) == "online"
+
+    def test_extracts_verify_stage(self):
+        """Extracts 'verify' lifecycle_stage."""
+        metadata = {"bot_options": {"lifecycle_stage": "verify"}}
+        assert extract_lifecycle_stage(metadata) == "verify"
+
+    def test_empty_string_lifecycle_stage_defaults_to_online(self):
+        """Empty string lifecycle_stage defaults to 'online'."""
+        metadata = {"bot_options": {"lifecycle_stage": ""}}
+        assert extract_lifecycle_stage(metadata) == "online"
+
+
+# ==================== Tests: parse_bot_id ====================
+
+
+class TestParseBotId:
+    def test_parses_full_bot_id(self):
+        real_bot_id, entity_id = parse_bot_id(f"{BOT_ID}:{ENTITY_ID}")
+        assert real_bot_id == BOT_ID
+        assert entity_id == ENTITY_ID
+
+    def test_parses_bot_id_without_entity(self):
+        real_bot_id, entity_id = parse_bot_id(BOT_ID)
+        assert real_bot_id == BOT_ID
+        assert entity_id == ""
+
+    def test_parses_empty_string(self):
+        real_bot_id, entity_id = parse_bot_id("")
+        assert real_bot_id == ""
+        assert entity_id == ""
+
+
+# ==================== Tests: resolve_bot_id ====================
+
+
+@pytest.fixture
+def baas_binding():
+    return BotBindingInfo(
+        bot_id=BOT_ID,
+        entity_id=ENTITY_ID,
+        sandbox_id=None,
+        device_id=APP_ID_BAAS,
+        device_provider="baas",
+        binding_id=100002,
+        bot_type="service",
+    )
+
+
+@pytest.fixture
+def arca_binding():
+    return BotBindingInfo(
+        bot_id=BOT_ID,
+        entity_id=ENTITY_ID,
+        sandbox_id="ARCA-SANDBOX-abc@0",
+        device_id="staff_bot_123",
+        device_provider="arca",
+        binding_id=100101,
+        bot_type="personal",
+    )
+
+
+class TestResolveBotId:
+    def test_baas_binding_returns_device_id(self, baas_binding):
+        result = resolve_bot_id(f"{BOT_ID}:{ENTITY_ID}", baas_binding)
+        assert result == APP_ID_BAAS
+
+    def test_arca_binding_returns_bot_id(self, arca_binding):
+        result = resolve_bot_id(f"{BOT_ID}:{ENTITY_ID}", arca_binding)
+        assert result == BOT_ID
+
+    def test_none_binding_returns_original(self):
+        result = resolve_bot_id(f"{BOT_ID}:{ENTITY_ID}", None)
+        assert result == f"{BOT_ID}:{ENTITY_ID}"
+
+
+# ==================== Tests: extract_session_id_from_record ====================
+
+
+class TestExtractSessionIdFromRecord:
+    def test_extracts_from_result_extra(self):
+        """优先从 result_extra JSON 中取 session_id"""
+        record = MagicMock(
+            result_extra={"session_id": "sess-from-extra"},
+            metadata={"session_id": "sess-from-meta"},
+        )
+        assert extract_session_id_from_record(record) == "sess-from-extra"
+
+    def test_falls_back_to_metadata(self):
+        """result_extra 无 session_id 时，从 metadata 中取"""
+        record = MagicMock(
+            result_extra={"other_key": "value"},
+            metadata={"session_id": "sess-from-meta"},
+        )
+        assert extract_session_id_from_record(record) == "sess-from-meta"
+
+    def test_result_extra_not_dict(self):
+        """result_extra 不是 dict 时，从 metadata 中取"""
+        record = MagicMock(
+            result_extra="not-a-dict",
+            metadata={"session_id": "sess-from-meta"},
+        )
+        assert extract_session_id_from_record(record) == "sess-from-meta"
+
+    def test_both_none(self):
+        """result_extra 和 metadata 都为 None 时，返回 None"""
+        record = MagicMock(
+            result_extra=None,
+            metadata=None,
+        )
+        assert extract_session_id_from_record(record) is None
+
+    def test_result_extra_none_metadata_has_session(self):
+        """result_extra 为 None，metadata 有 session_id"""
+        record = MagicMock(
+            result_extra=None,
+            metadata={"session_id": "sess-from-meta"},
+        )
+        assert extract_session_id_from_record(record) == "sess-from-meta"
+
+
+# ==================== Tests: parse_wait_result ====================
+
+
+class TestParseWaitResult:
+    def test_no_key(self):
+        assert parse_wait_result({}) is True
+
+    # ── ignore_result (旧，兼容) ────────────────────────────────────────
+
+    def test_ignore_result_true_bool(self):
+        assert parse_wait_result({"ignore_result": True}) is False
+
+    def test_ignore_result_false_bool(self):
+        assert parse_wait_result({"ignore_result": False}) is True
+
+    def test_ignore_result_true_string(self):
+        assert parse_wait_result({"ignore_result": "true"}) is False
+
+    def test_ignore_result_false_string(self):
+        assert parse_wait_result({"ignore_result": "false"}) is True
+
+    def test_ignore_result_zero(self):
+        assert parse_wait_result({"ignore_result": 0}) is True
+
+    # ── ignore_content (新) ─────────────────────────────────────────────
+
+    def test_ignore_content_true_bool(self):
+        assert parse_wait_result({"ignore_content": True}) is False
+
+    def test_ignore_content_false_bool(self):
+        assert parse_wait_result({"ignore_content": False}) is True
+
+    def test_ignore_content_true_string(self):
+        assert parse_wait_result({"ignore_content": "true"}) is False
+
+    def test_ignore_content_false_string(self):
+        assert parse_wait_result({"ignore_content": "false"}) is True
+
+    # ── ignore_content 优先于 ignore_result ─────────────────────────────
+
+    def test_ignore_content_takes_priority(self):
+        """ignore_content 存在时忽略 ignore_result"""
+        assert (
+            parse_wait_result({"ignore_result": False, "ignore_content": True}) is False
+        )
+
+
+# ==================== Tests: binding_data_to_info ====================
+
+
+class TestBindingDataToInfo:
+    def test_basic_field_mapping(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="openclaw",
+            binding_id=100,
+            device_provider="arca",
+            device_id="device-001",
+        )
+        info = binding_data_to_info(data)
+
+        assert info.bot_id == "bot-001"
+        assert info.entity_id == "entity-001"  # owner_id → entity_id
+        assert info.bot_type == "service"
+        assert info.engine_type == "openclaw"
+        assert info.binding_id == 100
+        assert info.device_provider == "arca"
+        assert info.device_id == "device-001"
+
+    def test_arca_provider_sandbox_id_equals_device_id(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="personal",
+            engine_type="openclaw",
+            binding_id=100,
+            device_provider="arca",
+            device_id="sandbox-abc@0",
+        )
+        info = binding_data_to_info(data)
+
+        assert info.sandbox_id == "sandbox-abc@0"
+        assert info.device_id == "sandbox-abc@0"
+
+    def test_non_arca_provider_sandbox_id_is_none(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="openclaw",
+            binding_id=100,
+            device_provider="baas",
+            device_id="app-id-123",
+        )
+        info = binding_data_to_info(data)
+
+        assert info.sandbox_id is None
+        assert info.device_id == "app-id-123"
+
+    def test_owner_id_maps_to_entity_id(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="owner-xyz",
+            bot_type="personal",
+            engine_type="openclaw",
+        )
+        info = binding_data_to_info(data)
+        assert info.entity_id == "owner-xyz"
+
+    def test_empty_engine_type_defaults_to_openclaw(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="",
+        )
+        info = binding_data_to_info(data)
+        assert info.engine_type == "openclaw"
+
+    def test_device_props_is_always_empty_dict(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="openclaw",
+        )
+        info = binding_data_to_info(data)
+        assert info.device_props == {}
+
+    def test_baas_session_id_is_always_none(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="openclaw",
+        )
+        info = binding_data_to_info(data)
+        assert info.baas_session_id is None
+
+    def test_publish_fields_not_carried_over(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="service",
+            engine_type="openclaw",
+            publish_id=42,
+            publish_status="success",
+        )
+        info = binding_data_to_info(data)
+        # BotBindingInfo has no publish_id/publish_status fields
+        assert not hasattr(info, "publish_id")
+        assert not hasattr(info, "publish_status")
+
+    def test_local_provider_sandbox_id_is_none(self):
+        data = BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="personal",
+            engine_type="openclaw",
+            binding_id=1,
+            device_provider="local",
+            device_id="local-device",
+        )
+        info = binding_data_to_info(data)
+
+        assert info.sandbox_id is None
+        assert info.device_id == "local-device"
+
+
+# ============ Tests: binding_data_to_info engine_type 归一化 ============
+
+
+class TestBindingDataToInfoEngineNormalization:
+    """active_engine + template_type 共同决定 engine_type(见 _normalize_engine_type)。
+
+    aicoding 家族沙箱(personalCoding/applicationCoding)即使 active_engine 被写成
+    claude_code,也必须归一化为 aicoding,否则 create adapter session 会命中 aicoding
+    沙箱却传 engine=claude_code 报 500。
+    """
+
+    def _data(self, engine_type: str, template_type: str | None) -> BotBindingData:
+        return BotBindingData(
+            bot_id="bot-001",
+            owner_id="entity-001",
+            bot_type="personal",
+            engine_type=engine_type,
+            binding_id=1,
+            device_provider="arca",
+            device_id="ARCA-SANDBOX-abc@0",
+            template_type=template_type,
+        )
+
+    @pytest.mark.parametrize(
+        ("engine_type", "template_type", "expected"),
+        [
+            # claude_code + coding 家族模板 → 归一化为 aicoding(核心修复)
+            ("claude_code", "applicationCoding", "aicoding"),
+            ("claude_code", "personalCoding", "aicoding"),
+            # claude_code + 空/普通模板 → 保持 claude_code
+            ("claude_code", None, "claude_code"),
+            ("claude_code", "", "claude_code"),
+            ("claude_code", "normalCC", "claude_code"),
+            # aicoding + 任意模板 → aicoding
+            ("aicoding", "applicationCoding", "aicoding"),
+            ("aicoding", None, "aicoding"),
+            # 其他已知引擎以 active_engine 为准,不受 template_type 影响
+            ("hermes", "applicationCoding", "hermes"),
+            ("openclaw", None, "openclaw"),
+            ("deepseek_harness", None, "deepseek_harness"),
+            # 空 / 未知 active_engine 兜底 openclaw(与旧行为等价)
+            ("", None, "openclaw"),
+            ("unknown_engine", None, "openclaw"),
+        ],
+    )
+    def test_engine_type_normalization_matrix(
+        self, engine_type, template_type, expected
+    ):
+        info = binding_data_to_info(self._data(engine_type, template_type))
+        assert info.engine_type == expected
+
+
+# ==================== Tests: extract_lifecycle_stage eval ====================
+
+
+class TestExtractLifecycleStageEval:
+    """extract_lifecycle_stage 支持 eval 返回值（场景三）。"""
+
+    def test_eval_stage(self):
+        """lifecycle_stage='eval' 正确返回。"""
+        metadata = {"bot_options": {"lifecycle_stage": "eval"}}
+        assert extract_lifecycle_stage(metadata) == "eval"
+
+    def test_eval_stage_with_other_fields(self):
+        """metadata 含 eval_id 等额外字段时仍返回 'eval'。"""
+        metadata = {
+            "bot_options": {"lifecycle_stage": "eval"},
+            "eval_id": "eval:eval:bot-1",
+            "default_tag": "eval",
+        }
+        assert extract_lifecycle_stage(metadata) == "eval"
+
+
+# ==================== Tests: build_chat_metadata eval ====================
+
+
+class TestBuildChatMetadataEval:
+    """build_chat_metadata eval 观测字段注入（S3-AVE-07）。"""
+
+    def test_default_tag_sets_eval_biz_scene(self):
+        """default_tag 非空时 biz_scene 为 'eval:{default_tag}'。"""
+        metadata = {"default_tag": "eval", "biz_task_id": "task-1"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["biz_scene"] == "eval:eval"
+        assert result["biz_task_id"] == "task-1"
+
+    def test_default_tag_injects_default_tag_field(self):
+        """default_tag 非空时注入 default_tag 观测字段（通过 eval_session_log Plugin）。"""
+        metadata = {"default_tag": "staging"}
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:staging",
+            "default_tag": "staging",
+        }
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
+        assert result["default_tag"] == "staging"
+        mock_log.enrich_chat_metadata.assert_called_once()
+
+    def test_eval_id_injected_when_present(self):
+        """metadata 含 eval_id 时注入到 chat_metadata（通过 eval_session_log Plugin）。"""
+        metadata = {"eval_id": "eval:eval:bot-1", "default_tag": "eval"}
+        mock_log = MagicMock()
+        mock_log.enrich_chat_metadata.return_value = {
+            "biz_task_id": "run-1",
+            "biz_scene": "eval:eval",
+            "eval_id": "eval:eval:bot-1",
+        }
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=mock_log
+        )
+        assert result["eval_id"] == "eval:eval:bot-1"
+        mock_log.enrich_chat_metadata.assert_called_once()
+
+    def test_no_default_tag_uses_default_biz_scene(self):
+        """default_tag 为空时 biz_scene 保持默认逻辑。"""
+        metadata = {"biz_scene": "custom"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["biz_scene"] == "custom"
+
+    def test_no_default_tag_no_eval_fields(self):
+        """default_tag 为空无 eval 观测字段注入。"""
+        metadata = {}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "eval_id" not in result
+        assert "default_tag" not in result
+        assert result["biz_scene"] == "default"
+
+    def test_eval_id_passthrough_to_chat_metadata(self):
+        """eval_id 从原始 metadata 透传到 chat_metadata（引擎 chat.send 需要）。"""
+        metadata = {"eval_id": "eval-abc123", "default_tag": "eval"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["eval_id"] == "eval-abc123"
+        assert result["default_tag"] == "eval"
+
+    def test_default_tag_only_passthrough(self):
+        """仅 default_tag 无 eval_id 时，eval_id 不注入，default_tag 透传。"""
+        metadata = {"default_tag": "staging"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "eval_id" not in result
+        assert result["default_tag"] == "staging"
+
+    def test_eval_id_only_no_default_tag_passthrough(self):
+        """eval_id 存在但 default_tag 不存在时，eval_id 透传，default_tag 不注入。"""
+        metadata = {"eval_id": "eval-xyz789"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["eval_id"] == "eval-xyz789"
+        assert "default_tag" not in result
+
+
+# ==================== Tests: caller binding ====================
+
+
+class TestBuildCallerBinding:
+    """测试 build_caller_binding：用指定 sandbox 构造 caller 模式 binding。"""
+
+    def test_builds_binding_with_caller_provider(self):
+        info = build_caller_binding(f"{BOT_ID}:{ENTITY_ID}", "sbx-1")
+        assert info.bot_id == BOT_ID
+        assert info.entity_id == ENTITY_ID
+        assert info.sandbox_id == "sbx-1"
+        assert info.device_id == "sbx-1"
+        assert info.device_provider == "caller"
+
+    def test_plain_bot_id_without_entity(self):
+        info = build_caller_binding(BOT_ID, "sbx-2")
+        assert info.bot_id == BOT_ID
+        assert info.entity_id == ""
+
+
+class TestResolveCallerBinding:
+    """测试 BotBindingResolver.resolve_caller_binding：调 caller-connection 拉容器。
+
+    metadata 的 ``iam_token`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
+    ``IAM_TOKEN=<值>`` 传给插件。
+    """
+
+    async def test_resolves_sandbox_via_caller_connection(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-9")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={
+                "user_id": "u-9",
+                "iam_token": "test-value",
+            },
+        )
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-9",
+            cookie="IAM_TOKEN=test-value",
+        )
+        assert info.sandbox_id == "sbx-9"
+        assert info.device_provider == "caller"
+
+    async def test_user_id_defaults_to_empty_string(self):
+        """metadata 无 user_id 时直接传空串（无兜底推导）；cookie 空值包装。"""
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
+        resolver = BotBindingResolver(plugin)
+        await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID, owner_id="", user_id="", cookie="IAM_TOKEN="
+        )
+
+
+class TestResolveBindingNormalOnly:
+    """resolve_binding 只做正常解析：caller 模式的容器拉起不在本方法。"""
+
+    async def test_caller_mode_metadata_resolves_normally(self):
+        """caller 模式 metadata 同样走正常 get_binding，不调 caller-connection。"""
+        plugin = MagicMock()
+        plugin.get_binding = AsyncMock(
+            return_value=BotBindingData(
+                bot_id=BOT_ID,
+                owner_id=ENTITY_ID,
+                bot_type="service",
+                engine_type="teclaw",
+                publish_id=None,
+                publish_status=None,
+                binding_id=0,
+                device_provider="teclaw",
+                device_id="dev-1",
+            )
+        )
+        plugin.get_caller_connection = AsyncMock()
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={"iam_token": "iam-value", "user_id": "u-1"},
+        )
+        assert info is not None
+        assert info.device_provider == "teclaw"
+        plugin.get_binding.assert_awaited_once()
+        plugin.get_caller_connection.assert_not_called()
+
+    async def test_empty_real_bot_id_returns_none(self):
+        """空 bot_id 防御：parse 后 real_bot_id 为空时返回 None。"""
+        plugin = MagicMock()
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(bot_id="", metadata={})
+        assert info is None
+
+
+# ==================== Tests: is_caller_mode ====================
+
+
+class TestIsCallerMode:
+    """is_caller_mode 判定：metadata 双键 + binding 引擎条件。"""
+
+    def test_missing_binding_info_returns_false(self):
+        """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
+        assert (
+            is_caller_mode({"iam_token": "iam-value", "user_id": "u-1"}, None) is False
+        )
+
+
+# ==================== Tests: extract_session_key_from_planned_id ====================
+
+
+class TestExtractSessionKeyFromPlannedId:
+    """测试 extract_session_key_from_planned_id：planned id → 裸 session key。"""
+
+    def test_openclaw_planned_id(self):
+        assert (
+            extract_session_key_from_planned_id("agent:main:session:abc-123:user:u-1")
+            == "abc-123"
+        )
+
+    def test_generic_planned_id(self):
+        assert (
+            extract_session_key_from_planned_id(f"agent:{BOT_ID}:session:k-9:user:u-2")
+            == "k-9"
+        )
+
+    def test_user_first_agent_tail_planned_id(self):
+        """aicoding / claude_code 的 user 前置格式（尾段 :agent:）同样提取裸 key。"""
+        assert (
+            extract_session_key_from_planned_id("user:u-1:session:k-8:agent:b-3")
+            == "k-8"
+        )
+
+    def test_no_session_marker_returns_as_is(self):
+        """无 ":session:" 标记（非 planned 构造）原样返回。"""
+        assert extract_session_key_from_planned_id("sess-plain") == "sess-plain"
+
+    def test_missing_user_marker_returns_as_is(self):
+        """有 ":session:" 但无 ":user:/:agent:" 尾段时格式不完整，原样返回。"""
+        assert (
+            extract_session_key_from_planned_id("agent:main:session:abc-1")
+            == "agent:main:session:abc-1"
+        )
+
+
+# ==================== Tests: build_chat_metadata title/model ====================
+
+
+class TestBuildChatMetadataTitleModel:
+    """title/model 复制到 chat_metadata（供 materialize 恢复会话属性）。"""
+
+    def test_title_and_model_copied_as_str(self):
+        result = build_chat_metadata(
+            {"title": 123, "model": "m-1"},
+            run_id="run-1",
+            eval_session_log=NoopEvalSessionLog(),
+        )
+        assert result["title"] == "123"
+        assert result["model"] == "m-1"
+
+    def test_absent_title_model_omitted(self):
+        result = build_chat_metadata(
+            {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "title" not in result
+        assert "model" not in result
+
+    def test_sender_options_copied_as_dict(self):
+        """sender_options 以嵌套 dict 原样透传（materialize 路径按 dict 读 from）。"""
+        result = build_chat_metadata(
+            {"sender_options": {"from": "owner"}},
+            run_id="run-1",
+            eval_session_log=NoopEvalSessionLog(),
+        )
+        assert result["sender_options"] == {"from": "owner"}
+
+    def test_absent_sender_options_omitted(self):
+        result = build_chat_metadata(
+            {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "sender_options" not in result

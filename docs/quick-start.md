@@ -23,10 +23,10 @@ Common entry points:
 | Entry | Best for | Purpose |
 | --- | --- | --- |
 | [README.md](../README.md) | First-time readers | Product positioning, capability status, recommended startup paths, and documentation navigation. |
-| `./scripts/singlebox.sh` | Daily local developers and first-time users | Starts BAAS, backend, BCS, the local 5-bot stack, demo bot, and frontend using repo-local isolated runtime paths. |
-| `./scripts/singlebox.sh --standalone` | Compatibility with older docs or scripts | Explicit alias for the default isolated singlebox mode. |
-| `./scripts/singlebox.sh install-tools` | Users who want script-assisted dependency installation | Interactively checks and installs missing tools, explaining write paths and impact before it writes. |
-| `./scripts/singlebox.sh check` | Users who only want a preflight | Checks dependencies, directories, and ports; except for initializing a few local runtime directories, it does not install, build, start, or stop processes. |
+| `./singlebox/singlebox.sh` | Daily local developers and first-time users | Starts BAAS, backend, BCS, the local 5-bot stack, demo bot, and frontend using repo-local isolated runtime paths. |
+| `./singlebox/singlebox.sh --standalone` | Compatibility with older docs or scripts | Explicit alias for the default isolated singlebox mode. |
+| `./singlebox/singlebox.sh install-tools` | Users who want script-assisted dependency installation | Interactively checks and installs missing tools, explaining write paths and impact before it writes. |
+| `./singlebox/singlebox.sh check` | Users who only want a preflight | Checks dependencies, directories, and ports; except for initializing a few local runtime directories, it does not install, build, start, or stop processes. |
 
 The current `all` group starts BAAS, backend, BCS, the local 5-bot stack, demo
 bot, and frontend. When BCS starts, it brings up 5 local OpenClaw bots and
@@ -58,21 +58,21 @@ Only one singlebox stack should listen on the default ports at a time:
 If you want the script to check and install missing tools:
 
 ```bash
-./scripts/singlebox.sh install-tools
-./scripts/singlebox.sh
+./singlebox/singlebox.sh install-tools
+./singlebox/singlebox.sh
 ```
 
 If you only want to preflight dependencies and ports, then decide how to install
 missing tools yourself:
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 After the preflight passes, start the default isolated path:
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 Frontend URL:
@@ -98,7 +98,7 @@ directory or call the local package manager. It asks for confirmation before
 installing OpenClaw, Rust/Cargo, and protobuf/protoc.
 
 ```bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ```
 
 Running `singlebox.sh` also installs the repo-local pre-push hook by setting
@@ -110,7 +110,7 @@ ports; except for initializing a few local runtime directories, it does not
 install, build, start, or stop processes:
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 If you want to manage dependency versions completely by hand, follow
@@ -190,13 +190,13 @@ After success, you should see:
 Check overall status:
 
 ```bash
-./scripts/singlebox.sh status
+./singlebox/singlebox.sh status
 ```
 
 Check the isolated path status:
 
 ```bash
-./scripts/singlebox.sh status
+./singlebox/singlebox.sh status
 ```
 
 ## Common operations
@@ -204,19 +204,19 @@ Check the isolated path status:
 Stop the default isolated path:
 
 ```bash
-./scripts/singlebox.sh stop
+./singlebox/singlebox.sh stop
 ```
 
 Restart:
 
 ```bash
-./scripts/singlebox.sh restart
+./singlebox/singlebox.sh restart
 ```
 
 Clean intermediate BCS state:
 
 ```bash
-./scripts/singlebox.sh clean bcs
+./singlebox/singlebox.sh clean bcs
 ```
 
 `clean bcs` first stops BCS and the local 5-bot stack, then removes the BCS
@@ -262,7 +262,7 @@ test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 If the plugin build output does not exist, rerun:
 
 ```bash
-./scripts/singlebox.sh setup bcs
+./singlebox/singlebox.sh setup bcs
 ```
 
 ### 3. Bots did not all connect
@@ -304,7 +304,7 @@ FRONTEND_PORT=<available-frontend-port>
 You can also pass them explicitly at startup:
 
 ```bash
-./scripts/singlebox.sh --bcs-port <available-bcs-port> --frontend-port <available-frontend-port>
+./singlebox/singlebox.sh --bcs-port <available-bcs-port> --frontend-port <available-frontend-port>
 ```
 
 The default ports cannot be shared by two singlebox stacks. If another checkout

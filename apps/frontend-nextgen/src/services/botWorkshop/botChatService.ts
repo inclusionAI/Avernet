@@ -1,0 +1,177 @@
+import type { BotChatContext, BotChatDetail, BotChatFilters, BotChatRelationScope } from '@/domain/botChats';
+import { getBotChat, listBotChats, type BotChatListParams } from '@/services/backendApi/bots/botChatController';
+import { useBotChatStore } from '@/stores/botChatStore';
+import { mapBotChatDetail, mapBotChatPage } from './botChatMapper';
+
+const optional = (value: string) => value.trim() || undefined;
+const isoDate = (value: string) => (value ? new Date(value).toISOString() : undefined);
+
+// 后端对 contains 模糊查询限制 90 天时间跨度，超出即返回 Invalid log query；
+// 拼参数前把起始日期钳制进窗口，避免查询被网关拒绝。
+export const fuzzyQueryWindowDays = 90;
+
+const toLocalDateTimeInput = (date: Date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+};
+
+export const clampFuzzyQueryFromDate = (fromDate: string, toDate: string): string => {
+  if (!fromDate || !toDate) return fromDate;
+  const from = new Date(fromDate).getTime();
+  const to = new Date(toDate).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return fromDate;
+  const earliest = to - fuzzyQueryWindowDays * 24 * 60 * 60 * 1000;
+  return from < earliest ? toLocalDateTimeInput(new Date(earliest)) : fromDate;
+};
+
+export const formatFriendlyDateTime = (value: string) => value.replace('T', ' ');
+
+function buildParams(context: BotChatContext, filters: BotChatFilters, page: number, limit: number): BotChatListParams {
+  const fuzzy = Boolean(filters.keyword);
+  return {
+    user_id: context.userId,
+    owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+    trace_id: optional(filters.traceId),
+    session_id: optional(filters.sessionId),
+    session_key: optional(filters.sessionKey),
+    query: optional(filters.keyword),
+    biz_scene: optional(filters.bizScene),
+    biz_task_id: optional(filters.bizTaskId),
+    group_id: optional(filters.groupId),
+    match_mode: filters.keyword ? 'contains' : 'exact',
+    include_output_match: Boolean(filters.keyword),
+    from_date: isoDate(fuzzy ? clampFuzzyQueryFromDate(filters.fromDate, filters.toDate) : filters.fromDate),
+    to_date: isoDate(filters.toDate),
+    page,
+    limit,
+  };
+}
+
+const messageOf = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
+const mergeTracePages = (current: ReturnType<typeof mapBotChatPage>, next: ReturnType<typeof mapBotChatPage>) => {
+  const seen = new Set<string>();
+  return {
+    ...next,
+    items: [...current.items, ...next.items].filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    }),
+  };
+};
+let listSequence = 0;
+let detailSequence = 0;
+let relatedSequence = 0;
+
+export const botChatService = {
+  async list(context: BotChatContext, filters: BotChatFilters, page = 1, limit = 20) {
+    const sequence = ++listSequence;
+    useBotChatStore.getState().setListState({ loading: true, error: undefined });
+    try {
+      const response = await listBotChats(context.botId, buildParams(context, filters, page, limit));
+      if (!response.data) throw new Error(response.message || '日志列表为空');
+      const result = mapBotChatPage(response.data);
+      if (sequence === listSequence && useBotChatStore.getState().open) {
+        useBotChatStore.getState().setListState({ page: result, loading: false, error: undefined });
+      }
+      return result;
+    } catch (error) {
+      if (sequence === listSequence)
+        useBotChatStore.getState().setListState({ loading: false, error: messageOf(error, '日志加载失败') });
+      throw error;
+    }
+  },
+
+  async detail(
+    context: BotChatContext,
+    traceId: string,
+    groupId?: string,
+    addressedBotId?: string,
+    sessionId?: string,
+    preserveRelated = false,
+  ) {
+    const sequence = ++detailSequence;
+    useBotChatStore.getState().setDetailState({ detailLoading: true, error: undefined });
+    if (!groupId && !preserveRelated) {
+      useBotChatStore.getState().setRelatedState({ related: undefined, relatedLoading: false, error: undefined });
+    }
+    try {
+      // The OpenAPI route is bot-scoped. For a Group trace, use the source bot
+      // returned by the aggregated list; otherwise use the page Bot context.
+      const detailBotId = addressedBotId ?? context.botId;
+      let resolvedBotId = detailBotId;
+      if (sessionId) {
+        const history = await listBotChats(detailBotId, {
+          user_id: context.userId,
+          owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+          session_id: sessionId,
+          match_mode: 'exact',
+          time_scope: 'all',
+          page: 1,
+          limit: 100,
+        });
+        const matchedTrace = history.data?.sessions.find((item) => item.id === traceId);
+        if (!matchedTrace) throw new Error('未找到对应的日志 Trace');
+        resolvedBotId = matchedTrace.bot_id ?? detailBotId;
+      }
+      const response = await getBotChat(resolvedBotId, traceId, {
+        user_id: context.userId,
+        owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+      });
+      if (!response.data) throw new Error(response.message || '日志详情为空');
+      const detail = mapBotChatDetail(response.data);
+      if (sequence === detailSequence && useBotChatStore.getState().open) {
+        useBotChatStore.getState().setDetailState({ detail, detailLoading: false, error: undefined });
+      }
+      return detail;
+    } catch (error) {
+      if (sequence === detailSequence)
+        useBotChatStore
+          .getState()
+          .setDetailState({ detailLoading: false, error: messageOf(error, '日志详情加载失败') });
+      throw error;
+    }
+  },
+
+  async related(context: BotChatContext, detail: BotChatDetail, scope: BotChatRelationScope, page = 1, append = false) {
+    const sequence = ++relatedSequence;
+    useBotChatStore.getState().setRelatedState({
+      relationScope: scope,
+      related: append ? useBotChatStore.getState().related : undefined,
+      relatedLoading: true,
+      error: undefined,
+    });
+    const relation: Partial<BotChatListParams> =
+      scope === 'session'
+        ? { session_id: detail.sessionId, session_key: detail.sessionId ? undefined : detail.sessionKey }
+        : scope === 'task'
+        ? { biz_scene: detail.bizScene, biz_task_id: detail.bizTaskId }
+        : { group_id: detail.groupId };
+    try {
+      const response = await listBotChats(context.botId, {
+        user_id: context.userId,
+        owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+        ...relation,
+        match_mode: 'exact',
+        ...(scope !== 'task' ? { time_scope: 'all' } : {}),
+        page,
+        limit: 100,
+      });
+      if (!response.data) throw new Error(response.message || '关联日志为空');
+      const result = mapBotChatPage(response.data);
+      if (sequence === relatedSequence && useBotChatStore.getState().open) {
+        const current = useBotChatStore.getState().related;
+        const merged = append && current ? mergeTracePages(current, result) : result;
+        useBotChatStore.getState().setRelatedState({ related: merged, relatedLoading: false, error: undefined });
+        return merged;
+      }
+      return result;
+    } catch (error) {
+      if (sequence === relatedSequence)
+        useBotChatStore
+          .getState()
+          .setRelatedState({ relatedLoading: false, error: messageOf(error, '关联日志加载失败') });
+      throw error;
+    }
+  },
+};

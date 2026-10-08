@@ -24,8 +24,8 @@ test -f scripts/6bots_undercover_game_profile/bots.json && echo "谁是卧底配
 安装工具并检查环境：
 
 ```bash
-./scripts/singlebox.sh install-tools
-./scripts/singlebox.sh check bcs_frontend
+./singlebox/singlebox.sh install-tools
+./singlebox/singlebox.sh check bcs_frontend
 ```
 
 按终端提示安装缺失工具。主要需要 Rust/Cargo、protoc、Node.js/npm、OpenClaw、jq，以及本机编译依赖。具体版本和系统安装方法见 [本地依赖清单](dependencies.zh-CN.md)。
@@ -43,13 +43,13 @@ test -f scripts/6bots_undercover_game_profile/bots.json && echo "谁是卧底配
 先编译协作服务、构建副屏资源并安装前端依赖：
 
 ```bash
-./scripts/singlebox.sh setup bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 ```
 
 命令成功结束后，检查游戏 Bot 的启动条件：
 
 ```bash
-./scripts/singlebox.sh check bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh check bots --profile-dir scripts/6bots_undercover_game_profile
 ```
 
 检查应识别到 6 个 Bot 的配置。后续管理游戏 Bot 时，都要带上同一个 `--profile-dir` 参数。
@@ -114,13 +114,13 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 启动 BCS 和前端，并指定本次使用的游戏配置目录：
 
 ```bash
-./scripts/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ```
 
 这一步启动网页和协作服务，游戏 Bot 在下一步单独启动。检查服务状态：
 
 ```bash
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bcs_frontend
 curl --fail http://127.0.0.1:21000/health
 ```
 
@@ -131,7 +131,7 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 运行：
 
 ```bash
-./scripts/singlebox.sh start bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_undercover_game_profile
 ```
 
 如果出现模型配置菜单，根据第 3 步的准备选择：
@@ -146,7 +146,7 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 检查进程状态和注册结果：
 
 ```bash
-./scripts/singlebox.sh status bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_undercover_game_profile
 ./src/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 list
 ```
 
@@ -255,19 +255,19 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 需要重启游戏 Bot 时使用：
 
 ```bash
-./scripts/singlebox.sh restart bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh restart bots --profile-dir scripts/6bots_undercover_game_profile
 ```
 
 玩完后停止这套游戏 Bot：
 
 ```bash
-./scripts/singlebox.sh stop bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_undercover_game_profile
 ```
 
 如果也不再使用 Avernet 页面和协作服务，再运行：
 
 ```bash
-./scripts/singlebox.sh stop bcs_frontend
+./singlebox/singlebox.sh stop bcs_frontend
 ```
 
-更多角色说明和游戏实现细节见 [谁是卧底配置说明](../scripts/6bots_undercover_game_profile/README.md)。
+更多角色说明和游戏实现细节见 [谁是卧底配置说明](../singlebox/agents/6bots_undercover_game_profile/README.md)。

@@ -1,0 +1,163 @@
+# secbaas-community
+
+**SecBaaS Community Edition** — the open-source, single-box runtime of the TeamClaw AI bot platform.
+
+This package provides the core server that manages AI bot lifecycles: creation, sandbox provisioning, runtime scheduling, session management, API gateway, billing control, and third-party integrations.
+
+## Quick Start
+
+```bash
+# Install dependencies
+uv sync
+
+# Run in bare mode (standalone, no sidecar)
+python src/secbaas/community/main.py --config configs/ --mode bare
+
+# Run in SOFA mode (with MOSN/Layotto sidecar)
+python src/secbaas/community/main.py --config configs/ --mode sofa
+```
+
+## Architecture
+
+```
+src/secbaas/
+├── api/            # HTTP API layer — route definitions & request models
+│   ├── api_gateway/    # API key management & access control
+│   ├── auth/           # Authentication endpoints
+│   ├── bcn/            # BCN downlink protocol
+│   ├── bot_manage/     # Bot CRUD
+│   ├── bot_qpm/        # Bot QPM configuration
+│   ├── bot_runtime/    # Bot runtime status
+│   ├── config_manage/  # System configuration API
+│   ├── device_manage/  # Device lifecycle API
+│   ├── health_check/   # Health check endpoints
+│   ├── open_api/       # Public REST API
+│   ├── paas/           # Sandbox PaaS API
+│   ├── publish_manage/ # Bot publishing API
+│   ├── sse/            # Server-sent events
+│   ├── template_manage/# Bot template API
+│   └── tenant_manage/  # Multi-tenant management
+├── adapters/       # Transport adapters (FastAPI web app)
+├── bootstrap/      # DI container wiring, cron jobs, startup
+├── config/         # Config loader & models
+├── core/           # Domain logic — services, repositories, DB
+│   ├── service/        # Business services (23 domains)
+│   ├── repository/     # Data access layer
+│   ├── database/       # Database adapters
+│   └── utils/          # Shared utilities
+├── logger/         # Structured logging
+├── plugins/        # Pluggable backends (auth, crypto, cache, DB, sandbox, scheduler, etc.)
+├── spi/            # Service Provider Interface — abstract plugin contracts
+└── main.py         # Unified entry point
+```
+
+### Layers
+
+| Layer | Responsibility |
+|---|---|
+| **SPI** (`spi/`) | Abstract interfaces / contracts for each plugin domain |
+| **Plugins** (`plugins/`) | Concrete implementations selected via config (stub/real) |
+| **Core** (`core/`) | Domain services, repositories, and database access |
+| **API** (`api/`) | Request/response models, validation, protocol definitions |
+| **Adapters** (`adapters/`) | FastAPI app, middleware, DI wiring, WSGI server |
+| **Bootstrap** (`bootstrap/`) | Composition root — assembles containers, starts services |
+
+### Plugin System
+
+The runtime uses an SPI-based plugin model. Each capability (auth, crypto, cache, database, sandbox, scheduler, etc.) has:
+
+1. An **interface** in `spi/` (the contract)
+2. One or more **implementations** in `plugins/` (e.g., `stub` for local dev, `real` for production)
+3. A **config-driven switch** in `application.yaml` to select which implementation to use
+
+### Runtime Modes
+
+- **Bare mode** — standalone FastAPI server, no sidecar dependency. Ideal for local development and single-box deployments.
+- **SOFA mode** — runs behind MOSN/Layotto sidecar for service mesh integration. Requires the `secbaas.enterprise` package.
+
+## Configuration
+
+See [configs/application.yaml](configs/application.yaml) for the full configuration reference. Environment-specific overlays are in `configs/overlays/`.
+
+Key configuration sections:
+
+| Section | Description |
+|---|---|
+| `module_config.web` | HTTP server settings (port, workers) |
+| `user_config.plugins` | Plugin backend selection (stub/real) |
+| `user_config.plugins.sandbox` | Sandbox provider configs (Arca, K8s, Docker, etc.) |
+| `user_config.bot_service` | Bot runtime proxy settings |
+| `user_config.bot_run_queue` | Task queue worker config |
+| `user_config.device_ttl_timer` | Device TTL renewal schedule |
+| `user_config.expire_sandbox_timer` | Aliyun ACK pod expiry sweep (destroy Pod + stop bot) schedule |
+| `user_config.publish_retry_sweep` | Publish retry sweep schedule (advances timed-out device attempts) |
+| `user_config.bot_runner` | Concurrency limits per bot |
+
+### Publish retry
+
+Device publish operations retry the full per-device lifecycle — sandbox create,
+start script, and callback — up to a per-request budget. The budget is a request
+parameter, not a deployment setting; it defaults to `0`, which preserves
+single-attempt behavior.
+
+| API | Parameter |
+|---|---|
+| Publish API (`POST /api/v1/publishes`) | `config.publish_max_retry_times` |
+| Bot API (`POST /api/v1/bots`, `/scale`, `/update`, `/update-devices`) | `config.publish_max_retry_times` |
+| Bot restart API (`POST /api/v1/bots/{bot_uuid}/restart`) | `publish_max_retry_times` |
+
+Accepted range is `0`–`3`; the value means additional attempts after the first.
+The budget and attempts consumed are stored per device in
+`baas_publish_record.extra_config`, so retry state survives process restarts.
+Attempts that outrun their window are picked up by the `publish_retry_sweep`
+scheduled task, so retries do not depend on a client polling for progress. A
+device that exhausts its budget is marked `FAILED`, failing the publish exactly
+as a single-attempt failure would.
+
+## Development
+
+```bash
+# Lint & format
+just lint
+just format
+
+# Unit tests
+just test-ut
+
+# Integration tests (requires SQLite)
+just test-it
+
+# Architecture tests
+just test-arch
+
+# E2E tests (requires running app)
+just test-e2e
+
+# Full CI pipeline
+just test
+```
+
+`bash scripts/ci_test.sh` (or `just test-ci`) enforces the same changed-line
+coverage gate (threshold 90) as the GitHub CI job in
+`.github/workflows/unit-tests.yml`: when `--base` is omitted it is derived via
+`singlebox/lib/resolve_base_ref.sh` (the merge base of `origin/dev` by default,
+following the pre-push target contract `AVERNET_PRE_PUSH_MERGE_TARGET` >
+`avernet.prePush.mergeTarget` > `origin/dev`); if the target cannot be fetched,
+the gate fails loudly instead of silently skipping. `just test` runs only the
+test pipeline without the coverage gate.
+
+### Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `SERVER_ENV` | Deployment environment (dev, prepub, prod) |
+| `COMMUNITY_DEPLOY` | When set, its value replaces `SERVER_ENV` for naming the `application-<value>.yaml` overlay (community deployments set `COMMUNITY_DEPLOY=community`) |
+| `SOFAPY_CONFIG_OVERLAY` | Additional YAML overlay path |
+| `DEPLOY_ENV` | Custom deploy-env probe variable |
+
+## Project Conventions
+
+- **Python**: 3.12+, strict static typing (mypy + pyright)
+- **Imports**: Private modules (`_module`) never imported cross-package from public `__init__.py` files — see [src/secbaas/CLAUDE.md](src/secbaas/CLAUDE.md)
+- **Tests**: pytest with markers for `unit`, `integration`, `e2e`, `architecture`
+- **Config**: YAML-based with env-specific overlays

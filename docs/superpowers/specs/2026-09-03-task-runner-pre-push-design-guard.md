@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Phase:** 1 — GitHub PR required check
 - **Target branch:** `dev`
-- **Owner identity:** GitHub login `regrecall`
+- **Exempt identities:** GitHub logins `regrecall` and `xsandyguo`
 
 The filename is retained from the original pre-push prototype so existing links
 remain valid. This document supersedes that prototype: the guard no longer runs
@@ -52,10 +52,10 @@ used because contributors can set them locally.
 
 Decision order:
 
-1. `regrecall` bypasses this guard.
-2. A non-owner modifying a guard control file is rejected.
-3. A non-owner absent from the guarded-submitter policy skips the structural
-   comparison and passes.
+1. `regrecall` and `xsandyguo` bypass this guard.
+2. A non-exempt author modifying a guard control file is rejected.
+3. A non-exempt author absent from the guarded-submitter policy skips the
+   structural comparison and passes.
 4. A guarded submitter receives the full TaskRunner structural comparison.
 
 Login comparison is case-insensitive.
@@ -73,12 +73,12 @@ The guarded-submitter policy is
 ```
 
 The list must be non-empty, contain valid GitHub logins, and contain no
-case-insensitive duplicates. Only a pull request authored by `regrecall` may
-change it. A policy update takes effect only after it is merged into `dev`.
+case-insensitive duplicates. Only a pull request authored by an exempt identity
+may change it. A policy update takes effect only after it is merged into `dev`.
 
 ## 4. Guard Control Files
 
-A non-owner pull request is rejected with `TRG900` if it changes any of:
+A non-exempt pull request is rejected with `TRG900` if it changes any of:
 
 - `.github/workflows/task-design-guard.yml`
 - `docs/arch/task-design-guard-submitters.json`
@@ -135,7 +135,7 @@ The checker has three exit statuses:
 
 | Status | Meaning | Workflow result |
 | --- | --- | --- |
-| `0` | passed, owner bypass, or unlisted-author skip | pass |
+| `0` | passed, exempt-author bypass, or unlisted-author skip | pass |
 | `1` | confirmed structural violation, control-file violation, or PR-head parse failure | fail |
 | `2` | trusted policy, checker, or recoverable Git/environment failure | warn and pass |
 
@@ -207,9 +207,9 @@ Tests must cover:
 
 - all existing class and protected-method AST rules;
 - method-body changes passing;
-- `regrecall` bypass;
+- `regrecall` and `xsandyguo` bypass;
 - guarded, unlisted, and case-insensitive submitter behavior;
-- non-owner control-file changes failing before membership checks;
+- non-exempt control-file changes failing before membership checks;
 - trusted manifest and submitter policy being read from the base revision;
 - malformed PR-head source returning `1`;
 - trusted configuration or base-source failures returning `2`;

@@ -75,7 +75,7 @@ ENV_FILE=""
 # main.py defaults to 8888. Every rendered manifest therefore published a port
 # with no listener behind it. Each entry below is the service's real default.
 declare -A DEFAULT_PORT=(
-    # baas is the exception: it has NO port env override (nothing in src/baas/
+    # baas is the exception: it has NO port env override (nothing in apps/baas/
     # reads BAAS_PORT), so its listener is whatever the mounted config says.
     # Every k8s deployment here sets COMMUNITY_DEPLOY=community
     # (scripts/k8s-tests/*/baas.env), which merges application-community.yaml

@@ -1,6 +1,6 @@
 # Context Boundary Format (Rule 22)
 
-Every boundary-significant module under `src/backend/src/agentclaw/`
+Every boundary-significant module under `apps/backend/src/agentclaw/`
 declares its context in a `README.md` next to the module's source, with
 a fixed `## Context Boundary` section. The arch test
 `tests/architecture/test_module_boundaries.py` parses these and

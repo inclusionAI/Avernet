@@ -38,7 +38,7 @@ FROM rust:1.91.0-bookworm AS bcs-cli-builder
 
 WORKDIR /opt/bcs
 
-COPY src/bcs/ /opt/bcs/
+COPY apps/bcs/ /opt/bcs/
 RUN cargo build --locked --release --package bcs-cli \
     && strip target/release/bcs-cli \
     && target/release/bcs-cli --help >/dev/null
@@ -95,7 +95,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && which uv && uv --version
 
 # Build engine virtualenv from pyproject.toml.
-COPY src/engine/ /opt/engine/
+COPY engine/adapter/ /opt/engine/
 RUN uv venv --python 3 /opt/.venv \
     && UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
        uv pip install --python /opt/.venv/bin/python -r /opt/engine/pyproject.toml \
@@ -107,7 +107,7 @@ RUN uv venv --python 3 /opt/.venv \
 
 # Build the vendored claude_code relay gateway (the Node WS server the engine's
 # claude_code mode connects to at ws://127.0.0.1:18900). Build command mirrors
-# scripts/modules/claude_relays.sh::claude_relays_setup (npm install --include=dev
+# singlebox/modules/claude_relays.sh::claude_relays_setup (npm install --include=dev
 # --ignore-scripts, tshy build via prepublishOnly), then prune devDeps like the
 # bcn plugin build below keeps the runtime layer lean. The repo ships no dist/;
 # it must be built here or the relay cannot run in the image.
@@ -119,7 +119,7 @@ RUN cd /opt/engine/src/engine/community/claude_code_gateway \
 
 # Build the openclaw-channel-bcn plugin (BCS WebSocket channel).
 # Mirrors Dockerfile.ocb: npm install → build → prune devDeps.
-COPY src/bcs/crates/plugins/openclaw-channel-bcn/ /tmp/openclaw-channel-bcn/
+COPY apps/bcs/crates/plugins/openclaw-channel-bcn/ /tmp/openclaw-channel-bcn/
 RUN cd /tmp/openclaw-channel-bcn \
     && npm install \
     && npm run build \
@@ -152,14 +152,14 @@ RUN cd /tmp/openclaw-channel-bcn \
 # Layer caching: manifests + scripts/configs → `npm ci` (heavy) → rest of
 # source → build → prune. Source edits do not invalidate the npm ci layer.
 # node_modules / dist / *.tgz are excluded by the repo .dockerignore.
-COPY src/evolverun/taskguard/package.json \
-     src/evolverun/taskguard/package-lock.json \
-     src/evolverun/taskguard/tsconfig.json \
+COPY apps/evolverun/taskguard/package.json \
+     apps/evolverun/taskguard/package-lock.json \
+     apps/evolverun/taskguard/tsconfig.json \
      /tmp/taskguard/
 # scripts/ ships with the manifest stage so `npm run build` (scripts/build/*.mjs)
 # can be invoked without an extra source layer. configs/ arrives with the
 # full source COPY below.
-COPY src/evolverun/taskguard/scripts /tmp/taskguard/scripts
+COPY apps/evolverun/taskguard/scripts /tmp/taskguard/scripts
 RUN cd /tmp/taskguard \
     && npm ci --no-audit --no-fund --ignore-scripts \
     && npm cache clean --force
@@ -167,7 +167,7 @@ RUN cd /tmp/taskguard \
 # Layer the rest of the source on top. The COPY above does not overwrite
 # node_modules (it is .dockerignore'd from the build context). configs/,
 # skills/, packs/, src/ all land here, ready for `npm run build`.
-COPY src/evolverun/taskguard/ /tmp/taskguard/
+COPY apps/evolverun/taskguard/ /tmp/taskguard/
 
 # Build (tshy compile + facade skills + runtime asset bundling), then prune
 # devDeps so node_modules keeps ONLY the transitive closure reachable from
@@ -188,11 +188,11 @@ RUN cd /tmp/taskguard \
     && rm -rf /tmp/taskguard
 
 # Overlay the source-of-truth config so the docker image always ships the
-# latest baseUrl / apiKey / etc. from src/evolverun/taskguard/configs/.
+# latest baseUrl / apiKey / etc. from apps/evolverun/taskguard/configs/.
 # The cp -R configs/ above mirrors the source tree, but pinning a single
 # file guarantees application.yaml always reflects repo HEAD even if a
 # future build step mutates configs/ in /tmp.
-COPY src/evolverun/taskguard/configs/application.yaml \
+COPY apps/evolverun/taskguard/configs/application.yaml \
      /opt/openclawExt/taskguard/configs/application.yaml
 
 # Install supervisor in an isolated venv (avoids conflicts with engine site-packages).
@@ -243,7 +243,7 @@ COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # Install the source-built BCS CLI and its matching OpenClaw coordination skill.
 COPY --from=bcs-cli-builder /opt/bcs/target/release/bcs-cli /usr/local/bin/bcs-cli
-COPY src/bcs/crates/tools/bcs-cli/bcs-coordination/ /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/
+COPY apps/bcs/crates/tools/bcs-cli/bcs-coordination/ /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/
 RUN bcs-cli --help >/dev/null \
     && test -f /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/SKILL.md
 

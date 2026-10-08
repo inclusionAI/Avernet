@@ -6,8 +6,8 @@
 
 本教程使用的 Bot profile 是：
 
-- [商家经营协作队配置](../scripts/4bots_merchant_operations_profile/bots.json)
-- [商家经营协作队说明](../scripts/4bots_merchant_operations_profile/README.md)
+- [商家经营协作队配置](../singlebox/agents/4bots_merchant_operations_profile/bots.json)
+- [商家经营协作队说明](../singlebox/agents/4bots_merchant_operations_profile/README.md)
 
 > 本教程不要求从前端选择固定模板，也不要求手工编写 YAML。店长会根据本轮真实协商结果动态生成一次性自定义协作。代码中的 manager-worker 和 state machine，分别对应产品中的“任务协作”和“自定义协作”。
 
@@ -151,7 +151,7 @@ test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.
 推荐让仓库脚本检查并安装缺失工具：
 
 ~~~bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ~~~
 
 这个过程是交互式的。脚本可能会：
@@ -168,7 +168,7 @@ test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.
 完成后执行依赖预检：
 
 ~~~bash
-./scripts/singlebox.sh check bcs_frontend
+./singlebox/singlebox.sh check bcs_frontend
 ~~~
 
 此时还没有编译 BCS，因此暂时不要执行 Bot 的完整预检；下一步编译完成后再检查。
@@ -184,7 +184,7 @@ test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.
 运行：
 
 ~~~bash
-./scripts/singlebox.sh setup bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 ~~~
 
 这一步会：
@@ -198,7 +198,7 @@ test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.
 现在再检查经营协作 Bot 的启动条件：
 
 ~~~bash
-./scripts/singlebox.sh check bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh check bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 预检应识别到 4 Bot manifest，并检查 30601 至 30631 这 4 个端口。
@@ -255,7 +255,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 运行：
 
 ~~~bash
-./scripts/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ~~~
 
 这个命令只启动 BCS 和前端，不会启动默认 Bot，也不会询问模型配置。前端启动时会再次检查依赖；依赖已经是最新状态时会跳过安装，缺失或过期时会自动执行一次安装。
@@ -263,7 +263,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 成功后，终端会显示本地服务已经就绪。可以另外确认状态：
 
 ~~~bash
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
 预期结果：
@@ -278,7 +278,7 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 保持 BCS 正在运行，然后执行：
 
 ~~~bash
-./scripts/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 终端会出现：
@@ -297,7 +297,7 @@ Choose model config mode:
 脚本随后会准备 4 份隔离的 OpenClaw profile、连接 BCS、注册 Bot，并把它们设为可发现。等待命令成功结束后检查状态：
 
 ~~~bash
-./scripts/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 4 个 Bot 都应显示 `Running`，并各自带有端口和 `bot_uuid`。
@@ -509,15 +509,15 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 演示结束后，先停止 4 个 Bot，再停止前端和 BCS：
 
 ~~~bash
-./scripts/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
-./scripts/singlebox.sh stop bcs_frontend
+./singlebox/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh stop bcs_frontend
 ~~~
 
 检查是否都已停止：
 
 ~~~bash
-./scripts/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
-./scripts/singlebox.sh status bcs_frontend
+./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
 `stop` 只停止进程，保留本地 Bot 身份、协作群和会话数据，方便下次继续。不要为了普通重启执行 `clean`；`clean` 会删除本地运行数据，只有明确希望从零重置时才使用。
@@ -525,8 +525,8 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 下次复现通常只需要：
 
 ~~~bash
-./scripts/singlebox.sh start bcs_frontend
-./scripts/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 ## 18. 常见问题
@@ -537,7 +537,7 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 
 ~~~bash
 chmod +x scripts/singlebox.sh
-./scripts/singlebox.sh --help
+./singlebox/singlebox.sh --help
 ~~~
 
 ### 18.2 前端提示 `cross-env: command not found`
@@ -546,7 +546,7 @@ chmod +x scripts/singlebox.sh
 
 ~~~bash
 node --version
-./scripts/singlebox.sh start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ~~~
 
 如果 npm 安装失败，查看终端中的第一个错误，而不是最后一行。常见原因是公共 npm registry 网络不可达、磁盘空间不足或本机 npm 配置异常。
@@ -556,7 +556,7 @@ node --version
 说明还没有完成 setup，重新执行：
 
 ~~~bash
-./scripts/singlebox.sh setup bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 ~~~
 
 成功后再启动 BCS 和 Bot。
@@ -568,8 +568,8 @@ node --version
 先停止 Bot，再使用真实配置重新启动：
 
 ~~~bash
-./scripts/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
-./scripts/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 选择 `2` 或 `3`，并确认模型服务本身可用。
@@ -579,7 +579,7 @@ node --version
 先确认状态：
 
 ~~~bash
-./scripts/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
 ~~~
 
 如果状态正常，等待 10 至 20 秒后刷新 `/bcn/chat/list`。还看不到时，确认 BCS 和 Bot 来自同一个 Avernet checkout，并查看汇总日志 `scripts/.dependencies/logs/bots_*.log`。
