@@ -69,7 +69,8 @@ pub async fn wire_with_leader(
     let durable = repository.is_durable();
     config.provider_http.validate().map_err(|e| invalid(&e))?;
     flow.queue_persistable_headers = config.provider_http.queue_persistable_headers.clone();
-    let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone()));
+    let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone()).with_session_registry(flow.session_management.clone()));
+    live.validate_direct_readiness(&initial.policy).await.map_err(|_| invalid("session_registry_invalid"))?;
     let service = ManagedMessageDelivery::new(repository).with_policy(live.clone());
     let metrics = Arc::new(crate::delivery_metrics::DeliveryMetrics::default());
     let service = service.with_instrumentation(metrics.clone());

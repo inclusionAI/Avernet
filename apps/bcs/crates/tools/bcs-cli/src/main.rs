@@ -1371,14 +1371,25 @@ enum Commands {
         #[arg(long, default_value_t = 15_000u64, hide = true)]
         poll_wait_ms: u64,
 
-        /// Detach after BCS accepts and starts the run. The run keeps executing
-        /// on the server; the CLI returns without waiting for the full response.
+        /// Return as soon as BCS durably accepts the request, including queued requests.
         #[arg(long, default_value_t = false)]
         detach: bool,
+
+        /// Wait for downstream execution to start, without waiting for completion.
+        #[arg(long, value_parser = ["running"], conflicts_with = "detach")]
+        wait_until: Option<String>,
 
         /// Organization code for scoped A2A chat. This is request metadata only.
         #[arg(long)]
         organization_code: Option<String>,
+    },
+
+    /// Query or cancel an existing Direct A2A run.
+    ChatRun {
+        #[arg(short, long)]
+        token: Option<String>,
+        #[command(subcommand)]
+        command: ChatRunCommands,
     },
 
     /// Update group status (coordinator/originator only)
@@ -1464,6 +1475,14 @@ enum Commands {
         #[command(subcommand)]
         command: ServiceCommands,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ChatRunCommands {
+    /// Read the run and its queue status.
+    Status { #[arg(long)] run_id: String },
+    /// Request cancellation; a downstream abort may remain unconfirmed.
+    Cancel { #[arg(long)] run_id: String },
 }
 
 #[derive(Subcommand)]
@@ -3687,6 +3706,7 @@ pub async fn run() -> Result<()> {
             response_mode,
             poll_wait_ms,
             detach,
+            wait_until,
             organization_code,
         } => {
             let token = get_token(token.as_deref())?;
@@ -3697,7 +3717,7 @@ pub async fn run() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let client_wait_timeout_ms = timeout_ms.unwrap_or(if detach {
+            let client_wait_timeout_ms = timeout_ms.unwrap_or(if detach || wait_until.is_some() {
                 60_000
             } else {
                 1_800_000
@@ -3727,7 +3747,7 @@ pub async fn run() -> Result<()> {
                     response_mode.as_deref(),
                     organization_code.as_deref(),
                     client_wait_timeout_ms,
-                    detach,
+                    detach || wait_until.is_some(),
                 )
                 .await
             {
@@ -3752,6 +3772,8 @@ pub async fn run() -> Result<()> {
                     }
 
                     if detach {
+                        BcsClient::admitted_outcome(&submit)
+                    } else if wait_until.is_some() {
                         client
                             .chat_poll_run_until_running(
                                 &submit,
@@ -3770,6 +3792,7 @@ pub async fn run() -> Result<()> {
                     }
                 }
                 Err(ChatAsyncError::Transport(msg)) => ChatRunOutcome {
+                    delivery: None,
                     delivered: false,
                     submitted: false,
                     run_id: None,
@@ -3784,6 +3807,7 @@ pub async fn run() -> Result<()> {
                     content_truncated: false,
                 },
                 Err(ChatAsyncError::NotSuccessful { status, body }) => ChatRunOutcome {
+                    delivery: None,
                     delivered: false,
                     submitted: false,
                     run_id: None,
@@ -3795,6 +3819,7 @@ pub async fn run() -> Result<()> {
                     content_truncated: false,
                 },
                 Err(ChatAsyncError::InvalidResponse(msg)) => ChatRunOutcome {
+                    delivery: None,
                     delivered: false,
                     submitted: false,
                     run_id: None,
@@ -3816,6 +3841,7 @@ pub async fn run() -> Result<()> {
                 "chat outcome"
             );
 
+            let success = if detach { outcome.admission_succeeded() } else { outcome.delivered };
             if json_mode {
                 // stdout = EXACTLY one JSON object (jq-parseable).
                 let json_value = if detach {
@@ -3826,6 +3852,8 @@ pub async fn run() -> Result<()> {
                         "run_id": outcome.run_id,
                         "session_id": outcome.session_id,
                         "state": outcome.state,
+                        "delivery_status": outcome.delivery.as_ref().map(|d| &d.status),
+                        "wait_reason": outcome.delivery.as_ref().and_then(|d| d.wait_reason.as_ref()),
                         "error_message": outcome.error_message,
                     })
                 } else {
@@ -3836,6 +3864,8 @@ pub async fn run() -> Result<()> {
                         "run_id": outcome.run_id,
                         "session_id": outcome.session_id,
                         "state": outcome.state,
+                        "delivery_status": outcome.delivery.as_ref().map(|d| &d.status),
+                        "wait_reason": outcome.delivery.as_ref().and_then(|d| d.wait_reason.as_ref()),
                         "response": {"content": outcome.response_content.unwrap_or_default()},
                         "error_message": outcome.error_message,
                         "content_truncated": outcome.content_truncated,
@@ -3865,15 +3895,37 @@ pub async fn run() -> Result<()> {
                     outcome.session_id.as_deref().unwrap_or("none")
                 );
                 println!("State: {}", outcome.state);
+                if let Some(delivery) = &outcome.delivery {
+                    println!("Delivery: {}", delivery.status);
+                    if let Some(reason) = &delivery.wait_reason { println!("Waiting: {}", reason); }
+                }
                 if let Some(err) = &outcome.error_message {
                     println!("Error: {}", err);
                 }
             }
 
-            if !outcome.delivered {
+            if !success {
                 std::process::exit(1);
             }
-        }
+        },
+
+        Commands::ChatRun { token, command } => {
+            let token = get_token(token.as_deref())?;
+            let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
+            let result = match command {
+                ChatRunCommands::Status { run_id } => serde_json::to_value(client.chat_run_status(&run_id, None, None).await?)?,
+                ChatRunCommands::Cancel { run_id } => serde_json::to_value(client.chat_run_cancel(&run_id).await?)?,
+            };
+            if structured_mode { println!("{}", serde_json::to_string(&result)?); }
+            else {
+                println!("Run: {}", result["run_id"].as_str().unwrap_or("unknown"));
+                println!("State: {}", result["state"].as_str().unwrap_or("unknown"));
+                if let Some(status) = result.get("delivery").and_then(|d| d.get("status")).and_then(|v| v.as_str()) {
+                    println!("Delivery: {}", status);
+                    if matches!(status, "cancelling" | "cancel_unknown") { println!("Cancellation is not confirmed; query status again."); }
+                }
+            }
+        },
 
         Commands::GroupStatus {
             token,
