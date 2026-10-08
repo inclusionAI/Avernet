@@ -50,6 +50,15 @@
 
 这些默认值用于形成完整可评审合同，不声称用户已逐项确认。manager 再授权意味着其拥有完整管理员成员管理能力；第 4.2 节规定授予第三人的边不随授予人撤权而级联删除，因而存在持续权限扩散面。文档审阅通过不等于产品已接受此默认值。实施前须记录明确的接受或收紧决定；如收紧为仅 owner 可分配 manager，应同步修改第 5.4/6/8 节及 AC09，不能由实现者自行选择。默认多视角聚合如需变更，也必须显式修订合同。
 
+**2026-10-08 Gate 0 需求方确认记录**（实施计划 `docs/superpowers/plans/2026-10-08-bot-owner-manager-implementation.md` 的 Gate 0 要求落档）：
+
+1. **manager 再授权**：接受本稿默认值——manager 可以添加、撤销其他 manager 并自撤权，授予第三人的边不级联撤销（§4.2、AC09 维持原文）；manager API 不能改变当前 owner。
+2. **team 服务凭证**：按实施计划 Task 13 草案——复用 `bcs-jwt` 纯签名校验边界，bootstrap 配置注入密钥；`VerifiedTeamManagerService` 携带 service_id/env 及允许 Bot/team/operation scope。同一 Bot 的 sync/move 按提交确认顺序串行投递；不引入 membership_version，不承诺自动识别任意乱序。
+3. **转交期限**：确认固定 7 天。失败初始化的恢复与旧数据冲突治理走 dry-run 候选/冲突清单 + 维护 binary 人工确认流程（Task 17），不自动认领。
+4. **team 快照上限**：接受 Task 7 工程建议——完整 manager 快照上限 1,000 个去重 Human，超限在事务前 400；分块 SQL 每块至多 100 名、同一 Bot 事务。
+
+以上确认于 2026-10-08 由需求方在实施启动时作出，据此允许按实施计划挂载新授权写入口。
+
 ### 1.4 非目标
 
 不迁移 Backend/Engine 资产归属、Skill、部署、Provider 绑定/凭据、计费或 runtime token；不提供隐式组织继承，但提供显式、可信来源的 team manager sync；不提供多 owner、临时 manager 授权、细粒度 reader/writer、manager 申请审批或默认多视角消息聚合。本功能不是离职清权或整机资产移交方案。
