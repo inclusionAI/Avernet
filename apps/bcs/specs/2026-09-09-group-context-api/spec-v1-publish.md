@@ -256,7 +256,7 @@ POST /groupcontext/setsystemprompt
 #### 4.1.1 查看现有 context
 
 ```
-POST /groups/game-room-7/groupcontext/list
+POST /groupcontext/list?groupId=game-room-7
 scope_levels: ["group","session"]
 actor_id: judge_bot
 ```
@@ -280,7 +280,7 @@ actor_id: judge_bot
 #### 4.1.2 为每位玩家创建底牌（add ×5）
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
 name: player_word_1
 scope_level: session
 content: 你的词语是：香蕉
@@ -296,10 +296,14 @@ collect_from: [judge_bot]
 同样为李四(苹果)、王五(苹果)、赵六(香蕉)、钱七(苹果)创建 `player_word_2` 到 `player_word_5`，
 每人 `visible_to` 仅含裁判和本人。系统自动生成 `scope = sess-001`，每条 name 不同所以不冲突。
 
+> **底牌的分发方式（不是 API 调用，只是交互流程）**：context 写好后，裁判 bot 在群里私聊每位玩家 bot，
+> 告诉他"去查 `player_word_1`" / "去查 `player_word_2`"。玩家再自己 `get` 对应 name（见 4.2.2）拿到自己的词。
+> 信息隔离不靠 API 隔，靠 `visible_to` —— 裁判只告诉玩家他该查的那条 name，玩家也只能 `get` 到自己在 `visible_to` 里的条目。
+
 #### 4.1.3 记录卧底对应关系（add）
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
 name: player_role
 scope_level: session
 content: 平民词=苹果, 卧底词=香蕉。player_word_1(张三)和player_word_4(赵六)是卧底
@@ -315,7 +319,7 @@ collect_from: [judge_bot]
 #### 4.1.4 写入玩家状态（add）
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
 name: player_state
 scope_level: session
 content: 张三存活、李四存活、王五存活、赵六存活、钱七存活
@@ -333,7 +337,7 @@ collect_from: [judge_bot]
 一轮投票后张三出局：
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/update
+POST /groupcontext/update?groupId=game-room-7&sessionId=sess-001
 name: player_state
 scope_level: session
 content: 张三出局、李四存活、王五存活、赵六存活、钱七存活
@@ -353,7 +357,7 @@ supersede 后写入新版本（新 `id`，`context_id` 不变）。
 裁判想查每个玩家的底牌，逐一调用 get：
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+POST /groupcontext/get?groupId=game-room-7&sessionId=sess-001
 name: player_word_1
 scope_levels: [session]
 ```
@@ -379,7 +383,7 @@ scope_levels: [session]
 #### 4.2.1 查看自己可见的 context
 
 ```
-POST /groupcontext/list?group_id=group-room-7&session_id=sess-001
+POST /groupcontext/list?groupId=game-room-7&sessionId=sess-001
 scope_levels: ["group","session"]
 actor_id: 张三
 ```
@@ -419,7 +423,7 @@ actor_id: 张三
 #### 4.2.2 查自己的底牌
 
 ```
-POST /groupcontext/get?group_id=group-room-7&session_id=sess-001
+POST /groupcontext/get?groupId=game-room-7&sessionId=sess-001
 name: player_word_1
 scope_levels: [session]
 actor_id: 张三
@@ -441,7 +445,7 @@ actor_id: 张三
 
 如果张三尝试 get `player_role`：
 ```
-POST /groupcontext/get?group_id=group-room-7&session_id=sess-001
+POST /groupcontext/get?groupId=game-room-7&sessionId=sess-001
 name: player_role
 scope_levels: [session]
 actor_id: 张三
