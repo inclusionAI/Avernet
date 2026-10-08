@@ -79,7 +79,6 @@ if TYPE_CHECKING:
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from .restart_dispatch import RestartDispatchMixin
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
     IMAGE_POLICY_ON_ACTIVE_KEY,
@@ -327,7 +326,7 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     return f"{date_part}_{random_part}"
 
 
-class BotService(RestartDispatchMixin, BotServiceProtocol):
+class BotService(BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
     def __init__(
@@ -4617,6 +4616,23 @@ class BotService(RestartDispatchMixin, BotServiceProtocol):
         logger.info(f"[bot_service.start_bot] Bot {bot_id} start initiated, device allocation in progress")
         return updated_bot
 
+    async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
+        """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
+        ctx, strategy = resolve_restart_strategy(bot)
+        from agentclaw.community.core.bot_management.engines.restart_contract import RestartServices
+
+        return await strategy.execute_restart(
+            ctx, self.restart_bot,
+            services=RestartServices(
+                repository=self._repository,
+                task_queue=self._task_queue_service,
+                get_bot=self.get_bot,
+                template_service=self._template_service,
+            ),
+            **kwargs,
+        )
+
     def restart_bot(
         self,
         bot_id: str,
@@ -4647,9 +4663,6 @@ class BotService(RestartDispatchMixin, BotServiceProtocol):
         bot = self._repository.get_by_id_and_owner(bot_id, user_id)
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-        ctx, strategy = resolve_restart_strategy(bot)
-        bot = strategy.restart_lifecycle_snapshot(ctx, bot)
 
         if self.is_teclaw_bot(bot.get("active_engine")):
             logger.warning(
@@ -4919,10 +4932,6 @@ class BotService(RestartDispatchMixin, BotServiceProtocol):
                         "device_id": None,
                     },
                 )
-            strategy.restart_handoff(ctx, {
-                "provider": "allocation", "binding_id": None,
-                "source_binding_id": binding_id,
-            })
             updated_bot = self.start_bot(
                 bot_id=bot_id,
                 user_id=user_id,
@@ -5248,20 +5257,9 @@ class BotService(RestartDispatchMixin, BotServiceProtocol):
         # From this point on, every ambiguous failure is recoverable by the
         # pre-existing task. It either reads the stored publish id or adopts the
         # single workflow issued after workflow_baseline.
-        restart_ctx, restart_strategy = resolve_restart_strategy(bot)
-        restart_strategy.restart_handoff(restart_ctx, {
-            "provider": "baas", "binding_id": binding_id,
-            "source_binding_id": binding_id, "restart_request_id": request_id,
-            "publish_id": None, "workflow_baseline": workflow_baseline,
-        })
         result = baas_service.upgrade_bot(**upgrade_kwargs)
         publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
         if publish_id is not None:
-            restart_strategy.restart_handoff(restart_ctx, {
-                "provider": "baas", "binding_id": binding_id,
-                "source_binding_id": binding_id, "restart_request_id": request_id,
-                "publish_id": str(publish_id), "workflow_baseline": workflow_baseline,
-            })
             restart_publish_id = str(publish_id)
             try:
                 self._device_binding_repo.update_device_props(

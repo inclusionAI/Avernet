@@ -108,14 +108,14 @@ This requires no database migration and does not backfill historical Bot rows.
 
 Only explicit `aicoding` / `claude_code` strategies durably admit ordinary restart
 requests. `engines/aicoding/restart_task.py` owns the queue handler and admission;
-`restart_state.py` owns the ext journal and mutation fence. Failures atomically
-persist Bot `FAILED` and the existing `ext.start_status` / `ext.start_message`.
+`restart_state.py` owns the ext journal and mutation fence. Failures persist existing `ext.start_status` / `ext.start_message` using
+ext-only CAS, then write Bot `FAILED` using `update_by_owner`.
 Both status routes use the original `get_bot` and error extraction, with no
 restart-specific projection or queue lookup. Runtime callbacks are unchanged;
 the journal is an audit/recovery record, not a public status override.
 
-`RestartDispatchMixin` and the provisioning hooks are engine-neutral. The queue
-and Bot repository provide dedup and ext CAS primitives. Repository CAS can
-optionally transition status and fence the expected lifecycle snapshot; legacy
-ext-only calls retain their behavior. No table or frontend migration is needed.
+The existing async entrypoint only supplies neutral dependencies to the strategy.
+The synchronous restart, stop/start and provider upgrade flows are unchanged. The queue
+and Bot repository provide dedup and ext CAS primitives. Repository contracts and implementations are unchanged. Journal and status
+writes are separate; lifecycle-field CAS is not provided. No table or frontend migration is needed.
 See the 2026-10-08 durable-restart spec for recovery and query limitations.

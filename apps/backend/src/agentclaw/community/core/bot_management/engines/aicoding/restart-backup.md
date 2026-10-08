@@ -22,8 +22,10 @@ coding strategy. No restart-lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
 resolves the strategy and calls its `execute_restart` contract; explicit
-`aicoding` / `claude_code` engines enqueue durable work and commit PENDING before
-returning. Default engines execute inline. The coding worker calls the original
+`aicoding` / `claude_code` engines with an eligible existing binding enqueue
+durable work and persist PENDING before returning. Unbound recovery and existing
+activation-in-progress cases retain their original threaded, awaited lifecycle
+so that admission does not erase their original FAILED/ACTIVE state. Default engines execute inline. The coding worker calls the original
 synchronous restart method with the original callback signature. The worker
 supplies a stable backup operation ID and a CAS mutation fence through the
 coding-owned execution context; direct synchronous callers retain their gate.

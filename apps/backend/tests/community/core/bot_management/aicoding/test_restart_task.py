@@ -67,7 +67,7 @@ class Repository:
         return deepcopy(self.bot)
 
     def compare_and_set_ext(
-        self, *, bot_id, owner_id, expected_ext, ext, status=None, expected_state=None
+        self, *, bot_id, owner_id, expected_ext, ext
     ):
         with self.lock:
             if self.failed_write:
@@ -75,13 +75,16 @@ class Repository:
             if self.conflict:
                 self.bot["ext"]["concurrent"] = 1
                 self.conflict = False
-            if self.bot["ext"] != expected_ext or any(
-                self.bot.get(k) != v for k, v in (expected_state or {}).items()
-            ):
+            if self.bot["ext"] != expected_ext:
                 return None
             self.bot["ext"] = deepcopy(ext)
-            if status is not None:
-                self.bot["status"] = status
+            return deepcopy(self.bot)
+
+    def update_by_owner(self, bot_id, owner_id, update_data):
+        with self.lock:
+            if self.failed_write:
+                raise RuntimeError("database unavailable")
+            self.bot.update(deepcopy(update_data))
             return deepcopy(self.bot)
 
 
@@ -160,24 +163,14 @@ def mock_lifecycle(s, *, backup_error=None, publish_id="12", crash_after_handoff
     def restart(**kwargs):
         assert kwargs == {"bot_id": "b", "user_id": "o", "nick_name": None}
         execution = current_restart.get()
-        snapshot = s.strategy.restart_lifecycle_snapshot(s.ctx, s.repo.bot)
-        assert snapshot["status"] in {"ACTIVE", "FAILED", "PENDING"}
         if backup_error:
             raise backup_error
         execution.check_target(s.ctx, s.repo.bot["binding_id"])
         execution.fence_mutation()
-        handoff = dict(
-            provider="baas",
-            binding_id=7,
-            source_binding_id=7,
-            restart_request_id="request",
-            publish_id=publish_id,
-            workflow_baseline=10,
-        )
-        s.strategy.restart_handoff(s.ctx, handoff)
         s.binding["device_props"] = {
             "restart_request_id": "request",
             "restart_publish_id": publish_id,
+            "restart_workflow_baseline": 10,
         }
         if crash_after_handoff:
             raise ConnectionError("secret upstream response")
@@ -578,3 +571,66 @@ async def test_target_changed_failure_does_not_mark_replacement_failed(setup):
     assert s.repo.bot["status"] == "ACTIVE"
     assert "start_message" not in s.repo.bot["ext"]
     assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
+
+
+@pytest.mark.parametrize("status", ["FAILED", "ACTIVE", "PENDING"])
+@pytest.mark.asyncio
+async def test_unbound_restart_preserves_original_lifecycle_input(setup, status):
+    s = setup
+    s.repo.bot.update(binding_id=None, status=status)
+    s.service.restart_bot.side_effect = lambda **kwargs: {"original_status": s.repo.bot["status"]}
+    assert await submit(s) == {"original_status": status}
+    assert not s.queue.tasks
+    assert KEY not in s.repo.bot["ext"]
+    s.service.restart_bot.assert_called_once_with(bot_id="b", user_id="o")
+
+
+@pytest.mark.asyncio
+async def test_pending_binding_preserves_existing_activation_guard(setup):
+    s = setup
+    s.binding["status"] = "PENDING"
+    s.service.restart_bot.return_value = {"activation_in_progress": True}
+    assert await submit(s) == {"activation_in_progress": True}
+    assert s.repo.bot["status"] == "ACTIVE"
+    assert not s.queue.tasks
+
+
+@pytest.mark.asyncio
+async def test_old_provider_intent_is_not_a_new_restart_completion(setup):
+    s = setup
+    s.binding["device_props"] = {
+        "restart_request_id": "old", "restart_publish_id": "10",
+    }
+    await submit(s)
+
+    def ambiguous(**kwargs):
+        current_restart.get().fence_mutation()
+        raise ConnectionError("unknown submission result")
+
+    s.service.restart_bot.side_effect = ambiguous
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)["phase"] == "RESTARTING"
+    assert "handoff" not in journal(s.repo.bot)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_process_loss_after_mutation_is_not_replayed(setup):
+    s = setup
+    await submit(s)
+
+    class ProcessLost(BaseException):
+        pass
+
+    def crash(**kwargs):
+        current_restart.get().fence_mutation()
+        raise ProcessLost()
+
+    s.service.restart_bot.side_effect = crash
+    with pytest.raises(ProcessLost):
+        s.handler.handle(task(s).payload)
+    assert current_restart.get() is None
+    assert journal(s.repo.bot)["phase"] == "RESTARTING"
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()

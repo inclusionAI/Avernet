@@ -281,14 +281,8 @@ class BotRepository(Protocol):
         owner_id: str,
         expected_ext: Optional[Dict[str, Any]],
         ext: Dict[str, Any],
-        status: str | None = None,
-        expected_state: Dict[str, Any] | None = None,
     ) -> Optional[Dict[str, Any]]:
-        """CAS ext and optional status; expected_state fences status/binding_id/active_engine.
-
-        Omitting status preserves it. Both fields change in one DB statement.
-        Existing ext-only callers retain their behavior.
-        """
+        """Replace ``ext`` only when the full stored value is unchanged."""
         ...
 
     @abstractmethod

@@ -121,7 +121,7 @@ def lifecycle():
 
 
 @pytest.mark.asyncio
-async def test_real_baas_restart_handoff_is_persisted_before_platform_call(lifecycle):
+async def test_real_baas_restart_observes_existing_intent_after_platform_call(lifecycle):
     s = lifecycle
     accepted = await s.service.restart_bot_async(bot_id="b", user_id="o")
     assert accepted["status"] == "PENDING"
@@ -129,8 +129,9 @@ async def test_real_baas_restart_handoff_is_persisted_before_platform_call(lifec
 
     def upgrade(**_):
         record = journal(s.repo.bot)
-        assert record["phase"] == "WAITING_READY"
-        assert record["handoff"]["workflow_baseline"] == 10
+        assert record["phase"] == "RESTARTING"
+        assert "handoff" not in record
+        assert s.binding["device_props"]["restart_workflow_baseline"] == 10
         assert s.repo.bot["status"] == "PENDING"
         assert s.binding["status"] == "PENDING"
         assert len(s.queue.provider_tasks) == 1
@@ -207,7 +208,7 @@ async def test_real_stop_start_path_records_handoff_and_keeps_backup_first(lifec
     device.release_device.side_effect = lambda **_: events.append("release")
 
     def start(**kwargs):
-        assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+        assert journal(s.repo.bot)["phase"] == "RESTARTING"
         assert s.repo.bot["binding_id"] is None
         events.append("allocate")
         s.repo.bot.update(binding_id=8, status="PENDING")

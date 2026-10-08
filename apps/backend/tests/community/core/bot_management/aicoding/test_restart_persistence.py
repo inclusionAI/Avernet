@@ -100,7 +100,7 @@ def persisted(tmp_path):
     engine.dispose()
 
 
-def test_status_and_journal_are_committed_together(persisted):
+def test_admission_persists_status_and_journal_using_existing_repository(persisted):
     p = persisted
     result = p.strategy._submit_restart(
         p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
@@ -137,39 +137,12 @@ def test_stale_cas_cannot_clobber_ext_or_status(persisted):
             owner_id="owner",
             expected_ext=initial["ext"],
             ext={KEY: {"phase": "QUEUED"}},
-            status="PENDING",
         )
         is None
     )
     bot = repo.get_by_id_and_owner("bot", "owner")
     assert bot["status"] == "ACTIVE"
     assert bot["ext"] == {"concurrent": True}
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [("status", "FAILED"), ("binding_id", 8), ("active_engine", "openclaw")],
-)
-def test_lifecycle_cas_fences_target_and_engine(persisted, field, value):
-    repo = persisted.repo
-    initial = repo.get_by_id_and_owner("bot", "owner")
-    repo.update_by_owner("bot", "owner", {field: value})
-    assert (
-        repo.compare_and_set_ext(
-            bot_id="bot",
-            owner_id="owner",
-            expected_ext=initial["ext"],
-            ext={KEY: {}},
-            status="PENDING",
-            expected_state={
-                key: initial[key] for key in ("status", "binding_id", "active_engine")
-            },
-        )
-        is None
-    )
-    current = repo.get_by_id_and_owner("bot", "owner")
-    assert current[field] == value
-    assert KEY not in current["ext"]
 
 
 def test_ext_only_cas_still_preserves_status(persisted):
@@ -182,7 +155,7 @@ def test_ext_only_cas_still_preserves_status(persisted):
     assert updated["ext"] == {"changed": 1}
 
 
-def test_failure_commits_bot_status_and_existing_error_fields_together(persisted):
+def test_failure_persists_bot_status_and_existing_error_fields(persisted):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
         RestartState,
     )
@@ -199,3 +172,64 @@ def test_failure_commits_bot_status_and_existing_error_fields_together(persisted
     assert bot["ext"]["start_message"] == "容器最终备份失败，旧容器未销毁"
     assert bot["binding_id"] == 7
     assert bot["ext"]["unrelated"] == 1
+
+
+def test_admission_status_write_failure_propagates_and_retry_repairs(persisted):
+    from unittest.mock import patch
+
+    p = persisted
+    with patch.object(p.repo, "update_by_owner", side_effect=RuntimeError("write failed")):
+        with pytest.raises(RuntimeError, match="write failed"):
+            p.strategy._submit_restart(
+                p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
+            )
+    bot = p.repo.get_by_id_and_owner("bot", "owner")
+    operation = bot["ext"][KEY]["operation_id"]
+    assert bot["status"] == "ACTIVE"
+    assert bot["ext"][KEY]["phase"] == "QUEUED"
+    result = p.strategy._submit_restart(
+        p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
+    )
+    assert result["status"] == "PENDING"
+    assert result["restart_operation_id"] == operation
+
+
+def test_failure_status_write_failure_propagates_and_worker_can_repair(persisted):
+    from unittest.mock import patch
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
+        RestartState,
+    )
+
+    p = persisted
+    p.strategy._submit_restart(p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"})
+    task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner"))
+    state = RestartState(p.repo, "bot", "owner", task.payload["operation_id"])
+    with patch.object(p.repo, "update_by_owner", side_effect=RuntimeError("write failed")):
+        with pytest.raises(RuntimeError, match="write failed"):
+            state.fail("backup failed")
+    partial = p.repo.get_by_id_and_owner("bot", "owner")
+    assert partial["status"] == "PENDING"
+    assert partial["ext"]["start_status"] == "FAILED"
+    repaired = state.ensure(task.payload, task.id)
+    assert repaired["status"] == "FAILED"
+    assert repaired["ext"]["start_message"] == "backup failed"
+
+
+def test_status_only_write_does_not_overwrite_concurrent_ext(persisted):
+    from unittest.mock import patch
+
+    p = persisted
+    original = p.repo.update_by_owner
+
+    def concurrent_write(bot_id, owner_id, changes):
+        assert set(changes) == {"status"}
+        bot = p.repo.get_by_id_and_owner(bot_id, owner_id)
+        original(bot_id, owner_id, {"ext": {**bot["ext"], "callback": "keep"}})
+        return original(bot_id, owner_id, changes)
+
+    with patch.object(p.repo, "update_by_owner", side_effect=concurrent_write):
+        p.strategy._submit_restart(p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"})
+    bot = p.repo.get_by_id_and_owner("bot", "owner")
+    assert bot["status"] == "PENDING"
+    assert bot["ext"]["callback"] == "keep"
+    assert bot["ext"][KEY]["phase"] == "QUEUED"

@@ -93,14 +93,9 @@ class RestartState:
                 owner_id=self.owner_id,
                 expected_ext=bot.get("ext"),
                 ext=ext,
-                status="FAILED" if failed and owns_target else None,
-                expected_state={
-                    field: bot.get(field)
-                    for field in ("status", "binding_id", "active_engine")
-                },
             )
             if updated is not None:
-                return updated
+                return self._sync_status(updated) if failed else updated
         raise RuntimeError("Restart journal update contention")
 
     def ensure(self, payload: dict, task_id: int) -> dict:
@@ -108,13 +103,13 @@ class RestartState:
 
         Queue dedup is the admission authority. The monotonic task row ID prevents
         a delayed submitter overwriting a subsequent operation or its outcome.
-        PENDING and the journal become visible in the same CAS statement.
+        Journal CAS and Bot status use separate existing repository methods.
         """
         for _ in range(12):
             bot = self.read()
             old = journal(bot)
             if old.get("operation_id") == self.operation_id:
-                return bot
+                return self._sync_status(bot)
             if int(old.get("task_id") or 0) >= task_id:
                 raise RestartSuperseded("A newer restart owns this Bot")
             matches = (
@@ -145,15 +140,50 @@ class RestartState:
                 owner_id=self.owner_id,
                 expected_ext=bot.get("ext"),
                 ext=ext,
-                expected_state={
-                    field: bot.get(field)
-                    for field in ("status", "binding_id", "active_engine")
-                },
-                status="PENDING" if matches else None,
             )
             if result is not None:
-                return result
+                return self._sync_status(result) if matches else result
         raise RuntimeError("Restart journal initialization contention")
+
+    def _sync_status(self, bot: dict) -> dict:
+        """Reuse status-only updates without overwriting the CAS-owned journal.
+
+        This is deliberately NOT a lifecycle CAS. Re-read operation/target to
+        reject already superseded writes, but another writer can still race
+        between this read and update_by_owner. The repository contract is kept
+        unchanged; phase/mutation fencing retains the original ext-only CAS.
+        """
+        record = journal(bot)
+        phase = record.get("phase")
+        if phase not in {"QUEUED", "FAILED"}:
+            return bot
+        target = record.get("failed_binding_id", record.get("binding_id"))
+        current = self.read()
+        current_record = journal(current)
+        if (
+            current_record.get("operation_id") != self.operation_id
+            or current_record.get("phase") != phase
+            or current.get("binding_id") != target
+            or not supports(current)
+            or current.get("active_engine") != record.get("engine")
+        ):
+            return current
+        status = "FAILED" if phase == "FAILED" else "PENDING"
+        # A rejected admission has no matching public failure marker.
+        if phase == "FAILED" and (
+            (current.get("ext") or {}).get("start_status") != "FAILED"
+            or (current.get("ext") or {}).get("start_message")
+            != current_record.get("error_message")
+        ):
+            return current
+        if current.get("status") == status:
+            return current
+        updated = self.repository.update_by_owner(
+            self.bot_id, self.owner_id, {"status": status}
+        )
+        if updated is None:
+            raise RestartSuperseded("Bot disappeared while saving restart status")
+        return updated
 
     def fail(self, message: str) -> dict:
         return self.update(

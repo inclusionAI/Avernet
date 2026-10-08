@@ -262,14 +262,6 @@ class EngineProvisioningStrategy(ABC):
         """
         return restart(**kwargs)
 
-    def restart_lifecycle_snapshot(self, ctx: BotProvisioningContext, bot: dict) -> dict:
-        """Allow an owning operation to retain its validated admission state."""
-        return bot
-
-    def restart_handoff(self, ctx: BotProvisioningContext, handoff: dict) -> None:
-        """Record provider intent before asynchronous completion; default no-op."""
-        return None
-
     @abstractmethod
     def apply_restart_extra_configs(
         self,

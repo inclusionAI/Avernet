@@ -91,25 +91,9 @@ class AicodingDurableRestartMixin:
         if services is None or services.task_queue is None:
             raise RuntimeError("重启任务队列不可用，未执行重启")
         # Only admission and persistence run here, never the backup or mutation.
-        return await asyncio.to_thread(self._submit_restart, ctx, services, kwargs)
+        return await asyncio.to_thread(self._submit_restart, ctx, services, kwargs, restart)
 
-    def restart_lifecycle_snapshot(self, ctx, bot):
-        execution = current_restart.get()
-        if execution is None:
-            return bot
-        execution.check_target(ctx, bot.get("binding_id"))
-        # PENDING was published at admission. Lifecycle validation still needs
-        # the original FAILED/ACTIVE state (notably FAILED without a binding).
-        return {**bot, "status": execution.payload["previous_status"]}
-
-    def restart_handoff(self, ctx, handoff):
-        execution = current_restart.get()
-        if execution is not None and execution.fenced:
-            execution.state.update(
-                {"RESTARTING", "WAITING_READY"}, phase="WAITING_READY", handoff=handoff
-            )
-
-    def _submit_restart(self, ctx, services, kwargs):
+    def _submit_restart(self, ctx, services, kwargs, restart=None):
         # Local import avoids a strategy <-> lifecycle implementation cycle and
         # preserves the existing domain error mapping at the HTTP boundary.
         from agentclaw.community.core.bot_management.services.bot_service import (
@@ -139,6 +123,16 @@ class AicodingDurableRestartMixin:
             payload = existing.payload
             result = _state(services.repository, payload).ensure(payload, existing.id)
             return self._accepted(result)
+
+        # No old binding means no backup to wait for. Keep historical unbound
+        # provider recovery intact instead of changing its FAILED input to
+        # PENDING. Likewise retain the existing activation-in-progress guard.
+        if bot.get("binding_id") is None or (
+            binding.get("status") == "PENDING" and bot.get("status") != "PENDING"
+        ):
+            if restart is None:
+                raise BotServiceError("Original restart callback is required")
+            return restart(**kwargs)
 
         # Save template snapshots using their existing encryption/authorization
         # contract, not as plaintext credentials in a task-queue payload.
@@ -270,7 +264,13 @@ class AicodingRestartHandler:
             ):
                 state.fail("重启目标已变化，本次重启已终止，旧容器未销毁")
                 return Fail("target changed")
-            service.restart_bot(
+            props = binding.get("device_props") or {}
+            state.update(
+                {"BACKING_UP"},
+                source_request_id=props.get("restart_request_id"),
+                source_publish_id=props.get("restart_publish_id"),
+            )
+            result = service.restart_bot(
                 bot_id=state.bot_id,
                 user_id=state.owner_id,
                 nick_name=payload.get("nick_name"),
@@ -279,20 +279,15 @@ class AicodingRestartHandler:
                 # Existing lock/activation guards may return without handing off.
                 # They are not proof that this operation restarted a container.
                 return Reschedule(POLL_SECONDS)
-            saved = journal(state.read())
-            if saved["phase"] == "RESTARTING":
-                # A lifecycle implementation must publish a handoff before it
-                # returns. Do not infer success from an uncorrelated ACTIVE Bot.
-                state.fail("重启提交缺少可核对的进度记录，请检查实例状态")
-                return Fail("missing restart handoff")
+            self._capture_completion(state, payload, result=result)
             return Reschedule(POLL_SECONDS)
         except RestartSuperseded:
             return self._superseded(state)
         except Exception as error:
-            if journal(state.read()).get("phase") == "WAITING_READY":
-                # The provider intent was durably recorded before its mutation.
-                # A lost response is reconciled by the existing provider poller,
-                # never by blindly calling restart again.
+            if execution.fenced:
+                # Only observe durable provider intent; never reissue mutation
+                # after an ambiguous response. No hook in the shared lifecycle.
+                self._capture_completion(state, payload)
                 return Reschedule(POLL_SECONDS)
             if (
                 not execution.fenced
@@ -310,6 +305,48 @@ class AicodingRestartHandler:
             return Fail(message)
         finally:
             current_restart.reset(context_reset_handle)
+
+    def _capture_completion(self, state, payload, *, result=None):
+        """Read existing provider records after the unmodified restart call.
+
+        If the process dies before this observation is persisted, reclaimed
+        RESTARTING deliveries wait for timeout rather than replaying mutation.
+        """
+        record = journal(state.read())
+        if record.get("phase") != "RESTARTING":
+            return
+        bot = self.bot_service_provider().get_bot(state.bot_id, state.owner_id)
+        binding = bot.get("device_binding") or {}
+        props = binding.get("device_props") or {}
+        if payload["provider"] == "baas":
+            if bot.get("binding_id") != payload["binding_id"]:
+                return
+            request_id = props.get("restart_request_id")
+            publish_id = props.get("restart_publish_id")
+            new_request = request_id and request_id != record.get("source_request_id")
+            new_publish = (
+                publish_id is not None
+                and str(publish_id) != str(record.get("source_publish_id"))
+            )
+            if not new_request and not (result is not None and new_publish):
+                return
+            handoff = {
+                "provider": "baas", "binding_id": payload["binding_id"],
+                "source_binding_id": payload["binding_id"],
+                "restart_request_id": request_id, "publish_id": publish_id,
+                "workflow_baseline": props.get("restart_workflow_baseline"),
+            }
+        else:
+            # A failed stop/start call cannot prove allocation was submitted.
+            if result is None:
+                return
+            target = bot.get("binding_id")
+            handoff = {
+                "provider": "allocation",
+                "source_binding_id": payload["binding_id"],
+                "binding_id": target if target != payload["binding_id"] else None,
+            }
+        state.update({"RESTARTING"}, phase="WAITING_READY", handoff=handoff)
 
     @staticmethod
     def _superseded(state):
