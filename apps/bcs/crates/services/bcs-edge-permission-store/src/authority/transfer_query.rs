@@ -112,9 +112,10 @@ pub(super) fn list_filter_predicate(flavor: &DbSqlFlavor, status: Option<Transfe
 /// materialization would persist it: status `expired`, system decider,
 /// `decided_at = expires_at` (§9.1: 物化保持同一逻辑决定时间).
 ///
-/// Every illegal shape — unknown status, undecodable decision columns,
-/// terminal rows missing their decision columns — is the fail-closed
-/// `CorruptAuthority` branch, never an implicit empty projection.
+/// Every illegal shape — unknown status, undecodable timestamps or
+/// decision columns, terminal rows missing their decision columns — is
+/// the fail-closed `CorruptAuthority` branch, never an implicit empty
+/// projection.
 pub(super) fn decode_transfer_row(
     row: &DbRow,
     env: &str,
@@ -137,7 +138,7 @@ pub(super) fn decode_transfer_row(
         parse_timestamp_epoch_ms(&required(row, "expires_at")?).ok_or_else(|| {
             corrupt("undecodable expires_at text".to_string())
         })?;
-    let stored_status = required(row, "status").and_then(|text| decode_status(&text))?;
+    let stored_status = required(row, "status").and_then(|text| decode_status(&text, &corrupt))?;
     let terminal_reason = match row.get_string("terminal_reason").ok().flatten() {
         None => Ok(None),
         Some(text) => decode_terminal_reason(&text, &corrupt).map(Some),
@@ -239,7 +240,10 @@ fn transfer_status_text(status: TransferStatus) -> &'static str {
     }
 }
 
-fn decode_status(text: &str) -> ServiceResult<TransferStatus> {
+fn decode_status(
+    text: &str,
+    corrupt: &dyn Fn(String) -> ServiceError,
+) -> ServiceResult<TransferStatus> {
     Ok(match text {
         "pending" => TransferStatus::Pending,
         "accepted" => TransferStatus::Accepted,
@@ -247,11 +251,7 @@ fn decode_status(text: &str) -> ServiceResult<TransferStatus> {
         "cancelled" => TransferStatus::Cancelled,
         "expired" => TransferStatus::Expired,
         "invalidated" => TransferStatus::Invalidated,
-        other => {
-            return Err(ServiceError::InternalError(format!(
-                "authority transfer row: unknown status '{other}'"
-            )))
-        }
+        other => return Err(corrupt(format!("unknown transfer status '{other}'"))),
     })
 }
 

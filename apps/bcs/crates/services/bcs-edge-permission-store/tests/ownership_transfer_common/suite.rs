@@ -404,7 +404,7 @@ async fn round_trip_and_stale_pending_case(h: &Harness) {
     // version bump, slot released, and the SAME result on retry.
     let stale_version = h
         .driver
-        .seed_pending("bot-rt", "a", "b", 99, FUTURE_DEADLINE)
+        .seed_pending("bot-rt", "a", "b", 99, FUTURE_DEADLINE, "")
         .await;
     let before = repo.ownership("bot-rt").await.unwrap();
     let changed = repo
@@ -448,7 +448,7 @@ async fn round_trip_and_stale_pending_case(h: &Harness) {
     h.seed_human("d").await;
     let wrong_from = h
         .driver
-        .seed_pending("bot-wf", "former-owner", "d", 1, FUTURE_DEADLINE)
+        .seed_pending("bot-wf", "former-owner", "d", 1, FUTURE_DEADLINE, "")
         .await;
     let changed = repo
         .decide_transfer("d", &wrong_from, TransferAction::Accept)
@@ -505,7 +505,7 @@ async fn expiration_boundary_case(h: &Harness) {
     // with the system decider and the logical decision time expires_at.
     let lapsed = h
         .driver
-        .seed_pending("bot-ex", "a", "b", 1, LAPSED_DEADLINE)
+        .seed_pending("bot-ex", "a", "b", 1, LAPSED_DEADLINE, "")
         .await;
     let owner_before = repo.ownership("bot-ex").await.unwrap();
     let outcome = repo
@@ -568,7 +568,7 @@ async fn expiration_boundary_case(h: &Harness) {
     h.seed_owned("bot-proj", "a").await;
     let projected = h
         .driver
-        .seed_pending("bot-proj", "a", "b", 1, LAPSED_DEADLINE)
+        .seed_pending("bot-proj", "a", "b", 1, LAPSED_DEADLINE, "")
         .await;
     let receipt = repo.get_transfer("b", &projected).await.unwrap();
     assert_eq!(receipt.status, TransferStatus::Expired);
@@ -618,7 +618,7 @@ async fn corrupted_rows_fail_closed_case(h: &Harness) {
     // the receipt reads own (未知/损坏行是数据错误, never a domain state).
     let corrupted = h
         .driver
-        .seed_pending("bot-corrupt", "a", "b", 1, "not-a-timestamp")
+        .seed_pending("bot-corrupt", "a", "b", 1, "not-a-timestamp", "")
         .await;
     match repo.get_transfer("b", &corrupted).await {
         Err(ServiceError::Authority(AuthorityError::CorruptAuthority { .. })) => {}

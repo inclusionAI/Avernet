@@ -17,7 +17,7 @@ use super::suite::{
     assert_receipt, expect_concealed, fresh_key,
 };
 use super::Harness;
-use super::{create_with_key, LAPSED_DEADLINE};
+use super::{create_with_key, FUTURE_DEADLINE, LAPSED_DEADLINE};
 
 // ---------------------------------------------------------------------------
 // Case 5 — accept / cancel / reject racing on one pending
@@ -215,7 +215,7 @@ pub(super) async fn visibility_and_paging_case(h: &Harness) {
     };
     let lapsed_id = h
         .driver
-        .seed_pending("bot-v2", "av", "bv", 1, LAPSED_DEADLINE)
+        .seed_pending("bot-v2", "av", "bv", 1, LAPSED_DEADLINE, "")
         .await;
     expected_status.push((lapsed_id.clone(), TransferStatus::Expired));
     let accepted_id = {
@@ -411,6 +411,56 @@ pub(super) async fn visibility_and_paging_case(h: &Harness) {
     let cancelled_receipt = repo.get_transfer("av", &cancelled_id).await.unwrap();
     assert_eq!(cancelled_receipt.status, TransferStatus::Cancelled);
     assert_eq!(cancelled_receipt.terminal_reason, None);
+
+    // The deterministic ordering proof: creation times that DIFFER (with a
+    // same-second pair for the transfer_id tie-break), so an inverted twin
+    // can never hide behind the all-same-second fixtures above.
+    h.seed_human("ov").await;
+    h.seed_owned("bot-ord1", "av").await;
+    h.seed_owned("bot-ord2", "av").await;
+    h.seed_owned("bot-ord3", "av").await;
+    h
+        .driver
+        .seed_pending("bot-ord1", "av", "ov", 1, FUTURE_DEADLINE, "2000-02-02 02:02:02")
+        .await;
+    h
+        .driver
+        .seed_pending("bot-ord2", "av", "ov", 1, FUTURE_DEADLINE, "2000-02-02 02:02:02")
+        .await;
+    let oldest = h
+        .driver
+        .seed_pending("bot-ord3", "av", "ov", 1, FUTURE_DEADLINE, "1999-01-01 00:00:00")
+        .await;
+    let ordered = repo
+        .list_transfers(ListOwnershipTransfers {
+            viewer_user_id: "ov".to_string(),
+            direction: TransferListDirection::Received,
+            status: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+    assert_eq!(ordered.total, 3);
+    // Newest-first: the same-second pair leads, tie-broken transfer_id ASC.
+    assert_eq!(ordered.items[0].gmt_create, ordered.items[1].gmt_create);
+    assert!(
+        ordered.items[0].transfer_id < ordered.items[1].transfer_id,
+        "equal gmt_create must tie-break transfer_id ASC"
+    );
+    // ...and the strictly older row closes the page.
+    assert_eq!(ordered.items[2].transfer_id, oldest);
+    assert!(ordered.items[2].gmt_create < ordered.items[0].gmt_create);
+    // The strict adjacent-pair contract on deterministically distinct times.
+    for pair in ordered.items.windows(2) {
+        let (left, right) = (&pair[0], &pair[1]);
+        assert!(
+            left.gmt_create > right.gmt_create
+                || (left.gmt_create == right.gmt_create
+                    && left.transfer_id < right.transfer_id),
+            "ordering contract violated: gmt_create DESC, transfer_id ASC"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -129,7 +129,7 @@ async fn sqlite_deadline_boundary_at_the_database_clock() {
         .expect("now column");
     let boundary_id = h
         .driver
-        .seed_pending("bot-boundary", "a", "b", 1, &now_text)
+        .seed_pending("bot-boundary", "a", "b", 1, &now_text, "")
         .await;
 
     // The decide runs strictly after the seeding read: the database clock

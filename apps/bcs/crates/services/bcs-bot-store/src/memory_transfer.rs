@@ -308,6 +308,15 @@ pub(crate) async fn memory_create_transfer(
     let bots = repo.bots.write().await;
     let mut authority = repo.authority.write().await;
 
+    // In-section liveness re-read (the bots guard is already in hand, so
+    // this stays inside the section's acquisition order): a retirement that
+    // committed while we waited for the lock removed the row — answer
+    // BotNotFound here, never the zero-owner CorruptAuthority the emptied
+    // role rows would otherwise produce.
+    if !bots.contains_key(&command.bot_id) {
+        return Err(ServiceError::BotNotFound(command.bot_id.clone()));
+    }
+
     // -- Idempotency replay never re-executes and never re-requires the
     //    caller's current ownership (spec §10.1 step 1). ------------------
     if let Some(existing) = authority.transfer_rows.iter().find(|row| {
@@ -625,6 +634,13 @@ pub(crate) async fn memory_decide_transfer(
     //    mismatch materialization or the action atomically. --------------
     let bots = repo.bots.write().await;
     let mut authority = repo.authority.write().await;
+
+    // In-section liveness re-read (the same one-liner the create lane
+    // carries): a retirement that raced the pre-check answers BotNotFound,
+    // never the zero-owner CorruptAuthority of the emptied rows.
+    if !bots.contains_key(&row_bot_id) {
+        return Err(ServiceError::BotNotFound(row_bot_id.clone()));
+    }
 
     let row_index = authority
         .transfer_rows
@@ -950,11 +966,15 @@ pub(crate) async fn memory_list_transfers(
         matches.push(row);
     }
     let total = matches.len() as u64;
+    // The binding ordering contract of the port (spec §11.1, identical to
+    // the SQL lane): `gmt_create DESC, transfer_id ASC` — the DB-text
+    // timestamps share the 'YYYY-MM-DD HH:MM:SS' shape, so lexicographic
+    // string compare IS chronological.
     matches.sort_by(|left, right| {
-        (left.gmt_create.clone(), right.transfer_id.clone()).cmp(&(
-            right.gmt_create.clone(),
-            left.transfer_id.clone(),
-        ))
+        right
+            .gmt_create
+            .cmp(&left.gmt_create)
+            .then_with(|| left.transfer_id.cmp(&right.transfer_id))
     });
     let items = matches
         .into_iter()

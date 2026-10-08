@@ -63,8 +63,10 @@ pub trait TransferDriver: Send + Sync {
     /// Seed one live bot with UNINITIALIZED ownership (version 0).
     async fn seed_uninitialized_bot(&self, bot_id: &str);
     /// Seed one full-shape PENDING transfer row with an explicit deadline
-    /// text and version snapshot (the lapsed/mismatched preconditions the
-    /// production create lane cannot produce). Returns the transfer id.
+    /// text, version snapshot and creation time (the lapsed/mismatched
+    /// preconditions and the deterministic ordering fixtures the
+    /// production create lane cannot produce). An empty `gmt_create`
+    /// means the driver's own database now. Returns the transfer id.
     async fn seed_pending(
         &self,
         bot_id: &str,
@@ -72,6 +74,7 @@ pub trait TransferDriver: Send + Sync {
         to_user_id: &str,
         expected_owner_version: u64,
         expires_at: &str,
+        gmt_create: &str,
     ) -> String;
     /// The Task 5 retirement lane: soft-delete the Bot, revoke every
     /// authority edge, and INVALIDATE its pendings with terminal_reason
@@ -303,27 +306,46 @@ impl TransferDriver for SqliteDriver {
         to_user_id: &str,
         expected_owner_version: u64,
         expires_at: &str,
+        gmt_create: &str,
     ) -> String {
         let transfer_id = uuid::Uuid::new_v4().to_string();
+        // An explicit creation time drives the deterministic ordering
+        // fixtures; the empty default defers to the column's DB-clock
+        // DEFAULT (never a client-supplied clock of the test process).
+        let explicit_create = !gmt_create.is_empty();
+        let created_columns = if explicit_create {
+            ", gmt_create, gmt_modified"
+        } else {
+            ""
+        };
+        let mut sql = format!(
+            "INSERT INTO bot_ownership_transfers \
+                 (transfer_id, env, bot_id, from_user_id, to_user_id, expected_owner_version, \
+                  client_request_id, status, expires_at, bot_name_snapshot{created_columns}) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?"
+        );
+        if explicit_create {
+            sql.push_str(", ?, ?");
+        }
+        sql.push(')');
+        let mut params = vec![
+            DbValue::from(transfer_id.clone()),
+            DbValue::from(self.env.clone()),
+            DbValue::from(bot_id),
+            DbValue::from(from_user_id),
+            DbValue::from(to_user_id),
+            DbValue::from(expected_owner_version as i64),
+            DbValue::from(uuid::Uuid::new_v4().to_string()),
+            DbValue::from(expires_at),
+            DbValue::from(bot_id),
+        ];
+        if explicit_create {
+            params.push(DbValue::from(gmt_create));
+            params.push(DbValue::from(gmt_create));
+        }
         self.db
             .inner
-            .execute(DbStatement::with_params(
-                "INSERT INTO bot_ownership_transfers \
-                     (transfer_id, env, bot_id, from_user_id, to_user_id, expected_owner_version, \
-                      client_request_id, status, expires_at, bot_name_snapshot) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
-                vec![
-                    DbValue::from(transfer_id.clone()),
-                    DbValue::from(self.env.clone()),
-                    DbValue::from(bot_id),
-                    DbValue::from(from_user_id),
-                    DbValue::from(to_user_id),
-                    DbValue::from(expected_owner_version as i64),
-                    DbValue::from(uuid::Uuid::new_v4().to_string()),
-                    DbValue::from(expires_at),
-                    DbValue::from(bot_id),
-                ],
-            ))
+            .execute(DbStatement::with_params(sql, params))
             .await
             .expect("seed_pending");
         transfer_id
@@ -525,6 +547,7 @@ impl TransferDriver for MemoryDriver {
         to_user_id: &str,
         expected_owner_version: u64,
         expires_at: &str,
+        gmt_create: &str,
     ) -> String {
         self.repo
             .seed_authority_pending_transfer_custom(
@@ -533,6 +556,7 @@ impl TransferDriver for MemoryDriver {
                 to_user_id,
                 expected_owner_version,
                 expires_at,
+                gmt_create,
             )
             .await
             .expect("seed_pending")

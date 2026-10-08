@@ -1135,11 +1135,13 @@ impl MemoryBotRepo {
     }
 
     /// Test-only: seed one full-shape PENDING transfer row with an EXPLICIT
-    /// deadline text and version snapshot (plan Task 8 harness lever for
-    /// the lapsed/mismatched preconditions the production create lane
-    /// cannot produce directly). Like every `seed_authority_*` lever this
-    /// exists for the conformance drivers only — never a production claim
-    /// path. Returns the seeded `transfer_id`.
+    /// deadline text, version snapshot and creation time (plan Task 8
+    /// harness lever for the lapsed/mismatched preconditions and the
+    /// deterministic ordering fixtures the production create lane cannot
+    /// produce directly; an empty `gmt_create` means the twin's now). Like
+    /// every `seed_authority_*` lever this exists for the conformance
+    /// drivers only — never a production claim path. Returns the seeded
+    /// `transfer_id`.
     pub async fn seed_authority_pending_transfer_custom(
         &self,
         bot_id: &str,
@@ -1147,9 +1149,15 @@ impl MemoryBotRepo {
         to_user_id: &str,
         expected_owner_version: u64,
         expires_at: &str,
+        gmt_create: &str,
     ) -> ServiceResult<String> {
         let transfer_id = uuid::Uuid::new_v4().to_string();
         let now_text = super::transfer::now_db_text();
+        let created_text = if gmt_create.is_empty() {
+            now_text.clone()
+        } else {
+            gmt_create.to_string()
+        };
         super::transfer::seed_pending_transfer_row(
             self,
             MemoryOwnershipTransferRow {
@@ -1168,8 +1176,8 @@ impl MemoryBotRepo {
                 result_owner_version: None,
                 terminal_reason: None,
                 bot_name_snapshot: bot_id.to_string(),
-                gmt_create: now_text.clone(),
-                gmt_modified: now_text,
+                gmt_create: created_text.clone(),
+                gmt_modified: created_text,
             },
         )
         .await?;
