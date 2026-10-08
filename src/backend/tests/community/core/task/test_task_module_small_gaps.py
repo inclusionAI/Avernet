@@ -296,3 +296,101 @@ def test_graph_support_remaining_guard_and_error_branches():
     )
     _attach_done_output_artifacts(owner, "t1", [output])
     assert output.artifacts == []
+
+
+def test_remaining_graph_support_and_multi_sample_loop_branches():
+    from unittest.mock import MagicMock
+
+    from agentclaw.community.core.task.task_context.task_graph_support import (
+        _relay_output_value,
+        list_bbs_tasks_overview,
+    )
+    from agentclaw.community.core.task.task_dispatch.strategies import (
+        _multi_sample_result,
+    )
+
+    assert _relay_output_value({"result": ""}) == {"result": ""}
+
+    repo = SimpleNamespace(list_bbs_tasks_overview=MagicMock(return_value=(["row"], 1)))
+    owner = SimpleNamespace(_graph_repo=repo)
+    assert list_bbs_tasks_overview(
+        owner, 2, 5, search_word="needle", status="RUNNING"
+    ) == (["row"], 1)
+    repo.list_bbs_tasks_overview.assert_called_once_with(
+        2, 5, search_word="needle", status="RUNNING"
+    )
+
+    result = _multi_sample_result(
+        [{"not_an_identity": True}, {"bot_uuid": "b1:u1"}], 1
+    )
+    assert result.bot_id == "b1:u1"
+
+
+def test_search_group_formation_omits_empty_task_context(monkeypatch):
+    import asyncio
+
+    from agentclaw.community.core.task.domain.models import (
+        Context,
+        Goal,
+        RuntimeInfo,
+        Status,
+        TaskExecutionGraph,
+        TaskNode,
+        TaskSpec,
+    )
+    from agentclaw.community.core.task.task_dispatch import strategies
+    from agentclaw.community.core.task.task_dispatch.strategies import (
+        SearchBasedDispatchStrategy,
+    )
+    from agentclaw.community.core.task.task_runner.client.candidate_search import (
+        CandidateSearchResult,
+    )
+
+    async def _prefetch(_discover, _node, _graph):
+        return CandidateSearchResult(
+            candidates=[
+                {"bot_id": "b1", "bot_uuid": "b1:u1"},
+                {"bot_id": "b2", "bot_uuid": "b2:u2"},
+                {"bot_id": "b3", "bot_uuid": "b3:u3"},
+            ],
+            tokens=[],
+            raw_item_count=3,
+            failed_keywords=[],
+        )
+
+    monkeypatch.setattr(strategies, "_prefetch_candidates", _prefetch)
+
+    class _Discover:
+        def search_by_keyword(self, **_kwargs):
+            return {
+                "items": [
+                    {"bot_id": "b1", "bot_uuid": "b1:u1"},
+                    {"bot_id": "b2", "bot_uuid": "b2:u2"},
+                ]
+            }
+
+    node = TaskNode(
+        node_id="n1",
+        task_id="t1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            context=Context(background="", title=""),
+            goal=Goal(objective="", acceptances=[]),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=None,
+    )
+    graph = TaskExecutionGraph(
+        task_id="t1",
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner", "owner_user_id": "u0"},
+    )
+    result = asyncio.run(
+        SearchBasedDispatchStrategy(bot=object(), discover=_Discover()).apply(
+            node, graph
+        )
+    )
+    assert result.group_formation is not None
+    assert "task_context" not in result.group_formation.extend_props

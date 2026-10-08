@@ -347,3 +347,107 @@ def test_anniversary_enrichment_ignores_bot_without_name():
     )
     service._enrich_anniversary_trigger_bot_name(request, graph)
     assert "trigger_bot_name" not in graph.extend_props
+
+
+def test_materialize_static_plan_keeps_required_input_empty_without_fallback(monkeypatch):
+    from dataclasses import replace
+
+    from agentclaw.community.core.task.domain.requests import (
+        RequestContext,
+        RequestGoal,
+        RequestTaskSpec,
+    )
+    from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+    from tests.community.core.task.test_task_center_cov_gaps import (
+        _build_service,
+        _request,
+    )
+
+    service, _ = _build_service()
+    service._resolve_static_plan_template_id = lambda _request: "okr-implementation"
+    definition = SimpleNamespace(
+        input_schema={
+            "required_empty": {"required": True},
+            "second": {"required": False},
+        },
+        validate_input=MagicMock(),
+        validate_bindings=MagicMock(),
+        nodes=[],
+        entry_bot_id="",
+    )
+    monkeypatch.setattr(
+        StaticPlanDefinition, "from_file", classmethod(lambda cls, *args, **kwargs: definition)
+    )
+    request = replace(
+        _request(),
+        execution_config={},
+        task_spec=RequestTaskSpec(
+            context=RequestContext(title="", background=""),
+            goal=RequestGoal(objective="", acceptances=[]),
+        ),
+    )
+    materialized = service._materialize_static_plan_if_needed(request)
+    assert materialized.execution_config["template_input"] == {}
+    definition.validate_input.assert_called_once_with({})
+
+
+def test_manager_worker_nonterminal_accepted_event_exits_without_converging():
+    from tests.community.core.task.test_task_center_cov_gaps import (
+        _build_service,
+        _run,
+    )
+
+    service, _ = _build_service(callback_repo=None)
+    service.converge_by_session = AsyncMock()
+    event = {
+        "event_id": "evt-created",
+        "event_type": "session.created",
+        "scope": {"session_id": "sess-1", "group_id": "grp-1"},
+        "data": {},
+    }
+    _run(service.apply_manager_worker_event(event))
+    service.converge_by_session.assert_not_called()
+
+
+def test_delete_node_relation_false_and_already_pruned_child_edges():
+    service = TaskGraphService()
+    service.initialize_graph(_info("t1"))
+    graph = service._graphs["t1"]
+    for node_id in ("n1", "n2"):
+        node = _node(node_id)
+        node.task_id = "t1"
+        graph.tasks.append(node)
+    graph.relations.extend(
+        [
+            SimpleNamespace(src_id="n1", dst_id="n2", type="OTHER"),
+            Relation(src_id="n1", dst_id="n1", type=RelationType.DEPENDENCY),
+        ]
+    )
+    service.delete_task_node("t1", "n1")
+    assert all(node.node_id != "n1" for node in service._graphs["t1"].tasks)
+
+
+def test_claim_bbs_node_preserves_existing_start_time():
+    from tests.community.core.task.test_context_dispatch_plan_cov_gaps import (
+        FakeGraphRepo,
+        _child,
+        _task_info,
+    )
+
+    service = TaskGraphService(FakeGraphRepo())
+    service.initialize_graph(_task_info("t1"))
+    service.update_task_graph_info(
+        "t1", TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+    )
+    service.add_task_nodes([_child("b1")], parent_node_id="t1")
+    graph = service._graphs["t1"]
+    child = next(node for node in graph.tasks if node.node_id == "b1")
+    child.run_info.run_mode = "bbs"
+    child.run_info.start_time = 123
+    service._persist_locked(graph)
+
+    service.claim_bbs_owner("t1", "botX", node_id="b1", claim_id="claim-1")
+    claimed = next(
+        node for node in service.query_task_dashboard("t1").tasks if node.node_id == "b1"
+    )
+    assert claimed.run_info.start_time == 123

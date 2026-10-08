@@ -162,3 +162,120 @@ def test_poller_report_without_sink_absent_handle_and_explicit_stop_event():
     stop = threading.Event()
     stop.set()
     poller.run_poll_loop(stop)
+
+
+def test_bbs_explicit_error_type_optional_callbacks_and_prompt_parts(monkeypatch):
+    from agentclaw.community.core.task.task_runner.modal_executor import (
+        bbs_modal_executor as bbs,
+    )
+
+    trajectory = SimpleNamespace(emit_trajectory_event=MagicMock())
+    graph = SimpleNamespace(task_id="t1", tasks=[], loop_round=0)
+    bbs._emit_bbs_trajectory(
+        trajectory,
+        graph,
+        None,
+        "failed",
+        exception=RuntimeError("boom"),
+        error_type="explicit",
+    )
+    assert trajectory.emit_trajectory_event.call_args.kwargs["error_type"] == "explicit"
+
+    monkeypatch.setattr(bbs, "_ROSTER_MAX_RETRIES", 1)
+
+    class _BadRoster:
+        def list_bots_by_task_modes(self, **_kwargs):
+            raise RuntimeError("roster down")
+
+    assert asyncio.run(bbs._list_claim_bots(_BadRoster(), "t1")) == []
+
+    class _BadBot:
+        async def send_and_wait_async(self, **_kwargs):
+            raise RuntimeError("send down")
+
+    assert asyncio.run(
+        bbs._bid_one(_BadBot(), {"bot_id": "b1"}, graph)
+    ) is None
+
+    common = {
+        "skill_name": "skill",
+        "execution_graph": graph,
+        "backend_url": "http://backend",
+        "bot_id": "b1",
+        "task_id": "t1",
+        "node_id": "n1",
+        "reason": "",
+    }
+    title_only = bbs._task_msg(**common, title="Title", goal="")
+    goal_only = bbs._task_msg(**common, title="", goal="Goal")
+    neither = bbs._task_msg(**common, title="", goal="")
+    assert "- title: Title" in title_only
+    assert "- goal: Goal" in goal_only
+    assert "- title:" not in neither and "- goal:" not in neither
+
+
+def test_task_executor_persists_empty_patch_and_group_optional_fields():
+    import pytest
+
+    from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+    from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+        PromptFormatterImpl,
+    )
+    from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
+        _DoubleBcsBotIdentityResolver,
+    )
+    from tests.community.core.task.task_runner.integration.test_state_machine import (
+        _Bcs,
+        _Ctx,
+        _Poller,
+    )
+
+    node = TaskNode(
+        node_id="n1",
+        task_id="t1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            context=Context(title="title", background="bg"),
+            goal=Goal(objective="goal", acceptances=[]),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=None,
+    )
+    executor = TaskExecutor.__new__(TaskExecutor)
+    executor._graph = object()
+    executor._report_node_patch = MagicMock()
+    executor._persist_dispatch_ids(node)
+    assert executor._report_node_patch.call_args.args[0].extend_props_patch == {}
+
+    missing_bcs = TaskExecutor(
+        bot=None,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+    )
+    with pytest.raises(AttributeError):
+        asyncio.run(
+            missing_bcs.form_coop_group(
+                GroupFormation(bot_ids=["drv"], collab_mode="chat")
+            )
+        )
+
+    bcs = _Bcs()
+    state_machine = TaskExecutor(
+        bot=None,
+        bcs=bcs,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+    )
+    asyncio.run(
+        state_machine.form_coop_group(
+            GroupFormation(bot_ids=["drv"], collab_mode="state_machine")
+        )
+    )
+    assert bcs.created_req.collaboration_definition_yaml is None
