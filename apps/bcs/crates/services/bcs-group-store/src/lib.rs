@@ -40,6 +40,13 @@ use bcs_service_api::{
 
 pub mod memory;
 
+mod action_audit;
+
+use action_audit::{
+    audit_slot_retry_classified, audit_slot_select, eventful_mutation_audit_record,
+    group_action_audit_insert,
+};
+
 pub use bcs_service_api::port::repo::GroupRepoPort;
 pub use memory::{GroupBuilder, MemoryGroupRepo};
 mod store_dm;

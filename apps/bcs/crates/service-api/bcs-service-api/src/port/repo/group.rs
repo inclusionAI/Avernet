@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 
 use crate::types::{
-    EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
-    GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
-    ServiceResult, ServiceSpec, Workspace,
+    BotOperationContext, EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
+    GroupMutableFieldsPatch, GroupStatus, Participant, MessageViewScope, ParticipantMode,
+    RoutingPolicy, ServiceError, ServiceResult, ServiceSpec, Workspace,
 };
 
 use super::AppendEventRecord;
@@ -54,6 +54,11 @@ pub struct CommitGroupEventfulMutation {
     /// `None` only when Eventing is disabled. When present, the Event must be
     /// committed in the same transaction as the business mutation.
     pub event: Option<AppendEventRecord>,
+    /// Caller-side audit identity (spec §12.5). When present, the store
+    /// commits an ordinary-business `applied` audit row in the SAME
+    /// transaction as the business mutation and its Event; an audit INSERT
+    /// failure rolls the whole transaction back, leaving no partial success.
+    pub operation: Option<BotOperationContext>,
 }
 
 /// Repository contract for group persistence implementations.
@@ -121,7 +126,16 @@ pub trait GroupRepoPort: Send + Sync {
         actor_id: &str,
         message_view_scope: MessageViewScope,
     ) -> ServiceResult<()>;
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
+    /// Persist (or publish, for memory-like stores) a workspace replacement.
+    /// `operation` is the REQUIRED audit identity (spec §12.5): stores that
+    /// actually persist workspaces publish the change and its `applied`
+    /// audit atomically.
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        operation: BotOperationContext,
+    ) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
     /// Persist a `service_spec` patch onto the group. `Some(spec)` installs or

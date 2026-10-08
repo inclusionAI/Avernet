@@ -415,6 +415,7 @@ pub async fn add_group_member(
             group_id: id.clone(),
             bot_id: bot_uuid,
             message_view_scope: None,
+        human_sponsorship: None,
         })
         .await
         .map_err(group_use_case_error_to_http)?;
@@ -593,6 +594,17 @@ pub async fn update_workspace(
     Path(id): Path<String>,
     Json(workspace): Json<Workspace>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    // Spec §12.5: ordinary-business writes carry the REAL typed operator.
+    // This legacy route authenticates no Human context, so the write is an
+    // honest system action — never a fabricated Human.
+    let operation = bcs_service_api::types::operation_context_from_event_actor(
+        uuid::Uuid::new_v4().to_string(),
+        &bcs_service_api::types::EventActor {
+            actor_type: bcs_service_api::types::EventActorType::System,
+            id: "legacy-http-group-workspace".to_string(),
+            display_name: None,
+        },
+    );
     let result = state
         .services
         .group_management
@@ -600,6 +612,7 @@ pub async fn update_workspace(
             caller_actor_id: None,
             group_id: id.clone(),
             workspace,
+            operation,
         })
         .await
         .map_err(group_use_case_error_to_http)?;

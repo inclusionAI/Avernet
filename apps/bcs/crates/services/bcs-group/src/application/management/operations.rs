@@ -58,6 +58,9 @@ impl GroupManagementService for GroupManagement {
         &self,
         cmd: GroupAddMemberCommand,
     ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
+        // Order pins the brief: the group-management authorization inside
+        // `authorize_add_member` runs FIRST; only then is the target's
+        // sponsorship evaluated.
         let (caller, group) = self.authorize_add_member(&cmd).await?;
 
         let bot = self
@@ -92,8 +95,31 @@ impl GroupManagementService for GroupManagement {
         }
 
         if bot.actor_kind == ActorKind::Bot {
-            self.ensure_add_member_reachable(&group.driver_bot, &cmd.bot_id)
-                .await?;
+            if let Some(sponsor) = cmd.human_sponsorship.as_ref() {
+                // Human-sponsored add (spec §8.3.4): with the trust anchor
+                // already verified in `authorize_add_member`, the target must
+                // satisfy the sponsorship predicate — not driver friendship.
+                // Hidden refusal is named explicitly so the denial is
+                // diagnosable as a concealment state, not a missing grant.
+                if bot.status == ActorStatus::Hidden {
+                    return Err(GroupUseCaseError::Forbidden(format!(
+                        "Bot '{}' is hidden (offline) and cannot be invited into a group",
+                        cmd.bot_id
+                    )));
+                }
+                if !self
+                    .sponsorship_allows_bot(&sponsor.user_id, &bot)
+                    .await?
+                {
+                    return Err(GroupUseCaseError::Forbidden(format!(
+                        "Bot '{}' is neither public nor sponsored by human '{}'",
+                        cmd.bot_id, sponsor.user_id
+                    )));
+                }
+            } else {
+                self.ensure_add_member_reachable(&group.driver_bot, &cmd.bot_id)
+                    .await?;
+            }
             if group.visibility == "public" && bot.capabilities.visibility != "public" {
                 return Err(GroupUseCaseError::InvalidProposal(format!(
                     "Cannot add non-public bot '{}' to a public group",
@@ -423,7 +449,7 @@ impl GroupManagementService for GroupManagement {
         cmd: GroupUpdateWorkspaceCommand,
     ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
         self.group
-            .update_workspace(&cmd.group_id, cmd.workspace.clone())
+            .update_workspace(&cmd.group_id, cmd.workspace.clone(), cmd.operation)
             .await?;
         Ok(GroupWorkspaceResult {
             group_id: cmd.group_id,

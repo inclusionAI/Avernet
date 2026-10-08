@@ -99,6 +99,7 @@ where
                 ..Default::default()
             }),
             event: None,
+            operation: None,
         })
         .await
         .context("eventful mode patch")?;
@@ -167,6 +168,7 @@ where
                 ..Default::default()
             }),
             event: None,
+            operation: None,
         })
         .await
         .expect_err("stale expected_version must conflict");

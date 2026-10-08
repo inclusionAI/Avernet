@@ -611,6 +611,7 @@ fn group_create_cmd() -> GroupCreateCommand {
         group_strategy: None,
         visibility: None,
         provisioning: false,
+        human_sponsorship: None,
     }
 }
 
@@ -629,6 +630,7 @@ fn group_add_member_cmd() -> GroupAddMemberCommand {
         group_id: "group-wrapper".to_string(),
         bot_id: "bot-member".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     }
 }
 

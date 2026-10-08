@@ -49,6 +49,7 @@ fn command(group_id: &str, mutation: GroupMutationKind) -> GroupMutationCommand 
         correlation_id: Some("request-1".to_string()),
         trace_id: None,
         mutation,
+        operation: None,
     }
 }
 

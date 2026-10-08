@@ -356,6 +356,46 @@ impl BotActionAuditRecord {
     }
 }
 
+/// Project the typed audit identity from a transport-neutral
+/// [`super::EventActor`] that an authenticated boundary already chose.
+///
+/// `human_<id>` maps to the Human branch (the User ID IS the trusted
+/// staff number the boundary authenticated); Bot actors keep their
+/// verified Bot identity without any Human; System/App event actors map
+/// to the System branch with a fixed system identifier — never a forged
+/// Human. The `operation_id` is service-generated per call.
+pub fn operation_context_from_event_actor(
+    operation_id: impl Into<String>,
+    actor: &super::EventActor,
+) -> BotOperationContext {
+    BotOperationContext {
+        operation_id: operation_id.into(),
+        actor: BotOperationActor::from_event_actor(actor),
+    }
+}
+
+impl BotOperationActor {
+    /// Same projection as [`operation_context_from_event_actor`] but for
+    /// the actor alone.
+    pub fn from_event_actor(actor: &super::EventActor) -> Self {
+        match actor.actor_type {
+            super::EventActorType::Human => Self::Human {
+                user_id: actor
+                    .id
+                    .strip_prefix("human_")
+                    .unwrap_or(&actor.id)
+                    .to_string(),
+                effective_actor_id: actor.id.clone(),
+            },
+            super::EventActorType::Bot => Self::Bot { bot_id: actor.id.clone() },
+            super::EventActorType::System | super::EventActorType::App => Self::System {
+                system_id: actor.id.clone(),
+                effective_actor_id: actor.id.clone(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! Pure-type test area for the ordinary business audit contract

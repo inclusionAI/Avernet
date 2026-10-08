@@ -1686,7 +1686,7 @@ fn build_openapi_v1_state(
         friends.clone(),
         connect_service.clone(),
         candidate_search,
-        authority_hook,
+        Arc::clone(&authority_hook),
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1704,6 +1704,7 @@ fn build_openapi_v1_state(
         relation.clone(),
         sessions.clone(),
         group_management,
+        authority_hook,
         GroupServiceConfig {
             relation_env: relation_env.clone(),
         },
@@ -2174,6 +2175,12 @@ impl Default for BcsServerState {
         // Task 9: the memory bot store is also the bot authority repo (same
         // lifecycle/authority critical section).
         let bot_authority_repo: Arc<MemoryBotRepo> = bot_repo.clone();
+        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(BotAuthorityHookImpl::new(Arc::new(
+                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
+                    bot_authority_repo.clone(),
+                ),
+            )));
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -2429,7 +2436,8 @@ impl Default for BcsServerState {
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
             .with_outbound_url_guard(outbound_url_guard.clone())
-            .with_bot_runtime(bot_use_cases.clone()),
+            .with_bot_runtime(bot_use_cases.clone())
+            .with_authority(authority_hook.clone()),
         );
         let group_proposals = Arc::new(GroupProposalUseCases::new(
             sessions.clone(),
@@ -2557,12 +2565,9 @@ impl Default for BcsServerState {
                 config.onboard_binding_enabled,
                 config.default_visibility.clone(),
             ));
-        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
-            Arc::new(BotAuthorityHookImpl::new(Arc::new(
-                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
-                    bot_authority_repo,
-                ),
-            )));
+        // The authority hook was hoisted before the group wiring so the
+        // Group facade and GroupManagement share the SAME live authority.
+        let authority_hook = authority_hook.clone();
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -2987,6 +2992,7 @@ fn build_use_case_bundle(
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
+    authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
 ) -> UseCaseBundle {
     let candidate_search =
         build_candidate_search_bindings(config, bot_registry.clone(), friend.clone(), fuse_client);
@@ -3057,7 +3063,8 @@ fn build_use_case_bundle(
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
         .with_outbound_url_guard(callback_url_guard.clone())
-        .with_bot_runtime(bot_use_cases.clone()),
+        .with_bot_runtime(bot_use_cases.clone())
+        .with_authority(authority_hook.clone()),
     );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());
@@ -3814,6 +3821,12 @@ impl BcsServer {
         // Task 9: the memory bot store is also the bot authority repo (same
         // lifecycle/authority critical section).
         let bot_authority_repo: Arc<MemoryBotRepo> = bot_repo.clone();
+        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(BotAuthorityHookImpl::new(Arc::new(
+                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
+                    bot_authority_repo.clone(),
+                ),
+            )));
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -4066,6 +4079,7 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
             Arc::new(bcs_test_support::NoopPermissionProfileRepo),
+            authority_hook.clone(),
         );
         let (message_flow, channel_slot) =
             finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
@@ -4157,12 +4171,9 @@ impl BcsServer {
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
-        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
-            Arc::new(BotAuthorityHookImpl::new(Arc::new(
-                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
-                    bot_authority_repo,
-                ),
-            )));
+        // The authority hook was hoisted before the group wiring so the
+        // Group facade and GroupManagement share the SAME live authority.
+        let authority_hook = authority_hook.clone();
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -4914,6 +4925,35 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let authority_env = crate::env::resolve_env();
+        let bot_authority_repo: Arc<dyn bcs_service_api::port::repo::BotAuthorityRepoPort> =
+            match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                        db_plugin.clone(),
+                        authority_env,
+                    ),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbBotAuthorityStore::mysql(
+                        db_plugin.clone(),
+                        authority_env,
+                    ),
+                ),
+                DbPluginKind::External(provider) => panic!(
+                    "external database plugin '{}' has no bot authority store wiring",
+                    provider
+                ),
+            };
+        // `new_with_infrastructure` resolves the DB-backed authority store;
+        // its hook (over that store, not the memory twin) serves BOTH the
+        // Group facade and GroupManagement with the SAME live authority.
+        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(BotAuthorityHookImpl::new(Arc::new(
+                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
+                    bot_authority_repo,
+                ),
+            )));
         let use_cases = build_use_case_bundle(
             &config,
             message_flow_builder.system_queue_port(),
@@ -4942,6 +4982,7 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
             profile_store.clone(),
+            authority_hook.clone(),
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone());
         let channel_slot = message_flow_builder.channel_slot();
@@ -5055,33 +5096,8 @@ impl BcsServer {
             eventing_runtime.lifecycle.as_ref(),
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
-        let authority_env = crate::env::resolve_env();
-        let bot_authority_repo: Arc<dyn bcs_service_api::port::repo::BotAuthorityRepoPort> =
-            match db_kind {
-                DbPluginKind::LocalSqlite => Arc::new(
-                    bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
-                        db_plugin.clone(),
-                        authority_env,
-                    ),
-                ),
-                DbPluginKind::Mysql => Arc::new(
-                    bcs_edge_permission_store::DbBotAuthorityStore::mysql(
-                        db_plugin.clone(),
-                        authority_env,
-                    ),
-                ),
-                DbPluginKind::External(provider) => panic!(
-                    "external database plugin '{}' has no bot authority store wiring",
-                    provider
-                ),
-            };
-        let authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
-            Arc::new(BotAuthorityHookImpl::new(Arc::new(
-                bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(
-                    bot_authority_repo,
-                ),
-            )));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
+
             &config,
             invite_token_secret.clone(),
             authority_hook,

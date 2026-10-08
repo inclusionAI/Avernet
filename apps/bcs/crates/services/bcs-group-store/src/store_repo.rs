@@ -110,7 +110,18 @@ impl GroupRepoPort for MySqlGroupStore {
             .await
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<()> {
+        // The SQL twin's workspace update is intentionally memory-only today
+        // (see `update_workspace_sql`): there is no persisted business write
+        // to hang a same-transaction `applied` audit on, so the REQUIRED
+        // operation context is accepted here for the §12.5 thread but no
+        // audit row is fabricated. The memory twin owns the atomic publish.
+        let _ = &operation;
         self.update_workspace_sql(id, workspace).await
     }
 

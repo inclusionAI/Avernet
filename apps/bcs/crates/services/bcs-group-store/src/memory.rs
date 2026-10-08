@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
@@ -14,6 +15,9 @@ use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
 use bcs_service_api::types::MessageViewScope;
+use bcs_service_api::types::{
+    BotActionAuditRecord, BotOperationContext,
+};
 use bcs_service_api::{
     Group as DomainGroup, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
@@ -28,6 +32,12 @@ pub struct MemoryGroupRepo {
     message_counts: RwLock<HashMap<String, usize>>,
     event_store: Option<Arc<MemoryEventStore>>,
     event_env: Option<String>,
+    /// Published ordinary-business audit rows (spec §12.5) — appended under
+    /// the SAME critical section that publishes the business mutation.
+    action_audits: RwLock<Vec<BotActionAuditRecord>>,
+    /// TEST-ONLY armed failure: the next audit append fails, proving state +
+    /// audit publish together or not at all.
+    action_audit_failure_armed: AtomicBool,
 }
 
 impl MemoryGroupRepo {
@@ -44,6 +54,56 @@ impl MemoryGroupRepo {
         self.event_store = Some(event_store);
         self.event_env = Some(env.into());
         self
+    }
+
+    /// TEST-ONLY: arm a one-shot failure of the next ordinary-business audit
+    /// append; the co-published business mutation must be discarded too.
+    pub fn arm_action_audit_write_failure(&self) {
+        self.action_audit_failure_armed
+            .store(true, Ordering::SeqCst);
+    }
+
+    /// TEST/diagnostic observation of the published ordinary-business audit
+    /// rows (the in-memory counterpart of querying `bcs_bot_action_audits`).
+    /// The audit table is not a permission fact source and no public query
+    /// API is added.
+    pub async fn group_action_audit_records(&self) -> ServiceResult<Vec<BotActionAuditRecord>> {
+        let audits = self.action_audits.read().await;
+        Ok(audits.clone())
+    }
+
+    fn audit_env(&self) -> String {
+        self.event_env
+            .clone()
+            .unwrap_or_else(|| "memory".to_string())
+    }
+
+    /// Append one ordinary-business audit record under the caller's held
+    /// critical section (spec §12.5): a same-slot record with identical
+    /// content is an idempotent no-op; different content under the same
+    /// `(env, operation_id, step_key)` slot is a conflict that aborts the
+    /// mutation ("失败丢弃暂存状态").
+    async fn append_action_audit_once(
+        &self,
+        record: &BotActionAuditRecord,
+    ) -> ServiceResult<()> {
+        if self.action_audit_failure_armed.swap(false, Ordering::SeqCst) {
+            return Err(ServiceError::InternalError(
+                "injected group action audit append failure".to_string(),
+            ));
+        }
+        let mut audits = self.action_audits.write().await;
+        if let Some(existing) = audits.iter().find(|existing| existing.same_slot(record)) {
+            if existing.content_conflicts(record) {
+                return Err(ServiceError::Conflict(format!(
+                    "group action audit slot '{}' already carries different content",
+                    record.step_key
+                )));
+            }
+            return Ok(());
+        }
+        audits.push(record.clone());
+        Ok(())
     }
 }
 
@@ -148,8 +208,20 @@ impl GroupRepoPort for MemoryGroupRepo {
                 request_id: None,
             });
         }
-        let mut candidate = current;
+        let mut candidate = current.clone();
         apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
+
+        // Same-critical-section ordinary-business audit (spec §12.5, plan
+        // Task 10): the audit row publishes with the business state (and its
+        // Event) or not at all — an audit failure restores the previous
+        // group snapshot, leaving no partial success.
+        let audit_record = command.operation.as_ref().map(|operation| {
+            crate::action_audit::eventful_mutation_audit_record(
+                &command,
+                operation,
+                &self.audit_env(),
+            )
+        });
 
         if let Some(event) = command.event.as_ref() {
             let event_store =
@@ -197,6 +269,14 @@ impl GroupRepoPort for MemoryGroupRepo {
             }
         } else {
             groups.insert(command.group_id.clone(), candidate.clone());
+        }
+        if let Some(record) = audit_record.as_ref() {
+            if let Err(audit_error) = self.append_action_audit_once(record).await {
+                // 失败丢弃暂存状态: restore the pre-mutation snapshot so the
+                // business change and its audit publish together or not at all.
+                groups.insert(current.id.clone(), current);
+                return Err(audit_error);
+            }
         }
         Ok(candidate)
     }
@@ -396,17 +476,34 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        operation: BotOperationContext,
+    ) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
+        let previous = groups
+            .get(id)
+            .cloned()
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        let group = groups.get_mut(id).expect("group snapshot exists");
 
         group.workspace = workspace;
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+
+        // Same-critical-section audit (spec §12.5): the workspace change
+        // and its `applied` audit row publish together or not at all.
+        let record =
+            crate::action_audit::workspace_audit_record(id, &operation, &self.audit_env());
+        if let Err(audit_error) = self.append_action_audit_once(&record).await {
+            // 失败丢弃暂存状态: restore the previous workspace snapshot.
+            groups.insert(id.to_string(), previous);
+            return Err(audit_error);
+        }
         Ok(())
     }
 

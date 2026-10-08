@@ -15,6 +15,15 @@ use bcs_test_support::{
     NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
 };
 
+fn test_operation_context() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: "test-group-operation".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "driver".to_string(),
+        },
+    }
+}
+
 #[test]
 fn group_create_command_carries_caller_and_members() {
     let cmd = GroupCreateCommand {
@@ -52,6 +61,7 @@ fn group_create_command_carries_caller_and_members() {
         group_strategy: None,
         visibility: None,
         provisioning: false,
+        human_sponsorship: None,
     };
 
     assert_eq!(cmd.group_id.as_deref(), Some("group-explicit"));
@@ -141,6 +151,7 @@ fn group_status_and_history_commands_carry_route_inputs() {
         group_id: "group-1".to_string(),
         bot_id: "bot-a".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     };
     let history = GroupHistoryCommand {
         caller: CallerContext::Public,
@@ -343,6 +354,7 @@ async fn noop_group_management_service_fails_closed() {
             group_strategy: None,
             visibility: None,
             provisioning: false,
+            human_sponsorship: None,
         })
         .await;
     assert_not_configured(created, "group management service is not configured");
@@ -377,6 +389,7 @@ async fn noop_group_management_service_fails_closed() {
             group_id: "group-1".to_string(),
             bot_id: "bot-a".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert_not_configured(added, "group management service is not configured");
@@ -411,6 +424,7 @@ async fn noop_group_management_service_fails_closed() {
             caller_actor_id: None,
             group_id: "group-1".to_string(),
             workspace: Workspace::default(),
+            operation: test_operation_context(),
         })
         .await;
     assert_not_configured(workspace, "group management service is not configured");

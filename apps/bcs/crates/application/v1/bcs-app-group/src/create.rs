@@ -165,6 +165,16 @@ impl GroupServiceImpl {
                 message_view_scope: participant.message_view_scope,
             })
             .collect::<Vec<_>>();
+        // Trusted Human sponsorship (spec §8.3): built from the AUTHENTICATED
+        // Principal only. A Human caller sponsors under their verified User ID;
+        // a Bot originator carries no credential (the management lane is
+        // required to reject one).
+        let human_sponsorship = match &principal {
+            Principal::Human(human) => Some(HumanSponsorship {
+                user_id: human.subject.id.clone(),
+            }),
+            Principal::Bot(_) => None,
+        };
         let created = self
             .management
             .create_group(GroupCreateCommand {
@@ -185,6 +195,7 @@ impl GroupServiceImpl {
                 originator: Some(originator),
                 visibility: Some(visibility_name(request.visibility).to_string()),
                 provisioning,
+                human_sponsorship,
             })
             .await
             .map_err(map_group_error)?;

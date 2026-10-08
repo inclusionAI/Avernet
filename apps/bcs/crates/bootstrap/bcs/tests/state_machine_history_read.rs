@@ -29,6 +29,14 @@ impl DbPlugin for ReadOnlyHistoryDb {
     async fn transaction(&self, _: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> { panic!("history opened a write transaction") }
     async fn health_check(&self) -> DbResult<DbHealth> { self.inner.health_check().await }
 }
+struct DenyAllAuthorityHook;
+#[async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for DenyAllAuthorityHook {
+    async fn can_manage(&self, _: &str, _: &str) -> Result<bool, ServiceError> { Ok(false) }
+    async fn require_owner(&self, _: &str, _: &str) -> Result<(), ServiceError> {
+        Err(ServiceError::Forbidden("no authority in this read-only fixture".to_string()))
+    }
+}
 struct UnusedPorts;
 #[async_trait]
 impl JudgeEvaluatorPort for UnusedPorts {
@@ -85,6 +93,7 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         SessionServiceConfig { relation_env: env.into() }));
     let group = Arc::new(bcs_app_group::GroupServiceImpl::new(services.group.clone(), services.registry.clone(),
         services.friend.clone(), services.relation.clone(), services.session_management.clone(), services.group_management.clone(),
+        Arc::new(DenyAllAuthorityHook),
         bcs_app_group::GroupServiceConfig { relation_env: env.into() }));
     let invite = Arc::new(bcs_group::application::invite::InviteServiceImpl {
         registry: services.registry.clone(), group: services.group.clone(), session: services.session_management.clone(),

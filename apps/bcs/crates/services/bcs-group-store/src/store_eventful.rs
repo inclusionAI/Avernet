@@ -93,6 +93,29 @@ impl MySqlGroupStore {
             .await?
             .ok_or_else(|| ServiceError::GroupNotFound(command.group_id.clone()))?;
         if current.version != command.expected_version {
+            // Same-slot replay classification (spec §12.5): when this
+            // command carries the audited operation whose earlier attempt
+            // ALREADY fully committed (byte-identical record in the slot
+            // and the committed business state visible), the replay is an
+            // idempotent completion — report the committed state. Any
+            // other mismatch keeps the optimistic-version Conflict.
+            if let Some(operation) = command.operation.as_ref() && current.version == command.expected_version + 1
+            {
+                let record =
+                    eventful_mutation_audit_record(&command, operation, &self.env);
+                let rows = self
+                    .db
+                    .plugin()
+                    .query(audit_slot_select(&record))
+                    .await
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+                if let Err(classified) =
+                    audit_slot_retry_classified(&record, rows, "version-conflict replay")
+                {
+                    return Err(classified);
+                }
+                return Ok(current);
+            }
             return Err(ServiceError::Conflict(format!(
                 "Group '{}' expected version {}, found {}",
                 command.group_id, command.expected_version, current.version
@@ -469,7 +492,50 @@ impl MySqlGroupStore {
                 ),
             ));
         }
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 10):
+        // the audit INSERT joins the business write + its Event in ONE
+        // transaction, so an audit failure rolls everything back.
+        let audit_record = command.operation.as_ref().map(|operation| {
+            eventful_mutation_audit_record(&command, operation, &self.env)
+        });
+        if let Some(record) = audit_record.as_ref() {
+            steps.push(DbTransactionStep::Execute(group_action_audit_insert(record)));
+        }
         if let Err(error) = self.db.plugin().transaction(steps).await {
+            if let Some(record) = audit_record.as_ref() {
+                // A same-slot audit INSERT means either a genuine injected
+                // failure or a replay of an operation whose earlier attempt
+                // FULLY committed. Probe the slot (spec §12.5): identical
+                // content + the commit actually visible = idempotent replay
+                // of the whole mutation; different content = conflict; no
+                // row = genuine failure (audit never happened, the whole
+                // transaction rolled back leaving no partial success).
+                let probe = self
+                    .db
+                    .plugin()
+                    .query(audit_slot_select(record))
+                    .await
+                    .map_err(|error| ServiceError::InternalError(error.to_string()));
+                match probe {
+                    Ok(rows) if !rows.is_empty() => {
+                        audit_slot_retry_classified(record, rows, &error.to_string())?;
+                        // Identical byte content in the slot: the earlier
+                        // attempt fully committed, so this retry is an
+                        // idempotent completion — report the committed
+                        // state (or the removed snapshot for a Delete).
+                        match self.try_get(&command.group_id).await {
+                            Ok(Some(group)) if !deleting => return Ok(group),
+                            _ if deleting => return Ok(terminal),
+                            Ok(_) => return Ok(terminal),
+                            Err(error) => {
+                                return Err(ServiceError::InternalError(error.to_string()))
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(classify_error) => return Err(classify_error),
+                }
+            }
             if routing_policy_snapshot.is_some() && transaction_lock_row_is_missing(&error) {
                 self.cache.write().await.remove(&command.group_id);
                 return Err(ServiceError::Conflict(format!(

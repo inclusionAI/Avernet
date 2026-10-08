@@ -59,6 +59,13 @@ pub struct GroupMutationCommand {
     pub correlation_id: Option<String>,
     pub trace_id: Option<String>,
     pub mutation: GroupMutationKind,
+    /// Caller-side audit identity (spec §12.5): when present, the owning
+    /// store commits an `applied` ordinary-business audit row in the SAME
+    /// transaction as the business mutation and its Event, and an audit
+    /// failure rolls the whole mutation back. Production application lanes
+    /// always construct this from an authenticated principal (Human/Bot) or
+    /// an honest system actor.
+    pub operation: Option<crate::types::BotOperationContext>,
 }
 
 /// Validate sender_routes against group participants.
@@ -286,7 +293,16 @@ pub trait GroupCoreService: Send + Sync {
     }
 
     /// Update group workspace.
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
+    ///
+    /// `operation` is the REQUIRED caller-side audit identity (spec §12.5):
+    /// Memory-like stores publish the workspace change and its `applied`
+    /// audit in one critical section.
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        operation: crate::types::BotOperationContext,
+    ) -> ServiceResult<()>;
 
     /// Update group label.
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;

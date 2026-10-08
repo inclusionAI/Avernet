@@ -139,6 +139,7 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
+            operation: None,
         })
         .await
         .expect("eventful mode patch");
@@ -167,6 +168,7 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
+            operation: None,
         })
         .await;
     assert!(

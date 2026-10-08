@@ -144,7 +144,7 @@ pub use friends::{
 pub use group_use_cases::{
     BotGroupListCommand, DmCreateCommand, DmCreateResult, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand,
-    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupHistoryCommand,
+    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupHistoryCommand, HumanSponsorship,
     GroupHistoryResult, GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantModeResult,
     InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState, MessageHistoryOptions,

@@ -71,6 +71,12 @@ pub(crate) async fn update_group_status(
     reason: impl Into<String>,
     actor: bcs_service_api::types::EventActor,
 ) -> bcs_service_api::ServiceResult<()> {
+    let operation = bcs_service_api::types::operation_context_from_event_actor(
+        uuid::Uuid::new_v4().to_string(),
+        // The transport-neutral event actor the delivery boundary already
+        // authenticated (spec §12.5).
+        &actor,
+    );
     group
         .mutate(bcs_service_api::core::GroupMutationCommand {
             group_id: group_id.to_string(),
@@ -81,6 +87,7 @@ pub(crate) async fn update_group_status(
                 status,
                 reason: reason.into(),
             },
+            operation: Some(operation),
         })
         .await
         .map(|_| ())

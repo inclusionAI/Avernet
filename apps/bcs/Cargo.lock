@@ -503,6 +503,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-db-api",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -513,9 +514,11 @@ dependencies = [
  "bcs-test-support",
  "secrecy",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1250,6 +1253,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",

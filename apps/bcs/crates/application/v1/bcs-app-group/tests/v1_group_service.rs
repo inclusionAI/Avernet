@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
-use bcs_bot_store::PersistentBotRepo;
+use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
+use bcs_service_api::application::v1::BotAuthorityHook;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
@@ -42,10 +43,19 @@ use bcs_test_support::NoopSystemMessageService;
 
 use bcs_app_group::{GroupProvisioningReconciler, GroupServiceConfig, GroupServiceImpl};
 
+#[path = "common/mod.rs"]
+mod common;
+
 struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
+    bot_repo: Option<Arc<MemoryBotRepo>>,
+    /// Keeps the tempdir backing `bot_repo` alive for the whole fixture.
+    _temp: tempfile::TempDir,
+    /// Typed handle on the failed-injectable authority double of
+    /// caller-supplied-bot fixtures.
+    authority_recording_hook: Option<Arc<common::RecordingAuthorityHook>>,
     friends: Arc<FriendCore>,
     relation: Arc<RelationCore>,
     sessions: Arc<SessionManagementServiceImpl>,
@@ -81,53 +91,10 @@ impl Fixture {
     async fn new_with_failing_group_store() -> Self {
         let group_repo = Arc::new(MySqlGroupStore::new(Arc::new(FailingDb), "dev".to_string()));
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = Arc::new(BotCore::memory());
-        let relation = Arc::new(RelationCore::memory());
-        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
-        let sessions = Arc::new(SessionManagementServiceImpl::new(
-            Arc::new(MemorySessionRepo::new()),
-            group_repo,
-        ));
-        let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
-        let management = Arc::new(
-            GroupManagement::new(
-                groups.clone(),
-                bots.clone(),
-                friends.clone(),
-                relation.clone(),
-                GroupConfig::default(),
-                sessions.clone(),
-                system_message,
-            )
-            .for_v1_openapi(),
-        );
-        let service = GroupServiceImpl::new(
-            groups.clone(),
-            bots.clone(),
-            friends.clone(),
-            relation.clone(),
-            sessions.clone(),
-            management,
-            GroupServiceConfig {
-                relation_env: "dev".to_string(),
-            },
-        );
-        Self {
-            service,
-            groups,
-            bots,
-            friends,
-            relation: relation.clone(),
-            sessions,
-        }
-    }
-
-    async fn new_with_runtime_and_failing_channel_cleanup(
-        runtime: Arc<dyn CollaborationRuntimeService>,
-    ) -> Self {
-        let group_repo = Arc::new(MemoryGroupRepo::new());
-        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = Arc::new(BotCore::memory());
+        let temp = tempfile::tempdir().expect("temp bot dir");
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+        let bots = Arc::new(BotCore::with_repo(bot_repo.clone()));
+        let authority = common::repo_authority_hook(&bot_repo);
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -146,6 +113,61 @@ impl Fixture {
                 system_message,
             )
             .for_v1_openapi()
+            .with_authority(authority.clone()),
+        );
+        let service = GroupServiceImpl::new(
+            groups.clone(),
+            bots.clone(),
+            friends.clone(),
+            relation.clone(),
+            sessions.clone(),
+            management,
+            authority,
+            GroupServiceConfig {
+                relation_env: "dev".to_string(),
+            },
+        );
+        Self {
+            service,
+            groups,
+            bots,
+            bot_repo: Some(bot_repo),
+            authority_recording_hook: None,
+            friends,
+            relation: relation.clone(),
+            sessions,
+            _temp: temp,
+        }
+    }
+
+    async fn new_with_runtime_and_failing_channel_cleanup(
+        runtime: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        let group_repo = Arc::new(MemoryGroupRepo::new());
+        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+        let temp = tempfile::tempdir().expect("temp bot dir");
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+        let bots = Arc::new(BotCore::with_repo(bot_repo.clone()));
+        let authority = common::repo_authority_hook(&bot_repo);
+        let relation = Arc::new(RelationCore::memory());
+        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            group_repo,
+        ));
+        let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let management = Arc::new(
+            GroupManagement::new(
+                groups.clone(),
+                bots.clone(),
+                friends.clone(),
+                relation.clone(),
+                GroupConfig::default(),
+                sessions.clone(),
+                system_message,
+            )
+            .for_v1_openapi()
+            .with_authority(authority.clone())
             .with_channel_binding_cleanup(Arc::new(FailingChannelBindingCleanup)),
         );
         let service = GroupServiceImpl::new(
@@ -155,6 +177,7 @@ impl Fixture {
             relation.clone(),
             sessions.clone(),
             management,
+            authority,
             GroupServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -164,9 +187,12 @@ impl Fixture {
             service,
             groups,
             bots,
+            bot_repo: Some(bot_repo),
+            authority_recording_hook: None,
             friends,
             relation,
             sessions,
+            _temp: temp,
         }
     }
 
@@ -175,9 +201,31 @@ impl Fixture {
         friends: Option<Arc<FriendCore>>,
         bots: Option<Arc<BotCore>>,
     ) -> Self {
+        let temp = tempfile::tempdir().expect("temp bot dir");
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = bots.unwrap_or_else(|| Arc::new(BotCore::memory()));
+        // Caller-supplied Bot cores belong to DB-failure tests that only use
+        // Bot principals, so a fail-closed recording hook is enough there;
+        // the shared fixture wraps the REAL production authority chain.
+        let (bot_repo, bots, authority, recording_hook): (
+            Option<Arc<MemoryBotRepo>>,
+            Arc<BotCore>,
+            Arc<dyn BotAuthorityHook>,
+            Option<Arc<common::RecordingAuthorityHook>>,
+        ) = match bots {
+            Some(bots) => {
+                let hook = Arc::new(common::RecordingAuthorityHook::new(false));
+                (None, bots, hook.clone(), Some(hook))
+            }
+            None => {
+                let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(
+                    temp.path().to_path_buf(),
+                ));
+                let bots = Arc::new(BotCore::with_repo(bot_repo.clone()));
+                let authority = common::repo_authority_hook(&bot_repo);
+                (Some(bot_repo), bots, authority, None)
+            }
+        };
         let relation = Arc::new(RelationCore::memory());
         let friends = friends
             .unwrap_or_else(|| Arc::new(FriendCore::memory().with_relation(relation.clone())));
@@ -196,7 +244,8 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
-            .for_v1_openapi(),
+            .for_v1_openapi()
+            .with_authority(authority.clone()),
         );
         let mut service = GroupServiceImpl::new(
             groups.clone(),
@@ -205,6 +254,7 @@ impl Fixture {
             relation.clone(),
             sessions.clone(),
             management,
+            authority,
             GroupServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -216,9 +266,12 @@ impl Fixture {
             service,
             groups,
             bots,
+            bot_repo,
+            authority_recording_hook: recording_hook,
             friends,
             relation,
             sessions,
+            _temp: temp,
         }
     }
 
@@ -236,6 +289,7 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+        self.seed_authority_owner(bot_uuid, bot_uuid).await;
     }
 
     async fn add_protected_bot(&self, bot_uuid: &str) {
@@ -252,6 +306,7 @@ impl Fixture {
             .save_created_by(bot_uuid, bot_uuid, true)
             .await
             .expect("assign test Bot owner");
+        self.seed_authority_owner(bot_uuid, bot_uuid).await;
     }
 
     async fn add_bot_owned_by(
@@ -273,6 +328,20 @@ impl Fixture {
             .save_created_by(bot_uuid, owner_staff_no, true)
             .await
             .expect("assign test Bot owner");
+        self.seed_authority_owner(bot_uuid, owner_staff_no).await;
+    }
+
+    /// Initialize the Bot's ownership through the Task-5 production contract
+    /// so facade decisions resolve via the LIVE authority hook (spec §12.4),
+    /// never via `created_by`.
+    async fn seed_authority_owner(&self, bot_uuid: &str, owner_staff_no: &str) {
+        let Some(bot_repo) = self.bot_repo.as_ref() else {
+            panic!("this fixture has no authority-backed bot repo");
+        };
+        bot_repo
+            .seed_authority_owned(bot_uuid, owner_staff_no)
+            .await
+            .expect("seed test authority owner edge");
     }
 }
 
@@ -1074,6 +1143,7 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         .save_created_by("owned-by-alice", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+    fixture.seed_authority_owner("owned-by-alice", "alice").await;
     fixture
         .groups
         .upsert(normal_group(
@@ -1163,6 +1233,7 @@ async fn group_detail_accepts_human_or_exact_owned_bot_participation_only() {
         .save_created_by("owned", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
+    fixture.seed_authority_owner("owned", "alice").await;
     fixture
         .relation
         .upsert_edge(bcs_service_api::RelationEdge {
@@ -1259,7 +1330,12 @@ async fn get_public_group_readable_without_participation() {
 }
 
 #[tokio::test]
-async fn group_detail_propagates_owned_bot_lookup_database_failure() {
+async fn group_detail_propagates_authority_failure_instead_of_denying() {
+    // Task-10 §12.4 cutover: `created_by` lookups no longer decide detail
+    // reads — the LIVE authority hook does. The propagated backend failure
+    // contract survives: a hook failure must surface as an error, never
+    // degrade into a plain `forbidden` (match the pre-cutover registry
+    // failure contract, on the new fact source).
     let bots = Arc::new(BotCore::with_repo(Arc::new(
         PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
@@ -1275,6 +1351,13 @@ async fn group_detail_propagates_owned_bot_lookup_database_failure() {
         ))
         .await
         .expect("store Group");
+    if let Some(hook) = fixture.authority_recording_hook.as_ref() {
+        hook.arm_failure(ServiceError::InternalError(
+            "authority backend unavailable".to_string(),
+        ));
+    } else {
+        panic!("this fixture must carry the injectable recording hook");
+    }
 
     let error = fixture
         .service
@@ -1283,11 +1366,11 @@ async fn group_detail_propagates_owned_bot_lookup_database_failure() {
             group_id: "owned-bot-lookup-failure".into(),
         })
         .await
-        .expect_err("owned-Bot lookup failure must not be reported as forbidden");
+        .expect_err("authority failure must not be reported as forbidden");
 
     assert!(matches!(
         error,
-        ApplicationError::Internal(message) if message.contains("bot database unavailable")
+        ApplicationError::Internal(message) if message.contains("authority backend unavailable")
     ));
 }
 
@@ -2384,7 +2467,7 @@ async fn bot_dm_propagates_friendship_failure_after_initial_validation() {
     let result = fixture
         .service
         .create(CreateGroup {
-            caller: bot_principal("caller"),
+            caller: authenticated_bot_principal("caller", "caller"),
             group: CreateGroupSpec::DirectMessage(CreateDirectMessageGroup {
                 name: None,
                 context: None,
@@ -4322,16 +4405,21 @@ mod originator_v1_policy {
     }
 
     #[tokio::test]
-    async fn owned_bot_originator_accepted_when_driver_reachable() {
+    async fn owned_bot_originator_is_rejected_for_human_caller() {
+        // Spec §8.3.1 (Task 10): a verified Human caller may select ONLY
+        // themselves as `originator = human_{U}`; even an owned/managed Bot
+        // is no longer accepted as the originator. The sponsored Bots enter
+        // as driver/participants instead — `human_{U}` originator + public
+        // driver still succeeds, pinned below.
         let fixture = Fixture::new().await;
         fixture.add_public_bot("driver").await;
         fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
-        let detail = fixture
+        let err = fixture
             .service
             .create(chat_group(Some("bot-o".into()), vec![]))
             .await
-            .expect("owned-bot originator with public driver");
-        assert_eq!(collaboration_originator(detail), "bot-o");
+            .expect_err("owned-bot originator must be rejected for a Human caller");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
     }
 
     #[tokio::test]
@@ -4368,24 +4456,33 @@ mod originator_v1_policy {
     }
 
     #[tokio::test]
-    async fn owned_bot_originator_equal_to_driver_succeeds() {
-        // A human designates an owned bot as BOTH originator and driver. The
-        // driver is self-reachable — must not require self-friendship.
+    async fn owned_bot_originator_driver_combo_is_rejected_for_human_caller() {
+        // Spec §8.3.1 (Task 10): the Human caller origins as themselves; a
+        // sponsored managed/owned Bot may be the DRIVER, never the
+        // originator — even when originator would equal the driver.
         let fixture = Fixture::new().await;
         fixture.add_bot_owned_by("bot-o", "staff-1", "protected").await;
-        let detail = fixture
+        let err = fixture
             .service
             .create(chat_group_with_driver("bot-o", Some("bot-o".into()), vec![]))
             .await
-            .expect("originator==driver must succeed without self-friendship");
-        assert_eq!(collaboration_originator(detail), "bot-o");
+            .expect_err("bot originator must be rejected for a Human caller");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+        // The sponsored equivalent keeps working: the Human origins as
+        // themselves and the managed Bot drives.
+        let detail = fixture
+            .service
+            .create(chat_group_with_driver("bot-o", None, vec![]))
+            .await
+            .expect("human-originator with managed sponsored driver");
+        assert_eq!(collaboration_originator(detail), "human_staff-1");
     }
 
     #[tokio::test]
-    async fn owned_bot_originator_accepts_friend_driver() {
-        // When the originator is a caller-owned Bot distinct from the driver,
-        // the driver must be reachable from that originator bot — here, a
-        // friend (covers the try_are_friends==true reachable branch).
+    async fn owned_bot_originator_friend_driver_is_rejected_for_human_caller() {
+        // Spec §8.3.1 (Task 10): designating a Bot originator stays rejected
+        // even when Bot↔Bot reachability (friendship) would have passed —
+        // friendship is not a Human→originator qualification.
         let fixture = Fixture::new().await;
         fixture.add_bot_owned_by("bot-o", "staff-1", "public").await;
         fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
@@ -4394,12 +4491,12 @@ mod originator_v1_policy {
             .add_friendship("bot-o", "driver")
             .await
             .expect("originator/driver friendship");
-        let detail = fixture
+        let err = fixture
             .service
             .create(chat_group_with_driver("driver", Some("bot-o".into()), vec![]))
             .await
-            .expect("friend driver reachable from originator bot");
-        assert_eq!(collaboration_originator(detail), "bot-o");
+            .expect_err("bot originator must be rejected despite friendship");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
     }
 
     #[tokio::test]

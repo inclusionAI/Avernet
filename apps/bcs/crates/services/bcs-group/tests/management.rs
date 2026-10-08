@@ -522,6 +522,7 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
                 decisions: vec!["ship it".to_string()],
                 ..Workspace::default()
             },
+            operation: test_operation_context(),
         })
         .await
         .unwrap();
@@ -882,6 +883,7 @@ async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
             group_id: group.group_id,
             bot_id: "provider-worker".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("provider downlink bot can be added to manager_worker group");
@@ -917,6 +919,7 @@ async fn add_member_assigns_worker_in_manager_worker_group() {
             group_id: group.group_id,
             bot_id: "new-worker".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("member should be added with the strategy-owned role");
@@ -1339,6 +1342,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert!(matches!(
@@ -1354,6 +1358,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "stranger".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert!(matches!(
@@ -1368,6 +1373,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "private-friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("private friend target is reachable");
@@ -1380,6 +1386,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert!(matches!(
@@ -1395,6 +1402,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("friend target is reachable");
@@ -1440,6 +1448,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             group_id: "group-under-test".to_string(),
             bot_id: "public-helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("originator can add public helper");
@@ -1450,6 +1459,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             group_id: "group-under-test".to_string(),
             bot_id: "protected-helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("originator can add protected friend of driver");
@@ -2120,6 +2130,7 @@ async fn group_secondary_mutations_run_through_management_service() {
                 decisions: vec!["ship".to_string()],
                 ..Default::default()
             },
+            operation: test_operation_context(),
         })
         .await
         .unwrap();
@@ -2955,6 +2966,16 @@ fn create_cmd(
         group_strategy: None,
         visibility: None,
         provisioning: false,
+        human_sponsorship: None,
+    }
+}
+
+fn test_operation_context() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: "test-group-operation".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "driver".to_string(),
+        },
     }
 }
 
@@ -3596,6 +3617,7 @@ async fn add_member_human_consultant_ok() {
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("adding human consultant should succeed");
@@ -3626,6 +3648,7 @@ async fn add_member_human_worker_in_manager_worker_ok() {
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("adding human worker to mw group should succeed");
@@ -3683,6 +3706,7 @@ async fn originator_human_can_add_member() {
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("human originator should be able to add member");
@@ -3764,6 +3788,7 @@ async fn originator_bot_self_driver_can_manage() {
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("driver should still be able to add member");
@@ -4015,6 +4040,7 @@ async fn add_non_public_bot_to_public_group_rejected() {
         group_id: "group-under-test".to_string(),
         bot_id: "bot_private".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     }).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Cannot add non-public bot"));
@@ -4039,6 +4065,7 @@ async fn add_human_to_public_group_succeeds() {
         group_id: "group-under-test".to_string(),
         bot_id: "human_123".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     }).await;
     assert!(result.is_ok(), "error: {:?}", result.unwrap_err());
 }
@@ -4075,6 +4102,7 @@ async fn list_groups_filters_by_visibility() {
         group_strategy: None,
         visibility: Some("public".to_string()),
         provisioning: false,
+        human_sponsorship: None,
     };
     service.create_group(cmd2).await.unwrap();
 
