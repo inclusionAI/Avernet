@@ -2596,7 +2596,7 @@ async def get_bot_status(
         #    finalize.sh Step 5.4 workspace_warmup 失败 → STARTING_MARKER_FILE=FAILED
         #    → starting_watchdog 上报 status=FAILED + tail 1 行 log
         # binding 层没有 error_message 字段时（如 DeviceBindingRecord）退到 ext
-        error_message = bot.get("error_message") or (binding_info.get("error_message") if binding_info else None)
+        error_message = binding_info.get("error_message") if binding_info else None
         if not error_message and ext.get("start_status") == "FAILED" and not stale_baas_failure:
             error_message = ext.get("start_message")
         response_ext = _sanitize_baas_status_ext_for_response(

@@ -222,12 +222,16 @@ class AicodingDurableRestartMixin:
             return bot
         result = deepcopy(bot)
         result["status"] = "FAILED" if phase == "FAILED" else "PENDING"
-        result["error_message"] = message if phase == "FAILED" else None
-        # Response-only: old startup failures must not terminate the unchanged
-        # browser poller during a new backup. Do not rewrite device startup data.
+        # Preserve the existing startup-error response contract. The durable
+        # operation copy protects the failure reason from late runtime reports;
+        # in-progress responses still suppress superseded startup failures.
         ext = result.setdefault("ext", {})
-        ext.pop("start_status", None)
-        ext.pop("start_message", None)
+        if phase == "FAILED":
+            ext["start_status"] = "FAILED"
+            ext["start_message"] = message
+        else:
+            ext.pop("start_status", None)
+            ext.pop("start_message", None)
         binding = result.get("device_binding")
         if isinstance(binding, dict):
             binding.pop("error_message", None)

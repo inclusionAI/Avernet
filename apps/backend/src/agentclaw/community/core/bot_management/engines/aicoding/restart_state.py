@@ -1,6 +1,7 @@
 """Coding-only restart journal, CAS transitions and per-invocation backup fence.
 
-The journal is stored in Bot.ext, not in device error/startup fields. A ContextVar
+The journal is stored in Bot.ext; terminal failures also use the existing
+Bot status and start_status/start_message fields consumed by status polling. A ContextVar
 carries the durable operation through the *synchronous* legacy restart callback;
 it never changes that callback's public signature or affects instance restarts.
 """
@@ -70,11 +71,33 @@ class RestartState:
                 raise RestartSuperseded("Restart operation or phase changed")
             ext = deepcopy(bot.get("ext") or {})
             ext[KEY] = {**old, **changes}
+            failed = changes.get("phase") == "FAILED"
+            # Reuse the existing public startup-error contract. The journal's
+            # copy remains an operation-scoped audit/recovery record, not a new
+            # status response field. Never mark a replacement instance failed.
+            target_binding = old.get("handoff", {}).get(
+                "binding_id", old.get("binding_id")
+            )
+            if failed:
+                ext[KEY]["failed_binding_id"] = target_binding
+            owns_target = (
+                supports(bot)
+                and bot.get("active_engine") == old.get("engine", bot.get("active_engine"))
+                and bot.get("binding_id") == target_binding
+            )
+            if failed and owns_target:
+                ext["start_status"] = "FAILED"
+                ext["start_message"] = changes["error_message"]
             updated = self.repository.compare_and_set_ext(
                 bot_id=self.bot_id,
                 owner_id=self.owner_id,
                 expected_ext=bot.get("ext"),
                 ext=ext,
+                status="FAILED" if failed and owns_target else None,
+                expected_state={
+                    field: bot.get(field)
+                    for field in ("status", "binding_id", "active_engine")
+                },
             )
             if updated is not None:
                 return updated
@@ -108,10 +131,15 @@ class RestartState:
                 if matches
                 else "重启目标或状态已变化，本次重启未执行",
                 "binding_id": payload["binding_id"],
+                "engine": payload["engine"],
                 "started_at": payload["started_at"],
             }
             ext = deepcopy(bot.get("ext") or {})
             ext[KEY] = record
+            if matches:
+                # A previous startup/restart error must not stop the new poll.
+                ext.pop("start_status", None)
+                ext.pop("start_message", None)
             result = self.repository.compare_and_set_ext(
                 bot_id=self.bot_id,
                 owner_id=self.owner_id,
@@ -132,7 +160,6 @@ class RestartState:
             IN_PROGRESS,
             phase="FAILED",
             error_message=message,
-            failed_binding_id=self.read().get("binding_id"),
         )
 
 

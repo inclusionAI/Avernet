@@ -180,3 +180,22 @@ def test_ext_only_cas_still_preserves_status(persisted):
     )
     assert updated["status"] == "ACTIVE"
     assert updated["ext"] == {"changed": 1}
+
+
+def test_failure_commits_bot_status_and_existing_error_fields_together(persisted):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
+        RestartState,
+    )
+
+    p = persisted
+    accepted = p.strategy._submit_restart(
+        p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
+    )
+    state = RestartState(p.repo, "bot", "owner", accepted["restart_operation_id"])
+    state.fail("容器最终备份失败，旧容器未销毁")
+    bot = p.repo.get_by_id_and_owner("bot", "owner")
+    assert bot["status"] == "FAILED"
+    assert bot["ext"]["start_status"] == "FAILED"
+    assert bot["ext"]["start_message"] == "容器最终备份失败，旧容器未销毁"
+    assert bot["binding_id"] == 7
+    assert bot["ext"]["unrelated"] == 1

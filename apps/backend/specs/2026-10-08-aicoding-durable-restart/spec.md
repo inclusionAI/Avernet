@@ -85,12 +85,18 @@ CAS 初始化 journal；队列入库失败不写 PENDING。若任务已入库但
 普通 `/api/bots/{id}/status` 和 OpenAPI status 读该投影，接口地址和字段不变。
 
 - 进行中：返回 PENDING，因此 is_ready=false。
-- 失败：返回 FAILED；普通状态接口在原 error_message 字段返回脱敏原因。
+- 失败：aicoding 策略通过同一条 CAS 将 Bot.status=FAILED、
+  ext.start_status=FAILED、ext.start_message=脱敏原因一并落库。普通状态接口
+  复用原先读取 ext.start_message 的逻辑，不读取额外的 Bot.error_message。
+- journal 的 error_message 仅保留操作级审计/恢复副本，防止旧容器迟到的
+  startup 回调覆盖本轮原因；状态视图仍通过原 start_* 字段表达错误。
+- 写失败前校验引擎及目标绑定；旧操作不得把新实例标记 FAILED。
 - 成功/没有本次记录：使用原状态逻辑。
 - 任务被队列超时/异常终止或超过观察预算，即使 Worker 没能清理 journal，
   查询也不能永远返回 PENDING；不向客户端暴露队列的原始异常文本。
 - 投影期间剔除响应副本中旧的 start_status/start_message 和绑定错误，防止
-  既有前端因上一轮失败中止本轮轮询；**不改写真实启动或设备错误字段**。
+  既有前端因上一轮失败中止本轮轮询；受理时同步清理旧 start_* 字段，
+  失败时复用这些字段。绑定本身的状态和错误字段不写入。
 - 上一轮失败不遮蔽已换绑的新实例；新的普通重启受理会替换旧 journal。
 
 ## 传播与部署
@@ -125,3 +131,11 @@ boundaries 和 oversized-module gates。新增 Python 文件 Ruff 检查和
 原有 997 行，CAS 抽出后降至 967 行；未进行无关的大规模生命周期/路由拆分。
 
 本地修改尚未提交或推送；线上/预发 E2E 尚未运行。
+
+## 2026-10-08 错误字段复用调整
+
+备份失败不再仅靠查询投影显示 FAILED：Bot 主状态和既有 start_* 错误字段
+原子落库。进行中/迟到回调的查询保护仍保留，不能在没有替代写入保护时
+直接删除，否则旧容器 ACTIVE 回调可能让前端提前停止轮询。
+本次恢复 HTTP /status 原有错误字段取值逻辑，但 get_bot_status 调度保留。
+其他引擎、发布重启、Caller 及前端不变。

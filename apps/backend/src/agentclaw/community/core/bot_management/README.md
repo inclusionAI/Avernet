@@ -109,7 +109,10 @@ This requires no database migration and does not backfill historical Bot rows.
 Only explicit `aicoding` / `claude_code` strategies durably admit ordinary restart
 requests. `engines/aicoding/restart_task.py` owns the queue handler, admission and
 read-only status projection; `restart_state.py` owns the ext journal and mutation
-fence. `RestartDispatchMixin` and the provisioning hooks are engine-neutral.
+fence. Failures atomically persist Bot `FAILED` and the existing
+`ext.start_status` / `ext.start_message` fields. The journal retains an
+operation-scoped recovery copy to protect polling from late runtime callbacks.
+`RestartDispatchMixin` and the provisioning hooks are engine-neutral.
 `get_bot_status` preserves the Bot-shaped service contract while `/status` keeps
 its existing response fields. Runtime `get_bot` reads remain unchanged, so Caller
 and published-service restart consumers do not consume a status overlay.
