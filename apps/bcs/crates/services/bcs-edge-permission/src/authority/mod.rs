@@ -16,5 +16,6 @@
 
 mod manager;
 mod reads;
+mod team_sync;
 
 pub use reads::BotAuthorityCoreServiceImpl;

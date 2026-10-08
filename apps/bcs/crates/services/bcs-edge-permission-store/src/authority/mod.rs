@@ -19,5 +19,7 @@ mod audit;
 mod codec;
 mod manager;
 mod reads;
+mod team_sync;
+mod team_sync_sql;
 
 pub use reads::DbBotAuthorityStore;

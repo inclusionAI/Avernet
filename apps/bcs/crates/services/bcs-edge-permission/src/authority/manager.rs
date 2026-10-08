@@ -110,6 +110,13 @@ mod tests {
                 Err(err) => Err(clone_service_error(err)),
             }
         }
+
+        async fn sync_team(
+            &self,
+            _command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+        ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+            unreachable!("mutate/list recording tests never synchronize teams")
+        }
     }
 
     fn clone_service_error(err: &ServiceError) -> ServiceError {

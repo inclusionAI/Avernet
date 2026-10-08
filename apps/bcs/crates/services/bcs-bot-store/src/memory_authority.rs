@@ -52,6 +52,7 @@ use bcs_service_api::types::error::AuthorityError;
 use bcs_service_api::{ServiceError, ServiceResult};
 use tracing::warn;
 
+use super::team_sync::{MemoryTeamSourceBinding, MemoryTeamSyncOperationRecord};
 use super::{MemoryBotRepo, RegisteredBotInner, resolve_env};
 
 /// One raw authority role row, mirroring the `edge_grants` column shapes so
@@ -133,6 +134,17 @@ pub(crate) struct MemoryAuthorityState {
     /// deletion boundary. Only the columns the retirement needs are
     /// mirrored (transfer id, status, terminal_reason, decided_by).
     pub(crate) transfer_rows: Vec<MemoryOwnershipTransferRow>,
+    /// Mirror of `bot_manager_sync_operations` (plan Task 7): one
+    /// DURABLE idempotency receipt per
+    /// `(env, service, bot, team, idempotency_key)` — never a memory-only
+    /// idempotency: to-be-replayed ops must find their original receipt.
+    pub(crate) sync_operations: Vec<MemoryTeamSyncOperationRecord>,
+    /// Mirror of `bot_team_manager_sources` (plan Task 7): the
+    /// `(env, bot, team)` binding state (an EMPTY manager snapshot may
+    /// still represent an `active` team; a move atomically stops the old
+    /// binding and activates the new one).
+    pub(crate) team_source_bindings:
+        HashMap<(String, String, String), MemoryTeamSourceBinding>,
 }
 
 /// One `bot_ownership_initializations` row projection (plan Task 5).
@@ -168,7 +180,9 @@ pub(crate) struct MemoryOwnershipTransferRow {
     pub(crate) decided_by: Option<String>,
 }
 
-fn corrupt(bot_id: &str, env: &str, detail: impl Into<String>) -> ServiceError {
+/// Fail-closed authority corruption branch, shared by every authority
+/// module of this repo (direct lane + team-sync lane).
+pub(crate) fn corrupt(bot_id: &str, env: &str, detail: impl Into<String>) -> ServiceError {
     ServiceError::Authority(AuthorityError::CorruptAuthority {
         bot_id: bot_id.to_string(),
         env: env.to_string(),
@@ -221,8 +235,10 @@ fn memory_manager_source_from_row(
 
 impl MemoryAuthorityState {
     /// Append ONE `bot_manager_changes` audit row (`<operation_id>-<edge_id>`
-    /// mirror of the SQL audit id) recording the TRUE operator.
-    fn append_manager_audit(
+    /// mirror of the SQL audit id) recording the TRUE operator. Shared by
+    /// the direct-lane mutations and the Task 7 team-sync lane (same audit
+    /// primitives, plan Task 7).
+    pub(crate) fn append_manager_audit(
         &mut self,
         operation_id: &str,
         subject_user_id: &str,
@@ -798,6 +814,19 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
             owner_user_id,
             managers,
         })
+    }
+
+    async fn sync_team(
+        &self,
+        command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+    ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+        // Task 7's team synchronization: same strictness contract as the
+        // SQL store (scope re-validation, durable idempotency, one
+        // critical section for validation + edges + audit + binding +
+        // receipt; see the port docs). The in-memory engine lives in
+        // `memory_team_sync.rs`; the whole team-sync contract lives in
+        // the trait docs.
+        super::team_sync::memory_sync_team(self, command).await
     }
 }
 

@@ -22,7 +22,7 @@ pub(super) const MANAGER_CHANGE_COLUMNS: &str = "audit_id, env, bot_id, subject_
 
 /// Per-flavor `audit_id` expression over the selected edge row
 /// (`<operation_id param> || '-' || <edge id>` / `CONCAT(?, '-', <edge id>)`).
-fn audit_id_expr(flavor: &DbSqlFlavor) -> &'static str {
+pub(super) fn audit_id_expr(flavor: &DbSqlFlavor) -> &'static str {
     match flavor {
         DbSqlFlavor::Sqlite => "? || '-' || id",
         DbSqlFlavor::Mysql => "CONCAT(?, '-', id)",

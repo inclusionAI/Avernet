@@ -497,7 +497,7 @@ impl super::reads::DbBotAuthorityStore {
     /// SQLite reserves the write lock (IMMEDIATE) for any transaction that
     /// contains writes starting at this step; MySQL takes the row lock with
     /// `FOR UPDATE`.
-    fn bot_lock_statement(&self, bot_id: &str) -> DbStatement {
+    pub(super) fn bot_lock_statement(&self, bot_id: &str) -> DbStatement {
         let suffix = match self.flavor {
             DbSqlFlavor::Sqlite => "",
             DbSqlFlavor::Mysql => " FOR UPDATE",

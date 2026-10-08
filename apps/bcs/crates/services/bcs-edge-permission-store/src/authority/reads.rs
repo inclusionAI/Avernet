@@ -245,6 +245,17 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
     ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
         self.list_managers_inner(bot_id, offset, limit).await
     }
+
+    // Task 7's team synchronization: the ONE-TRANSACTION lane owning every
+    // `team/*` manager edge. The full contract (durable idempotency,
+    // aggregate reconcile, service-actor audit, source isolation) lives
+    // in the trait docs; the SQL engine is `team_sync.rs`.
+    async fn sync_team(
+        &self,
+        command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+    ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+        self.sync_team_inner(command).await
+    }
 }
 
 /// Owner-priority merge of two relations for one subject/bot pair.

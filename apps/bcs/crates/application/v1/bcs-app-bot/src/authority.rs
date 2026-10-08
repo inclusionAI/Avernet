@@ -113,6 +113,13 @@ mod tests {
         ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
             unimplemented!("the hook never lists managers itself")
         }
+
+        async fn sync_team(
+            &self,
+            _command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+        ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+            unimplemented!("the hook never synchronizes team sources itself")
+        }
     }
 
     fn clone_error(err: &ServiceError) -> ServiceError {

@@ -34,6 +34,7 @@ use bcs_domain::{
 
 use crate::core::error::ServiceResult;
 use crate::types::BotManagerList;
+use crate::types::team_manager_sync::{TeamManagerSync, TeamSyncReceipt};
 
 /// The Human actor id carrying a principal's `user_id`
 /// (`human_<user_id>`, D11 id-by-prefix).
@@ -152,4 +153,68 @@ pub trait BotAuthorityRepoPort: Send + Sync {
         offset: u64,
         limit: u64,
     ) -> ServiceResult<BotManagerList>;
+
+    /// Atomically reconcile ONE URL team's manager source (spec §5.4/§6,
+    /// plan Task 7). `team/*` manager edges are written ONLY through this
+    /// lane — the direct manager API never touches them, and this lane
+    /// never touches `direct`/`ownership_transfer` sources: a sync
+    /// replaces exactly ONE team's source and leaves every other source
+    /// of every other subject intact.
+    ///
+    /// The command carries a [`VerifiedTeamManagerService`] credential —
+    /// never a raw client actor. The application layer (Task 13's trusted
+    /// verifier) validated the credential first; the STORE re-validates
+    /// the scopes fail-closed as the authority boundary: credential env
+    /// == the store's bound env, Bot/team/operation inside the
+    /// credential's allow-lists (`AuthorityError::Forbidden`), structural
+    /// identity defects (`ServiceError::InvalidOperation`).
+    ///
+    /// Normalization: `manager_user_ids` becomes the canonical
+    /// deduplicated, case-sensitively ordered set. An EMPTY snapshot is
+    /// legal and means a validated full revoke of this team's source
+    /// (the team binding itself may stay `active`); blank member ids are
+    /// rejected (`InvalidSubject`) — a missing/null field is rejected at
+    /// the transport boundary and NEVER defaults to an empty snapshot.
+    /// The deduplicated snapshot above
+    /// `TEAM_SYNC_MAX_SNAPSHOT` (= 1,000; Gate 0, spec §1.3) is rejected
+    /// BEFORE any transaction. Every listed Human must be a live,
+    /// same-env human (`InvalidSubject`); the Bot's owner may not appear
+    /// in the snapshot (`Conflict` — owner authority never derives from
+    /// team sources); the Bot must be live, initialized and own its
+    /// unique approved owner slot (`BotNotFound` /
+    /// `OwnershipNotInitialized` / `CorruptAuthority`).
+    ///
+    /// Durable idempotency (`bot_manager_sync_operations`, keyed by
+    /// `(env, service, bot, team, idempotency_key)` — NOT memory-only):
+    /// - same key + identical canonical payload → the ORIGINAL receipt is
+    ///   returned WITHOUT recomputation (no edge change, no audit row);
+    /// - same key + different payload/operation → [`AuthorityError::Conflict`];
+    /// - even a completely no-difference sync persists its receipt.
+    ///
+    /// Reconcile semantics on the locked Bot boundary (ONE transaction:
+    /// lock → re-read idempotency receipt + current sources under the
+    /// lock → validated writes → audit → binding → receipt, all commit
+    /// together or not at all; a validated pre-read is a fast path whose
+    /// drift re-validates through bounded retries, exactly like
+    /// [`Self::mutate_manager`]):
+    /// - `Sync`: `added = desired − current`, `removed = current −
+    ///   desired` for THIS team; grants restore previously revoked rows
+    ///   under the SAME row id (never INSERT-IGNORE), revokes only
+    ///   actually-changed edges;
+    /// - `Move`: atomically STOP the old team (binding `stopped`, ALL its
+    ///   approved edges revoked) and write the complete snapshot at the
+    ///   new team — an existing new-team snapshot is REPLACED by the new
+    ///   complete one, never merged; replaying the move's key (or an old
+    ///   sync's key) never resurrects the stopped team.
+    ///
+    /// Audit: every actually-changed edge appends one
+    /// `bot_manager_changes` row through the shared audit primitives,
+    /// recording the TRUE operator (the service actor derived from the
+    /// verified credential) and ONE `operation_id` shared with the
+    /// receipt. Large snapshots run as chunked SQL (at most 100 Humans
+    /// per in-chunk statement, at most 60 guarded INSERT rows per
+    /// statement) inside the SAME Bot transaction — statements are
+    /// batched per chunk, never per subject (no N+1), and the atomic
+    /// snapshot is never assembled from multiple transactions.
+    async fn sync_team(&self, command: TeamManagerSync) -> ServiceResult<TeamSyncReceipt>;
 }

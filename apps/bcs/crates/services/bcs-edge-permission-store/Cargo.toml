@@ -33,6 +33,14 @@ hex = { workspace = true }
 bcs-edge-permission = { workspace = true }
 bcs-bot-store = { workspace = true }
 tempfile = { workspace = true }
+# tests/team_manager_sync.rs drives the shared team-sync contract: the
+# Memory driver resolves its bound env through bcs-config, and the
+# #[ignore]d MySQL concurrency contracts (BCS_TEST_MYSQL_URL) use the
+# MySQL plugin (same pattern as bcs-event-store's conformance tests).
+bcs-config = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
 
 [lints]
 workspace = true

@@ -95,6 +95,19 @@ impl BotAuthorityCoreService for BotAuthorityCoreServiceImpl {
     ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
         self.authority.list_managers(bot_id, offset, limit).await
     }
+
+    // Task 7's team synchronization: the REPO owns the whole
+    // one-transaction contract (scope re-validation, durable
+    // idempotency, chunked reconcile, service-actor audit, binding and
+    // receipt), so the Core forwards the command verbatim and composes
+    // nothing on top — the same no-pre-read rule as `mutate_manager`.
+    // The delegation recording tests live in `team_sync.rs`.
+    async fn sync_team(
+        &self,
+        command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+    ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+        self.authority.sync_team(command).await
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +191,13 @@ mod tests {
             _limit: u64,
         ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
             unreachable!("read-side recording tests never list managers")
+        }
+
+        async fn sync_team(
+            &self,
+            _command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+        ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+            unreachable!("read-side recording tests never synchronize teams")
         }
     }
 
@@ -340,6 +360,12 @@ mod tests {
                 limit: u64,
             ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
                 self.inner.list_managers(bot_id, offset, limit).await
+            }
+            async fn sync_team(
+                &self,
+                command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
+            ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
+                self.inner.sync_team(command).await
             }
         }
         let repo = Counting {

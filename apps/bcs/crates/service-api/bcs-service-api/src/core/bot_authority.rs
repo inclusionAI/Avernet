@@ -15,8 +15,9 @@
 use async_trait::async_trait;
 use bcs_domain::{BotAccessRelation, ManagerMutation, ManagerMutationResult, OwnershipState};
 
-use crate::types::{AuditActor, BotManagerList};
 use crate::types::error::ServiceResult;
+use crate::types::team_manager_sync::{TeamManagerSync, TeamSyncReceipt};
+use crate::types::{AuditActor, BotManagerList};
 
 /// Core contract for strict bot authority resolution.
 #[async_trait]
@@ -80,4 +81,21 @@ pub trait BotAuthorityCoreService: Send + Sync {
         offset: u64,
         limit: u64,
     ) -> ServiceResult<BotManagerList>;
+
+    /// Atomically synchronize one URL team's manager source (spec §5.4/§6,
+    /// plan Task 7) with durable idempotency. The REPO owns the whole
+    /// one-transaction contract (credential scope re-validation,
+    /// normalization, Human validation, chunked reconcile, service-actor
+    /// audit, `bot_team_manager_sources` binding and the persisted
+    /// receipt — see `BotAuthorityRepoPort::sync_team`), so the Core
+    /// forwards the command verbatim and composes nothing on top, exactly
+    /// like [`Self::mutate_manager`]: a validation outside the mutation
+    /// transaction adds no authority, and the application layer reaches
+    /// this lane through the Core, never the repo port directly.
+    ///
+    /// Same-key replays return the original committed receipt without
+    /// re-execution; payloads that differ for the same key are a
+    /// `Conflict`. The verified-service credential is the only accepted
+    /// actor shape — the Core never substitutes a raw client actor.
+    async fn sync_team(&self, command: TeamManagerSync) -> ServiceResult<TeamSyncReceipt>;
 }
