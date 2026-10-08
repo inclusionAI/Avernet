@@ -190,6 +190,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
+from agentclaw.community.core.bot_management.engines.aicoding.restart_task import (
+    AicodingRestartHandler, AicodingRestartLifecycle,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
@@ -402,6 +405,21 @@ class BotManagementModule(Module):
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
         return UnifiedBotRepository(db)
 
+
+    @singleton
+    @provider
+    @inject
+    def aicoding_restart_lifecycle(
+        self, registry: HandlerRegistry, repository: BotRepository,
+        task_queue: TaskQueueService, injector: Injector,
+    ) -> AicodingRestartLifecycle:
+        return AicodingRestartLifecycle(registry, AicodingRestartHandler(
+            repository=repository, task_queue=task_queue,
+            bot_service_provider=lambda: injector.get(BotServiceProtocol),
+            publish_progress=lambda publish_id: injector.get(BaasService).get_publish_progress(
+                publish_id=publish_id, include_devices=False,
+            ),
+        ))
 
     @singleton
     @provider

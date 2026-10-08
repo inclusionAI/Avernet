@@ -254,8 +254,12 @@ class EngineProvisioningStrategy(ABC):
         """Async consumers use the same precondition; default performs no I/O."""
         return self.prepare_restart(ctx, **kwargs)
 
-    async def execute_restart(self, ctx: BotProvisioningContext, restart, **kwargs):
-        """Preserve inline execution unless the engine requires blocking work offload."""
+    async def execute_restart(self, ctx: BotProvisioningContext, restart, *, services=None, **kwargs):
+        """Default: inline lifecycle/result. Engines may return durable acceptance.
+
+        services supplies persistence and read collaborators; it is not passed
+        through to the original synchronous lifecycle callback.
+        """
         return restart(**kwargs)
 
     @abstractmethod
