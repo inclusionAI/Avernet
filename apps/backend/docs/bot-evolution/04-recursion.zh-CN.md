@@ -45,8 +45,8 @@ ClawEvolve 已经在第 3 层手工改进其机制：
 补丁来修改。补丁可以编辑流程、替换某个插件版本、编辑提示词、修改参数或添加
 算子。同一套注册表、引用、归档和晋升模型同时服务于两种产物类型：
 
-```yaml
-target_kind: bot_genome | mechanism   # the loop is generic over what it improves
+```jsonc
+{"target_kind": "bot_genome"}   // or "mechanism" — the loop is generic over what it improves
 ```
 
 机制引用按进化策略家族划定作用域。`clawevolve/bot-evolution` 拥有 `active`、
@@ -114,13 +114,16 @@ M1 产出更好的经验证改进？**」
 
 **改进问题。** 一个冻结的、可回放的第 2 层任务：
 
-```text
-ImprovementProblem = {
-  bot_genome_revision S,           # starting system
-  experience_snapshot,             # episodes / feedback the mechanism may see
-  suites: train | validation       # visible to the mechanism under normal rules
-  hidden: holdout | regression | safety,   # used only to score the outcome
-  budget                           # identical for every mechanism compared
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "bot_genome_revision": "sha256:…",              // starting system S
+  "experience_snapshot": "snapshot:…",            // episodes / feedback the mechanism may see
+  "suites": {
+    "visible": ["train", "validation"],           // visible to the mechanism under normal rules
+    "hidden": ["holdout", "regression", "safety"] // used only to score the outcome
+  },
+  "budget": {"max_usd": 20, "max_rollouts": 400}  // identical for every mechanism compared
 }
 ```
 

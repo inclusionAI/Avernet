@@ -18,6 +18,9 @@ policy，并且只能通过补丁变更。修订版是**完整的**：包含所�
 状态如何，一个修订版都能完整决定 bot。文件内容按摘要引用，存放在现有的
 Manifest 内容存储中；Skill Center 的 skill 以钉住的 Center 版本引用，而不复制。
 
+修订版以 RFC 8785 规范 JSON 存储，并以 `{spec, policy}` 的 SHA-256 作为标识。
+YAML 仅作为人工编写的输入被接受。
+
 修订版带有父指针、便于阅读的按 bot 递增序号、来源记录（由谁或什么创建、依据
 哪些证据）和状态。具名引用
 （ref）（`active`、`previous`、`canary`、`draft`、`candidate/*`、`inbox/*`）

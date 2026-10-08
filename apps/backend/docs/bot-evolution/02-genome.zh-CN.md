@@ -52,47 +52,56 @@ Manifest 之上恰好增加了以下几项：
 `engine_config`（Manifest 本身已有该类别；为一个白名单子集放开它是进化会受益的
 Manifest 变更，而不是基因组独有的新增）。
 
-```yaml
-# Illustrative — the normative schema is work item RSI-02.
-genome_schema: 1
-revision:                        # computed / platform-written, not authored
-  id: sha256:7c1e…               # hash of canonical(spec) — content address
-  seq: 42                        # per-bot sequence number for humans ("r42"); not an identity
-  bot_id: bot_123
-  lineage_id: lin_support_agent  # stable across forks; a fork starts a new lineage
-  parents: [sha256:a90b…]        # >1 parent allowed (crossover/merge)
-  created_by: {kind: strategy_run, run_id: run_88, step: propose, actor: clawevolve/bot-evolution@2}
-  created_at: 2026-10-08T03:12:00Z
-  status: candidate              # draft | candidate | accepted | rejected | promoted | archived
-  patch_from_parent: blob:sha256:…  # the Genome Patch that produced it
-  evidence: [episode:ep_91, episode:ep_97, finding:f_12]
-  evaluations: [eval:ev_301, eval:ev_302]   # links into C5, not embedded scores
-
-spec:                            # the evolvable content (authored / proposed)
-  persona:                       # == manifest.identity, but pinned
-    - {type: SOUL.md, blob: sha256:…}
-    - {type: AGENTS.md, blob: sha256:…}
-  skills:
-    - {name: refund-policy, origin: {kind: center, version: "center://…@v7"}}   # pinned Center version, not copied
-    - {name: quality-check, blob: sha256:…, origin: {kind: local}}              # bot-owned: stored as a blob
-  memory:                        # NEW — see §5
-    mode: seed                   # seed | replace | merge
-    items_blob: sha256:…         # itemized memory set (not a raw MEMORY.md)
-  resources:
-    - {path: data/kb/, blob: sha256:…}
-  tools:
-    mcp: [{server_code: mcp.x.meet, config_blob: sha256:…}]
-    cli_tools: [{name: shopctl, blob: sha256:…, version: 2.3.0}]
-  engine_config:                 # NEW in evolution scope — allowlisted keys only
-    model: provider/model-x
-    reasoning_effort: medium
-  script: {blob: sha256:…}       # carried, but LOCKED for evolution by default
-
-policy:                          # NOT evolvable — copied forward verbatim by the platform
-  locked_genes: [script, tools.mcp, policy]
-  mutable_genes: [persona, skills, memory, resources, engine_config.reasoning_effort]
-  pins: [skills.refund-policy]   # write-protected items (Hermes-style pinning)
-  risk_overrides: {}
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// The normative schema is work item RSI-02.
+{
+  "genome_schema": 1,
+  "revision": {                                   // computed / platform-written, not authored
+    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}) — content address
+    "seq": 42,                                    // per-bot sequence number for humans ("r42"); not an identity
+    "bot_id": "bot_123",
+    "lineage_id": "lin_support_agent",            // stable across forks; a fork starts a new lineage
+    "parents": ["sha256:a90b…"],                  // >1 parent allowed (crossover/merge)
+    "created_by": {"kind": "strategy_run", "run_id": "run_88", "step": "propose",
+                   "actor": "clawevolve/bot-evolution@2"},
+    "created_at": "2026-10-08T03:12:00Z",
+    "status": "candidate",                        // draft | candidate | accepted | rejected | promoted | archived
+    "patch_from_parent": "blob:sha256:…",         // the Genome Patch that produced it
+    "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+    "evaluations": ["eval:ev_301", "eval:ev_302"] // links into C5, not embedded scores
+  },
+  "spec": {                                       // the evolvable content (authored / proposed)
+    "persona": [                                  // == manifest.identity, but pinned
+      {"type": "SOUL.md", "blob": "sha256:…"},
+      {"type": "AGENTS.md", "blob": "sha256:…"}
+    ],
+    "skills": [
+      {"name": "refund-policy", "origin": {"kind": "center", "version": "center://…@v7"}},  // pinned Center version, not copied
+      {"name": "quality-check", "blob": "sha256:…", "origin": {"kind": "local"}}          // bot-owned: stored as a blob
+    ],
+    "memory": {                                   // NEW — see §5
+      "mode": "seed",                             // seed | replace | merge
+      "items_blob": "sha256:…"                    // itemized memory set (not a raw MEMORY.md)
+    },
+    "resources": [{"path": "data/kb/", "blob": "sha256:…"}],
+    "tools": {
+      "mcp": [{"server_code": "mcp.x.meet", "config_blob": "sha256:…"}],
+      "cli_tools": [{"name": "shopctl", "blob": "sha256:…", "version": "2.3.0"}]
+    },
+    "engine_config": {                            // allowlisted keys only; no floats in hashed content
+      "model": "provider/model-x",
+      "reasoning_effort": "medium"
+    },
+    "script": {"blob": "sha256:…"}                // carried, but LOCKED for evolution by default
+  },
+  "policy": {                                     // NOT evolvable — copied forward verbatim by the platform
+    "locked_genes": ["script", "tools.mcp", "policy"],
+    "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
+    "pins": ["skills.refund-policy"],             // write-protected items (Hermes-style pinning)
+    "risk_overrides": {}
+  }
+}
 ```
 
 设计要点：
@@ -113,6 +122,8 @@ policy:                          # NOT evolvable — copied forward verbatim by 
 - **`script` 默认锁定。** 命令式启动脚本是最危险的可进化面，并且在 teclaw 上
   已经被拒绝。它们仍然是基因组的一部分，以保证修订版完整，但除非所有者解锁，
   否则处于锁定状态。
+- **规范 JSON。** 修订版以 RFC 8785 规范 JSON 存储，id 对 `{spec, policy}`
+  计算哈希；YAML 仅作为人工编写的输入被接受（§7.3）。
 - **元数据引用评估，而从不内嵌评估。** 分数存放在 C5 中，在归档读模型中进行
   关联；基因组保持为纯粹的定义。
 
@@ -147,30 +158,29 @@ policy:                          # NOT evolvable — copied forward verbatim by 
 提议器唯一允许产出的输出。逐项列出且带类型，遵循 ACE 的发现：增量更新可以避免
 上下文坍缩。
 
-```yaml
-patch_schema: 1
-base: sha256:a90b…                       # must equal the parent; CAS on record
-ops:
-  - op: file.edit                        # text files: persona md, SKILL.md, resources
-    target: persona/SOUL.md
-    edits:
-      - {kind: replace_section, heading: "## Escalation", content: "…"}
-      - {kind: insert_after, anchor: "## Tone", content: "…"}
-  - op: skill.add
-    name: invoice-lookup
-    files: {SKILL.md: "…", scripts/lookup.py: blob:sha256:…}
-  - op: skill.update
-    name: refund-policy
-    file_ops: [{kind: unified_diff, path: SKILL.md, diff: "@@ …"}]
-  - op: memory.add                       # itemized memory, see §5
-    item: {key: "customer-tier-rules", text: "…", tags: [billing], source: [episode:ep_91]}
-  - op: memory.retire
-    key: "old-shipping-sla"
-  - op: engine_config.set
-    key: reasoning_effort
-    value: high
-rationale: "…"                           # required; shown to reviewers
-evidence: [finding:f_12]                 # required for non-trivial ops
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "patch_schema": 1,
+  "base": "sha256:a90b…",                         // must equal the parent; CAS on record
+  "ops": [
+    {"op": "file.edit", "target": "persona/SOUL.md",   // text files: persona md, SKILL.md, resources
+     "edits": [
+       {"kind": "replace_section", "heading": "## Escalation", "content": "…"},
+       {"kind": "insert_after", "anchor": "## Tone", "content": "…"}
+     ]},
+    {"op": "skill.add", "name": "invoice-lookup",
+     "files": {"SKILL.md": "…", "scripts/lookup.py": "blob:sha256:…"}},
+    {"op": "skill.update", "name": "refund-policy",
+     "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ …"}]},
+    {"op": "memory.add",                                // itemized memory, see §5
+     "item": {"key": "customer-tier-rules", "text": "…", "tags": ["billing"], "source": ["episode:ep_91"]}},
+    {"op": "memory.retire", "key": "old-shipping-sla"},
+    {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
+  ],
+  "rationale": "…",                                     // required; shown to reviewers
+  "evidence": ["finding:f_12"]                          // required for non-trivial ops
+}
 ```
 
 平台在记录候选时强制执行的规则：
@@ -265,6 +275,31 @@ Manifest apply 管线已经为它拉取的所有内容保存了平台自己的�
 建议：DB 原生，外加一个 **git 导出**（`avn genome export
 --format git`），让人类和编码 agent 类提议器能在熟悉的文件系统历史上工作
 （Meta-Harness 的经验），而无需让 git 成为真相来源。
+
+### 7.3 序列化：规范 JSON
+
+本设计中所有由平台持有的记录都以 JSON 存储和交换：基因组修订版、基因组补丁、
+机制（进化策略）修订版、作业输入与输出、判定，以及实验记录条目。
+
+- **规范形式。** 记录在计算哈希前按 JSON 规范化方案（RFC 8785）序列化。修订版
+  `id` 是 `{spec, policy}` 规范形式的 SHA-256；`revision` 元数据不参与计算，
+  因此相同内容总是得到相同 id。
+- **被哈希的内容中不使用浮点数。** RFC 8785 按 IEEE 双精度格式化数字，因此被
+  哈希的内容只使用整数、字符串和枚举（例如 `max_wall_clock_s: 7200`、
+  `temperature: "0.2"`）。
+- **校验。** 每种记录类型都有 JSON Schema（RSI-02、RSI-06），与
+  `BotConfigArtifact` 已在使用的机制（`artifact.schema.json`）相同，也是
+  OpenAPI 的基础。
+- **YAML 仅作为人工编写的输入。** 人仍可以用 YAML 编写 Bot Config Manifest 文档
+  和策略清单。记录修订版时只解析一次输入，补全被省略的类别、钉住来源，然后存储
+  规范 JSON。人工编写的原文作为来源记录 blob 保留，因此其中的注释不会丢失，但它
+  永远不是被哈希或被交换的形式。
+
+为什么不用 YAML 作为存储形式：它没有规范序列化（同一份数据可以有多种写法，因此
+无法直接哈希）；它的隐式类型在 YAML 1.1 与 1.2 之间、以及不同库之间都不一致
+（`no`、`on`、`1.10`、日期）；而每个插件，无论用什么语言，都必须读到完全相同的值。
+补丁与 diff 工具（JSON Patch，RFC 6902；JSON Merge Patch，RFC 7396）也是基于
+JSON 定义的；基因组补丁操作是否映射到 RFC 6902 由 RSI-02 决定。
 
 ## 8. 多 bot 与团队（未来）
 

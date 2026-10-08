@@ -21,6 +21,9 @@ determines the bot regardless of prior state. File content is referenced by
 digest and stored in the existing manifest content store; Skill Center skills
 are referenced by pinned Center version rather than copied.
 
+Revisions are stored as RFC 8785 canonical JSON and identified by the
+SHA-256 of `{spec, policy}`. YAML is accepted only as authored input.
+
 Revisions carry parent pointers, a readable per-bot sequence number,
 provenance (who or what created them, from which evidence), and status. Named refs (`active`, `previous`, `canary`,
 `draft`, `candidate/*`, `inbox/*`) point at revisions and move by

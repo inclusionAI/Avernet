@@ -59,47 +59,56 @@ layer and are only linked), and `engine_config` (the Manifest already has the
 category; enabling an allowlisted subset is a Manifest change evolution
 benefits from, not a genome-only addition).
 
-```yaml
-# Illustrative — the normative schema is work item RSI-02.
-genome_schema: 1
-revision:                        # computed / platform-written, not authored
-  id: sha256:7c1e…               # hash of canonical(spec) — content address
-  seq: 42                        # per-bot sequence number for humans ("r42"); not an identity
-  bot_id: bot_123
-  lineage_id: lin_support_agent  # stable across forks; a fork starts a new lineage
-  parents: [sha256:a90b…]        # >1 parent allowed (crossover/merge)
-  created_by: {kind: strategy_run, run_id: run_88, step: propose, actor: clawevolve/bot-evolution@2}
-  created_at: 2026-10-08T03:12:00Z
-  status: candidate              # draft | candidate | accepted | rejected | promoted | archived
-  patch_from_parent: blob:sha256:…  # the Genome Patch that produced it
-  evidence: [episode:ep_91, episode:ep_97, finding:f_12]
-  evaluations: [eval:ev_301, eval:ev_302]   # links into C5, not embedded scores
-
-spec:                            # the evolvable content (authored / proposed)
-  persona:                       # == manifest.identity, but pinned
-    - {type: SOUL.md, blob: sha256:…}
-    - {type: AGENTS.md, blob: sha256:…}
-  skills:
-    - {name: refund-policy, origin: {kind: center, version: "center://…@v7"}}   # pinned Center version, not copied
-    - {name: quality-check, blob: sha256:…, origin: {kind: local}}              # bot-owned: stored as a blob
-  memory:                        # NEW — see §5
-    mode: seed                   # seed | replace | merge
-    items_blob: sha256:…         # itemized memory set (not a raw MEMORY.md)
-  resources:
-    - {path: data/kb/, blob: sha256:…}
-  tools:
-    mcp: [{server_code: mcp.x.meet, config_blob: sha256:…}]
-    cli_tools: [{name: shopctl, blob: sha256:…, version: 2.3.0}]
-  engine_config:                 # NEW in evolution scope — allowlisted keys only
-    model: provider/model-x
-    reasoning_effort: medium
-  script: {blob: sha256:…}       # carried, but LOCKED for evolution by default
-
-policy:                          # NOT evolvable — copied forward verbatim by the platform
-  locked_genes: [script, tools.mcp, policy]
-  mutable_genes: [persona, skills, memory, resources, engine_config.reasoning_effort]
-  pins: [skills.refund-policy]   # write-protected items (Hermes-style pinning)
-  risk_overrides: {}
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// The normative schema is work item RSI-02.
+{
+  "genome_schema": 1,
+  "revision": {                                   // computed / platform-written, not authored
+    "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}) — content address
+    "seq": 42,                                    // per-bot sequence number for humans ("r42"); not an identity
+    "bot_id": "bot_123",
+    "lineage_id": "lin_support_agent",            // stable across forks; a fork starts a new lineage
+    "parents": ["sha256:a90b…"],                  // >1 parent allowed (crossover/merge)
+    "created_by": {"kind": "strategy_run", "run_id": "run_88", "step": "propose",
+                   "actor": "clawevolve/bot-evolution@2"},
+    "created_at": "2026-10-08T03:12:00Z",
+    "status": "candidate",                        // draft | candidate | accepted | rejected | promoted | archived
+    "patch_from_parent": "blob:sha256:…",         // the Genome Patch that produced it
+    "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
+    "evaluations": ["eval:ev_301", "eval:ev_302"] // links into C5, not embedded scores
+  },
+  "spec": {                                       // the evolvable content (authored / proposed)
+    "persona": [                                  // == manifest.identity, but pinned
+      {"type": "SOUL.md", "blob": "sha256:…"},
+      {"type": "AGENTS.md", "blob": "sha256:…"}
+    ],
+    "skills": [
+      {"name": "refund-policy", "origin": {"kind": "center", "version": "center://…@v7"}},  // pinned Center version, not copied
+      {"name": "quality-check", "blob": "sha256:…", "origin": {"kind": "local"}}          // bot-owned: stored as a blob
+    ],
+    "memory": {                                   // NEW — see §5
+      "mode": "seed",                             // seed | replace | merge
+      "items_blob": "sha256:…"                    // itemized memory set (not a raw MEMORY.md)
+    },
+    "resources": [{"path": "data/kb/", "blob": "sha256:…"}],
+    "tools": {
+      "mcp": [{"server_code": "mcp.x.meet", "config_blob": "sha256:…"}],
+      "cli_tools": [{"name": "shopctl", "blob": "sha256:…", "version": "2.3.0"}]
+    },
+    "engine_config": {                            // allowlisted keys only; no floats in hashed content
+      "model": "provider/model-x",
+      "reasoning_effort": "medium"
+    },
+    "script": {"blob": "sha256:…"}                // carried, but LOCKED for evolution by default
+  },
+  "policy": {                                     // NOT evolvable — copied forward verbatim by the platform
+    "locked_genes": ["script", "tools.mcp", "policy"],
+    "mutable_genes": ["persona", "skills", "memory", "resources", "engine_config.reasoning_effort"],
+    "pins": ["skills.refund-policy"],             // write-protected items (Hermes-style pinning)
+    "risk_overrides": {}
+  }
+}
 ```
 
 Design points:
@@ -126,6 +135,9 @@ Design points:
   dangerous evolvable surface and are already rejected on teclaw. They remain
   part of the genome so a revision is complete, but are locked unless the
   owner unlocks them.
+- **Canonical JSON.** Revisions are stored as RFC 8785 canonical JSON, and
+  the id hashes `{spec, policy}`; YAML is accepted only as authored input
+  (§7.3).
 - **Metadata references, never embeds, evaluation.** Scores live in C5 and
   are joined in the Archive read model; the genome stays a pure definition.
 
@@ -162,30 +174,29 @@ generalise: any `promoted` revision can be re-promoted.
 The only output a Proposer may produce. Itemized and typed, following ACE's
 finding that delta updates avoid context collapse.
 
-```yaml
-patch_schema: 1
-base: sha256:a90b…                       # must equal the parent; CAS on record
-ops:
-  - op: file.edit                        # text files: persona md, SKILL.md, resources
-    target: persona/SOUL.md
-    edits:
-      - {kind: replace_section, heading: "## Escalation", content: "…"}
-      - {kind: insert_after, anchor: "## Tone", content: "…"}
-  - op: skill.add
-    name: invoice-lookup
-    files: {SKILL.md: "…", scripts/lookup.py: blob:sha256:…}
-  - op: skill.update
-    name: refund-policy
-    file_ops: [{kind: unified_diff, path: SKILL.md, diff: "@@ …"}]
-  - op: memory.add                       # itemized memory, see §5
-    item: {key: "customer-tier-rules", text: "…", tags: [billing], source: [episode:ep_91]}
-  - op: memory.retire
-    key: "old-shipping-sla"
-  - op: engine_config.set
-    key: reasoning_effort
-    value: high
-rationale: "…"                           # required; shown to reviewers
-evidence: [finding:f_12]                 # required for non-trivial ops
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "patch_schema": 1,
+  "base": "sha256:a90b…",                         // must equal the parent; CAS on record
+  "ops": [
+    {"op": "file.edit", "target": "persona/SOUL.md",   // text files: persona md, SKILL.md, resources
+     "edits": [
+       {"kind": "replace_section", "heading": "## Escalation", "content": "…"},
+       {"kind": "insert_after", "anchor": "## Tone", "content": "…"}
+     ]},
+    {"op": "skill.add", "name": "invoice-lookup",
+     "files": {"SKILL.md": "…", "scripts/lookup.py": "blob:sha256:…"}},
+    {"op": "skill.update", "name": "refund-policy",
+     "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ …"}]},
+    {"op": "memory.add",                                // itemized memory, see §5
+     "item": {"key": "customer-tier-rules", "text": "…", "tags": ["billing"], "source": ["episode:ep_91"]}},
+    {"op": "memory.retire", "key": "old-shipping-sla"},
+    {"op": "engine_config.set", "key": "reasoning_effort", "value": "high"}
+  ],
+  "rationale": "…",                                     // required; shown to reviewers
+  "evidence": ["finding:f_12"]                          // required for non-trivial ops
+}
 ```
 
 Rules enforced by the platform when recording a candidate:
@@ -295,6 +306,36 @@ Recommendation: DB-native, plus a **git export** (`avn genome export
 --format git`) so humans and coding-agent proposers can work on a familiar
 filesystem history (the Meta-Harness lesson) without git being the source of
 truth.
+
+### 7.3 Serialization: canonical JSON
+
+Every platform-owned record in this design is stored and exchanged as JSON:
+genome revisions, Genome Patches, mechanism (strategy) revisions, job inputs
+and outputs, verdicts, and Experiment Ledger entries.
+
+- **Canonical form.** A record is serialized with the JSON Canonicalization
+  Scheme (RFC 8785) before hashing. The revision `id` is the SHA-256 of the
+  canonical form of `{spec, policy}`; `revision` metadata is excluded, so the
+  same content always has the same id.
+- **No floats in hashed content.** RFC 8785 formats numbers as IEEE doubles,
+  so hashed content uses integers, strings, and enums only (for example
+  `max_wall_clock_s: 7200`, `temperature: "0.2"`).
+- **Validation.** Every record type has a JSON Schema (RSI-02, RSI-06), the
+  same mechanism `BotConfigArtifact` already uses (`artifact.schema.json`)
+  and the one OpenAPI is built on.
+- **YAML only as authored input.** Humans may keep writing Bot Config
+  Manifest documents and strategy manifests in YAML. Recording a revision
+  parses the input once, fills omitted categories, pins sources, and stores
+  canonical JSON. The authored document is kept as a provenance blob, so its
+  comments are not lost, but it is never the hashed or exchanged form.
+
+Why not YAML as the stored form: it has no canonical serialization (the same
+data can be written many ways, so it cannot be hashed directly); its implicit
+typing differs between YAML 1.1 and 1.2 and between libraries (`no`, `on`,
+`1.10`, dates); and every plugin, in any language, must read exactly the same
+values. Patch and diff tooling (JSON Patch, RFC 6902; JSON Merge Patch,
+RFC 7396) is also defined over JSON; whether Genome Patch ops map onto
+RFC 6902 is decided in RSI-02.
 
 ## 8. Multi-bot and teams (future)
 

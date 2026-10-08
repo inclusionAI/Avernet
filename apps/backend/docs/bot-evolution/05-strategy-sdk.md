@@ -59,36 +59,41 @@ platform code (DR-2).
 
 ## 4. Strategy manifest
 
-A strategy is a versioned YAML document registered in C3.
+A strategy is a versioned document registered in C3. Like every
+platform-owned record it is stored as canonical JSON; authors may write it in
+YAML ([02-genome.md §7.3](02-genome.md#73-serialization-canonical-json)).
 
-```yaml
-strategy_schema: 1
-id: clawevolve/bot-evolution
-version: 2.0.0
-description: Diagnose real sessions, tune persona and local skills, gate on ClawBench.
-applies_to:
-  engines: [openclaw, claude_code]           # checked against engine capabilities
-  genes: [persona, skills]                   # max scope this strategy may patch
-requires_capabilities: [session_export.v1, eval_env.sandbox]
-flow:
-  - step: analyze
-    plugin: clawevolve/diagnose@1.4
-    params: {window_days: 7, max_cases: 40}
-  - step: build_suite
-    plugin: clawevolve/plan@1.2
-  - loop: {max_iterations: 3, until: policy.stop}
-    steps:
-      - step: propose
-        plugin: clawevolve/tune-review@2.0
-      - step: evaluate
-        plugin: platform/clawbench@1          # platform-provided
-        splits: [train, validation]
-      - step: decide
-        plugin: clawevolve/acceptance@1        # "validation > parent, paired win-rate ≥ 0.6"
-defaults:
-  selector: platform/latest-active@1
-  budget: {max_usd: 20, max_wall_clock: 2h, max_rollouts: 400}
-  models: {proposer: "${MODEL_STRONG}", judge: "${MODEL_JUDGE}"}   # resolved by config, no hardcoded endpoints
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Authors may write the same document as YAML; it is stored as canonical JSON.
+{
+  "strategy_schema": 1,
+  "id": "clawevolve/bot-evolution",
+  "version": "2.0.0",
+  "description": "Diagnose real sessions, tune persona and local skills, gate on ClawBench.",
+  "applies_to": {
+    "engines": ["openclaw", "claude_code"],       // checked against engine capabilities
+    "genes": ["persona", "skills"]                // max scope this strategy may patch
+  },
+  "requires_capabilities": ["session_export.v1", "eval_env.sandbox"],
+  "flow": [
+    {"step": "analyze", "plugin": "clawevolve/diagnose@1.4",
+     "params": {"window_days": 7, "max_cases": 40}},
+    {"step": "build_suite", "plugin": "clawevolve/plan@1.2"},
+    {"loop": {"max_iterations": 3, "until": "policy.stop"},
+     "steps": [
+       {"step": "propose", "plugin": "clawevolve/tune-review@2.0"},
+       {"step": "evaluate", "plugin": "platform/clawbench@1",   // platform-provided
+        "splits": ["train", "validation"]},
+       {"step": "decide", "plugin": "clawevolve/acceptance@1"}  // "validation > parent, paired win-rate ≥ 0.6"
+     ]}
+  ],
+  "defaults": {
+    "selector": "platform/latest-active@1",
+    "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "max_rollouts": 400},
+    "models": {"proposer": "${MODEL_STRONG}", "judge": "${MODEL_JUDGE}"}  // resolved by config, no hardcoded endpoints
+  }
+}
 ```
 
 The flow vocabulary is deliberately small: `step`, `loop`, `parallel`

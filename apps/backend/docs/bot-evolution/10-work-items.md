@@ -41,7 +41,8 @@ the rest.
 - **Module**: backend (contract), engine (review)
 - **Goal**: Normative JSON Schema for Genome Revision (`spec`, `policy`,
   `revision` metadata) and Genome Patch (ops, risk-tier mapping, rewrite
-  threshold), canonicalisation rules for the content hash, and the mapping to
+  threshold), canonicalisation rules for the content hash (RFC 8785 canonical JSON, see
+  [02-genome.md §7.3](02-genome.md#73-serialization-canonical-json)), and the mapping to
   and from Manifest schema v1.
 - **Read first**: [02-genome.md](02-genome.md); `manifest-schema.zh-CN.md`;
   `schema/validator.py`.

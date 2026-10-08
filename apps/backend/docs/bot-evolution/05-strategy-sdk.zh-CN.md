@@ -54,36 +54,40 @@ rollout、apply。这些是平台代码（DR-2）。
 
 ## 4. 策略清单
 
-一个进化策略是在 C3 中注册的、带版本的 YAML 文档。
+一个进化策略是在 C3 中注册的、带版本的文档。与所有平台持有的记录一样，它以
+规范 JSON 存储；作者可以用 YAML 编写（[02-genome.zh-CN.md §7.3](02-genome.zh-CN.md#73-序列化规范-json)）。
 
-```yaml
-strategy_schema: 1
-id: clawevolve/bot-evolution
-version: 2.0.0
-description: Diagnose real sessions, tune persona and local skills, gate on ClawBench.
-applies_to:
-  engines: [openclaw, claude_code]           # 根据引擎能力校验
-  genes: [persona, skills]                   # 本策略可修补的最大范围
-requires_capabilities: [session_export.v1, eval_env.sandbox]
-flow:
-  - step: analyze
-    plugin: clawevolve/diagnose@1.4
-    params: {window_days: 7, max_cases: 40}
-  - step: build_suite
-    plugin: clawevolve/plan@1.2
-  - loop: {max_iterations: 3, until: policy.stop}
-    steps:
-      - step: propose
-        plugin: clawevolve/tune-review@2.0
-      - step: evaluate
-        plugin: platform/clawbench@1          # 平台提供
-        splits: [train, validation]
-      - step: decide
-        plugin: clawevolve/acceptance@1        # "validation > parent, paired win-rate ≥ 0.6"
-defaults:
-  selector: platform/latest-active@1
-  budget: {max_usd: 20, max_wall_clock: 2h, max_rollouts: 400}
-  models: {proposer: "${MODEL_STRONG}", judge: "${MODEL_JUDGE}"}   # 由配置解析，不硬编码端点
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// Authors may write the same document as YAML; it is stored as canonical JSON.
+{
+  "strategy_schema": 1,
+  "id": "clawevolve/bot-evolution",
+  "version": "2.0.0",
+  "description": "Diagnose real sessions, tune persona and local skills, gate on ClawBench.",
+  "applies_to": {
+    "engines": ["openclaw", "claude_code"],       // checked against engine capabilities
+    "genes": ["persona", "skills"]                // max scope this strategy may patch
+  },
+  "requires_capabilities": ["session_export.v1", "eval_env.sandbox"],
+  "flow": [
+    {"step": "analyze", "plugin": "clawevolve/diagnose@1.4",
+     "params": {"window_days": 7, "max_cases": 40}},
+    {"step": "build_suite", "plugin": "clawevolve/plan@1.2"},
+    {"loop": {"max_iterations": 3, "until": "policy.stop"},
+     "steps": [
+       {"step": "propose", "plugin": "clawevolve/tune-review@2.0"},
+       {"step": "evaluate", "plugin": "platform/clawbench@1",   // platform-provided
+        "splits": ["train", "validation"]},
+       {"step": "decide", "plugin": "clawevolve/acceptance@1"}  // "validation > parent, paired win-rate ≥ 0.6"
+     ]}
+  ],
+  "defaults": {
+    "selector": "platform/latest-active@1",
+    "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "max_rollouts": 400},
+    "models": {"proposer": "${MODEL_STRONG}", "judge": "${MODEL_JUDGE}"}  // resolved by config, no hardcoded endpoints
+  }
+}
 ```
 
 flow 词汇表刻意保持精简：`step`、`loop`、`parallel`（提议器种群）、`when`

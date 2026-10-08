@@ -39,7 +39,8 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：backend（契约）、engine（评审）
 - **目标**：为基因组修订版（Genome Revision）（`spec`、`policy`、`revision`
   元数据）和基因组补丁（Genome Patch）（操作、风险等级映射、重写阈值）制定
-  规范性 JSON Schema，制定内容哈希的规范化规则，以及与 Manifest schema v1 之间
+  规范性 JSON Schema，制定内容哈希的规范化规则（RFC 8785 规范 JSON，见
+  [02-genome.zh-CN.md §7.3](02-genome.zh-CN.md#73-序列化规范-json)），以及与 Manifest schema v1 之间
   的双向映射。
 - **先读**：[02-genome.zh-CN.md](02-genome.zh-CN.md)；`manifest-schema.zh-CN.md`；
   `schema/validator.py`。

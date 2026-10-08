@@ -49,8 +49,8 @@ flow, replace a plugin version, edit a prompt, change a parameter, or add an
 operator. One registry, refs, archive and promotion model serve both
 artifact kinds:
 
-```yaml
-target_kind: bot_genome | mechanism   # the loop is generic over what it improves
+```jsonc
+{"target_kind": "bot_genome"}   // or "mechanism" — the loop is generic over what it improves
 ```
 
 Mechanism refs are scoped per strategy family. `clawevolve/bot-evolution`
@@ -127,13 +127,16 @@ verified improvements than M1, on problems neither was tuned on?**"
 
 **Improvement problem.** A frozen, replayable level-2 task:
 
-```text
-ImprovementProblem = {
-  bot_genome_revision S,           # starting system
-  experience_snapshot,             # episodes / feedback the mechanism may see
-  suites: train | validation       # visible to the mechanism under normal rules
-  hidden: holdout | regression | safety,   # used only to score the outcome
-  budget                           # identical for every mechanism compared
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+{
+  "bot_genome_revision": "sha256:…",              // starting system S
+  "experience_snapshot": "snapshot:…",            // episodes / feedback the mechanism may see
+  "suites": {
+    "visible": ["train", "validation"],           // visible to the mechanism under normal rules
+    "hidden": ["holdout", "regression", "safety"] // used only to score the outcome
+  },
+  "budget": {"max_usd": 20, "max_rollouts": 400}  // identical for every mechanism compared
 }
 ```
 
