@@ -429,6 +429,78 @@ def test_notify_relay_send_failure_releases_current_bbs_node():
     assert execution_graph.extend_props["bbs_node_id"] == "relay-bbs-send-failure"
 
 
+def test_relay_bot_reply_before_callback_keeps_claim_and_records_pending_result():
+    """A completed chat is not an EXECUTION_RESULT; late callbacks need a live baton."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-late-callback", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-late", task_id=execution_graph.task_id,
+        status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    trajectory = _TrajectoryContext()
+    bot = _FakeBot(rates={"A": 80})
+
+    _run(notify(
+        execution_graph, bcn=_FakeBcn(_roster("A")), bot=bot, graph=graph,
+        backend_url="http://x", target_node_id=relay_node.node_id,
+        task_context_service=trajectory,
+    ))
+
+    assert len(bot.sent_messages) == 1
+    assert relay_node.status is Status.RUNNING
+    assert relay_node.run_info.assignee == "A"
+    assert relay_node.run_info.extend_props["bbs_owner"] == "A"
+    assert not graph.cleared
+    pending = [e[3] for e in trajectory.events
+               if e[3]["action_result"] == "bbs_execution_result_pending"]
+    assert len(pending) == 1
+    assert pending[0]["error_type"] == "relay"
+    assert not any(e[3]["action_result"] == "bbs_execution_failed"
+                   for e in trajectory.events)
+    # A callback after the chat reply can still target the claimed RUNNING node.
+    graph.update_task_node_info(TaskNodePatch(
+        task_id=execution_graph.task_id, node_id=relay_node.node_id,
+        extend_props_patch={"execution_decision": "ACCEPTED"},
+    ))
+    assert relay_node.status is Status.RUNNING
+    assert relay_node.run_info.extend_props["execution_decision"] == "ACCEPTED"
+
+
+def test_relay_callback_before_chat_reply_does_not_reopen_node():
+    """The chat completion must never overwrite callback-owned relay state."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-callback-first", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-callback-first", task_id=execution_graph.task_id,
+        status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+
+    class _CallbackFirstBot(_FakeBot):
+        async def send_and_wait_async(self, **kwargs):
+            result = await super().send_and_wait_async(**kwargs)
+            if "[bbs-bid]" not in kwargs["message"]:
+                relay_node.status = Status.DONE
+                relay_node.run_info.extend_props["execution_decision"] = "ACCEPTED"
+            return result
+
+    bot = _CallbackFirstBot(rates={"A": 80})
+    _run(notify(
+        execution_graph, bcn=_FakeBcn(_roster("A")), bot=bot, graph=graph,
+        backend_url="http://x", target_node_id=relay_node.node_id,
+    ))
+
+    assert len(bot.sent_messages) == 1
+    assert relay_node.status is Status.DONE
+    assert relay_node.run_info.extend_props["execution_decision"] == "ACCEPTED"
+    assert not graph.cleared
+
+
 def test_notify_empty_roster_returns_silently():
     """空 roster → 静默返回(不 claim、不 send)。"""
     bot = _FakeBot(rates={})

@@ -66,8 +66,8 @@ def _release_relay_bbs_claim(
     """Return a claimed Relay BBS baton to the square without touching predecessors.
 
     回广场即录(零盲区):``task_context_service`` + ``execution_graph`` 传入时同步落一条
-    ``execute/bbs_released`` 轨迹行(前面紧邻的失败成因行——``bbs_execution_result_missing``
-    / ``bbs_execution_failed``——只记因,不记"棒已回广场"这个态);两参缺省(未接线)跳过,
+    ``execute/bbs_released`` 轨迹行(前面紧邻的 ``bbs_execution_failed`` 只记因,
+    不记"棒已回广场"这个态);两参缺省(未接线)跳过,
     ``_emit_bbs_trajectory`` 自带吞异常 + WARNING(决策 #14),绝不阻断归还补丁。"""
     graph.report(TaskCallbackData(data={
         "report_type": "NODE_PATCH",
@@ -148,6 +148,7 @@ def _emit_bbs_trajectory(
     exception: Exception | None = None,
     details: dict[str, Any] | None = None,
     error_msg: str | None = None,
+    error_type: str | None = None,
     boost_reason: str | None = None,
 ) -> None:
     """Write BBS milestones/errors through the task-context trajectory facade."""
@@ -165,7 +166,6 @@ def _emit_bbs_trajectory(
     ext_info: dict[str, Any] = {"execution_mode": "bbs", "phase": "bbs_modal"}
     if details:
         ext_info.update(details)
-    error_type = None
     if exception is not None:
         exception_type = type(exception).__name__
         ext_info["exception_type"] = exception_type
@@ -461,19 +461,20 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         if target_node_id is not None and _relay_bbs_execution_result_missing(
             graph, task_id, target_node_id
         ):
+            # The bot chat may finish before its callback reaches the graph.
+            # Keep the claim RUNNING so that a late EXECUTION_RESULT is accepted;
+            # TaskHarness returns the baton to BBS only after its execution SLA.
             _emit_bbs_trajectory(
                 task_context_service, execution_graph, target_node_id,
-                "bbs_execution_result_missing",
+                "bbs_execution_result_pending",
                 error_type="relay",
-                error_msg="relay BBS bot replied without EXECUTION_RESULT",
+                error_msg="relay BBS bot replied; awaiting EXECUTION_RESULT",
                 details={"winner_bot_id": winner_bot_id},
             )
-            _release_relay_bbs_claim(
-                graph, task_id, target_node_id,
-                "relay BBS bot replied without EXECUTION_RESULT",
-                task_context_service=task_context_service,
-                execution_graph=execution_graph,
-            )
+            return
+        if target_node_id is not None:
+            # Relay facts and terminal transitions belong exclusively to the
+            # callback. A chat reply must not reopen an already completed node.
             return
 
         _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
@@ -494,16 +495,14 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
             }
         )
 
-        if target_node_id is None and on_bbs_report is not None:
+        if on_bbs_report is not None:
             await on_bbs_report(_scoped_patch)
         else:
-            if target_node_id is None:
-                logger.warning(
-                    "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 运行事实，保持根 HUNG",
-                    task_id,
-                )
-            # Relay target stays RUNNING until its task-loop Skill reports
-            # EXECUTION_RESULT; centralized fallback records the scoped output.
+            logger.warning(
+                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 运行事实，保持根 HUNG",
+                task_id,
+            )
+            # Centralized fallback records the scoped output.
             graph.report(TaskCallbackData(data={
                 "report_type": "NODE_PATCH",
                 "payload": {"patch": _scoped_patch},

@@ -240,6 +240,21 @@ class TestPollOnce:
         # 回调收到 (task_id, node_id, reason) —— relay/bbs_return 轨迹事件的事实原料
         assert returned == [("t1", "c1", "执行超时未上报 EXECUTION_RESULT")]
 
+    def test_relay_bbs_waits_for_callback_then_recovers_only_after_sla(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1", run_mode="bbs", assignee="bot1")
+        clock = _Clock(0.0)
+        h = TaskHarness(svc, Recorder(), clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(3.0)
+        h._poll_once()
+        assert svc._get_node(graph, "c1").status is Status.RUNNING
+        clock.advance(3.0)
+        h._poll_once()
+        assert svc._get_node(graph, "c1").status is Status.PENDING
+        assert graph.extend_props["bbs_node_id"] == "c1"
+
     def test_relay_bbs_return_callback_failure_does_not_break_recovery(self, svc, graph):
         """回调抛错被吞(决策 #14):回收补丁照常落地,回调异常不外抛。"""
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"

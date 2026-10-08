@@ -576,6 +576,20 @@ def test_relay_dispatch_rejects_current_holder_as_next_relay_bot() -> None:
         )
 
 
+def test_relay_execute_registers_harness_for_missing_callback_recovery() -> None:
+    from agentclaw.community.core.task.task_harness.harness import TaskHarness
+
+    graph = TaskGraphService()
+    harness = TaskHarness(graph)
+    service = TaskService(
+        graph, harness=harness, task_settings=_Settings(),
+        task_id_provider=lambda: "relay-task",
+    )
+    result = _run(service.execute(_request()))
+    assert result.success
+    assert "relay-task" in harness._registered
+
+
 def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_reset() -> (
     None
 ):

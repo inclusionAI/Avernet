@@ -144,6 +144,19 @@ their execution node. They are not merely action-log payloads.
    that claimant's skill-produced plan/search proposal just like every other
    relay executor.
 
+## BBS callback timing and recovery
+
+A Relay BBS claimant's chat reply is not an execution-result acknowledgement.
+After `send_and_wait_async` returns, the BBS executor checks for a persisted
+`EXECUTION_RESULT`. If it has not arrived, it records an observational
+`bbs_execution_result_pending` milestone and leaves the claimed node RUNNING;
+callback/report remains the only writer of Relay execution facts and terminal
+transitions. The registered TaskHarness returns a still-unreported baton to
+BBS only after the configured `SLA_TIMEOUT` (or its normal default) expires.
+Actual delivery exceptions continue to release the claim immediately. This
+keeps a callback arriving after the chat reply from being rejected as a stale
+PENDING-node report, without leaving a permanently unreported claim live.
+
 ## State model
 
 Keep node and graph status enums unchanged. Add relay turn state separately:

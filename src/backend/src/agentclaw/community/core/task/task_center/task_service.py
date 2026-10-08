@@ -490,7 +490,10 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         )
         task_type = request.execution_config.get("task_type")
         if request.execution_config.get("orchestration_mode") == "relay":
-            return self._bootstrap_relay(task_id, request.owner_bot_id, graph.run_id)
+            result = self._bootstrap_relay(task_id, request.owner_bot_id, graph.run_id)
+            if self._harness is not None:
+                self._harness.register(task_id)
+            return result
         if task_type == TaskType.WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
         if task_type == TaskType.YAML:
