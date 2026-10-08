@@ -5,6 +5,7 @@ import { useRunEvolutionAnalysis } from '../../api/hooks'
 import RunEvolutionAnalysis from '../evolution/RunEvolutionAnalysis'
 import { diffWorkflowPatchOperations, type DiagnosisCluster } from './evolution-utils'
 import IssueSummary from './IssueSummary'
+import DetailDrawer from './DetailDrawer'
 import { REMEDY_KIND } from './RemediesPanel'
 
 export const SUGGESTION_STATUS: Record<string, { label: string; cls: string }> = {
@@ -42,9 +43,10 @@ export function SuggestionActions({ suggestion, canEdit, legacyApplyEnabled, onA
 }
 
 export default function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFlowId, selectedAnalysisId, canEdit,
-  legacyApplyEnabled, repairContent, onAction, onApply, onClose }: {
+  legacyApplyEnabled, repairContent, initialTab, onAction, onApply, onClose }: {
   cluster: DiagnosisCluster
   repairContent: ReactNode
+  initialTab?: 'causes' | 'repairs' | 'evidence'
   suggestion?: DisplaySuggestion
   task?: SuggestionApplyTask
   previousTask?: SuggestionApplyTask
@@ -56,32 +58,25 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
   onApply: (ids: string[]) => void
   onClose: () => void
 }) {
-  const [tab, setTab] = useState<'causes' | 'repairs' | 'evidence'>(selectedFlowId || selectedAnalysisId ? 'evidence' : 'causes')
+  const [tab, setTab] = useState<'causes' | 'repairs' | 'evidence'>(initialTab ?? (selectedFlowId || selectedAnalysisId ? 'evidence' : 'causes'))
   const summary = cluster.latest.error_text ?? cluster.latest.reasoning ?? cluster.mode
   const proposalDiff = suggestion?.proposal && previousTask?.proposal
     ? diffWorkflowPatchOperations(previousTask.proposal, suggestion.proposal)
     : null
 
-  return <div className="fixed inset-0 z-40">
-    <button type="button" aria-label="关闭问题详情" className="absolute inset-0 cursor-default bg-slate-950/20" onClick={onClose} />
-    <aside role="dialog" aria-modal="true" aria-label="问题详情" className="absolute inset-y-0 right-0 flex w-full max-w-[560px] flex-col border-l border-slate-200 bg-white shadow-[-16px_0_40px_rgba(15,23,42,0.14)]">
-      <header className="flex items-start gap-4 border-b border-slate-200 px-5 py-4">
-        <div className="min-w-0 flex-1">
+  return <DetailDrawer title="问题详情" onClose={onClose} header={<>
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-semibold text-slate-950">{cluster.node}</h3>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{cluster.mode}</span>
           </div>
           <p className="mt-1 text-xs text-slate-400">问题累计涉及 {cluster.runIds.length} 个运行</p>
-        </div>
-        <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">×</button>
-      </header>
-
-      <nav aria-label="问题详情分区" className="flex gap-2 border-b border-slate-200 px-5">
+      </>} navigation={<nav aria-label="问题详情分区" className="flex shrink-0 gap-2 border-b border-slate-200 px-5">
         {([['causes', '问题原因'], ['repairs', '修复建议'], ['evidence', '证据与历史']] as const).map(([key, label]) =>
           <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}
             className={`border-b-2 px-3 py-3 text-sm ${tab === key ? 'border-blue-600 font-medium text-blue-700' : 'border-transparent text-slate-500'}`}>{label}</button>)}
-      </nav>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      </nav>} footer={tab === 'evidence' && suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
+        <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
+      </footer>}>
         {tab === 'causes' && (cluster.aggregation ? <IssueSummary group={cluster.aggregation} /> : <section>
           <p className="text-xs font-semibold text-slate-900">最新诊断结论</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{summary}</p>
@@ -113,13 +108,7 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
         <IssueEvidence cluster={cluster} selectedFlowId={selectedFlowId} selectedAnalysisId={selectedAnalysisId} />
         </>}
 
-      </div>
-
-      {tab === 'evidence' && suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
-        <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
-      </footer>}
-    </aside>
-  </div>
+  </DetailDrawer>
 }
 
 
