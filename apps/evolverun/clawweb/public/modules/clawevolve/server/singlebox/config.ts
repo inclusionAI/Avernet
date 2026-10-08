@@ -81,7 +81,7 @@ export function loadSingleboxConfig(file: string): SingleboxConfig {
     maxArtifactBytes, userId: required("userId"), model, models,
     botSource,
     backendDb, skillsRoot: validateSkillsRoot(path("skillsRoot", true, process.env.CLAWEVOLVE_SKILLS_ROOT)),
-    // Same default layout as scripts/singlebox.sh and BAAS local_proc.
+    // Same default layout as singlebox/singlebox.sh and BAAS local_proc.
     botsRoot: botSource === "openclaw" ? openclawHome! : input.botsRoot === undefined
       ? resolve(dirname(backendDb), "../../..", "test-bots/aidesktop/aidesktop_singlebox/bolt_data")
       : path("botsRoot", true),

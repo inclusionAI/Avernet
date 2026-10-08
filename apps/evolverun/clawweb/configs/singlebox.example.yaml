@@ -7,7 +7,7 @@ botSource: "singlebox"
 model: "your-configured-provider/model"
 # models:
 #   - "your-configured-provider/model"
-backendDb: "/path/to/Avernet/scripts/.dependencies/data/backend.db"
+backendDb: "/path/to/Avernet/singlebox/.dependencies/data/backend.db"
 # Required only when botSource is openclaw:
 # openclawHome: "/Users/you/.openclaw"
 # Optional: defaults to the public Skills shipped in this Avernet checkout.
