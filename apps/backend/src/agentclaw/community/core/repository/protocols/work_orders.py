@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
+
 if TYPE_CHECKING:
     from agentclaw.community.core.work_orders.models import (
         WorkOrderApprovalContext,
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
         WorkOrderDecision,
         WorkOrderEventCreatedResult,
         NotificationCategory,
+        WorkOrderApprovalMode,
     )
 
 
@@ -32,6 +34,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode | None = None,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -43,6 +46,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         apply_reason: str | None,
         biz_data: str | None,
         env: str,
+        callback_source_event_type: str | None = None,
     ) -> WorkOrderEventCreatedResult: ...
 
     @abstractmethod
@@ -65,6 +69,40 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderApprovalContext: ...
 
     @abstractmethod
+    def claim_auto_approval(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def finalize_auto_approval(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def mark_auto_approval_failed(
+        self, *, work_order_id: int, reviewer_user_id: str,
+        review_remark: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def apply_auto_space_join(self, *, work_order_id: int, env: str) -> None: ...
+
+    @abstractmethod
+    def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None: ...
+
+    @abstractmethod
+    def apply_auto_skill_editor_request(
+        self, *, work_order_id: int, source_event_type: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def create_auto_result_notifications(
+        self, *, work_order_id: int, recipient_user_ids: list[str], biz_type: str,
+        biz_id: str, source_event_type: str, status: WorkOrderStatus,
+        review_remark: str | None, env: str,
+    ) -> None: ...
+
+    @abstractmethod
     def process_approval(
         self,
         *,
@@ -73,6 +111,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         decision: WorkOrderDecision,
         review_remark: str | None,
         env: str,
+        source_event_type: str | None = None,
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(

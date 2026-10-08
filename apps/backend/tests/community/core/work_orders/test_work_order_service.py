@@ -28,6 +28,7 @@ from agentclaw.community.core.work_orders.errors import (
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderApprovalContext,
+    WorkOrderApprovalMode,
     WorkOrderApproverRecord,
     WorkOrderApproverStatus,
     WorkOrderBizType,
@@ -621,6 +622,98 @@ def test_create_friend_event_requires_callback_contract(
             content=None,
             apply_reason=None,
             biz_data=biz_data,
+            actor_id="actor-1",
+        )
+
+    repository.create_work_order_event.assert_not_called()
+
+
+def test_auto_work_order_rejects_applicant_other_than_actor() -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderAccessDeniedError, match="applicant must be"):
+        service.create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="friend-auto",
+            event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+            applicant_user_id="someone-else",
+            approver_user_ids=["result-recipient"],
+            recipient_user_ids=[],
+            title="friend request",
+            content=None,
+            apply_reason=None,
+            biz_data={"request_ids": ["request-auto"]},
+            actor_id="actor-auto",
+        )
+
+    repository.create_work_order_event.assert_not_called()
+
+
+def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = True
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    repository.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=11,
+        work_order_no="WO-11",
+        notification_ids=[21],
+        status=WorkOrderEventStatus.APPROVED,
+    )
+    callback_context = WorkOrderCallbackCredential(headers={"X-Request-Id": "req-1"})
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto",
+        event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="actor-auto",
+        approver_user_ids=["ignored-approver"],
+        recipient_user_ids=[],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data={"request_ids": ["request-auto"]},
+        actor_id="actor-auto",
+        callback_auth=callback_context,
+    )
+
+    assert result.status is WorkOrderEventStatus.APPROVED
+    kwargs = repository.create_work_order_event.call_args.kwargs
+    assert kwargs["approver_user_ids"] == ["ignored-approver"]
+    assert kwargs["callback_source_event_type"] == (
+        WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
+    )
+    callbacks.dispatch.assert_called_once()
+    dispatch_kwargs = callbacks.dispatch.call_args.kwargs
+    repository.get_approval_context.return_value.model_copy.assert_called_once_with(
+        update={"source_event_type": WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value}
+    )
+    assert dispatch_kwargs["decision"] is WorkOrderDecision.APPROVED
+    assert dispatch_kwargs["review_remark"] is None
+    assert dispatch_kwargs["credential"] is callback_context
+
+
+def test_auto_mode_is_rejected_for_notice_events() -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderInvalidEventError, match="only valid for approval"):
+        service.create_work_order_event(
+            event_category=NotificationCategory.NOTICE,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.GROUP_MENTION.value,
+            biz_id="group-1:s1",
+            event_type=WorkOrderEventType.HUMAN_GROUP_MENTIONED.value,
+            applicant_user_id=None,
+            approver_user_ids=[],
+            recipient_user_ids=["recipient-1"],
+            title="你被 @ 了",
+            content={"text": "hello"},
+            apply_reason=None,
+            biz_data=None,
             actor_id="actor-1",
         )
 
@@ -1335,3 +1428,77 @@ def test_friend_approval_rejects_missing_or_unsupported_source_event(
 
     callbacks.dispatch.assert_not_called()
     repository.process_approval.assert_not_called()
+
+
+def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize():
+    service, repo, *_ = _service()
+    repo.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=19,
+        work_order_no="WO-19",
+        notification_ids=[],
+        status=WorkOrderEventStatus.PENDING,
+    )
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="skill-1",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor",
+        approver_user_ids=["notify-user"],
+        recipient_user_ids=[],
+        title="AUTO request",
+        content=None,
+        apply_reason=None,
+        biz_data={},
+        actor_id="actor",
+    )
+
+    assert result.status is WorkOrderEventStatus.APPROVED
+    repo.apply_auto_skill_editor_request.assert_called_once_with(
+        work_order_id=19,
+        source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        env="dev",
+    )
+    repo.finalize_auto_approval.assert_not_called()
+    repo.create_auto_result_notifications.assert_not_called()
+
+
+def test_auto_skill_non_approved_handler_result_marks_order_failed():
+    service, repo, *_ = _service()
+    repo.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=20,
+        work_order_no="WO-20",
+        notification_ids=[],
+        status=WorkOrderEventStatus.PENDING,
+    )
+    repo.apply_auto_skill_editor_request.side_effect = RuntimeError(
+        "skill transaction failed"
+    )
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="skill-2",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor",
+        approver_user_ids=["notify-user"],
+        recipient_user_ids=[],
+        title="AUTO request",
+        content=None,
+        apply_reason=None,
+        biz_data={},
+        actor_id="actor",
+    )
+
+    assert result.status is WorkOrderEventStatus.FAILED
+    repo.mark_auto_approval_failed.assert_called_once()
+    assert "skill transaction failed" in repo.mark_auto_approval_failed.call_args.kwargs[
+        "review_remark"
+    ]
+    repo.create_auto_result_notifications.assert_called_once()
+    assert repo.create_auto_result_notifications.call_args.kwargs["status"] is WorkOrderStatus.FAILED
+    repo.finalize_auto_approval.assert_not_called()

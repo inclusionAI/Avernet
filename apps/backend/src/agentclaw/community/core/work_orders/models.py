@@ -9,14 +9,26 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class WorkOrderApprovalMode(StrEnum):
+    MANUAL = "MANUAL"
+    AUTO = "AUTO"
+
+
+SYSTEM_REVIEWER_USER_ID = "SYSTEM"
+
+
 class WorkOrderStatus(StrEnum):
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
 
 class WorkOrderEventStatus(StrEnum):
     PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    FAILED = "FAILED"
     CREATED = "CREATED"
 
 
@@ -326,6 +338,7 @@ class WorkOrderRecord(BaseModel):
     reviewer_user_id: str | None
     review_remark: str | None
     reviewed_at: datetime | None
+    approval_mode: WorkOrderApprovalMode | None = None
     env: str
     gmt_created: datetime
     gmt_modified: datetime
@@ -362,6 +375,7 @@ class WorkOrderNotificationDraft(BaseModel):
 class WorkOrderNotificationDetail(BaseModel):
     notification: WorkOrderNotificationRecord
     work_order_status: WorkOrderStatus | None
+    approval_mode: WorkOrderApprovalMode | None = None
     can_approve: bool
 
 
@@ -391,10 +405,13 @@ class WorkOrderDetail(BaseModel):
 
 
 class WorkOrderApprovalContext(BaseModel):
-    """Canonical source event and state used before an external callback."""
+    """Canonical source event and state used before an external callback.
+
+    AUTO callbacks have no human approver record; MANUAL callers must provide one.
+    """
 
     work_order: WorkOrderRecord
-    approver: WorkOrderApproverRecord
+    approver: WorkOrderApproverRecord | None
     source_event_type: str | None
 
 

@@ -42,6 +42,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderBizType,
     WorkOrderDecision,
     WorkOrderApproverStatus,
@@ -84,6 +85,72 @@ def _skill_editor_requests(db) -> SkillEditorRequestRepository:
 def _work_orders(db) -> WorkOrderRepository:
     return WorkOrderRepository(db, _skill_editor_requests(db))
 
+
+def test_auto_event_is_created_pending_without_result_notice(db) -> None:
+    repository = _work_orders(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto-1",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["approver-auto"],
+        recipient_user_ids=["applicant-auto"],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-auto-1"]}),
+        env="dev",
+    )
+    assert created.status.value == "PENDING"
+    with db.orm_session() as session:
+        order = session.query(WorkOrderModel).one()
+        assert order.status == WorkOrderStatus.PENDING.value
+        assert session.query(WorkOrderApproverModel).count() == 0
+        assert session.query(WorkOrderNotificationModel).count() == 0
+
+
+def test_auto_finalize_records_system_reviewer_without_approver_rows(db) -> None:
+    repository = _work_orders(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto-finalize",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["first-approver", "final-approver"],
+        recipient_user_ids=["applicant-auto"],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-auto-finalize"]}),
+        env="dev",
+    )
+    repository.claim_auto_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="SYSTEM",
+        env="dev",
+    )
+    repository.finalize_auto_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="SYSTEM",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        order = session.query(WorkOrderModel).filter(
+            WorkOrderModel.id == created.work_order_id
+        ).one()
+        status = order.status
+        reviewer_user_id = order.reviewer_user_id
+        approver_count = session.query(WorkOrderApproverModel).filter(
+            WorkOrderApproverModel.work_order_id == created.work_order_id
+        ).count()
+    assert status == WorkOrderStatus.APPROVED.value
+    assert reviewer_user_id == "SYSTEM"
+    assert approver_count == 0
 
 def _space_skills(db) -> SpaceSkillRepository:
     return SpaceSkillRepository(db, _skill_editor_requests(db))
@@ -1010,6 +1077,12 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         apply_reason="join",
         env="dev",
     )
+    # The endpoint's historical helper creates NULL/legacy MANUAL rows; explicit
+    # MANUAL rows from the unified event endpoint must also remain reviewable.
+    with db.transactional_orm_session() as session:
+        session.query(WorkOrderModel).filter(
+            WorkOrderModel.id == record.id
+        ).update({WorkOrderModel.approval_mode: "MANUAL"})
     assert record.status is WorkOrderStatus.PENDING
     assert record.work_order_no.startswith("WO")
     assert record.biz_data is None

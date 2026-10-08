@@ -10,6 +10,18 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_serializer
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
 
+class WorkOrderApprovalMode(_DocumentedEnum):
+    """Approval workflow selected for a work order event."""
+
+    MANUAL = "MANUAL"
+    AUTO = "AUTO"
+
+    __descriptions__ = {
+        "MANUAL": "Requires a decision from a human approver.",
+        "AUTO": "Runs the business callback and records a system decision.",
+    }
+
+
 class WorkOrderDecision(_DocumentedEnum):
     """Decision submitted for a pending work order."""
 
@@ -26,13 +38,17 @@ class WorkOrderStatus(_DocumentedEnum):
     """Current processing state of a work order."""
 
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
     __descriptions__ = {
         "PENDING": "Awaiting review.",
+        "PROCESSING": "An automatic approval is being processed.",
         "APPROVED": "Approved by an authorized reviewer or the Bot's auto-approval policy.",
         "REJECTED": "Rejected by an authorized reviewer.",
+        "FAILED": "Automatic approval processing failed.",
     }
 
 
@@ -68,10 +84,14 @@ class WorkOrderEventStatus(_DocumentedEnum):
     """Persistence state returned after a unified event is accepted."""
 
     PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    FAILED = "FAILED"
     CREATED = "CREATED"
 
     __descriptions__ = {
         "PENDING": "An approval work order is waiting for review.",
+        "APPROVED": "The automatic approval completed successfully.",
+        "FAILED": "The automatic approval failed; see the work-order result.",
         "CREATED": "A notice notification was created.",
     }
 
@@ -81,6 +101,10 @@ class CreateWorkOrderEventRequest(BaseModel):
 
     event_category: NotificationCategory = Field(
         description="Whether the event requires approval or is informational."
+    )
+    approval_mode: WorkOrderApprovalMode = Field(
+        default=WorkOrderApprovalMode.MANUAL,
+        description="Approval workflow; AUTO is valid only for approval events.",
     )
     biz_type: str = Field(
         min_length=1,
@@ -103,11 +127,18 @@ class CreateWorkOrderEventRequest(BaseModel):
         description="Applicant user identifier, when applicable.",
     )
     approver_user_ids: list[str] = Field(
-        default_factory=list, description="User identifiers who may approve the event."
+        default_factory=list,
+        description=(
+            "MANUAL: users who may approve the event. AUTO: users who receive the "
+            "final approval result; they are not assigned human approval tasks."
+        ),
     )
     recipient_user_ids: list[str] = Field(
         default_factory=list,
-        description="User identifiers who receive the event notice.",
+        description=(
+            "Recipients for notice events. For AUTO approval events, final-result "
+            "recipients are supplied in approver_user_ids instead."
+        ),
     )
     title: str = Field(
         min_length=1, max_length=256, description="Display title of the event."

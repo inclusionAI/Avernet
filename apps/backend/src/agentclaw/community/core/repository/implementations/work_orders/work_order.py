@@ -8,6 +8,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.repository.implementations.work_orders.auto_approval import (
+    _AutoApprovalWorkOrderRepository,
+)
 from agentclaw.community.core.repository.implementations.work_orders.bot_editor import (
     _BotEditorWorkOrderRepository,
 )
@@ -36,6 +39,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderApprovalContext,
     WorkOrderApproverRecord,
     WorkOrderBizType,
@@ -49,6 +53,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderDecision,
     WorkOrderApproverStatus,
+    SYSTEM_REVIEWER_USER_ID,
     WorkOrderEventCreatedResult,
     WorkOrderEventType,
     WorkOrderMessageContent,
@@ -67,7 +72,9 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
 
-class WorkOrderRepository(WorkOrderRepositoryProtocol):
+class WorkOrderRepository(
+    _AutoApprovalWorkOrderRepository, WorkOrderRepositoryProtocol
+):
     @inject
     def __init__(
         self,
@@ -93,6 +100,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode = WorkOrderApprovalMode.MANUAL,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -104,9 +112,12 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         apply_reason: str | None,
         biz_data: str | None,
         env: str,
+        callback_source_event_type: str | None = None,
     ) -> WorkOrderEventCreatedResult:
+        approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
         return self._creation.create_work_order_event(
             event_category=event_category,
+            approval_mode=approval_mode,
             biz_type=biz_type,
             biz_id=biz_id,
             event_type=event_type,
@@ -118,6 +129,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             apply_reason=apply_reason,
             biz_data=biz_data,
             env=env,
+            callback_source_event_type=callback_source_event_type,
         )
 
     def create_work_order(
@@ -143,56 +155,6 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             env=env,
         )
 
-    def get_approval_context(
-        self, *, work_order_id: int, reviewer_user_id: str, env: str
-    ) -> WorkOrderApprovalContext:
-        with self._db.orm_session() as db:
-            order = (
-                db.query(self._WorkOrder)
-                .filter(self._WorkOrder.id == work_order_id, self._WorkOrder.env == env)
-                .one_or_none()
-            )
-            if order is None:
-                raise WorkOrderNotFoundError("work order not found")
-            approver = (
-                db.query(self._Approver)
-                .filter(
-                    self._Approver.work_order_id == work_order_id,
-                    self._Approver.approver_user_id == reviewer_user_id,
-                    self._Approver.env == env,
-                )
-                .one_or_none()
-            )
-            if approver is None:
-                raise WorkOrderAccessDeniedError("current user is not an approver")
-            source_event = (
-                db.query(self._Notification.event_type)
-                .filter(
-                    self._Notification.work_order_id == work_order_id,
-                    self._Notification.notification_category
-                    == NotificationCategory.APPROVAL.value,
-                    self._Notification.env == env,
-                )
-                .order_by(self._Notification.id.asc())
-                .first()
-            )
-            source_event_type = source_event[0] if source_event is not None else None
-            return WorkOrderApprovalContext(
-                work_order=order.to_record(),
-                approver=WorkOrderApproverRecord(
-                    id=approver.id,
-                    work_order_id=approver.work_order_id,
-                    approver_user_id=approver.approver_user_id,
-                    status=approver.status,
-                    review_remark=approver.review_remark,
-                    reviewed_at=approver.reviewed_at,
-                    env=approver.env,
-                    gmt_created=approver.gmt_created,
-                    gmt_modified=approver.gmt_modified,
-                ),
-                source_event_type=source_event_type,
-            )
-
     def process_approval(
         self,
         *,
@@ -201,6 +163,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         decision: WorkOrderDecision,
         review_remark: str | None,
         env: str,
+        source_event_type: str | None = None,
     ):
         with self._db.transactional_orm_session() as db:
             now = db.execute(select(func.now())).scalar_one()
@@ -212,6 +175,12 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             )
             if order is None:
                 raise WorkOrderNotFoundError("work order not found")
+            if (
+                order.approval_mode
+                not in (None, WorkOrderApprovalMode.MANUAL.value)
+                or order.status != WorkOrderStatus.PENDING.value
+            ):
+                raise WorkOrderAlreadyProcessedError("work order is not a pending MANUAL order")
             approver = (
                 db.query(self._Approver)
                 .filter(
@@ -225,8 +194,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             if approver is None:
                 raise WorkOrderAccessDeniedError("current user is not an approver")
             if (
-                order.status != WorkOrderStatus.PENDING.value
-                or approver.status != WorkOrderApproverStatus.PENDING.value
+                approver.status != WorkOrderApproverStatus.PENDING.value
             ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")
             target = WorkOrderStatus(decision.value)
@@ -248,8 +216,13 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             )
             if updated != 1:
                 raise WorkOrderAlreadyProcessedError("approver already processed")
-            db.query(self._WorkOrder).filter(
+            order_updated = db.query(self._WorkOrder).filter(
                 self._WorkOrder.id == work_order_id,
+                self._WorkOrder.env == env,
+                or_(
+                    self._WorkOrder.approval_mode.is_(None),
+                    self._WorkOrder.approval_mode == WorkOrderApprovalMode.MANUAL.value,
+                ),
                 self._WorkOrder.status == WorkOrderStatus.PENDING.value,
             ).update(
                 {
@@ -261,6 +234,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+            if order_updated != 1:
+                raise WorkOrderAlreadyProcessedError("work order is not a pending MANUAL order")
 
             # A unified SPACE_JOIN approval has a domain side effect in
             # addition to the generic work-order state transition: the
@@ -336,7 +311,11 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .order_by(self._Notification.id.asc())
                 .first()
             )
-            source_event_type = source_event[0] if source_event is not None else None
+            source_event_type = (
+                source_event_type
+                if source_event_type is not None
+                else (source_event[0] if source_event is not None else None)
+            )
             reviewed_event_type = reviewed_event_type_for(
                 source_event_type=source_event_type,
                 biz_type=order.biz_type,
@@ -524,8 +503,14 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         self._Notification.env == env,
                     ),
                 ).filter(
-                    self._WorkOrder.applicant_user_id == actor_id,
                     self._WorkOrder.env == env,
+                    or_(
+                        self._WorkOrder.applicant_user_id == actor_id,
+                        and_(
+                            self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
+                            self._WorkOrder.reviewer_user_id == actor_id,
+                        ),
+                    ),
                 )
             else:
                 query = (
@@ -566,6 +551,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                                     [
                                         WorkOrderStatus.APPROVED.value,
                                         WorkOrderStatus.REJECTED.value,
+                                        WorkOrderStatus.FAILED.value,
                                     ]
                                 ),
                             ),
@@ -771,6 +757,14 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             )
             if work_order is None:
                 raise WorkOrderNotFoundError("work order not found")
+            if (
+                work_order.approval_mode
+                not in (None, WorkOrderApprovalMode.MANUAL.value)
+                or work_order.status != WorkOrderStatus.PENDING.value
+            ):
+                raise WorkOrderAlreadyProcessedError(
+                    "work order is not a pending MANUAL order"
+                )
             owner = (
                 db.query(self._Member.id)
                 .filter(
@@ -788,6 +782,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 db.query(self._WorkOrder)
                 .filter(
                     self._WorkOrder.id == work_order_id,
+                    or_(
+                        self._WorkOrder.approval_mode.is_(None),
+                        self._WorkOrder.approval_mode == WorkOrderApprovalMode.MANUAL.value,
+                    ),
                     self._WorkOrder.status == WorkOrderStatus.PENDING.value,
                     self._WorkOrder.env == env,
                 )

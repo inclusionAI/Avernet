@@ -26,7 +26,9 @@ from agentclaw.community.core.repository.implementations.work_orders.work_order 
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.spaces.repository.models import SpaceMemberModel
 from agentclaw.community.core.work_orders.errors import (
+    WorkOrderAccessDeniedError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderNotFoundError,
     WorkOrderSkillApplicantAlreadyEditorError,
     WorkOrderSkillEditorRequestNotAllowedError,
 )
@@ -130,6 +132,7 @@ def _claimed_auto_skill_order(db, *, enabled=True):
             applicant_user_id="applicant-1",
             apply_reason="maintain together",
             status="PROCESSING",
+            approval_mode="AUTO",
             env="dev",
         )
         session.add(order)
@@ -478,4 +481,128 @@ def test_auto_skill_step_rejects_untrusted_order_shape(db, unsafe_case) -> None:
             )
             .count()
             == 0
+        )
+
+def test_work_order_auto_skill_completion_is_atomic(db) -> None:
+    _, skill_id, order_id = _claimed_auto_skill_order(db)
+    repository = _work_orders(db)
+
+    repository.apply_auto_skill_editor_request(
+        work_order_id=order_id,
+        source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        order = session.get(WorkOrderModel, order_id)
+        grant = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+                SkillGrant.env == "dev",
+            )
+            .one()
+        )
+        notice = (
+            session.query(WorkOrderNotificationModel)
+            .filter(WorkOrderNotificationModel.work_order_id == order_id)
+            .one()
+        )
+        assert (order.status, order.reviewer_user_id, order.review_remark) == (
+            WorkOrderStatus.APPROVED.value,
+            "SYSTEM",
+            None,
+        )
+        assert (grant.role, grant.status, grant.granted_by) == (
+            "MANAGER",
+            "ACTIVE",
+            "SYSTEM",
+        )
+        assert notice.recipient_user_id == "applicant-1"
+        assert notice.notification_category == NotificationCategory.NOTICE.value
+        assert notice.event_type == WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value
+        assert json.loads(notice.content) == {
+            "text": "自动审批已通过。",
+            "status": WorkOrderStatus.APPROVED.value,
+        }
+
+
+def test_work_order_auto_skill_completion_rejects_non_auto_order(db) -> None:
+    _, _, order_id = _claimed_auto_skill_order(db)
+    with db.orm_session() as session:
+        order = session.get(WorkOrderModel, order_id)
+        order.approval_mode = "MANUAL"
+
+    with pytest.raises(WorkOrderAccessDeniedError, match="not an AUTO Skill"):
+        _work_orders(db).apply_auto_skill_editor_request(
+            work_order_id=order_id,
+            source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        order = session.get(WorkOrderModel, order_id)
+        assert order.status == WorkOrderStatus.PROCESSING.value
+        assert session.query(WorkOrderNotificationModel).count() == 0
+
+
+def test_work_order_auto_skill_completion_rolls_back_grant_and_status_if_notice_fails(
+    db, monkeypatch
+) -> None:
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    _, skill_id, order_id = _claimed_auto_skill_order(db)
+
+    def fail_notice_flush(session, _flush_context, instances):
+        if any(isinstance(item, WorkOrderNotificationModel) for item in session.new):
+            raise RuntimeError("notice insert failed")
+
+    event.listen(Session, "before_flush", fail_notice_flush)
+    try:
+        with pytest.raises(RuntimeError, match="notice insert failed"):
+            _work_orders(db).apply_auto_skill_editor_request(
+                work_order_id=order_id,
+                source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+                env="dev",
+            )
+    finally:
+        event.remove(Session, "before_flush", fail_notice_flush)
+
+    with db.orm_session() as session:
+        order = session.get(WorkOrderModel, order_id)
+        assert order.status == WorkOrderStatus.PROCESSING.value
+        assert order.reviewer_user_id is None
+        assert (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+            )
+            .count()
+            == 0
+        )
+        assert session.query(WorkOrderNotificationModel).count() == 0
+
+
+def test_work_order_auto_skill_completion_rejects_missing_order(db) -> None:
+    with pytest.raises(WorkOrderNotFoundError, match="not found"):
+        _work_orders(db).apply_auto_skill_editor_request(
+            work_order_id=9999,
+            source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+            env="dev",
+        )
+
+
+def test_work_order_auto_skill_completion_rejects_non_processing_order(db) -> None:
+    _, _, order_id = _claimed_auto_skill_order(db)
+    with db.orm_session() as session:
+        session.get(WorkOrderModel, order_id).status = WorkOrderStatus.APPROVED.value
+
+    with pytest.raises(WorkOrderAlreadyProcessedError, match="not processing"):
+        _work_orders(db).apply_auto_skill_editor_request(
+            work_order_id=order_id,
+            source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+            env="dev",
         )
