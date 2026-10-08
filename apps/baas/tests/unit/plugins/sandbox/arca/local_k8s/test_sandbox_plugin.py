@@ -755,6 +755,48 @@ class TestLocalK8sSandbox:
         )
         assert sandbox._exec_in_container.call_count == 2
 
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_tolerates_sidecar_admin_not_ready(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """sidecar admin port 未就绪时 quitquitquit 报 Connection refused 应继续等待就绪。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        refused = MagicMock(
+            exit_code=-1,
+            stdout="",
+            stderr=(
+                "curl: (7) Failed to connect to 127.0.0.1 port 38081 after 3 ms: "
+                "Connection refused"
+            ),
+        )
+        sandbox._exec_in_container = MagicMock(
+            side_effect=[refused, MagicMock(exit_code=0)]
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+        assert sandbox._exec_in_container.call_count == 2
+
 
 class TestResolveOutboundRule:
     """Tests for _resolve_outbound_rule helper."""

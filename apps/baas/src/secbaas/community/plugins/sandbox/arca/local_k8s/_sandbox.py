@@ -359,13 +359,15 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         try:
             self._restart_sidecar()
         except RuntimeError as e:
-            # 重启空窗期（上一实例已退出、kubelet 尚未重建）exec 会报
-            # container not found；新实例启动时会加载已更新的 ConfigMap，
-            # 无需重发 quitquitquit，直接等待就绪。
-            if "container not found" not in str(e):
+            # 以下两类错误属于 sidecar 暂不可用，新实例启动/就绪后会加载已更新的
+            # ConfigMap，无需重发 quitquitquit，直接等待就绪：
+            # - 重启空窗期：上一实例已退出、kubelet 尚未重建，exec 报 container not found
+            # - sidecar 尚未就绪：Envoy admin port 还未监听，curl 报 Connection refused
+            err = str(e)
+            if "container not found" not in err and "Connection refused" not in err:
                 raise
             logger.warning(
-                "local_k8s: sidecar %s missing (recreating), skip restart: %s",
+                "local_k8s: sidecar %s not ready or missing, skip restart: %s",
                 self._sidecar_container_name,
                 e,
             )
