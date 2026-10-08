@@ -7,7 +7,6 @@ this module is entered only through the ordinary HTTP execute_restart hook.
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import time
 import uuid
 from typing import Callable
@@ -139,7 +138,7 @@ class AicodingDurableRestartMixin:
         if existing is not None and existing.status not in TERMINAL_STATUSES:
             payload = existing.payload
             result = _state(services.repository, payload).ensure(payload, existing.id)
-            return self._accepted(ctx, result, services.task_queue)
+            return self._accepted(result)
 
         # Save template snapshots using their existing encryption/authorization
         # contract, not as plaintext credentials in a task-queue payload.
@@ -176,65 +175,13 @@ class AicodingDurableRestartMixin:
         # A concurrent submit may have won queue dedup. Its payload, never ours,
         # owns the operation/target, even if its HTTP process died before CAS.
         result = _state(services.repository, task.payload).ensure(task.payload, task.id)
-        return self._accepted(ctx, result, services.task_queue)
+        return self._accepted(result)
 
-    def _accepted(self, ctx, bot, task_queue):
-        result = self.project_restart_status(ctx, bot, task_queue=task_queue)
-        result = dict(result)
+    @staticmethod
+    def _accepted(bot):
+        result = dict(bot)
         result["restart_in_progress"] = journal(bot).get("phase") in IN_PROGRESS
         result["restart_operation_id"] = journal(bot).get("operation_id")
-        return result
-
-    def project_restart_status(self, ctx, bot: dict, *, task_queue=None) -> dict:
-        if not supports(bot):
-            return bot
-        record = journal(bot)
-        if not record:
-            return bot
-        phase, message = record.get("phase"), record.get("error_message")
-        if (
-            phase == "FAILED"
-            and "failed_binding_id" in record
-            and bot.get("binding_id") != record["failed_binding_id"]
-        ):
-            return bot
-        if (
-            phase in IN_PROGRESS
-            and time.time() - record.get("started_at", time.time()) >= BUSINESS_TIMEOUT
-        ):
-            phase, message = (
-                "FAILED",
-                "重启等待超时，请检查实例状态；不会自动重复执行重启",
-            )
-        if phase in IN_PROGRESS and task_queue is not None:
-            task = task_queue.find_by_idempotency_key(
-                TASK_TYPE, task_key(str(bot["bot_id"]), str(bot["owner_id"]))
-            )
-            if (
-                task is not None
-                and task.payload.get("operation_id") == record.get("operation_id")
-                and task.status in TERMINAL_STATUSES
-            ):
-                # Worker deadline/unhandled failure must not leave permanent
-                # PENDING. Never expose raw queue last_error (may contain secrets).
-                phase, message = "FAILED", "重启任务已终止但未确认完成，请检查实例状态"
-        if phase not in IN_PROGRESS and phase != "FAILED":
-            return bot
-        result = deepcopy(bot)
-        result["status"] = "FAILED" if phase == "FAILED" else "PENDING"
-        # Preserve the existing startup-error response contract. The durable
-        # operation copy protects the failure reason from late runtime reports;
-        # in-progress responses still suppress superseded startup failures.
-        ext = result.setdefault("ext", {})
-        if phase == "FAILED":
-            ext["start_status"] = "FAILED"
-            ext["start_message"] = message
-        else:
-            ext.pop("start_status", None)
-            ext.pop("start_message", None)
-        binding = result.get("device_binding")
-        if isinstance(binding, dict):
-            binding.pop("error_message", None)
         return result
 
 

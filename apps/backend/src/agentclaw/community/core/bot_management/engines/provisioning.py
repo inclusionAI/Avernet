@@ -270,10 +270,6 @@ class EngineProvisioningStrategy(ABC):
         """Record provider intent before asynchronous completion; default no-op."""
         return None
 
-    def project_restart_status(self, ctx: BotProvisioningContext, bot: dict, *, task_queue=None) -> dict:
-        """Read-only status projection. Default engines return the record unchanged."""
-        return bot
-
     @abstractmethod
     def apply_restart_extra_configs(
         self,

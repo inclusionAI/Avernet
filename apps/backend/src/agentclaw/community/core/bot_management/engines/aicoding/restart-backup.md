@@ -17,7 +17,7 @@ caller, so a prepare failure leaves no lock to clean up and a verify failure
 flows through the caller's existing `finally` release. The default strategy
 returns no verifier and never probes devices. The synchronous stop/start/update and allocation lock hand-off remain in
 BotService. Ordinary HTTP coding restart now admits a durable task before this
-precondition; its pending projection and operation journal are owned by the
+precondition; its persisted pending state and operation journal are owned by the
 coding strategy. No restart-lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService

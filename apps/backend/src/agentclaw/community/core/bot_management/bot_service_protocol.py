@@ -20,10 +20,6 @@ class BotServiceProtocol(Protocol):
     # ── Queries ────────────────────────────────────────────────────────
     def get_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def get_bot_status(self, bot_id: str, user_id: str) -> dict:
-        """Bot-shaped runtime view including engine-owned restart progress."""
-        ...
-
     def get_bot_by_id(self, bot_id: str) -> Any: ...
 
     def get_bot_classification(

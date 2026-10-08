@@ -80,31 +80,30 @@ CAS 初始化 journal；队列入库失败不写 PENDING。若任务已入库但
 
 ## 状态查询兼容
 
-新增中立的 `BotService.get_bot_status`，读取原 `get_bot` 后委托已选引擎的
-`project_restart_status`。非 Coding 策略原样返回，不读队列、不解释 coding 字段。
-普通 `/api/bots/{id}/status` 和 OpenAPI status 读该投影，接口地址和字段不变。
+普通 `/api/bots/{id}/status` 和 OpenAPI status 完全沿用基线实现，调用
+`get_bot` 读取数据库和绑定。不新增查询方法或策略投影，不读取任务队列。
 
-- 进行中：返回 PENDING，因此 is_ready=false。
-- 失败：aicoding 策略通过同一条 CAS 将 Bot.status=FAILED、
-  ext.start_status=FAILED、ext.start_message=脱敏原因一并落库。普通状态接口
-  复用原先读取 ext.start_message 的逻辑，不读取额外的 Bot.error_message。
-- journal 的 error_message 仅保留操作级审计/恢复副本，防止旧容器迟到的
-  startup 回调覆盖本轮原因；状态视图仍通过原 start_* 字段表达错误。
-- 写失败前校验引擎及目标绑定；旧操作不得把新实例标记 FAILED。
-- 成功/没有本次记录：使用原状态逻辑。
-- 任务被队列超时/异常终止或超过观察预算，即使 Worker 没能清理 journal，
-  查询也不能永远返回 PENDING；不向客户端暴露队列的原始异常文本。
-- 投影期间剔除响应副本中旧的 start_status/start_message 和绑定错误，防止
-  既有前端因上一轮失败中止本轮轮询；受理时同步清理旧 start_* 字段，
-  失败时复用这些字段。绑定本身的状态和错误字段不写入。
-- 上一轮失败不遮蔽已换绑的新实例；新的普通重启受理会替换旧 journal。
+- 受理原子写入 PENDING，并清除上一轮 start_status/start_message。
+- 后台失败原子写入 Bot.status=FAILED、ext.start_status=FAILED、
+  ext.start_message=脱敏原因；普通状态接口按原逻辑返回 error_message。
+- 写失败前校验引擎及目标绑定；不把替换后的实例标记失败。
+- 成功就绪沿用原容器启动/provider 回写，不以重启任务 journal 强制覆盖查询结果。
+- journal 内错误只用于操作审计/恢复，不用于覆盖接口结果。
+
+本次不改公共设备回调。ACTIVE 绑定再次收到 alive 不会触发 Bot 的
+PENDING→ACTIVE 更新；仅绑定自身 PENDING→ACTIVE 时触发。尚未证实存在
+本次异步改造特有的迟到回调冲突，不以该假设增加公共写入钩子。
+既有 startup 回调仍能修改 start_* 字段，本次不承诺隔离所有历史回调。
+若任务被队列直接终止而 handler 未执行失败落库，Bot 可能保留 PENDING；
+查询侧不再合成失败，前端仍按原 5 分钟超时退出。此情形需运维核对任务
+与实例，不自动重复容器副作用。worker 正常执行的业务超时仍落库 FAILED。
 
 ## 传播与部署
 
 - 公共层只提供策略 dispatch、provider handoff 以及通用 CAS 扩展；具体引擎名、
   journal 字段、备份、任务、去重及状态映射均在 aicoding 策略模块内。
 - Repository 新增可选 CAS 参数，旧 ext-only 调用语义不变；无需数据库 migration。
-- BotService 的查询新增方法同步更新 Protocol，并用 conformance tests 验证。
+- BotService 查询契约和两个 status 路由恢复基线，不增加状态读取扩展点。
 - DI bootstrap 注册 handler，TaskWorker startup 后才领取任务。
 - 上线应保证领取队列的所有实例都注册新 task_type，再启用新入口；混部旧 worker
   可能把未知任务判为失败。回滚前应排空/处置本类型未结束任务和 journal。
@@ -132,10 +131,9 @@ boundaries 和 oversized-module gates。新增 Python 文件 Ruff 检查和
 
 本地修改尚未提交或推送；线上/预发 E2E 尚未运行。
 
-## 2026-10-08 错误字段复用调整
+## 2026-10-08 状态查询收敛
 
-备份失败不再仅靠查询投影显示 FAILED：Bot 主状态和既有 start_* 错误字段
-原子落库。进行中/迟到回调的查询保护仍保留，不能在没有替代写入保护时
-直接删除，否则旧容器 ACTIVE 回调可能让前端提前停止轮询。
-本次恢复 HTTP /status 原有错误字段取值逻辑，但 get_bot_status 调度保留。
-其他引擎、发布重启、Caller 及前端不变。
+备份失败通过已有字段落库。删除 get_bot_status/project_restart_status 与
+查询侧任务兜底，两个 status 路由恢复基线。不增加公共回调保护钩子。
+仍保留既有本分支的任务依赖传递、后台注册、原子 CAS、重启前状态快照和
+provider handoff；后两者服务于持久化重启执行，而非设备回调或状态查询。

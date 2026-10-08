@@ -144,7 +144,7 @@ async def test_real_baas_restart_handoff_is_persisted_before_platform_call(lifec
         assert isinstance(s.handler.handle(task.payload), Reschedule)
     record = journal(s.repo.bot)
     assert record["handoff"]["publish_id"] == "12"
-    assert s.service.get_bot_status("b", "o")["status"] == "PENDING"
+    assert s.service.get_bot("b", "o")["status"] == "PENDING"
     s.repo.bot["status"] = "ACTIVE"
     s.binding["status"] = "ACTIVE"
     # Old runtime ACTIVE is not enough; the exact workflow is still pending.
@@ -154,7 +154,7 @@ async def test_real_baas_restart_handoff_is_persisted_before_platform_call(lifec
     s.progress.return_value = {"status": "SUCCESS"}
     assert isinstance(s.handler.handle(task.payload), Complete)
     s.platform.upgrade_bot.assert_called_once()
-    assert s.service.get_bot_status("b", "o")["status"] == "ACTIVE"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_real_backup_failure_never_reaches_platform(lifecycle):
     s.platform.upgrade_bot.assert_not_called()
     assert not s.queue.provider_tasks
     assert s.repo.bot["binding_id"] == 7
-    assert s.service.get_bot_status("b", "o")["status"] == "FAILED"
+    assert s.service.get_bot("b", "o")["status"] == "FAILED"
 
 
 @pytest.mark.asyncio

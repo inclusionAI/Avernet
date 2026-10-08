@@ -2579,7 +2579,7 @@ async def get_bot_status(
 
         resolved_owner_id = owner_id or operator_id
 
-        bot = bot_service.get_bot_status(bot_id, resolved_owner_id)
+        bot = bot_service.get_bot(bot_id, resolved_owner_id)
 
         # Extract status info
         bot_status = bot.get("status", "UNKNOWN")

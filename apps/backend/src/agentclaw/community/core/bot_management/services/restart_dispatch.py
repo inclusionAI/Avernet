@@ -23,11 +23,3 @@ class RestartDispatchMixin:
             ),
             **kwargs,
         )
-
-    def get_bot_status(self, bot_id: str, user_id: str) -> dict:
-        """Return a Bot-shaped status view; never change stored runtime state."""
-        bot = self.get_bot(bot_id, user_id)
-        ctx, strategy = resolve_restart_strategy(bot)
-        return strategy.project_restart_status(
-            ctx, bot, task_queue=self._task_queue_service
-        )

@@ -258,7 +258,7 @@ async def test_backup_failure_persists_existing_status_and_startup_error_fields(
     )
     result = s.handler.handle(task(s).payload)
     assert isinstance(result, Fail)
-    view = BotService.get_bot_status(s.service, "b", "o")
+    view = s.service.get_bot("b", "o")
     assert view["status"] == "FAILED"
     assert "旧容器未销毁" in view["ext"]["start_message"]
     assert "secret" not in view["ext"]["start_message"]
@@ -276,7 +276,7 @@ async def test_backup_timeout_has_actionable_reason(setup):
     await submit(s)
     mock_lifecycle(s, backup_error=TimeoutError("secret"))
     assert isinstance(s.handler.handle(task(s).payload), Fail)
-    assert "备份超时" in BotService.get_bot_status(s.service, "b", "o")["ext"]["start_message"]
+    assert "备份超时" in s.service.get_bot("b", "o")["ext"]["start_message"]
 
 
 @pytest.mark.asyncio
@@ -289,17 +289,17 @@ async def test_target_changes_before_worker_does_not_restart(setup):
 
 
 @pytest.mark.asyncio
-async def test_old_active_and_failed_start_marker_do_not_end_browser_poll(setup):
+async def test_read_returns_persisted_runtime_state_without_restart_projection(setup):
     s = setup
     await submit(s)
     s.repo.bot["status"] = "ACTIVE"  # old runtime callback
     s.repo.bot["ext"].update(start_status="FAILED", start_message="old failure")
     s.binding["error_message"] = "old device error"
-    view = BotService.get_bot_status(s.service, "b", "o")
-    assert view["status"] == "PENDING"
-    assert "start_message" not in view["ext"]
-    assert "start_status" not in view["ext"]
-    assert "error_message" not in view["device_binding"]
+    view = s.service.get_bot("b", "o")
+    assert view["status"] == "ACTIVE"
+    assert view["ext"]["start_message"] == "old failure"
+    assert view["ext"]["start_status"] == "FAILED"
+    assert view["device_binding"]["error_message"] == "old device error"
     assert s.repo.bot["ext"]["start_status"] == "FAILED"
 
 
@@ -311,12 +311,12 @@ async def test_real_workflow_success_required_then_raw_readiness(setup):
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
-    assert BotService.get_bot_status(s.service, "b", "o")["status"] == "PENDING"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
     s.repo.bot["ext"]["restart_publish_id"] = "12"
     s.binding["device_props"]["restart_request_id"] = None
     s.progress.return_value = {"status": "SUCCESS"}
     assert isinstance(s.handler.handle(task(s).payload), Complete)
-    assert BotService.get_bot_status(s.service, "b", "o")["status"] == "ACTIVE"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
     s.service.restart_bot.assert_called_once()
 
 
@@ -410,13 +410,13 @@ async def test_superseded_task_cannot_overwrite_new_operation(setup):
 
 
 @pytest.mark.asyncio
-async def test_queue_terminal_error_visible_without_worker_cleanup(setup):
+async def test_queue_terminal_status_is_not_inferred_by_bot_read(setup):
     s = setup
     await submit(s)
     task(s).status = TaskStatus.TIMED_OUT
-    view = BotService.get_bot_status(s.service, "b", "o")
-    assert view["status"] == "FAILED"
-    assert view["ext"]["start_message"]
+    view = s.service.get_bot("b", "o")
+    assert view["status"] == "PENDING"
+    assert "start_message" not in view["ext"]
 
 
 @pytest.mark.asyncio
@@ -453,7 +453,7 @@ async def test_other_engines_never_use_queue_or_status_projection(setup, engine)
     s.service.restart_bot.return_value = {"original": True}
     assert await submit(s) == {"original": True}
     assert not s.queue.tasks
-    assert BotService.get_bot_status(s.service, "b", "o")["status"] == "ACTIVE"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -478,9 +478,6 @@ async def test_status_http_response_keeps_existing_failure_fields(setup):
     await submit(s)
     mock_lifecycle(s, backup_error=TimeoutError())
     s.handler.handle(task(s).payload)
-    s.service.get_bot_status.side_effect = lambda *args: BotService.get_bot_status(
-        s.service, *args
-    )
     response = await inspect.unwrap(get_bot_status)(
         bot_id="b",
         owner_id="o",
@@ -509,7 +506,7 @@ async def test_old_failed_record_does_not_hide_new_binding(setup):
     mock_lifecycle(s, backup_error=TimeoutError())
     s.handler.handle(task(s).payload)
     s.repo.bot.update(binding_id=99, status="ACTIVE")
-    assert BotService.get_bot_status(s.service, "b", "o")["status"] == "ACTIVE"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"
 
 
 @pytest.mark.asyncio
@@ -557,17 +554,18 @@ async def test_retry_clears_existing_failure_fields_atomically(setup):
 
 
 @pytest.mark.asyncio
-async def test_late_runtime_report_does_not_hide_backup_failure(setup):
+async def test_runtime_report_behavior_is_unchanged_without_read_projection(setup):
     s = setup
     await submit(s)
     mock_lifecycle(s, backup_error=TimeoutError())
     s.handler.handle(task(s).payload)
     failure = s.repo.bot["ext"]["start_message"]
     s.repo.bot["ext"].update(start_status="SUCCEEDED", start_message="late report")
-    view = BotService.get_bot_status(s.service, "b", "o")
+    view = s.service.get_bot("b", "o")
     assert view["status"] == "FAILED"
-    assert view["ext"]["start_status"] == "FAILED"
-    assert view["ext"]["start_message"] == failure
+    assert view["ext"]["start_status"] == "SUCCEEDED"
+    assert view["ext"]["start_message"] == "late report"
+    assert journal(s.repo.bot)["error_message"] == failure
     assert "error_message" not in view
 
 
@@ -579,4 +577,4 @@ async def test_target_changed_failure_does_not_mark_replacement_failed(setup):
     assert isinstance(s.handler.handle(task(s).payload), Fail)
     assert s.repo.bot["status"] == "ACTIVE"
     assert "start_message" not in s.repo.bot["ext"]
-    assert BotService.get_bot_status(s.service, "b", "o")["status"] == "ACTIVE"
+    assert s.service.get_bot("b", "o")["status"] == "ACTIVE"

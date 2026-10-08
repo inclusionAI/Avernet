@@ -1271,7 +1271,7 @@ async def get_bot_status(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""
-    bot = bot_service.get_bot_status(bot_id, owner_id)
+    bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
     return envelope(
         BotStatus(
