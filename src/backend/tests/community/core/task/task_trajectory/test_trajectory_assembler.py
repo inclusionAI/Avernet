@@ -859,6 +859,34 @@ def test_assemble_projects_relay_search_probe():
     assert probe["selected_bot_ids"] == []  # relay 侧由持棒 bot 决策,框架不推导
 
 
+def test_assemble_projects_relay_dispatch_search_evidence():
+    """Relay DISPATCH_RESULT 的/action_result=hit_single, hit_multi, miss/ 事件也投影同一 probe。"""
+    ext = (
+        '{"schema_v":1,"search_evidence":{'
+        '"query":"寻找存储行业研究 Bot",'
+        '"origin_node_id":"origin-1",'
+        '"search_result":{"candidates":[{"bot_uuid":"bot-a:1",'
+        '"bot_name":"Research Bot"}],"total":1,'
+        '"tokens":["存储","行业"],"raw_item_count":2,"failed_keywords":[],'
+        '"keyword_hits":[]},'
+        '"candidate_evaluations":[{"bot_id":"bot-a:1","score":95,'
+        '"score_reason":"匹配行业研究能力","selected":true,'
+        '"decision":"selected_as_driver","reject_reason":null}],'
+        '"selected_bot_ids":["bot-a:1"]}}'
+    )
+    repo = _FakeRepo(events=[_event_record(
+        node_id="target-1", action_type="relay", action_result="hit_single",
+        ext_info=ext,
+    )])
+    probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
+    assert probe is not None
+    assert probe["decision_mode"] == "relay_dispatch"
+    assert probe["origin_node_id"] == "origin-1"
+    assert probe["candidates"][0]["bot_name"] == "Research Bot"
+    assert probe["candidate_evaluations"][0]["score"] == 95
+    assert probe["selected_bot_ids"] == ["bot-a:1"]
+
+
 def test_assemble_legacy_rationale_still_projects_without_sampling_keys():
     """采样功能落库前的旧 rationale(无 search_sampling/excerpt 新键)照常投影旧素材。"""
     legacy_ext = (

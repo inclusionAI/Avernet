@@ -101,10 +101,10 @@ class TrajectoryEvent:
     ``search_probe`` = **读时定向投影**字段(不落库;与 ``holder_id`` 同款白名单
     投影,是 REQ-1 "ext_info 不整体入领域" 边界的定向扩展而非破坏):派发搜推三问
     (关键词/返回结果/最终选择)的可展示摘要,由 assembler 从本事件行 ``ext_info``
-    投影——DISPATCH 事件取 ``_dispatch_rationale``(decision_mode/tokens/keywords/
-    raw_item_count/failed_keywords/candidates/selected/dropped/rule_selection_note/
-    skill_response_excerpt/miss_reason),relay ``action_result="search"`` 事件取
-    顶层 ``search_sampling``+``candidates``。无素材的事件保持 ``None``(缺字段=无信号)。
+    投影——DISPATCH 事件取 ``_dispatch_rationale``,relay ``action_result="search"``
+    事件取顶层 ``search_sampling``+``candidates``;relay ``DISPATCH_RESULT`` 的
+    ``action_result="hit_single|hit_multi|miss"`` 事件取 ``search_evidence``。
+    无素材的事件保持 ``None``(缺字段=无信号)。
     """
 
     task_id: str

@@ -377,6 +377,10 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "决策完成后统一进入上报阶段" in s7
     assert s7.index("/api/v1/collaboration/tasks/search") < s7.index("event_type=PLAN_RESULT") < s7.index("event_type=DISPATCH_RESULT")
     assert "gaps 为空时必须跳过搜索，直接提交 PLAN_RESULT(gaps=[], next_task_spec=null) 收口" in s7
+    assert "search_evidence={query, search_result, candidate_evaluations, origin_node_id（当前棒节点）}" in s7
+    assert "candidate_evaluations 必须覆盖每个返回候选" in s7
+    assert "score(0–100)" in s7
+    assert "score_reason" in s7
 
     assert "固定阶段编号 S1-S8" in prompt
     for stage in (

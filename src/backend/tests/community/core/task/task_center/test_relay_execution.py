@@ -90,6 +90,23 @@ class _Discover:
         }
 
 
+class _DiscoverSequential:
+    def __init__(self):
+        self.count = 0
+
+    def search_by_keyword(self, **kwargs):
+        self.count += 1
+        bot_id = f"research-bot-{self.count}"
+        return {
+            "items": [
+                {
+                    "bot_id": bot_id,
+                    "bot_uuid": f"{bot_id}:owner-{self.count}",
+                    "recommend": {"score": 0.9},
+                }
+            ]
+        }
+
 class _DiscoverTwo:
     def search_by_keyword(self, **kwargs):
         return {
@@ -170,9 +187,12 @@ def _service(*, discover=None, relay_enabled: bool = True, task_context_service=
     ), graph
 
 
-def _service_with_traj():
+def _service_with_traj(discover=None):
     repo = TaskTrajectoryRepository(_make_db())
-    service, graph = _service(task_context_service=_tcs(repo))
+    service, graph = _service(
+        discover=discover,
+        task_context_service=_tcs(repo),
+    )
     return service, graph, repo
 
 
@@ -182,6 +202,34 @@ def _relay_records(repo):
         for record in repo.list_events_by_task("relay-task")
         if str(record.action_type) == "relay"
     ]
+
+
+def _search_payload(suffix, search_result, origin_node_id):
+    candidates = search_result["candidates"]
+    fallback_bot = f"research-bot-{suffix}"
+    bot = candidates[0]["bot_uuid"].partition(":")[0] if candidates else fallback_bot
+    return {
+        "outcome": "HIT_SINGLE",
+        "run_mode": "single_bot",
+        "driver_bot_id": bot,
+        "next_relay_bots": [bot],
+        "search_evidence": {
+            "query": f"补齐市场研究 gap {origin_node_id}",
+            "search_result": search_result,
+            "candidate_evaluations": [
+                {
+                    "bot_id": item["bot_uuid"] or item["bot_id"],
+                    "score": 92,
+                    "score_reason": "能力画像与该子任务匹配",
+                    "selected": True,
+                    "decision": "selected_as_driver",
+                    "reject_reason": None,
+                }
+                for item in candidates
+            ],
+            "origin_node_id": origin_node_id,
+        },
+    }
 
 
 def _plan_and_select(
@@ -210,7 +258,8 @@ def _plan_and_select(
         )
     )
     target_node_id = planned["target_node_id"]
-    _run(service.search_task_candidates(query="补齐市场研究 gap"))
+    search_result = _run(service.search_task_candidates(query="调研"))
+    payload = _search_payload(event_suffix, search_result, origin_node_id)
     _run(
         service.report_task_event(
             task_id="relay-task",
@@ -220,18 +269,7 @@ def _plan_and_select(
             holder_id=holder_id,
             relay_turn=turn,
             progress_reason="候选 Bot 能力与下一节点目标匹配",
-            payload={
-                "outcome": "HIT_SINGLE",
-                "run_mode": "single_bot",
-                "driver_bot_id": (
-                    "research-bot" if event_suffix == "1" else f"research-bot-{event_suffix}"
-                ),
-                "next_relay_bots": (
-                    ["research-bot"]
-                    if event_suffix == "1"
-                    else [f"research-bot-{event_suffix}"]
-                ),
-            },
+            payload=payload,
         )
     )
     return target_node_id
@@ -371,8 +409,174 @@ def test_relay_search_sampling_failure_never_blocks_search():
     assert result["candidates"][0]["bot_uuid"] == "research-bot:owner-2"
 
 
+def test_relay_dispatch_emits_search_evidence_to_trajectory() -> None:
+    service, graph_service, repo = _service_with_traj()
+    _run(service.execute(_request()))
+    execution = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-evidence",
+            holder_id="main-bot",
+            progress_reason="首棒完成，准备搜推下一棒",
+            payload=_accepted({"summary": "首轮结论"}),
+        )
+    )
+    target_node_id = _plan_and_select(
+        service,
+        origin_node_id="relay-task",
+        holder_id="main-bot",
+        turn=execution["relay_turn"],
+        child_node_id="research-step",
+        event_suffix="evidence",
+    )
+    assert target_node_id
+    hit_rows = [
+        record
+        for record in _relay_records(repo)
+        if record.action_result in {"hit_single", "hit_multi"}
+    ]
+    assert len(hit_rows) == 1
+    payload = json.loads(hit_rows[0].ext_info)
+    assert payload["search_evidence"]["origin_node_id"] == "relay-task"
+    assert payload["search_evidence"]["query"]
+    assert payload["search_evidence"]["search_result"]["candidates"]
+    assert payload["search_evidence"]["candidate_evaluations"][0]["score"] == 92
+    assert len(payload["search_evidence"]["candidate_evaluations"]) == len(
+        payload["search_evidence"]["search_result"]["candidates"]
+    )
+    assert payload["search_evidence"]["selected_bot_ids"]
+
+
+def test_relay_miss_emits_empty_search_evidence_to_trajectory() -> None:
+    class _EmptyDiscover:
+        def search_by_keyword(self, **kwargs):
+            return {"total": 0, "items": []}
+
+    service, _graph, repo = _service_with_traj(discover=_EmptyDiscover())
+    _run(service.execute(_request()))
+    execution = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-miss-evidence",
+            holder_id="main-bot",
+            progress_reason="首棒完成，搜索无候选",
+            payload=_accepted({"summary": "首轮结论"}),
+        )
+    )
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan-miss-evidence",
+            holder_id="main-bot",
+            relay_turn=execution["relay_turn"],
+            progress_reason="需要下一棒补齐专业缺口",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    search_result = _run(service.search_task_candidates(query="补齐市场研究 gap"))
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=planned["target_node_id"],
+            event_type="DISPATCH_RESULT",
+            event_id="dispatch-miss-evidence",
+            holder_id="main-bot",
+            relay_turn=execution["relay_turn"],
+            progress_reason="无候选发布至 BBS",
+            failure_reason="no_candidates",
+            payload={
+                "outcome": "MISS",
+                "miss_reason": "no_candidates",
+                "search_evidence": {
+                    "query": "补齐市场研究 gap",
+                    "search_result": search_result,
+                    "candidate_evaluations": [],
+                    "origin_node_id": "relay-task",
+                },
+            },
+        )
+    )
+    miss_rows = [record for record in _relay_records(repo) if record.action_result == "miss"]
+    assert len(miss_rows) == 1
+    ext = json.loads(miss_rows[0].ext_info)
+    evidence = ext["search_evidence"]
+    assert evidence["origin_node_id"] == "relay-task"
+    assert evidence["search_result"]["candidates"] == []
+    assert evidence["candidate_evaluations"] == []
+    assert evidence["selected_bot_ids"] == []
+
+
+def test_relay_dispatch_rejects_search_evidence_selection_mismatch() -> None:
+    service, _ = _service()
+    _run(service.execute(_request()))
+    execution = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-bad-evidence",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted({"summary": "首轮"}),
+        )
+    )
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan-bad-evidence",
+            holder_id="main-bot",
+            relay_turn=execution["relay_turn"],
+            progress_reason="需要下一棒",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    search_result = _run(service.search_task_candidates(query="调研"))
+    with pytest.raises(
+        TaskStateError, match="selection does not match DISPATCH_RESULT selection"
+    ):
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=planned["target_node_id"],
+                event_type="DISPATCH_RESULT",
+                event_id="dispatch-bad-evidence",
+                holder_id="main-bot",
+                relay_turn=execution["relay_turn"],
+                progress_reason="候选与最终选择不一致",
+                payload={
+                    "outcome": "HIT_SINGLE",
+                    "driver_bot_id": "another-bot",
+                    "next_relay_bots": ["another-bot"],
+                    "search_evidence": {
+                        "query": "调研",
+                        "search_result": search_result,
+                        "candidate_evaluations": [
+                            {
+                                "bot_id": "research-bot:owner-2",
+                                "score": 92,
+                                "score_reason": "能力匹配",
+                                "selected": True,
+                                "decision": "selected_as_driver",
+                                "reject_reason": None,
+                            }
+                        ],
+                        "origin_node_id": "relay-task",
+                    },
+                },
+            )
+        )
+
+
 def test_relay_exec_plan_search_dispatch_and_complete() -> None:
-    service, graph_service = _service()
+    service, graph_service = _service(discover=_DiscoverSequential())
     submitted = _run(service.execute(_request()))
     assert submitted.success
     graph = graph_service.query_task_dashboard("relay-task")
@@ -452,7 +656,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
             dispatch_id="dispatch-1",
         )
     )
-    assert dispatched["assignee"] == "research-bot"
+    assert dispatched["assignee"] == "research-bot-1"
     running_baton = graph_service.query_task_dashboard("relay-task")
     running_child = next(
         n for n in running_baton.tasks if n.node_id == research_step
@@ -467,7 +671,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
             node_id=research_step,
             event_type="EXECUTION_RESULT",
             event_id="exec-2",
-            holder_id="research-bot",
+            holder_id="research-bot-1",
             progress_reason="第二棒产出完成，继续计算全局 gap",
             payload=_accepted({"recommendation": "进入市场"}),
         )
@@ -475,7 +679,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
     final_step = _plan_and_select(
         service,
         origin_node_id=research_step,
-        holder_id="research-bot",
+        holder_id="research-bot-1",
         turn=second["relay_turn"],
         child_node_id="final-step",
         event_suffix="2",
@@ -485,7 +689,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
             task_id="relay-task",
             origin_node_id=research_step,
             target_node_id=final_step,
-            holder_id="research-bot",
+            holder_id="research-bot-1",
             relay_turn=second["relay_turn"],
             dispatch_id="dispatch-2",
         )
@@ -1343,7 +1547,7 @@ def test_declined_execution_is_not_exposed_as_done_output() -> None:
 
 class TestRelayTrajectory:
     def test_full_cycle_emits_relay_timeline_in_order(self):
-        service, _graph, repo = _service_with_traj()
+        service, _graph, repo = _service_with_traj(discover=_DiscoverSequential())
         _run(service.execute(_request()))
         exec1 = _run(
             service.report_task_event(
@@ -1380,7 +1584,7 @@ class TestRelayTrajectory:
                 node_id=step1,
                 event_type="EXECUTION_RESULT",
                 event_id="exec-2",
-                holder_id="research-bot",
+                holder_id="research-bot-1",
                 progress_reason="第二棒完成",
                 payload=_accepted({"recommendation": "进入市场"}),
             )
@@ -1388,7 +1592,7 @@ class TestRelayTrajectory:
         step2 = _plan_and_select(
             service,
             origin_node_id=step1,
-            holder_id="research-bot",
+            holder_id="research-bot-1",
             turn=exec2["relay_turn"],
             child_node_id="ignored",
             event_suffix="2",
@@ -1398,7 +1602,7 @@ class TestRelayTrajectory:
                 task_id="relay-task",
                 origin_node_id=step1,
                 target_node_id=step2,
-                holder_id="research-bot",
+                holder_id="research-bot-1",
                 relay_turn=exec2["relay_turn"],
                 dispatch_id="dispatch-2",
             )
@@ -1454,7 +1658,7 @@ class TestRelayTrajectory:
             for record in records
             if record.action_result == "plan_result"
         ]
-        assert plan_holders == ["main-bot", "research-bot", "research-bot-2"]
+        assert plan_holders == ["main-bot", "research-bot-1", "research-bot-2"]
 
     def test_callback_events_are_correlated_without_leaking_turn(self):
         service, _graph, repo = _service_with_traj()

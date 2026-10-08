@@ -170,6 +170,29 @@ def _search_probe_from_ext_info(
             "skill_response_excerpt": rationale.get("skill_response_excerpt"),
             "miss_reason": rationale.get("miss_reason"),
         }
+    if str(action_result or "") in {"hit_single", "hit_multi", "miss"}:
+        evidence = data.get("search_evidence")
+        if not isinstance(evidence, dict):
+            return None
+        result = evidence.get("search_result")
+        result = result if isinstance(result, dict) else {}
+        return {
+            "decision_mode": "relay_dispatch",
+            "query": evidence.get("query"),
+            "origin_node_id": evidence.get("origin_node_id"),
+            "tokens": list(result.get("tokens") or []),
+            "keywords": list(result.get("keyword_hits") or []),
+            "raw_item_count": int(result.get("raw_item_count") or 0),
+            "failed_keywords": list(result.get("failed_keywords") or []),
+            "candidates": list(result.get("candidates") or []),
+            "candidate_evaluations": list(evidence.get("candidate_evaluations") or []),
+            "selected_bot_ids": list(evidence.get("selected_bot_ids") or []),
+            "dropped_bot_ids": [],
+            "rule_selection_note": None,
+            "skill_response_excerpt": None,
+            "miss_reason": data.get("miss_reason") or evidence.get("miss_reason"),
+        }
+
     # relay 场景的采样 ext 只应出现在 action_result=search 的事件行上
     # (写侧 emit_relay_event 门控);读侧同键复核,防旁路事件误投影。
     if str(action_result or "") != "search":

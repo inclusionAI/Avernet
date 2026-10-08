@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any
@@ -20,7 +19,6 @@ from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
     TaskOpResult,
     TaskCallbackData,
-    task_spec_instruction,
 )
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.core.task.task_center.relay import (
@@ -33,7 +31,6 @@ from agentclaw.community.core.task.task_center.relay import (
 from agentclaw.community.core.task.task_center.task_service_relay_dispatch import (
     TaskServiceRelayDispatchMixin,
 )
-from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
 )
@@ -718,191 +715,6 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
                 "[task][relay][search] sampling skipped: no task context provided"
             )
         return result
-
-    def _schedule_relay_bbs_selection(self, task_id: str, node_id: str) -> None:
-        """Run the centralized BBS roster/bid selector on an existing Relay node."""
-        node = self._relay_node(task_id, node_id)[1]
-        task = asyncio.create_task(self._relay_adapter.runner.start_run([node]))
-        tasks = getattr(self, "_bg_tasks", None)
-        if isinstance(tasks, set):
-            tasks.add(task)
-            task.add_done_callback(tasks.discard)
-        logger.info(
-            "[task][relay-bbs] scheduled centralized dynamic selection task=%s node=%s",
-            task_id,
-            node_id,
-        )
-
-    async def _apply_search_result(
-        self,
-        graph,
-        node,
-        holder_id,
-        payload,
-        relay_turn,
-        progress_reason,
-        failure_reason,
-    ) -> dict[str, Any]:
-        if node.status != Status.PENDING:
-            raise TaskStateError(
-                f"relay dispatch decision target must be PENDING node={node.node_id}"
-            )
-        outcome = str(payload.get("outcome") or "").upper()
-        next_bots = [
-            str(item).strip()
-            for item in (payload.get("next_relay_bots") or payload.get("bot_ids") or [])
-            if str(item).strip()
-        ]
-        driver = str(
-            payload.get("driver_bot_id")
-            or payload.get("assignee")
-            or (next_bots[0] if next_bots else "")
-        ).strip()
-        holder_base = str(holder_id).partition(":")[0]
-        selected_bases = {
-            item.partition(":")[0]
-            for item in [driver, *next_bots]
-            if item.partition(":")[0]
-        }
-        if holder_base and holder_base in selected_bases:
-            raise TaskStateError(
-                "relay dispatch cannot select the current holder as the next relay bot"
-            )
-        if outcome == "HIT_SINGLE":
-            if not next_bots and driver:
-                next_bots = [driver]
-            if len(next_bots) != 1 or driver != next_bots[0]:
-                raise TaskStateError(
-                    "HIT_SINGLE requires one next_relay_bot equal to driver_bot_id"
-                )
-            patch = TaskNodePatch(
-                task_id=graph.task_id,
-                node_id=node.node_id,
-                run_mode="single_bot",
-                assignee=driver,
-                progress_reason=progress_reason,
-                failure_reason=failure_reason,
-                extend_props_patch={
-                    "relay_holder_id": driver,
-                    "driver_bot_id": driver,
-                    "next_relay_bots": next_bots,
-                },
-            )
-        elif outcome == "HIT_MULTI_BOTS":
-            if len(next_bots) < 2 or not driver or driver not in next_bots:
-                raise TaskStateError(
-                    "HIT_MULTI_BOTS requires driver_bot_id in next_relay_bots"
-                )
-            members_info = payload.get("members_info") or [
-                {
-                    "bot_id": bot_id,
-                    "role": "manager" if bot_id == driver else "worker",
-                }
-                for bot_id in next_bots
-            ]
-            formation = GroupFormation(
-                bot_ids=next_bots,
-                collab_mode=str(payload.get("collab_mode") or "manager_worker"),
-                group_name=payload.get("group_name"),
-                members_info=members_info,
-                extend_props={
-                    **dict(payload.get("group_extend_props") or {}),
-                    "relay_execution": True,
-                    "dynamic_task_node_protocol": True,
-                    "task_id": graph.task_id,
-                    "loop_task_id": f"{graph.task_id}::{node.node_id}",
-                    "task_objective": node.task_spec.goal.objective,
-                    "task_instruction": task_spec_instruction(node.task_spec),
-                    "task_context": node.task_spec.context.background,
-                    "acceptances": [
-                        item.to_dict() for item in node.task_spec.goal.acceptances
-                    ],
-                    "manager_bot_id": driver,
-                    "originator_bot_id": driver,
-                    "owner_user_id": graph.extend_props.get("owner_user_id"),
-                },
-            )
-            patch = TaskNodePatch(
-                task_id=graph.task_id,
-                node_id=node.node_id,
-                run_mode="coop_group",
-                assignee=driver,
-                progress_reason=progress_reason,
-                failure_reason=failure_reason,
-                extend_props_patch={
-                    "pending_group_formation": formation.to_dict(),
-                    "relay_holder_id": driver,
-                    "driver_bot_id": driver,
-                    "next_relay_bots": next_bots,
-                },
-            )
-        elif outcome == "MISS":
-            reason = failure_reason or str(
-                payload.get("miss_reason") or "搜推没有匹配结果"
-            )
-            self._report_node_patch(
-                TaskNodePatch(
-                    task_id=graph.task_id,
-                    node_id=node.node_id,
-                    run_mode="bbs",
-                    progress_reason=progress_reason,
-                    failure_reason=reason,
-                    extend_props_patch={
-                        "driver_bot_id": None,
-                        "next_relay_bots": [],
-                    },
-                )
-            )
-            self._report_graph_patch(
-                graph.task_id,
-                TaskGraphPatch(
-                    extend_props_patch={"bbs_mode": True, "bbs_node_id": node.node_id}
-                ),
-            )
-            self._report_relay_turn(
-                "RELAY_TURN_CONSUME",
-                task_id=graph.task_id,
-                node_id=node.node_id,
-                holder_id=holder_id,
-                token=relay_turn,
-            )
-            self._schedule_relay_bbs_selection(graph.task_id, node.node_id)
-            self._emit_relay(
-                task_id=graph.task_id,
-                node_id=node.node_id,
-                action_result="miss",
-                attempt=self._relay_attempt(graph.task_id),
-                boost_reason=progress_reason,
-                ext_info={
-                    "published_bbs": True,
-                    "miss_reason": reason,
-                    "holder_id": holder_id,
-                },
-            )
-            return {"ok": True, "published_bbs": True, "node_id": node.node_id}
-        else:
-            raise TaskStateError(f"unsupported dispatch outcome={outcome}")
-        self._report_node_patch(patch)
-        self._emit_relay(
-            task_id=graph.task_id,
-            node_id=node.node_id,
-            action_result="hit_single" if outcome == "HIT_SINGLE" else "hit_multi",
-            attempt=self._relay_attempt(graph.task_id),
-            boost_reason=progress_reason,
-            ext_info={
-                "driver_bot_id": driver,
-                "next_relay_bots": next_bots,
-                "holder_id": holder_id,
-                "planned_by": node.run_info.extend_props.get("relay_planned_by"),
-            },
-        )
-        return {
-            "ok": True,
-            "published_bbs": False,
-            "node_id": node.node_id,
-            "driver_bot_id": driver,
-            "next_relay_bots": next_bots,
-        }
 
     def _claim_relay_bbs(
         self, task_id: str, node_id: str, bot_id: str, claim_id: str | None = None

@@ -201,8 +201,8 @@ stateDiagram-v2
 - `TaskGraphService.report(...)` 是 Planner、Dispatcher、Runner、Harness、BBS 和 Relay 写入图谱事实的统一入口。
 - `GET /api/v1/collaboration/tasks/{task_id}/context` 返回通用
   `TaskContext(spec, all_done_output, gaps)`。
-- `/search` 只检索候选；`DISPATCH_RESULT` 记录决策；`/dispatch` 执行实际投递。
-- Relay 事件结果记录仅用于幂等重放，例如响应丢失后用同一 `event_id` 找回 `PLAN_RESULT.target_node_id`；记录中不得持久化 `relay_turn` 明文，也不得携带 live `TaskNode` 领域对象。
+- `/search` 只检索候选；`DISPATCH_RESULT` 记录决策和可选 `search_evidence`；`/dispatch` 执行实际投递。
+- Relay 事件结果记录仅用于幂等重放，例如响应丢失后用同一 `event_id` 找回 `PLAN_RESULT.target_node_id`；记录中不得持久化 `relay_turn` 明文，也不得携带 live `TaskNode` 领域对象。`search_evidence` 只作为轨迹诊断字段随 Relay 轨迹事件写入，不进入 TaskNode.run_info。
 - `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
 
 模式差异：
