@@ -356,6 +356,20 @@ impl BotActionAuditRecord {
     }
 }
 
+/// An honest System identity for an independent runtime lane (spec §12.5):
+/// scanner/recovery/dispatcher lanes that carry NO verified Human or Bot
+/// caller record the system action itself — never a forged Human and never
+/// a replayed historical identity. Each call generates a fresh operation id.
+pub fn system_lane_operation(system_id: &str) -> BotOperationContext {
+    BotOperationContext {
+        operation_id: format!("{system_id}:{}", uuid::Uuid::new_v4()),
+        actor: BotOperationActor::System {
+            system_id: system_id.to_string(),
+            effective_actor_id: system_id.to_string(),
+        },
+    }
+}
+
 /// Project the typed audit identity from a transport-neutral
 /// [`super::EventActor`] that an authenticated boundary already chose.
 ///

@@ -1,7 +1,6 @@
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
-    MessageViewScope, ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind,
-    SessionStatus, UpdateSession, select_principal,
+    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, MessageViewScope,
+    ParticipantMode, ParticipantRole, SessionKind, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -90,18 +89,12 @@ impl CreateSessionRequest {
         if let Some(meta) = self.meta.as_ref() {
             validate_session_metadata(meta)?;
         }
-        let caller = match select_principal(caller, IdentityPolicy::HumanOrOwnedBot)? {
-            Principal::Human(human) => SessionCaller::Human {
-                actor_id: format!("human_{}", human.subject.id),
-                owner_id: human.subject.id,
-                display_name: human.subject.display_name.or(human.subject.full_name),
-            },
-            Principal::Bot(bot) => SessionCaller::Bot {
-                bot_uuid: bot.bot_uuid,
-            },
-        };
+        // Spec §12.1(4): the synchronous principal selection moved into the
+        // application facade, which resolves the effective caller through the
+        // async authority hook (live owner/manager facts) instead of the
+        // Gateway's signed owner_id claim.
         Ok(CreateSession {
-            caller,
+            caller: caller.clone(),
             group_id,
             title: self.title,
             kind: self.kind,

@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
@@ -13,7 +14,12 @@ use bcs_domain::{FileStatus, SessionFile};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
 };
+use bcs_service_api::types::{BotActionAuditRecord, BotOperationContext};
 use bcs_service_api::{ServiceError, ServiceResult};
+
+use crate::action_audit::{
+    create_file_audit_record, delete_file_audit_record, update_file_audit_record,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -37,12 +43,78 @@ fn now_secs() -> u64 {
 #[derive(Default)]
 pub struct MemorySessionFileRepo {
     rows: Arc<RwLock<HashMap<(String, String), SessionFile>>>,
+    /// Published ordinary-business audit rows (the in-memory counterpart of
+    /// `bcs_bot_action_audits`), kept SEPARATE from `rows` so an armed audit
+    /// failure can be observed without touching business state.
+    action_audits: RwLock<Vec<BotActionAuditRecord>>,
+    action_audit_failure_armed: AtomicBool,
 }
 
 impl MemorySessionFileRepo {
     /// Create a new empty in-memory session file repository.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// TEST-ONLY: arm a one-shot failure of the next ordinary-business audit
+    /// append; the co-published business mutation must be discarded too.
+    pub fn arm_action_audit_write_failure(&self) {
+        self.action_audit_failure_armed
+            .store(true, Ordering::SeqCst);
+    }
+
+    /// TEST/diagnostic observation of the published ordinary-business audit
+    /// rows (the in-memory counterpart of querying `bcs_bot_action_audits`).
+    /// The audit table is not a permission fact source and no public query
+    /// API is added.
+    pub async fn session_file_action_audit_records(
+        &self,
+    ) -> ServiceResult<Vec<BotActionAuditRecord>> {
+        let audits = self.action_audits.read().await;
+        Ok(audits.clone())
+    }
+
+    fn audit_env(&self) -> String {
+        "memory".to_string()
+    }
+
+    /// STAGE one ordinary-business audit row (spec §12.5): every fallible
+    /// decision — the armed test failure AND the `(env, operation_id,
+    /// step_key)` slot conflict check — happens HERE, BEFORE any business
+    /// side effect, so an audit failure leaves no partial success: the
+    /// metadata mutation and the audit publish together or not at all.
+    /// A same-slot record with identical content stages as an idempotent
+    /// no-op; different content under the same slot is a Conflict.
+    async fn stage_action_audit(
+        &self,
+        record: &BotActionAuditRecord,
+    ) -> ServiceResult<tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>> {
+        if self.action_audit_failure_armed.swap(false, Ordering::SeqCst) {
+            return Err(ServiceError::InternalError(
+                "injected file action audit append failure".to_string(),
+            ));
+        }
+        let mut audits = self.action_audits.write().await;
+        if let Some(existing) = audits.iter().find(|existing| existing.same_slot(record)) {
+            if existing.content_conflicts(record) {
+                return Err(ServiceError::Conflict(format!(
+                    "file action audit slot '{}' already carries different content",
+                    record.step_key
+                )));
+            }
+        }
+        Ok(audits)
+    }
+
+    /// Publish a staged audit row synchronously inside the caller's critical
+    /// section; a slot already carrying identical content stays a no-op.
+    fn publish_staged_action_audit(
+        audits: &mut tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>,
+        record: &BotActionAuditRecord,
+    ) {
+        if !audits.iter().any(|existing| existing.same_slot(record)) {
+            audits.push(record.clone());
+        }
     }
 }
 
@@ -76,7 +148,14 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
                 params.session_id, params.file_id
             )));
         }
+        // Same-critical-section audit (spec §12.5): stage first so an armed
+        // audit failure discards the INSERT; the row publishes WITH the
+        // metadata INSERT (all-or-nothing).
+        let record =
+            create_file_audit_record(&params.operation, &self.audit_env(), &row.file_id);
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         rows.insert(key, row.clone());
+        Self::publish_staged_action_audit(&mut staged_audit, &record);
         Ok(row)
     }
 
@@ -106,14 +185,31 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
         object_handle: &str,
         status: FileStatus,
         size: u64,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Option<SessionFile>> {
         let mut rows = self.rows.write().await;
+        let Some(existing) = rows.get(&(session_id.to_string(), file_id.to_string())).cloned() else {
+            return Ok(None);
+        };
+        if existing.object_handle == object_handle
+            && existing.status == status
+            && existing.size == size
+        {
+            // Idempotent no-change update: NO audit row (spec §12.5), mirroring
+            // the SQL twin's conditional UPDATE + stop-on-no-rows.
+            return Ok(Some(existing));
+        }
+        // Same-critical-section `update/session_file/applied` audit.
+        let record = update_file_audit_record(operation, &self.audit_env(), file_id);
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         if let Some(r) = rows.get_mut(&(session_id.to_string(), file_id.to_string())) {
             r.object_handle = object_handle.to_string();
             r.status = status;
             r.size = size;
             r.updated_at = now_secs();
-            Ok(Some(r.clone()))
+            let updated = r.clone();
+            Self::publish_staged_action_audit(&mut staged_audit, &record);
+            Ok(Some(updated))
         } else {
             Ok(None)
         }
@@ -124,24 +220,68 @@ impl SessionFileRepoPort for MemorySessionFileRepo {
         session_id: &str,
         file_id: &str,
         status: FileStatus,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Option<SessionFile>> {
         let mut rows = self.rows.write().await;
+        let Some(existing) = rows.get(&(session_id.to_string(), file_id.to_string())).cloned() else {
+            return Ok(None);
+        };
+        if existing.status == status {
+            // Idempotent no-change update: NO audit row (spec §12.5).
+            return Ok(Some(existing));
+        }
+        // Same-critical-section `update/session_file/applied` audit.
+        let record = update_file_audit_record(operation, &self.audit_env(), file_id);
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         if let Some(r) = rows.get_mut(&(session_id.to_string(), file_id.to_string())) {
             r.status = status;
             r.updated_at = now_secs();
-            Ok(Some(r.clone()))
+            let updated = r.clone();
+            Self::publish_staged_action_audit(&mut staged_audit, &record);
+            Ok(Some(updated))
         } else {
             Ok(None)
         }
     }
 
-    async fn delete(&self, session_id: &str, file_id: &str) -> ServiceResult<bool> {
-        Ok(self
-            .rows
-            .write()
-            .await
-            .remove(&(session_id.to_string(), file_id.to_string()))
-            .is_some())
+    async fn delete(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<bool> {
+        // Final metadata DELETE + `delete/session_file/completed` audit in
+        // the SAME critical section (spec §12.5): an armed audit failure
+        // keeps the row in place with no `completed` row. A missing row is an
+        // idempotent no-op that records nothing.
+        let key = (session_id.to_string(), file_id.to_string());
+        let mut rows = self.rows.write().await;
+        if !rows.contains_key(&key) {
+            return Ok(false);
+        }
+        let record = delete_file_audit_record(
+            operation,
+            &self.audit_env(),
+            file_id,
+            bcs_service_api::types::BotActionAuditPhase::Completed,
+            None,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
+        let removed = rows.remove(&key).is_some();
+        Self::publish_staged_action_audit(&mut staged_audit, &record);
+        Ok(removed)
+    }
+
+    /// Standalone phase recorder (spec §12.5, plan Task 11): the ONLY audit
+    /// lane outside the atomic mutations, used by the file service to
+    /// persist `admitted` (before external backend I/O) and explicit
+    /// `failed`/`unknown` outcomes. A slot already carrying this
+    /// byte-identical record is an idempotent no-op; different content under
+    /// the same slot is a Conflict.
+    async fn record_operation_phase(&self, audit: BotActionAuditRecord) -> ServiceResult<()> {
+        let mut staged_audit = self.stage_action_audit(&audit).await?;
+        Self::publish_staged_action_audit(&mut staged_audit, &audit);
+        Ok(())
     }
 
     async fn list(
@@ -247,6 +387,17 @@ mod tests {
             storage_backend: "local".into(),
             object_handle: serde_json::json!({ "expires_at": expires_at }).to_string(),
             expires_at,
+            operation: test_operation(),
+        }
+    }
+
+    fn test_operation() -> BotOperationContext {
+        BotOperationContext {
+            operation_id: "memory-file-store-tests".into(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "memory-file-store-tests".into(),
+                effective_actor_id: "memory-file-store-tests".into(),
+            },
         }
     }
 
@@ -285,6 +436,7 @@ mod tests {
                 r#"{"expires_at":1}"#,
                 FileStatus::Ready,
                 10,
+                &test_operation(),
             )
             .await
             .unwrap()
@@ -292,7 +444,7 @@ mod tests {
         assert_eq!(updated.status, FileStatus::Ready);
 
         // delete
-        assert!(repo.delete("s1", "f1").await.unwrap());
+        assert!(repo.delete("s1", "f1", &test_operation()).await.unwrap());
         assert!(repo.get("s1", "f1").await.unwrap().is_none());
     }
 
@@ -445,6 +597,7 @@ mod tests {
             storage_backend: "local".into(),
             object_handle: serde_json::json!({ "expires_at": 9999u64 }).to_string(),
             expires_at: 9999,
+            operation: test_operation(),
         };
         repo.insert(make("p1", "images/cat.png")).await.unwrap();
         repo.insert(make("p2", "images/dog.png")).await.unwrap();

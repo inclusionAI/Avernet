@@ -349,7 +349,7 @@ pub async fn list_sessions_for_group(
         // this check any caller could enumerate any bot's collected sessions
         // in any group (BOLA).
         match resolve_collector_bot(&state, &headers, &uri, Some(bot_uuid)).await {
-            Ok(authorized_bot) => {
+            Ok((authorized_bot, _authorized_caller)) => {
                 if authorized_bot != bot_uuid {
                     return (
                         StatusCode::FORBIDDEN,
@@ -563,7 +563,11 @@ pub async fn patch_session(
         match state
             .services
             .session_management
-            .update_title(&sid, Some(title))
+            .update_title(
+                &sid,
+                Some(title),
+                &legacy_lane_operation_context("patch-session"),
+            )
             .await
         {
             Ok(s) => return Json(s).into_response(),
@@ -690,7 +694,12 @@ pub async fn complete_session(
     match state
         .services
         .session_management
-        .complete_if_running(&sid, output, error)
+        .complete_if_running(
+            &sid,
+            output,
+            error,
+            &caller_operation_context(&caller),
+        )
         .await
     {
         Ok(Some(session)) => {
@@ -845,7 +854,11 @@ pub async fn add_session_participant(
     match state
         .services
         .session_management
-        .add_participant(&sid, participant.clone())
+        .add_participant(
+            &sid,
+            participant.clone(),
+            &legacy_lane_operation_context("add-participant"),
+        )
         .await
     {
         Ok(s) => {
@@ -996,10 +1009,14 @@ pub async fn remove_session_participant(
         ActorKind::Bot
     };
 
-    match state
+match state
         .services
         .session_management
-        .remove_participant(&sid, &bot_uuid)
+        .remove_participant(
+            &sid,
+            &bot_uuid,
+            &legacy_lane_operation_context("remove-participant"),
+        )
         .await
     {
         Ok(s) => {
@@ -1134,10 +1151,13 @@ pub async fn update_session_participant_mode(
                     participant.bot_name = human.nick_name.clone();
                     participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
                     participant.message_view_scope = message_view_scope;
+                    // The authenticated Human materializes its own actor
+                    // entry: the audit carries that Human's dual identity.
+                    let human_ctx = caller_operation_context(&caller);
                     return match state
                         .services
                         .session_management
-                        .add_participant(&sid, participant)
+                        .add_participant(&sid, participant, &human_ctx)
                         .await
                     {
                         Ok(session) => Json(session_to_json(&session)).into_response(),
@@ -1159,6 +1179,7 @@ pub async fn update_session_participant_mode(
                 .into_response();
         }
 
+        let human_ctx = caller_operation_context(&caller);
         match state
             .services
             .session_management
@@ -1167,6 +1188,7 @@ pub async fn update_session_participant_mode(
                 &bot_uuid,
                 mode,
                 message_view_scope,
+                &human_ctx,
             )
             .await
         {
@@ -1185,7 +1207,11 @@ pub async fn update_session_participant_mode(
                 return match state
                     .services
                     .session_management
-                    .add_participant(&sid, participant)
+                    .add_participant(
+                        &sid,
+                        participant,
+                        &caller_operation_context(&caller),
+                    )
                     .await
                 {
                     Ok(session) => Json(session_to_json(&session)).into_response(),
@@ -1226,10 +1252,11 @@ pub async fn update_session_participant_mode(
         }
     });
 
+    let participant_operation = caller_operation_context(&caller);
     let result = state
         .services
         .session_management
-        .update_participant_mode(&sid, &bot_uuid, mode)
+        .update_participant_mode(&sid, &bot_uuid, mode, &participant_operation)
         .await;
 
     match result {
@@ -1274,17 +1301,23 @@ pub async fn update_session_participant_mode(
                     bcs_service_api::ParticipantRole::Observer,
                 );
                 participant.bot_name = Some(actor_name.clone());
+                let materialize_operation = caller_operation_context(&caller);
                 match state
                     .services
                     .session_management
-                    .add_participant(&sid, participant)
+                    .add_participant(&sid, participant, &materialize_operation)
                     .await
                 {
                     Ok(_) => {
                         match state
                             .services
                             .session_management
-                            .update_participant_mode(&sid, &bot_uuid, mode)
+                            .update_participant_mode(
+                                &sid,
+                                &bot_uuid,
+                                mode,
+                                &materialize_operation,
+                            )
                             .await
                         {
                             Ok(s) => {
@@ -1436,10 +1469,11 @@ pub async fn session_chat(
             .nick_name
             .clone()
             .or_else(|| Some(human.staff_no.clone()));
+        let join_operation = caller_operation_context(&caller);
         sess = match state
             .services
             .session_management
-            .add_participant(&sid, participant.clone())
+            .add_participant(&sid, participant.clone(), &join_operation)
             .await
         {
             Ok(updated) => updated,
@@ -1977,7 +2011,16 @@ pub async fn delete_session(
             match state
                 .services
                 .session_files
-                .delete_all_for_session(&sid)
+                .delete_all_for_session(
+                    &sid,
+                    // Batch cleanup after a session deletion: an honest
+                    // system cleanup actor (spec §12.5) — the deleting
+                    // caller's identity lives on the session-delete audit
+                    // lane, not on this best-effort reconciliation.
+                    &bcs_service_api::types::system_lane_operation(
+                        "bcs-http-session-file-cleanup",
+                    ),
+                )
                 .await
             {
                 Ok(n) => tracing::info!(
@@ -2021,12 +2064,103 @@ pub struct CollectSessionRequest {
     pub participant: Option<String>,
 }
 
+
+/// REQUIRED audit identity (spec §12.5) for a legacy route mutation, built
+/// from the identity the legacy adapter actually authenticated: a Bot token
+/// records the verified Bot; a Human caller records the trusted staff number
+/// plus the Human's own actor as the effective actor. Routes that carry no
+/// authenticated identity record an honest System lane with a fixed
+/// identifier — never a forged Human and never an audit-skipping `None`.
+/// Audit identity of a legacy collect/uncollect request: the resolved
+/// collector is the effective actor; the HUMAN caller (when the request was
+/// Human-driven) stays recorded as the operator so a manager-driven collect
+/// never degrades into a bare Bot row (spec §12.5).
+pub(crate) fn legacy_collect_operation(
+    caller: &GroupChatCaller,
+    collector: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    match caller {
+        GroupChatCaller::Human(human) => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy-collect:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: human.staff_no.clone(),
+                effective_actor_id: collector.to_string(),
+            },
+        },
+        GroupChatCaller::Bot { bot_uuid } => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy-collect:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: bot_uuid.clone(),
+            },
+        },
+    }
+}
+
+pub(crate) fn caller_operation_context(
+    caller: &GroupChatCaller,
+) -> bcs_service_api::types::BotOperationContext {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: bot_uuid.clone(),
+            },
+        },
+        GroupChatCaller::Human(human) => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: human.staff_no.clone(),
+                effective_actor_id: human.actor_id.clone(),
+            },
+        },
+    }
+}
+
+/// Audit identity for a legacy route that resolved only a bare actor id
+/// (`human_<staff>` or a Bot uuid): a Human id keeps the dual identity; a
+/// Bot id records the Bot acting as itself.
+pub(crate) fn actor_id_operation_context(
+    actor_id: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    if let Some(staff_no) = actor_id.strip_prefix("human_") {
+        bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: staff_no.to_string(),
+                effective_actor_id: actor_id.to_string(),
+            },
+        }
+    } else {
+        bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: actor_id.to_string(),
+            },
+        }
+    }
+}
+
+/// Audit identity for legacy mutation or maintenance lanes that carry no
+/// authenticated identity at all: an HONEST system actor per spec §12.5 —
+/// the row never claims a Human and never silently skips the audit.
+pub(crate) fn legacy_lane_operation_context(
+    lane: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("bcs-http-legacy-{lane}:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: format!("bcs-http-legacy-{lane}"),
+            effective_actor_id: format!("bcs-http-legacy-{lane}"),
+        },
+    }
+}
+
 async fn resolve_collector_bot(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
     participant: Option<&str>,
-) -> Result<String, Response> {
+) -> Result<(String, GroupChatCaller), Response> {
     let caller = match resolve_group_chat_caller(state, headers, uri).await {
         Ok(c) => c,
         Err(_) => {
@@ -2038,7 +2172,9 @@ async fn resolve_collector_bot(
         }
     };
     match caller {
-        GroupChatCaller::Bot { bot_uuid } => Ok(bot_uuid),
+        GroupChatCaller::Bot { bot_uuid } => {
+            Ok((bot_uuid.clone(), GroupChatCaller::Bot { bot_uuid }))
+        }
         GroupChatCaller::Human(h) => {
             let bot_uuid = participant.ok_or_else(|| {
                 (
@@ -2067,7 +2203,7 @@ async fn resolve_collector_bot(
                 )
                     .into_response());
             }
-            Ok(bot_uuid.to_string())
+            Ok((bot_uuid.to_string(), GroupChatCaller::Human(h)))
         }
     }
 }
@@ -2079,15 +2215,16 @@ pub async fn collect_session(
     uri: Uri,
     Json(body): Json<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector =
+    let (collector, collector_caller) =
         match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
             Ok(b) => b,
             Err(resp) => return resp,
         };
+    let collect_operation = legacy_collect_operation(&collector_caller, &collector);
     match state
         .services
         .session_management
-        .collect(&sid, &collector)
+        .collect(&sid, &collector, &collect_operation)
         .await
     {
         Ok(()) => Json(serde_json::json!({"collected": true, "session_id": sid})).into_response(),
@@ -2102,15 +2239,16 @@ pub async fn uncollect_session(
     uri: Uri,
     Query(body): Query<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector =
+    let (collector, collector_caller) =
         match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
             Ok(b) => b,
             Err(resp) => return resp,
         };
+    let collect_operation = legacy_collect_operation(&collector_caller, &collector);
     match state
         .services
         .session_management
-        .uncollect(&sid, &collector)
+        .uncollect(&sid, &collector, &collect_operation)
         .await
     {
         Ok(()) => Json(serde_json::json!({"collected": false, "session_id": sid})).into_response(),

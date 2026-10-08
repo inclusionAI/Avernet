@@ -116,7 +116,11 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub caller: SessionCaller,
+    /// The raw authenticated caller (spec §12.1(4)): the mixed-identity
+    /// principal selection migrated out of the HTTP DTO and into the
+    /// application, which resolves the effective launch caller through the
+    /// async authority hook (live owner/manager role facts).
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub title: Option<String>,
     pub kind: Option<SessionKind>,

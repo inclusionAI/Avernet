@@ -2222,8 +2222,21 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .await
         .is_empty());
 
+
+/// Contract-test audit identity for the collect-family repo checks
+/// (spec §12.5): the required context flows verbatim through both dialect
+/// twins and the same-slot replay keeps the first committed audit row.
+fn contract_collect_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: "contract-session-collect".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "bot-collector".to_string(),
+        },
+    }
+}
+
     // collect by a participant
-    repo.collect(&collect_session.id, "bot-collector")
+    repo.collect(&collect_session.id, "bot-collector", &contract_collect_operation())
         .await
         .expect("collect by participant");
     let collected = repo
@@ -2258,16 +2271,20 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .is_empty());
 
     // collect by non-participant errors
-    let err = repo.collect(&collect_session.id, "bot-stranger").await;
+    let err = repo
+        .collect(&collect_session.id, "bot-stranger", &contract_collect_operation())
+        .await;
     assert!(err.is_err(), "collect by non-participant must error");
 
-    // repeat collect is idempotent (no error)
-    repo.collect(&collect_session.id, "bot-collector")
+    // repeat collect with the SAME operation context is idempotent AND adds no
+    // second applied audit row for the same (env, operation_id, step_key) slot.
+    repo.collect(&collect_session.id, "bot-collector", &contract_collect_operation())
         .await
         .expect("repeat collect idempotent");
 
-    // uncollect removes it
-    repo.uncollect(&collect_session.id, "bot-collector")
+    // uncollect removes it (fresh operation context: a distinct logical
+    // operation from the collect flip above).
+    repo.uncollect(&collect_session.id, "bot-collector", &contract_collect_operation())
         .await
         .expect("uncollect");
     assert!(repo
@@ -2276,10 +2293,10 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .is_empty());
 
     // uncollect of a never-collected / non-participant is idempotent Ok
-    repo.uncollect(&collect_session.id, "bot-collector")
+    repo.uncollect(&collect_session.id, "bot-collector", &contract_collect_operation())
         .await
         .expect("uncollect not-collected idempotent");
-    repo.uncollect(&collect_session.id, "bot-stranger")
+    repo.uncollect(&collect_session.id, "bot-stranger", &contract_collect_operation())
         .await
         .expect("uncollect non-participant idempotent");
 

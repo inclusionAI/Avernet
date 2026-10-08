@@ -25,10 +25,16 @@ use bcs_service_api::port::repo::{
     RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
+use bcs_service_api::types::BotOperationContext;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
+};
+
+use crate::action_audit::{
+    collect_state_audit_record, create_session_audit_record, remove_participant_audit_record,
+    session_action_audit_insert, update_session_audit_record,
 };
 
 // ---------------------------------------------------------------------------
@@ -240,6 +246,15 @@ impl MySqlSessionStore {
                 })?;
             steps.extend(event_plan.steps);
         }
+
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `create/session/applied` audit row joins the Session INSERT (and
+        // its participants side-table rows and its Event) in ONE transaction,
+        // so an audit INSERT failure rolls the whole creation back. The
+        // operation context is REQUIRED on `NewSessionParams` — there is no
+        // fallback that silently skips the audit.
+        let audit_record = create_session_audit_record(&params.operation, &self.env, &session_id);
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
 
         self.db
             .transaction(steps)
@@ -875,6 +890,15 @@ impl SessionRepoPort for MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `update/session/applied` audit row commits with the completion CAS
+        // and its Event in ONE transaction; any failure rolls all of it back.
+        let audit_record = update_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             ServiceError::Conflict(format!(
                 "Session '{}' changed during completion: {error}",
@@ -1616,6 +1640,14 @@ impl SessionRepoPort for MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `create/session/applied` for a membership record being created.
+        let audit_record = create_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             if transaction_lock_row_is_missing(&error) {
                 // The CAS lock row vanished: a concurrent writer changed or
@@ -1775,6 +1807,14 @@ impl SessionRepoPort for MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `delete/session/applied` for a membership record being removed.
+        let audit_record = remove_participant_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             if transaction_lock_row_is_missing(&error) {
                 // The CAS lock row vanished: a concurrent writer changed or
@@ -2060,6 +2100,14 @@ impl SessionRepoPort for MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session participant scope Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `update/session/applied` for the participant mode/scope change.
+        let audit_record = update_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             if transaction_lock_row_is_missing(&error) {
                 // The CAS lock row vanished: a concurrent writer changed or
@@ -2141,15 +2189,19 @@ impl SessionRepoPort for MySqlSessionStore {
         Ok(result.affected_rows > 0)
     }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
         // Existence check via SELECT, NOT affected_rows: the MySQL connection does
         // not set CLIENT_FOUND_ROWS (see bcs-config-api/src/mysql.rs to_mysql_url and
         // bcs-db-mysql/src/manager.rs), so mysql_async reports CHANGED rows. A repeat
         // collect (collected already 1) would yield affected_rows=0 and falsely look
         // like a non-participant. SELECTing the side-table row first lets us
         // distinguish non-participant (row absent) from already-collected (row present)
-        // independent of changed-rows semantics; the subsequent unconditional UPDATE is
-        // then idempotent by construction.
+        // independent of changed-rows semantics.
         let check_sql = "SELECT 1 FROM bcs_session_participants \
                          WHERE env = ? AND session_id = ? AND bot_uuid = ? LIMIT 1";
         let rows = self
@@ -2169,54 +2221,84 @@ impl SessionRepoPort for MySqlSessionStore {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
-        // First-collect-writes-time, repeat-collect-keeps-it (idempotent), expressed
-        // via the NULL-ness of collected_at itself: COALESCE writes `now` only when
-        // collected_at is NULL (never collected, or cleared by a prior uncollect) and
-        // preserves the existing value otherwise. This is dialect-portable: do NOT
-        // rewrite as `CASE WHEN collected = 0 THEN now ...` — MySQL evaluates a single
-        // UPDATE's SET left-to-right (so `collected` is already 1 by the time the CASE
-        // reads it) while SQLite evaluates all SET RHS against the pre-update row, so
-        // the CASE form silently never sets collected_at on MySQL while working on
-        // SQLite. Relying on collected_at's own NULL-ness avoids any cross-column
-        // old-value dependency.
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11).
+        //
+        // The business change is a CONDITIONAL UPDATE (`AND collected = 0`) marked
+        // `with_transaction_stop_on_no_rows`: an already-collected participant ends
+        // the transaction BEFORE the audit step, so "幂等无变化不制造 applied"
+        // holds WITHOUT relying on any dialect's no-op affected_rows counting —
+        // both dialects report exactly 1 affected row for a genuine flip and 0
+        // for a no-change, and the transaction machinery short-circuits on 0.
+        //
+        // First-collect-writes-time, repeat-collect-keeps-it, expressed via the
+        // NULL-ness of collected_at itself (COALESCE writes `now` only when
+        // collected_at is NULL). Do NOT rewrite as `CASE WHEN collected = 0 THEN
+        // now ...` — MySQL evaluates a single UPDATE's SET left-to-right while
+        // SQLite evaluates all SET RHS against the pre-update row (see git
+        // history); relying on collected_at's own NULL-ness avoids any
+        // cross-column old-value dependency.
         let update_sql = format!(
             "UPDATE bcs_session_participants \
              SET collected = 1, \
                  collected_at = COALESCE(collected_at, {}) \
-             WHERE env = ? AND session_id = ? AND bot_uuid = ?",
+             WHERE env = ? AND session_id = ? AND bot_uuid = ? AND collected = 0",
             self.flavor.now()
         );
+        let audit_record = collect_state_audit_record(operation, &self.env, session_id);
+        let steps = vec![
+            DbTransactionStep::Execute(
+                DbStatement::with_params(
+                    update_sql,
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(bot_uuid),
+                    ],
+                )
+                .with_transaction_stop_on_no_rows(),
+            ),
+            DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+        ];
         self.db
-            .execute(DbStatement::with_params(
-                update_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
+            .transaction(steps)
             .await
             .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
         Ok(())
     }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
-        // Idempotent: the only caller-facing error is session-not-found, which
-        // the application layer checks via get() before calling. Here we run the
-        // UPDATE regardless of whether a side-table row / collected flag exists.
-        // Clearing collected_at means a later re-collect records a fresh event time.
-        let sql = "UPDATE bcs_session_participants \
-                   SET collected = 0, collected_at = NULL \
-                   WHERE env = ? AND session_id = ? AND bot_uuid = ?";
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
+        // Idempotent mirror of `collect`, carrying the same REQUIRED audit
+        // identity (spec §12.5, plan Task 11): the conditional `AND collected
+        // = 1` UPDATE flips the favorite state and `collect/session/applied`
+        // commits in the SAME transaction; an already-uncollected participant
+        // stops the transaction before the audit step, so a no-change
+        // uncollect writes no audit row. Clearing collected_at means a later
+        // re-collect records a fresh event time.
+        let update_sql = "UPDATE bcs_session_participants \
+                          SET collected = 0, collected_at = NULL \
+                          WHERE env = ? AND session_id = ? AND bot_uuid = ? AND collected = 1";
+        let audit_record = collect_state_audit_record(operation, &self.env, session_id);
+        let steps = vec![
+            DbTransactionStep::Execute(
+                DbStatement::with_params(
+                    update_sql,
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(bot_uuid),
+                    ],
+                )
+                .with_transaction_stop_on_no_rows(),
+            ),
+            DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+        ];
         self.db
-            .execute(DbStatement::with_params(
-                sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
+            .transaction(steps)
             .await
             .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
         Ok(())

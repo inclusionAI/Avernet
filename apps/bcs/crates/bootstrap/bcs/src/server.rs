@@ -1704,7 +1704,7 @@ fn build_openapi_v1_state(
         relation.clone(),
         sessions.clone(),
         group_management,
-        authority_hook,
+        authority_hook.clone(),
         GroupServiceConfig {
             relation_env: relation_env.clone(),
         },
@@ -1723,12 +1723,12 @@ fn build_openapi_v1_state(
             groups.clone(),
             registry.clone(),
             friends.clone(),
-            relation,
+            authority_hook.clone(),
             session_repo,
             group_message_history,
             collaboration_runtime.clone(),
             system_message.clone(),
-            SessionServiceConfig { relation_env },
+            SessionServiceConfig {},
         )
         .with_participant_view_bindings(participant_view_bindings),
     );
@@ -1744,6 +1744,7 @@ fn build_openapi_v1_state(
         sessions.clone(),
         groups.clone(),
         registry.clone(),
+        authority_hook.clone(),
         system_message.clone(),
         Arc::new(session_file_url_projector.clone()),
     ));
@@ -2515,6 +2516,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
             system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,
@@ -4143,6 +4145,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             use_cases.system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,
@@ -5055,6 +5058,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             use_cases.system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,

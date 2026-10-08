@@ -388,9 +388,19 @@ impl InviteService for InviteServiceImpl {
             tags: Vec::new(),
             message_view_scope,
         };
+        // REQUIRED audit identity (spec §12.5): the invite was accepted by the
+        // verified Human (staff_no authenticated through the invite token);
+        // the effective actor is that Human's own actor entry.
+        let operation = bcs_service_api::types::BotOperationContext {
+            operation_id: format!("invite-join:session:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: cmd.staff_no.clone(),
+                effective_actor_id: actor_id.clone(),
+            },
+        };
         let updated_session = self
             .session
-            .add_participant(session_id, participant.clone())
+            .add_participant(session_id, participant.clone(), &operation)
             .await
             .map_err(|e| match e {
                 bcs_service_api::SessionUseCaseError::NotFound(msg) => {

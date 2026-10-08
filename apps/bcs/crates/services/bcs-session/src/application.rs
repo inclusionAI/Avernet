@@ -27,8 +27,7 @@ use bcs_service_api::port::{
     EventRecordFactoryPort, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
     FrontendDeliveryTarget, NewEvent,
 };
-use bcs_service_api::types::MessageViewScope;
-use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
+use bcs_service_api::types::{BotOperationContext, EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, MessageViewScope};
 use bcs_service_api::{
     ActorKind, BotRuntimeConnectionService, CollaborationRuntimeService, GroupStrategy,
     Participant, ParticipantMode, ParticipantRole, ServiceError, Session, SessionKind,
@@ -161,9 +160,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         output: Option<Value>,
         error: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         self.inner
-            .complete_if_running(session_id, output, error)
+            .complete_if_running(session_id, output, error, operation)
             .await
     }
 
@@ -177,16 +177,22 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.add_participant(session_id, participant).await
+        self.inner
+            .add_participant(session_id, participant, operation)
+            .await
     }
 
     async fn remove_participant(
         &self,
         session_id: &str,
         bot_uuid: &str,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.remove_participant(session_id, bot_uuid).await
+        self.inner
+            .remove_participant(session_id, bot_uuid, operation)
+            .await
     }
 
     async fn update_participant_mode(
@@ -194,9 +200,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
-            .update_participant_mode(session_id, bot_uuid, mode)
+            .update_participant_mode(session_id, bot_uuid, mode, operation)
             .await
     }
 
@@ -205,9 +212,15 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
-            .update_participant_message_view_scope(session_id, actor_id, message_view_scope)
+            .update_participant_message_view_scope(
+                session_id,
+                actor_id,
+                message_view_scope,
+                operation,
+            )
             .await
     }
 
@@ -217,6 +230,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
             .update_participant_mode_and_message_view_scope(
@@ -224,6 +238,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                 actor_id,
                 mode,
                 message_view_scope,
+                operation,
             )
             .await
     }
@@ -232,8 +247,9 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.update_title(session_id, title).await
+        self.inner.update_title(session_id, title, operation).await
     }
 
     async fn list_group_ids_by_session_participant(
@@ -257,12 +273,22 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.delete(session_id).await
     }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
-        self.inner.collect(session_id, bot_uuid).await
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.collect(session_id, bot_uuid, operation).await
     }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
-        self.inner.uncollect(session_id, bot_uuid).await
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.uncollect(session_id, bot_uuid, operation).await
     }
 
     async fn list_collected_by_group(
@@ -288,6 +314,20 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     }
 }
 
+/// Honest System identity for the activation-completion lane: its callers
+/// (service-invocation callback confirmations) carry no verified Human
+/// operator, so the audit row records the independent system action itself
+/// and never forges a Human (spec §12.5).
+fn callback_completion_operation() -> BotOperationContext {
+    BotOperationContext {
+        operation_id: format!("service-callback-complete:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "bcs-session-callback".to_string(),
+            effective_actor_id: "bcs-session-callback".to_string(),
+        },
+    }
+}
+
 impl SessionManagementServiceImpl {
     async fn complete_session(
         &self,
@@ -295,6 +335,7 @@ impl SessionManagementServiceImpl {
         output: Option<Value>,
         error: Option<String>,
         guard_activation: bool,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         let session_id = current.id.as_str();
         let summary_value = output.clone().unwrap_or(Value::Null);
@@ -338,6 +379,7 @@ impl SessionManagementServiceImpl {
                     output,
                     error,
                     event,
+                    operation: operation.clone(),
                 })
                 .await?),
             None if guard_activation => Ok(self.repo.complete_running_service_activation(
@@ -629,6 +671,11 @@ impl SessionManagementService for SessionManagementServiceImpl {
                 .as_ref()
                 .is_some_and(|group| group.record_status == "provisioning");
             let mut params = cmd.params;
+            // The compensation completion below aborts THIS creation, so it
+            // reuses the create's own operation identity (spec §12.5: a
+            // command's internal retry/compensation step shares the
+            // operation; one logical operation per step key).
+            let create_operation = params.operation.clone();
             let session = if group_is_provisioning || self.event_record_factory.is_none() {
                 self.repo.create(&cmd.group_id, params).await?
             } else {
@@ -688,6 +735,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                             &session.id,
                             None,
                             compensation_reason,
+                            &create_operation,
                         )
                         .await
                     };
@@ -839,6 +887,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         session_id: &str,
         output: Option<Value>,
         error: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         let Some(current) = self.repo.get(session_id).await else {
             return Err(SessionUseCaseError::NotFound(session_id.to_string()));
@@ -846,7 +895,8 @@ impl SessionManagementService for SessionManagementServiceImpl {
         if current.status == SessionStatus::Completed {
             return Ok(None);
         }
-        self.complete_session(current, output, error, false).await
+        self.complete_session(current, output, error, false, operation)
+            .await
     }
 
     async fn complete_running_service_activation(
@@ -863,13 +913,15 @@ impl SessionManagementService for SessionManagementServiceImpl {
         {
             return Ok(None);
         }
-        self.complete_session(current, output, error, true).await
+        self.complete_session(current, output, error, true, &callback_completion_operation())
+            .await
     }
 
     async fn add_participant(
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let session = self
             .repo
@@ -921,6 +973,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     expected_participants: session.participants,
                     participant,
                     event,
+                    operation: operation.clone(),
                 })
                 .await?),
             None => Ok(self.repo.add_participant(session_id, participant).await?),
@@ -931,6 +984,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         session_id: &str,
         bot_uuid: &str,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let session = self
             .repo
@@ -1002,6 +1056,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     expected_participants: session.participants,
                     bot_uuid: bot_uuid.to_string(),
                     event,
+                    operation: operation.clone(),
                 })
                 .await?),
             None => Ok(self.repo.remove_participant(session_id, bot_uuid).await?),
@@ -1013,6 +1068,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         Ok(self
             .repo
@@ -1025,12 +1081,14 @@ impl SessionManagementService for SessionManagementServiceImpl {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.update_participant_mode_and_message_view_scope(
             session_id,
             actor_id,
             None,
             message_view_scope,
+            operation,
         )
         .await
     }
@@ -1041,6 +1099,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let session = self
             .repo
@@ -1104,6 +1163,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                         message_view_scope,
                         mode,
                         event,
+                        operation: operation.clone(),
                     },
                 )
                 .await?),
@@ -1123,7 +1183,9 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
+        let _ = operation;
         Ok(self.repo.update_title(session_id, title).await?)
     }
 
@@ -1141,19 +1203,29 @@ impl SessionManagementService for SessionManagementServiceImpl {
         Ok(self.repo.delete(session_id).await?)
     }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
         if self.repo.get(session_id).await.is_none() {
             return Err(SessionUseCaseError::NotFound(session_id.to_string()));
         }
-        self.repo.collect(session_id, bot_uuid).await?;
+        self.repo.collect(session_id, bot_uuid, operation).await?;
         Ok(())
     }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
         if self.repo.get(session_id).await.is_none() {
             return Err(SessionUseCaseError::NotFound(session_id.to_string()));
         }
-        self.repo.uncollect(session_id, bot_uuid).await?;
+        self.repo.uncollect(session_id, bot_uuid, operation).await?;
         Ok(())
     }
 

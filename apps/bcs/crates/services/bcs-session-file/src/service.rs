@@ -22,6 +22,7 @@ use bcs_service_api::application::session_files::{
     PrepareUploadResult, SessionFileService, SessionFileUseCaseError, ShareConsumeResult,
     ShareMintCommand, ShareMintResult,
 };
+use bcs_service_api::types::{BotActionAuditPhase, BotOperationContext};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListParams, SessionFileRepoPort, SessionRepoPort,
 };
@@ -30,7 +31,21 @@ use bcs_storage_api::{
     StorageError, StorageHandle, UploadHandle, UploadMode, UploadPrepareRequest,
 };
 
+use crate::audit::{
+    delete_phase_record, per_resource_operation, share_phase_record, sweep_operation,
+};
 use crate::authz::{can_mutate, can_share, derive_key, validate_file_name};
+
+/// Map a phase-record persistence failure to the use-case error surface. A
+/// failed `admitted` persist must surface BEFORE any external side effect is
+/// started (the caller refuses to touch the backend); a failed
+/// `completed`/`failed` persist propagates the error — it never silently
+/// swallows the outcome (spec §12.5 "传播持久化失败").
+fn audit_persist_error() -> SessionFileUseCaseError {
+    SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
+        "session file operation audit persistence failed".into(),
+    ))
+}
 
 /// Fixed part size used by the local-proxy (`ProxyViaBcs`) multipart branch.
 ///
@@ -274,6 +289,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 storage_backend: self.cfg.storage.backend_name().to_string(),
                 object_handle: handle_json,
                 expires_at: prepared.expires_at,
+                operation: cmd.operation.clone(),
             })
             .await
             .map_err(SessionFileUseCaseError::Internal)?;
@@ -361,6 +377,7 @@ impl SessionFileService for SessionFileServiceImpl {
         &self,
         session_id: &str,
         file_id: &str,
+        operation: &BotOperationContext,
     ) -> Result<SessionFile, SessionFileUseCaseError> {
         let row = self
             .cfg
@@ -417,6 +434,8 @@ impl SessionFileService for SessionFileServiceImpl {
                 e.to_string(),
             ))
         })?;
+        // Same-transaction metadata change + `update/session_file/applied`
+        // audit row (spec §12.5): the store commits both atomically.
         let updated = self
             .cfg
             .repo
@@ -426,6 +445,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 &handle_json,
                 FileStatus::Ready,
                 final_size,
+                operation,
             )
             .await
             .map_err(SessionFileUseCaseError::Internal)?
@@ -455,11 +475,32 @@ impl SessionFileService for SessionFileServiceImpl {
                 cmd.file_id,
             )));
         }
+        // External-effect class (spec §12.5, plan Task 11): persist
+        // `delete/session_file/admitted` BEFORE any backend I/O. When the
+        // admitted row cannot be persisted the side effect MUST NOT start —
+        // the backend is never called (storage call count stays 0) and the
+        // error propagates.
+        let admitted = delete_phase_record(
+            &cmd.operation,
+            &self.cfg.env,
+            &cmd.file_id,
+            BotActionAuditPhase::Admitted,
+            None,
+        );
+        if self
+            .cfg
+            .repo
+            .record_operation_phase(admitted)
+            .await
+            .is_err()
+        {
+            return Err(audit_persist_error());
+        }
         let result = match row.status {
             FileStatus::Ready => {
                 let handle: StorageHandle = serde_json::from_str(&row.object_handle).map_err(|e| {
                     SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
-                        format!("decode storage handle: {e}"),
+                        format!("decode storage handle: {e}")
                     ))
                 })?;
                 self.cfg.storage.delete(&handle).await
@@ -467,41 +508,51 @@ impl SessionFileService for SessionFileServiceImpl {
             FileStatus::Pending | FileStatus::Failed => {
                 let handle: UploadHandle = serde_json::from_str(&row.object_handle).map_err(|e| {
                     SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
-                        format!("decode upload handle: {e}"),
+                        format!("decode upload handle: {e}")
                     ))
                 })?;
                 self.cfg.storage.abort_upload(&handle).await
             }
-            FileStatus::Deleting => {
-                // Should not normally occur in v1; treat as a no-op backend call.
-                return self
-                    .cfg
-                    .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
-                    .await
-                    .map(|_| ())
-                    .map_err(SessionFileUseCaseError::Internal);
-            }
+            // Should not normally occur in v1; no backend object remains in
+            // this state, so the final metadata delete happens directly.
+            FileStatus::Deleting => Ok(()),
         };
         match result {
-            Ok(()) => {
+            Ok(()) | Err(StorageError::NotFound) => {
+                // Backend success (NotFound is the idempotent form). The final
+                // metadata DELETE and the `delete/session_file/completed`
+                // audit row commit in ONE store transaction: a metadata/audit
+                // failure RETAINS the row (with the admitted row) and surfaces
+                // the error — never a false completion and never a silent
+                // rollback claim about the already-removed backend object.
                 self.cfg
                     .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
+                    .delete(&cmd.session_id, &cmd.file_id, &cmd.operation)
                     .await
                     .map_err(SessionFileUseCaseError::Internal)?;
                 Ok(())
             }
-            Err(StorageError::NotFound) => {
-                // Backend NotFound = idempotent. Drop the metadata row and return Ok.
-                self.cfg
-                    .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
-                    .await
-                    .map_err(SessionFileUseCaseError::Internal)?;
-                Ok(())
+            Err(e) => {
+                // Explicit backend failure: persist the `failed` phase (fixed
+                // machine reason, never raw storage error text) best-effort,
+                // leave the row for the sweep/retry contract, and surface the
+                // storage error.
+                let failed = delete_phase_record(
+                    &cmd.operation,
+                    &self.cfg.env,
+                    &cmd.file_id,
+                    BotActionAuditPhase::Failed,
+                    Some("backend_removal_failed"),
+                );
+                if let Err(audit_error) = self.cfg.repo.record_operation_phase(failed).await {
+                    warn!(
+                        file_id = %cmd.file_id,
+                        error = %audit_error,
+                        "failed to persist the delete failed-phase audit row",
+                    );
+                }
+                Err(map_storage_err(e)) // Backend failure: leave row for sweep.
             }
-            Err(e) => Err(map_storage_err(e)), // Backend failure: leave row for sweep.
         }
     }
 
@@ -589,7 +640,8 @@ impl SessionFileService for SessionFileServiceImpl {
             )));
         }
         let ttl = cmd.ttl_seconds.unwrap_or(self.cfg.share_default_ttl);
-        self.mint_share_link(&cmd.session_id, &cmd.file_id, ttl).await
+        self.mint_share_link(&cmd.session_id, &cmd.file_id, ttl, &cmd.operation)
+            .await
     }
 
     async fn share_mint_for_history(
@@ -597,8 +649,10 @@ impl SessionFileService for SessionFileServiceImpl {
         session_id: &str,
         file_id: &str,
         ttl_seconds: u64,
+        operation: &BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
-        self.mint_share_link(session_id, file_id, ttl_seconds).await
+        self.mint_share_link(session_id, file_id, ttl_seconds, operation)
+            .await
     }
 
     async fn share_consume(
@@ -670,6 +724,13 @@ impl SessionFileService for SessionFileServiceImpl {
             .map_err(SessionFileUseCaseError::Internal)?;
         let mut swept = 0u64;
         for row in rows {
+            // Spec §12.5: the pending sweep is an INDEPENDENT system action.
+            // It records an honest System operator with a per-row operation —
+            // never a forged Human and never a replayed historical identity.
+            // The status flip commits its own `update/session_file/applied`
+            // audit row in the store's atomic transaction, and a re-sweep of
+            // an already-swept row is an idempotent no-op (no audit row).
+            let operation = sweep_operation(&row.file_id);
             let handle: UploadHandle = match serde_json::from_str(&row.object_handle) {
                 Ok(h) => h,
                 Err(e) => {
@@ -681,7 +742,12 @@ impl SessionFileService for SessionFileServiceImpl {
                     let _ = self
                         .cfg
                         .repo
-                        .update_status(&row.session_id, &row.file_id, FileStatus::Failed)
+                        .update_status(
+                            &row.session_id,
+                            &row.file_id,
+                            FileStatus::Failed,
+                            &operation,
+                        )
                         .await;
                     swept += 1;
                     continue;
@@ -697,14 +763,18 @@ impl SessionFileService for SessionFileServiceImpl {
             let _ = self
                 .cfg
                 .repo
-                .update_status(&row.session_id, &row.file_id, FileStatus::Failed)
+                .update_status(&row.session_id, &row.file_id, FileStatus::Failed, &operation)
                 .await;
             swept += 1;
         }
         Ok(swept)
     }
 
-    async fn delete_all_for_session(&self, session_id: &str) -> Result<u64, SessionFileUseCaseError> {
+    async fn delete_all_for_session(
+        &self,
+        session_id: &str,
+        operation: &BotOperationContext,
+    ) -> Result<u64, SessionFileUseCaseError> {
         // Collect every row for the session WITHOUT deleting yet, so backend
         // cleanup happens BEFORE the metadata row is dropped. The previous flow
         // deleted every row up front (atomic repo `delete_all_for_session`)
@@ -740,10 +810,27 @@ impl SessionFileService for SessionFileServiceImpl {
         let mut deleted = 0u64;
         let mut retained = 0u64;
         for row in rows {
+            // Per-row sub-operation (spec §12.5): the audit slot key must never
+            // carry two different resource ids, so each row derives its own
+            // deterministic sub-operation-id from the caller's context.
+            let row_operation = per_resource_operation(operation, &row.file_id);
+            // External-effect bracket: persist `admitted` before the backend
+            // call; skip the row when it cannot be persisted.
+            let admitted = delete_phase_record(
+                &row_operation, &self.cfg.env, &row.file_id,
+                BotActionAuditPhase::Admitted, None,
+            );
+            if self.cfg.repo.record_operation_phase(admitted).await.is_err() {
+                retained += 1;
+                continue;
+            }
             if self.cleanup_backend_for_row(&row).await {
+                // Final metadata DELETE + `delete/session_file/completed`
+                // audit in ONE store transaction; a failure keeps the row for
+                // retry and surfaces the error.
                 self.cfg
                     .repo
-                    .delete(&row.session_id, &row.file_id)
+                    .delete(&row.session_id, &row.file_id, &row_operation)
                     .await
                     .map_err(SessionFileUseCaseError::Internal)?;
                 deleted += 1;
@@ -775,6 +862,7 @@ impl SessionFileServiceImpl {
         session_id: &str,
         file_id: &str,
         ttl_seconds: u64,
+        operation: &BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
         let row = self
             .cfg
@@ -788,6 +876,28 @@ impl SessionFileServiceImpl {
                 "file status {:?} not Ready — cannot share",
                 row.status,
             )));
+        }
+        // External-effect class (spec §12.5): the `share/session_file/admitted`
+        // row persists BEFORE the share link is minted; a persistence failure
+        // refuses to mint. Share changes no metadata, so the mint result has
+        // no atomic transaction — instead the `completed` phase persists
+        // through the standalone recorder afterwards (admitted is NOT proof
+        // the share link was handed out).
+        let admitted = share_phase_record(
+            operation,
+            &self.cfg.env,
+            file_id,
+            BotActionAuditPhase::Admitted,
+            None,
+        );
+        if self
+            .cfg
+            .repo
+            .record_operation_phase(admitted)
+            .await
+            .is_err()
+        {
+            return Err(audit_persist_error());
         }
         let ttl = ttl_seconds.clamp(SHARE_TTL_MIN, SHARE_TTL_MAX);
         let exp = now_secs() + ttl;
@@ -809,6 +919,22 @@ impl SessionFileServiceImpl {
             base,
             token,
         );
+        // Successful mint: persist the `completed` phase (no metadata change,
+        // standalone record). The persistence failure PROPAGATES (spec §12.5
+        // "传播持久化失败") — the caller learns the outcome record could not
+        // be persisted.
+        let completed = share_phase_record(
+            operation,
+            &self.cfg.env,
+            file_id,
+            BotActionAuditPhase::Completed,
+            None,
+        );
+        self.cfg
+            .repo
+            .record_operation_phase(completed)
+            .await
+            .map_err(|_| audit_persist_error())?;
         Ok(ShareMintResult {
             share_url,
             share_token: token,

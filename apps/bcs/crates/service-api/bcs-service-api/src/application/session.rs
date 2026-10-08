@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::ServiceError;
 use crate::port::repo::NewSessionParams;
-use crate::types::{MessageViewScope, Participant, ParticipantMode, Session, SessionStatus};
+use crate::types::{
+    BotOperationContext, MessageViewScope, Participant, ParticipantMode, Session, SessionStatus,
+};
 
 /// Use-case level error for session operations.
 #[derive(Debug, thiserror::Error)]
@@ -171,11 +173,17 @@ pub trait SessionManagementService: Send + Sync {
 
     /// CAS 终结：仅当 status=Running 时落 Completed 并触发 callback；
     /// 已 Completed 返回 `Ok(None)`。
+    ///
+    /// The REQUIRED `operation` (spec §12.5, plan Task 11) identifies the
+    /// actor for the eventful completion lane's `update/session/applied`
+    /// audit row: authenticated callers carry their real identity; the
+    /// scanner/callback system lanes carry an honest System actor.
     async fn complete_if_running(
         &self,
         session_id: &str,
         output: Option<serde_json::Value>,
         error: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError>;
 
     /// Complete the caller's saved Running ServiceInvocation activation with
@@ -200,12 +208,14 @@ pub trait SessionManagementService: Send + Sync {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError>;
 
     async fn remove_participant(
         &self,
         session_id: &str,
         bot_uuid: &str,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError>;
 
     async fn update_participant_mode(
@@ -213,6 +223,7 @@ pub trait SessionManagementService: Send + Sync {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError>;
 
     async fn update_participant_message_view_scope(
@@ -220,8 +231,9 @@ pub trait SessionManagementService: Send + Sync {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        let _ = (session_id, actor_id, message_view_scope);
+        let _ = (session_id, actor_id, message_view_scope, operation);
         Err(SessionUseCaseError::Internal(
             ServiceError::InvalidOperation {
                 message: "Session participant scope updates are not configured".to_string(),
@@ -236,16 +248,19 @@ pub trait SessionManagementService: Send + Sync {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let updated = self
             .update_participant_message_view_scope(
                 session_id,
                 actor_id,
                 message_view_scope,
+                operation,
             )
             .await?;
         if let Some(mode) = mode {
-            self.update_participant_mode(session_id, actor_id, mode).await
+            self.update_participant_mode(session_id, actor_id, mode, operation)
+                .await
         } else {
             Ok(updated)
         }
@@ -255,6 +270,7 @@ pub trait SessionManagementService: Send + Sync {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError>;
 
     async fn list_group_ids_by_session_participant(
@@ -268,21 +284,29 @@ pub trait SessionManagementService: Send + Sync {
     // ── session collection (收藏) ──────────────────────────────
     /// Mark a session as collected by `bot_uuid`. The bot must be a
     /// participant of the session (the side-table row exists).
+    ///
+    /// The REQUIRED `operation` (spec §12.5, plan Task 11) is the
+    /// same-transaction audit identity: the owning store commits the
+    /// `collect/session/applied` audit row with the conditional UPDATE in
+    /// ONE transaction; an already-collected no-change collects nothing.
     async fn collect(
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &BotOperationContext,
     ) -> Result<(), SessionUseCaseError> {
         Err(SessionUseCaseError::Internal(ServiceError::InternalError(
             "collect not implemented for this SessionManagementService".into(),
         )))
     }
     /// Remove the collection mark. Idempotent: only session-not-found is an
-    /// error; non-participant / not-collected returns Ok.
+    /// error; non-participant / not-collected returns Ok. Carries the same
+    /// REQUIRED audit identity as `collect`.
     async fn uncollect(
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &BotOperationContext,
     ) -> Result<(), SessionUseCaseError> {
         Err(SessionUseCaseError::Internal(ServiceError::InternalError(
             "uncollect not implemented for this SessionManagementService".into(),

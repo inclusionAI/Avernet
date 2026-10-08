@@ -30,7 +30,7 @@ pub mod session_file;
 pub use auth::*;
 pub use authorization::{
     Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
-    require_human, select_principal,
+    require_human, resolve_authorized_principal, select_principal,
 };
 pub use bot::*;
 pub use bot_authority::*;

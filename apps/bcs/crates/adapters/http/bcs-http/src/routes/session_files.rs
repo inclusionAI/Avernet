@@ -10,6 +10,8 @@
 //! `/files/{file_id}` — axum matchit is static-first by default, and an
 //! explicit regression test guards it.
 
+use crate::routes::sessions::caller_operation_context;
+
 use axum::{
     Json,
     body::{Body, BodyDataStream},
@@ -438,6 +440,9 @@ pub async fn prepare_upload(
         size: body.size,
         mime_type: body.mime_type,
         caller: caller_to_actor_ref(&caller),
+        // REQUIRED audit identity (spec §12.5) from the identity this route
+        // actually authenticated (dual identity for a Human caller).
+        operation: caller_operation_context(&caller),
     };
     match state.services.session_files.prepare_upload(cmd).await {
         Ok(r) => {
@@ -554,6 +559,8 @@ pub async fn delete_file(
         caller_identities: caller_identities(&state, &caller).await,
         session_creator,
         driver_bot,
+        // REQUIRED audit identity (spec §12.5).
+        operation: caller_operation_context(&caller),
     };
     match state.services.session_files.delete_file(cmd).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -734,6 +741,8 @@ pub async fn share_mint(
         caller: caller_to_actor_ref(&caller),
         ttl_seconds: body.ttl_seconds,
         caller_identities: caller_identities(&state, &caller).await,
+        // REQUIRED audit identity (spec §12.5).
+        operation: caller_operation_context(&caller),
         session_participants: sess
             .participants
             .iter()
