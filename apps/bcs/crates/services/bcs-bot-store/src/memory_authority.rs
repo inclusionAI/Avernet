@@ -165,19 +165,32 @@ pub(crate) struct MemoryOwnershipInitRecord {
     pub(crate) operation_id: String,
 }
 
-/// One `bot_ownership_transfers` row projection (plan Task 5): pending rows
-/// are seeded through the test lever; retirement invalidates them.
-/// `decided_by` exists to mirror the schema's decision-column CHECK; only
-/// the status/terminal-reason pair is asserted today.
+/// One `bot_ownership_transfers` row projection (plan Task 5, extended by
+/// plan Task 8): the FULL spec §5.2 column set so the Task 8 transfer lanes
+/// (create / decide / query) have the same durable shape as the SQL store.
+/// Time-valued fields keep the DB timestamp TEXT shape ('YYYY-MM-DD
+/// HH:MM:SS'), exactly like the SQL columns, so the projection/parse code
+/// paths stay shared twins.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct MemoryOwnershipTransferRow {
     pub(crate) transfer_id: String,
     pub(crate) env: String,
     pub(crate) bot_id: String,
+    pub(crate) from_user_id: String,
+    pub(crate) to_user_id: String,
+    pub(crate) expected_owner_version: u64,
+    pub(crate) client_request_id: String,
     pub(crate) status: String,
-    pub(crate) terminal_reason: Option<String>,
+    pub(crate) expires_at: String,
+    pub(crate) decision_actor_kind: Option<String>,
     pub(crate) decided_by: Option<String>,
+    pub(crate) decided_at: Option<String>,
+    pub(crate) result_owner_version: Option<u64>,
+    pub(crate) terminal_reason: Option<String>,
+    pub(crate) bot_name_snapshot: String,
+    pub(crate) gmt_create: String,
+    pub(crate) gmt_modified: String,
 }
 
 /// Fail-closed authority corruption branch, shared by every authority
@@ -828,6 +841,40 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         // the trait docs.
         super::team_sync::memory_sync_team(self, command).await
     }
+
+    async fn create_transfer(
+        &self,
+        command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+        // Task 8's ownership transfer lanes: the same contract twins, in
+        // one shared critical section per command (the in-memory engine is
+        // `memory_transfer.rs`; the full contracts live in the port docs).
+        super::transfer::memory_create_transfer(self, command).await
+    }
+
+    async fn decide_transfer(
+        &self,
+        actor_user_id: &str,
+        transfer_id: &str,
+        action: bcs_service_api::types::TransferAction,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+        super::transfer::memory_decide_transfer(self, actor_user_id, transfer_id, action).await
+    }
+
+    async fn get_transfer(
+        &self,
+        viewer_user_id: &str,
+        transfer_id: &str,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+        super::transfer::memory_get_transfer(self, viewer_user_id, transfer_id).await
+    }
+
+    async fn list_transfers(
+        &self,
+        query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+        super::transfer::memory_list_transfers(self, query).await
+    }
 }
 
 impl MemoryBotRepo {
@@ -1040,24 +1087,92 @@ impl MemoryBotRepo {
     /// Test-only: seed one PENDING `bot_ownership_transfers`-shaped row for
     /// the Task 5 deletion-boundary tests (transfer creation is a later
     /// task's production contract; retirement must terminate the pending
-    /// slot). Returns the seeded `transfer_id`.
+    /// slot). Returns the seeded `transfer_id`. The Task 8 full-column row
+    /// shape is filled with Twinned defaults (+7-day deadline, current
+    /// version snapshot); only the status lifecycle is asserted by the
+    /// deletion tests.
     pub async fn seed_authority_pending_transfer(
         &self,
         bot_id: &str,
         from_user_id: &str,
         to_user_id: &str,
     ) -> ServiceResult<String> {
+        let env = resolve_env();
         let transfer_id = uuid::Uuid::new_v4().to_string();
-        let mut authority = self.authority.write().await;
-        authority.transfer_rows.push(MemoryOwnershipTransferRow {
-            transfer_id: transfer_id.clone(),
-            env: resolve_env(),
-            bot_id: bot_id.to_string(),
-            status: "pending".to_string(),
-            terminal_reason: None,
-            decided_by: None,
-        });
-        let _ = (from_user_id, to_user_id);
+        let now_text = super::transfer::now_db_text();
+        let expires_text = super::transfer::deadline_db_text(super::transfer::DAY_MS * 7);
+        let authority = self.authority.write().await;
+        let expected_owner_version = authority
+            .ownership_versions
+            .get(bot_id)
+            .copied()
+            .unwrap_or(1);
+        drop(authority);
+        super::transfer::seed_pending_transfer_row(
+            self,
+            MemoryOwnershipTransferRow {
+                transfer_id: transfer_id.clone(),
+                env,
+                bot_id: bot_id.to_string(),
+                from_user_id: from_user_id.to_string(),
+                to_user_id: to_user_id.to_string(),
+                expected_owner_version,
+                client_request_id: uuid::Uuid::new_v4().to_string(),
+                status: "pending".to_string(),
+                expires_at: expires_text,
+                decision_actor_kind: None,
+                decided_by: None,
+                decided_at: None,
+                result_owner_version: None,
+                terminal_reason: None,
+                bot_name_snapshot: bot_id.to_string(),
+                gmt_create: now_text.clone(),
+                gmt_modified: now_text,
+            },
+        )
+        .await?;
+        Ok(transfer_id)
+    }
+
+    /// Test-only: seed one full-shape PENDING transfer row with an EXPLICIT
+    /// deadline text and version snapshot (plan Task 8 harness lever for
+    /// the lapsed/mismatched preconditions the production create lane
+    /// cannot produce directly). Like every `seed_authority_*` lever this
+    /// exists for the conformance drivers only — never a production claim
+    /// path. Returns the seeded `transfer_id`.
+    pub async fn seed_authority_pending_transfer_custom(
+        &self,
+        bot_id: &str,
+        from_user_id: &str,
+        to_user_id: &str,
+        expected_owner_version: u64,
+        expires_at: &str,
+    ) -> ServiceResult<String> {
+        let transfer_id = uuid::Uuid::new_v4().to_string();
+        let now_text = super::transfer::now_db_text();
+        super::transfer::seed_pending_transfer_row(
+            self,
+            MemoryOwnershipTransferRow {
+                transfer_id: transfer_id.clone(),
+                env: resolve_env(),
+                bot_id: bot_id.to_string(),
+                from_user_id: from_user_id.to_string(),
+                to_user_id: to_user_id.to_string(),
+                expected_owner_version,
+                client_request_id: uuid::Uuid::new_v4().to_string(),
+                status: "pending".to_string(),
+                expires_at: expires_at.to_string(),
+                decision_actor_kind: None,
+                decided_by: None,
+                decided_at: None,
+                result_owner_version: None,
+                terminal_reason: None,
+                bot_name_snapshot: bot_id.to_string(),
+                gmt_create: now_text.clone(),
+                gmt_modified: now_text,
+            },
+        )
+        .await?;
         Ok(transfer_id)
     }
 

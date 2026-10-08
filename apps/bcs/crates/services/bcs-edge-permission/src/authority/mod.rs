@@ -15,6 +15,7 @@
 //! §12.4/§13.5: batch reads failing to authorize must fail unified).
 
 mod manager;
+mod ownership;
 mod reads;
 mod team_sync;
 

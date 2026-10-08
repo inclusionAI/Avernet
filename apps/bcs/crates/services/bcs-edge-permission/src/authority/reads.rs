@@ -108,6 +108,47 @@ impl BotAuthorityCoreService for BotAuthorityCoreServiceImpl {
     ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
         self.authority.sync_team(command).await
     }
+
+    // Task 8's ownership transfer lanes: the REPO owns each one-Bot
+    // transaction (create idempotency/validation/slot hygiene, the decide
+    // committed-prefix probes and the all-or-nothing accept, and the
+    // party-visible reads), so the Core forwards verbatim and composes
+    // nothing on top — the same no-pre-read rule as the sibling mutation
+    // lanes. The delegation recording tests live in `ownership.rs`.
+    async fn create_transfer(
+        &self,
+        command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+        self.authority.create_transfer(command).await
+    }
+
+    async fn decide_transfer(
+        &self,
+        actor_user_id: &str,
+        transfer_id: &str,
+        action: bcs_domain::TransferAction,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+        self.authority
+            .decide_transfer(actor_user_id, transfer_id, action)
+            .await
+    }
+
+    async fn get_transfer(
+        &self,
+        viewer_user_id: &str,
+        transfer_id: &str,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+        self.authority
+            .get_transfer(viewer_user_id, transfer_id)
+            .await
+    }
+
+    async fn list_transfers(
+        &self,
+        query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+        self.authority.list_transfers(query).await
+    }
 }
 
 #[cfg(test)]
@@ -115,7 +156,7 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use bcs_domain::{BotAccessRelation, OwnershipState};
+    use bcs_domain::{BotAccessRelation, OwnershipState, TransferAction};
     use bcs_service_api::port::repo::BotAuthorityRepoPort;
     use bcs_service_api::types::error::AuthorityError;
     use bcs_service_api::{ServiceError, ServiceResult};
@@ -198,6 +239,37 @@ mod tests {
             _command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
         ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
             unreachable!("read-side recording tests never synchronize teams")
+        }
+
+        async fn create_transfer(
+            &self,
+            _command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+            unreachable!("read-side recording tests never create transfers")
+        }
+
+        async fn decide_transfer(
+            &self,
+            _actor_user_id: &str,
+            _transfer_id: &str,
+            _action: TransferAction,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+            unreachable!("read-side recording tests never decide transfers")
+        }
+
+        async fn get_transfer(
+            &self,
+            _viewer_user_id: &str,
+            _transfer_id: &str,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+            unreachable!("read-side recording tests never read transfers")
+        }
+
+        async fn list_transfers(
+            &self,
+            _query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+            unreachable!("read-side recording tests never list transfers")
         }
     }
 
@@ -366,6 +438,35 @@ mod tests {
                 command: bcs_service_api::types::team_manager_sync::TeamManagerSync,
             ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
                 self.inner.sync_team(command).await
+            }
+            async fn create_transfer(
+                &self,
+                command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+            ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+                self.inner.create_transfer(command).await
+            }
+            async fn decide_transfer(
+                &self,
+                actor_user_id: &str,
+                transfer_id: &str,
+                action: TransferAction,
+            ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+                self.inner
+                    .decide_transfer(actor_user_id, transfer_id, action)
+                    .await
+            }
+            async fn get_transfer(
+                &self,
+                viewer_user_id: &str,
+                transfer_id: &str,
+            ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+                self.inner.get_transfer(viewer_user_id, transfer_id).await
+            }
+            async fn list_transfers(
+                &self,
+                query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+            ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+                self.inner.list_transfers(query).await
             }
         }
         let repo = Counting {

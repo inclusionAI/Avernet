@@ -499,7 +499,10 @@ impl MemoryBotRepo {
             if transfer.env == env && transfer.bot_id == bot_id && transfer.status == "pending" {
                 transfer.status = "invalidated".to_string();
                 transfer.terminal_reason = Some("bot_deleted".to_string());
+                transfer.decision_actor_kind = Some("system".to_string());
                 transfer.decided_by = Some(operation.actor.operator_id().to_string());
+                transfer.decided_at = Some(crate::memory::transfer::now_db_text());
+                transfer.gmt_modified = crate::memory::transfer::now_db_text();
             }
         }
         authority

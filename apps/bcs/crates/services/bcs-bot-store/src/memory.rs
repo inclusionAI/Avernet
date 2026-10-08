@@ -8,6 +8,8 @@ mod registration_create;
 pub(crate) mod memory_authority;
 #[path = "memory_team_sync.rs"]
 mod team_sync;
+#[path = "memory_transfer.rs"]
+pub(crate) mod transfer;
 #[path = "memory_bot_repo.rs"]
 mod bot_repo;
 #[path = "memory_token_storage.rs"]

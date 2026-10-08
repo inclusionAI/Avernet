@@ -21,5 +21,8 @@ mod manager;
 mod reads;
 mod team_sync;
 mod team_sync_sql;
+mod transfer_create;
+mod transfer_decide;
+mod transfer_query;
 
 pub use reads::DbBotAuthorityStore;

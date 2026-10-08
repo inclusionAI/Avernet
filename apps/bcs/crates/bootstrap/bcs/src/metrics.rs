@@ -1704,6 +1704,11 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
             | bcs_service_api::types::error::AuthorityError::Conflict(_) => {
                 DeliveryErrorCode::InvalidOperation
             }
+            // A concealed/missing transfer is a business not-found branch;
+            // the transfer delivery path classifies it when it lands.
+            bcs_service_api::types::error::AuthorityError::OwnershipTransferNotFound { .. } => {
+                DeliveryErrorCode::NotFound
+            }
         },
     }
 }

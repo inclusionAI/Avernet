@@ -120,6 +120,37 @@ mod tests {
         ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
             unimplemented!("the hook never synchronizes team sources itself")
         }
+
+        async fn create_transfer(
+            &self,
+            _command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+            unimplemented!("the hook never creates ownership transfers itself")
+        }
+
+        async fn decide_transfer(
+            &self,
+            _actor_user_id: &str,
+            _transfer_id: &str,
+            _action: bcs_service_api::types::TransferAction,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+            unimplemented!("the hook never decides ownership transfers itself")
+        }
+
+        async fn get_transfer(
+            &self,
+            _viewer_user_id: &str,
+            _transfer_id: &str,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+            unimplemented!("the hook never reads ownership transfers itself")
+        }
+
+        async fn list_transfers(
+            &self,
+            _query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+            unimplemented!("the hook never lists ownership transfers itself")
+        }
     }
 
     fn clone_error(err: &ServiceError) -> ServiceError {

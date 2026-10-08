@@ -202,6 +202,14 @@ pub enum AuthorityError {
     /// already-final mutation state).
     #[error("conflict: {0}")]
     Conflict(String),
+    /// The ownership transfer record does not exist, or the authenticated
+    /// viewer/actor is not one of its two recorded parties — ONE branch by
+    /// design (404/`ownership_transfer_not_found`, spec §11.2), so an
+    /// unauthorized caller cannot learn whether a transfer id exists
+    /// (anti-enumerment). Different 403 semantics exist for callers that
+    /// ARE a recorded party but whose role forbids the requested action.
+    #[error("ownership transfer not found: '{transfer_id}'")]
+    OwnershipTransferNotFound { transfer_id: String },
 }
 
 impl AuthorityError {
@@ -214,6 +222,7 @@ impl AuthorityError {
             Self::Forbidden(_) => "forbidden",
             Self::InvalidSubject(_) => "invalid_subject",
             Self::Conflict(_) => "conflict",
+            Self::OwnershipTransferNotFound { .. } => "ownership_transfer_not_found",
         }
     }
 }
@@ -294,6 +303,9 @@ impl ServiceError {
                     | AuthorityError::InvalidSubject(reason)
                     | AuthorityError::Conflict(reason) => {
                         serde_json::json!({ "reason": reason })
+                    }
+                    AuthorityError::OwnershipTransferNotFound { transfer_id } => {
+                        serde_json::json!({ "transfer_id": transfer_id })
                     }
                 }
             }            Self::ExistNonPublicBots { bots } => {

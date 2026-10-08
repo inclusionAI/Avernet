@@ -144,6 +144,41 @@ mod tests {
                 Err(err) => Err(clone_authority_error(err)),
             }
         }
+
+        async fn create_transfer(
+            &self,
+            _command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+            *self.extra_calls.lock().unwrap() += 1;
+            unreachable!("the sync delegation never creates transfers")
+        }
+
+        async fn decide_transfer(
+            &self,
+            _actor_user_id: &str,
+            _transfer_id: &str,
+            _action: bcs_domain::TransferAction,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+            *self.extra_calls.lock().unwrap() += 1;
+            unreachable!("the sync delegation never decides transfers")
+        }
+
+        async fn get_transfer(
+            &self,
+            _viewer_user_id: &str,
+            _transfer_id: &str,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+            *self.extra_calls.lock().unwrap() += 1;
+            unreachable!("the sync delegation never reads transfers")
+        }
+
+        async fn list_transfers(
+            &self,
+            _query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+            *self.extra_calls.lock().unwrap() += 1;
+            unreachable!("the sync delegation never lists transfers")
+        }
     }
 
     #[tokio::test]

@@ -256,6 +256,42 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
     ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
         self.sync_team_inner(command).await
     }
+
+    // Task 8's ownership transfer lanes: create/decide (one Bot-serialized
+    // transaction each) plus the party-visible read/list projections. The
+    // full contracts live in the trait docs; the SQL engines live in
+    // `transfer_create.rs` / `transfer_decide.rs` / `transfer_query.rs`.
+    async fn create_transfer(
+        &self,
+        command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+        self.create_transfer_inner(command).await
+    }
+
+    async fn decide_transfer(
+        &self,
+        actor_user_id: &str,
+        transfer_id: &str,
+        action: bcs_domain::TransferAction,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+        self.decide_transfer_inner(actor_user_id, transfer_id, action)
+            .await
+    }
+
+    async fn get_transfer(
+        &self,
+        viewer_user_id: &str,
+        transfer_id: &str,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+        self.get_transfer_inner(viewer_user_id, transfer_id).await
+    }
+
+    async fn list_transfers(
+        &self,
+        query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+    ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+        self.list_transfers_inner(query).await
+    }
 }
 
 /// Owner-priority merge of two relations for one subject/bot pair.

@@ -117,6 +117,37 @@ mod tests {
         ) -> ServiceResult<bcs_service_api::types::team_manager_sync::TeamSyncReceipt> {
             unreachable!("mutate/list recording tests never synchronize teams")
         }
+
+        async fn create_transfer(
+            &self,
+            _command: bcs_service_api::types::ownership_transfer::CreateOwnershipTransfer,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CreateTransferResult> {
+            unreachable!("mutate/list recording tests never create transfers")
+        }
+
+        async fn decide_transfer(
+            &self,
+            _actor_user_id: &str,
+            _transfer_id: &str,
+            _action: bcs_domain::TransferAction,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::CommittedTransferOutcome> {
+            unreachable!("mutate/list recording tests never decide transfers")
+        }
+
+        async fn get_transfer(
+            &self,
+            _viewer_user_id: &str,
+            _transfer_id: &str,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransfer> {
+            unreachable!("mutate/list recording tests never read transfers")
+        }
+
+        async fn list_transfers(
+            &self,
+            _query: bcs_service_api::types::ownership_transfer::ListOwnershipTransfers,
+        ) -> ServiceResult<bcs_service_api::types::ownership_transfer::OwnershipTransferPage> {
+            unreachable!("mutate/list recording tests never list transfers")
+        }
     }
 
     fn clone_service_error(err: &ServiceError) -> ServiceError {

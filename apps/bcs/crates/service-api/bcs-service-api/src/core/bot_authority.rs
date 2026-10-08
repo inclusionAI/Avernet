@@ -13,9 +13,15 @@
 //! and must never reach the repo port directly.
 
 use async_trait::async_trait;
-use bcs_domain::{BotAccessRelation, ManagerMutation, ManagerMutationResult, OwnershipState};
+use bcs_domain::{
+    BotAccessRelation, ManagerMutation, ManagerMutationResult, OwnershipState, TransferAction,
+};
 
 use crate::types::error::ServiceResult;
+use crate::types::ownership_transfer::{
+    CommittedTransferOutcome, CreateOwnershipTransfer, CreateTransferResult, ListOwnershipTransfers,
+    OwnershipTransfer, OwnershipTransferPage,
+};
 use crate::types::team_manager_sync::{TeamManagerSync, TeamSyncReceipt};
 use crate::types::{AuditActor, BotManagerList};
 
@@ -98,4 +104,60 @@ pub trait BotAuthorityCoreService: Send + Sync {
     /// `Conflict`. The verified-service credential is the only accepted
     /// actor shape — the Core never substitutes a raw client actor.
     async fn sync_team(&self, command: TeamManagerSync) -> ServiceResult<TeamSyncReceipt>;
+
+    /// Initiate one ownership transfer (plan Task 8, spec §10.1). The REPO
+    /// owns the whole one-Bot-transaction contract — idempotency replay,
+    /// owner/recipient/version validation inside the transaction, slot
+    /// hygiene and the pending insert — so the Core forwards the command
+    /// VERBATIM and composes nothing on top, exactly like
+    /// [`Self::mutate_manager`]/[`Self::sync_team`]: a validation outside
+    /// the mutation transaction adds no authority, and the application
+    /// layer reaches this lane through the Core, never the repo port
+    /// directly. Same-key same-payload replays return the original receipt
+    /// with `created = false`; different payloads are a `Conflict`.
+    async fn create_transfer(
+        &self,
+        command: CreateOwnershipTransfer,
+    ) -> ServiceResult<CreateTransferResult>;
+
+    /// Decide (accept / reject / cancel) one transfer, or observe its
+    /// already-committed outcome (plan Task 8, spec §10.2/§10.3). The REPO
+    /// owns the whole one-Bot-transaction contract — party visibility,
+    /// terminal-row retry re-derivation from `terminal_reason`, the
+    /// database-clock expiry materialization, the committed
+    /// `invalidated(owner_changed)` domain result, and the all-or-nothing
+    /// accept (owner edge swap + `ownership_transfer/<id>` manager source
+    /// for the previous owner + recipient non-team source revoke + version
+    /// CAS + the accepted receipt). The Core forwards verbatim and composes
+    /// nothing: [`CommittedTransferOutcome::OwnerChanged`] /
+    /// [`CommittedTransferOutcome::Expired`] /
+    /// [`CommittedTransferOutcome::Invalidated`] are COMMITTED domain
+    /// results the application layer maps (409 semantics) — the Core must
+    /// never wrap them into errors or roll the invalidations back.
+    async fn decide_transfer(
+        &self,
+        actor_user_id: &str,
+        transfer_id: &str,
+        action: TransferAction,
+    ) -> ServiceResult<CommittedTransferOutcome>;
+
+    /// Read one transfer receipt for a recorded party (plan Task 8). The
+    /// Core forwards verbatim: the effective-expiry projection and the
+    /// party-visibility concealment contract ([§11.1/OT18]) live in the
+    /// repo reads — there is no authorization composition to add, and a
+    /// pre-read would only duplicate read-side truth.
+    async fn get_transfer(
+        &self,
+        viewer_user_id: &str,
+        transfer_id: &str,
+    ) -> ServiceResult<OwnershipTransfer>;
+
+    /// List the viewer's transfer inbox/outbox page (plan Task 8). The
+    /// Core forwards verbatim (same read-only contract as
+    /// [`Self::get_transfer`]; see the port docs for the snapshot/
+    /// effective-status/anti-enumeration rules).
+    async fn list_transfers(
+        &self,
+        query: ListOwnershipTransfers,
+    ) -> ServiceResult<OwnershipTransferPage>;
 }

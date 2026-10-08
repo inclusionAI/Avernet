@@ -207,6 +207,15 @@ impl ApplicationError {
                 err.fixed_code(),
                 message.clone(),
             ),
+            // Transfer ids are concealed from non-parties: a missing row
+            // and an unauthorized viewer share ONE 404 branch so neither
+            // can be enumerated (spec §11.2 `ownership_transfer_not_found`).
+            AuthorityError::OwnershipTransferNotFound { transfer_id } => Self::not_found(
+                err.fixed_code(),
+                format!(
+                    "ownership transfer '{transfer_id}' not found or not visible to the caller"
+                ),
+            ),
         }
     }
 
