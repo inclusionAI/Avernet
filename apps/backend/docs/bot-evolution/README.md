@@ -60,7 +60,7 @@ ADR number:
 
 - [DR-1 — Bot Genome is the unit of evolution](decisions/0001-bot-genome-is-the-unit-of-evolution.md)
 - [DR-2 — Promotion is platform-owned](decisions/0002-promotion-is-platform-owned.md)
-- [DR-3 — Bot principal for the evolution surface](decisions/0003-bot-principal-for-evolution-surface.md)
+- [DR-3 — Bot principal for the evolution surface](decisions/0003-bot-principal-for-evolution-surface.md) (**postponed**: how bots talk to the platform is decided first)
 
 ## Glossary (local to this design until it stabilises)
 

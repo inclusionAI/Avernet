@@ -2,7 +2,11 @@
 
 > 中文版：[0003-bot-principal-for-evolution-surface.zh-CN.md](0003-bot-principal-for-evolution-surface.zh-CN.md)
 
-Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
+Status: **postponed**. How bots talk to the platform will be decided first;
+this record is then revisited. Until then, OpenAPI v1 keeps refusing bot
+principals on every endpoint, including the evolution surface, and strategy
+job workers run as platform services, not bots. The text below is the
+proposal as drafted, kept as input.
 
 ## Decision
 

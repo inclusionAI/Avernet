@@ -20,7 +20,7 @@ platform trustworthy regardless of which strategy runs.
 
 | Power | Holder | Never held by |
 | --- | --- | --- |
-| Propose changes | Strategies (by submitting candidates), subject bots (inbox) | — |
+| Propose changes | Strategies (by submitting candidates); subject bots through the inbox once DR-3 is decided (postponed) | — |
 | Choose which strategies run on a bot, what they may change, and how strictly they are verified | **Owner / tenant admin** (bindings) | Strategies, bots |
 | Define what must never get worse | **Platform + owner** (regression, safety, holdout suites; platform floor) | Strategies, bots |
 | Run evaluations | **Platform** (Verification Service, with verifier-owned executors and graders) | Strategies |
@@ -88,8 +88,8 @@ Assigned per patch op; a patch takes the max of its ops.
   declared otherwise and approved.
 - Experience is **untrusted input** (prompt-injection and memory-poisoning
   vector). Strategies must treat episode text as data; patches derived from
-  it get secret/PII/URL scanning; inbox submissions from subject bots are
-  rate-limited.
+  it get secret/PII/URL scanning; inbox submissions from subject bots (postponed
+  with DR-3) would be rate-limited.
 
 ## 6. Rollout and rollback
 

@@ -90,11 +90,13 @@ Anthropic Dreams):
 - **Slow / offline loop** — a strategy run. Batch, budgeted, evaluated.
   ClawEvolve's optimize rounds, a GEPA-style prompt optimizer, a nightly
   memory consolidation ("dream") job.
-- **Fast / in-loop capture** — the subject bot notices something mid-session
-  ("this tool call pattern failed three times") and records an
-  **observation** or a **draft patch** through the CLI. These land in a
-  per-bot *proposal inbox*; they are inputs to the slow loop and never reach
-  the live bot without going through steps 5–8.
+- **Fast / in-loop capture** *(postponed with DR-3)* — the subject bot
+  notices something mid-session ("this tool call pattern failed three
+  times") and records an **observation** or a **draft patch**. These would
+  land in a per-bot *proposal inbox*; they are inputs to the slow loop and
+  never reach the live bot without going through steps 5–8. How a bot
+  talks to the platform is not decided yet, so this path is out of the
+  first iteration.
 
 ## 4. Components
 
@@ -153,10 +155,15 @@ Generalizes ClawEvolve's `official-stage-catalog.json` +
 ### C4 Run Orchestrator
 
 A durable state machine for runs (`queued → running → completed | failed |
-cancelled | budget_exhausted`). It fires bindings on their triggers, freezes
+cancelled | budget_exhausted`). Submitting a run is idempotent and returns
+a run id; status is looked up by that id. It fires bindings on their triggers, freezes
 the strategy version, params, parent, and budget, builds a
 `StrategyContext` with exactly the granted capabilities, and calls the
-strategy's single `run(ctx)` method, in process or over the Job Protocol. It
+strategy's single `run(ctx)` method, in process or over the Job Protocol.
+Every run is a leased job: if the process dies, the lease expires and the
+run is dispatched again with the same run id. The strategy persists and
+restores its own progress; the platform has no checkpoint API
+([05-strategy-sdk.md §7](05-strategy-sdk.md#7-run-lifecycle)). It
 enforces budgets and leases, and guarantees that nothing hidden reaches the
 strategy (for example, held-out cases). Generalizes ClawEvolve's `ce_tasks` /
 `ce_steps` / claim-report endpoints.
@@ -270,7 +277,7 @@ during migration.
 | Engine session export contract (`session-export/v1` → v2) | Plugin API | Evolution → Engine |
 | Verification Service API + Executor/Grader plugin protocols | Service API + Plugin API | Orchestrator, publish flow, Quality Task → Verification |
 | Experiment Ledger schema + mechanism metrics | Data contract | Evolution → selectors, meta-loop, UI |
-| Bot evolution scopes for the bot principal | Admission contract | Gateway/Backend |
+| Bot evolution scopes for the bot principal *(postponed with DR-3)* | Admission contract | Gateway/Backend |
 
 Each one needs docs + conformance tests in the same change (R1, R25).
 
@@ -301,8 +308,8 @@ schedule because the failure-rate signal crossed a threshold.
    with aggregates only.
 7. **Gate**: the verdict is `accept` and the platform floor passes; risk
    tier = T2 (persona + skill), so the candidate goes to the review queue.
-8. The strategy, having waited on the verdict, may start its next round from
-   the accepted revision.
+8. The strategy, having looked the verdict up by candidate id, may start
+   its next round from the accepted revision.
 9. Owner reviews diff + verification report in UI (or `avn evolve review`), approves.
 10. Promotion: `active → r42`, `previous → r41`; apply via Manifest; for a
     service bot, published as the next version via draft → verify → publish.
@@ -313,12 +320,12 @@ schedule because the failure-rate signal crossed a threshold.
 
 | Phase | Outcome | Usable on its own? |
 | --- | --- | --- |
-| P0 Contracts | DR-1–DR-3 accepted; genome schema, strategy port and capability catalog, job protocol, API sketch reviewed | — |
+| P0 Contracts | DR-1 and DR-2 accepted (DR-3 postponed); genome schema, strategy port and capability catalog, job protocol, API sketch reviewed | — |
 | P1 Genome Registry | Manifest gains revisions, refs, compare-and-swap, pinned resolution, apply-records-revision, going back to any earlier revision | **Yes** — versioned bots, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded as a black-box strategy: session export provider, sandboxed tune emitting patches, ClawBench graders in the Verification Service | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
 | P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of verification profiles and submission filters over H | Hardening; the verify gate is useful for service bots on its own |
-| P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
+| P5 Bot-driven + mechanism verification | Bot-driven parts postponed with DR-3 (bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox). In scope: memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
 | P6 Open-ended | Automated meta-strategy (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
 
 **First iteration scope.** The first iteration focuses on level 2:

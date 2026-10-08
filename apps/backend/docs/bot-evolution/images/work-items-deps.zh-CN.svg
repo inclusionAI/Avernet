@@ -7,7 +7,7 @@
 <path d="M 150.0 210 C 156.0 210 156.0 310 162.0 310" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 300.0 110 C 306.0 110 306.0 70 312.0 70" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 300.0 110 C 306.0 110 306.0 150 312.0 150" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
-<path d="M 300.0 310 C 306.0 310 306.0 330 312.0 330" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
+<path d="M 300.0 310 C 306.0 310 306.0 330 312.0 330" fill="none" stroke-dasharray="4 3" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 450.0 70 C 456.0 70 456.0 60 462.0 60" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 450.0 70 C 456.0 70 456.0 230 462.0 230" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 300.0 210 C 381.0 210 381.0 230 462.0 230" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
@@ -31,7 +31,6 @@
 <path d="M 750.0 90 C 906.0 90 906.0 120 1062.0 120" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 1050.0 230 C 1056.0 230 1056.0 230 1062.0 230" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 450.0 150 C 756.0 150 756.0 230 1062.0 230" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
-<path d="M 450.0 330 C 756.0 330 756.0 230 1062.0 230" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 1050.0 230 C 1056.0 230 1056.0 330 1062.0 330" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <path d="M 1200.0 120 C 1206.0 120 1206.0 120 1212.0 120" fill="none" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#ahl)"/>
 <rect x="14.0" y="190.0" width="136" height="40" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
@@ -52,9 +51,9 @@
 <rect x="314.0" y="130.0" width="136" height="40" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
 <text x="382.0" y="142.9125" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">RSI-05</text>
 <text x="382.0" y="158.1" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">记忆投影</text>
-<rect x="314.0" y="310.0" width="136" height="40" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<rect x="314.0" y="310.0" width="136" height="40" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>
 <text x="382.0" y="322.9125" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">RSI-14</text>
-<text x="382.0" y="338.09999999999997" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Bot 主体 + avn skill</text>
+<text x="382.0" y="338.09999999999997" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Bot 主体（已推迟）</text>
 <rect x="464.0" y="40.0" width="136" height="40" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
 <text x="532.0" y="52.9125" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">RSI-04</text>
 <text x="532.0" y="68.10000000000001" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Manifest v2 兼容</text>

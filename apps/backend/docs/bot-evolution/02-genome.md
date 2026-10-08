@@ -156,7 +156,7 @@ Named, movable pointers to immutable revisions, git-style:
 | `canary` | Revision on canary instances | Promotion only |
 | `draft` | Owner's in-progress manual edit | Owner (UI/API) |
 | `candidate/<run>/<n>` | Candidates in a run | Orchestrator |
-| `inbox/<id>` | Bot-submitted draft patches (fast loop) | Bot principal |
+| `inbox/<id>` | Bot-submitted draft patches (fast loop; postponed with DR-3) | Bot principal |
 
 Ref updates are compare-and-swap (`expected_revision`), closing the
 concurrent-edit gap.

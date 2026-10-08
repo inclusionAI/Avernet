@@ -41,7 +41,7 @@
 | **Strategy** | Code implementing `run(ctx)`, plus its registration record (§3) | Strategy author | New strategy version |
 | **Capability** | A named, versioned part of the context a strategy may use, from a platform-owned catalog (§4) | Platform | Platform contract change |
 | **Binding** | One entry in a bot's evolution policy: which strategy, when, what it may change, how it is verified, budget, params (§5) | Bot owner / tenant admin | Any time |
-| **Run** | One execution of a binding, with strategy version, params, parent, and budget frozen at start (§7) | Platform | — |
+| **Run** | One execution of a binding, with strategy version, params, parent, and budget frozen at start; the run id returned at submission is its only handle (§7) | Platform | — |
 | **StrategyContext** | The run's only door to the platform: always-granted parts plus the capabilities the strategy needs (§6) | Platform | — |
 | **Candidate → Verdict** | A Genome Patch the strategy submits, and the platform's verification result for it (§6) | Strategy → platform | — |
 
@@ -195,7 +195,9 @@ class StrategyContext(Protocol):
     workspace: WorkspaceFactory                     # materialise(revision) → sandbox dir; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
-    async def submit(self, c: Candidate) -> Submission: ...
+    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
+    async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
+    async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -206,14 +208,19 @@ class StrategyContext(Protocol):
 - **Candidate** = a Genome Patch against a base revision, a rationale,
   evidence ids, and optional self-reported metrics (shown to reviewers,
   never used for acceptance).
-- **Submission** = the recorded candidate revision id, plus
-  `await verdict()`. The verdict is `accept`, `reject`, or `inconclusive`,
-  with validation **aggregates** only, never per-case hidden data.
-- `submit` is idempotent: the candidate id is the content hash of the
-  patch, so a retried submission does not create a duplicate.
-- A strategy **may wait for a verdict inside a run**. Multi-round
-  strategies such as ClawEvolve build the next round on the last accepted
-  candidate. Waiting is bounded by the binding's `max_wall_clock_s`.
+- `submit` records the candidate and returns its **candidate id** at once;
+  it does not wait for verification. It is idempotent: the candidate id is
+  the content hash of the patch, so a retried submission (including one
+  repeated after a re-dispatch, §7) returns the same id and creates no
+  duplicate.
+- **Verdict** = the result of looking up a candidate id: status `pending`,
+  `accept`, `reject`, or `inconclusive`, with validation **aggregates**
+  only, never per-case hidden data. The id is the only handle; there is no
+  callback and no blocking call.
+- A multi-round strategy such as ClawEvolve that builds the next round on
+  the last accepted candidate looks the verdict up by id until it is no
+  longer `pending`. The run stays `running` while it does, and that time
+  counts against the binding's `max_wall_clock_s`.
 - What a strategy submits is its own choice (its heuristics decide what is
   worth submitting). Whether a candidate is accepted is the platform's
   choice: verification under the binding's profile, then the gate and risk
@@ -228,12 +235,36 @@ queued → running → completed | failed | cancelled | budget_exhausted
 - **Start:** the orchestrator freezes the strategy version, params, parent,
   and budget; builds the context with exactly the granted capabilities; and
   reserves the budget.
-- **During:** every model call and evaluation is charged to the budget. A
-  job-worker run holds a lease with a fencing token; a lost lease ends the
-  run as `failed`.
+- **During:** every model call and evaluation is charged to the budget.
 - **End:** submissions made before a failure, cancellation, or budget stop
   are kept and still verified. Every submission, accepted or rejected, is
   recorded in the Experiment Ledger H with the strategy version.
+
+### 7.1 Submission and status by id
+
+Starting a run (a trigger firing, or a caller through the Evolution API,
+[06-interfaces.md](06-interfaces.md)) returns a **run id**. Submission is
+idempotent, and the platform guarantees it: the caller sends an
+idempotency key, and a repeated submission with the same key returns the
+same run id instead of starting a second run. From then on, the run id is
+the only handle: callers look up status, submissions, and verdicts by it.
+The same holds one level down: a strategy's `ctx.submit` returns a
+candidate id, and verdicts are looked up by that id (§6).
+
+### 7.2 Crashes and restarts
+
+The work is split between the platform and the strategy:
+
+| Concern | Owner | How |
+| --- | --- | --- |
+| The run record, its frozen inputs, budget spent, and candidates submitted | Platform | Persisted before `submit` or run submission returns |
+| Noticing that a run's process died | Platform | Every run is a **leased job**. The worker (or the in-process host) renews the lease; when it expires (process crash, hardware failure, reboot), the job goes back to `queued` and is dispatched again with the same run id and `ctx.attempt + 1`. A fencing token rejects calls from the old holder. After `max_attempts` the run ends as `failed` |
+| The strategy's own progress (round number, search state, history) | Strategy | The strategy persists whatever it needs in **its own storage**, keyed by run id, and on re-dispatch reloads it and continues. The platform has no checkpoint API and never reads this state; its shape differs from strategy to strategy |
+
+A re-dispatched run uses the same frozen inputs and the same budget: what
+earlier attempts spent stays spent. Because `submit` is idempotent, a
+strategy that resubmits a candidate it had already submitted before the
+crash gets the same candidate id back.
 
 ## 8. Two tiers on the same port
 
@@ -261,27 +292,32 @@ Until then, ClawEvolve and other strategies plug in as black boxes.
 | `runtime.kind` | How it runs | How `ctx` reaches it |
 | --- | --- | --- |
 | `in_process` | Python package loaded by the `apps/evolution` composition root, selected by configuration (R5/R14) | Direct Python objects |
-| `job_worker` | Container image (any language), or a runner bot using the `avn` CLI | The Job Protocol below: each `ctx` call maps to one HTTP endpoint |
+| `job_worker` | Container image (any language) | The Job Protocol below: each `ctx` call maps to one HTTP endpoint |
 
 ### Job Protocol
 
 ```text
-POST /evolution/v1/jobs:claim                       {worker_id, strategy_ids[]} → job {run_id, params, parent, budget, granted}
-POST /evolution/v1/jobs/{id}/heartbeat              (lease extension; fencing token)
+POST /evolution/v1/jobs:claim                       {worker_id, strategy_ids[]} → job {run_id, attempt, params, parent, budget, granted, fencing_token}
+POST /evolution/v1/jobs/{id}/heartbeat              lease renewal; an expired lease re-queues the job (§7.2)
 GET  /evolution/v1/runs/{run}/parent                ctx.parent
 GET  /evolution/v1/runs/{run}/content/{digest}      file bytes of the parent / workspace
 GET  /evolution/v1/runs/{run}/experience/sessions   ctx.experience.sessions   (if granted)
 GET  /evolution/v1/runs/{run}/experience/feedback   ctx.experience.feedback   (if granted)
 POST /evolution/v1/runs/{run}/agents:run            ctx.agents.run            (if granted)
 POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.train        (if granted)
-POST /evolution/v1/runs/{run}/candidates            ctx.submit → {revision_id}
-GET  /evolution/v1/runs/{run}/candidates/{id}/verdict
+POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
+GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
 
 All payloads are JSON with JSON Schemas. A worker gets no credentials to
-the bot; endpoints for capabilities that were not granted return `403`.
+the bot; endpoints for capabilities that were not granted return `403`;
+calls with a stale fencing token return `409`.
+
+Workers are platform-run containers. Bots acting as workers ("runner bots")
+are postponed together with DR-3
+([decisions/0003](decisions/0003-bot-principal-for-evolution-surface.md)).
 
 ## 10. Examples
 
@@ -292,22 +328,32 @@ the context.
 ```python
 class ClawEvolveStrategy(EvolutionStrategy):
     async def run(self, ctx):
-        findings = diagnose(await ctx.experience.sessions(days=ctx.params["window_days"]))
-        await ctx.evaluate.add_train_cases(plan_bench(findings))          # platform assigns splits
-        base = ctx.parent
-        for round_no in range(ctx.params["max_rounds"]):
-            ws = await ctx.workspace.materialise(base)                   # sandbox, not the live bot
-            await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
-                                 prompt=build_tune_prompt(findings, history))
-            train = await ctx.evaluate.train(ws)                         # replaces its own bench step
-            if train.score <= history.best_train:
-                continue                                                 # its own heuristic
-            sub = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=..., evidence=findings.ids))
-            verdict = await sub.verdict()                                # the platform decides
-            history.record(round_no, train, verdict)
-            if verdict.accepted:
-                base = verdict.revision                                  # next round builds on it
-        return RunSummary(rounds=round_no + 1)
+        state = await self.store.load(ctx.run_id)                        # its own storage, not the platform's
+        if state is None:                                                # first attempt
+            findings = diagnose(await ctx.experience.sessions(days=ctx.params["window_days"]))
+            await ctx.evaluate.add_train_cases(plan_bench(findings))      # platform assigns splits
+            state = State(findings=findings, base=ctx.parent.id, next_round=0)
+            await self.store.save(ctx.run_id, state)
+        while state.next_round < ctx.params["max_rounds"]:
+            if state.pending is None:
+                ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
+                await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
+                                     prompt=build_tune_prompt(state.findings, state.history))
+                train = await ctx.evaluate.train(ws)                     # replaces its own bench step
+                if train.score > state.best_train:                       # its own heuristic
+                    state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
+                                                               evidence=state.findings.ids))
+                    await self.store.save(ctx.run_id, state)             # survives a crash from here on
+            if state.pending is not None:
+                verdict = await ctx.verdict(state.pending)               # the platform decides
+                if verdict.status == "pending":
+                    await asyncio.sleep(ctx.params["poll_s"]); continue
+                if verdict.status == "accept":
+                    state.base = verdict.revision                        # next round builds on it
+                state.pending = None
+            state.next_round += 1
+            await self.store.save(ctx.run_id, state)
+        return RunSummary(rounds=state.next_round)
 ```
 
 **Another team's optimizer in another language.** A TypeScript, GEPA-style
@@ -342,7 +388,8 @@ Conformance runs on both sides of the port:
   outside development): candidates validate against the patch schema and
   the run's `allowed_genes`; the strategy uses only granted capabilities;
   it stops on cancellation and on `BudgetExhausted`; resubmitting the same
-  candidate is idempotent.
+  candidate is idempotent; killing the strategy mid-run and dispatching the
+  same run id again neither duplicates candidates nor exceeds the budget.
 - **Capability providers** (run by the platform and engine adapters): each
   catalog entry has a contract test per engine provider, following
   `docs/arch/protocol-contract-tests.md`.
@@ -351,7 +398,7 @@ Conformance runs on both sides of the port:
 
 | Strategy | Shape | Fits the port by |
 | --- | --- | --- |
-| ClawEvolve (`apps/evolverun`) | Multi-round tune → bench → review | Black box; `agents`, `experience.sessions`, `evaluate.train`; waits on verdicts between rounds |
+| ClawEvolve (`apps/evolverun`) | Multi-round tune → bench → review | Black box; `agents`, `experience.sessions`, `evaluate.train`; looks up verdicts by candidate id between rounds |
 | `platform/consolidate-memory` ([07-default-strategy.md §5](07-default-strategy.md#5-a-second-non-clawevolve-default-memory-consolidation)) | Scheduled consolidation of observations into memory items | Black box; `experience.feedback` only; one submission per run |
 | GEPA / OPRO-style optimizers | Population search with reflective mutation | Black box; `evaluate.train` for fitness; submits the best candidates |
 | Coding-agent strategy (Meta-Harness style) | Agent edits files with full history | Black box; `workspace` + `agents` |

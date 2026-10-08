@@ -4,16 +4,26 @@
 
 > Status: DRAFT. Answers "API/SDK or CLI, and how does a bot drive RSI?"
 
+> **Postponed: bot callers.** How a bot talks to the platform is not
+> decided yet, so DR-3 is postponed
+> ([decisions/0003](decisions/0003-bot-principal-for-evolution-surface.md)).
+> Everything below that has a bot calling the platform (actors C and D,
+> the bot skill in §4, §5, and the bot scopes in §6) is kept as input for
+> that later decision, not as first-iteration scope. In the first
+> iteration the callers are pipelines and humans (actors A and B), and
+> strategies run as platform job workers, not as bots.
+
 ## 1. Recommendation in one paragraph
 
 Build **one resource API** (OpenAPI, under `/openapi/v1/evolution/*` plus the
 Genome endpoints under `/openapi/v1/bots/{id}/genome/*`), and derive
 everything else from it: **generated client SDKs** for deterministic code, a
 separate **Strategy (plugin) SDK** for people who write evolution approaches,
-and a **thin `avn` CLI** over the client SDK that serves humans, CI, *and
-bots*. Bots use the CLI through a shipped `SKILL.md`, authenticated as a
-**bot principal with narrow scopes**, exactly like `bcs-cli` today. Do not
-build a separate "bot API": a bot is just a caller with fewer permissions.
+and a **thin `avn` CLI** over the client SDK that serves humans and CI.
+If bots later call the platform (postponed, see above), the proposal is
+that they use the same CLI through a shipped `SKILL.md`, authenticated as a
+**bot principal with narrow scopes**, like `bcs-cli` today, rather than a
+separate "bot API": a bot would be just a caller with fewer permissions.
 An MCP server can be generated from the same API later if an engine needs it.
 
 ## 2. Who drives evolution — four actors
@@ -25,8 +35,8 @@ The vagueness goes away once the actors are separated. They need different
 | --- | --- | --- | --- | --- |
 | **A. Deterministic pipeline** | Nightly job, CI after a skill change, a product backend | Client SDK / REST | start run, poll, read report, approve per policy | Only within auto-promote policy configured by owner |
 | **B. Human operator** | Bot owner, tenant admin, researcher | UI, CLI | everything, review queue, rollback | **Yes** (review) |
-| **C. Runner bot** (bot *as the optimizer*) | ClawEvolve tune agent, a "coach" bot evolving other bots | Job Protocol via CLI + skill | claim job, read input, materialise sandbox, submit patch / scores | No |
-| **D. Subject bot** (bot *improving itself*) | Support bot noticing it keeps failing refunds | CLI + skill | read own active genome, record observation, submit draft patch to inbox, request a run | **Never** |
+| **C. Runner bot** (bot *as the optimizer*) *(postponed)* | ClawEvolve tune agent, a "coach" bot evolving other bots | Job Protocol via CLI + skill | claim job, read input, materialise sandbox, submit patch / scores | No |
+| **D. Subject bot** (bot *improving itself*) *(postponed)* | Support bot noticing it keeps failing refunds | CLI + skill | read own active genome, record observation, submit draft patch to inbox, request a run | **Never** |
 
 Key insight: "RSI driven by a bot" is two different things — a bot doing the
 optimization work for a run (C), and a bot asking to be improved (D). Both are
@@ -53,6 +63,7 @@ PUT    /bots/{bot}/genome/content                  bytes → {digest}
 GET    /evolution/strategies                       ?engine=&gene=
 POST   /evolution/strategies                       register / new version
 POST   /bots/{bot}/evolution/runs                  {strategy, version?, params?, budget?, trigger}
+                                                   Idempotency-Key header → 202 {run_id}
 GET    /bots/{bot}/evolution/runs/{run}            status, iterations, budget used
 GET    /bots/{bot}/evolution/runs/{run}/candidates
 POST   /bots/{bot}/evolution/runs/{run}:cancel
@@ -62,11 +73,11 @@ GET    /bots/{bot}/evolution/policy                enabled strategies, schedules
 PUT    /bots/{bot}/evolution/policy
 
 # Experience (apps/evolution)
-POST   /bots/{bot}/experience/observations         fast-loop note from subject bot
+POST   /bots/{bot}/experience/observations         fast-loop note from subject bot (postponed)
 POST   /bots/{bot}/experience/feedback             rating / correction / outcome
 GET    /bots/{bot}/experience/episodes?revision=&since=&outcome=
 
-# Inbox (fast loop)
+# Inbox (fast loop; postponed with DR-3)
 POST   /bots/{bot}/evolution/inbox                 draft patch from subject bot
 GET    /bots/{bot}/evolution/inbox
 
@@ -74,11 +85,16 @@ GET    /bots/{bot}/evolution/inbox
 GET    /evolution/suites/{suite}                   cases visible per caller role
 POST   /bots/{bot}/evolution/evaluations           evaluate a revision on a suite (operator only)
 
-# Jobs (runner protocol) — see 05-strategy-sdk.md §5
+# Jobs (Job Protocol for strategy workers) — see 05-strategy-sdk.md §9
 ```
 
-Async pattern: POST returns `202` + resource; clients poll or subscribe
-(webhook / SSE). The CLI hides this with `--wait`.
+Async pattern: starting a run returns `202` with a **run id**. Submission
+is idempotent and the platform guarantees it: a repeated POST with the same
+`Idempotency-Key` returns the same run id and starts nothing new. From then
+on the run id is the only handle; callers look up status with
+`GET …/runs/{run}`. No callback channel is needed. The CLI's `--wait` only
+repeats that lookup. A run survives crashes and restarts under the same id
+([05-strategy-sdk.md §7](05-strategy-sdk.md#7-run-lifecycle)).
 
 ## 4. CLI design (`avn`)
 
@@ -93,12 +109,12 @@ Requirements that make a CLI good for both humans and agents:
   operations require `--yes`; `--dry-run` everywhere it makes sense.
 - **Self-describing**: `avn <cmd> --help --output json` emits the command
   schema, so an agent can discover arguments without a doc dump.
-- **Auth from environment like `bcs-cli`**: session file under
-  `$BOT_DATA_DIR` for bots; OAuth device flow / token for humans; explicit
-  precedence documented.
-- **Deliverable to every engine**: single static binary (Rust, like
-  `bcs-cli`) or Python zipapp; delivered to bots via Manifest `cli_tools`,
-  which already works on teclaw.
+- **Auth from environment like `bcs-cli`**: OAuth device flow / token for
+  humans and CI; explicit precedence documented. (A session file under
+  `$BOT_DATA_DIR` for bots is postponed with DR-3.)
+- **Deliverable to every engine** *(when bots call it; postponed)*: single
+  static binary (Rust, like `bcs-cli`) or Python zipapp; delivered to bots
+  via Manifest `cli_tools`, which already works on teclaw.
 
 Command tree (illustrative):
 
@@ -106,14 +122,14 @@ Command tree (illustrative):
 avn genome  show|log|diff|refs|promote|content get|put|patch apply --dry-run
 avn evolve  run start|status|cancel|report  ·  strategies list|show  ·  policy get|set
 avn evolve  review list|show|approve|reject
-avn evolve  inbox submit|list                     # subject bot
-avn evolve  observe "<note>" --episode <id>       # subject bot
+avn evolve  inbox submit|list                     # subject bot (postponed)
+avn evolve  observe "<note>" --episode <id>       # subject bot (postponed)
 avn experience episodes|feedback
-avn job     claim|input|heartbeat|upload|complete|fail   # runner bot / worker
+avn job     claim|input|heartbeat|upload|complete|fail   # strategy job workers
 avn strategy dev|test|publish                     # strategy authors (wraps strategy SDK harness)
 ```
 
-### The bot skill
+### The bot skill *(postponed with DR-3)*
 
 Ship `skills/avernet-evolution/SKILL.md` (agentskills.io format) that tells a
 bot *when* and *how* to use the subset of commands it is allowed:
@@ -127,7 +143,7 @@ bot *when* and *how* to use the subset of commands it is allowed:
 Progressive disclosure keeps this cheap in context: the description is
 always loaded; the body only when relevant.
 
-## 5. Why CLI (+skill) rather than MCP or a native tool, for bots
+## 5. Why CLI (+skill) rather than MCP or a native tool, for bots *(postponed with DR-3)*
 
 | Option | For | Against |
 | --- | --- | --- |
@@ -139,8 +155,12 @@ Generate an MCP adapter from OpenAPI later (P6) if an engine lacks `exec`.
 
 ## 6. Authentication and authorization
 
-OpenAPI v1 refuses `bot` principals today, deliberately. DR-3 proposes
-re-admitting bots **only** for the evolution surface with explicit scopes:
+OpenAPI v1 refuses `bot` principals today, deliberately, and the first
+iteration keeps it that way. Callers are users, tenant admins, and
+pipelines with their existing credentials; strategy job workers are
+platform services, not bots. The scope table below is DR-3's proposal for
+admitting bots **only** to the evolution surface. It is postponed until the
+way bots talk to the platform is decided:
 
 | Scope | Granted to | Allows |
 | --- | --- | --- |
@@ -163,8 +183,10 @@ the bot id in the credential, never to a request parameter.
 from avernet_evolution import Client
 
 c = Client.from_env()
-run = c.runs.start(bot="bot_123", strategy="clawevolve/bot-evolution", budget={"max_usd": 10})
-run = run.wait(timeout="2h")
+run_id = c.runs.start(bot="bot_123", strategy="clawevolve/bot-evolution",
+                      budget={"max_usd": 10}, idempotency_key="nightly-2026-10-08")
+# safe to repeat: the same key returns the same run_id
+run = c.runs.get(run_id)            # status lookup by id; repeat until run.status is terminal
 for cand in run.candidates(accepted=True):
     report = cand.report()
     if report.risk_tier <= policy.auto_tier and report.gate.passed:
@@ -179,7 +201,6 @@ Same calls the CLI makes; same calls the UI backend makes.
   (No general Avernet CLI exists today; `bcs-cli` is BCS-scoped.)
   Recommendation: new `avn` in Rust following `bcs-cli` conventions, with
   room for other platform commands later.
-- Q2: Should subject bots be allowed `run:request:self` by default? Recommend
-  off by default, on per owner policy with a daily budget.
-- Q3: Webhook vs SSE for run events — reuse whatever the gateway already
-  supports for other async resources.
+- Q2 *(postponed with DR-3)*: Should subject bots be allowed
+  `run:request:self` by default? Recommend off by default, on per owner
+  policy with a daily budget.

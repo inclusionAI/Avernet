@@ -28,12 +28,13 @@ the rest.
 ### RSI-01 Accept or revise the three draft decisions
 - **Module**: arch
 - **Goal**: Owners decide DR-1 (genome = unit of evolution, built on
-  Manifest), DR-2 (promotion is platform-owned), DR-3 (bot principal for the
-  evolution surface). Also decide open decision D-1 (control-plane module
+  Manifest) and DR-2 (promotion is platform-owned). DR-3 (bot principal for
+  the evolution surface) is postponed until the way bots talk to the
+  platform is decided. Also decide open decision D-1 (control-plane module
   placement) from [01-design.md §5](01-design.md#5-ownership-and-module-placement).
 - **Read first**: [01-design.md](01-design.md), [02-genome.md](02-genome.md),
   [08-governance.md](08-governance.md), [06-interfaces.md §6](06-interfaces.md#6-authentication-and-authorization).
-- **Deliverable**: DR-1..DR-3 accepted (promoted to `docs/adr/` with the next
+- **Deliverable**: DR-1 and DR-2 accepted (promoted to `docs/adr/` with the next
   free numbers) or revised; D-1 recorded.
 - **Done when**: each ADR has an owner, and the engine owners have
   explicitly signed off on the memory consequence in DR-1.
@@ -56,12 +57,16 @@ the rest.
 ### RSI-06 Strategy port, capability catalog, and Job Protocol
 - **Module**: evolution (new), arch
 - **Goal**: Define the strategy port (`run(ctx)`), `StrategyContext`,
-  Candidate / Submission / Verdict, the registration record schema, the
+  Candidate / Verdict (submission returns a candidate id; verdicts are
+  looked up by id), the registration record schema, the
   first capability catalog (`experience.sessions@1`,
   `experience.feedback@1`, `agents@1`, `evaluate.train@1`) with per-engine
   provider contracts, the evolution policy (binding) schema and binding
-  checks, run lifecycle and failure semantics (R11), isolation (R13), and
-  the Job Protocol mapping of every `ctx` call.
+  checks, run lifecycle and failure semantics (R11): idempotent run
+  submission returning a run id, leased jobs re-dispatched after a crash
+  with the same run id, strategy-owned progress persistence (no platform
+  checkpoint API); isolation (R13); and the Job Protocol mapping of every
+  `ctx` call.
 - **Read first**: [05-strategy-sdk.md](05-strategy-sdk.md); ClawEvolve
   `official-stage-catalog.json`, `routes/internal/evolve.ts`;
   `docs/arch/protocol-contract-tests.md`.
@@ -114,21 +119,25 @@ the rest.
 ### RSI-08 Evolution service skeleton
 - **Module**: evolution (new `apps/evolution`, per D-1)
 - **Goal**: Service scaffold following Backend DI/plugin conventions; Run
-  Orchestrator state machine with budgets; Strategy Registry; Job Protocol
+  Orchestrator state machine with budgets, idempotent run submission
+  (idempotency key → run id), and job leases with re-dispatch on expiry; Strategy Registry; Job Protocol
   endpoints; evolution policy (bindings) with binding checks and triggers;
   local profile (SQLite, in-process strategies) for singlebox; a reference
   strategy `platform/manual-patch` (submits a supplied patch; verified with
   deterministic checks) to exercise the loop end-to-end.
 - **Depends on**: RSI-06, RSI-07, RSI-03.
 - **Done when**: singlebox story: start run with reference strategy →
-  candidate recorded → gate → promoted → bot updated → rollback.
+  candidate recorded → gate → promoted → bot updated → rollback; repeating
+  the start with the same idempotency key returns the same run id; killing
+  the worker mid-run leads to re-dispatch under the same run id.
 
 ### RSI-09 Strategy SDK and conformance kit
 - **Module**: evolution
 - **Goal**: Python strategy SDK: `EvolutionStrategy` base, typed models,
   in-process and Job-Protocol `StrategyContext` implementations,
   `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` with an
-  OpenClaw provider, local harness with a fake platform, strategy
+  OpenClaw provider, local harness with a fake platform (able to kill and
+  re-dispatch a run, to test a strategy's own recovery), strategy
   conformance kit, `avn strategy dev|test|publish`.
 - **Depends on**: RSI-06, RSI-08.
 - **Done when**: an example third-party strategy (e.g. OPRO-style persona
@@ -180,7 +189,9 @@ the rest.
   shadow-record revisions → black-box adapter strategy → native strategy.
   Tune works on a sandbox from `ctx.workspace`; its accept rule becomes an
   internal submission filter while acceptance moves to platform
-  verification; pack/restore removed from the flow; decide D-2, D-3.
+  verification; pack/restore removed from the flow; ClawEvolve persists
+  its round state in its own store keyed by run id (today's `ce_tasks` /
+  `ce_steps` can serve) so a re-dispatched run continues; decide D-2, D-3.
 - **Depends on**: RSI-09, RSI-10, RSI-11, RSI-12.
 - **Done when**: `clawevolve/bot-evolution` produces the same or better
   results as legacy AgentEvolve on its own bench, through the platform, without
@@ -242,7 +253,9 @@ the rest.
 
 ## P5 — Bot-driven evolution
 
-### RSI-14 Bot principal scopes and `avn` bot skill
+### RSI-14 Bot principal scopes and `avn` bot skill *(postponed)*
+- **Status**: postponed with DR-3 until the way bots talk to the platform
+  is decided. Do not pick up.
 - **Module**: gateway, backend, evolution, (bcs-cli conventions)
 - **Goal**: Implement DR-3: bot principal admission for evolution
   endpoints only, scopes from interfaces §6 enforced via authorization hook;
@@ -266,7 +279,9 @@ the rest.
 - **Goal**: `platform/consolidate-memory` per
   [07-default-strategy.md §5](07-default-strategy.md#5-a-second-non-clawevolve-default-memory-consolidation)
   — second, non-ClawEvolve default proving pluggability (R19).
-- **Depends on**: RSI-05 (or interim), RSI-13, RSI-14.
+- **Depends on**: RSI-05 (or interim), RSI-13. Observations recorded by
+  bots wait for RSI-14 (postponed); until then the strategy uses feedback
+  and episodes.
 
 ## P6 — Open-ended
 
