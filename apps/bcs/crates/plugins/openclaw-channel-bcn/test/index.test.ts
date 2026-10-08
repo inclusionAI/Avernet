@@ -716,6 +716,7 @@ describe('openclaw-channel-bcn', () => {
     }> = [];
     const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
     let rejectLoad: ((error: Error) => void) | undefined;
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
     const client = {
       sendResponse(
         id: string,
@@ -737,7 +738,14 @@ describe('openclaw-channel-bcn', () => {
           });
         },
       },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => { agentEventHandler = undefined; };
+        },
+      },
     } as any);
+    initAgentEventsSubscription();
     const account = {
       accountId: 'default',
       enabled: true,
@@ -775,12 +783,28 @@ describe('openclaw-channel-bcn', () => {
     }, client as any);
     assert.equal(responses.at(-1)?.error?.code, 'SCOPE_MISMATCH');
 
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'assistant', ts: 1,
+      data: { text: '工具前', delta: '工具前' },
+    });
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'tool', ts: 2,
+      data: { phase: 'start', toolCallId: 'tool-1', name: 'read', args: {} },
+    });
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'assistant', ts: 3,
+      data: { text: '工具前工具后未完成', delta: '工具后未完成' },
+    });
+
     await handleChatAbort({
       type: 'req', id: 'abort-1', method: 'chat.abort',
       params: { session_key: 'session-1', run_id: 'run-exact' },
     }, client as any);
     assert.deepEqual(responses.at(-1)?.payload?.aborted_run_ids, [ 'run-exact' ]);
-    assert.equal(events.filter(event => event.payload.state === 'aborted').length, 1);
+    assert.deepEqual(
+      events.filter(event => event.event === 'chat').map(event => [ event.payload.state, event.payload.content ]),
+      [[ 'delta', '工具前' ], [ 'delta', '工具后未完成' ], [ 'aborted', undefined ]],
+    );
 
     await handleChatAbort({
       type: 'req', id: 'abort-repeat', method: 'chat.abort',
@@ -797,6 +821,8 @@ describe('openclaw-channel-bcn', () => {
     rejectLoad?.(new Error('stop after abort'));
     await send;
     assert.equal(events.filter(event => event.payload.state === 'aborted').length, 1);
+    assert.equal(events.filter(event => event.event === 'chat').length, 3);
+    cleanupAgentEventsSubscription();
     abortAllStreams();
   });
 
