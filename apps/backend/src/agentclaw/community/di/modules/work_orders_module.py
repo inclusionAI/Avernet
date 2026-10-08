@@ -14,6 +14,9 @@ from agentclaw.community.core.repository.implementations.work_orders import (
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
+)
 from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderDecisionCallbackDispatcher,
 )
@@ -70,7 +73,7 @@ class WorkOrdersModule(Module):
     @provider
     @inject
     def skill_collaborator_approval_handler(
-        self, repository: WorkOrderRepositoryProtocol
+        self, repository: SkillEditorRequestRepositoryProtocol
     ) -> SkillCollaboratorApprovalHandlerProtocol:
         """Assemble approval policy with environment at the DI boundary."""
         return SkillCollaboratorApprovalHandler(repository, get_current_env)

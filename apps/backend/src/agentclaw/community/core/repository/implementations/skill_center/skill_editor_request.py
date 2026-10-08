@@ -48,6 +48,10 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
+_AUTO_PROCESSING_STATUS = "PROCESSING"  # WorkOrder AUTO claim; owned by PR #2463.
+_SYSTEM_REVIEWER_USER_ID = "SYSTEM"
+
+
 class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
     """Skill-owned integration UoW for editor requests and Work Orders."""
 
@@ -83,6 +87,11 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             if binding is None:
                 raise WorkOrderNotFoundError("Space Skill not found")
+            if binding.auto_approve_editor_requests:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "automatic approval is unavailable until the trusted "
+                    "WorkOrder integration is installed"
+                )
             space = (
                 db.query(SpaceModel)
                 .filter(
@@ -346,7 +355,11 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                     .with_for_update()
                     .one_or_none()
                 )
-                if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                if (
+                    grant is not None
+                    and grant.role == "OWNER"
+                    and grant.status == "ACTIVE"
+                ):
                     raise WorkOrderSkillApplicantAlreadyEditorError(
                         "applicant is now the Skill Owner"
                     )
@@ -403,6 +416,211 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 decision=WorkOrderDecision(target_status.value),
                 reviewer_user_id=reviewer_user_id,
                 review_remark=review_remark,
+                reviewed_at=reviewed_at,
+            )
+
+    def approve_auto_skill_editor_request(
+        self, *, work_order_id: int, env: str
+    ) -> WorkOrderReviewResult:
+        """Finish a claimed AUTO order and its Skill effects in one transaction.
+
+        The WorkOrder dispatcher must authorize AUTO and claim the order before
+        invoking this internal seam. No public request path calls it yet.
+        """
+        with self._db.transactional_orm_session() as db:
+            order = (
+                db.query(WorkOrderModel)
+                .filter(
+                    WorkOrderModel.id == work_order_id,
+                    WorkOrderModel.biz_type
+                    == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    WorkOrderModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderNotFoundError("Skill editor work order not found")
+            if (
+                order.status == WorkOrderStatus.APPROVED.value
+                and order.reviewer_user_id == _SYSTEM_REVIEWER_USER_ID
+                and order.reviewed_at is not None
+            ):
+                return WorkOrderReviewResult(
+                    work_order_id=work_order_id,
+                    status=WorkOrderStatus.APPROVED,
+                    reviewer_user_id=_SYSTEM_REVIEWER_USER_ID,
+                    review_remark=order.review_remark,
+                    reviewed_at=order.reviewed_at,
+                )
+            if order.status != _AUTO_PROCESSING_STATUS:
+                raise WorkOrderAlreadyProcessedError(
+                    "AUTO Skill order must be claimed before approval"
+                )
+            if not order.applicant_user_id:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "Skill editor applicant is required"
+                )
+            try:
+                data = json.loads(order.biz_data or "{}")
+                space_id = int(data["space_id"])
+                skill_id = int(data["skill_id"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "work-order Skill identity is invalid"
+                ) from exc
+            if str(skill_id) != order.biz_id:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "work-order Skill identity is inconsistent"
+                )
+            if (
+                db.query(WorkOrderApproverModel.id)
+                .filter(
+                    WorkOrderApproverModel.work_order_id == work_order_id,
+                    WorkOrderApproverModel.env == env,
+                )
+                .first()
+                is not None
+            ):
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "AUTO Skill order must not have a human approver"
+                )
+            binding = (
+                db.query(SkillSpaceBinding)
+                .filter(
+                    SkillSpaceBinding.space_id == space_id,
+                    SkillSpaceBinding.skill_id == skill_id,
+                    SkillSpaceBinding.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            skill = (
+                db.query(Skill)
+                .filter(Skill.id == skill_id, Skill.env == env)
+                .with_for_update()
+                .one_or_none()
+            )
+            space = (
+                db.query(SpaceModel.id)
+                .filter(
+                    SpaceModel.id == space_id,
+                    SpaceModel.space_type == SpaceType.TEAM.value,
+                    SpaceModel.env == env,
+                    SpaceModel.deleted_at.is_(None),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if binding is None or skill is None or space is None:
+                raise WorkOrderNotFoundError("work-order Space Skill not found")
+            if skill.offline_at is not None:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "offline Skill does not accept editor approvals"
+                )
+            if not binding.auto_approve_editor_requests:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "automatic Skill editor approval is disabled"
+                )
+            owner = (
+                db.query(SkillGrant.id)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.role == "OWNER",
+                    SkillGrant.status == "ACTIVE",
+                    SkillGrant.owner_slot == 1,
+                    SkillGrant.env == env,
+                )
+                .with_for_update()
+                .first()
+            )
+            if owner is None:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "Skill has no active Owner"
+                )
+            member = (
+                db.query(SpaceMemberModel.id)
+                .filter(
+                    SpaceMemberModel.space_id == space_id,
+                    SpaceMemberModel.user_id == order.applicant_user_id,
+                    SpaceMemberModel.status == "ACTIVE",
+                    SpaceMemberModel.env == env,
+                )
+                .with_for_update()
+                .first()
+            )
+            if member is None:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "applicant is no longer an active Team Space member"
+                )
+            grant = (
+                db.query(SkillGrant)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == order.applicant_user_id,
+                    SkillGrant.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                raise WorkOrderSkillApplicantAlreadyEditorError(
+                    "applicant is now the Skill Owner"
+                )
+            if grant is None:
+                db.add(
+                    SkillGrant(
+                        skill_id=skill_id,
+                        user_id=order.applicant_user_id,
+                        role="MANAGER",
+                        status="ACTIVE",
+                        owner_slot=None,
+                        granted_by=_SYSTEM_REVIEWER_USER_ID,
+                        grant_reason=order.apply_reason,
+                        env=env,
+                    )
+                )
+            elif grant.status != "ACTIVE":
+                grant.role = "MANAGER"
+                grant.status = "ACTIVE"
+                grant.owner_slot = None
+                grant.granted_by = _SYSTEM_REVIEWER_USER_ID
+                grant.grant_reason = order.apply_reason
+                grant.revoked_at = None
+                grant.revoked_by = None
+            db.flush()  # Grant writes must succeed before the success transition.
+
+            reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            order.status = WorkOrderStatus.APPROVED.value
+            order.reviewer_user_id = _SYSTEM_REVIEWER_USER_ID
+            order.review_remark = None
+            order.reviewed_at = reviewed_at
+            order.gmt_modified = reviewed_at
+            content = WorkOrderMessageContent.SKILL_COLLABORATOR_APPROVED.value.format(
+                skill_name=skill.name
+            )
+            db.add(
+                WorkOrderNotificationModel(
+                    work_order_id=work_order_id,
+                    recipient_user_id=order.applicant_user_id,
+                    notification_category=NotificationCategory.NOTICE.value,
+                    event_type=WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
+                    biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    biz_id=str(skill_id),
+                    title=notification_title_for(
+                        WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
+                        WorkOrderMessageTitle.SKILL_COLLABORATOR_APPROVED.value,
+                    ),
+                    content=json.dumps({"text": content}, ensure_ascii=False),
+                    env=env,
+                )
+            )
+            db.flush()
+            return WorkOrderReviewResult(
+                work_order_id=work_order_id,
+                status=WorkOrderStatus.APPROVED,
+                reviewer_user_id=_SYSTEM_REVIEWER_USER_ID,
+                review_remark=None,
                 reviewed_at=reviewed_at,
             )
 
@@ -474,4 +692,6 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 synchronize_session=False,
             )
         session.flush()
+
+
 __all__ = ["SkillEditorRequestRepository"]

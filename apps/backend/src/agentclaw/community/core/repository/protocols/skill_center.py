@@ -10,19 +10,17 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable
-from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.materialization_contract import (
         MaterializingSkillVersion,
         PublishedMaterializedSkillVersion,
     )
-    from agentclaw.community.core.work_orders.models import (
-        WorkOrderNotificationDraft,
-        WorkOrderRecord,
-        WorkOrderReviewResult,
-        WorkOrderStatus,
-    )
+
+from .skill_editor_request import (
+    SkillEditorRequestRepositoryProtocol as SkillEditorRequestRepositoryProtocol,
+)
 
 from .skill_center_types import (
     SpaceCreateData,
@@ -154,46 +152,6 @@ class SpaceSkillReadRepository(Protocol):
     def get_skill(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> SpaceSkillReadRecord: ...
-
-
-@runtime_checkable
-class SkillEditorRequestRepositoryProtocol(Protocol):
-    """Atomic Skill-owned seam spanning editor requests and their Work Orders."""
-
-    @abstractmethod
-    def create_skill_editor_request(
-        self,
-        *,
-        space_id: int,
-        skill_id: int,
-        applicant_user_id: str,
-        applicant_name: str,
-        apply_reason: str,
-        env: str,
-    ) -> WorkOrderRecord: ...
-
-    @abstractmethod
-    def review_skill_editor_request(
-        self,
-        *,
-        work_order_id: int,
-        reviewer_user_id: str,
-        review_remark: str | None,
-        target_status: WorkOrderStatus,
-        notification: WorkOrderNotificationDraft,
-        env: str,
-    ) -> WorkOrderReviewResult: ...
-
-    @staticmethod
-    @abstractmethod
-    def reroute_pending_reviewer(
-        session: Any,
-        *,
-        skill_id: int,
-        previous_owner_user_id: str,
-        new_owner_user_id: str,
-        env: str,
-    ) -> None: ...
 
 
 @runtime_checkable
