@@ -50,6 +50,7 @@ from agentclaw.community.di.modules.desktop_skill_recovery_config_module import 
 )
 from agentclaw.community.di.modules.devices_module import DevicesModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
+from agentclaw.community.di.modules.feedback_module import FeedbackModule
 from agentclaw.community.di.modules.forum_module import ForumModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
@@ -193,6 +194,7 @@ def build_injector(
         HttpClientModule(),
         EconomyGovernanceModule(),
         ForumModule(),
+        FeedbackModule(),
         TaskDiscoveryModule(),
     ]
 
