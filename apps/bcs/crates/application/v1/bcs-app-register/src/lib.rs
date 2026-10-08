@@ -230,8 +230,12 @@ impl RegisterService for RegisterServiceImpl {
         // consumes the plan-Task-5 first-ownership initialization. A required
         // persistence write failure is a registration failure — the former
         // warn-and-return-success branch is intentionally removed (plan
-        // Task 6: no 2xx "fix later").
-        self.bot_onboarding
+        // Task 6: no 2xx "fix later"). The removed branch was this lane's
+        // only diagnostic, so the failure is logged here (bot_uuid + the
+        // unsanitized service error) BEFORE the sanitized client-facing
+        // mapping: a production 500 must keep a server-side trace.
+        let onboarding_result = self
+            .bot_onboarding
             .admin_onboard_bot(AdminBotOnboardCommand {
                 bot_uuid: connect.bot_uuid.clone(),
                 name: Some(bot_name.to_string()),
@@ -245,8 +249,15 @@ impl RegisterService for RegisterServiceImpl {
                     nick_name: None,
                 }),
             })
-            .await
-            .map_err(|_| ApplicationError::internal("bot onboard failed"))?;
+            .await;
+        if let Err(error) = &onboarding_result {
+            tracing::error!(
+                bot_uuid = %connect.bot_uuid,
+                error = %error,
+                "register: required onboarding write failed; failing registration"
+            );
+        }
+        onboarding_result.map_err(|_| ApplicationError::internal("bot onboard failed"))?;
         Ok(BotRegistration {
             bot_name: bot_name.to_string(),
             bot_uuid: connect.bot_uuid,
