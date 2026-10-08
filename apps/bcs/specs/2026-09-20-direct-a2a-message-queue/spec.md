@@ -81,7 +81,7 @@ CREATE TABLE bcs_session_registry (
 
 客户端不能提供或修改 `session_type`。`group` 行的 `current_msg_seq` 必须为 null，Group 消息序号
 继续由 `bcs_group_sessions.current_msg_seq` 管理；`direct_a2a` 行必须从 0 开始且非 null，由
-Direct admission 原子递增。未知类型或不符合该约束的行会阻止 Direct A2A 队列 readiness。
+Direct admission 原子递增。未知类型或不符合该约束的行在实际请求读取时返回错误，不作为配置启用前置条件。
 
 registry 与现有业务表的职责如下：
 
@@ -177,21 +177,16 @@ MySQL/OceanBase 与 SQLite 的下一个可用迁移必须包含：
 回填遇到同一 `(env, session_id)` 的不同类型数据时迁移失败，不选择覆盖方。迁移前没有
 Direct A2A registry 数据，因此正常升级只产生 `group` 行。
 
-### 4.2 启动一致性检查
+### 4.2 部署一致性核验
 
-代码声明 Direct A2A ready 前，启动和 master 接管必须验证：
+注册表回填、类型/序号状态、环境唯一索引及 ChatRun 关联列由部署流程核验。
+启动、master 接管、策略同步和 Direct A2A 策略启用不执行这些数据库预检，
+也不因这些检查拒绝发布或激活策略。策略参数、权限、版本 CAS 和 scheduler 可用性
+校验保持不变。
 
-- 每个 Group Session 有且仅有一个 `group` registry 行，且 `current_msg_seq IS NULL`。
-- 每个 `direct_a2a` registry 行的 `current_msg_seq` 非 null 且不小于 0。
-- registry 类型与 `bcs_group_sessions` 的存在关系一致。
-- 已删除 Group Session 的 `group` registry 行保留为类型占位；`direct_a2a` registry 行不能有同 ID Group Session。
-- Message/Session 唯一索引已包含 env。
-
-校验失败时：
-
-- Direct A2A managed admission fail closed。
-- `flow_enabled.direct_a2a=true` 的策略不能发布或激活。
-- 已有 Group/System/Task 队列不因 Direct A2A readiness 失败而被改写。
+实际 admission、序号分配及 ChatRun 读写仍校验当前请求并传播数据库错误。
+配置启用成功不表示缺失的表、字段或回填已自动修复；未回填的历史 Group Session
+无法仅凭 registry 保证跨类型互斥，部署仍应完成迁移。
 
 ### 4.3 分阶段发布
 
@@ -579,8 +574,8 @@ wait_reason 仍来自公共 scheduler，delivery 状态指标自动包含 `flow_
 | bcs-message-store | Direct sequence allocation、empty-group admission、run ID 注入、迁移与 conformance |
 | bcs-message-flow | admission、Direct preparation、terminal、cancel、drain guard、ChatRun reconcile |
 | bcs-chat-run-store | 新关联列、CAS/scan/recovery |
-| bcs-config-api | manages_direct_a2a、scheduler/readiness 校验 |
-| bootstrap/bcs | wiring、启动一致性检查、ready flow、scheduler preparation dispatch |
+| bcs-config-api | manages_direct_a2a、scheduler 校验 |
+| bootstrap/bcs | wiring、ready flow、scheduler preparation dispatch |
 | bcs-protocol / bcs-http | chat v3 optional delivery summary、409 映射 |
 | bcs-cli | detach、wait-until、status/cancel、结构化输出 |
 | docs | message-delivery API、配置示例、回滚和 Direct A2A ready 状态 |
@@ -595,7 +590,7 @@ wait_reason 仍来自公共 scheduler，delivery 状态指标自动包含 `flow_
 - Group 与 Direct 并发认领时恰好一个成功，另一个得到 `session_type_conflict`。
 - 同类型并发 ensure 幂等返回同一 Session。
 - 不同 env 可以使用相同 Session ID。
-- 现有 Group Session 全量回填，缺失/错配会阻止 Direct readiness。
+- 现有 Group Session 全量回填由部署流程负责，缺失/错配不再阻止配置启用。
 - Group Session 新建、回滚和失败事务不会留下 registry/session 半提交。
 - Direct ensure 后 admission 失败允许留下 `current_msg_seq=0` registry 行，不产生 message/delivery。
 
@@ -717,8 +712,9 @@ wait_reason 仍来自公共 scheduler，delivery 状态指标自动包含 `flow_
   一次 delivery ID batch 查询，只有需要修复的记录才执行 CAS，不逐 run 查询 delivery。
   满批返回正文的内存上界约 8 MiB。扫描失败向上返回，由下一个 cleanup tick 重试。
   LIMIT 约束返回行数；历史终态过滤的实际扫描量仍需真实 MySQL 执行计划和负载验证。
-- 启动、master 接管和 Direct policy 启用检查 registry 类型/序号、Group 认领、环境唯一索引以及
-  ChatRun 关联列；旧的 Group registry 占位允许保留。
+- 启动、master 接管、策略同步和 Direct policy 启用不再执行注册表就绪预检（类型/序号、Group
+  认领、环境唯一索引和 ChatRun 关联列）。迁移与回填由部署流程负责；实际请求仍执行
+  Session 类型/序号校验并传播数据库错误。配置成功不代表数据库已就绪。
 - 存储短暂故障只重试稳定的 checkpoint 或 delivery CAS，沿用 100ms 至 5 秒的指数退避；
   不重放网络 send。测试覆盖故障注入后 final 落盘及新缓存实例读取。
 

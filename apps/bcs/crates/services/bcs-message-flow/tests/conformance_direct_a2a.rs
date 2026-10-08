@@ -58,7 +58,7 @@ impl Harness {
             (sessions, messages.clone(), messages, Arc::new(bcs_chat_run_store::MemoryChatRunRepo::new()))
         };
         let session_service = Arc::new(bcs_session::SessionManagementServiceImpl::new(sessions.clone(), Arc::new(bcs_group_store::MemoryGroupRepo::new())));
-        let policy = Arc::new(LiveDeliveryPolicy::new(deliveries.clone(), Default::default()).with_session_registry(Some(session_service.clone())));
+        let policy = Arc::new(LiveDeliveryPolicy::new(deliveries.clone(), Default::default()));
         {
             let mut snapshot = policy.snapshot.write().await;
             snapshot.policy.flow_enabled.direct_a2a = true;
