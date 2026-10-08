@@ -81,7 +81,7 @@ class TaskSearch:
                 self.backend_name,
                 (time.monotonic() - started_at) * 1000,
             )
-            return {"candidates": [], "total": 0}
+            return self._response([], result=None)
         result = await self.search(normalized)
         candidates = [
             self._project_candidate(item)
@@ -111,4 +111,30 @@ class TaskSearch:
                 result.failed_keywords,
                 (time.monotonic() - started_at) * 1000,
             )
-        return {"candidates": candidates, "total": len(candidates)}
+        return self._response(candidates, result=result)
+
+    @staticmethod
+    def _response(candidates: list[dict[str, Any]], *, result: Any = None) -> dict[str, Any]:
+        """Response dict with additive retrieval diagnostics (轨迹采样素材).
+
+        ``candidates``/``total`` 契约不变;新增 ``tokens``/``raw_item_count``/
+        ``failed_keywords``/``keyword_hits`` 为加法键,旧消费方按键读取不受影响。
+        ``keyword_hits`` 与 ``DispatchRationale.search_sampling`` 的 keywords 同形。
+        """
+        keyword_hits = [
+            {
+                "keyword": k.keyword,
+                "item_count": k.item_count,
+                "bot_ids": list(k.bot_ids),
+                "failed": bool(k.failed),
+            }
+            for k in (getattr(result, "keyword_hits", None) or ())
+        ]
+        return {
+            "candidates": candidates,
+            "total": len(candidates),
+            "tokens": list(getattr(result, "tokens", None) or []),
+            "raw_item_count": int(getattr(result, "raw_item_count", None) or 0),
+            "failed_keywords": list(getattr(result, "failed_keywords", None) or []),
+            "keyword_hits": keyword_hits,
+        }

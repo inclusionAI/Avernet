@@ -61,6 +61,8 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     DispatchCandidate,
     DispatchRationale,
+    SearchKeywordHit,
+    SearchSampling,
 )
 
 
@@ -371,12 +373,35 @@ _SAMPLE_RATIONALE: dict = dataclasses.asdict(
     DispatchRationale(
         strategy_name="search",
         decision_mode="skill",
-        candidates=[DispatchCandidate(bot_id="A", recommend_score=0.9, short_profile="pA")],
+        candidates=[
+            DispatchCandidate(
+                bot_id="A",
+                recommend_score=0.9,
+                short_profile="pA",
+                bot_name="bot-a",
+                owner_name="owner-a",
+                reasons=["近线存储专家"],
+            )
+        ],
         prefetch_tokens=["存储", "分析"],
         join_filter_applied=False,
         join_dropped=[],
         skill_prompt_digest="a" * 64,
         skill_response_digest="b" * 64,
+        skill_response_excerpt='{"outcome":"HIT_SINGLE","bot_id":"A"}',
+        miss_reason=None,
+        search_sampling=SearchSampling(
+            keywords=[
+                SearchKeywordHit(
+                    keyword="存储", item_count=1, bot_ids=["A"], failed=False
+                ),
+                SearchKeywordHit(
+                    keyword="分析", item_count=0, bot_ids=[], failed=True
+                ),
+            ],
+            raw_item_count=1,
+            failed_keywords=["分析"],
+        ),
     )
 )
 
@@ -427,8 +452,20 @@ class TestDispatchGateEmitsTrajectory:
         rat = payload["_dispatch_rationale"]
         assert rat["strategy_name"] == "search"
         assert rat["decision_mode"] == "skill"
-        assert rat["candidates"] == [{"bot_id": "A", "recommend_score": 0.9, "short_profile": "pA"}]
+        assert rat["candidates"] == [{
+            "bot_id": "A", "recommend_score": 0.9, "short_profile": "pA",
+            "bot_name": "bot-a", "owner_name": "owner-a", "reasons": ["近线存储专家"],
+        }]
         assert rat["join_dropped"] == []
+        # 搜推三问采样经 carrier 原样透传:关键词命中事实 + skill 决策回包原文摘录
+        assert rat["skill_response_excerpt"] == '{"outcome":"HIT_SINGLE","bot_id":"A"}'
+        sampling = rat["search_sampling"]
+        assert sampling["raw_item_count"] == 1
+        assert sampling["failed_keywords"] == ["分析"]
+        assert sampling["keywords"][0] == {
+            "keyword": "存储", "item_count": 1, "bot_ids": ["A"], "failed": False,
+        }
+        assert sampling["keywords"][1]["failed"] is True
 
     def test_hit_multi_gate_emits_trajectory_with_rationale(self, svc):
         from agentclaw.community.core.task.domain.models import TaskNode

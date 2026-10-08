@@ -49,7 +49,9 @@ async def search_task_candidates(
         source="task_loop", headers=request.headers, raw_body=raw,
         method=request.method, path=request.url.path,
     )
-    result = await service.search_task_candidates(query=body.query)
+    result = await service.search_task_candidates(
+        query=body.query, task_id=body.task_id, node_id=body.node_id
+    )
     return envelope(result, request)
 
 

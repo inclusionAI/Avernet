@@ -24,10 +24,13 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     DispatchCandidate,
     DispatchRationale,
     JoinDropped,
+    SearchKeywordHit,
+    SearchSampling,
 )
 
 if TYPE_CHECKING:
@@ -35,6 +38,9 @@ if TYPE_CHECKING:
     # so this import does NOT create a circular dependency with strategies.py.
     from agentclaw.community.core.task.domain.models import TaskNode
     from agentclaw.community.core.task.task_dispatch.strategies import SearchResult
+    from agentclaw.community.core.task.task_runner.client.candidate_search import (
+        CandidateSearchResult,
+    )
 
 logger = logging.getLogger("task.dispatcher")
 
@@ -50,6 +56,22 @@ def _claim_product(bot_id: str | None) -> str:
     """
     bid = (bot_id or "").strip()
     return bid.split(":", 1)[0] if bid else ""
+
+
+def _identity_of(candidate: dict) -> str:
+    """候选归一 identity —— same shape as ``candidate_search._candidate_identity``.
+
+    Kept local for the same leaf reason as ``_claim_product``: ``bot_uuid`` 优先,
+    否则就地合成 canonical identity(不 back-import strategies/candidate_search)。
+    """
+    if not isinstance(candidate, dict):
+        return ""
+    bot_uuid = str(candidate.get("bot_uuid") or "").strip()
+    if bot_uuid:
+        return bot_uuid
+    return compose_bot_identity(
+        str(candidate.get("bot_id") or ""), candidate.get("owner_id")
+    )
 
 
 def _classify_join_drop_reason(
@@ -162,6 +184,7 @@ def _build_search_rationale(
     response_text: str | None,
     filter_ran: bool,
     prefetch_tokens: list[str],
+    search_result: "CandidateSearchResult | None" = None,
 ) -> DispatchRationale | None:
     """Build the ``DispatchRationale`` for ``SearchBasedDispatchStrategy.apply`` (REQ-2).
 
@@ -174,6 +197,13 @@ def _build_search_rationale(
 
     ``prefetch_tokens`` is **caller-supplied** (computed in strategies via
     ``_prefetch_tokens``) so this module stays leaf (no back-import).
+
+    ``search_result`` (optional, 搜推三问采样): the retrieval
+    ``CandidateSearchResult`` —— per-keyword hit facts feed
+    ``SearchSampling``; rule-mode framework truncation evidence
+    (selected/dropped) is derived from ``candidates`` order (= score 降序),
+    while the skill-mode decision stays in ``skill_response_excerpt`` (回包
+    原文) and is NOT mechanically derived.
     """
     try:
         # candidates: from ``_prefetch_candidates`` actual hits (REQ-2).
@@ -190,11 +220,20 @@ def _build_search_rationale(
             # outer try/except → None (REQ-2 验收 defensive-assembly test path).
             score_f = float(score) if score is not None else 0.0
             short_profile = str(rec.get("short_profile") or "")
+            # recommend.reasons: list 截断投影(每条 ≤100 字符,最多前 5 条);
+            # 非 list/tuple 形态 → None(不因类型噪声拖垮整个 rationale)。
+            raw_reasons = rec.get("reasons")
+            reasons: list[str] | None = None
+            if isinstance(raw_reasons, (list, tuple)):
+                reasons = [str(r)[:100] for r in raw_reasons[:5]] or None
             cand_list.append(
                 DispatchCandidate(
                     bot_id=str(bid),
                     recommend_score=score_f,
                     short_profile=short_profile,
+                    bot_name=str(c.get("bot_name") or "") or None,
+                    owner_name=str(c.get("owner_name") or "") or None,
+                    reasons=reasons,
                 )
             )
 
@@ -206,11 +245,56 @@ def _build_search_rationale(
         # (None for rule mode / MISS(no_candidates) / direct / replay / bbs).
         skill_prompt_digest: str | None = None
         skill_response_digest: str | None = None
+        skill_response_excerpt: str | None = None
         if use_skill and prompt_text:
             skill_prompt_digest = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
             skill_response_digest = hashlib.sha256(
                 (response_text or "")[:500].encode("utf-8")
             ).hexdigest()
+            # "最终选择"的直接证据: owner bot 决策回包原文(截 2000,对齐 ext_info 内
+            # error_msg ≤2000 惯例);prompt 刻意只存 digest(候选目录另有结构化记录)。
+            skill_response_excerpt = (response_text or "")[:2000] or None
+
+        # 搜推三问采样: per-keyword 命中事实 + rule 模式框架截断选择证据。
+        search_sampling: SearchSampling | None = None
+        if search_result is not None:
+            search_sampling = SearchSampling(
+                keywords=[
+                    SearchKeywordHit(
+                        keyword=str(k.keyword),
+                        item_count=int(k.item_count),
+                        bot_ids=list(k.bot_ids),
+                        failed=bool(k.failed),
+                    )
+                    for k in (search_result.keyword_hits or ())
+                ],
+                raw_item_count=int(search_result.raw_item_count or 0),
+                failed_keywords=list(search_result.failed_keywords or []),
+            )
+        if not use_skill and search_sampling is not None:
+            # rule 模式的最终选择是框架机械截断,由 candidates 顺序(score 降序)推导:
+            # identities 全量 → selected 之外即 dropped。skill 模式的选择自由度在
+            # 回包原文(skill_response_excerpt)里,不做机械推导。
+            identities = [
+                ident
+                for ident in (_identity_of(c) for c in (candidates or []))
+                if ident
+            ]
+            if sr.outcome == "HIT_SINGLE" and sr.bot_id:
+                search_sampling.selected_bot_ids = [str(sr.bot_id)]
+                selected_set = {str(sr.bot_id)}
+                search_sampling.dropped_bot_ids = [
+                    ident for ident in identities if ident not in selected_set
+                ]
+                search_sampling.rule_selection_note = "hit_single_takes_first"
+            elif sr.outcome == "HIT_MULTI_BOTS" and sr.group_formation is not None:
+                selected = [str(b) for b in (sr.group_formation.bot_ids or [])]
+                selected_set = set(selected)
+                search_sampling.selected_bot_ids = selected
+                search_sampling.dropped_bot_ids = [
+                    ident for ident in identities if ident not in selected_set
+                ]
+                search_sampling.rule_selection_note = "hit_multi_capped_at_3"
 
         return DispatchRationale(
             strategy_name="search",
@@ -221,6 +305,9 @@ def _build_search_rationale(
             join_dropped=join_dropped,
             skill_prompt_digest=skill_prompt_digest,
             skill_response_digest=skill_response_digest,
+            skill_response_excerpt=skill_response_excerpt,
+            miss_reason=(str(sr.miss_reason) if sr.miss_reason else None),
+            search_sampling=search_sampling,
         )
     except Exception as ex:  # noqa: BLE001  rationale 装配失败 → None,派发继续
         logger.debug(

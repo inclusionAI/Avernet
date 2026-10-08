@@ -211,6 +211,10 @@ class TaskSearchRequestDTO(BaseModel):
     """Search candidates from a skill-provided query; the skill remains the decider."""
 
     query: str = Field(..., min_length=1)
+    # 可选:轨迹采样归属(搜推关键词/返回结果采样进任务轨迹)。不传则跳过采样 ——
+    # 不按持棒者猜测归属(同一 holder 可挂多任务,猜测会错误归因)。
+    task_id: str | None = Field(None, description="可选:搜推轨迹采样归属任务")
+    node_id: str | None = Field(None, description="可选:搜推轨迹采样归属节点,缺省用 task_id")
 
 
 class TaskDispatchRequestDTO(BaseModel):
@@ -936,8 +940,8 @@ class TaskSettingStateDTO(BaseModel):
 # ===== 任务轨迹(REQ-8 ``GET /tasks/{id}/trajectory``)DTO =====
 # 扁平投影:领域对象 ``TaskTrajectory`` / ``TrajectoryEvent`` → DTO(Rule 22 边界翻译)。
 # ``analysis`` 为 ``TrajectoryAnalysis`` JSON 字符串(客户端自行解析;执行者多源,保持 string 透出);
-# ``ext_info`` 不整体进入领域对象/DTO(REQ-1),仅投影 ``holder_id`` 供排障展示。
-# 两模式(do_analysis 真/假)同形态。
+# ``ext_info`` 不整体进入领域对象/DTO(REQ-1),仅定向投影 ``holder_id`` 与
+# ``search_probe``(派发搜推三问采样)供排障展示。两模式(do_analysis 真/假)同形态。
 
 
 class TrajectoryEventDTO(BaseModel):
@@ -972,6 +976,13 @@ class TrajectoryEventDTO(BaseModel):
         description="子任务会话消息(最近 running_session_message_limit 条,原文;"
                     "读时自末位事件 ext_info.session_msgs 富化,仅该 node 最后一条事件携带,"
                     "未物化/无会话为 None)",
+    )
+    search_probe: dict[str, Any] | None = Field(
+        None,
+        description="派发搜推三问采样摘要(关键词/返回结果/最终选择;读时自本事件 "
+                    "ext_info 定向投影:dispatch 事件取 _dispatch_rationale,relay "
+                    "action_result=search 事件取顶层 search_sampling+candidates;"
+                    "无搜推素材的事件为 None)",
     )
 
 
@@ -1029,6 +1040,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 analysis=ev.analysis,
                 output=ev.output,
                 session_msgs=ev.session_msgs,
+                search_probe=ev.search_probe,
             )
             for ev in trajectory.timeline
         ],

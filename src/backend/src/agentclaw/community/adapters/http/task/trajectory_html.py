@@ -204,6 +204,63 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(lines)}</pre>")
         parts.append("</details>")
 
+    # 搜推采样(读时定向投影;dispatch / relay search 事件携带,可折叠)——三问
+    # 结构化呈现:关键词命中 / 返回候选 / 最终选择。
+    probe = getattr(ev, "search_probe", None)
+    if probe:
+        lines: list[str] = []
+        tokens = probe.get("tokens") or []
+        if tokens:
+            lines.append("关键词: " + ", ".join(str(t) for t in tokens))
+        for k in probe.get("keywords") or []:
+            if not isinstance(k, dict):
+                continue
+            if k.get("failed"):
+                state = "调用失败"
+            else:
+                state = f"命中 {k.get('item_count', 0)}: " + ", ".join(
+                    str(b) for b in (k.get("bot_ids") or [])
+                )
+            lines.append(f"  - {k.get('keyword')}: {state}")
+        failed = probe.get("failed_keywords") or []
+        if failed:
+            lines.append("失败关键词: " + ", ".join(str(f) for f in failed))
+        candidates = probe.get("candidates") or []
+        lines.append(f"返回结果({len(candidates)} 个候选):")
+        for c in candidates:
+            if not isinstance(c, dict):
+                continue
+            bid = c.get("bot_id") or c.get("bot_uuid")
+            name = c.get("bot_name")
+            score = c.get("recommend_score", c.get("score"))
+            entry = f"  - {bid}"
+            if name:
+                entry += f" · {name}"
+            if score is not None:
+                entry += f" (score={score})"
+            lines.append(entry)
+        selected = probe.get("selected_bot_ids") or []
+        if selected:
+            lines.append("最终选择: " + ", ".join(str(s) for s in selected))
+        dropped = probe.get("dropped_bot_ids") or []
+        if dropped:
+            lines.append("截断丢弃: " + ", ".join(str(d) for d in dropped))
+        if probe.get("rule_selection_note"):
+            lines.append(f"选择依据: {probe['rule_selection_note']}")
+        if probe.get("miss_reason"):
+            lines.append(f"未选中原因: {probe['miss_reason']}")
+        excerpt = probe.get("skill_response_excerpt")
+        if excerpt:
+            lines.append("skill 决策回包:")
+            lines.append(str(excerpt))
+        label = "搜推采样" + (
+            f" · {probe['decision_mode']}" if probe.get("decision_mode") else ""
+        )
+        parts.append('<details class="ev-input">')
+        parts.append(f"<summary>{html.escape(label)}</summary>")
+        parts.append(f"<pre>{html.escape(chr(10).join(lines))}</pre>")
+        parts.append("</details>")
+
     parts.append("</div>")
     return "".join(parts)
 

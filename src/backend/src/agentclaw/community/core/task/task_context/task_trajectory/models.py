@@ -87,8 +87,8 @@ class TrajectoryEvent:
     """单条轨迹事件(FLAT 投影行;无嵌套 ``payload`` / ``rationale`` / ``phase``)。
 
     定型列即领域字段;附加素材(``DispatchRationale`` / RESET 计量 / SUBMIT 来源等)由采集层
-    写入事件行 ``ext_info`` 自由 JSON 列(领域对象不整体映射,仅定向投影 ``holder_id`` 供展示,
-    analyzer 仍按需读取完整 JSON)。
+    写入事件行 ``ext_info`` 自由 JSON 列(领域对象不整体映射,仅定向投影 ``holder_id`` 与
+    ``search_probe``(派发搜推三问采样)供展示,analyzer 仍按需读取完整 JSON)。
     ``gmt_create`` = 事件发射时间(timeline 排序依据);``gmt_modified`` 仅在分析回填 ``analysis``
     时更新(未回填时 == ``gmt_create``)。``analysis`` 为内嵌 ``TrajectoryAnalysis`` JSON 字符串,
     发射时为 ``None``,分析完成后统一回填(REC-9)。``action_input`` **不截断**(原文落库)。
@@ -97,6 +97,14 @@ class TrajectoryEvent:
     (``node.run_info.output``,经 ``task_execution_graph`` 查询接口获取),由 service
     在 ``get_trajectory`` 返回前挂到该节点在 timeline 中的**最后一条**事件上;库行
     无此列,组装的原始值为 ``None``,富化失败/未接线也保持 ``None``(缺字段=无信号)。
+
+    ``search_probe`` = **读时定向投影**字段(不落库;与 ``holder_id`` 同款白名单
+    投影,是 REQ-1 "ext_info 不整体入领域" 边界的定向扩展而非破坏):派发搜推三问
+    (关键词/返回结果/最终选择)的可展示摘要,由 assembler 从本事件行 ``ext_info``
+    投影——DISPATCH 事件取 ``_dispatch_rationale``(decision_mode/tokens/keywords/
+    raw_item_count/failed_keywords/candidates/selected/dropped/rule_selection_note/
+    skill_response_excerpt/miss_reason),relay ``action_result="search"`` 事件取
+    顶层 ``search_sampling``+``candidates``。无素材的事件保持 ``None``(缺字段=无信号)。
     """
 
     task_id: str
@@ -116,6 +124,7 @@ class TrajectoryEvent:
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
     session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(同上;源自末位事件 ext_info.session_msgs,展示/DTO 用,不落库)
+    search_probe: dict[str, Any] | None = None  # 读时定向投影:派发搜推三问采样摘要(源自本事件 ext_info;不落库,详见类 docstring)
 
 
 @dataclass
@@ -163,6 +172,11 @@ class DispatchCandidate:
     bot_id: str
     recommend_score: float
     short_profile: str
+    # 搜推候选投影扩展(全部可选):``bot_name``/``owner_name`` 取自 catalog 命中 item;
+    # ``reasons`` 为 ``recommend.reasons`` 截断投影(每条 ≤100 字符,最多前 5 条)。
+    bot_name: str | None = None
+    owner_name: str | None = None
+    reasons: list[str] | None = None
 
 
 @dataclass
@@ -215,3 +229,48 @@ class DispatchRationale:
     join_dropped: list[JoinDropped] = field(default_factory=list)
     skill_prompt_digest: str | None = None       # search-skill 模式:SHA-256(prompt)+截断响应 digest
     skill_response_digest: str | None = None
+    # 搜推采样(三问:关键词/返回结果/最终选择)。``skill_prompt`` 刻意只存 digest(体量大,
+    # 候选目录另有 ``candidates`` 结构化记录);``skill_response_excerpt`` 是 owner bot 决策
+    # 回包原文(≤2000 字符,"最终选择"的直接证据);``miss_reason`` 为 MISS 原因(此前只在
+    # ``miss_events`` 可见,轨迹侧补齐)。
+    skill_response_excerpt: str | None = None
+    miss_reason: str | None = None
+    search_sampling: SearchSampling | None = None
+
+
+@dataclass
+class SearchKeywordHit:
+    """单关键词搜回事实(轨迹侧投影,源自召回层 ``candidate_search.KeywordHit``)。
+
+    ``item_count`` 为该关键词原始命中条数(候选去重前);``bot_ids`` 为该关键词命中的
+    归一候选 identity(原序,跨关键词不去重);``failed`` 标记该关键词的 discover 调用
+    是否异常(异常时 ``bot_ids`` 为空、``item_count`` 为 0,关键词同步计入
+    ``SearchSampling.failed_keywords``)。
+    """
+
+    keyword: str
+    item_count: int
+    bot_ids: list[str]
+    failed: bool
+
+
+@dataclass
+class SearchSampling:
+    """DISPATCH 事件的搜推采样对象(``DispatchRationale.search_sampling``)。
+
+    覆盖"搜推三问":①关键词(``keywords``/``failed_keywords``/``raw_item_count``);
+    ②返回结果(``keywords[].bot_ids`` + ``DispatchRationale.candidates`` 全量投影);
+    ③最终选择(rule 模式的 ``selected_bot_ids``/``dropped_bot_ids`` +
+    ``rule_selection_note``;skill 模式的选择自由度在 ``skill_response_excerpt`` 回包
+    原文里,不做机械推导)。relay ``/search`` 路径的``ext_info["search_sampling"]``
+    与本对象同形(无 rationale 载体的场景单独携带 ``candidates`` 键)。
+    """
+
+    keywords: list[SearchKeywordHit] = field(default_factory=list)
+    raw_item_count: int = 0
+    failed_keywords: list[str] = field(default_factory=list)
+    # rule 模式选择证据(框架机械截断;skill 模式置空):
+    selected_bot_ids: list[str] = field(default_factory=list)
+    dropped_bot_ids: list[str] = field(default_factory=list)
+    # "hit_single_takes_first" | "hit_multi_capped_at_3"
+    rule_selection_note: str | None = None

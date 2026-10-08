@@ -246,7 +246,15 @@ def test_relay_search_logs_empty_result_diagnostics(caplog) -> None:
     with caplog.at_level(logging.DEBUG, logger="task.relay.search"):
         result = _run(service.search_task_candidates(query="存储行业尽调"))
 
-    assert result == {"candidates": [], "total": 0}
+    # candidates/total 契约不变;加法诊断键(轨迹采样素材)同形返回
+    assert result["candidates"] == []
+    assert result["total"] == 0
+    assert result["raw_item_count"] == 0
+    assert result["failed_keywords"] == []
+    assert result["keyword_hits"] == [] or all(
+        isinstance(h, dict) for h in result["keyword_hits"]
+    )
+    assert isinstance(result["tokens"], list)
     messages = [record.getMessage() for record in caplog.records]
     assert any(
         "search_start" in message and "存储行业尽调" in message for message in messages
@@ -269,13 +277,98 @@ def test_relay_search_logs_discover_failure(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="task.relay.search"):
         result = _run(service.search_task_candidates(query="存储行业尽调"))
 
-    assert result == {"candidates": [], "total": 0}
+    # candidates/total 契约不变;全部关键词失败 → failed_keywords 记满
+    assert result["candidates"] == []
+    assert result["total"] == 0
+    assert result["raw_item_count"] == 0
+    assert result["failed_keywords"] == result["tokens"]
     assert any(
         "search_failed" in record.getMessage()
         and "RuntimeError" in record.getMessage()
         and "catalog unavailable" in record.getMessage()
         for record in caplog.records
     )
+
+
+def _search_sampling_records(repo):
+    return [
+        record
+        for record in _relay_records(repo)
+        if record.action_result == "search"
+    ]
+
+
+def test_relay_search_emits_trajectory_sampling():
+    """带 task_id/node_id 的 /search → relay+search 轨迹事件携带搜推三问采样。"""
+    repo = TaskTrajectoryRepository(_make_db())
+    service, _ = _service(
+        discover=_Discover(), task_context_service=_tcs(repo)
+    )
+
+    result = _run(
+        service.search_task_candidates(
+            query="完成市场研究和结论", task_id="relay-task", node_id="n1"
+        )
+    )
+
+    # 检索结果照常返回(加法诊断键)
+    assert result["total"] == 1
+    # 轨迹采样:一条 relay action_result=search 的事件,node_id 定向归属
+    records = _search_sampling_records(repo)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.task_id == "relay-task"
+    assert rec.node_id == "n1"
+    payload = json.loads(rec.ext_info)
+    assert payload["schema_v"] == 1
+    sampling = payload["search_sampling"]
+    assert sampling["tokens"]  # 关键词
+    assert sampling["failed_keywords"] == []
+    assert sampling["raw_item_count"] == len(sampling["tokens"])
+    assert sampling["keywords"][0] == {
+        "keyword": sampling["tokens"][0],
+        "item_count": 1,
+        "bot_ids": ["research-bot:owner-2"],
+        "failed": False,
+    }
+    # relay 场景无 rationale 载体 → 另带候选瘦投影
+    assert payload["candidates"] == [
+        {"bot_id": "research-bot:owner-2", "bot_name": "Research Bot", "score": 0.91}
+    ]
+
+
+def test_relay_search_without_task_context_skips_sampling():
+    """不传 task_id → 跳过采样(不按持棒者猜测归属),检索不受影响。"""
+    repo = TaskTrajectoryRepository(_make_db())
+    service, _ = _service(
+        discover=_Discover(), task_context_service=_tcs(repo)
+    )
+
+    result = _run(service.search_task_candidates(query="完成市场研究和结论"))
+
+    assert result["total"] == 1
+    assert _search_sampling_records(repo) == []
+
+
+def test_relay_search_sampling_failure_never_blocks_search():
+    """采样发射失败(轨迹服务抛错)绝不影响检索结果返回(决策 #14)。"""
+
+    class _ExplodingContextService:
+        def emit_trajectory_event(self, *args, **kwargs):
+            raise RuntimeError("trajectory boom")
+
+    service, _ = _service(
+        discover=_Discover(), task_context_service=_ExplodingContextService()
+    )
+
+    result = _run(
+        service.search_task_candidates(
+            query="完成市场研究和结论", task_id="relay-task"
+        )
+    )
+
+    assert result["total"] == 1
+    assert result["candidates"][0]["bot_uuid"] == "research-bot:owner-2"
 
 
 def test_relay_exec_plan_search_dispatch_and_complete() -> None:

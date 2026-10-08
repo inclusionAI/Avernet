@@ -424,9 +424,16 @@ def _derive_boost_reason(
         jd_summary = f"{len(join_dropped)}个({reasons})"
     else:
         jd_summary = "0个"
+    # 搜推三问采样消费: MISS 时由 rationale.miss_reason 补出可读归因(旧事件缺
+    # 该键 → 不追加,保持原文案,读端 .get() 容忍)。
+    miss_note = ""
+    if action_result == "miss":
+        miss_reason = rationale.get("miss_reason")
+        if miss_reason:
+            miss_note = f"; 未选中原因={miss_reason}"
     return (
         f"策略={strategy_name} 模式={decision_mode} 选中={assignee}({action_result}); "
-        f"候选{candidate_count} 取最优; JOIN 丢={jd_summary}"
+        f"候选{candidate_count} 取最优; JOIN 丢={jd_summary}{miss_note}"
     )
 
 
@@ -513,6 +520,25 @@ def _build_ext_info_brief(
                         "count": len(join_dropped),
                         "reasons": jd_reasons,
                     },
+                    # 搜推三问采样素材(旧事件缺键 → None/0,tc_bot 按值语义消费):
+                    # miss 原因 + per-keyword 命中规模 + 失败关键词数 + rule 截断证据。
+                    "miss_reason": rationale.get("miss_reason"),
+                    "search_failed_keywords": list(
+                        (rationale.get("search_sampling") or {}).get(
+                            "failed_keywords"
+                        )
+                        or []
+                    ),
+                    "search_keyword_count": len(
+                        (rationale.get("search_sampling") or {}).get("keywords")
+                        or []
+                    ),
+                    "rule_dropped_count": len(
+                        (rationale.get("search_sampling") or {}).get(
+                            "dropped_bot_ids"
+                        )
+                        or []
+                    ),
                 }
             break
     # Last RESET with sla_timeout / pending_dispatch_stuck → elapsed/threshold

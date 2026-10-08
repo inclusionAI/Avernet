@@ -822,3 +822,100 @@ def test_html_content_is_a_subset_of_json_payload():
         assert _html.escape(str(parsed[key])) in page, f"analysis.{key} 未在 HTML 展示"
     assert _Bij(parsed["gmt_create"]) in page, "分析时间未(格式化)展示"
     assert _html.escape(parsed["analysis_input"])[:20] in page  # 折叠摘要截断
+
+
+@pytest.mark.unit
+def test_trajectory_dto_passes_through_search_probe():
+    """定向投影的搜推采样摘要(dispatch / relay search 事件携带)经 DTO 透传为
+    ``timeline[i].search_probe``;无素材的事件为 null(两模式同形态)。"""
+    probe = {
+        "decision_mode": "rule",
+        "tokens": ["存储", "检索"],
+        "keywords": [
+            {"keyword": "存储", "item_count": 2, "bot_ids": ["a:o", "b:o"],
+             "failed": False},
+        ],
+        "raw_item_count": 2,
+        "failed_keywords": [],
+        "candidates": [
+            {"bot_id": "rule-a", "recommend_score": 0.9, "short_profile": "pA",
+             "bot_name": "A", "owner_name": "O1", "reasons": None},
+        ],
+        "selected_bot_ids": ["rule-a:1"],
+        "dropped_bot_ids": ["rule-b:2"],
+        "rule_selection_note": "hit_single_takes_first",
+        "skill_response_excerpt": None,
+        "miss_reason": None,
+    }
+    events = [
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.DISPATCH,
+            action_result="hit_single", attempt=0, gmt_create=1000, gmt_modified=1000,
+            search_probe=probe,
+        ),
+        TrajectoryEvent(
+            task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+            action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
+        ),
+    ]
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=events, analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1"},
+    )
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    assert timeline[0]["search_probe"] == probe
+    assert timeline[1]["search_probe"] is None
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_search_probe():
+    """HTML 页在携带采样的派发事件下渲染可折叠的「搜推采样」块(三问:
+    关键词命中 / 返回候选 / 最终选择)。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.DISPATCH,
+        action_result="hit_single", attempt=0, gmt_create=1000, gmt_modified=1000,
+        search_probe={
+            "decision_mode": "rule",
+            "tokens": ["存储", "检索"],
+            "keywords": [
+                {"keyword": "存储", "item_count": 2, "bot_ids": ["a:o", "b:o"],
+                 "failed": False},
+            ],
+            "raw_item_count": 2,
+            "failed_keywords": ["检索"],
+            "candidates": [
+                {"bot_id": "rule-a", "bot_name": "存储专家", "recommend_score": 0.9},
+            ],
+            "selected_bot_ids": ["rule-a:1"],
+            "dropped_bot_ids": ["rule-b:2"],
+            "rule_selection_note": "hit_single_takes_first",
+            "skill_response_excerpt": None,
+            "miss_reason": None,
+        },
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    text = r.text
+    assert "搜推采样 · rule" in text
+    # 三问逐项可见:关键词 / 返回结果 / 最终选择 + 失败词与截断依据
+    assert "关键词: 存储, 检索" in text
+    assert "失败关键词: 检索" in text
+    assert "返回结果(1 个候选)" in text
+    assert "存储专家" in text
+    assert "最终选择: rule-a:1" in text
+    assert "截断丢弃: rule-b:2" in text
+    assert "hit_single_takes_first" in text
