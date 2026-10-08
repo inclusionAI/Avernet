@@ -89,11 +89,5 @@ class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol)
             env=self._env_provider(),
         )
 
-    def process_auto(self, *, work_order_id: int):
-        """Called only by WorkOrder's trusted AUTO dispatcher after its claim."""
-        return self._repository.approve_auto_skill_editor_request(
-            work_order_id=work_order_id, env=self._env_provider()
-        )
-
 
 __all__ = ["SkillCollaboratorApprovalHandler"]

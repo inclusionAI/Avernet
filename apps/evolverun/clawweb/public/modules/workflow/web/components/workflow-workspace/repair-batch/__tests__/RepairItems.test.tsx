@@ -1,8 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RepairInboxItem } from '../../../../../server/contracts/repair-workbench'
 import RepairItems, { RepairStateCounts } from '../RepairItems'
+import RepairItemDetail from '../RepairItemDetail'
 
 const item = (overrides: Partial<RepairInboxItem> = {}): RepairInboxItem => ({
   itemId: 'one', groupKey: 'group', proposalKey: 'proposal', contentRevision: 1, previousItemId: null,
@@ -28,12 +29,25 @@ describe('readable repair candidates', () => {
       nodeId: 'query', reasoning: '上游连接超时', flowId: 'run', analysisId: 'AN',
       evidence: [{ eventId: 'EV', missing: true }],
     }] } })
-    render(<RepairItems items={[candidate]} selected={[]} onToggle={() => {}} canEdit limit={100} />)
+    render(<RepairItemDetail item={candidate} detail={candidate} selected={false} onToggle={() => {}} canEdit limitReached={false} onLoad={() => {}} onDisposition={() => {}} />)
     expect(screen.getByText(/尚无结构化修改明细/)).toBeVisible()
-    await userEvent.click(screen.getByText('查看建议与证据'))
-    await userEvent.click(screen.getByText('来源诊断 1 · query'))
+    await userEvent.click(screen.getByText('query · 来源运行 1'))
     expect(screen.getByText('上游连接超时')).toBeVisible()
     expect(screen.getByText('原始证据已缺失')).toBeVisible()
-    expect(screen.getByText('技术数据（完整载荷）').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('技术详情（来源标识与完整载荷）').closest('details')).not.toHaveAttribute('open')
+  })
+
+  it('shows the complete proposed value outside technical data and copies it unchanged', async () => {
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const value = '输入：{{input.params.raw_message}}\n'.repeat(30)
+    const candidate = item({ proposal: { summary: '修正输入', operations: [{ path: '/executor/prompt', value }] } })
+    render(<RepairItemDetail item={candidate} detail={candidate} selected={false} onToggle={() => {}} canEdit limitReached={false} onLoad={() => {}} onDisposition={() => {}} />)
+    await user.click(screen.getByText('展开完整目标值'))
+    expect(screen.getByText(value.trim(), { exact: false, selector: 'pre', normalizer: text => text.trim() })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '复制目标值' }))
+    expect(copy).toHaveBeenCalledWith(value)
+    expect(screen.getByRole('status')).toHaveTextContent('已复制')
+    expect(screen.getByText('技术详情（来源标识与完整载荷）').closest('details')).not.toHaveAttribute('open')
   })
 })

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchJson, type EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client';
+import type { EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client';
+import { readOnlyJson } from '../../api/read-only-json';
 
 export type IssueGroupView = {
   workflowId: string; signature: string; inputDigest: string; flowIds: string[];
@@ -16,7 +17,8 @@ export type IssueGroupView = {
 
 export function useIssueGroups(workflowId: string) {
   return useQuery({ queryKey: ['evolve-issue-groups', workflowId],
-    queryFn: () => fetchJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?workflowId=${encodeURIComponent(workflowId)}`),
+    queryFn: ({ signal }) => readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?workflowId=${encodeURIComponent(workflowId)}`, signal),
+    retry: false,
     enabled: !!workflowId,
     refetchInterval: query => query.state.data?.groups.some(group => group.aggregationStatus === 'queued') ? 15_000 : 60_000,
   });

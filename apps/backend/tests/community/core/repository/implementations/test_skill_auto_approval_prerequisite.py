@@ -1,4 +1,4 @@
-"""Staged Skill AUTO completion against real SQLite persistence."""
+"""Skill-only AUTO Grant step against real SQLite persistence."""
 
 import asyncio
 import json
@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
@@ -33,6 +34,7 @@ from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderApproverStatus,
     WorkOrderBizType,
+    WorkOrderEventType,
     WorkOrderStatus,
 )
 from agentclaw.community.core.work_orders.repository.models import (
@@ -200,24 +202,24 @@ def test_skill_editor_request_fails_closed_before_auto_integration(db) -> None:
         assert session.query(WorkOrderModel).count() == 0
 
 
-def test_auto_skill_editor_approval_grants_manager_and_notifies_once(db) -> None:
+def _apply_auto(db, order_id: int) -> None:
+    with db.transactional_orm_session() as session:
+        _skill_editor_requests(db).apply_auto_skill_editor_request(
+            session=session, work_order_id=order_id, env="dev"
+        )
+
+
+def test_auto_skill_step_only_grants_manager_in_caller_transaction(db) -> None:
     _, skill_id, order_id = _claimed_auto_skill_order(db)
     repository = _skill_editor_requests(db)
-
-    result = repository.approve_auto_skill_editor_request(
-        work_order_id=order_id, env="dev"
-    )
-    retry = repository.approve_auto_skill_editor_request(
-        work_order_id=order_id, env="dev"
-    )
-
-    assert result == retry
-    assert result.status is WorkOrderStatus.APPROVED
-    assert result.reviewer_user_id == "SYSTEM"
-    with db.orm_session() as session:
+    with db.transactional_orm_session() as session:
+        repository.apply_auto_skill_editor_request(
+            session=session, work_order_id=order_id, env="dev"
+        )
+        repository.apply_auto_skill_editor_request(
+            session=session, work_order_id=order_id, env="dev"
+        )
         order = session.get(WorkOrderModel, order_id)
-        order_status = order.status
-        reviewer_user_id = order.reviewer_user_id
         grants = (
             session.query(SkillGrant)
             .filter(
@@ -227,45 +229,19 @@ def test_auto_skill_editor_approval_grants_manager_and_notifies_once(db) -> None
             )
             .all()
         )
-        notices = (
+        assert order.status == "PROCESSING"
+        assert order.reviewer_user_id is None
+        assert len(grants) == 1
+        assert (grants[0].role, grants[0].status, grants[0].granted_by) == (
+            "MANAGER",
+            "ACTIVE",
+            "SYSTEM",
+        )
+        assert (
             session.query(WorkOrderNotificationModel)
-            .filter(
-                WorkOrderNotificationModel.work_order_id == order_id,
-                WorkOrderNotificationModel.env == "dev",
-            )
-            .all()
-        )
-        approvers = (
-            session.query(WorkOrderApproverModel)
-            .filter(
-                WorkOrderApproverModel.work_order_id == order_id,
-                WorkOrderApproverModel.env == "dev",
-            )
-            .all()
-        )
-        grant_facts = [(grant.role, grant.status, grant.granted_by) for grant in grants]
-        notice_facts = [
-            (notice.recipient_user_id, notice.notification_category, notice.content)
-            for notice in notices
-        ]
-    assert order_status == WorkOrderStatus.APPROVED.value
-    assert reviewer_user_id == "SYSTEM"
-    assert len(grant_facts) == 1
-    assert grant_facts[0] == ("MANAGER", "ACTIVE", "SYSTEM")
-    assert len(notice_facts) == 1
-    assert notice_facts[0][:2] == ("applicant-1", NotificationCategory.NOTICE.value)
-    assert json.loads(notice_facts[0][2]) == {
-        "text": "你共同编辑 Skill「review-skill」的申请已通过。"
-    }
-    assert approvers == []
-
-
-def test_auto_skill_editor_approval_rechecks_toggle_and_rolls_back(db) -> None:
-    _, skill_id, order_id = _claimed_auto_skill_order(db, enabled=False)
-
-    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError, match="disabled"):
-        _skill_editor_requests(db).approve_auto_skill_editor_request(
-            work_order_id=order_id, env="dev"
+            .filter(WorkOrderNotificationModel.work_order_id == order_id)
+            .count()
+            == 0
         )
 
     with db.orm_session() as session:
@@ -277,7 +253,7 @@ def test_auto_skill_editor_approval_rechecks_toggle_and_rolls_back(db) -> None:
                 SkillGrant.user_id == "applicant-1",
             )
             .count()
-            == 0
+            == 1
         )
         assert (
             session.query(WorkOrderNotificationModel)
@@ -287,7 +263,24 @@ def test_auto_skill_editor_approval_rechecks_toggle_and_rolls_back(db) -> None:
         )
 
 
-def test_auto_skill_editor_approval_rechecks_active_member(db) -> None:
+def test_auto_skill_step_rechecks_toggle_and_rolls_back(db) -> None:
+    _, skill_id, order_id = _claimed_auto_skill_order(db, enabled=False)
+    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError, match="disabled"):
+        _apply_auto(db, order_id)
+    with db.orm_session() as session:
+        assert session.get(WorkOrderModel, order_id).status == "PROCESSING"
+        assert (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+            )
+            .count()
+            == 0
+        )
+
+
+def test_auto_skill_step_rechecks_active_member(db) -> None:
     space_id, skill_id, order_id = _claimed_auto_skill_order(db)
     with db.orm_session() as session:
         member = (
@@ -299,14 +292,9 @@ def test_auto_skill_editor_approval_rechecks_active_member(db) -> None:
             .one()
         )
         member.status = "INACTIVE"
-
     with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError, match="active"):
-        _skill_editor_requests(db).approve_auto_skill_editor_request(
-            work_order_id=order_id, env="dev"
-        )
-
+        _apply_auto(db, order_id)
     with db.orm_session() as session:
-        assert session.get(WorkOrderModel, order_id).status == "PROCESSING"
         assert (
             session.query(SkillGrant)
             .filter(
@@ -318,30 +306,15 @@ def test_auto_skill_editor_approval_rechecks_active_member(db) -> None:
         )
 
 
-def test_auto_skill_editor_approval_rejects_offline_skill(db) -> None:
+def test_auto_skill_step_rejects_offline_skill(db) -> None:
     _, skill_id, order_id = _claimed_auto_skill_order(db)
     with db.orm_session() as session:
         session.get(Skill, skill_id).offline_at = datetime(2026, 10, 8)
-
     with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError, match="offline"):
-        _skill_editor_requests(db).approve_auto_skill_editor_request(
-            work_order_id=order_id, env="dev"
-        )
-
-    with db.orm_session() as session:
-        assert session.get(WorkOrderModel, order_id).status == "PROCESSING"
-        assert (
-            session.query(SkillGrant)
-            .filter(
-                SkillGrant.skill_id == skill_id,
-                SkillGrant.user_id == "applicant-1",
-            )
-            .count()
-            == 0
-        )
+        _apply_auto(db, order_id)
 
 
-def test_auto_skill_editor_approval_preserves_existing_manager_audit(db) -> None:
+def test_auto_skill_step_preserves_existing_manager_audit(db) -> None:
     space_id, skill_id, order_id = _claimed_auto_skill_order(db)
     _space_skills(db).add_manager(
         space_id=space_id,
@@ -360,11 +333,7 @@ def test_auto_skill_editor_approval_preserves_existing_manager_audit(db) -> None
             .one()
         )
         before = (grant.id, grant.granted_by, grant.grant_reason, grant.gmt_modified)
-
-    _skill_editor_requests(db).approve_auto_skill_editor_request(
-        work_order_id=order_id, env="dev"
-    )
-
+    _apply_auto(db, order_id)
     with db.orm_session() as session:
         grant = (
             session.query(SkillGrant)
@@ -382,16 +351,12 @@ def test_auto_skill_editor_approval_preserves_existing_manager_audit(db) -> None
         ) == before
 
 
-def test_auto_skill_editor_approval_never_downgrades_owner(db) -> None:
+def test_auto_skill_step_never_downgrades_owner(db) -> None:
     _, _, order_id = _claimed_auto_skill_order(db)
     with db.orm_session() as session:
         session.get(WorkOrderModel, order_id).applicant_user_id = "owner-1"
-
     with pytest.raises(WorkOrderSkillApplicantAlreadyEditorError):
-        _skill_editor_requests(db).approve_auto_skill_editor_request(
-            work_order_id=order_id, env="dev"
-        )
-
+        _apply_auto(db, order_id)
     with db.orm_session() as session:
         assert session.get(WorkOrderModel, order_id).status == "PROCESSING"
         owner = (
@@ -402,7 +367,7 @@ def test_auto_skill_editor_approval_never_downgrades_owner(db) -> None:
         assert owner.role == "OWNER"
 
 
-def test_auto_skill_editor_approval_reactivates_revoked_manager(db) -> None:
+def test_auto_skill_step_reactivates_revoked_manager(db) -> None:
     space_id, skill_id, order_id = _claimed_auto_skill_order(db)
     _space_skills(db).add_manager(
         space_id=space_id,
@@ -421,11 +386,7 @@ def test_auto_skill_editor_approval_reactivates_revoked_manager(db) -> None:
             .one()
         )
         grant.status = "REVOKED"
-
-    _skill_editor_requests(db).approve_auto_skill_editor_request(
-        work_order_id=order_id, env="dev"
-    )
-
+    _apply_auto(db, order_id)
     with db.orm_session() as session:
         grants = (
             session.query(SkillGrant)
@@ -443,21 +404,30 @@ def test_auto_skill_editor_approval_reactivates_revoked_manager(db) -> None:
         )
 
 
-def test_auto_skill_editor_notification_failure_rolls_back_grant(db) -> None:
+def test_result_notice_persistence_failure_rolls_back_shared_transaction(db) -> None:
     _, skill_id, order_id = _claimed_auto_skill_order(db)
-
-    def fail_notice(_mapper, _connection, _target):
-        raise RuntimeError("notice insert failed")
-
-    event.listen(WorkOrderNotificationModel, "before_insert", fail_notice)
-    try:
-        with pytest.raises(RuntimeError, match="notice insert failed"):
-            _skill_editor_requests(db).approve_auto_skill_editor_request(
-                work_order_id=order_id, env="dev"
+    with pytest.raises(IntegrityError):
+        with db.transactional_orm_session() as session:
+            _skill_editor_requests(db).apply_auto_skill_editor_request(
+                session=session, work_order_id=order_id, env="dev"
             )
-    finally:
-        event.remove(WorkOrderNotificationModel, "before_insert", fail_notice)
-
+            order = session.get(WorkOrderModel, order_id)
+            order.status = WorkOrderStatus.APPROVED.value
+            order.reviewer_user_id = "SYSTEM"
+            session.add(
+                WorkOrderNotificationModel(
+                    work_order_id=order_id,
+                    recipient_user_id=None,  # Force the NOT NULL persistence gate.
+                    notification_category=NotificationCategory.NOTICE.value,
+                    event_type=WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
+                    biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    biz_id=str(skill_id),
+                    title="Skill 申请已通过",
+                    content=json.dumps({"text": "approved"}),
+                    env="dev",
+                )
+            )
+            session.flush()
     with db.orm_session() as session:
         assert session.get(WorkOrderModel, order_id).status == "PROCESSING"
         assert (
@@ -478,9 +448,7 @@ def test_auto_skill_editor_notification_failure_rolls_back_grant(db) -> None:
 
 
 @pytest.mark.parametrize("unsafe_case", ["pending", "approver", "identity"])
-def test_auto_skill_editor_approval_rejects_untrusted_order_shape(
-    db, unsafe_case
-) -> None:
+def test_auto_skill_step_rejects_untrusted_order_shape(db, unsafe_case) -> None:
     _, skill_id, order_id = _claimed_auto_skill_order(db)
     with db.orm_session() as session:
         order = session.get(WorkOrderModel, order_id)
@@ -497,14 +465,10 @@ def test_auto_skill_editor_approval_rejects_untrusted_order_shape(
             )
         else:
             order.biz_id = "another-skill"
-
     with pytest.raises(
         (WorkOrderAlreadyProcessedError, WorkOrderSkillEditorRequestNotAllowedError)
     ):
-        _skill_editor_requests(db).approve_auto_skill_editor_request(
-            work_order_id=order_id, env="dev"
-        )
-
+        _apply_auto(db, order_id)
     with db.orm_session() as session:
         assert (
             session.query(SkillGrant)
@@ -512,12 +476,6 @@ def test_auto_skill_editor_approval_rejects_untrusted_order_shape(
                 SkillGrant.skill_id == skill_id,
                 SkillGrant.user_id == "applicant-1",
             )
-            .count()
-            == 0
-        )
-        assert (
-            session.query(WorkOrderNotificationModel)
-            .filter(WorkOrderNotificationModel.work_order_id == order_id)
             .count()
             == 0
         )

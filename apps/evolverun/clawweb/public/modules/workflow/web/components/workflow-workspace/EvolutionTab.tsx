@@ -12,6 +12,8 @@ import IssueDetailDrawer, { ApplyTaskStatusBadge, SuggestionActions, SUGGESTION_
 import { repairBatches } from '../../api/repair-batches'
 import { repairSignatureKey, type RepairCandidatesResponse, type RepairInboxFilter, type RepairInboxItem } from '../../../server/contracts/repair-workbench'
 import RepairItems, { RepairStateCounts } from './repair-batch/RepairItems'
+import RepairItemDetail from './repair-batch/RepairItemDetail'
+import DetailDrawer from './DetailDrawer'
 import RepairTaskDialog from './repair-batch/RepairTaskDialog'
 import { exclusion, itemTitle, phases, primary, RepairDialog } from './repair-batch/repair-view'
 import Pagination from '../Pagination'
@@ -89,15 +91,6 @@ function issueState(status?: SuggestionStatus | ApplyTaskStatus): IssueState {
   return 'observing'
 }
 
-function repairIssueState(item: RepairInboxItem): IssueState {
-  if (item.state === 'processing') return 'processing'
-  if (item.state === 'awaiting_verification') return 'awaiting_verification'
-  if (item.state === 'verified' || item.state === 'ineffective') return 'closed'
-  if (item.state === 'no_action') return 'no_action'
-  if (item.state === 'pending') return 'pending'
-  return 'observing'
-}
-
 function repairInboxFilter(state: IssueState | 'all'): RepairInboxFilter {
   if (state === 'observing') return 'all'
   return state
@@ -137,6 +130,8 @@ function DiagnosisPanel({
   const [modeFilter, setModeFilter] = useState<string>('all')
   const [stateFilter, setStateFilter] = useState<IssueState | 'all'>(initialRepairView.stateFilter)
   const [selectedSignature, setSelectedSignature] = useState<string | null>(issueSignature ?? null)
+  const [selectedRepairItemId, setSelectedRepairItemId] = useState<string | null>(null)
+  const [drawerEntry, setDrawerEntry] = useState<'causes' | 'repairs' | 'evidence' | undefined>()
   const [repairData, setRepairData] = useState<RepairCandidatesResponse | null>(null)
   const [repairOpen, setRepairOpen] = useState(initialRepairView.repairOpen)
   const [repairLoading, setRepairLoading] = useState(false)
@@ -185,9 +180,7 @@ function DiagnosisPanel({
       const firstLoad = !initializedDigest.current
       const changed = !firstLoad && initializedDigest.current !== result.inputDigest
       if (firstLoad) {
-        const defaults = canEdit && result.canEdit ? result.items.filter(item => !exclusion(item)).slice(0, Math.min(100, result.limits.maxItems)) : []
-        setSelectedRepairIds(defaults.map(item => item.itemId))
-        setSelectionNotice(`已默认选择首次加载页的 ${defaults.length} 项可处理建议；不是全部问题，也不是优先级推荐。翻页不会自动增选。`)
+        setSelectionNotice('默认不选择建议。请明确勾选本次修复范围；翻页不会自动增选。')
       } else if (changed) {
         setSelectedRepairIds([])
         setDraftOpen(false)
@@ -196,6 +189,7 @@ function DiagnosisPanel({
         setRepairDetails({})
         setRepairDetailLoading({})
         setRepairDetailErrors({})
+        setSelectedRepairItemId(null)
         setSelectionNotice('建议来源已更新，原选择已清空，请重新确认范围。')
       } else {
         const unavailable = new Set(result.items.filter(item => exclusion(item)).map(item => item.itemId))
@@ -208,9 +202,6 @@ function DiagnosisPanel({
     }).finally(() => { if (current) setRepairLoading(false) })
     return () => { current = false }
   }, [workflowId, repairOpen, repairRefresh, repairPage, repairPageSize, includeHistorical, selectedRepairState, canEdit])
-
-  if (isLoading) return <div className="p-4 text-xs text-slate-500">加载问题与建议...</div>
-  if (isError) return <div role="alert" className="p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试</button></div>
 
   const clusters = aggregateDiagnoses(diagnoses)
   for (const cluster of clusters) cluster.aggregation = data?.groups.find(group => group.signature === cluster.signature)
@@ -259,19 +250,26 @@ function DiagnosisPanel({
     }
   })
   const repairBackedSignatureKeys = new Set(repairData?.repairSignatureKeys ?? [])
-  const pagedEnriched = enriched.filter(({ cluster }) => !repairData || !repairBackedSignatureKeys.has(repairSignatureKey(cluster.signature))
-    || repairBySignature.has(cluster.signature))
-  const filtered = pagedEnriched.filter(({ cluster, repairItems: groupItems, state }) =>
+  const filtered = enriched.filter(({ cluster, state }) =>
     (nodeFilter === 'all' || cluster.node === nodeFilter)
     && (modeFilter === 'all' || cluster.mode === modeFilter)
-    && (stateFilter === 'all' || (groupItems.length ? groupItems.some(item => repairIssueState(item) === stateFilter) : stateFilter === state)))
+    && (repairOpen || stateFilter === 'all' || stateFilter === state))
   const pendingCount = repairData?.counts.pending ?? enriched.filter((item) => item.state === 'pending').length
   const processingCount = repairData?.counts.processing ?? enriched.filter((item) => item.state === 'processing').length
   const verifyingCount = repairData?.counts.awaiting_verification ?? enriched.filter((item) => item.state === 'awaiting_verification').length
   const closedCount = repairData?.counts.closed ?? enriched.filter((item) => item.state === 'closed').length
   const noActionCount = repairData?.counts.no_action ?? 0
   const activeRepairTask = repairData?.tasks.find(task => ['drafting', 'review', 'blocked', 'publishing', 'failed'].includes(task.phase))
-  const selectedIssue = filtered.find(({ cluster }) => cluster.signature === selectedSignature)
+  const selectedIssue = enriched.find(({ cluster }) => cluster.signature === selectedSignature)
+  const selectedRepairItem = (selectedRepairItemId ? repairItems.find(item => item.itemId === selectedRepairItemId) ?? selectionItems[selectedRepairItemId] : undefined)
+    ?? selectedIssue?.repairItems[0]
+  const openRepairDetail = (item: RepairInboxItem) => {
+    const signature = typeof item.context?.signature === 'string' ? item.context.signature : null
+    setSelectedSignature(signature && clusterSignatures.has(signature) ? signature : null)
+    setSelectedRepairItemId(item.itemId)
+    setDrawerEntry('repairs')
+  }
+  const closeDetail = () => { setSelectedSignature(null); setSelectedRepairItemId(null) }
   const selectableFilteredIds = [...filtered.flatMap(({ repairItems: groupItems }) => groupItems), ...standaloneRepairItems]
     .filter(item => !exclusion(item)).map(item => item.itemId)
   const allFilteredSelected = selectableFilteredIds.length > 0 && selectableFilteredIds.every(id => selectedRepairIds.includes(id))
@@ -288,7 +286,8 @@ function DiagnosisPanel({
     setRepairData(null)
     setSelectedRepairIds([])
     setSelectionItems({})
-    setSelectionNotice('历史范围已改变，将重新选择首次加载页的可处理建议。')
+    setSelectionNotice('历史范围已改变，原选择已清空；请重新勾选需要处理的建议。')
+    setSelectedRepairItemId(null)
     setRepairDetails({})
     setRepairDetailLoading({})
     setRepairDetailErrors({})
@@ -355,10 +354,38 @@ function DiagnosisPanel({
     try {
       await repairBatches.disposition(disposition.item.itemId, { ...input, requestId: nextRequestId(input) })
       if (disposition.action === 'no_action') setSelectedRepairIds(current => current.filter(id => id !== disposition.item.itemId))
+      closeDetail()
+      setSelectionItems(current => {
+        const next = { ...current }
+        delete next[disposition.item.itemId]
+        return next
+      })
+      // State transitions keep the source digest; discard stale details and in-flight reads explicitly.
+      detailEpoch.current += 1
+      detailRequests.current.clear()
+      setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
       setDisposition(null); setDispositionReason(''); resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) { setRepairActionError(error instanceof Error ? error.message : String(error)) }
     finally { setRepairBusy(false) }
   }
+
+  const repairContent = <>
+    {selectedIssue && selectedIssue.repairItems.length > 0 && <label className="mb-4 block text-xs font-medium text-slate-600">本页建议
+      <select aria-label="切换建议" value={selectedRepairItem?.itemId ?? ''} onChange={event => setSelectedRepairItemId(event.target.value)}
+        className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-2 text-sm">
+        {selectedRepairItem && !selectedIssue.repairItems.some(item => item.itemId === selectedRepairItem.itemId) && <option value={selectedRepairItem.itemId}>{itemTitle(selectedRepairItem)}（其他页）</option>}
+        {selectedIssue.repairItems.map(item => <option key={item.itemId} value={item.itemId}>{itemTitle(item)}</option>)}
+      </select>
+    </label>}
+    {selectedRepairItem ? <RepairItemDetail key={`${selectedRepairItem.itemId}:${initializedDigest.current}`} item={selectedRepairItem}
+      detail={repairDetails[selectedRepairItem.itemId]} loading={repairDetailLoading[selectedRepairItem.itemId]} error={repairDetailErrors[selectedRepairItem.itemId]}
+      onLoad={itemId => void loadRepairDetail(itemId)} selected={selectedRepairIds.includes(selectedRepairItem.itemId)} onToggle={toggleRepairItem}
+      canEdit={canEdit && repairData?.canEdit === true && !repairLoading && !repairError && !repairBusy}
+      limitReached={selectedRepairIds.length >= Math.min(100, repairData?.limits.maxItems ?? 100)}
+      onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
+      : !repairOpen ? <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>
+        : <p className="text-xs text-slate-500">{repairLoading ? '正在加载修复建议…' : repairError || '本页没有该问题的建议；请翻阅建议分页，历史分析仍可查看。'}</p>}
+  </>
 
   return (
     <div className="space-y-3">
@@ -369,6 +396,9 @@ function DiagnosisPanel({
           {!repairOpen && <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>}
         </div>
       </div>
+
+      {isLoading && <p role="status" className="rounded-lg bg-slate-50 p-4 text-xs text-slate-500">正在加载问题摘要；修复建议和任务独立加载。</p>}
+      {isError && <div role="alert" className="rounded-lg bg-red-50 p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试问题</button></div>}
 
       {repairOpen && repairLoading && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">修复任务与处理状态仍在加载，问题列表可继续查看。</p>}
       {repairOpen && repairError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{repairError}<button type="button" className="ml-2 underline" onClick={() => setRepairRefresh(value => value + 1)}>重试</button></p>}
@@ -397,7 +427,7 @@ function DiagnosisPanel({
             <button type="button" className="text-blue-700 underline" disabled={!selectedRepairIds.length} onClick={() => setSelectionOpen(true)}>查看已选</button>
             <button type="button" className="text-blue-700 underline" disabled={!selectedRepairIds.length || repairBusy} onClick={() => setSelectedRepairIds([])}>清空选择</button>
             <button type="button" className="text-blue-700 underline" disabled={!canEdit || !repairData.canEdit || repairLoading || !selectableFilteredIds.length}
-              onClick={toggleAllFiltered}>{allFilteredSelected ? '取消本页选择' : '选择本页可处理项'}</button>
+              onClick={toggleAllFiltered}>{allFilteredSelected ? '取消本页选择' : `选择本页可处理建议（${selectableFilteredIds.length}）`}</button>
           </div>
           <p className="mt-2 leading-5">{selectionNotice}</p>
           {selectedRepairIds.some(id => !selectableFilteredIds.includes(id)) && <p className="mt-1">其中 {selectedRepairIds.filter(id => !selectableFilteredIds.includes(id)).length} 项不在当前可见范围，仍会纳入草稿。</p>}
@@ -417,7 +447,7 @@ function DiagnosisPanel({
         </div>
       </section>}
 
-      {diagnoses.length === 0 && standaloneSuggestions.length === 0 && standaloneRepairItems.length === 0 && (
+      {!isLoading && !isError && diagnoses.length === 0 && standaloneSuggestions.length === 0 && standaloneRepairItems.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-500">
           当前工作流暂无已记录异常。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
         </div>
@@ -444,18 +474,18 @@ function DiagnosisPanel({
                 onChange={toggleAllFiltered}
                 className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
               />
-              全选本页可见项
+              选择本页可处理建议（{selectableFilteredIds.length}）
             </label>}
             <select
-              aria-label="问题状态"
-              value={stateFilter}
+              aria-label={repairOpen ? '建议状态' : '问题状态'}
+              value={repairOpen && stateFilter === 'observing' ? 'all' : stateFilter}
               onChange={(e) => {
                 setRepairPage(1)
                 setStateFilter(e.target.value as IssueState | 'all')
               }}
               className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600"
             >
-              {Object.entries(ISSUE_STATE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {Object.entries(ISSUE_STATE_LABELS).filter(([value]) => !repairOpen || value !== 'observing').map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             <select
               aria-label="问题节点"
@@ -475,7 +505,7 @@ function DiagnosisPanel({
               <option value="all">全部模式</option>
               {modes.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
-            <span className="pl-1 text-[11px] text-slate-400">{filtered.length} / {clusters.length}</span>
+            <span className="pl-1 text-[11px] text-slate-400">显示 {filtered.length} / {clusters.length} 个问题</span>
           </div>
         </div>
 
@@ -486,6 +516,7 @@ function DiagnosisPanel({
           const status = suggestion ? SUGGESTION_STATUS[suggestion.status] ?? SUGGESTION_STATUS.pending : null
           const summary = cluster.aggregation?.summary?.summary ?? '聚合结论尚未生成，查看单次运行分析。'
           const task = suggestion ? applyTaskMap[suggestion.id] : undefined
+          const offPageRepair = repairOpen && !groupItems.length && repairBackedSignatureKeys.has(repairSignatureKey(cluster.signature))
           return <article key={cluster.signature} data-layout="compact-issue-row" className="px-4 py-3 transition-colors hover:bg-slate-50/70">
             <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
               <div className="min-w-0">
@@ -493,17 +524,18 @@ function DiagnosisPanel({
                   <span className="text-sm font-semibold text-slate-900">{cluster.node}</span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{cluster.mode}</span>
                   {groupItems.length > 0 && <RepairStateCounts items={groupItems} />}
-                  {!groupItems.length && status && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span>}
-                  {!groupItems.length && !status && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">观察中</span>}
+                  {offPageRepair && <span className="text-xs text-slate-500">建议状态见对应分页</span>}
+                  {!groupItems.length && !offPageRepair && status && <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span>}
+                  {!groupItems.length && !offPageRepair && !status && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">观察中</span>}
                 </div>
-                <p className="mt-1.5 line-clamp-2 max-w-5xl text-xs leading-5 text-slate-600" title={summary}>{summary}</p>
+                <p className="mt-1.5 line-clamp-1 max-w-5xl text-xs leading-5 text-slate-600" title={summary}>{summary}</p>
                 {cluster.aggregation?.stale && <p className="mt-1 text-xs text-amber-700">历史聚合摘要，尚未覆盖最新分析；请在详情核对来源范围。</p>}
-                {groupItems.length > 0 ? <div className="mt-3"><p className="mb-2 text-xs font-semibold text-slate-700">本页修复建议 · {groupItems.length} 项</p><RepairItems embedded items={groupItems} allItems={groupItems}
+                {groupItems.length > 0 ? <div className="mt-3"><p className="mb-2 text-xs font-semibold text-slate-700">本页修复建议 · {groupItems.length} 条</p><RepairItems embedded items={groupItems}
                   selected={selectedRepairIds} onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true}
                   limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
-                  details={repairDetails} detailLoading={repairDetailLoading} detailErrors={repairDetailErrors} onLoadDetail={itemId => void loadRepairDetail(itemId)}
-                  onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} /></div>
-                  : cluster.aggregation ? <p className="mt-2 rounded-lg bg-blue-50/70 px-3 py-2 text-xs text-blue-700">查看问题、建议总览与原始证据；可执行处理项同步后会直接出现在这里。</p> : suggestion ? <div className="mt-2 flex max-w-5xl items-start gap-2 rounded-lg bg-blue-50/70 px-3 py-2">
+                  onOpenDetail={openRepairDetail} /></div>
+                  : repairOpen && repairBackedSignatureKeys.has(repairSignatureKey(cluster.signature)) ? <p className="mt-2 text-xs text-slate-500">建议不在当前建议分页或筛选范围内；问题与历史证据仍可查看。</p>
+                  : cluster.aggregation ? <p className="mt-2 text-xs text-slate-500">查看问题、建议总览与原始证据；可执行处理项同步后会直接出现在这里。</p> : suggestion ? <div className="mt-2 flex max-w-5xl items-start gap-2 rounded-lg bg-blue-50/70 px-3 py-2">
                   <span className="shrink-0 text-[10px] font-semibold text-blue-700">建议</span>
                   <p className="line-clamp-2 min-w-0 text-xs leading-5 text-blue-700" title={suggestion.description}>{suggestion.description}</p>
                 </div> : <p className="mt-2 max-w-5xl rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">暂无可执行建议，暂不处理，等待更多运行证据或人工判断。</p>}
@@ -517,10 +549,10 @@ function DiagnosisPanel({
 
               <button
                 type="button"
-                onClick={() => setSelectedSignature(cluster.signature)}
+                onClick={() => { setSelectedSignature(cluster.signature); setSelectedRepairItemId(null); setDrawerEntry('causes') }}
                 className="whitespace-nowrap text-[11px] font-medium text-slate-500 hover:text-slate-900"
               >
-                查看
+                问题详情
               </button>
             </div>
           </article>
@@ -533,14 +565,16 @@ function DiagnosisPanel({
           <h3 className="text-sm font-semibold text-slate-900">历史建议与任务</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">即使最新分析不再包含对应诊断，处理状态、任务和历史结论仍会保留。</p>
         </div>
-        <RepairItems items={standaloneRepairItems} allItems={standaloneRepairItems} selected={selectedRepairIds} onToggle={toggleRepairItem}
+        <RepairItems items={standaloneRepairItems} selected={selectedRepairIds} onToggle={toggleRepairItem}
           canEdit={canEdit && repairData?.canEdit === true} limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
-          details={repairDetails} detailLoading={repairDetailLoading} detailErrors={repairDetailErrors} onLoadDetail={itemId => void loadRepairDetail(itemId)}
-          onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
+          onOpenDetail={openRepairDetail} />
       </section>}
 
-      {repairData && <Pagination page={repairData.page.page} pageSize={repairData.page.pageSize} total={repairData.page.total}
-        onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />}
+      {repairData && <section aria-label="修复建议分页" className="rounded-lg border border-slate-200 bg-white p-3">
+        <p className="mb-2 text-xs text-slate-500">修复建议分页 · 共 {repairData.page.total} 条建议。翻页仅切换建议，不隐藏问题；状态筛选仅作用于建议。</p>
+        <Pagination page={repairData.page.page} pageSize={repairData.page.pageSize} total={repairData.page.total}
+          onChange={(page, pageSize) => { setRepairPage(page); setRepairPageSize(pageSize) }} />
+      </section>}
 
       {standaloneSuggestions.length > 0 && <section aria-label="已有建议跟进" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
@@ -570,18 +604,10 @@ function DiagnosisPanel({
       </section>}
 
       {selectedIssue && <IssueDetailDrawer
-        key={selectedIssue.cluster.signature}
+        key={`${selectedIssue.cluster.signature}:${drawerEntry}`}
+        initialTab={drawerEntry}
         cluster={selectedIssue.cluster}
-        repairContent={<>
-          <p className="mb-3 text-xs leading-5 text-slate-500">以下是本页该问题的原始修复建议。勾选会同步到本次 Pack 草稿范围，不会立即应用。</p>
-          {selectedIssue.repairItems.length ? <RepairItems embedded items={selectedIssue.repairItems}
-            selected={selectedRepairIds} onToggle={toggleRepairItem} canEdit={canEdit && repairData?.canEdit === true}
-            limit={Math.min(100, repairData?.limits.maxItems ?? 100)}
-            details={repairDetails} detailLoading={repairDetailLoading} detailErrors={repairDetailErrors} onLoadDetail={itemId => void loadRepairDetail(itemId)}
-            onDisposition={(item, action) => { resetRequestId(); setRepairActionError(''); setDisposition({ item, action }); setDispositionReason('') }} />
-            : !repairOpen ? <button type="button" className={primary} onClick={() => setRepairOpen(true)}>进入修复处理</button>
-              : <p className="text-xs text-slate-500">{repairLoading ? '正在加载修复建议…' : repairError || '本页没有该问题的可处理建议；历史建议请到“证据与历史”查看。'}</p>}
-        </>}
+        repairContent={repairContent}
         suggestion={selectedIssue.suggestion}
         task={selectedIssue.suggestion ? applyTaskMap[selectedIssue.suggestion.id] : undefined}
         previousTask={selectedIssue.suggestion ? applyTasks.find((task) => task.suggestionId === selectedIssue.suggestion?.id
@@ -591,11 +617,14 @@ function DiagnosisPanel({
         selectedFlowId={runId}
         selectedAnalysisId={analysisId}
         canEdit={canEdit}
-        legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || selectedIssue.repairItems.length === 0}
+        legacyApplyEnabled={!repairOpen || repairData?.capabilities.generation === false || !repairBackedSignatureKeys.has(repairSignatureKey(selectedIssue.cluster.signature))}
         onAction={onAction}
         onApply={onApply}
-        onClose={() => setSelectedSignature(null)}
+        onClose={closeDetail}
       />}
+
+      {!selectedIssue && selectedRepairItemId && selectedRepairItem && <DetailDrawer title="建议详情" onClose={closeDetail}
+        header={<h3 className="text-base font-semibold text-slate-900">建议详情</h3>}>{repairContent}</DetailDrawer>}
 
       {selectionOpen && <RepairDialog title="已选修复建议" onClose={() => setSelectionOpen(false)}>
         <p className="mb-3 text-xs text-slate-500">包括其他页和被筛选隐藏的选择，共 {selectedRepairIds.length} 项。</p>

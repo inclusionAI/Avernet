@@ -254,3 +254,26 @@ async fn unready_flows_are_rejected_but_group_activation_is_allowed() {
     policy.defaults.mode = BotDeliveryMode::Enforce;
     assert!(live.replace(admin(), 0, policy).await.is_ok());
 }
+
+#[tokio::test]
+async fn direct_policy_publication_and_reload_do_not_require_registry_preflight() {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let live = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    let mut policy = DeliveryPolicy::default();
+    policy.flow_enabled.direct_a2a = true;
+    policy.defaults.mode = BotDeliveryMode::Enforce;
+    let error = live.replace(admin(), 0, policy.clone()).await.unwrap_err();
+    assert!(error.to_string().contains("delivery_scheduler_unavailable"));
+    live.scheduler_available.store(true, Ordering::SeqCst);
+    let committed = live.replace(admin(), 0, policy).await.unwrap();
+    assert_eq!(repo.load_policy().await.unwrap(), committed);
+    assert!(committed.policy.manages_direct_a2a("bot"));
+
+    let takeover = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    takeover.refresh_for_takeover().await.unwrap();
+    assert_eq!(*takeover.snapshot.read().await, committed);
+    let follower = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    follower.reconcile_durable_version().await.unwrap();
+    assert_eq!(*follower.snapshot.read().await, committed);
+    assert_eq!(LiveDeliveryPolicy::load_compatible(repo.as_ref()).await.unwrap(), committed);
+}

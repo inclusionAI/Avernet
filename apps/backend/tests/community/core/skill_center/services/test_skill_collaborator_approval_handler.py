@@ -69,17 +69,7 @@ def test_skill_collaborator_handler_delegates_atomic_approval() -> None:
     assert call["target_status"] is WorkOrderStatus.APPROVED
     assert call["notification"].recipient_user_id == "member-1"
     assert call["notification"].event_type == "SKILL_COLLABORATOR_REVIEWED"
-    assert call["notification"].content == {"text": "你共同编辑 Skill「Review Skill」的申请已通过。"}
+    assert call["notification"].content == {
+        "text": "你共同编辑 Skill「Review Skill」的申请已通过。"
+    }
     assert call["env"] == "test"
-
-
-def test_skill_collaborator_handler_delegates_auto_by_order_id() -> None:
-    repository = MagicMock()
-    handler = SkillCollaboratorApprovalHandler(repository, lambda: "test")
-
-    result = handler.process_auto(work_order_id=11)
-
-    assert result is repository.approve_auto_skill_editor_request.return_value
-    repository.approve_auto_skill_editor_request.assert_called_once_with(
-        work_order_id=11, env="test"
-    )
