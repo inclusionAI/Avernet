@@ -13,7 +13,13 @@ Manifest：一个修订版会编译成一份钉住的 Manifest（Bot 配置清�
 都解析到一个 commit SHA 或摘要），并通过现有的 Manifest / 发布管线应用。不引入
 第二条交付路径。
 
-修订版带有父指针、来源记录（由谁或什么创建、依据哪些证据）和状态。具名引用
+一句话概括：修订版是一份完整且钉住的 Manifest，加上策展记忆，加上谱系与锁定的
+policy，并且只能通过补丁变更。修订版是**完整的**：包含所有类别，因此无论先前
+状态如何，一个修订版都能完整决定 bot。文件内容按摘要引用，存放在现有的
+Manifest 内容存储中；Skill Center 的 skill 以钉住的 Center 版本引用，而不复制。
+
+修订版带有父指针、便于阅读的按 bot 递增序号、来源记录（由谁或什么创建、依据
+哪些证据）和状态。具名引用
 （ref）（`active`、`previous`、`canary`、`draft`、`candidate/*`、`inbox/*`）
 指向修订版，并通过 compare-and-swap 移动。现有的 `/config-manifest` 端点保留，
 成为注册表之上的视图。

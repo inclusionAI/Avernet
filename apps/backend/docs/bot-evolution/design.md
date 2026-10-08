@@ -110,8 +110,9 @@ existing apply pipeline. Full model in [genome.md](genome.md).
 
 Placement: **Backend** (`core/bot_genome/`), next to
 `core/bot_config_manifest/`, because Backend owns desired state and the
-Manifest already lives there. Blobs reuse the content-addressed
-`ac_manifest_content` store.
+Manifest already lives there. Blobs reuse the manifest content store (a
+content-addressed blob directory behind `ManifestContentService`, with
+provenance in `ac_manifest_content`); see [genome.md §7](genome.md#7-storage).
 
 ### C2 Experience Store
 

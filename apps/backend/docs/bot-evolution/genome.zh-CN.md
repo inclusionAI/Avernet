@@ -26,19 +26,38 @@ apply，并且已经具备能力矩阵和仅追加（append-only）的 apply 报
 | 整文档 PUT，按类别原子替换 | 提议器必须产出小而可审查、逐项列出的补丁 |
 | `MEMORY.md` / `IDENTITY.md` 被保留且被拒绝 | 习得的记忆是自改进产出的一半 |
 | v1 拒绝 `engine_config` | 模型 / temperature / 推理预算都是合理的可调参数 |
+| 文档中省略某个类别意味着「保持不动」 | 一个修订版必须完整决定 bot；否则同一修订版 apply 两次，可能因先前状态不同而得到不同的 bot |
 | 拒绝未知键；没有元数据 | 需要来源记录和注解 |
 | 回滚仅限一步且仅限 service bot | 需要对每个 bot 回滚到任意已接纳的修订版 |
 
 ## 2. 结构
 
-基因组修订版（Genome Revision）= **钉住的 Manifest 文档 + 记忆种子 + 元数据**，
-以不可变方式记录，并以其规范形式的哈希作为标识。
+一句话概括：基因组修订版（Genome Revision）是**一份完整且钉住的 Manifest，加上
+策展记忆，加上谱系与锁定的 policy，并且只能通过补丁变更**。具体而言，它在
+Manifest 之上恰好增加了以下几项：
+
+1. **修订版标识与谱系**：内容哈希 id 加上便于阅读的按 bot 递增序号、父版本、
+   来源记录（由谁或什么、基于哪些证据创建）、状态，以及通过比较并交换（CAS）
+   移动的具名引用（§3）。
+2. **不可进化的 `policy` 段**：锁定基因、可变基因、钉住条目、风险覆盖（见下文）。
+3. **钉住的内容**：每个源都解析到 commit SHA 或内容 digest，因此同一修订版总是
+   得到相同的字节（§7）。
+4. **完整性（totality）**：每个修订版都包含所有类别；`[]` 表示「无」。与
+   Manifest 文档不同，修订版从不把某个类别交给先前状态决定。
+5. **自动化执行者只能通过补丁变更**：进化策略和 Bot 针对一个具名的基准修订版
+   提交带类型、逐项列出的补丁（§4）。人工仍可从整份文档记录修订版。
+6. **一个新的内容类别：策展记忆**（§5），它需要新的引擎契约。
+
+刻意*没有*增加的：评估分数（存放在验证层，修订版只做链接），以及
+`engine_config`（Manifest 本身已有该类别；为一个白名单子集放开它是进化会受益的
+Manifest 变更，而不是基因组独有的新增）。
 
 ```yaml
 # Illustrative — the normative schema is work item RSI-02.
 genome_schema: 1
 revision:                        # computed / platform-written, not authored
   id: sha256:7c1e…               # hash of canonical(spec) — content address
+  seq: 42                        # per-bot sequence number for humans ("r42"); not an identity
   bot_id: bot_123
   lineage_id: lin_support_agent  # stable across forks; a fork starts a new lineage
   parents: [sha256:a90b…]        # >1 parent allowed (crossover/merge)
@@ -54,8 +73,8 @@ spec:                            # the evolvable content (authored / proposed)
     - {type: SOUL.md, blob: sha256:…}
     - {type: AGENTS.md, blob: sha256:…}
   skills:
-    - {name: refund-policy, blob: sha256:…, origin: {kind: center, ref: "center://…@v7"}}
-    - {name: quality-check, blob: sha256:…, origin: {kind: local}}
+    - {name: refund-policy, origin: {kind: center, version: "center://…@v7"}}   # pinned Center version, not copied
+    - {name: quality-check, blob: sha256:…, origin: {kind: local}}              # bot-owned: stored as a blob
   memory:                        # NEW — see §5
     mode: seed                   # seed | replace | merge
     items_blob: sha256:…         # itemized memory set (not a raw MEMORY.md)
@@ -78,11 +97,16 @@ policy:                          # NOT evolvable — copied forward verbatim by 
 
 设计要点：
 
-- **内容寻址的 blob。** 所有文件内容都存放在现有的内容寻址存储
-  （`ac_manifest_content`）中。共享某个 skill 的两个修订版共享同一个 blob。
-  diff 成本很低。
+- **内容寻址的 blob。** 文件内容按 digest 引用，存放在现有的 Manifest 内容存储
+  中（§7）。共享某个文件的两个修订版共享同一个 blob。diff 成本很低。
 - **钉住，而非浮动。** 当从一份使用移动引用 `sources` 的 Manifest 记录修订版时，
   平台会解析这些引用并存储 blob。浮动的 Manifest 是*输入*；修订版是*事实*。
+- **完整，而非部分。** 从一份部分 Manifest 文档记录修订版时，所有被省略的类别
+  都从父修订版（首个修订版则从 bot 的当前状态）补全，因此存储下来的修订版是
+  完整的。为 apply 编译修订版时总是输出所有类别。
+- **Center skill 钉住版本，而不复制。** Skill Center 已经存储了不可变、受治理的
+  版本（ADR 0010）。修订版记录 Center 版本；只有 bot 自有的 skill 以及来自
+  git/OSS 的内容才以 blob 形式存储。
 - **`spec` 与 `policy`。** `policy` 归 bot 所有者 / 平台所有，永远不归进化策略
   所有。平台底线会拒绝任何触及它的补丁。「工具和权限变更只能由人完成」正是在
   这里通过结构而非约定来强制执行的。
@@ -193,17 +217,49 @@ evidence: [finding:f_12]                 # required for non-trivial ops
 
 1. 修订版表 + 引用 + CAS（P1）。
 2. apply 报告记录 `revision_id` 和编译后文档的 digest（P1）。
-3. 在修订版上记录钉住后的解析结果（P1）。
+3. 在修订版上记录钉住后的解析结果（P1）；即使从部分文档记录，修订版也是完整的。
 4. `metadata` / `annotations` 顶层键，apply 时忽略（P1）。
 5. 为一个键白名单启用 `engine_config` 类别（P3/P4）。
 6. 带模式的 `memory` 类别（P5，依赖 RSI-05）。
 7. 个人 bot 和 service bot 均支持回滚到任意修订版（P1）。
+8. Manifest 内容存储接受带补丁来源记录的「产出」（非拉取）内容（P2）。
 
-## 7. 存储选型（待决事项 D-6）
+## 7. 存储
+
+### 7.1 内容：复用 Manifest 内容存储
+
+Manifest apply 管线已经为它拉取的所有内容保存了平台自己的持久副本
+（`core/bot_config_manifest/content/service.py`）：
+
+- **字节**存放在按内容寻址的 blob 目录 `<root>/blobs/<hex[:2]>/<hex64>` 中，
+  只写一次、原子写入，读取时校验哈希。根目录为
+  `user_config.bot_config_manifest.content_store_dir`（默认
+  `./data/manifest_content`；部署时指向共享卷）。
+- **来源记录**存放在 `ac_manifest_content` 中，这是一张只追加的存储事件日志
+  （bot、源 URL、凭证*名称*、apply）。该表不存字节。
+- **保留策略**在 v1 中是无条件的：不删除、不清扫、没有 TTL。
+
+基因组修订版引用的就是这个存储中的 blob，不存在第二份副本。需要三项扩展：
+
+1. **产出内容的写入路径。** 目前每个存储事件都是一次*拉取*（`source_url` 必填）。
+   由提议器创建的内容（例如编辑后的 `SKILL.md` 或新的记忆条目）从未被拉取过，
+   需要一个以产出它的补丁和运行作为来源记录的存储调用。
+2. **归档的保留策略。** 归档会保留每一个候选。大多数 blob 是小文本且可去重，
+   但 Manifest 资源单个可达 100–200 MiB。v1 采用无条件保留是可以接受的。之后的
+   任何清扫只能删除没有任何修订版引用的 blob，并且绝不能删除从某个 `promoted`
+   修订版可达的 blob。
+3. **Backend 之外的读取方。** `apps/evolution` 中的提议器和评估器通过基因组仓库
+   API（或已物化的沙箱）读取内容，绝不直接读取 blob 目录。
+
+待确认问题：目录类资源（来自 git 的 `path: data/kb/`）目前是如何存储的——整体
+一个归档 blob，还是每个文件一个 blob。这决定了针对资源的 `file.edit` 补丁能做
+到多细粒度，必须在 RSI-02 确定补丁 schema 之前确认。
+
+### 7.2 修订版：用数据库，而不是 git（待决事项 D-6）
 
 | 选项 | 优点 | 缺点 |
 | --- | --- | --- |
-| **DB 修订版 + 现有内容寻址存储**（推荐） | 租户隔离、ACL、可对谱系和状态进行查询，复用 `ac_manifest_content`，符合 Backend 的既有模式 | 需要自己的 diff/merge 工具 |
+| **DB 修订版 + 现有内容寻址存储**（推荐） | 租户隔离、ACL、可对谱系和状态进行查询，复用 Manifest 内容存储，符合 Backend 的既有模式 | 需要自己的 diff/merge 工具 |
 | 每个 bot 一个 Git 仓库 | 免费获得历史、diff、blame；提议器本就会使用 git | 多租户托管、ACL、跨 bot 查询、GC——一项新的基础设施依赖 |
 
 建议：DB 原生，外加一个 **git 导出**（`avn genome export

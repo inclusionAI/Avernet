@@ -14,8 +14,15 @@ a revision compiles to a pinned Manifest document (every source resolved to a
 commit SHA or digest) and is applied through the existing Manifest / publish
 pipeline. No second delivery path is introduced.
 
-Revisions carry parent pointers, provenance (who or what created them, from
-which evidence), and status. Named refs (`active`, `previous`, `canary`,
+In one sentence, a revision is a complete, pinned Manifest, plus curated
+memory, plus lineage and a locked policy, changed only through patches.
+Revisions are **total**: every category is present, so a revision fully
+determines the bot regardless of prior state. File content is referenced by
+digest and stored in the existing manifest content store; Skill Center skills
+are referenced by pinned Center version rather than copied.
+
+Revisions carry parent pointers, a readable per-bot sequence number,
+provenance (who or what created them, from which evidence), and status. Named refs (`active`, `previous`, `canary`,
 `draft`, `candidate/*`, `inbox/*`) point at revisions and move by
 compare-and-swap. The existing `/config-manifest` endpoints remain and
 become views over the registry.

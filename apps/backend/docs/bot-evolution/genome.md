@@ -27,19 +27,44 @@ needs (codebase evidence in [research.md §2.1](research.md#21-bot-config-manife
 | Whole-document PUT, category-atomic replace | Proposers must emit small, reviewable, itemized patches |
 | `MEMORY.md` / `IDENTITY.md` reserved and rejected | Learned memory is half of what self-improvement produces |
 | `engine_config` rejected in v1 | Model / temperature / reasoning budget are legitimate tunables |
+| A category left out of the document means "leave it untouched" | A revision must fully determine the bot; otherwise two applies of the same revision can produce different bots depending on prior state |
 | Unknown keys rejected; no metadata | Need provenance and annotations |
 | Rollback limited to one step and service bots only | Need rollback to any accepted revision for every bot |
 
 ## 2. Shape
 
-A Genome Revision = **pinned Manifest document + memory seed + metadata**,
-recorded immutably and identified by the hash of its canonical form.
+In one sentence: a Genome Revision is **a complete, pinned Manifest, plus
+curated memory, plus lineage and a locked policy, changed only through
+patches**. Concretely, it adds exactly these things on top of the Manifest:
+
+1. **Revision identity and lineage**: a content-hash id plus a readable
+   per-bot sequence number, parent(s), provenance (who or what created it,
+   from which evidence), status, and named refs moved by compare-and-swap
+   (§3).
+2. **A non-evolvable `policy` section**: locked genes, mutable genes, pinned
+   items, risk overrides (below).
+3. **Pinned content**: every source resolved to a commit SHA or content
+   digest, so the same revision always yields the same bytes (§7).
+4. **Totality**: every category is present in every revision; `[]` means
+   "none". Unlike a Manifest document, a revision never leaves a category to
+   prior state.
+5. **Patch-only change for automated actors**: strategies and bots submit
+   typed, itemized patches against a named base revision (§4). Humans can
+   still record a revision from a whole document.
+6. **One new content category, curated memory** (§5), which needs a new
+   engine contract.
+
+Deliberately *not* added: evaluation scores (they live in the verification
+layer and are only linked), and `engine_config` (the Manifest already has the
+category; enabling an allowlisted subset is a Manifest change evolution
+benefits from, not a genome-only addition).
 
 ```yaml
 # Illustrative — the normative schema is work item RSI-02.
 genome_schema: 1
 revision:                        # computed / platform-written, not authored
   id: sha256:7c1e…               # hash of canonical(spec) — content address
+  seq: 42                        # per-bot sequence number for humans ("r42"); not an identity
   bot_id: bot_123
   lineage_id: lin_support_agent  # stable across forks; a fork starts a new lineage
   parents: [sha256:a90b…]        # >1 parent allowed (crossover/merge)
@@ -55,8 +80,8 @@ spec:                            # the evolvable content (authored / proposed)
     - {type: SOUL.md, blob: sha256:…}
     - {type: AGENTS.md, blob: sha256:…}
   skills:
-    - {name: refund-policy, blob: sha256:…, origin: {kind: center, ref: "center://…@v7"}}
-    - {name: quality-check, blob: sha256:…, origin: {kind: local}}
+    - {name: refund-policy, origin: {kind: center, version: "center://…@v7"}}   # pinned Center version, not copied
+    - {name: quality-check, blob: sha256:…, origin: {kind: local}}              # bot-owned: stored as a blob
   memory:                        # NEW — see §5
     mode: seed                   # seed | replace | merge
     items_blob: sha256:…         # itemized memory set (not a raw MEMORY.md)
@@ -79,12 +104,20 @@ policy:                          # NOT evolvable — copied forward verbatim by 
 
 Design points:
 
-- **Content-addressed blobs.** All file content lives in the existing
-  content-addressed store (`ac_manifest_content`). Two revisions that share a
-  skill share its blob. Diffs are cheap.
+- **Content-addressed blobs.** File content is referenced by digest and
+  stored in the existing manifest content store (§7). Two revisions that
+  share a file share its blob. Diffs are cheap.
 - **Pinned, not floating.** When a revision is recorded from a Manifest that
   uses `sources` with moving refs, the platform resolves them and stores the
   blobs. A floating Manifest is an *input*; a revision is a *fact*.
+- **Total, not partial.** Recording a revision from a partial Manifest
+  document fills every omitted category from the parent revision (or from the
+  bot's current state for the first revision), so the stored revision is
+  complete. Compiling a revision for apply always emits every category.
+- **Center skills are pinned, not copied.** Skill Center already stores
+  immutable, governed versions (ADR 0010). A revision records the Center
+  version; only bot-owned skills and git/OSS-sourced content are stored as
+  blobs.
 - **`spec` vs `policy`.** `policy` is owned by the bot owner / platform, never
   by a strategy. The platform floor rejects any patch touching it. This is
   where "tool and permission changes are human-only" is enforced
@@ -204,17 +237,58 @@ Kept backward compatible with schema v1 documents.
 
 1. Revision table + refs + CAS (P1).
 2. Apply reports record `revision_id` and compiled document digest (P1).
-3. Pinned resolution recorded on revision (P1).
+3. Pinned resolution recorded on revision (P1); revisions are total even
+   when recorded from a partial document.
 4. `metadata` / `annotations` top-level key, ignored by apply (P1).
 5. `engine_config` category enabled for an allowlist of keys (P3/P4).
 6. `memory` category with modes (P5, depends on RSI-05).
 7. Any-revision rollback for personal and service bots (P1).
+8. Manifest content store accepts produced (non-fetched) content with patch
+   provenance (P2).
 
-## 7. Storage choice (open decision D-6)
+## 7. Storage
+
+### 7.1 Content: reuse the manifest content store
+
+The manifest apply pipeline already keeps the platform's own durable copy of
+everything it fetches (`core/bot_config_manifest/content/service.py`):
+
+- **Bytes** live in a content-addressed blob directory,
+  `<root>/blobs/<hex[:2]>/<hex64>`, written once and atomically and
+  hash-verified on read. The root is
+  `user_config.bot_config_manifest.content_store_dir` (default
+  `./data/manifest_content`; deployments point it at a shared volume).
+- **Provenance** lives in `ac_manifest_content`, an append-only log of store
+  events (bot, source URL, credential *name*, apply). The table holds no
+  bytes.
+- **Retention** in v1 is unconditional: no delete, no sweep, no TTL.
+
+Genome revisions reference blobs in this same store; there is no second
+copy. Three extensions are needed:
+
+1. **A write path for produced content.** Today every store event is a
+   *fetch* (`source_url` is required). Content created by a proposer, such
+   as an edited `SKILL.md` or a new memory item, was never fetched. It needs
+   a store call whose provenance is the producing patch and run.
+2. **Retention for the archive.** The archive keeps every candidate. Most
+   blobs are small text and deduplicate, but manifest resources may be
+   100–200 MiB each. Unconditional retention is acceptable for v1. Any later
+   sweep may only remove blobs that no revision references, and must never
+   remove a blob reachable from a `promoted` revision.
+3. **Readers outside Backend.** Proposers and evaluators in
+   `apps/evolution` read content through the Genome Registry API (or a
+   materialised sandbox), never from the blob directory directly.
+
+Open question: how a directory resource (`path: data/kb/` from git) is
+stored today, as one archive blob or one blob per file. It decides how
+fine-grained `file.edit` patches on resources can be, and must be confirmed
+before RSI-02 fixes the patch schema.
+
+### 7.2 Revisions: database, not git (open decision D-6)
 
 | Option | For | Against |
 | --- | --- | --- |
-| **DB revisions + existing content-addressed store** (recommended) | Tenancy, ACL, queries over lineage and status, reuses `ac_manifest_content`, fits Backend patterns | Need our own diff/merge tooling |
+| **DB revisions + existing content-addressed store** (recommended) | Tenancy, ACL, queries over lineage and status, reuses the manifest content store, fits Backend patterns | Need our own diff/merge tooling |
 | Git repository per bot | Free history, diff, blame; proposers already speak git | Multi-tenant hosting, ACL, querying across bots, GC — a new infrastructure dependency |
 
 Recommendation: DB-native, plus a **git export** (`avn genome export

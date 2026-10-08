@@ -97,8 +97,9 @@ Manifest**：一个修订版*编译成*一份钉住的 Manifest 文档加上一�
 通过现有的 apply 管线应用该文档。完整模型见 [genome.zh-CN.md](genome.zh-CN.md)。
 
 放置位置：**Backend**（`core/bot_genome/`），与 `core/bot_config_manifest/`
-相邻，因为 Backend 拥有期望状态，而 Manifest 已经在那里。blob 复用按内容寻址
-的 `ac_manifest_content` 存储。
+相邻，因为 Backend 拥有期望状态，而 Manifest 已经在那里。blob 复用 Manifest
+内容存储（`ManifestContentService` 背后的按内容寻址 blob 目录，来源记录在
+`ac_manifest_content` 中）；见 [genome.zh-CN.md §7](genome.zh-CN.md#7-存储)。
 
 ### C2 经验库
 
