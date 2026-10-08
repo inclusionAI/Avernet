@@ -1,5 +1,7 @@
 # Verification — deciding whether a change is actually better
 
+> 中文版：[verification.zh-CN.md](verification.zh-CN.md)
+
 > Status: DRAFT. This is the "verify & accept" box in every improvement loop.
 > It is platform-owned (DR-2) and is the anchor that recursion may not move
 > ([recursion.md §6](recursion.md#6-bounds-what-recursion-may-not-touch)).

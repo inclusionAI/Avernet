@@ -1,5 +1,7 @@
 # Interfaces — API, SDK, CLI, and bot-driven evolution
 
+> 中文版：[interfaces.zh-CN.md](interfaces.zh-CN.md)
+
 > Status: DRAFT. Answers "API/SDK or CLI, and how does a bot drive RSI?"
 
 ## 1. Recommendation in one paragraph

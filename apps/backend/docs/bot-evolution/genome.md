@@ -1,5 +1,7 @@
 # Bot Genome — the form of an evolved bot
 
+> 中文版：[genome.zh-CN.md](genome.zh-CN.md)
+
 > Status: DRAFT. Builds on the Bot Config Manifest
 > (`apps/backend/docs/bot-config-manifest/`). Proposed decision:
 > [DR-1](decisions/0001-bot-genome-is-the-unit-of-evolution.md).

@@ -1,5 +1,7 @@
 # Default strategies — onboarding the existing pipelines
 
+> 中文版：[default-strategy.zh-CN.md](default-strategy.zh-CN.md)
+
 > Status: DRAFT. How ClawEvolve and the other self-improvement code in
 > `apps/evolverun/` become the platform's default, replaceable strategies.
 > Evidence and file references: [research.md §2.2](research.md#22-existing-self-improvement-pipelines).

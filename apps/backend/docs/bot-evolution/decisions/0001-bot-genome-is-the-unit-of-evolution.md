@@ -1,5 +1,7 @@
 # Bot Genome is the unit of evolution, built on the Bot Config Manifest
 
+> 中文版：[0001-bot-genome-is-the-unit-of-evolution.zh-CN.md](0001-bot-genome-is-the-unit-of-evolution.zh-CN.md)
+
 Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision

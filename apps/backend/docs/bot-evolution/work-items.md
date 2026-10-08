@@ -1,5 +1,7 @@
 # Work items
 
+> 中文版：[work-items.zh-CN.md](work-items.zh-CN.md)
+
 > Status: DRAFT. Each item is sized for one follow-up session to take through
 > SDD (spec → plan → tasks → implement) or, for design-only items, to a
 > reviewed contract document. Start each with the documents listed under

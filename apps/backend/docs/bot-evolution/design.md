@@ -1,5 +1,7 @@
 # Bot Evolution Platform — architecture
 
+> 中文版：[design.zh-CN.md](design.zh-CN.md)
+
 > Status: DRAFT. Read [README.md](README.md) for the glossary.
 
 ## 1. Problem

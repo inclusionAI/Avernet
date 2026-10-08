@@ -1,5 +1,7 @@
 # Bot Evolution Platform (RSI) — design set
 
+> 中文版：[README.zh-CN.md](README.zh-CN.md)
+
 > Status: **DRAFT — high-level design, for review.** No code has been written
 > against this design. Decisions marked *proposed* need an owner's sign-off
 > before the work items that depend on them start.

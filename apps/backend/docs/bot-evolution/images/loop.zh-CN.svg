@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650" font-family="&apos;PingFang SC&apos;,&apos;Hiragino Sans GB&apos;,&apos;Microsoft YaHei&apos;,&apos;Noto Sans CJK SC&apos;,&apos;Source Han Sans SC&apos;,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="第 2 层改进循环与快循环收件箱">
+<title>第 2 层改进循环与快循环收件箱</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<rect width="1000" height="650" fill="#ffffff"/>
+<rect x="250" y="20" width="500" height="60" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="500.0" y="42.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">经验库</text>
+<text x="500.0" y="59.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">片段 · 反馈 · 评测轨迹 — 每条记录都标注产生它的基因组修订版</text>
+<rect x="30" y="260" width="170" height="70" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="115.0" y="287.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">表型</text>
+<text x="115.0" y="304.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">运行修订版 R 的 Bot</text>
+<rect x="250" y="110" width="500" height="380" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="500" y="132" font-size="15" font-weight="700" fill="#334155" text-anchor="middle" dominant-baseline="middle">进化运行（编排器）</text>
+<rect x="270" y="148" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="285" y="166" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">1  触发</text>
+<text x="420" y="166" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">定时 · 事件 · 手动 · Bot 请求</text>
+<text x="718" y="166" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">触发器</text>
+<rect x="270" y="190" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="285" y="208" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">2  选择父版本</text>
+<text x="420" y="208" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">从实验记录 H 中选取</text>
+<text x="718" y="208" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">选择器</text>
+<rect x="270" y="232" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="285" y="250" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">3  分析</text>
+<text x="420" y="250" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">经验 → 发现</text>
+<text x="718" y="250" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">分析器</text>
+<rect x="270" y="274" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="285" y="292" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">4  提议</text>
+<text x="420" y="292" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">父版本 + 发现 → 基因组补丁</text>
+<text x="718" y="292" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">提议器</text>
+<rect x="270" y="316" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="285" y="334" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">5  静态检查</text>
+<text x="420" y="334" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">schema · 锁定基因 · 密钥 · 大小</text>
+<text x="718" y="334" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">平台</text>
+<rect x="270" y="358" width="460" height="36" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="285" y="376" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">6  验证</text>
+<text x="420" y="376" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">候选 vs 父版本，在沙箱中</text>
+<text x="718" y="376" font-size="10.5" font-weight="700" fill="#d97706" text-anchor="end" dominant-baseline="middle">验证器</text>
+<rect x="270" y="400" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="285" y="418" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">7  门禁</text>
+<text x="420" y="418" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">策略接纳规则 + 平台底线</text>
+<text x="718" y="418" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">平台</text>
+<rect x="270" y="442" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="285" y="460" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">8  留存</text>
+<text x="420" y="460" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">将候选与谱系记入 H</text>
+<text x="718" y="460" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">平台</text>
+<rect x="250" y="525" width="500" height="70" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="500.0" y="552.2375000000001" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">晋升（平台）</text>
+<text x="500.0" y="569.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">风险等级 → 自动或评审  ·  影子 → 金丝雀 → active  ·  回滚 = 移动引用</text>
+<rect x="800" y="255" width="175" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="887.5" y="272.72499999999997" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">提议收件箱</text>
+<text x="887.5" y="289.59999999999997" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">快循环：被改进 Bot</text>
+<text x="887.5" y="304.45" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">经 avn CLI 提交的</text>
+<text x="887.5" y="319.3" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">观察与补丁草稿</text>
+<path d="M 115 258 L 115 50 L 248 50" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="103" y="155" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 103 155)">采集（经验源）</text>
+<path d="M 500 80 L 500 108" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="508" y="94" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">查询</text>
+<path d="M 500 490 L 500 523" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="508" y="507" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">被接纳的候选</text>
+<path d="M 250 560 L 115 560 L 115 332" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="103" y="446" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 103 446)">经 Manifest / 发布生效</text>
+<path d="M 800 295 L 752 295" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="250" y="615" width="16" height="16" rx="3" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="274" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">策略插件（可插拔）</text>
+<rect x="455" y="615" width="16" height="16" rx="3" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="479" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">平台（固定）</text>
+<rect x="605" y="615" width="16" height="16" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="629" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">验证器（固定，由人维护）</text>
+</svg>

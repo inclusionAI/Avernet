@@ -1,5 +1,7 @@
 # Recursion — improving the improvement mechanism
 
+> 中文版：[recursion.zh-CN.md](recursion.zh-CN.md)
+
 > Status: DRAFT. This is what makes the platform *recursive* self-improvement
 > rather than repeated single improvements. Read [verification.md](verification.md)
 > first; recursion is only as trustworthy as its verifier.

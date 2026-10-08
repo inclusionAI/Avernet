@@ -1,5 +1,7 @@
 # Governance — gating, safety, rollout
 
+> 中文版：[governance.zh-CN.md](governance.zh-CN.md)
+
 > Status: DRAFT. Proposed decision:
 > [DR-2](decisions/0002-promotion-is-platform-owned.md).
 

@@ -1,5 +1,7 @@
 # Admit bot principals to the evolution surface with self-scoped permissions
 
+> 中文版：[0003-bot-principal-for-evolution-surface.zh-CN.md](0003-bot-principal-for-evolution-surface.zh-CN.md)
+
 Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision

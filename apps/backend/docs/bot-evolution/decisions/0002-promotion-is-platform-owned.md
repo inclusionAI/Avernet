@@ -1,5 +1,7 @@
 # Promotion of evolved bot revisions is platform-owned
 
+> 中文版：[0002-promotion-is-platform-owned.zh-CN.md](0002-promotion-is-platform-owned.zh-CN.md)
+
 Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision

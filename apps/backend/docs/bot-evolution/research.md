@@ -1,5 +1,7 @@
 # Research — industry survey and codebase evidence
 
+> 中文版：[research.zh-CN.md](research.zh-CN.md)
+
 > Collected 2026-10-08. Industry items marked **[V]** were verified against a
 > fetched page or search result in this session; **[K]** are well-known papers
 > cited by standard arXiv id without re-fetching; **[U]** could not be

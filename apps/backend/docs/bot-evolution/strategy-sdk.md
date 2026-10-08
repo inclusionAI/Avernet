@@ -1,5 +1,7 @@
 # Strategy SDK — making evolution pluggable
 
+> 中文版：[strategy-sdk.zh-CN.md](strategy-sdk.zh-CN.md)
+
 > Status: DRAFT. How another team plugs a new evolution approach into the
 > platform without changing platform code.
 
