@@ -19,4 +19,15 @@ describe('IssueSummary', () => {
     render(<IssueSummary group={{ aggregationStatus: 'failed', summary: null, stale: false, sources: [] } as never} />);
     expect(screen.getByText(/聚合失败/)).toBeTruthy();
   });
+  it('distinguishes a retained summary scope from the current issue and collapses long prose', () => {
+    render(<IssueSummary group={{ aggregationStatus: 'too_large', stale: true,
+      flowIds: ['run-a', 'run-b', 'run-c'], sources: [{ sourceId: 'new', flowId: 'run-c' }],
+      summarySources: [{ sourceId: 'old', flowId: 'run-a' }],
+      summary: { summary: '历史摘要'.repeat(60), causes: [], unknowns: ['仍需核对超时机制'] },
+    } as never} />);
+    expect(screen.getByText(/此摘要覆盖 1 个运行 \/ 当前问题涉及 3 个运行/)).toBeTruthy();
+    expect(screen.getByText('以下为上次聚合，尚未覆盖最新分析。')).toBeTruthy();
+    expect(screen.getByText('展开完整摘要').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('待确认（1 项）').closest('details')).not.toHaveAttribute('open');
+  });
 });

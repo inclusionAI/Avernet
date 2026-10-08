@@ -6,6 +6,7 @@ import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/se
 import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access"
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js"
 import { IssueAggregationRepository } from '../repositories/issue-aggregation-repository.js';
+import { ISSUE_AGGREGATION_INPUT_V2 } from '../services/evolution/issue-aggregation.js';
 
 function lessonSuccessRate(hitCount: number, rescuedCount: number): number {
   if (!hitCount) return 0;
@@ -71,7 +72,8 @@ export function createEvolveKnowledgeRouter(
     if (!workflowId) { res.status(400).json({ error: 'workflowId is required' }); return; }
     if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view')) return;
     try {
-      res.json({ groups: await new IssueAggregationRepository(_db).list(workflowId) });
+      // Browser eligibility uses supported compaction; Bot preparation still negotiates its version.
+      res.json({ groups: await new IssueAggregationRepository(_db).list(workflowId, ISSUE_AGGREGATION_INPUT_V2) });
     } catch {
       res.status(500).json({ error: 'issue_groups_unavailable' });
     }

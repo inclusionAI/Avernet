@@ -1,23 +1,48 @@
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
-import { button, exclusion, isLegacyPreview, itemTitle, states } from './repair-view'
+import { button, exclusion, isLegacyPreview, itemTitle, JsonDetails, states } from './repair-view'
 
-function groupTitle(items: RepairInboxItem[]) {
-  const signature = items.map(item => item.context?.signature).find(value => typeof value === 'string' && value.trim())
-  if (typeof signature === 'string') return signature
-  for (const item of items) {
-    const label = [item.context?.nodeId, item.context?.failureMode].filter(value => typeof value === 'string' && value.trim()).join(' · ')
-    if (label) return label
-  }
-  return '问题与建议'
+export function RepairStateCounts({ items }: { items: RepairInboxItem[] }) {
+  return <span className="flex flex-wrap gap-2 text-xs text-slate-500">{Object.entries(states)
+    .filter(([state]) => items.some(item => item.state === state))
+    .map(([state, label]) => <span key={state}>{label} {items.filter(item => item.state === state).length}</span>)}</span>
 }
 
-function repairTheme(item: RepairInboxItem): { key: string; title: string } | null {
-  const operations = item.proposal?.operations
-  if (!Array.isArray(operations) || !operations.length) return null
-  const nodes = [...new Set(operations.flatMap(operation => operation && typeof operation === 'object' && !Array.isArray(operation)
-    && typeof operation.nodeId === 'string' && operation.nodeId.trim() ? [operation.nodeId.trim()] : []))].sort()
-  if (!nodes.length) return null
-  return { key: `${item.groupKey}:${nodes.join('\u0000')}`, title: nodes.join('、') }
+function RepairChange({ item }: { item: RepairInboxItem }) {
+  const operations: Record<string, unknown>[] = Array.isArray(item.proposal?.operations)
+    ? item.proposal.operations.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)) : []
+  if (!operations.length) return <p className="mt-2 text-xs text-slate-500">尚无结构化修改明细；生成草稿后仍需审阅实际 diff。</p>
+  return <ul aria-label="建议修改内容" className="mt-2 space-y-1 rounded-md bg-slate-50 p-2 text-xs text-slate-600">
+    {operations.map((operation, index) => {
+      const value = typeof operation.value === 'string' ? operation.value : JSON.stringify(operation.value)
+      return <li key={index} className="break-words">
+      <span className="font-medium">{String(operation.nodeId ?? '工作流')}</span>
+      {' · '}{String(operation.path ?? operation.op ?? '配置')}
+      {Object.hasOwn(operation, 'value') && <> → <code className="whitespace-pre-wrap">{value?.slice(0, 160)}{value && value.length > 160 ? '…（完整内容见证据）' : ''}</code></>}
+      {operation.op === 'remove' && '（删除）'}
+    </li>})}
+  </ul>
+}
+
+function records(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(row => !!row && typeof row === 'object' && !Array.isArray(row)) : []
+}
+
+function RepairEvidence({ item }: { item: RepairInboxItem }) {
+  const diagnoses = records(item.context?.diagnoses)
+  return <div className="max-h-80 space-y-2 overflow-y-auto">
+    {diagnoses.map((diagnosis, index) => <details key={index} className="rounded border border-slate-200 p-2">
+      <summary className="cursor-pointer text-slate-700">来源诊断 {index + 1} · {String(diagnosis.nodeId ?? '工作流')}
+        {typeof diagnosis.completedAtMs === 'number' && <> · {new Date(diagnosis.completedAtMs).toLocaleString()}</>}</summary>
+      <p className="mt-2 whitespace-pre-wrap leading-5 text-slate-600">{String(diagnosis.reasoning ?? '未提供原因说明')}</p>
+      {records(diagnosis.evidence).map((event, eventIndex) => <div key={eventIndex} className="mt-2 border-l-2 border-slate-200 pl-2">
+        <p className={event.missing ? 'text-amber-700' : 'text-slate-600'}>{event.missing ? '原始证据已缺失' : String(event.eventType ?? '运行事件')}
+          {typeof event.occurredAtMs === 'number' && <> · {new Date(event.occurredAtMs).toLocaleString()}</>}</p>
+        <JsonDetails title="事件内容与标识" value={event} />
+      </div>)}
+      <p className="mt-2 break-all text-slate-400">运行 {String(diagnosis.flowId ?? '未知')} · 分析 {String(diagnosis.analysisId ?? '未知')}</p>
+    </details>)}
+    {!diagnoses.length && <p className="text-slate-500">暂无关联诊断正文，保留来源引用供核对。</p>}
+  </div>
 }
 
 function runCount(items: RepairInboxItem[]): number | null {
@@ -26,42 +51,39 @@ function runCount(items: RepairInboxItem[]): number | null {
 }
 
 export default function RepairItems({ items, allItems = items, selected, onToggle, canEdit, limit, taskId, onDisposition,
-  details, detailLoading, detailErrors, onLoadDetail }: {
+  details, detailLoading, detailErrors, onLoadDetail, embedded = false }: {
   items: RepairInboxItem[]; allItems?: RepairInboxItem[]; selected: string[]; onToggle: (id: string) => void;
   canEdit: boolean; limit: number; taskId?: string; onDisposition?: (item: RepairInboxItem, action: 'no_action' | 'restore') => void;
   details?: Record<string, RepairInboxItem>; detailLoading?: Record<string, boolean>; detailErrors?: Record<string, string>;
-  onLoadDetail?: (itemId: string) => void;
+  onLoadDetail?: (itemId: string) => void; embedded?: boolean;
 }) {
-  const groups = [...new Set(items.map(item => item.groupKey))]
-  return <div className="divide-y divide-slate-200">{groups.map(group => {
-    const groupItems = items.filter(item => item.groupKey === group)
-    const all = allItems.filter(item => item.groupKey === group)
-    const counts = Object.entries(states).filter(([state]) => all.some(item => item.state === state))
-    const title = groupTitle(all)
-    const themed = new Map<string, { title: string; items: RepairInboxItem[] }>()
-    for (const item of groupItems) {
-      const theme = repairTheme(item)
-      const key = theme?.key ?? `item:${item.itemId}`
-      const entry = themed.get(key) ?? { title: theme?.title ?? '', items: [] }
-      entry.items.push(item); themed.set(key, entry)
-    }
-    const renderItem = (item: RepairInboxItem) => {
+  return <div className="space-y-3">
+    {!embedded && <div className="flex flex-wrap items-center gap-3 py-2 text-xs text-slate-600">
+      <span>本页修复建议 · {items.length} 项</span><RepairStateCounts items={allItems} />
+    </div>}
+    {items.map((item, index) => {
       const reason = exclusion(item, taskId)
       const title = itemTitle(item)
-      return <article key={item.itemId} className="rounded-lg border border-slate-200 bg-white p-3">
+      const detail = details?.[item.itemId] ?? item
+      const runs = runCount([item])
+      return <article key={item.itemId} className={`rounded-lg border p-3 ${selected.includes(item.itemId) ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200 bg-white'}`}>
         <div className="flex items-start gap-3"><input type="checkbox" className="mt-1 h-4 w-4 accent-blue-600" aria-label={`选择 ${title}`}
           checked={selected.includes(item.itemId)} disabled={!canEdit || !!reason || (!selected.includes(item.itemId) && selected.length >= limit)} onChange={() => onToggle(item.itemId)} />
-          <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="break-words text-sm font-medium text-slate-800">{title}</p><span className="text-xs text-slate-500">{states[item.state]}</span></div>
-            <p className="mt-1 text-xs leading-5 text-slate-500">内容 v{item.contentRevision} · {item.sources.length} 个来源</p>
+          <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><p className="break-words text-sm font-medium text-slate-800"><span className="mr-2 text-xs font-normal text-slate-500">建议 {index + 1}</span>{title}</p><span className="text-xs text-slate-500">{states[item.state]}</span></div>
+            <RepairChange item={item} />
+            <p className="mt-2 text-xs text-slate-500">{runs === null ? '来源运行数未知' : `本建议来源覆盖 ${runs} 个运行`} · {item.sources.length} 条来源引用</p>
             {reason && <p className="text-xs text-amber-700">{reason}</p>}
             <details className="mt-2 text-xs" onToggle={event => { if (event.currentTarget.open) onLoadDetail?.(item.itemId) }}>
               <summary className="cursor-pointer text-slate-500">查看建议与证据</summary>
               {detailLoading?.[item.itemId] ? <p role="status" className="mt-2 text-slate-500">加载证据…</p>
                 : detailErrors?.[item.itemId] ? <p role="alert" className="mt-2 text-red-600">证据读取失败：{detailErrors[item.itemId]}</p>
-                  : <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-50 p-3 text-[11px]">{JSON.stringify((() => {
-                    const value = details?.[item.itemId] ?? item
-                    return { instruction: value.instruction, proposal: value.proposal, sources: value.sources, ...('context' in value ? { context: value.context } : {}) }
-                  })(), null, 2)}</pre>}
+                  : <div className="mt-2 space-y-2">
+                    {detail.instruction && <p className="whitespace-pre-wrap leading-5 text-slate-600"><strong>修复要求：</strong>{detail.instruction}</p>}
+                    <RepairEvidence item={detail} />
+                    <JsonDetails title="来源引用与标识" value={detail.sources} />
+                    <JsonDetails title="技术数据（完整载荷）" value={{ instruction: detail.instruction, proposal: detail.proposal, sources: detail.sources, context: detail.context }} />
+                  </div>}
+
             </details>
             {item.disposition && <p className="mt-2 text-xs text-slate-500">处置记录：{item.disposition.reason}</p>}
             {canEdit && onDisposition && !isLegacyPreview(item) && (item.state === 'pending' || item.state === 'no_action') && <button type="button" className={`${button} mt-2`}
@@ -71,19 +93,5 @@ export default function RepairItems({ items, allItems = items, selected, onToggl
           </div>
         </div>
       </article>
-    }
-    return <section key={group} className="py-3" aria-label={`问题组 ${title}`}>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs"><span className="font-semibold text-slate-700">{title}</span>
-        {counts.length > 1 && <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">混合状态</span>}
-        {counts.map(([state, label]) => <span className="text-slate-500" key={state}>{label} {all.filter(item => item.state === state).length}</span>)}
-      </div>
-      <div className="space-y-2">{[...themed.entries()].map(([key, theme]) => theme.items.length > 1
-        ? <details key={key} role="group" aria-label={`修复主题 ${theme.title}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <summary className="cursor-pointer text-sm font-medium text-slate-800">{theme.title} · {theme.items.length} 个建议变体
-            <span className="ml-2 text-xs font-normal text-slate-500">{runCount(theme.items) === null ? '影响运行数未知' : `影响 ${runCount(theme.items)} 个运行`} · 已选择 {theme.items.filter(item => selected.includes(item.itemId)).length} 项</span>
-          </summary>
-          <div className="mt-3 space-y-2">{theme.items.map(renderItem)}</div>
-        </details> : renderItem(theme.items[0]))}</div>
-    </section>
-  })}</div>
+    })}</div>
 }

@@ -190,6 +190,13 @@ describe("evolve knowledge endpoints", () => {
     const aggregates = new IssueAggregationRepository(db);
     expect((await aggregates.list('wf'))[0].aggregationStatus).toBe('too_large');
     expect(await aggregates.prepare('large-parent')).toEqual([]);
+    const response = await fetch(`${baseUrl}/restricted/issue-groups?workflowId=wf`, { headers: { 'X-User-Id': 'owner' } });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.groups[0].aggregationStatus).toBe('not_generated');
+    // Eligibility is not proof that a Bot has received or completed compact input.
+    expect(body.groups[0].aggregationInputVersion).toBeNull();
+    expect(body.groups[0].aggregationInputSummary).toBeNull();
     const compactJobs = await aggregates.prepare('large-parent', ISSUE_AGGREGATION_INPUT_V2);
     expect(compactJobs).toHaveLength(1);
     expect('inputSummary' in compactJobs[0].input ? compactJobs[0].input.inputSummary.compactSources : 0).toBe(26);
@@ -197,6 +204,27 @@ describe("evolve knowledge endpoints", () => {
     expect(await aggregates.prepare('large-parent')).toEqual([]);
     expect((await aggregates.list('wf'))[0].aggregationStatus).toBe('too_large');
     expect(await db.query("SELECT analysis_id FROM workflow_evolution_analysis_runs WHERE scope_type = 'issue_aggregate'")).toHaveLength(1);
+  });
+  it.each([
+    { count: 501, reasoningLength: 10 },
+    { count: 24, reasoningLength: 8_000 },
+  ])('reports browser input as too large when compact input exceeds a hard bound: %j', async ({ count, reasoningLength }) => {
+    const diagnoses = Array.from({ length: count }, (_, index) => ({ diagnosisId: `bounded-${index}`, flowIds: ['run-a'], nodeId: 'fetch',
+      failureSignature: 'large-timeout', failureMode: 'timeout', severity: 'high', reasoning: 'x'.repeat(reasoningLength), evidenceEventIds: [] }));
+    // Each analysis is valid on its own; the group can exceed the cross-run source bound.
+    for (let offset = 0; offset < count; offset += 100) {
+      const analysisId = `bounded-parent-${offset}`;
+      const flowId = `run-${offset}`;
+      const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId, facts: [], inferences: [], unknowns: [],
+        diagnoses: diagnoses.slice(offset, offset + 100).map(diagnosis => ({ ...diagnosis, flowIds: [flowId] })) };
+      await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+        (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+        VALUES (?, ?, 'single_run', '{}', ?, 'wf', 'completed', 'v1', ?, 1, 1)`, [analysisId, analysisId, flowId, JSON.stringify(result)]);
+    }
+    const response = await fetch(`${baseUrl}/restricted/issue-groups?workflowId=wf`, { headers: { 'X-User-Id': 'owner' } });
+    expect(response.status).toBe(200);
+    expect((await response.json()).groups[0].aggregationStatus).toBe('too_large');
+    expect(await new IssueAggregationRepository(db).prepare('bounded-parent-0', ISSUE_AGGREGATION_INPUT_V2)).toEqual([]);
   });
   it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
     const insert = async (id: string, run: string, time: number, findings = true) => {
