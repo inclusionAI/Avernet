@@ -14,6 +14,7 @@ workspace = true
 diagnostic-logs = ["dep:bcs-observability", "dep:tracing", "dep:tracing-subscriber"]
 
 [dependencies]
+uuid            = { workspace = true }
 bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-auth-api    = { workspace = true }

@@ -119,6 +119,13 @@ impl Fixture {
             id: None,
             meta: None,
             message_visibility_version: 1,
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("group-invite-test-{}", uuid::Uuid::new_v4()),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "group-invite-test".to_string(),
+                    effective_actor_id: "group-invite-test".to_string(),
+                },
+            },
         };
         let outcome = self
             .sessions

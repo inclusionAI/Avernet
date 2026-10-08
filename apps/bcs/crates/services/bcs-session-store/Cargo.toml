@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+uuid = { workspace = true }
 async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }

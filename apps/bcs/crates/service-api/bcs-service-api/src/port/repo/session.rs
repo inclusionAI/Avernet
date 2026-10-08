@@ -58,8 +58,15 @@ impl Default for NewSessionParams {
             // Honest unattributed System default: ONLY for direct store
             // seeding by unauthenticated internals/tests. Production
             // Human/Bot lanes must set an explicit context (see field doc).
+            // The operation id is unique PER default() call so two
+            // independent seeds never collide in the audit's
+            // `(env, operation_id, step_key)` slot (each create is its own
+            // logical operation).
             operation: BotOperationContext {
-                operation_id: "session-unattributed".to_string(),
+                operation_id: format!(
+                    "session-unattributed:{}",
+                    uuid::Uuid::new_v4()
+                ),
                 actor: crate::types::BotOperationActor::System {
                     system_id: "bcs-session-unattributed".to_string(),
                     effective_actor_id: "bcs-session-unattributed".to_string(),

@@ -393,7 +393,7 @@ mod tests {
 
     fn test_operation() -> BotOperationContext {
         BotOperationContext {
-            operation_id: "memory-file-store-tests".into(),
+            operation_id: format!("memory-file-store-tests-{}", uuid::Uuid::new_v4()),
             actor: bcs_service_api::types::BotOperationActor::System {
                 system_id: "memory-file-store-tests".into(),
                 effective_actor_id: "memory-file-store-tests".into(),
@@ -482,6 +482,7 @@ mod tests {
                 storage_backend: "local".into(),
                 object_handle: serde_json::json!({ "expires_at": 9999u64 }).to_string(),
                 expires_at: 9999,
+                operation: test_operation(),
             };
             repo.insert(p).await.unwrap();
         }

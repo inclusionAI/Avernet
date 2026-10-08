@@ -374,6 +374,7 @@ impl SessionManagementService for RecordingSessions {
         _sid: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -382,6 +383,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let s = self.session.lock().await.clone().unwrap();
         Ok(s)
@@ -391,6 +393,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let s = self.session.lock().await.clone().unwrap();
         Ok(s)
@@ -401,6 +404,7 @@ impl SessionManagementService for RecordingSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         let s = self.session.lock().await.clone().unwrap();
         Ok(s)
@@ -410,6 +414,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }

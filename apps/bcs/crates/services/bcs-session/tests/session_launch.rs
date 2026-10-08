@@ -220,12 +220,15 @@ impl Fixture {
         ));
         let runtime = Arc::new(RecordingRuntime::default());
         let system_message = Arc::new(RecordingSystemMessage::default());
+        let authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(CreatedByAuthorityHook { bots: bots.clone() });
         let service = SessionLaunchApplication::new(
             bots.clone(),
             groups.clone(),
             sessions.clone(),
             runtime.clone(),
             system_message.clone(),
+            authority,
         );
         Self {
             service,
@@ -859,7 +862,7 @@ async fn reactivate_replaces_input_and_preserves_other_session_fields() {
         .clear();
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
     fixture
@@ -925,7 +928,7 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
         .expect("create");
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
     fixture
@@ -990,7 +993,7 @@ async fn reactivate_rejects_session_from_another_group() {
         .expect("create");
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
 
@@ -1006,4 +1009,46 @@ async fn reactivate_rejects_session_from_another_group() {
         result,
         Err(SessionLaunchError::SessionNotFound(_))
     ));
+}
+
+/// Launch-test authority double: resolves the SAME `created_by` facts the
+/// fixtures seed (spec §12.2 makes clear this is a test-only shortcut —
+/// production resolves through the real role edges).
+struct CreatedByAuthorityHook {
+    bots: Arc<BotCore>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for CreatedByAuthorityHook {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<bool> {
+        use bcs_service_api::BotRegistryCoreService;
+        match self.bots.get(bot_id).await {
+            Some(bot) => Ok(bot.created_by.as_deref() == Some(user_id)),
+            None => Err(bcs_service_api::ServiceError::BotNotFound(
+                bot_id.to_string(),
+            )),
+        }
+    }
+
+    async fn require_owner(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<()> {
+        if self
+            .can_manage(user_id, bot_id)
+            .await
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            Err(bcs_service_api::ServiceError::Unauthorized(
+                "test authority: not the fixture owner".to_string(),
+            ))
+        }
+    }
 }

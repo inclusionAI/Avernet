@@ -259,6 +259,16 @@ impl Fixture {
             .await
             .expect("group exists for session");
         let params = NewSessionParams {
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!(
+                    "invitation-test-{}",
+                    uuid::Uuid::new_v4()
+                ),
+                actor: bcs_service_api::types::BotOperationActor::Human {
+                    user_id: "staff-1".into(),
+                    effective_actor_id: "human_staff-1".into(),
+                },
+            },
             session_kind: SessionKind::Chat,
             participants,
             group_version: Some(group.version),

@@ -1001,6 +1001,13 @@ mod tests {
                     id: Some(sid.clone()),
                     meta: None,
                     message_visibility_version: 1,
+                    operation: bcs_service_api::types::BotOperationContext {
+                        operation_id: format!("legacy-test-app-{}", uuid::Uuid::new_v4()),
+                        actor: bcs_service_api::types::BotOperationActor::System {
+                            system_id: "bcs-http-test-app".to_string(),
+                            effective_actor_id: "bcs-http-test-app".to_string(),
+                        },
+                    },
                 },
             )
             .await
@@ -1034,12 +1041,18 @@ mod tests {
             Arc::new(SessionFileServiceImpl::new(file_cfg));
 
         let system_messages = Arc::new(RecordingSystemMessage::default());
+        // Fail-closed test double: the legacy test app never exercises
+        // mixed-identity Human+Bot lanes, so live-facts questions deny by
+        // default (never falling back to `created_by`).
+        let authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(FailClosedAuthorityHook);
         let session_file_application = Arc::new(
             bcs_app_session::SessionFileApplicationServiceImpl::new(
                 session_files.clone(),
                 session_management.clone(),
                 group_core.clone(),
                 registry.clone(),
+                authority,
                 system_messages.clone(),
                 Arc::new(CompletionShareProjector),
             ),
@@ -1691,4 +1704,30 @@ mod tests {
         (file_id, file_status)
     }
 
+}
+
+/// Fail-closed authority double for the legacy HTTP test app (spec §12.4:
+/// answers come from live facts only — none are seeded here, so the hook
+/// denies without ever consulting `created_by`).
+struct FailClosedAuthorityHook;
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for FailClosedAuthorityHook {
+    async fn can_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Ok(false)
+    }
+
+    async fn require_owner(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Unauthorized(
+            "no authority facts in the legacy test app".to_string(),
+        ))
+    }
 }

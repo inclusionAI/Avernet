@@ -418,13 +418,7 @@ mod tests {
 
         let sess = create_session(&session_repo, "g-d", SessionKind::ServiceInvocation, -60_000).await;
         session_repo
-            .complete_if_running(
-                &sess.id,
-                None,
-                Some("bot_closed".to_string()),
-                // Scanner lane: honest System operator (spec §12.5).
-                &bcs_service_api::types::system_lane_operation("bcs-timeout-scanner"),
-            )
+            .complete_if_running(&sess.id, None, Some("bot_closed".to_string()))
             .await
             .unwrap();
         let n = scan_once(&session_mgmt, &group_svc).await;

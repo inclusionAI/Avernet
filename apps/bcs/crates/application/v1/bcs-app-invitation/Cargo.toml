@@ -17,6 +17,7 @@ bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+uuid = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }

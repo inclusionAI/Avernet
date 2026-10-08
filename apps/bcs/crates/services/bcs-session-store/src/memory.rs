@@ -1554,6 +1554,16 @@ mod tests {
         assert_eq!(sessions[0].session_title.as_deref(), Some("Target Session"));
     }
 
+    fn unit_test_operation() -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("memory-unit-{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "memory-session-unit-tests".to_string(),
+                effective_actor_id: "memory-session-unit-tests".to_string(),
+            },
+        }
+    }
+
     #[tokio::test]
     async fn collection_collect_then_list_then_uncollect() {
         let repo = MemorySessionRepo::new();
@@ -1579,7 +1589,8 @@ mod tests {
             .await;
         assert!(listed.is_empty());
 
-        repo.collect(&sess.id, "bot1").await.expect("collect");
+        repo.collect(&sess.id, "bot1", &unit_test_operation())
+        .await.expect("collect");
         let listed = repo
             .list_collected_by_group(gid, "bot1", None, None, 0, 10)
             .await;
@@ -1592,7 +1603,8 @@ mod tests {
             .await;
         assert!(other.is_empty());
 
-        repo.uncollect(&sess.id, "bot1").await.expect("uncollect");
+        repo.uncollect(&sess.id, "bot1", &unit_test_operation())
+        .await.expect("uncollect");
         let listed = repo
             .list_collected_by_group(gid, "bot1", None, None, 0, 10)
             .await;
@@ -1628,8 +1640,8 @@ mod tests {
             .await
             .expect("create s2");
 
-        repo.collect(&s1.id, "bot1").await.expect("collect s1");
-        repo.collect(&s2.id, "bot1").await.expect("collect s2");
+        repo.collect(&s1.id, "bot1", &unit_test_operation()).await.expect("collect s1");
+        repo.collect(&s2.id, "bot1", &unit_test_operation()).await.expect("collect s2");
 
         let listed = repo
             .list_collected_by_group(gid, "bot1", None, None, 0, 10)
@@ -1657,7 +1669,8 @@ mod tests {
             )
             .await
             .expect("create");
-        let err = repo.collect(&sess.id, "not-a-participant").await;
+        let err = repo.collect(&sess.id, "not-a-participant", &unit_test_operation())
+        .await;
         assert!(err.is_err(), "collect by non-participant must error");
     }
 
@@ -1680,12 +1693,12 @@ mod tests {
             .await
             .expect("create");
         // uncollect a never-collected, still-participant session -> Ok
-        repo.uncollect(&sess.id, "bot1")
-            .await
+        repo.uncollect(&sess.id, "bot1", &unit_test_operation())
+        .await
             .expect("uncollect not collected ok");
         // uncollect a non-participant -> Ok (idempotent)
-        repo.uncollect(&sess.id, "nobody")
-            .await
+        repo.uncollect(&sess.id, "nobody", &unit_test_operation())
+        .await
             .expect("uncollect non-participant ok");
     }
 
@@ -1726,11 +1739,11 @@ mod tests {
         repo.complete_if_running(&s_to_complete.id, None, None)
             .await
             .expect("complete");
-        repo.collect(&s_running.id, "bot1")
-            .await
+        repo.collect(&s_running.id, "bot1", &unit_test_operation())
+        .await
             .expect("collect running");
-        repo.collect(&s_to_complete.id, "bot1")
-            .await
+        repo.collect(&s_to_complete.id, "bot1", &unit_test_operation())
+        .await
             .expect("collect completed");
 
         let only_running = repo
@@ -1764,7 +1777,8 @@ mod tests {
             )
             .await
             .expect("create");
-        repo.collect(&sess.id, "bot1").await.expect("collect");
+        repo.collect(&sess.id, "bot1", &unit_test_operation())
+        .await.expect("collect");
         assert_eq!(
             repo.list_collected_by_group(gid, "bot1", None, None, 0, 10)
                 .await

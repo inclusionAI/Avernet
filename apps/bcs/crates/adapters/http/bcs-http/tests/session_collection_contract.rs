@@ -168,6 +168,7 @@ impl SessionManagementService for CollectionMock {
         _session_id: &str,
         _output: Option<Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -176,6 +177,7 @@ impl SessionManagementService for CollectionMock {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by collection tests")
     }
@@ -184,6 +186,7 @@ impl SessionManagementService for CollectionMock {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by collection tests")
     }
@@ -193,6 +196,7 @@ impl SessionManagementService for CollectionMock {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by collection tests")
     }
@@ -201,6 +205,7 @@ impl SessionManagementService for CollectionMock {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by collection tests")
     }
@@ -222,6 +227,7 @@ impl SessionManagementService for CollectionMock {
         &self,
         session_id: &str,
         bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<(), SessionUseCaseError> {
         let exists = self
             .sessions
@@ -245,6 +251,7 @@ impl SessionManagementService for CollectionMock {
         &self,
         session_id: &str,
         bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<(), SessionUseCaseError> {
         let exists = self
             .sessions

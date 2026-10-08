@@ -61,6 +61,7 @@ struct Fixture {
     groups: Arc<GroupCore>,
     session_repo: Arc<dyn SessionRepoPort>,
     notifications: Arc<RecordingSystemMessage>,
+    authority: Arc<SeededAuthority>,
 }
 
 impl Fixture {
@@ -98,11 +99,16 @@ impl Fixture {
             },
         ));
         let notifications = Arc::new(RecordingSystemMessage::default());
+        // File-facade authority: the map-backed recording double keeps the
+        // live-fact semantics (fail-closed, never `created_by`) and lets the
+        // parity tests seed owner/manager edges (spec §8/§12.2).
+        let authority_hook = Arc::new(SeededAuthority::empty());
         let service = SessionFileApplicationServiceImpl::new(
             legacy,
             sessions,
             groups.clone(),
             bots.clone(),
+            authority_hook.clone(),
             notifications.clone(),
             Arc::new(CompletionShareProjector),
         );
@@ -112,6 +118,7 @@ impl Fixture {
             groups,
             session_repo,
             notifications,
+            authority: authority_hook,
         }
     }
 
@@ -132,6 +139,9 @@ impl Fixture {
                 .save_created_by(bot, owner, true)
                 .await
                 .expect("save Bot creator");
+            // Live-fact seeding (spec §12.2): the facade resolves the same
+            // ownership through the authority hook, not `created_by`.
+            self.seed_authority_owner(bot, owner).await;
         }
         let participants = vec![
             Participant::bot("bot-a", ParticipantRole::Driver),
@@ -154,6 +164,17 @@ impl Fixture {
             )
             .await
             .expect("store session");
+    }
+
+    /// Seed a live owner fact so mixed-identity and owner-eligibility checks
+    /// resolve through the authority hook, never `created_by`.
+    async fn seed_authority_owner(&self, bot_id: &str, owner_staff_no: &str) {
+        self.authority.seed_owner(bot_id, owner_staff_no).await;
+    }
+
+    /// Seed a live manager fact (spec §8 owner/manager parity).
+    async fn seed_authority_manager(&self, bot_id: &str, manager_staff_no: &str) {
+        self.authority.seed_manager(bot_id, manager_staff_no).await;
     }
 }
 
@@ -465,4 +486,58 @@ async fn participant_id_collision_does_not_cross_actor_kinds() {
         .expect_err("Human must not inherit ownership through a Human participant ID collision");
 
     assert_eq!(error.code(), "forbidden");
+}
+
+/// Shared authority double for the file-facade tests: answers from seeded
+/// live facts, fail-closed otherwise, never `created_by`.
+use std::collections::BTreeMap;
+struct SeededAuthority {
+    roles: std::sync::Mutex<BTreeMap<(String, String), &'static str>>,
+}
+
+impl SeededAuthority {
+    fn empty() -> Self {
+        Self {
+            roles: std::sync::Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    async fn seed_owner(&self, bot_id: &str, owner_staff_no: &str) {
+        self.roles
+            .lock()
+            .unwrap()
+            .insert((owner_staff_no.to_string(), bot_id.to_string()), "owner");
+    }
+
+    async fn seed_manager(&self, bot_id: &str, manager_staff_no: &str) {
+        self.roles.lock().unwrap().insert(
+            (manager_staff_no.to_string(), bot_id.to_string()),
+            "manager",
+        );
+    }
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for SeededAuthority {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        Ok(self
+            .roles
+            .lock()
+            .unwrap()
+            .contains_key(&(user_id.to_string(), bot_id.to_string())))
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        match self
+            .roles
+            .lock()
+            .unwrap()
+            .get(&(user_id.to_string(), bot_id.to_string()))
+        {
+            Some(&"owner") => Ok(()),
+            _ => Err(bcs_service_api::ServiceError::Forbidden(format!(
+                "user '{user_id}' is not the owner of bot '{bot_id}'"
+            ))),
+        }
+    }
 }

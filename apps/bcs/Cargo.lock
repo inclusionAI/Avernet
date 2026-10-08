@@ -537,6 +537,7 @@ dependencies = [
  "bcs-test-support",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -586,6 +587,7 @@ dependencies = [
  "bcs-bot-store",
  "bcs-db-api",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -599,6 +601,7 @@ dependencies = [
  "bcs-test-support",
  "bytes",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tracing",
@@ -1900,6 +1903,7 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -1908,6 +1912,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-service-api",
  "bcs-test-support",
@@ -1917,6 +1922,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1937,6 +1943,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2037,6 +2044,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

@@ -31,8 +31,10 @@ bcs-session = { workspace = true }
 bcs-session-file = { workspace = true }
 bcs-session-file-store = { workspace = true }
 bcs-session-store = { workspace = true }
+bcs-edge-permission = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-test-support = { workspace = true }
+tempfile = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }

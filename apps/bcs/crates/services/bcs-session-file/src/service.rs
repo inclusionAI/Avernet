@@ -1227,6 +1227,7 @@ mod tests {
             size,
             mime_type: "text/plain".into(),
             caller: actor("human_1"),
+            operation: test_operation(),
         }
     }
 
@@ -1375,7 +1376,7 @@ mod tests {
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5)
             .await
             .unwrap();
-        let f = s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        let f = s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         assert_eq!(f.status, FileStatus::Ready);
         assert_eq!(f.size, 5);
         let row = repo.get("g1:abcd1234", &r.file.file_id).await.unwrap().unwrap();
@@ -1388,7 +1389,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         // Now Ready — a second stream_upload should Conflict.
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hi"));
         let err = s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 2).await.unwrap_err();
@@ -1407,11 +1408,21 @@ mod tests {
     #[tokio::test]
     async fn complete_returns_not_found_for_unknown_file() {
         let (s, _, _) = build_svc(local_caps());
-        let err = s.complete_upload("g1:abcd1234", "nope").await.unwrap_err();
+        let err = s.complete_upload("g1:abcd1234", "nope", &test_operation()).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::NotFound(_)));
     }
 
     // ---- delete routing -----------------------------------------------------
+
+    fn test_operation() -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("session-file-service-test-{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: "1".into(),
+                effective_actor_id: "human_1".into(),
+            },
+        }
+    }
 
     fn delete_cmd(file_id: &str, caller_ids: &[&str]) -> DeleteFileCommand {
         let caller_identities = caller_ids.iter().map(|s| (*s).to_string()).collect();
@@ -1422,6 +1433,7 @@ mod tests {
             caller_identities,
             session_creator: Some("creator_1".into()),
             driver_bot: None,
+            operation: test_operation(),
         }
     }
 
@@ -1431,7 +1443,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         s.delete_file(delete_cmd(&r.file.file_id, &["human_1"])).await.unwrap();
         assert!(repo.get("g1:abcd1234", &r.file.file_id).await.unwrap().is_none());
     }
@@ -1495,7 +1507,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
         assert!(route.presign.is_none());
     }
@@ -1506,7 +1518,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, Some(60), false).await.unwrap();
         let ticket = route.presign.unwrap();
         assert!(ticket.download_url.starts_with("fake://"));
@@ -1520,7 +1532,7 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
 
         // download_route(..., None) should pass share_link_ttl (7777) to presign_get.
         let (_row, route) = s.download_route("g1:abcd1234", &r1.file.file_id, None, false).await.unwrap();
@@ -1536,7 +1548,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, true).await.unwrap();
         let _ticket = route.presign.expect("presign backend yields a ticket");
         let opts = storage.last_presign_opts().expect("presign_get was called");
@@ -1550,7 +1562,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, _route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
         let opts = storage.last_presign_opts().expect("presign_get was called");
         assert_eq!(opts.show, false, "download_route(show=false) must forward show=false");
@@ -1573,7 +1585,7 @@ mod tests {
         let payload = bytes::Bytes::from_static(b"hello");
         let body = bcs_storage_api::byte_stream_from_bytes(payload.clone());
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (file, stream) = s.get_stream("g1:abcd1234", &r.file.file_id).await.unwrap();
         assert_eq!(file.size, 5);
         let got = collect_stream(stream).await;
@@ -1592,6 +1604,7 @@ mod tests {
             ttl_seconds: None,
             caller_identities,
             session_participants,
+            operation: test_operation(),
         }
     }
 
@@ -1599,7 +1612,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         r.file.file_id
     }
 
@@ -1697,7 +1710,7 @@ mod tests {
         // share_mint uses ttl_seconds=None → defaults to share_default_ttl (3600).
         // Pass the same 3600 to mint_share_link so the token shape matches.
         let via_internal = svc
-            .mint_share_link("g1:abcd1234", &file_id, 3600)
+            .mint_share_link("g1:abcd1234", &file_id, 3600, &test_operation())
             .await
             .expect("internal mint");
         let via_public = svc
@@ -1717,7 +1730,7 @@ mod tests {
         let (svc, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&svc).await; // seeded under g1:abcd1234
         let minted = svc
-            .share_mint_for_history("g1:abcd1234", &file_id, 3600)
+            .share_mint_for_history("g1:abcd1234", &file_id, 3600, &test_operation())
             .await
             .expect("history mint");
         assert!(minted.share_url.contains("/sessions/shared-file/content?token="));
@@ -1734,7 +1747,7 @@ mod tests {
         let (svc, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&svc).await; // under g1:abcd1234
         let err = svc
-            .share_mint_for_history("g1:other", &file_id, 3600)
+            .share_mint_for_history("g1:other", &file_id, 3600, &test_operation())
             .await
             .expect_err("must reject cross-session");
         assert!(matches!(err, SessionFileUseCaseError::NotFound(_)), "got: {:?}", err);
@@ -1821,6 +1834,7 @@ mod tests {
             &handle.to_string(),
             FileStatus::Pending,
             row.size,
+            &test_operation(),
         ).await.unwrap();
         let swept = s.sweep_expired_pending().await.unwrap();
         assert_eq!(swept, 1);
@@ -1837,7 +1851,7 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
 
         let r2 = s.prepare_upload(sample_prepare(10)).await.unwrap(); // Pending
 
@@ -1848,9 +1862,13 @@ mod tests {
             size: 3,
             mime_type: "text/plain".into(),
             caller: actor("human_1"),
+            operation: test_operation(),
         }).await.unwrap();
 
-        let deleted = s.delete_all_for_session("g1:abcd1234").await.unwrap();
+        let deleted = s
+            .delete_all_for_session("g1:abcd1234", &test_operation())
+            .await
+            .unwrap();
         assert_eq!(deleted, 2);
         assert!(repo.get("g1:abcd1234", &r1.file.file_id).await.unwrap().is_none());
         assert!(repo.get("g1:abcd1234", &r2.file.file_id).await.unwrap().is_none());
@@ -1874,11 +1892,14 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
         // Pending file (abort succeeds → cleaned).
         let r2 = s.prepare_upload(sample_prepare(10)).await.unwrap();
 
-        let err = s.delete_all_for_session("g1:abcd1234").await.unwrap_err();
+        let err = s
+            .delete_all_for_session("g1:abcd1234", &test_operation())
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, SessionFileUseCaseError::Internal(_)),
             "expected partial-failure Internal error, got {err:?}"
@@ -2081,7 +2102,7 @@ mod tests {
             .await
             .unwrap();
         let ready = svc
-            .complete_upload("g1:abcd1234", &r.file.file_id)
+            .complete_upload("g1:abcd1234", &r.file.file_id, &test_operation())
             .await
             .unwrap();
         assert_eq!(ready.status, FileStatus::Ready); // not rejected as Conflict

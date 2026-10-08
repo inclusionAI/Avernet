@@ -1232,6 +1232,7 @@ impl SessionManagementService for RecordingSessionManagement {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -1240,6 +1241,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict("not implemented".to_string()))
     }
@@ -1248,6 +1250,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict("not implemented".to_string()))
     }
@@ -1257,6 +1260,7 @@ impl SessionManagementService for RecordingSessionManagement {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict("not implemented".to_string()))
     }
@@ -1265,6 +1269,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict("not implemented".to_string()))
     }
@@ -1274,6 +1279,24 @@ impl SessionManagementService for RecordingSessionManagement {
         _bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError> {
         Ok(Vec::new())
+    }
+
+    async fn collect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        Err(SessionUseCaseError::Conflict("not implemented".to_string()))
+    }
+
+    async fn uncollect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        Err(SessionUseCaseError::Conflict("not implemented".to_string()))
     }
 
     async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> {

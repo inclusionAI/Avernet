@@ -88,9 +88,9 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         services.session_files.clone(), Arc::new(UnusedPorts), 0, 0, 100, 50, 100, 600,
     ).with_persisted_state_machine_history(true, cutoff));
     let facade = Arc::new(SessionServiceImpl::new(services.session_launch.clone(), services.session_management.clone(),
-        services.group.clone(), services.registry.clone(), services.friend.clone(), services.relation.clone(), session_repo,
-        services.group_message_history.clone(), services.collaboration_runtime.clone(), services.system_message.clone(),
-        SessionServiceConfig { relation_env: env.into() }));
+        services.group.clone(), services.registry.clone(), services.friend.clone(), Arc::new(DenyAllAuthorityHook),
+        session_repo, services.group_message_history.clone(), services.collaboration_runtime.clone(),
+        services.system_message.clone(), SessionServiceConfig {}));
     let group = Arc::new(bcs_app_group::GroupServiceImpl::new(services.group.clone(), services.registry.clone(),
         services.friend.clone(), services.relation.clone(), services.session_management.clone(), services.group_management.clone(),
         Arc::new(DenyAllAuthorityHook),

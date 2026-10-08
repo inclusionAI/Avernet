@@ -210,14 +210,7 @@ mod tests {
                 .complete_if_running(
                     id,
                     None,
-                    None,
-                    // Recovery scanner lane: an honest System operator. The
-                    // ORIGINAL requester identity stays recorded on the
-                    // recovered run/session records — this pass is an
-                    // independent cleanup, never a replay in the Human's name.
-                    &bcs_service_api::types::system_lane_operation(
-                        "bcs-callback-recovery-scanner",
-                    ),
+                    None
                 )
                 .await
                 .expect("complete Service Session");

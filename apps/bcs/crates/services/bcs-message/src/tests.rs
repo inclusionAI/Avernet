@@ -77,6 +77,7 @@ impl SessionFileService for MintMock {
         &self,
         _session_id: &str,
         _file_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<bcs_domain::SessionFile, SessionFileUseCaseError> {
         unimplemented!()
     }
@@ -134,6 +135,7 @@ impl SessionFileService for MintMock {
     async fn delete_all_for_session(
         &self,
         _session_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<u64, SessionFileUseCaseError> {
         unimplemented!()
     }
@@ -142,6 +144,7 @@ impl SessionFileService for MintMock {
         _session_id: &str,
         _file_id: &str,
         _ttl_seconds: u64,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
         if self.ok {
             Ok(ShareMintResult {
