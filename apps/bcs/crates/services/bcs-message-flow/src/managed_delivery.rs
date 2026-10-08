@@ -124,7 +124,7 @@ impl ManagedMessageDelivery {
         let owner = initial.target_bot_id.clone();
         let mut bots = vec![owner.clone()];
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
-        if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::CancelRequested
+        if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::AbortUnconfirmed | Event::CancelRequested
             | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
             | Event::DefinitelyNotSent { .. }) {
             if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
@@ -192,7 +192,7 @@ impl ManagedMessageDelivery {
         if command.reply.is_some()
             && !matches!(
                 command.event,
-                Event::Completed | Event::Failed | Event::Aborted
+                Event::Completed | Event::Failed | Event::Aborted | Event::AbortUnconfirmed
             )
         {
             return Err(ManagedDeliveryError::Conflict);
@@ -322,6 +322,7 @@ impl ManagedMessageDelivery {
             primary.cancel_deadline_at_ms = command.deadline_at_ms;
         }
         let cancel_reason = command.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()).map(str::to_owned);
+        let task_timeout = command.transport_context_json.as_ref().and_then(|v| v.get("task_timeout")).and_then(|v| v.as_bool()) == Some(true);
         if event == Event::StartSend {
             primary.wait_reason = None;
             if primary.run_id.is_none() || primary.idempotency_key.is_none() {
@@ -348,6 +349,9 @@ impl ManagedMessageDelivery {
         ) {
             if let Some(reason) = cancel_reason {
                 primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))["cancel_reason"] = serde_json::json!(reason);
+            }
+            if task_timeout {
+                primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))["task_timeout"] = serde_json::json!(true);
             }
             primary.cancel_requested_at_ms = Some(command.now_ms);
             primary.cancel_requested_by = command.actor_id;

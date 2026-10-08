@@ -102,6 +102,64 @@ async fn unknown_and_unconfirmed_abort_do_not_notify_until_confirmed() {
 }
 
 #[tokio::test]
+async fn confirmed_timeout_admits_one_manager_task_result() {
+    let f = Fixture::new().await;
+    let (task_id, row) = f.dispatch().await;
+    let row = f.start(&row).await;
+    let cancelling = f.service.transition(DeliveryTransitionCommand {
+        delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
+        event:Event::CancelRequested, now_ms:chrono::Utc::now().timestamp_millis(),
+        request_id:None, actor_id:None, reply:None,
+        transport_context_json:Some(json!({
+            "cancel_reason":"任务运行已达到设定的超时期限，已按超时规则停止。",
+            "task_timeout":true,
+        })), deadline_at_ms:Some(chrono::Utc::now().timestamp_millis() + 30_000),
+    }).await.unwrap();
+    assert_eq!(cancelling.state.status, Status::Cancelling);
+    let stopped = f.transition(&cancelling, Event::Aborted).await;
+    assert_eq!(stopped.state.status, Status::Cancelled);
+    let rows = f.rows().await;
+    let results:Vec<_> = rows.iter().filter(|r| r.semantic_projection_json["task"]["leg"] == "result").collect();
+    assert_eq!(results.len(), 1);
+    let source = f.repo.get_message_by_id(SESSION, &format!("task-result:{task_id}")).await.unwrap().unwrap();
+    assert_eq!(source.content["task_state"], "timed_out");
+    assert!(source.content["task_result_text"].as_str().unwrap().contains("[任务超时]"));
+    assert!(source.content["task_result_text"].as_str().unwrap().contains("bcs_intent_assignment"));
+}
+
+#[tokio::test]
+async fn unconfirmed_timeout_atomically_queues_one_system_send_to_manager() {
+    let f = Fixture::new().await;
+    let (task_id, row) = f.dispatch().await;
+    let row = f.start(&row).await;
+    let cancelling = f.service.transition(DeliveryTransitionCommand {
+        delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
+        event:Event::CancelRequested, now_ms:chrono::Utc::now().timestamp_millis(),
+        request_id:None, actor_id:None, reply:None,
+        transport_context_json:Some(json!({
+            "cancel_reason":"任务运行已达到设定的超时期限，已按超时规则停止。",
+            "task_timeout":true,
+        })), deadline_at_ms:Some(chrono::Utc::now().timestamp_millis() + 30_000),
+    }).await.unwrap();
+    let uncertain = f.transition(&cancelling, Event::AbortUnconfirmed).await;
+    assert_eq!(uncertain.state.status, Status::CancelUnknown);
+    f.transition(&uncertain, Event::AbortUnconfirmed).await;
+    let rows = f.rows().await;
+    let notices:Vec<_> = rows.iter().filter(|r| r.source_message_id == format!("task-timeout-unknown:{task_id}")).collect();
+    assert_eq!(notices.len(), 1);
+    let notice = notices[0];
+    assert_eq!(notice.target_bot_id, "bot-driver");
+    assert_eq!(notice.state.kind, DeliveryType::Send);
+    let source = f.repo.get_message_by_id(SESSION, &notice.source_message_id).await.unwrap().unwrap();
+    assert_eq!(source.sender_id, "system");
+    assert_eq!(source.owner_bot_id.as_deref(), Some("bot-driver"));
+    assert!(source.content["text"].as_str().unwrap().contains("旧任务可能仍在运行"));
+    f.start(notice).await;
+    let frames = f.support.bot_delivery.frames().await;
+    assert!(serde_json::to_string(&frames[1]).unwrap().contains("旧任务可能仍在运行"));
+}
+
+#[tokio::test]
 async fn restarted_same_worker_tasks_keep_separate_assignment_references() {
     let mut f = Fixture::new().await;
     for id in ["bcs_intent_first", "bcs_intent_second"] {

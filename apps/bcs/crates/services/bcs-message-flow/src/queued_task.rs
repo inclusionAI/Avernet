@@ -135,6 +135,7 @@ pub(crate) async fn restore(flow: &BcsMessageFlow, row: &PersistedMessageDeliver
         Status::Queued => TaskLedgerStatus::Queued,
         Status::Completed => TaskLedgerStatus::Replied,
         Status::Failed | Status::RejectedCapacity => TaskLedgerStatus::Failed,
+        Status::Cancelled if crate::task_failure::is_task_timeout(row) => TaskLedgerStatus::TimedOut,
         Status::Cancelled => TaskLedgerStatus::Cancelled,
         Status::Expired => TaskLedgerStatus::TimedOut,
         _ => TaskLedgerStatus::Dispatched, // Unknown/cancelling still owns the task.

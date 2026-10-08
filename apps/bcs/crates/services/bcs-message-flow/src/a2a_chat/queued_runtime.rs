@@ -44,7 +44,7 @@ impl A2aChat {
             if let Some(params) = &mut request.params { params["idempotency_key"] = serde_json::json!(row.idempotency_key); }
         }
         let transport = crate::queued_group::QueuedTransportContext { version: 1, owner, connection_id,
-            downstream_run_id: None, cancel_reason: None, downstream_session_key: row.session_id.clone(),
+            downstream_run_id: None, cancel_reason: None, task_timeout: false, downstream_session_key: row.session_id.clone(),
             provider_route_headers: headers.clone(), relay_route_headers: None };
         Ok(PreparedManagedDelivery {
             command: BotDeliveryCommand { target, run_id: run.into(), frame, delivery_kind: BotDeliveryKind::Send,

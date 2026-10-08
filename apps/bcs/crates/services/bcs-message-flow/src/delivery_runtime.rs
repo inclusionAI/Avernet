@@ -65,6 +65,19 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
+
+fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -> Duration {
+    let is_worker_task = row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task
+        && matches!(crate::queued_task::intent(row), Ok(Some(task)) if task.leg == crate::queued_task::TaskLeg::Dispatch);
+    if is_worker_task {
+        provider_timeout.checked_sub(TASK_ABORT_RESERVE).filter(|time| !time.is_zero())
+            .unwrap_or(provider_timeout / 2)
+    } else {
+        provider_timeout
+    }
+}
+
 fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
         delivery_id: row.delivery_id.clone(),
@@ -196,6 +209,13 @@ impl DeliveryRuntime {
                             && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
                             let mut command = event(row, Event::CancelRequested);
                             command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            if matches!(crate::queued_task::intent(row), Ok(Some(task))
+                                if task.leg == crate::queued_task::TaskLeg::Dispatch) {
+                                command.transport_context_json = Some(serde_json::json!({
+                                    "cancel_reason": crate::task_failure::TASK_TIMEOUT_REASON,
+                                    "task_timeout": true,
+                                }));
+                            }
                             storage!(self.transition(command.clone()));
                         } else if row.state.status == Status::Cancelling && !aborting.contains(&row.delivery_id) {
                             if row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
@@ -362,7 +382,7 @@ impl DeliveryRuntime {
                             command.transport_context_json = Some(prepared.transport_context_json);
                             command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
                                 row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
-                            } else { now_ms().saturating_add(self.config.run_timeout.as_millis() as i64) });
+                            } else { now_ms().saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
                             let Some(started) = storage!(self.transition(command.clone())) else { continue; };
                             let request_id = started.request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
                             match &mut prepared.command.frame {

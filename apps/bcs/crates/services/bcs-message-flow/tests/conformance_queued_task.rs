@@ -508,3 +508,90 @@ async fn actual_runtime_orders_worker_tasks_and_manager_results_on_independent_l
     stop.send(true).unwrap();
     job.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn worker_task_deadline_precedes_provider_run_context_by_five_minutes() {
+    use bcs_message_flow::delivery_runtime::{DeliveryRuntime, DeliveryRuntimeConfig};
+    use std::time::Duration;
+    let f = Fixture::new().await;
+    f.context("bot-observer").await;
+    let (_, task) = f.dispatch().await;
+    let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+        preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
+        transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
+            max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
+            expiry_tick:Duration::from_millis(20), io_timeout:Duration::from_secs(1), run_timeout:Duration::from_secs(3 * 60 * 60),
+            cancel_timeout:Duration::from_secs(1), startup_recovery_grace:Duration::ZERO,
+            max_tasks:4, max_abort_tasks:1 } };
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let job = tokio::spawn(worker.run(shutdown));
+    f.wait_frames(1).await;
+    let row = f.rows().await.into_iter().find(|row| row.delivery_id == task.delivery_id).unwrap();
+    let started = row.send_started_at_ms.unwrap();
+    assert_eq!(row.run_deadline_at_ms.unwrap() - started, 175 * 60 * 1000);
+    let context = f.flow.bot_run_context.as_ref().unwrap().get_context(row.run_id.as_ref().unwrap()).await.unwrap();
+    assert_eq!(context.deadline_ms as i64 - started, 180 * 60 * 1000);
+    stop.send(true).unwrap();
+    job.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn provider_worker_abort_requires_exclusive_active_run() {
+    let f = Fixture::new().await;
+    f.support.registry.set_delivery_target("bot-observer",
+        support::FakeRegistryService::provider_target("bot-observer")).await;
+    f.context("bot-observer").await;
+    let (_, row) = f.dispatch().await;
+    let started = f.start(&row).await;
+    let preparer = QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() };
+    let abort = preparer.prepare_abort(&started).await.unwrap();
+    assert!(abort.run_id.is_none());
+    assert_eq!(abort.session_id, SESSION);
+    let context = f.flow.bot_run_context.as_ref().unwrap();
+    let active = context.find_active_run(started.run_id.as_deref().unwrap()).await.unwrap().unwrap();
+    context.put_context(bcs_service_api::BotRunContext {
+        run_id:"other-run".into(), bot_id:"bot-observer".into(), group_id:"group-1".into(),
+        bcs_session_id:Some(SESSION.into()), deadline_ms:u64::MAX, terminal:false,
+    }).await;
+    let mut other = active.clone();
+    other.canonical_run_id = "other-run".into();
+    other.downstream_run_id = "other-run".into();
+    context.register_active_run(other).await.unwrap();
+    assert!(preparer.prepare_abort(&started).await.is_err());
+}
+
+#[tokio::test]
+async fn runtime_times_out_worker_and_queues_manager_result_after_abort_ack() {
+    use bcs_message_flow::delivery_runtime::{DeliveryRuntime, DeliveryRuntimeConfig};
+    use std::time::Duration;
+    let f = Fixture::new().await;
+    f.context("bot-observer").await;
+    let (task_id, task) = f.dispatch().await;
+    let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
+        preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
+        transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
+            max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
+            expiry_tick:Duration::from_millis(20), io_timeout:Duration::from_secs(1), run_timeout:Duration::from_millis(600),
+            cancel_timeout:Duration::from_secs(1), startup_recovery_grace:Duration::ZERO,
+            max_tasks:4, max_abort_tasks:1 } };
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let job = tokio::spawn(worker.run(shutdown));
+    f.wait_frames(1).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let rows = f.rows().await;
+            if rows.iter().any(|row| row.delivery_id == task.delivery_id && row.state.status == Status::Cancelled) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }).await.unwrap();
+    let rows = f.rows().await;
+    let result = rows.iter().find(|row| row.source_message_id == format!("task-result:{task_id}")).unwrap();
+    let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
+    assert_eq!(source.content["task_state"], "timed_out");
+    assert!(source.content["task_result_text"].as_str().unwrap().contains("[任务超时]"));
+    assert_eq!(f.support.bot_delivery.aborts().await.len(), 1);
+    stop.send(true).unwrap();
+    job.await.unwrap().unwrap();
+}
