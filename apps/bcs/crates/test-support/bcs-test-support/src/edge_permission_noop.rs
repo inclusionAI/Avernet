@@ -26,8 +26,8 @@ impl EdgeGrantRepoPort for NoopEdgeGrantRepo {
     async fn list_friends_paginated(&self, _: &str, _: &str, _: FriendListQuery) -> ServiceResult<FriendIdsPage> {
         Ok(FriendIdsPage { items: vec![], total: 0 })
     }
-    async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<u64> { Ok(1) }
-    async fn revoke_grant(&self, _: u64, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn insert_grant(&self, _: EdgeGrant, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<u64> { Ok(1) }
+    async fn revoke_grant(&self, _: u64, _: &str, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
     async fn get_default_profile_id(&self, _: &str, _: &str) -> Option<u64> { None }
 }
 
@@ -42,27 +42,27 @@ impl PermissionProfileRepoPort for NoopPermissionProfileRepo {
 pub struct NoopPermissionRequestRepo;
 #[async_trait]
 impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
-    async fn insert(&self, _: PermissionRequest) -> ServiceResult<()> { Ok(()) }
+    async fn insert(&self, _: PermissionRequest, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
     async fn get(&self, _: &str, _: &str) -> Option<PermissionRequest> { None }
     async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
     async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
-    async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>) -> ServiceResult<()> { Ok(()) }
-    async fn backfill_edge_id(&self, _: &str, _: &str, _: u64) -> ServiceResult<()> { Ok(()) }
+    async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
+    async fn backfill_edge_id(&self, _: &str, _: &str, _: u64, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
 }
 
 pub struct NoopConnectService;
 #[async_trait]
 impl ConnectService for NoopConnectService {
-    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<ConnectResult> {
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<ConnectResult> {
         Ok(ConnectResult { request_ids: vec![], edge_ids: vec![], status: ConnectStatus::Pending, auto_accepted: false })
     }
-    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
-    async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { Ok(()) }
-    async fn cancel(&self, _: &str) -> ServiceResult<()> { Ok(()) }
+    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
+    async fn reject(&self, _: &str, _: &str, _: Option<String>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
+    async fn cancel(&self, _: &str, _: &str, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { Ok(()) }
     async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
         Err(bcs_service_api::ServiceError::FriendRequestNotFound("noop".to_string()))
     }
-    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
     async fn list_friends_paginated(&self, _: &str, _: FriendListQuery) -> ServiceResult<FriendEntriesPage> {
         Ok(FriendEntriesPage { items: vec![], total: 0 })

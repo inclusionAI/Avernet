@@ -7,14 +7,21 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_db_api::{DbExecuteResult, DbPlugin, DbRow, DbStatement, DbValue};
+use bcs_db_api::{DbExecuteResult, DbPlugin, DbRow, DbStatement, DbTransactionStep, DbValue};
 use bcs_domain::edge_permission::{
     PermissionRequest, RequestKind, RequestStatus,
 };
 pub use bcs_service_api::port::repo::PermissionRequestRepoPort;
+use bcs_service_api::types::{
+    BotActionAuditPhase, BotActionAuditRecord, BotActionKind, BotActionResourceKind,
+    BotOperationContext, stable_step_key,
+};
 use bcs_service_api::{ServiceError, ServiceResult};
 use tracing::warn;
 
+use crate::authority::audit::{
+    business_action_audit_id, business_action_audit_insert, require_business_operation,
+};
 use crate::common::{
     optional_string, optional_timestamp_text, optional_u64, parse_json_opt,
     parse_timestamp_epoch_ms, required_string, service_db_error,
@@ -140,7 +147,13 @@ impl DbPermissionRequestStore {
 
 #[async_trait]
 impl PermissionRequestRepoPort for DbPermissionRequestStore {
-    async fn insert(&self, request: PermissionRequest) -> ServiceResult<()> {
+    async fn insert(
+        &self,
+        request: PermissionRequest,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
+        require_business_operation(operation)?;
+        let audit = request_audit_record(operation, &request.env, &request.request_id, BotActionKind::Invite);
         let PermissionRequest {
             request_id,
             edge_id,
@@ -157,10 +170,12 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
             decided_by,
             decided_at: _,
         } = request;
-        self
-            .execute_result(
-                "insert_request",
-                DbStatement::with_params(
+        // Plan Task 12 (spec §12.5): the request row and its ordinary
+        // business audit row commit in ONE DbPlugin transaction — an audit
+        // failure rolls the business write back with it.
+        self.db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
                     self.insert_request_sql(),
                     vec![
                         DbValue::from(request_id),
@@ -185,9 +200,14 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
                         // The CASE in insert_request_sql keys decided_at off status.
                         DbValue::from(request_status_str(status)),
                     ],
-                ),
-            )
-            .await?;
+                )),
+                DbTransactionStep::Execute(business_action_audit_insert(&audit)),
+            ])
+            .await
+            .map_err(|err| {
+                warn!(operation = "insert_request", error = %err, "db_permission_request: transaction failed");
+                service_db_error("insert_request", err)
+            })?;
         Ok(())
     }
 
@@ -329,29 +349,44 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
         status: RequestStatus,
         decided_by: &str,
         decision_reason: Option<&str>,
+        operation: &BotOperationContext,
     ) -> ServiceResult<()> {
+        require_business_operation(operation)?;
+        let audit = request_audit_record(
+            operation,
+            env,
+            request_id,
+            BotActionKind::Update,
+        );
         // decided_at is a DB-managed timestamp: set to CURRENT_TIMESTAMP at the
-        // moment the request is decided (gmt_modified advances too).
-        self.execute(
-            "decide_request",
-            DbStatement::with_params(
-                "UPDATE permission_requests SET status = ?, decided_by = ?, \
-                     decision_reason = ?, decided_at = CURRENT_TIMESTAMP, \
-                     gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE request_id = ? AND env = ?",
-                vec![
-                    DbValue::from(request_status_str(status)),
-                    DbValue::from(decided_by),
-                    match decision_reason {
-                        Some(s) => DbValue::from(s),
-                        None => DbValue::Null,
-                    },
-                    DbValue::from(request_id),
-                    DbValue::from(env),
-                ],
-            ),
-        )
-        .await
+        // moment the request is decided (gmt_modified advances too). The
+        // decision row and its business audit commit in ONE transaction.
+        self.db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "UPDATE permission_requests SET status = ?, decided_by = ?, \
+                         decision_reason = ?, decided_at = CURRENT_TIMESTAMP, \
+                         gmt_modified = CURRENT_TIMESTAMP \
+                     WHERE request_id = ? AND env = ?",
+                    vec![
+                        DbValue::from(request_status_str(status)),
+                        DbValue::from(decided_by),
+                        match decision_reason {
+                            Some(s) => DbValue::from(s),
+                            None => DbValue::Null,
+                        },
+                        DbValue::from(request_id),
+                        DbValue::from(env),
+                    ],
+                )),
+                DbTransactionStep::Execute(business_action_audit_insert(&audit)),
+            ])
+            .await
+            .map_err(|err| {
+                warn!(operation = "decide_request", error = %err, "db_permission_request: transaction failed");
+                service_db_error("decide_request", err)
+            })
+            .map(|_| ())
     }
 
     async fn backfill_edge_id(
@@ -359,21 +394,30 @@ impl PermissionRequestRepoPort for DbPermissionRequestStore {
         request_id: &str,
         env: &str,
         edge_id: u64,
+        operation: &BotOperationContext,
     ) -> ServiceResult<()> {
-        self.execute(
-            "backfill_edge_id",
-            DbStatement::with_params(
-                "UPDATE permission_requests SET edge_id = ?, \
-                     gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE request_id = ? AND env = ?",
-                vec![
-                    DbValue::from(edge_id),
-                    DbValue::from(request_id),
-                    DbValue::from(env),
-                ],
-            ),
-        )
-        .await
+        require_business_operation(operation)?;
+        let audit = request_audit_record(operation, env, request_id, BotActionKind::Update);
+        self.db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "UPDATE permission_requests SET edge_id = ?, \
+                         gmt_modified = CURRENT_TIMESTAMP \
+                     WHERE request_id = ? AND env = ?",
+                    vec![
+                        DbValue::from(edge_id),
+                        DbValue::from(request_id),
+                        DbValue::from(env),
+                    ],
+                )),
+                DbTransactionStep::Execute(business_action_audit_insert(&audit)),
+            ])
+            .await
+            .map_err(|err| {
+                warn!(operation = "backfill_edge_id", error = %err, "db_permission_request: transaction failed");
+                service_db_error("backfill_edge_id", err)
+            })
+            .map(|_| ())
     }
 }
 
@@ -423,6 +467,31 @@ fn parse_request_status(value: &str) -> ServiceResult<RequestStatus> {
             "unknown request status: {}",
             other
         ))),
+    }
+}
+
+fn request_audit_record(
+    operation: &BotOperationContext,
+    env: &str,
+    request_id: &str,
+    action: BotActionKind,
+) -> BotActionAuditRecord {
+    let step_key = stable_step_key(
+        action,
+        BotActionResourceKind::Friend,
+        BotActionAuditPhase::Applied,
+    );
+    BotActionAuditRecord {
+        audit_id: business_action_audit_id(env, &operation.operation_id, &step_key),
+        env: env.to_string(),
+        operation_id: operation.operation_id.clone(),
+        step_key,
+        operator: operation.actor.clone(),
+        resource_kind: BotActionResourceKind::Friend,
+        resource_id: request_id.to_string(),
+        action,
+        phase: BotActionAuditPhase::Applied,
+        reason_code: None,
     }
 }
 
@@ -478,7 +547,41 @@ mod tests {
         ))
         .await
         .expect("create permission_requests");
+        // Plan Task 12: the insert/decide lanes commit one
+        // bcs_bot_action_audits row in the SAME transaction (mirrors the
+        // migration-032 business audit table).
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bot_action_audits (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                audit_id VARCHAR(128) NOT NULL, \
+                env VARCHAR(32) NOT NULL, \
+                operation_id VARCHAR(64) NOT NULL, \
+                step_key VARCHAR(128) NOT NULL, \
+                operator_kind VARCHAR(16) NOT NULL, \
+                operator_id VARCHAR(256) NOT NULL, \
+                operator_user_id VARCHAR(256), \
+                effective_actor_id VARCHAR(256) NOT NULL, \
+                resource_kind VARCHAR(32) NOT NULL, \
+                resource_id VARCHAR(256) NOT NULL, \
+                action VARCHAR(32) NOT NULL, \
+                phase VARCHAR(16) NOT NULL, \
+                reason_code VARCHAR(64), \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        ))
+        .await
+        .expect("create bcs_bot_action_audits");
         DbPermissionRequestStore::sqlite(Arc::new(db))
+    }
+
+    fn test_operation(label: &str) -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("test-op-{label}"),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: "85020".to_string(),
+                effective_actor_id: "human_85020".to_string(),
+            },
+        }
     }
 
     static REQUEST_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -540,7 +643,7 @@ mod tests {
         let store = request_store().await;
         let req = sample_request("dev");
         let request_id = req.request_id.clone();
-        store.insert(req).await.expect("insert");
+        store.insert(req, &test_operation("a")).await.expect("insert");
         let got = store.get(&request_id, "dev").await.expect("found");
         assert_eq!(got.request_id, request_id);
         assert_eq!(got.status, RequestStatus::Pending);
@@ -554,13 +657,20 @@ mod tests {
         let store = request_store().await;
         let r1 = sample_request("dev");
         let r1_id = r1.request_id.clone();
-        store.insert(r1).await.expect("insert r1");
+        store.insert(r1, &test_operation("r1")).await.expect("insert r1");
         let r2 = sample_request("dev");
         let r2_id = r2.request_id.clone();
-        store.insert(r2).await.expect("insert r2");
+        store.insert(r2, &test_operation("r2")).await.expect("insert r2");
         // decide r2 → approved
         store
-            .decide(&r2_id, "dev", RequestStatus::Approved, "85020", Some("ok"))
+            .decide(
+                &r2_id,
+                "dev",
+                RequestStatus::Approved,
+                "85020",
+                Some("ok"),
+                &test_operation("decide"),
+            )
             .await
             .expect("decide");
         let all = store.list_inbox("bot_b", "dev", None).await;
@@ -587,9 +697,9 @@ mod tests {
         let store = request_store().await;
         let req = sample_request("dev");
         let request_id = req.request_id.clone();
-        store.insert(req).await.expect("insert");
+        store.insert(req, &test_operation("a")).await.expect("insert");
         store
-            .backfill_edge_id(&request_id, "dev", 1001)
+            .backfill_edge_id(&request_id, "dev", 1001, &test_operation("bf"))
             .await
             .expect("backfill");
         let got = store.get(&request_id, "dev").await.expect("found");

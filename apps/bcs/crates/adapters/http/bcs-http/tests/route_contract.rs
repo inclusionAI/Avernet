@@ -243,7 +243,6 @@ fn actor_directory_use_cases(
     Arc::new(ActorDirectory::new(
         registry,
         friend,
-        noop_relation(),
         worker_profiles,
         candidate_search,
     ))

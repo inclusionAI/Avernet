@@ -3,6 +3,7 @@
     reason = "test assertions intentionally fail fast"
 )]
 
+use bcs_service_api::types::BotOperationContext;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -278,6 +279,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: Option<String>,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<bcs_service_api::application::ConnectResult> {
         unreachable!("not used")
     }
@@ -287,6 +289,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("not used")
     }
@@ -296,11 +299,12 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<String>,
+        _: BotOperationContext,
     ) -> ServiceResult<()> {
         unreachable!("not used")
     }
 
-    async fn cancel(&self, _: &str) -> ServiceResult<()> {
+    async fn cancel(&self, _: &str, _: &str, _: BotOperationContext) -> ServiceResult<()> {
         unreachable!("not used")
     }
 
@@ -316,6 +320,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("not used")
     }
@@ -407,7 +412,7 @@ impl BotControlPlaneCoreService for RecordingBotControlPlane {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
-        _operation: bcs_service_api::types::BotOperationContext,
+        _operation: BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
         unreachable!("not used")
     }
@@ -531,7 +536,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
-        _operation: bcs_service_api::types::BotOperationContext,
+        _operation: BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
         unreachable!("not used by authorization-priority test")
     }

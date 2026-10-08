@@ -1775,7 +1775,11 @@ fn build_openapi_v1_state(
                 default_ttl_seconds: config.invite.default_ttl_seconds,
             },
         )
-        .with_friend_connection_service(connect_service),
+        .with_friend_connection_service(connect_service)
+        // Plan Task 12: the V1 friend/invitation acting-actor and
+        // manage-resource questions resolve through the live authority hook;
+        // `created_by` is no longer an authorization answer.
+        .with_authority(authority_hook),
     );
     let register_service: Arc<dyn bcs_service_api::application::v1::RegisterService> =
         Arc::new(bcs_app_register::RegisterServiceImpl::new(
@@ -2539,13 +2543,14 @@ impl Default for BcsServerState {
             None,
         );
         let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> =
-            Arc::new(bcs_bot::ActorDirectory::new(
-                bot_registry.clone(),
-                friend_store.clone(),
-                relation_store.clone(),
-                candidate_search.worker_profiles,
-                candidate_search.legacy,
-            ),
+            Arc::new(
+                bcs_bot::ActorDirectory::new(
+                    bot_registry.clone(),
+                    friend_store.clone(),
+                    candidate_search.worker_profiles,
+                    candidate_search.legacy,
+                )
+                .with_authority(authority_hook.clone()),
         );
         let collaboration_templates = build_standalone_collaboration_template_service(&config);
         let invite_code_service =
@@ -3001,10 +3006,10 @@ fn build_use_case_bundle(
     let actor_directory = bcs_bot::ActorDirectory::new(
         bot_registry.clone(),
         friend.clone(),
-        relation.clone(),
         candidate_search.worker_profiles,
         candidate_search.legacy,
-    );
+    )
+    .with_authority(authority_hook.clone());
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_uplink_config(config.uplink.clone())
@@ -4673,16 +4678,49 @@ impl BcsServer {
                 ),
                 None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
             };
-        let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
-            edge_grant_store.clone(),
-            profile_store.clone(),
-            request_store.clone(),
-            bot_config_store.clone(),
-            user_directory.clone(),
-            friend_connect_notification,
-            friend_auth_sync.clone(),
-            edge_permission_env,
-        ));
+        // Plan Task 12 (spec §12.3/§12.4): the friend lane resolves the
+        // CURRENT owner (approval-notification recipient, friend-scope
+        // owner lookups) and its acting-actor authorizations through the
+        // strict authority core — while the external FriendAuthSyncPort
+        // keeps its historical backend addressing, and role lifecycles
+        // never trigger that sync.
+        let connect_authority_env = edge_permission_env.clone();
+        let connect_authority_repo: Arc<dyn bcs_service_api::port::repo::BotAuthorityRepoPort> =
+            match db_kind {
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbBotAuthorityStore::sqlite(
+                        db_plugin.clone(),
+                        connect_authority_env,
+                    ),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbBotAuthorityStore::mysql(
+                        db_plugin.clone(),
+                        connect_authority_env,
+                    ),
+                ),
+                DbPluginKind::External(provider) => panic!(
+                    "external database plugin '{}' has no bot authority store wiring",
+                    provider
+                ),
+            };
+        let connect_authority_core: Arc<dyn bcs_service_api::core::BotAuthorityCoreService> =
+            Arc::new(bcs_edge_permission::BotAuthorityCoreServiceImpl::new(
+                connect_authority_repo,
+            ));
+        let connect_service_impl = Arc::new(
+            bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                user_directory.clone(),
+                friend_connect_notification,
+                friend_auth_sync.clone(),
+                edge_permission_env,
+            )
+            .with_authority(connect_authority_core),
+        );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
         let edge_permission_friend_sync: Arc<dyn bcs_service_api::EdgePermissionFriendSyncService> =

@@ -2,25 +2,43 @@
 //! split out of the former over-limit `lib.rs` (plan Task 3 lib split).
 //!
 //! Role rows (`grant_kind` owner/manager) are NOT read here: they never
-//! join friend semantics or runtime admission (spec §5.1 — role edges do
-//! not enter the friend list or A2A runtime grants). Their strict reads
-//! live in [`crate::authority`] and reject undecodable shapes instead of
-//! warn-skipping rows.
+//! join friend semantics or runtime admission (spec §5.1/§13.4 — role
+//! edges do not enter the friend list or A2A runtime grants). The runtime
+//! read lane [`Self::list_active_grants`] (also serving `is_authorized`,
+//! the two-path admission SoR) whitelists the runtime grant kinds in SQL
+//! (`grant_kind IN ('permission_profile', 'rules')`, plan Task 12), so a
+//! role edge is not selected at all — not merely warn-skipped at decode.
+//! Their strict reads live in [`crate::authority`] and reject undecodable
+//! shapes instead of warn-skipping rows.
+//!
+//! Plan Task 12 (spec §12.5): the INSERT/REVOKE write lanes carry the
+//! REQUIRED [`BotOperationContext`] and commit the edge row plus its
+//! `bcs_bot_action_audits` record in ONE DbPlugin transaction.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_db_api::{DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
+use bcs_db_api::{
+    DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep,
+    DbTransactionStepResult, DbValue,
+};
 use bcs_domain::edge_permission::{
     EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType,
 };
 pub use bcs_service_api::port::repo::EdgeGrantRepoPort;
 use bcs_service_api::port::repo::edge_grant::{FriendIdsPage, FriendListQuery};
+use bcs_service_api::types::{
+    BotActionAuditPhase, BotActionAuditRecord, BotActionKind, BotActionResourceKind,
+    BotOperationContext, stable_step_key,
+};
 use bcs_domain::ActorKind;
 use bcs_service_api::{ServiceError, ServiceResult};
 use tracing::warn;
 
+use crate::authority::audit::{
+    business_action_audit_id, business_action_audit_insert, require_business_operation,
+};
 use crate::common::{
     json_to_db_value, optional_string, parse_json_opt, required_string, required_u64,
     service_db_error,
@@ -90,25 +108,16 @@ impl DbEdgeGrantStore {
         })
     }
 
-    /// INSERT with idempotent behavior on the unique key
-    /// `(from_id, to_id, env, grant_ref_id)`: SQLite `ON CONFLICT DO NOTHING`
-    /// vs MySQL `INSERT IGNORE`.
+    /// INSERT of one new edge row. The idempotency of a SURVIVING row under
+    /// the same natural key is answered by the pre-read in [`Self::insert_grant`]
+    /// (returning the existing id, no audit); losing a race fails the whole
+    /// transaction fail-closed on the UNIQUE violation instead of silently
+    /// writing a phantom audit for a no-change.
     fn insert_grant_sql(&self) -> &'static str {
-        match self.flavor {
-            EdgeGrantSqlFlavor::Mysql => {
-                "INSERT IGNORE INTO edge_grants \
-                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            }
-            EdgeGrantSqlFlavor::Sqlite => {
-                "INSERT INTO edge_grants \
-                 (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
-                  status, originator_policy_type, originator_policy_data) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-                 ON CONFLICT(from_id, to_id, env, grant_ref_id) DO NOTHING"
-            }
-        }
+        "INSERT INTO edge_grants \
+         (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+          status, originator_policy_type, originator_policy_data) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     }
 }
 
@@ -119,10 +128,16 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
             .query(
                 "list_active_grants",
                 DbStatement::with_params(
+                    // Runtime whitelist (plan Task 12, spec §13.4): only the
+                    // permission kinds ever join runtime admission or the A2A
+                    // authz context. Role rows (owner/manager) never admit
+                    // runtime friendship — the selection excludes them in SQL
+                    // instead of warn-skipping at decode time.
                     "SELECT id, env, from_id, to_id, grant_kind, grant_ref_id, \
                             rules, status, originator_policy_type, originator_policy_data \
                      FROM edge_grants \
-                     WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved'",
+                     WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved' \
+                       AND grant_kind IN ('permission_profile', 'rules')",
                     vec![
                         DbValue::from(from),
                         DbValue::from(to),
@@ -297,7 +312,12 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         Ok(FriendIdsPage { items, total })
     }
 
-    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
+    async fn insert_grant(
+        &self,
+        grant: EdgeGrant,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<u64> {
+        require_business_operation(operation)?;
         let EdgeGrant {
             edge_id: _,
             env,
@@ -315,12 +335,47 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
             management_source_kind: _,
             management_source_id: _,
         } = grant;
+        // Idempotent pre-check: a surviving row under the same natural key
+        // returns its id with NO new audit row (spec §12.5: 幂等无变化不造
+        // applied 事件). A concurrent racer that wins between this read and
+        // the write transaction below makes the UNIQUE violation fail the
+        // whole transaction fail-closed — never a phantom audit for a
+        // no-change.
+        let existing = self
+            .query(
+                "insert_grant_lookup",
+                DbStatement::with_params(
+                    "SELECT id FROM edge_grants WHERE from_id = ? AND to_id = ? AND env = ? AND grant_ref_id = ? LIMIT 1",
+                    vec![
+                        DbValue::from(from_id.clone()),
+                        DbValue::from(to_id.clone()),
+                        DbValue::from(env.clone()),
+                        DbValue::from(grant_ref_id),
+                    ],
+                ),
+            )
+            .await?;
+        if let Some(id) = existing
+            .into_iter()
+            .next()
+            .and_then(|row| row.get_i64("id").ok().flatten())
+            .and_then(|id| if id < 0 { None } else { Some(id as u64) })
+        {
+            return Ok(id);
+        }
         let rules_val = json_to_db_value(&rules);
         let policy_data_val = json_to_db_value(&originator_policy_data);
-        let result = self
-            .execute_result(
-                "insert_grant",
-                DbStatement::with_params(
+        // Plan Task 12 (spec §12.5): the edge INSERT and its ordinary
+        // business audit row commit in ONE DbPlugin transaction — an audit
+        // failure rolls the business edge back with it. The audit names the
+        // logical grant identity (from->to) because the auto-increment id is
+        // only known after the insert.
+        let audit_resource = format!("{from_id}->{to_id}");
+        let audit = edge_audit_record(operation, &env, &audit_resource, BotActionKind::Invite);
+        let results = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
                     self.insert_grant_sql(),
                     vec![
                         DbValue::from(env.clone()),
@@ -333,14 +388,29 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                         DbValue::from(originator_policy_type_str(originator_policy_type)),
                         policy_data_val,
                     ],
-                ),
-            )
-            .await?;
-        if let Some(id) = result.last_insert_id {
+                )),
+                DbTransactionStep::Execute(business_action_audit_insert(&audit)),
+            ])
+            .await
+            .map_err(|err| {
+                warn!(operation = "insert_grant", error = %err, "db_edge_grant: transaction failed");
+                service_db_error("insert_grant", err)
+            })?;
+        let exec = match &results[0] {
+            DbTransactionStepResult::Executed(exec) => exec,
+            _ => {
+                return Err(ServiceError::InternalError(
+                    "edge_grants insert did not return an execute result".to_string(),
+                ))
+            }
+        };
+        if let Some(id) = exec.last_insert_id {
             if id != 0 {
                 return Ok(id);
             }
         }
+        // Backends without a usable last_insert_id: resolve the id of the row
+        // this transaction just made durable.
         self.query(
             "insert_grant_lookup",
             DbStatement::with_params(
@@ -361,17 +431,46 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         .ok_or_else(|| ServiceError::InternalError("edge_grants insert did not return an id".to_string()))
     }
 
-    async fn revoke_grant(&self, edge_id: u64, env: &str) -> ServiceResult<()> {
-        self.execute(
-            "revoke_grant",
-            DbStatement::with_params(
-                "UPDATE edge_grants SET status = 'revoked', \
-                     gmt_modified = CURRENT_TIMESTAMP \
-                 WHERE id = ? AND env = ?",
-                vec![DbValue::from(edge_id), DbValue::from(env)],
-            ),
-        )
-        .await
+    async fn revoke_grant(
+        &self,
+        edge_id: u64,
+        env: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
+        require_business_operation(operation)?;
+        // Idempotent pre-check: revoking a non-active/missing edge is a
+        // no-change — no UPDATE, no audit row (spec §12.5 幂等无变化不造
+        // applied 事件).
+        let active = self
+            .query(
+                "revoke_grant_precheck",
+                DbStatement::with_params(
+                    "SELECT 1 AS one FROM edge_grants \
+                     WHERE id = ? AND env = ? AND status = 'approved' LIMIT 1",
+                    vec![DbValue::from(edge_id), DbValue::from(env)],
+                ),
+            )
+            .await?;
+        if active.is_empty() {
+            return Ok(());
+        }
+        let audit = edge_audit_record(operation, env, &edge_id.to_string(), BotActionKind::Delete);
+        self.db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "UPDATE edge_grants SET status = 'revoked', \
+                         gmt_modified = CURRENT_TIMESTAMP \
+                     WHERE id = ? AND env = ? AND status = 'approved'",
+                    vec![DbValue::from(edge_id), DbValue::from(env)],
+                )),
+                DbTransactionStep::Execute(business_action_audit_insert(&audit)),
+            ])
+            .await
+            .map_err(|err| {
+                warn!(operation = "revoke_grant", error = %err, "db_edge_grant: transaction failed");
+                service_db_error("revoke_grant", err)
+            })
+            .map(|_| ())
     }
 
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64> {
@@ -436,6 +535,31 @@ impl DbEdgeGrantStore {
                 false
             }
         }
+    }
+}
+
+fn edge_audit_record(
+    operation: &BotOperationContext,
+    env: &str,
+    resource: &str,
+    action: BotActionKind,
+) -> BotActionAuditRecord {
+    let step_key = stable_step_key(
+        action,
+        BotActionResourceKind::Friend,
+        BotActionAuditPhase::Applied,
+    );
+    BotActionAuditRecord {
+        audit_id: business_action_audit_id(env, &operation.operation_id, &step_key),
+        env: env.to_string(),
+        operation_id: operation.operation_id.clone(),
+        step_key,
+        operator: operation.actor.clone(),
+        resource_kind: BotActionResourceKind::Friend,
+        resource_id: resource.to_string(),
+        action,
+        phase: BotActionAuditPhase::Applied,
+        reason_code: None,
     }
 }
 
@@ -603,6 +727,16 @@ mod tests {
     use crate::DbPermissionProfileStore;
     use bcs_service_api::port::repo::PermissionProfileRepoPort;
 
+    fn test_operation(label: &str) -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("test-op-{label}"),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: "85020".to_string(),
+                effective_actor_id: "human_85020".to_string(),
+            },
+        }
+    }
+
     async fn sqlite_store() -> DbEdgeGrantStore {
         let db = LocalSqliteDbPlugin::new().expect("local sqlite");
         // edge_grants + permission_profiles schema (mirrors
@@ -625,6 +759,29 @@ mod tests {
         ))
         .await
         .expect("create edge_grants");
+        // Plan Task 12: insert/revoke commit one bcs_bot_action_audits row
+        // in the same transaction (mirrors migration-032).
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bot_action_audits (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                audit_id VARCHAR(128) NOT NULL, \
+                env VARCHAR(32) NOT NULL, \
+                operation_id VARCHAR(64) NOT NULL, \
+                step_key VARCHAR(128) NOT NULL, \
+                operator_kind VARCHAR(16) NOT NULL, \
+                operator_id VARCHAR(256) NOT NULL, \
+                operator_user_id VARCHAR(256), \
+                effective_actor_id VARCHAR(256) NOT NULL, \
+                resource_kind VARCHAR(32) NOT NULL, \
+                resource_id VARCHAR(256) NOT NULL, \
+                action VARCHAR(32) NOT NULL, \
+                phase VARCHAR(16) NOT NULL, \
+                reason_code VARCHAR(64), \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        ))
+        .await
+        .expect("create bcs_bot_action_audits");
         db.execute(DbStatement::new(
             "CREATE TABLE permission_profiles (\
                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
@@ -686,7 +843,7 @@ mod tests {
         let store = sqlite_store().await;
         let ref_id = seed_default(&store, "b", "dev").await;
         let g = default_grant("a", "b", "dev", ref_id);
-        let edge_id = store.insert_grant(g.clone()).await.expect("insert");
+        let edge_id = store.insert_grant(g.clone(), &test_operation("one")).await.expect("insert");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].edge_id, edge_id);
@@ -699,10 +856,16 @@ mod tests {
         let store = sqlite_store().await;
         let ref_id = seed_default(&store, "b", "dev").await;
         let mut g = default_grant("a", "b", "dev", ref_id);
-        let edge_id = store.insert_grant(g.clone()).await.expect("insert 1");
+        let edge_id = store
+            .insert_grant(g.clone(), &test_operation("idem-1"))
+            .await
+            .expect("insert 1");
         // Re-insert with same (from,to,env,ref) but different edge_id: DO NOTHING.
         g.edge_id = 9999;
-        let dup_id = store.insert_grant(g).await.expect("insert 2");
+        let dup_id = store
+            .insert_grant(g, &test_operation("idem-2"))
+            .await
+            .expect("insert 2");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert_eq!(listed.len(), 1);
         // The original auto-generated edge_id survives.
@@ -715,8 +878,8 @@ mod tests {
         let store = sqlite_store().await;
         let ref_id = seed_default(&store, "b", "dev").await;
         let g = default_grant("a", "b", "dev", ref_id);
-        let edge_id = store.insert_grant(g.clone()).await.expect("insert");
-        store.revoke_grant(edge_id, "dev").await.expect("revoke");
+        let edge_id = store.insert_grant(g.clone(), &test_operation("rev")).await.expect("insert");
+        store.revoke_grant(edge_id, "dev", &test_operation("rev-i")).await.expect("revoke");
         let listed = store.list_active_grants("a", "b", "dev").await;
         assert!(listed.is_empty());
     }
@@ -727,7 +890,10 @@ mod tests {
         let ref_id = seed_default(&store, "bot_b", "dev").await;
         // a (human) → b : friend edge (ref = b's default).
         let g = default_grant("human_a", "bot_b", "dev", ref_id);
-        store.insert_grant(g).await.expect("insert");
+        store
+            .insert_grant(g, &test_operation("friend-edge"))
+            .await
+            .expect("insert");
         assert!(store.has_friend_edge("human_a", "bot_b", "dev").await);
         assert!(store.has_friend_edge("bot_b", "human_a", "dev").await);
     }
@@ -738,16 +904,16 @@ mod tests {
         let ref_b = seed_default(&store, "bot_b", "dev").await;
         let ref_c = seed_default(&store, "bot_c", "dev").await;
         store
-            .insert_grant(default_grant("human_a", "bot_b", "dev", ref_b))
+            .insert_grant(default_grant("human_a", "bot_b", "dev", ref_b), &test_operation("b"))
             .await
             .expect("insert b");
         store
-            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_c))
+            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_c), &test_operation("c"))
             .await
             .expect("insert c");
         // non-friend (wrong ref) should not be listed
         store
-            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_b))
+            .insert_grant(default_grant("human_a", "bot_c", "dev", ref_b), &test_operation("wrong-ref"))
             .await
             .expect("insert wrong ref (different ref)");
 
@@ -762,10 +928,10 @@ mod tests {
         let bot_default = seed_default(&store, "bot-main", "dev").await;
         // Deliberately unsorted. Near-prefix IDs must remain Bots, not Humans.
         for peer in ["human_2002", "humanX1001", "bot-z", "Human_1001", "human_1001", "bot-A", "bot-a"] {
-            store.insert_grant(default_grant(peer, "bot-main", "dev", bot_default)).await.unwrap();
+            store.insert_grant(default_grant(peer, "bot-main", "dev", bot_default), &test_operation("peer")).await.unwrap();
         }
         let peer_default = seed_default(&store, "bot-z", "dev").await;
-        store.insert_grant(default_grant("bot-main", "bot-z", "dev", peer_default)).await.unwrap();
+        store.insert_grant(default_grant("bot-main", "bot-z", "dev", peer_default), &test_operation("bot-z")).await.unwrap();
         assert!(store.list_active_grants("bot-main", "human_1001", "dev").await.is_empty());
 
         let repo: &dyn EdgeGrantRepoPort = &store;
@@ -811,18 +977,18 @@ mod tests {
             ("human_wrong_profile_env", "dev", prod),
             ("human_other_env", "prod", prod),
         ] {
-            store.insert_grant(default_grant(peer, "bot-main", env, profile)).await.unwrap();
+            store.insert_grant(default_grant(peer, "bot-main", env, profile), &test_operation("exo")).await.unwrap();
         }
         let mut revoked = default_grant("human_revoked", "bot-main", "dev", active);
         revoked.status = EdgeStatus::Revoked;
-        store.insert_grant(revoked).await.unwrap();
+        store.insert_grant(revoked, &test_operation("revoked")).await.unwrap();
         let mut rules = default_grant("human_rules", "bot-main", "dev", active);
         rules.grant_kind = GrantKind::Rules;
-        store.insert_grant(rules).await.unwrap();
+        store.insert_grant(rules, &test_operation("rules")).await.unwrap();
         // Outbound edges must also match an active DEFAULT profile.
         for (bot, assignment) in [("inactive-bot", "status = 'inactive'"), ("custom-bot", "is_default = 0")] {
             let profile = seed_default(&store, bot, "dev").await;
-            store.insert_grant(default_grant("bot-main", bot, "dev", profile)).await.unwrap();
+            store.insert_grant(default_grant("bot-main", bot, "dev", profile), &test_operation("custom")).await.unwrap();
             store.db.execute(DbStatement::with_params(
                 format!("UPDATE permission_profiles SET {assignment} WHERE id = ?"),
                 vec![DbValue::from(profile)],
@@ -897,7 +1063,7 @@ mod tests {
         let seed = sqlite_store().await;
         let profile = seed_default(&seed, "bot-main", "dev").await;
         for i in 0..31 {
-            seed.insert_grant(default_grant(&format!("human_{i:03}"), "bot-main", "dev", profile)).await.unwrap();
+            seed.insert_grant(default_grant(&format!("human_{i:03}"), "bot-main", "dev", profile), &test_operation("bulk")).await.unwrap();
         }
         let db = Arc::new(RecordingFriendDb { inner: seed.db, reads: std::sync::Mutex::new(Vec::new()) });
         let store = DbEdgeGrantStore::sqlite(db.clone());

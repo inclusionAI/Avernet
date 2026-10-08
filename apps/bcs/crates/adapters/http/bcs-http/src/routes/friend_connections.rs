@@ -28,7 +28,11 @@ use bcs_service_api::RequestAuthHeaders;
 use crate::error::HttpAdapterError;
 use crate::{headers::extract_bearer_token, state::HttpAppState};
 
-use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
+use super::{
+    bots::bot_use_case_error_to_http,
+    caller::caller_actor_id_from_headers,
+    sessions::actor_id_operation_context,
+};
 
 
 fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
@@ -67,6 +71,9 @@ pub async fn create_friend_request(
     Json(body): Json<CreateFriendRequestBody>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let from = resolve_caller(&state, &headers, &uri, body.from_actor.as_deref(), body.actor_kind.as_deref()).await?;
+    // §12.5 REQUIRED operation context derived from the authenticated
+    // caller; the service refuses a missing context, never invents System.
+    let operation = actor_id_operation_context(&from);
     let res = state
         .connect
         .create_connect(
@@ -74,6 +81,7 @@ pub async fn create_friend_request(
             &body.to_bot,
             body.message.clone(),
             Some(request_auth_headers(&headers)),
+            operation,
         )
         .await?;
     let status = match res.status {
@@ -97,9 +105,10 @@ pub async fn accept_friend_request(
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let operation = actor_id_operation_context(&caller);
     let edge_ids = state
         .connect
-        .approve(&id, &caller, Some(request_auth_headers(&headers)))
+        .approve(&id, &caller, Some(request_auth_headers(&headers)), operation)
         .await?;
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
@@ -115,7 +124,8 @@ pub async fn reject_friend_request(
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
-    state.connect.reject(&id, &caller, reason).await?;
+    let operation = actor_id_operation_context(&caller);
+    state.connect.reject(&id, &caller, reason, operation).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "rejected".into(),
     })))
@@ -128,17 +138,12 @@ pub async fn cancel_friend_request(
     uri: Uri,
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    // Caller identity is resolved for auth-area consistency; the caller may
-    // only cancel requests they originally created.
+    // The adapter resolves IDENTITY only; the withdrawer verification
+    // (request creator/requester) lives in the application service, which
+    // commits the decision together with its §12.5 audit record.
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
-    let req = state.connect.get_request(&id).await?;
-    if req.created_by != caller {
-        return Err(HttpAdapterError::Forbidden(format!(
-            "not authorized to cancel request '{}'",
-            id
-        )));
-    }
-    state.connect.cancel(&id).await?;
+    let operation = actor_id_operation_context(&caller);
+    state.connect.cancel(&id, &caller, operation).await?;
     Ok(Json(envelope(&StatusResponse {
         status: "cancelled".into(),
     })))
@@ -182,9 +187,10 @@ pub async fn revoke_friend(
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body optional (bcs-cli sends empty POSTs). The service now returns the
     // actual revoked edge_ids (B4c) rather than a count.
+    let operation = actor_id_operation_context(&caller);
     let revoked_edges = state
         .connect
-        .revoke_friend(&caller, &actor, Some(request_auth_headers(&headers)))
+        .revoke_friend(&caller, &actor, Some(request_auth_headers(&headers)), operation)
         .await?;
     Ok(Json(envelope(&RevokeFriendResponse { revoked_edges })))
 }
@@ -223,7 +229,8 @@ pub async fn list_friends_by_actor(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
-/// Resolve the caller actor id from request context for friend-connections endpoints.
+/// Resolve the caller actor id from request context for friend-connections
+/// endpoints.
 ///
 /// friend-connections security model (stricter than old `/friends/*`):
 /// 1. **Bearer** (primary): token resolves to a human (`human_<staff>`) or bot
@@ -234,9 +241,11 @@ pub async fn list_friends_by_actor(
 ///    This closes the unauthenticated-self-declaration hole that the old
 ///    `/friends/*` Strategy-A fallback allowed.
 ///
-/// Ownership rule: a human bearer may only act as a bot they own
-/// (`bot_query.list_bots_by_creator(staff_no)`), and a bot bearer may only act
-/// as itself. Any other `from_actor` is rejected with 403.
+/// Acting-actor rule (plan Task 12, spec §12.1(5)/§12.4): a Human bearer may
+/// only act as a Bot they CURRENTLY own or manage — answered by the
+/// application `ConnectService` through the live authority facts, never the
+/// adapter's own `created_by` comparison (the historical creation list stays
+/// a creation-source query only). A bot bearer may only act as itself.
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -267,13 +276,26 @@ async fn resolve_caller(
 
     if matches!(actor_kind, Some("bot")) && bearer.starts_with("human_") {
         let staff_no = bearer.strip_prefix("human_").unwrap_or(&bearer);
-        let owned_bots = state
-            .services
-            .bot_query
-            .list_bots_by_creator(staff_no)
+        // Authorization lives behind the application service (the adapter
+        // stays identity-only, spec §12.1(4)): it consults the CURRENT
+        // owner/manager role facts and fails closed when the authority is
+        // unavailable.
+        let allowed = state
+            .connect
+            .authorize_acting_actor(staff_no, &canonical)
             .await
-            .map_err(bot_use_case_error_to_http)?;
-        if owned_bots.iter().any(|bot| bot.bot_uuid == canonical) {
+            .map_err(|error| {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    error = %error,
+                    target_actor = %canonical,
+                    "friend-connection acting-actor authorization failed"
+                );
+                HttpAdapterError::Forbidden(format!(
+                    "not authorized to act as actor '{canonical}'"
+                ))
+            })?;
+        if allowed {
             return Ok(canonical);
         }
     }
@@ -283,6 +305,7 @@ async fn resolve_caller(
         canonical
     )))
 }
+
 
 fn parse_status_filter(s: &str) -> Option<bcs_domain::edge_permission::RequestStatus> {
     use bcs_domain::edge_permission::RequestStatus;

@@ -356,6 +356,21 @@ impl BotActionAuditRecord {
     }
 }
 
+impl BotOperationContext {
+    /// Derive the action context of ONE specific persisted record inside a
+    /// multi-record use case (plan Task 12). Plan Task 1 pins that
+    /// `step_key` carries no resource id, so one operation slot covers one
+    /// logical step on one record: sibling records (a Bot↔Bot connect pair,
+    /// per-edge writes) take a derived operation id that keeps the SAME
+    /// operator identity and shows its lineage in `operation_id`.
+    pub fn for_sub_record(&self, suffix: &str) -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("{}:{suffix}", self.operation_id),
+            actor: self.actor.clone(),
+        }
+    }
+}
+
 /// An honest System identity for an independent runtime lane (spec §12.5):
 /// scanner/recovery/dispatcher lanes that carry NO verified Human or Bot
 /// caller record the system action itself — never a forged Human and never

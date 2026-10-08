@@ -34,3 +34,22 @@ pub trait BotAuthorityHook: Send + Sync {
     /// validation errors (missing bot, uninitialized, corrupt) propagate.
     async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()>;
 }
+/// Fail-closed Noop default of the centralized hook (spec §13.1: Noop denies,
+/// so an assembly that forgot to wire the strict authority never falls back
+/// to a legacy `created_by` allowance).
+pub struct NoopBotAuthorityHook;
+
+#[async_trait]
+impl BotAuthorityHook for NoopBotAuthorityHook {
+    async fn can_manage(&self, _user_id: &str, _bot_id: &str) -> ServiceResult<bool> {
+        Ok(false)
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        Err(crate::ServiceError::Authority(
+            crate::types::error::AuthorityError::Forbidden(format!(
+                "user '{user_id}' is not the owner of bot '{bot_id}' (authority hook not wired)"
+            )),
+        ))
+    }
+}

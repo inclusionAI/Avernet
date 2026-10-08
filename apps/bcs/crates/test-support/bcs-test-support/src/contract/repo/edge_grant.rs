@@ -15,6 +15,19 @@ use bcs_domain::edge_permission::{
 };
 use bcs_service_api::port::repo::EdgeGrantRepoPort;
 
+fn contract_op(label: &str) -> bcs_service_api::types::BotOperationContext {
+    // Honest test-seeding context: contract harnesses are not production
+    // operators, and the noop driver ignores the audit lane; the real store
+    // drivers take this as their REQUIRED context (plan Task 12).
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("edge-grant-conformance-{label}"),
+        actor: bcs_service_api::types::BotOperationActor::Human {
+            user_id: "85020".to_string(),
+            effective_actor_id: "human_85020".to_string(),
+        },
+    }
+}
+
 /// Rule 25 conformance suite for `EdgeGrantRepoPort`.
 ///
 /// Covers the friend-edge lifecycle (D12 symmetric + wrong-ref discrimination),
@@ -57,7 +70,10 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         management_source_kind: bcs_domain::NON_ROLE_SOURCE_KIND.into(),
         management_source_id: bcs_domain::NON_ROLE_SOURCE_ID.into(),
     };
-    let edge_id = repo.insert_grant(edge.clone()).await.unwrap();
+    let edge_id = repo
+        .insert_grant(edge.clone(), &contract_op("edge-conformance"))
+        .await
+        .unwrap();
 
     // 4. has_friend_edge both directions (D12 symmetric).
     assert!(
@@ -91,7 +107,10 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         grant_ref_id: default_id + 1,
         ..edge.clone()
     };
-    repo.insert_grant(wrong).await.unwrap();
+    repo
+        .insert_grant(wrong, &contract_op("edge-wrong-ref"))
+        .await
+        .unwrap();
     let grants2 = repo.list_active_grants(human, target_bot, env).await;
     assert_eq!(grants2.len(), 2, "both edges active (friend + wrong-ref)");
 
@@ -116,7 +135,7 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         edge_id: 1234,
         ..edge.clone()
     };
-    let dup_id = repo.insert_grant(dup)
+    let dup_id = repo.insert_grant(dup, &contract_op("edge-dup"))
         .await
         .expect("dup insert must not error (ON CONFLICT)");
     assert_eq!(dup_id, edge_id, "duplicate insert returns existing id");
@@ -128,7 +147,10 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
 
     // 9. Revoke the friend edge → has_friend_edge false (default revoked, the
     //    wrong-ref edge cannot substitute for a friend edge).
-    repo.revoke_grant(edge_id, env).await.unwrap();
+    repo
+        .revoke_grant(edge_id, env, &contract_op("edge-revoke"))
+        .await
+        .unwrap();
     assert!(
         !repo.has_friend_edge(human, target_bot, env).await,
         "revoked friend edge → not friends (wrong-ref does not count)"
