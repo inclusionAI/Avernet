@@ -9,6 +9,19 @@
 
 老产品沿用当前站点的登录 Cookie、`ctoken`、Referer 请求封装；内部接口从登录态取得用户工号，不在请求体中传 `user_id`。新产品沿用 OpenAPI 鉴权封装，GET/PUT 均须带 `user_id` query；真人调用时该值必须与已验证的登录用户一致。OpenAPI 的 `server_code` 是路径参数，构造 URL 时应编码。Cookie、`ctoken`、Referer 都不是下文的 JSON 字段。
 
+## PRD 原型与实际接口字段
+
+产品 HTML 是交互原型，展示的 payload **不能直接提交**。前端组装请求时按下表转换：
+
+| PRD 表单/原型字段 | 实际接口字段 | 联调要求 |
+| --- | --- | --- |
+| 调用版本选择、`version` | `endpoint_env` | 只提交 `PROD` 或 `PRE`；原型的 `DAILY` 不受支持。 |
+| 传输协议、`protocol` | `transport_protocol` | 只提交 `SSE`、`STREAMABLE_HTTP` 或 `null`；原型中的 `HTTP`、`STDIO`、`WebSocket` 不能原样提交。`null` 表示使用 Center 默认选择。 |
+| 变量名、变量值 | `params[].key`、`params[].value` | 一期按 **HTTP Header 名称和值**处理，不是任意 MCP 参数或环境变量。 |
+| 生效Bot 多选 | `params[].bots` | 提交 Bot ID，不提交展示名称；空数组表示 user 默认规则。 |
+
+前端应依据 MCP Center 实际可用端点展示环境/协议选项。请求中不要混用原型字段 `version`、`protocol`；两套接口都会将不支持的字段判为 422。
+
 ## 页面初始化
 
 1. 获取 MCP Center 元信息，展示可用的环境和传输协议：老产品可用 `GET /api/mcp/market/detail?server_code={server_code}`；新产品可用 `GET /openapi/v1/bots/mcp/servers/{server_code}`。
@@ -62,7 +75,7 @@ GET /openapi/v1/bots/mcp/servers/mcp.example.server/config-groups?user_id=<curre
 }
 ```
 
-`params` 只回显**显式保存的配置组**，不会把继承的 user Header 展开为 Bot 行。没有保存过配置时，返回 `endpoint_env: "PROD"`、`transport_protocol: null`、`params: []`。`value` 当前按一期约定原值回显，不做掩码；前端请勿写入控制台或埋点日志。GET 直接读控制面数据，不要求 MCP Center 当时可用。
+`params` 只回显**显式保存的配置组**，不会把继承的 user Header 展开为 Bot 行。存量 user Header 读取后表现为 `bots: []`，无需迁移旧数据。同名、同值的多个 Bot 规则在回读时可能合并成一个 `bots` 数组；配置组没有持久化行 ID，不保证保存前后的行数或顺序一致。前端应以 GET/保存响应的 `data.params` 重建表单，而不是依赖原行位置。没有保存过配置时，返回 `endpoint_env: "PROD"`、`transport_protocol: null`、`params: []`。`value` 当前按一期约定原值回显，不做掩码；前端请勿写入控制台或埋点日志。GET 直接读控制面数据，不要求 MCP Center 当时可用。
 
 ## 保存配置组
 
@@ -103,9 +116,11 @@ Content-Type: application/json
 | `params[].value` | 必填字符串 | Header 值；空字符串也是显式值。 |
 | `params[].bots` | 字符串数组，建议始终显式传递 | `[]` 表示 user 默认；非空表示仅为列出的本人 Bot 显式配置。 |
 
-允许同名 Header 同时存在 user 默认组和指定 Bot 组；Bot 的值覆盖同名默认值，其余 Header 继续继承。两个指定 Bot 组不能以同名 Header 命中同一个 Bot（名称比较不区分大小写）。指定 Bot 不要求此时已安装 MCP；未消费该 MCP 时只保存配置，不触发设备投影。
+PRD 中“生效Bot 不配置即所有bot生效”在接口上对应 `bots: []`。更准确的产品占位文案是 **“所有使用该 MCP 的 Bot 默认生效”**：它不会给 Bot 安装 MCP；同名 Bot 显式值优先，Bot 自定义 URL 不继承 user 默认 Header。允许同名 Header 同时存在一个 user 默认组和多个指定 Bot 组；两个指定 Bot 组不能以同名 Header 命中同一个 Bot（名称比较不区分大小写），前端应在提交前校验，后端也会拒绝重叠。指定 Bot 不要求此时已安装 MCP；未消费该 MCP 时只保存配置，不触发设备投影。
 
 保存是**完整快照替换**，不是逐行 PATCH：前端每次必须提交所有要保留的组，删除行即从 `params` 移除。`params: []` 清空 user/Bot 显式 Header，但本次提交的 `endpoint_env`、`transport_protocol` 仍会保存；API key、Bot 自定义 URL 和 Bot 自身环境/协议不被此接口改动。配置组接口也不负责安装 MCP。
+
+删除最后一个配置组后允许保存 `params: []`。原型为了预览把空 `key`/`value` 改成 `"(未填写)"`，正式提交不得这样替换：空白 Header 名称应提示用户修正；`value: ""` 则是合法的显式空值。原型中打印完整 payload 的 `console.log` 也不能带入正式实现，因为 Header 值会明文传输和回显。
 
 两套接口保存成功后都在 `data` 中返回持久化后的配置及 `sync_results`、`sync_summary`。老产品成功标志为 HTTP 200 / `success: true`；新产品为 HTTP 200 / `code: 200000`。这**只表示控制面保存成功**，不保证每个 Bot 投递成功。离线或单 Bot 投递失败不会回滚配置，页面应显示“已保存”并展示投递警告。例如：
 
