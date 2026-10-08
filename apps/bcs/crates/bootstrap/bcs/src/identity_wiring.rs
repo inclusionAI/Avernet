@@ -9,10 +9,59 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_auth_api::{AuthError, UserIdentityInfo, UserIdentityPort};
 use bcs_db_api::DbPlugin;
+use bcs_service_api::port::repo::auth_session::AuthSessionRepoPort;
 use bcs_service_api::UserIdentityRepoPort;
 use bcs_user_identity::{DbUserIdentityStore, MemoryUserIdentityRepo};
 
+use crate::identity_session_wiring::RepoAuthSessionIdentityPort;
 use crate::plugins::DbPluginKind;
+
+/// The identity-repo pair backing the OAuth login/subscriber surface. Both
+/// ports share ONE store instance so the legacy display lookups and the
+/// strict CAS session writes stay consistent (spec §8.5: a shared record
+/// must not have two independent writers).
+pub struct UserIdentityStores {
+    pub identity: Arc<dyn UserIdentityRepoPort>,
+    pub auth_session: Arc<dyn AuthSessionRepoPort>,
+}
+
+/// Build one shared store instance pair from the selected DB plugin.
+/// Task 11 (spec §8.6): the strict session surface and the legacy
+/// `ensure_identity` surface MUST observe the same rows.
+pub fn db_identity_stores(db_kind: DbPluginKind, db: Arc<dyn DbPlugin>) -> UserIdentityStores {
+    let store: Arc<DbUserIdentityStore> = match db_kind {
+        DbPluginKind::LocalSqlite => Arc::new(DbUserIdentityStore::sqlite(db)),
+        DbPluginKind::Mysql => Arc::new(DbUserIdentityStore::mysql(db)),
+        DbPluginKind::External(provider) => {
+            panic!(
+                "external database plugin '{provider}' has no user identity store wiring"
+            )
+        }
+    };
+    UserIdentityStores {
+        identity: store.clone(),
+        auth_session: store,
+    }
+}
+
+/// Shared in-memory store pair for standalone / test paths without a DB
+/// plugin. Identities do not survive a restart.
+pub fn memory_identity_stores() -> UserIdentityStores {
+    let store = Arc::new(MemoryUserIdentityRepo::new());
+    UserIdentityStores {
+        identity: store.clone(),
+        auth_session: store,
+    }
+}
+
+/// Build the strict `AuthSessionIdentityPort` over the shared store pair
+/// (the CAS install/rotate/revoke surface the OAuth session engine drives).
+pub fn auth_session_identity_port(stores: &UserIdentityStores) -> Arc<dyn bcs_auth_api::AuthSessionIdentityPort> {
+    Arc::new(RepoAuthSessionIdentityPort::new(
+        stores.auth_session.clone(),
+        stores.identity.clone(),
+    ))
+}
 
 /// Convert a persistence-layer `UserIdentity` into an auth-layer display struct.
 fn to_display_info(row: &bcs_service_api::UserIdentity) -> UserIdentityInfo {
@@ -90,18 +139,11 @@ impl UserIdentityPort for RepoUserIdentityPort {
             .await
             .map(|r| to_display_info(&r)))
     }
+}
 
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError> {
-        self.repo
-            .update_token(user_id, token, expire_at)
-            .await
-            .map_err(AuthError::LookupFailed)
-    }
+/// Build the legacy display identity port from the shared store pair.
+pub fn user_identity_port(stores: &UserIdentityStores) -> Arc<dyn UserIdentityPort> {
+    Arc::new(RepoUserIdentityPort::new(stores.identity.clone()))
 }
 
 /// Build a DB-backed identity port from the selected DB plugin.
@@ -111,23 +153,15 @@ pub fn db_user_identity_port(
     db_kind: DbPluginKind,
     db: Arc<dyn DbPlugin>,
 ) -> Arc<dyn UserIdentityPort> {
-    let repo: Arc<dyn UserIdentityRepoPort> = match db_kind {
-        DbPluginKind::LocalSqlite => Arc::new(DbUserIdentityStore::sqlite(db)),
-        DbPluginKind::Mysql => Arc::new(DbUserIdentityStore::mysql(db)),
-        DbPluginKind::External(provider) => {
-            panic!(
-                "external database plugin '{}' has no user identity store wiring",
-                provider
-            )
-        }
-    };
-    Arc::new(RepoUserIdentityPort::new(repo))
+    Arc::new(RepoUserIdentityPort::new(
+        db_identity_stores(db_kind, db).identity,
+    ))
 }
 
 /// Build an in-memory identity port for standalone / test paths that have no
 /// DB plugin. Identities do not survive a restart.
 pub fn memory_user_identity_port() -> Arc<dyn UserIdentityPort> {
-    Arc::new(RepoUserIdentityPort::new(Arc::new(
-        MemoryUserIdentityRepo::new(),
-    )))
+    Arc::new(RepoUserIdentityPort::new(
+        memory_identity_stores().identity,
+    ))
 }

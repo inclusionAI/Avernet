@@ -127,6 +127,10 @@ pub use bcs_routing::MessageRouter;
 
 // Server modules
 pub mod auth_wiring;
+pub mod api_auth_registry;
+pub mod api_auth_ports;
+pub mod api_auth_provider_configs;
+pub mod api_auth_wiring;
 mod config;
 mod config_loader;
 pub mod callback_recovery_scanner;
@@ -139,6 +143,7 @@ pub use friend_auth_sync::HttpFriendAuthSyncPort;
 pub mod http_adapter;
 pub mod agent_identity;
 mod identity_wiring;
+pub mod identity_session_wiring;
 pub mod lifecycle;
 mod ws_leadership;
 pub mod metrics;
@@ -173,7 +178,7 @@ pub use config::{
 };
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};
-pub use server::{resolve_config_secrets, BcsServer, BcsServerExtensions};
+pub use server::{resolve_config_secrets, BcsServer, BcsServerExtensions, BcsServerState};
 pub use http_adapter::set_health_version;
 
 pub const BCS_VERSION: &str = concat!(

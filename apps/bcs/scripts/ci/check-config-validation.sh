@@ -18,7 +18,7 @@ if ! cargo test -p bcs --lib config --quiet; then
   fail=1
 fi
 
-CONFIG_SCOPE=(crates/bootstrap/bcs/src/config.rs crates/bootstrap/bcs/src/config_loader.rs crates/bootstrap/bcs/tests)
+CONFIG_SCOPE=(crates/bootstrap/bcs/src/config.rs crates/bootstrap/bcs/src/config_loader.rs crates/bootstrap/bcs/src/config crates/bootstrap/bcs/src/api_auth_registry.rs crates/bootstrap/bcs/tests crates/service-api/bcs-config-api/src crates/service-api/bcs-config-api/tests)
 
 if ! rg -q 'deny_unknown_fields|unknown_(key|field)|unknown key|unknown field' "${CONFIG_SCOPE[@]}" 2>/dev/null; then
   echo "FAIL [CFG-1]: 缺未知配置 key 拒绝的显式测试或 serde deny_unknown_fields 覆盖（CI.enforce.bcs.md §E）"

@@ -83,15 +83,4 @@ pub trait UserIdentityPort: Send + Sync {
         &self,
         user_id: &str,
     ) -> Result<Option<UserIdentityInfo>, AuthError>;
-
-    /// Write or overwrite the stored session token fingerprint for a user
-    /// (`SHA-256` hex of the JWT, via `bcs_jwt::token_hash`). Pass an empty
-    /// string to revoke (logout). Called after OAuth callback JWT signing and
-    /// after `POST /auth/refresh` re-sign.
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token_hash: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError>;
 }

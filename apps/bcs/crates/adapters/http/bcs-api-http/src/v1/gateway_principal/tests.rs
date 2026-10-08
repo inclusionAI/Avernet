@@ -333,11 +333,22 @@ async fn header_verifier_extracts_one_signed_gateway_principal_token() {
         .await
         .expect("valid signed Gateway caller");
 
-    assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
-    assert_eq!(caller.user.as_ref().map(|user| user.id.as_str()), Some("user-1"));
-    assert_eq!(caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()), Some("bot-1"));
-    assert!(caller.app.is_some());
-    assert!(caller.access_key.is_some());
+    assert_eq!(caller.caller.tenant.as_deref(), Some("tenant-a"));
+    assert_eq!(
+        caller.caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("user-1")
+    );
+    assert_eq!(
+        caller.caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()),
+        Some("bot-1")
+    );
+    assert!(caller.caller.app.is_some());
+    assert!(caller.caller.access_key.is_some());
+    assert_eq!(caller.authentication_context.source, "gateway");
+    assert_eq!(
+        caller.authentication_context.credential_kind,
+        crate::v1::common::CredentialKind::GatewayPrincipalHeader
+    );
 }
 
 #[tokio::test]
@@ -353,7 +364,7 @@ async fn header_verifier_rejects_missing_duplicate_blank_and_non_utf8_values() {
     duplicate.append("x-avernet-principal", HeaderValue::from_static("two"));
     assert!(matches!(
         PrincipalVerifier::verify(&verifier, &duplicate).await,
-        Err(PrincipalVerificationError::Invalid(_))
+        Err(PrincipalVerificationError::Invalid)
     ));
 
     for value in [
@@ -365,7 +376,7 @@ async fn header_verifier_rejects_missing_duplicate_blank_and_non_utf8_values() {
         headers.insert("x-avernet-principal", value);
         assert!(matches!(
             PrincipalVerifier::verify(&verifier, &headers).await,
-            Err(PrincipalVerificationError::Invalid(_))
+            Err(PrincipalVerificationError::Invalid)
         ));
     }
 }

@@ -39,6 +39,13 @@ pub(crate) fn group_application_error_response(error: ApplicationError) -> Respo
         ApplicationError::BadGateway { code, message } => {
             legacy_group_error_response(StatusCode::BAD_GATEWAY, &code, message)
         }
+        ApplicationError::Unavailable(message) => {
+            legacy_group_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "unavailable",
+                message,
+            )
+        }
         // COSEC: keep persistence and infrastructure details out of the legacy response.
         ApplicationError::Internal(error) => {
             tracing::error!(request_id = %bcs_observability::CurrentRequestId, error = %error, "legacy Group application request failed");

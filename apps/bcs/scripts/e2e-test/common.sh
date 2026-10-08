@@ -101,6 +101,18 @@ assert_contains() {
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
 
+assert_not_contains() {
+    local desc="$1" haystack="$2" needle="$3"
+    if [[ "$haystack" == *"$needle"* ]]; then
+        fail "$desc ('$needle' unexpectedly found)"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    else
+        pass "$desc"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+}
+
 assert_status() {
     local desc="$1" expected="$2"
     assert_eq "$desc" "$HTTP_STATUS" "$expected"

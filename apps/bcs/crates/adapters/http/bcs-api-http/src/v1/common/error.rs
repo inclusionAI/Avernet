@@ -23,6 +23,43 @@ impl ErrorResponse {
             request_id: request_id.into(),
         }
     }
+
+    /// Access was authenticated but rejected by the trust boundary (e.g. CSRF
+    /// Origin check failed on a cookie-backed unsafe request — spec: 成功后
+    /// 的 Origin 拒绝是 403). The detail is intentionally not echoed.
+    pub fn forbidden(request_id: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: 40_300,
+            error_code: "forbidden".to_string(),
+            message: "Access is forbidden".to_string(),
+            request_id: request_id.into(),
+        }
+    }
+
+    /// Upstream verifier dependency is unavailable (503). Used when an OAuth
+    /// session verifier dependency cannot be reached.
+    pub fn unavailable(request_id: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: 50_300,
+            error_code: "unavailable".to_string(),
+            message: "Authentication service is unavailable".to_string(),
+            request_id: request_id.into(),
+        }
+    }
+
+    /// Internal PrincipalVerifier failure (500). No details are echoed; the
+    /// detail is logged at warn! in `principal.rs::principal_error_response`.
+    pub fn internal(request_id: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: 50_000,
+            error_code: "internal_error".to_string(),
+            message: "Internal server error".to_string(),
+            request_id: request_id.into(),
+        }
+    }
 }
 
 impl IntoResponse for ErrorResponse {
@@ -93,6 +130,19 @@ pub fn application_error_response(
         }
         ApplicationError::BadGateway { code, message } => {
             (StatusCode::BAD_GATEWAY, 50_200, code, message)
+        }
+        ApplicationError::Unavailable(detail) => {
+            tracing::warn!(
+                request_id = %request_id.0,
+                error = %detail,
+                "OpenAPI V1 dependency unavailable"
+            );
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                50_300,
+                "unavailable".to_string(),
+                "Authentication service is unavailable".to_string(),
+            )
         }
         ApplicationError::Internal(detail) => {
             tracing::error!(
@@ -245,6 +295,13 @@ mod tests {
                 50_000,
                 "internal_error",
                 "Internal server error",
+            ),
+            (
+                ApplicationError::unavailable("pending-login store down"),
+                StatusCode::SERVICE_UNAVAILABLE,
+                50_300,
+                "unavailable",
+                "Authentication service is unavailable",
             ),
         ];
         let request_id = RequestId("request-123".to_string());

@@ -295,14 +295,6 @@ impl UserIdentityPort for StaticUserIdentityPort {
         Ok(None)
     }
 
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 fn not_configured(name: &str) -> bcs_service_api::application::BotUseCaseError {
