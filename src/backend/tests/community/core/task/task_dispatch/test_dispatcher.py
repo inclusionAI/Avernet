@@ -363,6 +363,237 @@ def test_search_strategy_default_rule_accepts_candidate_outside_bbs_claim_roster
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "stranger:owner"
 
+
+def test_search_strategy_rule_rationale_samples_keywords_and_selection():
+    """搜推三问采样(rule,2 候选):关键词命中事实 + hit_single_takes_first 丢第 2 位。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1", "bot_name": "A", "owner_name": "O1",
+                 "recommend": {"score": 0.9, "reasons": ["近线存储"], "short_profile": "pA"}},
+                {"bot_id": "rule-b", "bot_uuid": "rule-b:2", "bot_name": "B", "owner_name": "O2",
+                 "recommend": {"score": 0.5, "short_profile": "pB"}},
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule dispatch must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    rat = result.rationale
+    assert rat is not None
+    assert rat.decision_mode == "rule"
+    assert rat.miss_reason is None
+    assert rat.skill_response_excerpt is None  # rule 模式无 skill 回包
+    # 候选投影扩展:bot_name/owner_name/reasons(有则全量,无则 None)
+    c0, c1 = rat.candidates
+    assert (c0.bot_id, c0.recommend_score) == ("rule-a", 0.9)
+    assert (c0.bot_name, c0.owner_name, c0.reasons) == ("A", "O1", ["近线存储"])
+    assert (c1.bot_name, c1.owner_name, c1.reasons) == ("B", "O2", None)
+    # 关键词命中事实(问题一/二):每词命中的 identity + 原始命中量,无失败词
+    sampling = rat.search_sampling
+    assert sampling is not None
+    assert sampling.keywords and all(k.failed is False for k in sampling.keywords)
+    for k in sampling.keywords:
+        assert k.bot_ids == ["rule-a:1", "rule-b:2"]
+    assert sampling.raw_item_count == 2 * len(sampling.keywords)
+    assert sampling.failed_keywords == []
+    # 最终选择(rule,问题三):取第一个、丢第二个
+    assert sampling.selected_bot_ids == ["rule-a:1"]
+    assert sampling.dropped_bot_ids == ["rule-b:2"]
+    assert sampling.rule_selection_note == "hit_single_takes_first"
+
+
+def test_search_strategy_rule_group_rationale_drops_beyond_cap():
+    """搜推三问采样(rule,4 候选):hit_multi_capped_at_3 → selected 前 3 + dropped 第 4。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": f"rule-{i}", "bot_uuid": f"rule-{i}:{i}",
+                 "recommend": {"score": 1.0 - 0.1 * i}}
+                for i in range(1, 5)
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule dispatch must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    sampling = result.rationale.search_sampling
+    assert sampling is not None
+    assert sampling.selected_bot_ids == ["rule-1:1", "rule-2:2", "rule-3:3"]
+    assert sampling.dropped_bot_ids == ["rule-4:4"]
+    assert sampling.rule_selection_note == "hit_multi_capped_at_3"
+
+
+def test_search_strategy_skill_rationale_records_response_excerpt():
+    """搜推三问采样(skill):最终选择 = owner bot 决策回包原文摘录;不做机械推导。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1",
+                 "recommend": {"score": 0.9, "short_profile": "pA"}},
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            return {
+                "status": "COMPLETED",
+                "result": {"content": '{"outcome":"HIT_SINGLE","bot_id":"rule-a:1"}'},
+            }
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    strategy = SearchBasedDispatchStrategy(_Bot(), _Discover(), use_search_skill=True)
+    result = _run(strategy.apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    rat = result.rationale
+    assert rat is not None
+    assert rat.decision_mode == "skill"
+    assert rat.skill_prompt_digest is not None
+    assert (
+        rat.skill_response_excerpt
+        == '{"outcome":"HIT_SINGLE","bot_id":"rule-a:1"}'
+    )
+    # skill 模式:关键词命中事实照采,但 rule 截断证据不做机械推导
+    assert rat.search_sampling is not None
+    assert rat.search_sampling.keywords
+    assert rat.search_sampling.selected_bot_ids == []
+    assert rat.search_sampling.dropped_bot_ids == []
+    assert rat.search_sampling.rule_selection_note is None
+
+
+def test_search_strategy_skill_response_excerpt_truncated_at_2000():
+    """超长 skill 回包摘录截断到 2000 字符(payload 写源头收紧);digest 照常计算。"""
+    import hashlib
+
+    long_content = "A" * 3000
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [
+                {"bot_id": "rule-a", "bot_uuid": "rule-a:1",
+                 "recommend": {"score": 0.9}},
+            ]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            return {"status": "COMPLETED", "result": {"content": long_content}}
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    strategy = SearchBasedDispatchStrategy(_Bot(), _Discover(), use_search_skill=True)
+    result = _run(strategy.apply(_node("c1"), graph))
+
+    # 非 JSON 回包 → MISS(parse_error),但采样侧仍留摘录(最终选择证据)
+    assert result.outcome == SearchOutcome.MISS
+    rat = result.rationale
+    assert rat is not None
+    assert rat.miss_reason == "parse_error"
+    assert rat.skill_response_excerpt == "A" * 2000
+    assert rat.skill_response_digest == hashlib.sha256(b"A" * 500).hexdigest()
+
+
+def test_search_strategy_no_candidates_early_exit_still_samples_keywords():
+    """no_candidates 早退照传关键词采样:关键词全失败/全空时诊断素材仍有价值。"""
+
+    class _FailingDiscover:
+        def search_by_keyword(self, **kwargs):
+            raise RuntimeError("catalog down")
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("no candidates → owner bot must not be called")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    node = _node("c1")
+    node.task_spec.goal.objective = "存储系统网络架构计算"
+    result = _run(
+        SearchBasedDispatchStrategy(_Bot(), _FailingDiscover()).apply(node, graph)
+    )
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_candidates"
+    rat = result.rationale
+    assert rat is not None
+    assert rat.miss_reason == "no_candidates"
+    sampling = rat.search_sampling
+    assert sampling is not None
+    assert sampling.keywords and all(k.failed for k in sampling.keywords)
+    assert set(sampling.failed_keywords) == set(sampling.keywords[i].keyword for i in range(len(sampling.keywords)))
+    assert sampling.raw_item_count == 0
+
+
+def test_candidate_search_keyword_hits_per_keyword_facts():
+    """search_candidates 逐关键词命中事实:失败标记/同序/跨词去重/aggregation。"""
+
+    class _FlakyDiscover:
+        def search_by_keyword(self, **kwargs):
+            keyword = kwargs.get("keyword")
+            if keyword == "网络":
+                raise RuntimeError("catalog down")
+            return {"items": [{"bot_id": f"b-{keyword}", "bot_uuid": f"b-{keyword}:o"}]}
+
+    from agentclaw.community.core.task.task_runner.client import (
+        candidate_search as cs,
+    )
+
+    _Flaky = _FlakyDiscover()
+    # monkeypatch 固定关键词(tokenize 依赖 jieba 可用性,固定后测试环境无关)
+    tokens = ["存储", "网络", "架构"]
+    original = cs.search_tokens
+    cs.search_tokens = lambda *a, **k: list(tokens)
+    try:
+        result = _run(cs.search_candidates(_Flaky, "任意 query", user_id="u"))
+    finally:
+        cs.search_tokens = original
+    # keyword_hits 与 tokens 同序(gather 保序)
+    assert [k.keyword for k in result.keyword_hits] == tokens
+    hit0, hit1, hit2 = result.keyword_hits
+    assert (hit0.item_count, hit0.bot_ids, hit0.failed) == (1, ("b-存储:o",), False)
+    assert (hit1.item_count, hit1.bot_ids, hit1.failed) == (0, (), True)
+    assert (hit2.item_count, hit2.bot_ids, hit2.failed) == (1, ("b-架构:o",), False)
+    assert result.failed_keywords == ["网络"]
+    assert result.raw_item_count == 2
+    assert [c.get("bot_uuid") for c in result.candidates] == ["b-存储:o", "b-架构:o"]
+    # discover=None / 无 token → keyword_hits 空
+    empty = _run(cs.search_candidates(None, "x", user_id="u"))
+    assert empty.keyword_hits == () and empty.candidates == []
+
+
 def test_search_strategy_composes_owner_identity_for_openapi_call():
     class _Discover:
         def search_by_keyword(self, **kwargs):
@@ -459,11 +690,18 @@ def test_prefetch_caps_tokens_to_max():
     node = _node("c1")
     node.task_spec.goal.objective = "存储系统网络架构计算资源安全策略数据备份监控运维容量"
     discover = _CountingDiscover()
-    cands = _run(_prefetch_candidates(discover, node, graph))
+    result = _run(_prefetch_candidates(discover, node, graph))
     # token 上限:search_by_keyword 调用次数恰为 _PREFETCH_MAX_TOKENS(9→5)
     assert len(discover.keywords) == _PREFETCH_MAX_TOKENS
     # 每 token 返回独立 bot_id → 候选数 == 调用数
-    assert len(cands) == _PREFETCH_MAX_TOKENS
+    assert len(result.candidates) == _PREFETCH_MAX_TOKENS
+    # 召回事实随 result 整体保留(搜推三问采样素材):
+    # keyword_hits 与 tokens 同序、每词命中 1 条、无失败词、原始命中量 == 调用数
+    tokens = result.tokens
+    assert [k.keyword for k in result.keyword_hits] == tokens
+    assert all(len(k.bot_ids) == 1 for k in result.keyword_hits)
+    assert result.failed_keywords == []
+    assert result.raw_item_count == _PREFETCH_MAX_TOKENS
 
 
 class TestDispatchExceptionCarrier:

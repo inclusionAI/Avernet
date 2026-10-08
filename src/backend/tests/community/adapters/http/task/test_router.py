@@ -296,10 +296,15 @@ class TestRouter:
         )
         assert response.status_code == 200, response.text
         assert response.json()["data"] == {"candidates": [], "total": 0}
+        # task_id/node_id 为可选轨迹采样归属,缺省 None(不传 → 服务层跳过采样)
         assert svc.callback.calls == [
             (
                 "search",
-                {"query": "完成下一步研究"},
+                {
+                    "query": "完成下一步研究",
+                    "task_id": None,
+                    "node_id": None,
+                },
             )
         ]
 

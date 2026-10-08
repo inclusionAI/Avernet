@@ -32,6 +32,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import Di
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     MAX_SEARCH_TOKENS as _PREFETCH_MAX_TOKENS,
     PER_KEYWORD_LIMIT as _PREFETCH_PER_KEYWORD_LIMIT,
+    CandidateSearchResult,
     search_candidates as _search_candidates,
     search_tokens as _prefetch_tokens,
     tokenize_query,
@@ -228,12 +229,15 @@ class SearchBasedDispatchStrategy:
         use_skill: bool,
         prompt_text: str | None,
         response_text: str | None,
+        search_result=None,
     ) -> None:
         """attach ``DispatchRationale`` to ``sr.rationale``(try/except-safe;失败赋 None)。
 
         ``prefetch_tokens`` 由本模块 ``_prefetch_tokens`` 计算(与 ``_prefetch_candidates``
         共用,审计可重放)并按 kw 传入 builder —— ``rationale._build_search_rationale``
         保持为 leaf 模块(不 back-import 本模块)。
+        ``search_result`` 为召回层 ``CandidateSearchResult``(搜推三问采样;早退路径
+        可为 None —— builder 对缺省完全容忍)。
         """
         sr.rationale = _build_search_rationale(
             node=node,
@@ -244,6 +248,7 @@ class SearchBasedDispatchStrategy:
             response_text=response_text,
             filter_ran=False,
             prefetch_tokens=_prefetch_tokens(node.task_spec.goal.objective or ""),
+            search_result=search_result,
         )
 
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
@@ -274,7 +279,8 @@ class SearchBasedDispatchStrategy:
             sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
             self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
             return sr
-        candidates = await _prefetch_candidates(self._discover, node, graph)
+        search_result = await _prefetch_candidates(self._discover, node, graph)
+        candidates = search_result.candidates
         if not candidates:
             logger.info(
                 "[task][search] task=%s node=%s 候选为空→MISS(no_candidates)",
@@ -282,7 +288,11 @@ class SearchBasedDispatchStrategy:
                 node.node_id,
             )
             sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
-            self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
+            # 关键词全失败/全空时 keywords 采样仍有诊断价值,故 no_candidates 早退仍传 search_result。
+            self._set_rationale(
+                node, [], sr, use_skill=use_skill, prompt_text=None,
+                response_text=None, search_result=search_result,
+            )
             return sr
         candidate_ids = [c.get("bot_id") for c in candidates]
         logger.info(
@@ -377,6 +387,7 @@ class SearchBasedDispatchStrategy:
             use_skill=rationale_use_skill,
             prompt_text=prompt_text,
             response_text=response_text,
+            search_result=search_result,
         )
         logger.info(
             "[task][task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s rationale=%s",
@@ -408,8 +419,12 @@ def _search_result_summary(result: SearchResult) -> dict[str, Any]:
 
 async def _prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph
-) -> list[dict]:
-    """Retrieve the shared tokenized candidate catalog for centralized dispatch."""
+) -> CandidateSearchResult:
+    """Retrieve the shared tokenized candidate catalog, keeping retrieval facts.
+
+    Returns the whole ``CandidateSearchResult``(而非仅 ``.candidates``),使
+    per-keyword 命中/原始命中量/失败关键词等召回事实能随 rationale 采样进轨迹。
+    """
     query = node.task_spec.goal.objective or ""
     user_id = str(graph.extend_props.get("owner_bot_id") or "")
     result = await _search_candidates(
@@ -431,7 +446,7 @@ async def _prefetch_candidates(
         len(result.candidates),
         [c.get("bot_uuid") or c.get("bot_id") for c in result.candidates],
     )
-    return result.candidates
+    return result
 
 async def prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph
@@ -439,7 +454,7 @@ async def prefetch_candidates(
     """Return the existing dispatch candidate catalog without making a decision."""
     if discover is None:
         return []
-    return await _prefetch_candidates(discover, node, graph)
+    return (await _prefetch_candidates(discover, node, graph)).candidates
 
 
 def _candidate_dispatch_ids(candidates: list[dict]) -> list[str]:

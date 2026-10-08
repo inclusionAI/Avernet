@@ -29,8 +29,10 @@ the head's persisted ``analysis``):
      mixes them.
    * ``action_input`` / ``analysis``: passed through as the raw strings the
      emitter wrote. ``ext_info`` remains absent from the domain object; the
-     assembler only safely projects its ``holder_id`` key for trajectory UI/API
-     display, while the P5 analyzer still queries the complete JSON on demand.
+     assembler only safely projects its ``holder_id`` key (Relay 执行人) and the
+     派发搜推三问采样摘要 (``search_probe``, from ``_dispatch_rationale`` or
+     relay ``search`` events) for trajectory UI/API display, while the P5
+     analyzer still queries the complete JSON on demand.
    * ``attempt`` / ``task_id`` / ``node_id`` / ``action_result`` / ``error_msg``:
      pass through verbatim.
 3. Read the head: ``list_head(task_id)`` → ``TaskTrajectoryRecord | None``;
@@ -126,6 +128,68 @@ def _holder_id_from_ext_info(ext_info: str | None) -> str | None:
         return None
     value = str(holder_id).strip()
     return value or None
+
+
+def _search_probe_from_ext_info(
+    ext_info: str | None, action_result: str | None
+) -> "dict | None":
+    """从自由 JSON 中定向投影派发搜推三问采样(关键词/返回结果/最终选择)。
+
+    REQ-1 边界的定向扩展(与 ``holder_id`` 同款白名单投影,不整体透传 ext_info):
+    * DISPATCH 事件 —— ``_dispatch_rationale``(中央派发搜推,含 ``search_sampling``);
+    * relay ``action_result="search"`` 事件 —— 顶层 ``search_sampling`` + ``candidates``。
+
+    两种来源归一到同一 probe 形态:``decision_mode``/``tokens``/``keywords``/
+    ``raw_item_count``/``failed_keywords``/``candidates``/``selected_bot_ids``/
+    ``dropped_bot_ids``/``rule_selection_note``/``skill_response_excerpt``/``miss_reason``。
+    旧事件(采样功能落库前)的 rationale 缺新键 → 对应槽位为空/None,照常投影旧素材;
+    无上述素材的事件 → ``None``(缺字段=无信号)。损坏 JSON → ``None``,不影响该行读取。
+    """
+    if not ext_info:
+        return None
+    try:
+        data = json.loads(ext_info)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    rationale = data.get("_dispatch_rationale")
+    if isinstance(rationale, dict) and rationale:
+        sampling = rationale.get("search_sampling")
+        sampling = sampling if isinstance(sampling, dict) else {}
+        return {
+            "decision_mode": rationale.get("decision_mode"),
+            "tokens": list(rationale.get("prefetch_tokens") or []),
+            "keywords": list(sampling.get("keywords") or []),
+            "raw_item_count": int(sampling.get("raw_item_count") or 0),
+            "failed_keywords": list(sampling.get("failed_keywords") or []),
+            "candidates": list(rationale.get("candidates") or []),
+            "selected_bot_ids": list(sampling.get("selected_bot_ids") or []),
+            "dropped_bot_ids": list(sampling.get("dropped_bot_ids") or []),
+            "rule_selection_note": sampling.get("rule_selection_note"),
+            "skill_response_excerpt": rationale.get("skill_response_excerpt"),
+            "miss_reason": rationale.get("miss_reason"),
+        }
+    # relay 场景的采样 ext 只应出现在 action_result=search 的事件行上
+    # (写侧 emit_relay_event 门控);读侧同键复核,防旁路事件误投影。
+    if str(action_result or "") != "search":
+        return None
+    sampling = data.get("search_sampling")
+    if isinstance(sampling, dict) and sampling:
+        return {
+            "decision_mode": "relay_search",
+            "tokens": list(sampling.get("tokens") or []),
+            "keywords": list(sampling.get("keywords") or []),
+            "raw_item_count": int(sampling.get("raw_item_count") or 0),
+            "failed_keywords": list(sampling.get("failed_keywords") or []),
+            "candidates": list(data.get("candidates") or []),
+            "selected_bot_ids": [],
+            "dropped_bot_ids": [],
+            "rule_selection_note": None,
+            "skill_response_excerpt": None,
+            "miss_reason": None,
+        }
+    return None
 
 
 def _datetime_to_int_ms(dt: Optional[datetime]) -> int:
@@ -292,4 +356,5 @@ class TaskTrajectoryAssembler:
             boost_reason=rec.boost_reason,
             holder_id=_holder_id_from_ext_info(rec.ext_info),
             analysis=rec.analysis,
+            search_probe=_search_probe_from_ext_info(rec.ext_info, rec.action_result),
         )

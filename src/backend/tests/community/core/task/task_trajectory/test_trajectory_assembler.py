@@ -69,9 +69,7 @@ from agentclaw.community.core.task.repository.types import (
 import agentclaw.community.core.task.repository.models  # noqa: F401  registers ORM models
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
-    TaskTrajectory,
     TrajectoryActionType,
-    TrajectoryEvent,
 )
 
 # The assembler module under test (RED: this import fails until implemented).
@@ -281,7 +279,6 @@ def test_assemble_orders_timeline_by_gmt_create_then_id():
     assert tj.timeline[0].action_type is TrajectoryActionType.SUBMIT
     assert tj.timeline[-1].action_type is TrajectoryActionType.TRANSITION
     # The two same-second events (id=3, id=4) come back in id ASC order.
-    same_sec = [e for e in tj.timeline if e.gmt_create == same_second * 1]
     # After mapping, e.gmt_create == int ms; identify by the dispatch/execute
     # action types (which share the same gmt_create second).
     dispatch_idx = [e.action_type for e in tj.timeline].index(TrajectoryActionType.DISPATCH)
@@ -789,3 +786,109 @@ def test_task_trajectory_record_dataclass_shape_unchanged():
             "status_from", "status_to", "error_type", "error_msg",
             "ext_info", "analysis"} <= event_fields
     assert {"id", "task_id", "analysis", "gmt_create", "gmt_modified"} <= head_fields
+
+
+# ---------------------------------------------------------------------------
+# 搜推三问采样定向投影(search_probe) — REQ-1 边界的白名单投影(与 holder_id 同款)
+# ---------------------------------------------------------------------------
+
+_DISPATCH_RATIONALE_EXT = (
+    '{"schema_v":1,"_dispatch_rationale":{'
+    '"strategy_name":"search","decision_mode":"skill",'
+    '"prefetch_tokens":["存储","分析"],'
+    '"candidates":[{"bot_id":"rule-a","recommend_score":0.9,"short_profile":"pA",'
+    '"bot_name":"A","owner_name":"O1","reasons":["近线存储"]}],'
+    '"skill_response_excerpt":"{\\"outcome\\":\\"HIT_SINGLE\\"}",'
+    '"miss_reason":null,'
+    '"search_sampling":{"keywords":[{"keyword":"存储","item_count":1,'
+    '"bot_ids":["rule-a:1"],"failed":false}],'
+    '"raw_item_count":1,"failed_keywords":["分析"],'
+    '"selected_bot_ids":[],"dropped_bot_ids":[],"rule_selection_note":null}'
+    "}}"
+)
+
+_RELAY_SEARCH_EXT = (
+    '{"schema_v":1,"search_sampling":{"tokens":["市场","调研"],'
+    '"raw_item_count":2,"failed_keywords":[],'
+    '"keywords":[{"keyword":"市场","item_count":1,"bot_ids":["b:owner"],'
+    '"failed":false}]},"candidates":['
+    '{"bot_id":"b:owner","bot_name":"Research Bot","score":0.91}]}'
+)
+
+
+def test_assemble_projects_dispatch_search_probe():
+    """DISPATCH 事件行的 ``_dispatch_rationale`` → 事件 ``search_probe``(三问摘要)。"""
+    repo = _FakeRepo(events=[_event_record(
+        node_id="N-1", action_type="dispatch", action_result="hit_single",
+        ext_info=_DISPATCH_RATIONALE_EXT,
+    )])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 1
+    probe = timeline[0].search_probe
+    assert probe is not None
+    assert probe["decision_mode"] == "skill"
+    assert probe["tokens"] == ["存储", "分析"]
+    assert probe["keywords"] == [
+        {"keyword": "存储", "item_count": 1, "bot_ids": ["rule-a:1"], "failed": False}
+    ]
+    assert probe["failed_keywords"] == ["分析"]
+    assert probe["candidates"][0]["bot_name"] == "A"
+    assert probe["skill_response_excerpt"] == '{"outcome":"HIT_SINGLE"}'
+    assert probe["miss_reason"] is None
+    # REQ-1 不破坏:事件对象仍然不携带整体 ext_info
+    assert not hasattr(timeline[0], "ext_info")
+
+
+def test_assemble_projects_relay_search_probe():
+    """relay search(action_result=search)事件行的顶层 search_sampling → 同形 probe。"""
+    repo = _FakeRepo(events=[_event_record(
+        node_id="N-2", action_type="relay", action_result="search",
+        ext_info=_RELAY_SEARCH_EXT,
+    )])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert len(timeline) == 1
+    probe = timeline[0].search_probe
+    assert probe is not None
+    assert probe["decision_mode"] == "relay_search"
+    assert probe["tokens"] == ["市场", "调研"]
+    assert probe["keywords"][0]["bot_ids"] == ["b:owner"]
+    assert probe["candidates"][0]["bot_name"] == "Research Bot"
+    assert probe["selected_bot_ids"] == []  # relay 侧由持棒 bot 决策,框架不推导
+
+
+def test_assemble_legacy_rationale_still_projects_without_sampling_keys():
+    """采样功能落库前的旧 rationale(无 search_sampling/excerpt 新键)照常投影旧素材。"""
+    legacy_ext = (
+        '{"schema_v":1,"_dispatch_rationale":{"strategy_name":"search",'
+        '"decision_mode":"rule","prefetch_tokens":["旧词"],'
+        '"candidates":[{"bot_id":"b1","recommend_score":0.5,"short_profile":"p"}]}}'
+    )
+    repo = _FakeRepo(events=[_event_record(
+        node_id="N-3", action_type="dispatch", action_result="miss",
+        ext_info=legacy_ext,
+    )])
+    probe = TaskTrajectoryAssembler(repo).assemble("T-1").timeline[0].search_probe
+    assert probe is not None
+    assert probe["decision_mode"] == "rule"
+    assert probe["tokens"] == ["旧词"]
+    assert probe["candidates"][0]["bot_id"] == "b1"
+    assert probe["keywords"] == [] and probe["raw_item_count"] == 0
+
+
+def test_assemble_events_without_search_material_keep_probe_none():
+    """无搜推素材(无 ext_info / 无关键 key / 损坏 JSON / 非 relay search 事件)→ None。"""
+    repo = _FakeRepo(events=[
+        _event_record(id=1, node_id="a", action_type="submit"),
+        _event_record(id=2, node_id="b", action_type="dispatch",
+                      ext_info='{"schema_v":1,"other":"无搜推素材"}'),
+        _event_record(id=3, node_id="c", action_type="execute",
+                      ext_info=_DISPATCH_RATIONALE_EXT[:20] + "损坏"),
+        # 带顶层 search_sampling 但 action_result 不是 search 的旁路事件 → 不投影
+        _event_record(id=4, node_id="d", action_type="execute",
+                      action_result="success", ext_info=_RELAY_SEARCH_EXT),
+        # relay 但非 search 动作 → 不投影
+        _event_record(id=5, node_id="e", action_type="relay",
+                      action_result="bootstrap", ext_info=_RELAY_SEARCH_EXT),
+    ])
+    timeline = TaskTrajectoryAssembler(repo).assemble("T-1").timeline
+    assert [ev.search_probe for ev in timeline] == [None, None, None, None, None]

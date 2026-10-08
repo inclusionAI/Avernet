@@ -35,6 +35,22 @@ _STOPWORDS: frozenset[str] = frozenset({
 
 
 @dataclass(frozen=True)
+class KeywordHit:
+    """Per-keyword retrieval fact for trajectory sampling (no dispatch decision).
+
+    ``bot_ids`` holds the normalized candidate identities hit by this keyword in
+    arrival order (deduplicated within the keyword). When ``failed`` is True the
+    discover call raised: ``bot_ids`` stays empty and the keyword is also listed
+    in ``CandidateSearchResult.failed_keywords``.
+    """
+
+    keyword: str
+    item_count: int
+    bot_ids: tuple[str, ...]
+    failed: bool
+
+
+@dataclass(frozen=True)
 class CandidateSearchResult:
     """Retrieval facts used for diagnostics; no dispatch decision is made here."""
 
@@ -42,6 +58,10 @@ class CandidateSearchResult:
     tokens: list[str]
     raw_item_count: int
     failed_keywords: list[str]
+    # Per-keyword hit facts for trajectory sampling (gathers preserve input
+    # order, so this aligns with ``tokens``). Defaults to empty so existing
+    # positional constructors/stubs keep working.
+    keyword_hits: tuple[KeywordHit, ...] = ()
 
 
 def tokenize_query(text: str) -> list[str]:
@@ -126,12 +146,17 @@ async def search_candidates(
     seen: dict[str, dict[str, Any]] = {}
     raw_item_count = 0
     failed_keywords: list[str] = []
+    keyword_hits: list[KeywordHit] = []
     for keyword, items, failed in responses:
         if failed:
             failed_keywords.append(keyword)
+        # Per-keyword hit fact (trajectory sampling): recorded for every keyword,
+        # including valid empty misses (item_count=0) and failed calls (failed=True).
+        hit_ids: list[str] = []
         if not items:
             # Empty results are valid misses, so only failures are tracked by the
             # keyword helper through the logger; the API remains candidate-only.
+            keyword_hits.append(KeywordHit(keyword, 0, (), failed))
             continue
         raw_item_count += len(items)
         for item in items:
@@ -140,5 +165,10 @@ async def search_candidates(
             identity = _candidate_identity(item)
             if identity and identity not in seen:
                 seen[identity] = item
+            if identity and identity not in hit_ids:
+                hit_ids.append(identity)
+        keyword_hits.append(KeywordHit(keyword, len(items), tuple(hit_ids), failed))
     candidates = sorted(seen.values(), key=_score, reverse=True)
-    return CandidateSearchResult(candidates, tokens, raw_item_count, failed_keywords)
+    return CandidateSearchResult(
+        candidates, tokens, raw_item_count, failed_keywords, tuple(keyword_hits)
+    )

@@ -647,8 +647,77 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
         # _apply_plan_result; terminal completion only closes the graph.
         self._report_graph_patch(task_id, TaskGraphPatch(status=Status.DONE))
 
-    async def search_task_candidates(self, *, query: str) -> dict[str, Any]:
-        return await self._relay_adapter.search.search_catalog(query)
+    async def search_task_candidates(
+        self,
+        *,
+        query: str,
+        task_id: str | None = None,
+        node_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Relay ``/search`` 候选检索 + 搜推轨迹采样(可选归属,旁路 fire-and-forget)。
+
+        ``task_id`` 由调用方(relay skill)可选携带;不传则**跳过采样** —— 不按
+        持棒者猜测归属(同一 holder 可挂多任务,猜测会错误归因)。采样发射复用
+        ``emit_relay_event``(``_task_context_service`` None-safe + 吞异常,决策
+        #14),``ext_info["search_sampling"]`` 与 ``DispatchRationale.search_sampling``
+        的 keywords 同形;另带 ``candidates`` 瘦投影(relay 场景无 rationale 载体)。
+        """
+        result = await self._relay_adapter.search.search_catalog(query)
+        if task_id:
+            try:  # 决策 #14:旁路观测,采样任何失败绝不影响检索结果返回
+                slim_candidates = [
+                    {
+                        "bot_id": c.get("bot_uuid") or c.get("bot_id"),
+                        "bot_name": c.get("bot_name"),
+                        "score": (c.get("recommend") or {}).get("score"),
+                    }
+                    for c in (result.get("candidates") or [])
+                    if isinstance(c, dict)
+                ]
+                emit_relay_event(
+                    self,
+                    task_id=task_id,
+                    node_id=node_id or task_id,
+                    action_result="search",
+                    ext_info={
+                        "search_sampling": {
+                            "tokens": list(result.get("tokens") or []),
+                            "raw_item_count": int(
+                                result.get("raw_item_count") or 0
+                            ),
+                            "failed_keywords": list(
+                                result.get("failed_keywords") or []
+                            ),
+                            "keywords": [
+                                h
+                                for h in (result.get("keyword_hits") or [])
+                                if isinstance(h, dict)
+                            ],
+                        },
+                        "candidates": slim_candidates,
+                    },
+                    attempt=relay_attempt(self, task_id),
+                )
+                logger.debug(
+                    "[task][relay][search] sampled task=%s node=%s tokens=%d "
+                    "candidates=%d",
+                    task_id,
+                    node_id,
+                    len(result.get("tokens") or []),
+                    len(slim_candidates),
+                )
+            except Exception:  # noqa: BLE001 采样失败仅留痕,检索结果照常返回
+                logger.warning(
+                    "[task][relay][search] trajectory sampling failed task=%s node=%s",
+                    task_id,
+                    node_id,
+                    exc_info=True,
+                )
+        else:
+            logger.debug(
+                "[task][relay][search] sampling skipped: no task context provided"
+            )
+        return result
 
     def _schedule_relay_bbs_selection(self, task_id: str, node_id: str) -> None:
         """Run the centralized BBS roster/bid selector on an existing Relay node."""

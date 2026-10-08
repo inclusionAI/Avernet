@@ -1223,7 +1223,14 @@ class TestTaskSearchFacade:
 
     def test_search_catalog_without_backend_returns_empty_page(self):
         payload = _run(TaskSearch(None).search_catalog("存储行业"))
-        assert payload == {"candidates": [], "total": 0}
+        assert payload == {
+            "candidates": [],
+            "total": 0,
+            "tokens": [],
+            "raw_item_count": 0,
+            "failed_keywords": [],
+            "keyword_hits": [],
+        }
 
 
 class TestClaimJoinGate:
