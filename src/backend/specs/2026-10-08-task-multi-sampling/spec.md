@@ -2,7 +2,7 @@
 
 ## Summary
 
-中心化动态任务的搜推派发支持配置 `task_dispatch.sample_count=N`。当 `N>1` 时，系统按搜推排序选择最多 N 个不同 Bot 独立执行同一逻辑节点，随后由任务 owner Bot 根据节点目标、验收标准和候选终态选择最佳结果。Graph 只接收一次规范回投，仍由 `TaskGraphService` 推进节点生命周期。
+中心化动态任务和 Relay 接力任务的搜推派发支持配置 `task_dispatch.sample_count=N`。当 `N>1` 时，系统按搜推排序选择最多 N 个不同 Bot 独立执行同一逻辑节点，随后由任务 owner Bot 根据节点目标、验收标准和候选终态选择最佳结果。Graph 只接收一次规范回投，仍由 `TaskGraphService` 推进节点生命周期。
 
 ## Configuration
 
@@ -16,9 +16,9 @@ user_config:
 
 ## Behavioral contract
 
-1. `/search` 和 Bot discovery 仍是候选排序事实来源；本功能不修改搜索算法。
-2. 当 `sample_count>1` 时，Dispatcher 取排序后的不同可执行 Bot identity，最多 N 个，并将稳定采样计划持久化到 `RuntimeInfo.extend_props.dispatch_samples`。
-3. TopN 表示独立采样，不表示协作关系；不创建 BCS 协作群，也不新增公开 `run_mode`。节点仍使用 `single_bot`，第一名仅作为兼容主 assignee。
+1. `/search` 和 Bot discovery 仍是候选排序事实来源；本功能不修改搜索算法。Relay `/search` 额外返回当前配置的 `sample_count`。
+2. 当 `sample_count>1` 时，中心化 Dispatcher 或 Relay 当前持棒 Bot 取排序后的不同可执行 Bot identity，最多 N 个，并将稳定采样计划持久化到 `RuntimeInfo.extend_props.dispatch_samples`。
+3. TopN 表示独立采样，不表示协作关系；不创建 BCS 协作群，也不新增公开 `run_mode`。节点仍使用 `single_bot`，第一名仅作为兼容主 assignee。Relay 使用独立的 `HIT_MULTI_SAMPLES` outcome 和有序 `sample_bot_ids`；原 `HIT_MULTI_BOTS` 仍只表示协作群。
 4. Runner 为每个样本构造相同任务上下文并并发执行，设置 `skill_report_enabled=false`，禁止样本直接改变逻辑节点状态。
 5. 每个样本必须产生合法终态 `{"success":bool,"data":Any,"gaps":list[str]}`。传输失败、非 COMPLETED、非法 JSON 或非法验收结构只使该样本失效，不取消其它样本。
 6. 至少一个样本产生合法终态后，Runner 调用任务 owner Bot 作为 judge。judge 只能从提供的 `sample_id` 中选择一个结果。
@@ -32,7 +32,7 @@ user_config:
 - `TaskDispatcher` 只选择并记录候选，不执行 Bot 调用。
 - `TaskExecutor` / `MultiSampleExecutor` 负责投递、等待和 judge 调用，不直接写 Graph。
 - `TaskGraphService.report(...)` 仍是节点事实和状态迁移的唯一入口。
-- 不新增 transport 依赖、外部 URL、公开 callback 协议或 Graph 状态。
+- 不新增 transport 依赖、外部 URL 或 Graph 状态。Relay `DISPATCH_RESULT` 增加 `HIT_MULTI_SAMPLES` outcome，属于现有通用 payload 的加法兼容扩展。
 
 ## Acceptance criteria
 
@@ -44,3 +44,6 @@ user_config:
 - [x] Graph 仅收到一次规范结果回投。
 - [x] 被选失败终态的 gaps 被保留并进入既有重规划流程。
 - [x] 全部样本失效进入既有 Harness 流程。
+- [x] Relay 搜索响应透出 `sample_count`，并通过 `HIT_MULTI_SAMPLES` 持久化独立样本计划。
+- [x] Relay 多采样复用既有 Runner/judge/单次规范回投链路，不创建协作群。
+- [x] Relay 重试复用节点上已持久化的样本计划。

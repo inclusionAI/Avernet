@@ -33,6 +33,7 @@ from agentclaw.community.core.task.task_center.relay import (
 from agentclaw.community.core.task.task_center.task_service_relay_dispatch import (
     TaskServiceRelayDispatchMixin,
 )
+from agentclaw.community.core.task.task_center import relay_sampling
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
@@ -654,14 +655,7 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
         task_id: str | None = None,
         node_id: str | None = None,
     ) -> dict[str, Any]:
-        """Relay ``/search`` 候选检索 + 搜推轨迹采样(可选归属,旁路 fire-and-forget)。
-
-        ``task_id`` 由调用方(relay skill)可选携带;不传则**跳过采样** —— 不按
-        持棒者猜测归属(同一 holder 可挂多任务,猜测会错误归因)。采样发射复用
-        ``emit_relay_event``(``_task_context_service`` None-safe + 吞异常,决策
-        #14),``ext_info["search_sampling"]`` 与 ``DispatchRationale.search_sampling``
-        的 keywords 同形;另带 ``candidates`` 瘦投影(relay 场景无 rationale 载体)。
-        """
+        """Search candidates and optionally emit task-attributed diagnostics."""
         result = await self._relay_adapter.search.search_catalog(query)
         if task_id:
             try:  # 决策 #14:旁路观测,采样任何失败绝不影响检索结果返回
@@ -717,7 +711,7 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
             logger.debug(
                 "[task][relay][search] sampling skipped: no task context provided"
             )
-        return result
+        return {**result, "sample_count": self._task_sample_count}
 
     def _schedule_relay_bbs_selection(self, task_id: str, node_id: str) -> None:
         """Run the centralized BBS roster/bid selector on an existing Relay node."""
@@ -748,11 +742,7 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
                 f"relay dispatch decision target must be PENDING node={node.node_id}"
             )
         outcome = str(payload.get("outcome") or "").upper()
-        next_bots = [
-            str(item).strip()
-            for item in (payload.get("next_relay_bots") or payload.get("bot_ids") or [])
-            if str(item).strip()
-        ]
+        next_bots = relay_sampling.dispatch_bot_ids(payload, outcome)
         driver = str(
             payload.get("driver_bot_id")
             or payload.get("assignee")
@@ -787,6 +777,15 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
                     "driver_bot_id": driver,
                     "next_relay_bots": next_bots,
                 },
+            )
+        elif outcome == "HIT_MULTI_SAMPLES":
+            patch, driver, next_bots = relay_sampling.build_relay_sample_patch(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                payload=payload,
+                sample_count=self._task_sample_count,
+                progress_reason=progress_reason,
+                failure_reason=failure_reason,
             )
         elif outcome == "HIT_MULTI_BOTS":
             if len(next_bots) < 2 or not driver or driver not in next_bots:
@@ -886,7 +885,7 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
         self._emit_relay(
             task_id=graph.task_id,
             node_id=node.node_id,
-            action_result="hit_single" if outcome == "HIT_SINGLE" else "hit_multi",
+            action_result=relay_sampling.hit_action(outcome),
             attempt=self._relay_attempt(graph.task_id),
             boost_reason=progress_reason,
             ext_info={
@@ -896,13 +895,12 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
                 "planned_by": node.run_info.extend_props.get("relay_planned_by"),
             },
         )
-        return {
-            "ok": True,
-            "published_bbs": False,
-            "node_id": node.node_id,
-            "driver_bot_id": driver,
-            "next_relay_bots": next_bots,
-        }
+        return relay_sampling.decision_response(
+            node_id=node.node_id,
+            driver=driver,
+            bot_ids=next_bots,
+            outcome=outcome,
+        )
 
     def _claim_relay_bbs(
         self, task_id: str, node_id: str, bot_id: str, claim_id: str | None = None

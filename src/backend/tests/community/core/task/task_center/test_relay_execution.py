@@ -159,7 +159,13 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _service(*, discover=None, relay_enabled: bool = True, task_context_service=None):
+def _service(
+    *,
+    discover=None,
+    relay_enabled: bool = True,
+    task_context_service=None,
+    task_sample_count: int = 1,
+):
     graph = TaskGraphService()
     return TaskService(
         graph,
@@ -167,6 +173,7 @@ def _service(*, discover=None, relay_enabled: bool = True, task_context_service=
         task_settings=_Settings(relay_enabled),
         task_id_provider=lambda: "relay-task",
         task_context_service=task_context_service,
+        task_sample_count=task_sample_count,
     ), graph
 
 
@@ -235,6 +242,169 @@ def _plan_and_select(
         )
     )
     return target_node_id
+
+
+def _plan_pending_target(service: TaskService, *, suffix: str = "samples") -> tuple[str, str]:
+    _run(service.execute(_request()))
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id=f"exec-{suffix}",
+            holder_id="main-bot",
+            progress_reason="首棒完成，规划下一棒",
+            payload=_accepted({"summary": "首轮结论"}),
+        )
+    )["relay_turn"]
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id=f"plan-{suffix}",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="存在下一棒缺口",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    return planned["target_node_id"], turn
+
+
+def test_relay_search_exposes_configured_sample_count() -> None:
+    service, _ = _service(task_sample_count=3)
+
+    result = _run(service.search_task_candidates(query="补齐市场研究 gap"))
+
+    assert result["sample_count"] == 3
+
+
+def test_relay_multi_samples_persist_and_dispatch_without_group() -> None:
+    service, graph_service = _service(task_sample_count=3)
+    target, turn = _plan_pending_target(service)
+    decision = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=target,
+            event_type="DISPATCH_RESULT",
+            event_id="samples-decision",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="按排序选择三个独立执行样本",
+            payload={
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "sample-a",
+                "sample_bot_ids": ["sample-a", "sample-b", "sample-c"],
+            },
+        )
+    )
+    assert decision["sample_bot_ids"] == ["sample-a", "sample-b", "sample-c"]
+    node = graph_service.query_task_nodes(
+        "relay-task", TaskNodeQueryCriteria(node_ids=[target])
+    )[0]
+    assert node.run_info.run_mode == "single_bot"
+    assert node.run_info.assignee == "sample-a"
+    assert node.run_info.extend_props["dispatch_samples"] == [
+        {"sample_id": "sample-1", "rank": 1, "bot_id": "sample-a"},
+        {"sample_id": "sample-2", "rank": 2, "bot_id": "sample-b"},
+        {"sample_id": "sample-3", "rank": 3, "bot_id": "sample-c"},
+    ]
+    assert "pending_group_formation" not in node.run_info.extend_props
+
+    delivered_nodes = []
+
+    async def _start_run(nodes):
+        delivered_nodes.extend(nodes)
+        return [True for _ in nodes]
+
+    service._relay_adapter.runner.start_run = _start_run
+    dispatched = _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id="relay-task",
+            target_node_id=target,
+            holder_id="main-bot",
+            relay_turn=turn,
+            dispatch_id="samples-dispatch",
+        )
+    )
+    assert dispatched["run_mode"] == "single_bot"
+    assert len(delivered_nodes) == 1
+    assert delivered_nodes[0].run_info.extend_props["dispatch_samples"] == (
+        node.run_info.extend_props["dispatch_samples"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "payload", "message"),
+    [
+        (
+            1,
+            {
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "sample-a",
+                "sample_bot_ids": ["sample-a", "sample-b"],
+            },
+            "sample_count greater than 1",
+        ),
+        (
+            3,
+            {
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "sample-a",
+                "sample_bot_ids": ["sample-a", "sample-a"],
+            },
+            "distinct sample_bot_ids",
+        ),
+        (
+            2,
+            {
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "sample-a",
+                "sample_bot_ids": ["sample-a", "sample-b", "sample-c"],
+            },
+            "exceeds configured",
+        ),
+        (
+            3,
+            {
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "sample-b",
+                "sample_bot_ids": ["sample-a", "sample-b"],
+            },
+            "first sample_bot_id",
+        ),
+        (
+            3,
+            {
+                "outcome": "HIT_MULTI_SAMPLES",
+                "driver_bot_id": "main-bot",
+                "sample_bot_ids": ["main-bot", "sample-b"],
+            },
+            "current holder",
+        ),
+    ],
+)
+def test_relay_multi_samples_reject_invalid_decisions(
+    sample_count: int, payload: dict, message: str
+) -> None:
+    service, _ = _service(task_sample_count=sample_count)
+    target, turn = _plan_pending_target(service, suffix=message.replace(" ", "-"))
+
+    with pytest.raises(TaskStateError, match=message):
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=target,
+                event_type="DISPATCH_RESULT",
+                event_id="invalid-samples",
+                holder_id="main-bot",
+                relay_turn=turn,
+                progress_reason="非法多采样决策",
+                payload=payload,
+            )
+        )
 
 
 def test_relay_search_logs_empty_result_diagnostics(caplog) -> None:

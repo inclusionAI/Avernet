@@ -374,6 +374,10 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "S6 已在本地解析出唯一 next_task_spec" in s7
     assert "不得提前上报 PLAN" in s7
     assert "确定下一棒执行者与执行模态" in s7
+    assert "sample_count>1" in s7
+    assert "HIT_MULTI_SAMPLES" in s7
+    assert "sample_bot_ids 表示相同节点的独立采样" in s7
+    assert "HIT_MULTI_BOTS 仅表示成员协作" in s7
     assert "决策完成后统一进入上报阶段" in s7
     assert s7.index("/api/v1/collaboration/tasks/search") < s7.index("event_type=PLAN_RESULT") < s7.index("event_type=DISPATCH_RESULT")
     assert "gaps 为空时必须跳过搜索，直接提交 PLAN_RESULT(gaps=[], next_task_spec=null) 收口" in s7
