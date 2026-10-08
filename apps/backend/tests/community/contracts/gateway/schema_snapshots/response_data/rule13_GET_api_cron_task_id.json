@@ -66,6 +66,16 @@
         "message": {
           "type": "string"
         },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "timeout_secs": {
           "type": "integer"
         }
