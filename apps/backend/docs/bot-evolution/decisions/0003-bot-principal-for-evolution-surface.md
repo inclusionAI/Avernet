@@ -15,7 +15,7 @@ explicit scopes instead of owner impersonation:
   acting on itself;
 - `run:request:self`, off by default, enabled by owner policy with a budget;
 - `evolution:runner` for bots or workers that execute strategy jobs, limited to
-  registered plugin ids and to the inputs of jobs they have claimed.
+  registered strategy ids and to the inputs of jobs they have claimed.
 
 `self` is bound to the bot identity in the credential, never to a request
 parameter. No bot scope allows promotion, rollback, policy changes, strategy

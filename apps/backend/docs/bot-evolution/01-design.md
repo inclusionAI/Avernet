@@ -120,8 +120,9 @@ A normalized, engine-neutral record of what bots did and how it went:
 
 - **Episode** — one session or task trajectory: messages, tool calls, tool
   results, timings, model, cost, outcome. Normalized from engine-specific
-  formats by an **ExperienceSource** plugin (default: the OpenClaw session
-  JSONL reader in `clawevolve-diagnose/acquisition/`).
+  formats by the engine's session export (the provider behind the
+  `experience.sessions` capability; the OpenClaw reader in
+  `clawevolve-diagnose/acquisition/` is the starting point).
 - **Feedback** — user ratings, corrections, task outcomes, BCS coordination
   outcomes, run-evidence events (TaskGuard).
 - **Eval trace** — every evaluation rollout, with grader scores and textual
@@ -140,21 +141,25 @@ C2 (see [08-governance.md §7](08-governance.md#7-data-handling)).
 
 ### C3 Strategy Registry
 
-Stores **strategy manifests** (which plugins, in what flow, with what
-parameters and budgets) and **plugin implementations** (versioned, with
-declared capabilities, isolation tier, and conformance status). A run
-records the exact strategy version it used. Generalizes ClawEvolve's
-`official-stage-catalog.json` + `ce_stage_skill_implementations`. Details in
+Stores **strategy registration records** (id, version, runtime, and the
+catalog capabilities the strategy `needs`), their conformance status, and
+the **capability catalog** itself. Per-bot **bindings** (which strategies a
+bot uses, when, what they may change, budget, params) live in the bot's
+evolution policy. A run records the exact strategy version it used.
+Generalizes ClawEvolve's `official-stage-catalog.json` +
+`ce_stage_skill_implementations`. Details in
 [05-strategy-sdk.md](05-strategy-sdk.md).
 
 ### C4 Run Orchestrator
 
-A durable state machine: `Run → Iteration → Step`. It resolves the
-strategy, enforces budgets (tokens, money, wall clock, rollouts, iterations),
-dispatches steps to plugins over the Job Protocol, persists every input and
-output by digest, and enforces that steps only see what their contract
-allows (e.g. a Proposer never receives the held-out split). Generalizes
-ClawEvolve's `ce_tasks` / `ce_steps` / claim-report endpoints.
+A durable state machine for runs (`queued → running → completed | failed |
+cancelled | budget_exhausted`). It fires bindings on their triggers, freezes
+the strategy version, params, parent, and budget, builds a
+`StrategyContext` with exactly the granted capabilities, and calls the
+strategy's single `run(ctx)` method, in process or over the Job Protocol. It
+enforces budgets and leases, and guarantees that nothing hidden reaches the
+strategy (for example, held-out cases). Generalizes ClawEvolve's `ce_tasks` /
+`ce_steps` / claim-report endpoints.
 
 ### C5 Verification Service
 
@@ -176,8 +181,7 @@ Platform-owned and **read-only to strategies and bots**:
   on the same cases, and optionally a **budget-matched baseline** (parent +
   extra sampling) so a strategy has to beat "just try harder".
 
-ClawBench (`clawbench-base`) and ClawEvolve's plan stage become the default
-grader and SuiteBuilder implementations; the backend eval env
+ClawBench (`clawbench-base`) becomes the default grader; the backend eval env
 (`eval_publish`) becomes the deployed-sandbox executor. The full protocol,
 the inventory of existing eval code, and its gaps are in
 [03-verification.md](03-verification.md).
@@ -190,8 +194,10 @@ The only component that can move a bot's `active` ref. See
 1. **Platform floor** (not overridable by strategies): schema valid, locked
    genes untouched, no secrets, no permission escalation, no regression on
    `regression`/`safety` suites beyond tolerance, budget not exceeded.
-2. **Strategy acceptance policy** (pluggable): e.g. ClawEvolve's
-   `test > baseline`, Pareto dominance, paired win-rate.
+2. **Verification verdict** under the binding's verification profile. An
+   owner may choose a stricter profile; a strategy cannot loosen it.
+   ClawEvolve's own `test > baseline` rule becomes an internal filter on what
+   it submits.
 3. **Risk tier** of the patch decides auto-promote vs human review.
 4. **Rollout**: optional shadow (verify stage), canary for multi-instance
    bots, then active. **Going back** is promoting an earlier revision
@@ -207,10 +213,11 @@ verdict, cost, later online outcome), including rejected ones — schema in
 [04-recursion.md §3](04-recursion.md#3-experiment-ledger-h). It is a read model over
 C1 + C5: the genome tree for a bot, every candidate's
 scores per split, which strategy and model produced it, what evidence it was
-based on, and who approved it. Selectors query it (latest-best, Pareto front
-per case, MAP-Elites niches, descendant-aware "clade" scores à la
-Huxley-Gödel Machine). Humans browse it in the UI. Proposers can be given a
-filesystem export of it (Meta-Harness found raw history beats summaries).
+based on, and who approved it. Parent choices beyond `active` (latest-best,
+Pareto front per case, MAP-Elites niches, descendant-aware "clade" scores à
+la Huxley-Gödel Machine) are later options of a binding's `parent` field and
+query it. Humans browse it in the UI. Strategies can be given a filesystem
+export of it (Meta-Harness found raw history beats summaries).
 It is also the evidence base for level 3.
 
 ### Meta-loop (level 3)
@@ -255,8 +262,10 @@ during migration.
 | Genome schema + patch format | Data contract, versioned | Everyone |
 | Genome Registry API | Service API | Evolution, UI, CLI → Backend |
 | Evolution API (`/openapi/v1/evolution/*`) | Service API | SDK/CLI/UI → Evolution |
-| Job Protocol (claim / heartbeat / input / output / report) | Plugin API (wire) | Orchestrator ↔ out-of-process plugins |
-| Plugin protocols (Analyzer, Proposer, Evaluator, Gate, Selector, Trigger, ExperienceSource, SuiteBuilder) | Plugin API | Orchestrator → strategy implementations |
+| Strategy port (`run(ctx)`), `StrategyContext`, Candidate / Verdict, registration record | Plugin API | Orchestrator → strategy implementations |
+| Capability catalog (one contract per entry, with per-engine providers) | Plugin API | Strategies → platform / engine providers |
+| Job Protocol (each `ctx` call as an HTTP endpoint) | Plugin API (wire) | Orchestrator ↔ job-worker strategies |
+| Evolution policy (bindings per bot) | Data contract | Owners, UI, CLI → Evolution |
 | Engine memory projection contract | Plugin API | Backend apply → Engine |
 | Engine session export contract (`session-export/v1` → v2) | Plugin API | Evolution → Engine |
 | Verification Service API + Executor/Grader plugin protocols | Service API + Plugin API | Orchestrator, publish flow, Quality Task → Verification |
@@ -270,30 +279,33 @@ Each one needs docs + conformance tests in the same change (R1, R25).
 Strategy `clawevolve/bot-evolution@2`, bot `support-agent`, trigger: nightly
 schedule because the failure-rate signal crossed a threshold.
 
-1. Orchestrator creates Run, freezes strategy version and budget
-   (`max_iterations: 3, max_usd: 20`).
-2. **Selector** (`latest-active`) picks parent = `active` revision `r41`.
-3. **Analyzer** (`clawevolve-diagnose`) queries C2 for episodes of `r41` in
-   the last 7 days, judges them, clusters root causes, emits `plan-source/v2`
-   findings with replayable cases.
-4. **SuiteBuilder** (`clawevolve-plan`) turns findings into suite cases;
-   C5 assigns splits (train/validation; holdout and regression are
-   pre-existing and not visible to the strategy).
-5. **Proposer** (`clawevolve-tune` + `clawevolve-review`) works in a
-   **sandbox workspace** materialised from `r41` and returns a Genome
-   Patch (itemized: `identity/SOUL.md: replace section "Escalation"`,
-   `skills/refund-policy: update SKILL.md`), plus rationale.
-6. Platform static checks pass; C1 records candidate `r41.c1` (parent `r41`).
-7. **Verification** (C5, `platform/clawbench` graders) runs parent and
-   candidate paired, with repeated seeds, on train + validation in eval bots,
-   plus the hidden regression + safety suites; the verdict and evidence go to
-   H.
-8. **Gate**: strategy policy (`validation > parent` and paired win-rate ≥
-   0.6) passes; platform floor passes; risk tier = T2 (persona + skill) →
-   review queue.
-9. Owner reviews diff + eval report in UI (or `avn evolve review`), approves.
+1. The bot's binding for `clawevolve/bot-evolution@2.0.0` fires on its
+   schedule. The orchestrator creates a Run and freezes the strategy
+   version, params (`max_rounds: 3`), budget (`max_usd: 20`), and parent
+   (`active` = revision `r41`).
+2. It builds a `StrategyContext` granting `experience.sessions`, `agents`
+   (OpenClaw), and `evaluate.train`, then calls `run(ctx)`.
+3. Inside the strategy, ClawEvolve's diagnose logic reads episodes of `r41`
+   from the last 7 days, clusters root causes, and adds replayable train
+   cases (the platform assigns splits; holdout and regression stay hidden).
+4. Its tune agent edits a **sandbox workspace** materialised from `r41`;
+   `ctx.evaluate.train` scores the result; the strategy submits a Genome
+   Patch (itemized: `persona/SOUL.md: replace section "Escalation"`,
+   `skills/refund-policy: update SKILL.md`) with a rationale.
+5. Platform static checks pass; C1 records candidate revision `r42`
+   (parent `r41`).
+6. **Verification** (C5, `platform/clawbench` graders) runs parent and
+   candidate paired, with repeated seeds, on validation in eval bots, plus
+   the hidden regression and safety suites, under the binding's verification
+   profile. The verdict and evidence go to H; the strategy sees the verdict
+   with aggregates only.
+7. **Gate**: the verdict is `accept` and the platform floor passes; risk
+   tier = T2 (persona + skill), so the candidate goes to the review queue.
+8. The strategy, having waited on the verdict, may start its next round from
+   the accepted revision.
+9. Owner reviews diff + verification report in UI (or `avn evolve review`), approves.
 10. Promotion: `active → r42`, `previous → r41`; apply via Manifest; for a
-    service bot, via draft → verify → publish.
+    service bot, published as the next version via draft → verify → publish.
 11. Episodes from now on carry `r42`. Next run can compare live outcomes of
     `r41` vs `r42` (online validation; auto-rollback rule optional).
 
@@ -301,10 +313,10 @@ schedule because the failure-rate signal crossed a threshold.
 
 | Phase | Outcome | Usable on its own? |
 | --- | --- | --- |
-| P0 Contracts | DR-1–DR-3 accepted; genome schema, job protocol, plugin protocols, API sketch reviewed | — |
+| P0 Contracts | DR-1–DR-3 accepted; genome schema, strategy port and capability catalog, job protocol, API sketch reviewed | — |
 | P1 Genome Registry | Manifest gains revisions, refs, compare-and-swap, pinned resolution, apply-records-revision, going back to any earlier revision | **Yes** — versioned bots, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
-| P3 Default strategy | ClawEvolve onboarded: ExperienceSource, sandboxed tune emitting patches, ClawBench evaluator, its acceptance rule as a Gate plugin | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
+| P3 Default strategy | ClawEvolve onboarded as a black-box strategy: session export provider, sandboxed tune emitting patches, ClawBench graders in the Verification Service | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
 | P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of acceptance policies over H | Hardening; the verify gate is useful for service bots on its own |
 | P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
 | P6 Open-ended | Automated meta-proposer (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |

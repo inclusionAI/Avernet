@@ -77,13 +77,14 @@ golden tests (config behaviour), legacy `validation_templates`.
 | **Executor** | Where a revision runs. *Local sandbox* (materialised workspace + engine CLI, ClawBench style; fast, cheap) or *deployed sandbox* (eval env bot via `eval_publish`; real delivery path, any engine) |
 | **Grader** | `automated`, `rubric_judge`, `hybrid`, `ensemble`. Every grader returns `score + critique + breakdown` |
 | **Comparator** | Paired per-case differences, repeated seeds, confidence intervals, win rate |
-| **Verification profile** | Versioned policy: which splits, how many seeds, which executor, thresholds, significance level, regression tolerance. Owned by the verifier, referenced by strategies |
+| **Verification profile** | Versioned policy: which splits, how many seeds, which executor, thresholds, significance level, regression tolerance. Owned by the verifier, chosen per binding |
 | **Verdict** | `accept` / `reject` / `inconclusive` with per-split evidence, cost, and verifier version |
 
-Executors and graders are **plugin kinds owned by the verifier**, not by
-strategies. A strategy may *request* a profile and *add* train-split cases
-through its SuiteBuilder. It may not change graders, holdout, regression, or
-safety.
+Executors and graders are **plugins owned by the verifier**, not by
+strategies. A binding picks the verification profile (an owner may pick a
+stricter one, never a looser one). A strategy may *add* train-split cases
+through `ctx.evaluate.add_train_cases()`. It may not change graders,
+holdout, regression, or safety.
 
 ## 4. Bot verification protocol (level 2)
 
@@ -120,7 +121,7 @@ Run when a strategy submits candidate S′ with parent S1.
    that it beats a budget-matched baseline (S1 with extra sampling).
 9. **Verdict** with evidence written to H.
 
-Default verdict policy (strategies can tighten it, not loosen it):
+Default verdict policy (a binding can choose a stricter profile, never a looser one):
 
 ```text
 accept  ⇔ floor ok ∧ sanity ok ∧ safety: no new failures ∧ regression: within tolerance

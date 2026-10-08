@@ -34,11 +34,11 @@ everything that determines its behaviour:
 
 | Mechanism component | Example in ClawEvolve today |
 | --- | --- |
-| Flow (steps, loop limits, stop rules) | `bot_evolution` stage sequence, `maxRounds` |
-| Proposer prompts and operator library | `_build_tune_prompt`, `references/mutation_operator_library.json` |
-| Analyzer heuristics | diagnose batch sizes, good/bad ratio, root-cause clustering |
-| Acceptance policy parameters | `FULL_OPT_MAX_REGRESSED_RATIO`, paired win-rate thresholds, `test > baseline` |
-| Selector policy | latest-active (implicit) |
+| Round structure (loop limits, stop rules) | `bot_evolution` stage sequence, `maxRounds` |
+| Proposal prompts and operator library | `_build_tune_prompt`, `references/mutation_operator_library.json` |
+| Analysis heuristics | diagnose batch sizes, good/bad ratio, root-cause clustering |
+| Submission filter (what is worth submitting) | `test > baseline`, `FULL_OPT_MAX_REGRESSED_RATIO`, paired win-rate thresholds |
+| Default binding params | parent choice, window, budget per run |
 | Model choices and budgets per step | tune/review/judge models, round budget |
 
 ClawEvolve already improves its mechanism by hand at level 3:
@@ -172,7 +172,8 @@ known fix.
 This is expensive, since every comparison runs many level-2 runs. Level 3
 therefore runs rarely and on a budget of its own. Cheap proxies are allowed
 for *pre-screening* candidates. One example is replaying stored candidates
-through a new acceptance policy, as `replay_candidate_gate.py` already does.
+through a new submission filter or verification profile, as
+`replay_candidate_gate.py` already does.
 Proxies are never allowed for adoption.
 
 ## 6. Bounds: what recursion may not touch
@@ -212,7 +213,7 @@ Rules:
 | Archive (C7) | Becomes the **Experiment Ledger H** with the schema of §3 and derived mechanism metrics |
 | Evaluation (C5) | Adds **mechanism verification** on top of bot verification ([03-verification.md](03-verification.md)) |
 | Gate (C6) | Separate gate profile for mechanism adoption (T3 default, comparison report required) |
-| Plugin kinds | Adds **MetaProposer** (a Proposer whose input is H and output a mechanism patch). The other kinds are reused |
+| Strategy port | A **meta-strategy** is an ordinary strategy whose target is a mechanism: it reads H (through a level-3 capability) and submits mechanism patches |
 | Governance | Verifier boundary ([08-governance.md](08-governance.md#1-separation-of-powers)) |
 
 ## 8. Phasing

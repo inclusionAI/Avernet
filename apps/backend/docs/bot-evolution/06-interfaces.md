@@ -110,7 +110,7 @@ avn evolve  inbox submit|list                     # subject bot
 avn evolve  observe "<note>" --episode <id>       # subject bot
 avn experience episodes|feedback
 avn job     claim|input|heartbeat|upload|complete|fail   # runner bot / worker
-avn strategy dev|test|publish                     # strategy authors (wraps plugin SDK harness)
+avn strategy dev|test|publish                     # strategy authors (wraps strategy SDK harness)
 ```
 
 ### The bot skill
@@ -148,7 +148,7 @@ re-admitting bots **only** for the evolution surface with explicit scopes:
 | `experience:write:self` | subject bot | observations and feedback for itself |
 | `inbox:write:self` | subject bot | submit draft patches for itself |
 | `run:request:self` | subject bot (opt-in by owner) | request a run of an *enabled* strategy, within budget |
-| `evolution:runner` | runner bot / worker | claim jobs for registered plugin ids; read job inputs; upload outputs |
+| `evolution:runner` | runner bot / worker | claim jobs for registered strategy ids; call the Job Protocol for runs it has claimed |
 | — | nobody but owner/admin/policy | promote, rollback, change policy, enable strategies, touch locked genes |
 
 Bot credentials come from the existing Passport/AgentPass issuance; the

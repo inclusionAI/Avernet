@@ -10,33 +10,33 @@
 <text x="115.0" y="304.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">bot running revision R</text>
 <rect x="250" y="110" width="500" height="380" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
 <text x="500" y="132" font-size="15" font-weight="700" fill="#334155" text-anchor="middle" dominant-baseline="middle">Evolution Run (orchestrator)</text>
-<rect x="270" y="148" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<rect x="270" y="148" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="166" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">1  Trigger</text>
-<text x="420" y="166" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">schedule · event · manual · bot request</text>
-<text x="718" y="166" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">Trigger</text>
-<rect x="270" y="190" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
-<text x="285" y="208" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">2  Select parent</text>
-<text x="420" y="208" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">from the Experiment Ledger H</text>
-<text x="718" y="208" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">Selector</text>
+<text x="420" y="166" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">the binding fires: schedule · event · manual</text>
+<text x="718" y="166" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
+<rect x="270" y="190" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="285" y="208" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">2  Freeze run</text>
+<text x="420" y="208" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">strategy version · params · parent · budget</text>
+<text x="718" y="208" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
 <rect x="270" y="232" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
-<text x="285" y="250" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">3  Analyze</text>
-<text x="420" y="250" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">experience → findings</text>
-<text x="718" y="250" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">Analyzer</text>
+<text x="285" y="250" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">3  run(ctx)</text>
+<text x="420" y="250" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">analyze · propose · evaluate on train</text>
+<text x="718" y="250" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">STRATEGY</text>
 <rect x="270" y="274" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
-<text x="285" y="292" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">4  Propose</text>
-<text x="420" y="292" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">parent + findings → Genome Patch</text>
-<text x="718" y="292" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">Proposer</text>
+<text x="285" y="292" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">4  Submit</text>
+<text x="420" y="292" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">candidate Genome Patch via ctx.submit</text>
+<text x="718" y="292" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">STRATEGY</text>
 <rect x="270" y="316" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="334" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">5  Static checks</text>
 <text x="420" y="334" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">schema · locked genes · secrets · size</text>
 <text x="718" y="334" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
 <rect x="270" y="358" width="460" height="36" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
 <text x="285" y="376" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">6  Verify</text>
-<text x="420" y="376" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">candidate vs parent, in sandbox</text>
+<text x="420" y="376" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">candidate vs parent, binding's profile</text>
 <text x="718" y="376" font-size="10.5" font-weight="700" fill="#d97706" text-anchor="end" dominant-baseline="middle">VERIFIER</text>
 <rect x="270" y="400" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="418" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">7  Gate</text>
-<text x="420" y="418" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">strategy policy + platform floor</text>
+<text x="420" y="418" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">verdict + platform floor + risk tier</text>
 <text x="718" y="418" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
 <rect x="270" y="442" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="460" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">8  Retain</text>
@@ -60,7 +60,7 @@
 <text x="103" y="446" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 103 446)">apply via Manifest / publish</text>
 <path d="M 800 295 L 752 295" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <rect x="250" y="615" width="16" height="16" rx="3" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
-<text x="274" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">strategy plugin (pluggable)</text>
+<text x="274" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">strategy (pluggable)</text>
 <rect x="455" y="615" width="16" height="16" rx="3" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="479" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">platform (fixed)</text>
 <rect x="605" y="615" width="16" height="16" rx="3" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>

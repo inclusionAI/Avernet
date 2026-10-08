@@ -16,10 +16,10 @@ platform trustworthy regardless of which strategy runs.
 
 | Power | Holder | Never held by |
 | --- | --- | --- |
-| Propose changes | Strategies (Proposer), subject bots (inbox) | — |
-| Define what "better" means for a run | Strategy (AcceptancePolicy) | — |
+| Propose changes | Strategies (by submitting candidates), subject bots (inbox) | — |
+| Choose which strategies run on a bot, what they may change, and how strictly they are verified | **Owner / tenant admin** (bindings) | Strategies, bots |
 | Define what must never get worse | **Platform + owner** (regression, safety, holdout suites; platform floor) | Strategies, bots |
-| Run evaluations | **Platform** (Verification Service, with verifier-owned executors and graders) | Proposers, strategies |
+| Run evaluations | **Platform** (Verification Service, with verifier-owned executors and graders) | Strategies |
 | Change the verifier (suites, graders, profiles, protocols, thresholds) | **Humans**, through reviewed changes ([03-verification.md §7](03-verification.md#7-verifier-integrity)) | Any automated loop, including level 3 |
 | Adopt a new mechanism (level 3) | Platform mechanism gate + human approval | Meta-proposers |
 | Decide promotion | **Platform gate** + owner/reviewer per risk tier | Strategies, bots |
@@ -36,8 +36,8 @@ A candidate is promotable only if **all** of these pass:
 2. **Regression floor** — on the bot's `regression` and `safety` suites the
    candidate is not worse than the parent beyond a tolerance (default: zero
    newly failing cases on `safety`, ≤ 1 on `regression` with review).
-3. **Strategy policy** — the strategy's AcceptancePolicy accepts on
-   `validation`.
+3. **Verification verdict** — `accept` on `validation` under the binding's
+   verification profile ([03-verification.md §4](03-verification.md#4-bot-verification-protocol-level-2)).
 4. **Holdout check** — periodically (not every iteration, to avoid leaking
    holdout through selection) the promoted revision is scored on `holdout`;
    a drop opens an incident and blocks further auto-promotion for the bot.
@@ -61,13 +61,13 @@ Assigned per patch op; a patch takes the max of its ops.
 
 - Evaluators, graders, suites, and their configs live **outside** the genome
   and are read-only to strategies and bots.
-- Proposer inputs exclude validation per-case details (aggregates only),
-  holdout, regression, and safety cases (ClawEvolve's review firewall,
-  generalised and enforced by the orchestrator, not by prompt).
+- Strategies never see validation per-case details (aggregates only),
+  holdout, regression, or safety cases (ClawEvolve's review firewall,
+  generalised and enforced by the `StrategyContext`, not by prompt).
 - Diff audit: patches that mention or edit guardrail-like text (safety
   sections, refusal policies, logging/reporting instructions) are tagged and
   raised to T2+.
-- Judges should come from a different model family than the proposer where
+- Judges should come from a different model family than the strategy's where
   available; multiple graders for T2 promotions.
 - Track cost and length per revision; a candidate that wins only by spending
   more is reported as such.
@@ -75,14 +75,15 @@ Assigned per patch op; a patch takes the max of its ops.
 
 ## 5. Sandboxing
 
-- Proposers and evaluators work only on **sandbox materialisations** (eval
+- Strategies and evaluators work only on **sandbox materialisations** (eval
   bots via `eval_env`, or ephemeral workspaces). No production credentials,
   no access to the live phenotype.
-- Plugin implementations declare isolation tier and allowed capabilities
-  (R13); the orchestrator enforces network egress to model providers only
-  unless declared otherwise and approved.
+- Each strategy declares the catalog capabilities it `needs` and its
+  runtime isolation (R13); its context grants nothing else, and the
+  orchestrator enforces network egress to model providers only unless
+  declared otherwise and approved.
 - Experience is **untrusted input** (prompt-injection and memory-poisoning
-  vector). Proposers must treat episode text as data; patches derived from
+  vector). Strategies must treat episode text as data; patches derived from
   it get secret/PII/URL scanning; inbox submissions from subject bots are
   rate-limited.
 

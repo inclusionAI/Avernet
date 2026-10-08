@@ -7,15 +7,17 @@ Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 ## Decision
 
 Evolution strategies are pluggable, but **promotion is not**. Only the
-platform gate can move a bot's `active` genome ref. Strategies may propose
-patches and contribute an acceptance policy; bots may submit observations and
+platform gate can move a bot's `active` genome ref. Strategies may submit
+candidate patches; bots may submit observations and
 draft patches to an inbox. Neither can write to a live bot, its workspace, or
 its genome refs.
 
 A candidate is promotable only when the platform floor passes (schema,
 locked genes and pins untouched, secret/PII scan, no permission escalation,
 no regression on platform-owned regression and safety suites, budget), the
-strategy's acceptance policy passes, and the patch's risk tier is approved
+verification verdict under the binding's verification profile is `accept`
+(owners may choose a stricter profile, strategies cannot loosen it), and the
+patch's risk tier is approved
 (auto for low tiers under owner policy, human review otherwise; tools, script,
 and policy changes are locked by default and never auto-promoted).
 
@@ -24,7 +26,7 @@ profiles, and protocols live outside the genome. They are read-only to
 strategies, bots, and the level-3 meta-loop, and change only through
 human-reviewed changes. A new improvement mechanism (strategy version)
 proposed by the meta-loop is adopted only after mechanism verification and
-human approval. Proposer inputs never include
+human approval. Strategy inputs never include
 holdout, regression, or safety cases.
 
 Design: [`../08-governance.md`](../08-governance.md).

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="450" viewBox="0 0 1000 450" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Strategy port, context, and binding">
+<title>Strategy port, context, and binding</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<rect width="1000" height="450" fill="#ffffff"/>
+<rect x="40" y="20" width="920" height="62" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="500.0" y="43.2375" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Run Orchestrator (platform)</text>
+<text x="500.0" y="60.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">fires bindings · freezes strategy version, params, parent, budget · builds ctx</text>
+<rect x="40" y="125" width="300" height="150" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="190.0" y="175.7" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">EvolutionStrategy</text>
+<text x="190.0" y="193.25" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">run(ctx) — the only method</text>
+<text x="190.0" y="209.45000000000002" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">black box: ClawEvolve, GEPA-style, …</text>
+<text x="190.0" y="225.65" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">composed: platform/composed</text>
+<rect x="390" y="115" width="570" height="170" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="675" y="135" font-size="14" font-weight="700" fill="#334155" text-anchor="middle" dominant-baseline="middle">StrategyContext — the only door out</text>
+<text x="405" y="160" font-size="11.5" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">Always granted</text>
+<rect x="405" y="172" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="446.0" y="187.0" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">parent</text>
+<rect x="497" y="172" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="538.0" y="187.0" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">workspace</text>
+<rect x="589" y="172" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="630.0" y="187.0" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">submit</text>
+<rect x="681" y="172" width="82" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="722.0" y="187.0" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">budget</text>
+<rect x="773" y="172" width="180" height="30" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="863.0" y="187.0" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">log · artifacts · cancelled</text>
+<text x="405" y="222" font-size="11.5" font-weight="700" fill="#64748b" text-anchor="start" dominant-baseline="middle">Granted only if declared in needs</text>
+<rect x="405" y="234" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="480.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.sessions@1</text>
+<rect x="563" y="234" width="150" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="638.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">experience.feedback@1</text>
+<rect x="721" y="234" width="96" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="769.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">agents@1</text>
+<rect x="825" y="234" width="126" height="30" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="888.0" y="249.0" font-size="11" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">evaluate.train@1</text>
+<path d="M 190 82 L 190 123" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="198" y="103" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">run(ctx)</text>
+<path d="M 340 200 L 388 200" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="364" y="190" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">calls</text>
+<rect x="40" y="330" width="300" height="100" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="190.0" y="356.7125" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Binding (per bot)</text>
+<text x="190.0" y="373.92499999999995" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">strategy · trigger · parent</text>
+<text x="190.0" y="389.44999999999993" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">allowed genes · verification profile</text>
+<text x="190.0" y="404.9749999999999" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">budget · params</text>
+<rect x="390" y="330" width="270" height="100" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="525.0" y="364.47499999999997" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Capability providers (per engine)</text>
+<text x="525.0" y="381.68749999999994" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">session export · agent runner</text>
+<text x="525.0" y="397.2124999999999" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">train evaluator</text>
+<rect x="690" y="330" width="270" height="100" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="825.0" y="364.47499999999997" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Platform pipeline</text>
+<text x="825.0" y="381.68749999999994" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">record → verify → gate → promote</text>
+<text x="825.0" y="397.2124999999999" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">verdict back to the strategy</text>
+<path d="M 525 285 L 525 328" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="533" y="307" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">served by</text>
+<path d="M 825 285 L 825 328" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="833" y="307" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">submit / verdict</text>
+<path d="M 40 380 L 22 380 L 22 51 L 38 51" fill="none" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="12" y="215" font-size="11" font-weight="400" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 12 215)">configures</text>
+</svg>

@@ -16,10 +16,10 @@ self-improvement (RSI) loops over any Avernet bot, where
 
 1. the **unit of evolution** is a versioned, immutable bot artifact — the
    *Bot Genome* — built on the existing Bot Config Manifest;
-2. **how** a bot evolves is a **pluggable strategy** (proposers, evaluators,
-   gates, triggers) that other teams can author with an SDK and register
-   without changing the platform; ClawEvolve becomes the first, default
-   strategy;
+2. **how** a bot evolves is a **pluggable strategy**: one `run(ctx)` port
+   that other teams implement with an SDK and register without changing the
+   platform. Each bot chooses its strategies through bindings; ClawEvolve
+   becomes the first, default strategy;
 3. the loop can be driven by **deterministic code** (API / SDK), by **an
    operator or CI** (CLI), or by **a bot** (the same CLI, scoped to a bot
    principal), all over one contract;
@@ -47,7 +47,7 @@ names the documents to read first.
 | 2 | [02-genome.md](02-genome.md) | What an evolved bot *is*: the Bot Genome, and how it extends the Manifest |
 | 3 | [03-verification.md](03-verification.md) | How we know a change is good: bot verification (S′ vs S) and mechanism verification (M′ vs M), and what eval code already exists |
 | 4 | [04-recursion.md](04-recursion.md) | Level 3: improving the improvement mechanism from the Experiment Ledger H, safely |
-| 5 | [05-strategy-sdk.md](05-strategy-sdk.md) | How evolution is pluggable: plugin kinds, strategy manifests, execution bindings |
+| 5 | [05-strategy-sdk.md](05-strategy-sdk.md) | How evolution is pluggable: the single strategy port, capability catalog, per-bot bindings, runtimes |
 | 6 | [06-interfaces.md](06-interfaces.md) | API vs SDK vs CLI, and how bots drive evolution |
 | 7 | [07-default-strategy.md](07-default-strategy.md) | How ClawEvolve and the other existing pipelines are onboarded as defaults |
 | 8 | [08-governance.md](08-governance.md) | Gating, risk tiers, anti-reward-hacking, sandboxing, rollout, budgets |
@@ -68,13 +68,15 @@ ADR number:
 | --- | --- |
 | **Bot Genome** | The evolvable, declarative definition of one bot: persona files, skills, memory seed, resources, tools, engine config. Immutable once recorded; identified by content hash. |
 | **Genome Revision** | One recorded version of a Genome, with parent pointer(s), provenance, and status. |
-| **Genome Patch** | A typed, itemized change from one revision to another. The only thing a Proposer may emit. |
+| **Genome Patch** | A typed, itemized change from one revision to another. The only thing a strategy may submit. |
 | **Phenotype** | The running bot (engine + workspace) produced by applying a revision. Observed, never edited by evolution. |
 | **Experience** | Normalized episodes (sessions / trajectories), feedback, and evaluation traces collected from phenotypes. |
-| **Strategy** | A versioned composition of plugins (analyzers, proposers, evaluators, gates, selectors, triggers) that defines *how* a bot evolves. |
-| **Evolution Run** | One execution of a strategy against one bot (or lineage), made of iterations, candidates, evaluations, and decisions. |
+| **Strategy** | Versioned code with one method, `run(ctx)`, that proposes candidates for a bot; registered with the catalog capabilities it `needs`. |
+| **Capability** | A platform-owned, versioned part of the strategy context (for example `experience.sessions@1`), with providers per engine. |
+| **Binding** | One entry in a bot's evolution policy: which strategy, trigger, parent, allowed genes, verification profile, budget, params. |
+| **Evolution Run** | One execution of a binding against one bot, with everything frozen at start; it submits candidates and receives verdicts. |
 | **Candidate** | A Genome Revision proposed during a run, not yet promoted. |
-| **Gate** | The platform-owned decision point that accepts/rejects a candidate, using the strategy's acceptance policy *plus* non-negotiable platform checks. |
+| **Gate** | The platform-owned decision point that accepts/rejects a candidate, using the verification verdict under the binding's profile *plus* non-negotiable platform checks. |
 | **Promotion** | Moving a bot's `active` ref to a revision and applying it through the existing Manifest / publish chain. |
 | **Archive / Experiment Ledger (H)** | Every improvement experiment ever run (mechanism, parent, candidate, evidence, verdict, cost, online outcome). Nothing is deleted; it is the level-2 selection pool and the level-3 evidence base. |
 | **Mechanism (M)** | The improvement mechanism: a strategy version plus its prompts, operators, parameters, and models. Versioned like a genome, so it can itself be improved (level 3). |

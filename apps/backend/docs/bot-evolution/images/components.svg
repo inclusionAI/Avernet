@@ -25,7 +25,7 @@
 <text x="385.0" y="220.875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">apps/evolution</text>
 <rect x="505" y="158" width="210" height="92" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
 <text x="610.0" y="188.47500000000002" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">C3 Strategy Registry</text>
-<text x="610.0" y="205.35" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">mechanism revisions · plugins</text>
+<text x="610.0" y="205.35" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">strategies · capability catalog</text>
 <text x="610.0" y="220.875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">apps/evolution</text>
 <rect x="730" y="158" width="210" height="92" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
 <text x="835.0" y="188.47500000000002" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">C4 Run Orchestrator</text>
@@ -49,7 +49,7 @@
 <text x="835.0" y="325.875" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">apps/evolution</text>
 <rect x="40" y="420" width="440" height="110" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
 <text x="260.0" y="450.7" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Strategy runners</text>
-<text x="260.0" y="468.25" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">in-process plugins (Python)</text>
+<text x="260.0" y="468.25" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">in-process strategies (Python)</text>
 <text x="260.0" y="484.45" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">job workers (any language, containers)</text>
 <text x="260.0" y="500.65" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">runner bots (avn CLI + skill)</text>
 <rect x="520" y="420" width="440" height="110" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
@@ -58,7 +58,7 @@
 <text x="740.0" y="484.45" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">teclaw BotConfigArtifact · ARCA push · eval env</text>
 <text x="740.0" y="500.65" font-size="12" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">Engine adapter owns physical layout</text>
 <path d="M 260 370 L 260 418" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
-<text x="270" y="394" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">Job Protocol (claim · heartbeat · report)</text>
+<text x="270" y="394" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">run(ctx) · Job Protocol</text>
 <path d="M 740 370 L 740 418" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="750" y="394" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">promote · materialise sandboxes</text>
 </svg>

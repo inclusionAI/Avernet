@@ -53,19 +53,23 @@ the rest.
   every patch op has a defined risk tier; reviewers agree on locked-gene
   defaults.
 
-### RSI-06 Plugin protocols and Job Protocol
+### RSI-06 Strategy port, capability catalog, and Job Protocol
 - **Module**: evolution (new), arch
-- **Goal**: Define each plugin kind's Protocol and JSON Schema I/O
-  (ExperienceSource, Trigger, Selector, Analyzer, SuiteBuilder, Proposer,
-  Evaluator, AcceptancePolicy, Curator, MetaProposer), lifecycle and failure semantics (R11),
-  isolation/capability declarations (R13), and the Job Protocol wire contract
-  (claim/lease/fencing/heartbeat/complete/fail, artifact upload).
+- **Goal**: Define the strategy port (`run(ctx)`), `StrategyContext`,
+  Candidate / Submission / Verdict, the registration record schema, the
+  first capability catalog (`experience.sessions@1`,
+  `experience.feedback@1`, `agents@1`, `evaluate.train@1`) with per-engine
+  provider contracts, the evolution policy (binding) schema and binding
+  checks, run lifecycle and failure semantics (R11), isolation (R13), and
+  the Job Protocol mapping of every `ctx` call.
 - **Read first**: [05-strategy-sdk.md](05-strategy-sdk.md); ClawEvolve
   `official-stage-catalog.json`, `routes/internal/evolve.ts`;
   `docs/arch/protocol-contract-tests.md`.
-- **Deliverable**: contract docs + schema files; strategy manifest schema.
-- **Done when**: ClawEvolve's diagnose/plan/tune/bench/accept I/O can each
-  be expressed in the schemas without loss (checked by mapping table).
+- **Deliverable**: contract docs + JSON Schema files.
+- **Done when**: ClawEvolve's round loop can be written against the context
+  without reaching around it (checked with the §10 sketch in
+  05-strategy-sdk), and a non-ClawEvolve strategy (memory consolidation) fits
+  with a different capability set.
 
 ### RSI-07 Evolution API and CLI contract
 - **Module**: evolution, backend, gateway
@@ -111,19 +115,21 @@ the rest.
 - **Module**: evolution (new `apps/evolution`, per D-1)
 - **Goal**: Service scaffold following Backend DI/plugin conventions; Run
   Orchestrator state machine with budgets; Strategy Registry; Job Protocol
-  endpoints; local profile (SQLite, in-process workers) for singlebox; a
-  reference strategy `platform/manual-patch` (Proposer = supplied patch,
-  Evaluator = deterministic checks) to exercise the loop end-to-end.
+  endpoints; evolution policy (bindings) with binding checks and triggers;
+  local profile (SQLite, in-process strategies) for singlebox; a reference
+  strategy `platform/manual-patch` (submits a supplied patch; verified with
+  deterministic checks) to exercise the loop end-to-end.
 - **Depends on**: RSI-06, RSI-07, RSI-03.
 - **Done when**: singlebox story: start run with reference strategy →
   candidate recorded → gate → promoted → bot updated → rollback.
 
 ### RSI-09 Strategy SDK and conformance kit
 - **Module**: evolution
-- **Goal**: Python plugin SDK (models, base classes, JobWorker,
-  `GenomeWorkspace` materialise/diff-to-patch, AgentRunner abstraction with
-  OpenClaw implementation), local harness, pytest conformance kit, `avn
-  strategy dev|test|publish`.
+- **Goal**: Python strategy SDK: `EvolutionStrategy` base, typed models,
+  in-process and Job-Protocol `StrategyContext` implementations,
+  `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` with an
+  OpenClaw provider, local harness with a fake platform, strategy
+  conformance kit, `avn strategy dev|test|publish`.
 - **Depends on**: RSI-06, RSI-08.
 - **Done when**: an example third-party strategy (e.g. OPRO-style persona
   optimizer) is written by someone outside the platform team using only the
@@ -159,11 +165,11 @@ the rest.
   and the platform grader.
 
 ### RSI-12 Gate, review queue, promotion
-- **Module**: backend (gate floor, promotion), evolution (policy plugins)
-- **Goal**: Platform floor checks, risk-tier assignment, AcceptancePolicy
-  plugin execution, review queue with diff + eval report, approvals,
-  owner policy (enabled strategies, auto-promote ceiling, budgets, schedules),
-  audit events, kill switches.
+- **Module**: backend (gate floor, promotion), evolution (bindings)
+- **Goal**: Platform floor checks, risk-tier assignment, gate on the
+  verification verdict under the binding's profile, review queue with diff +
+  verification report, approvals, owner policy (bindings, auto-promote
+  ceiling), audit events, kill switches.
 - **Done when**: T1 auto-promotes under policy; T2 waits for approval; T3
   rejected while locked; all decisions audited.
 
@@ -171,9 +177,10 @@ the rest.
 - **Module**: evolverun, evolution
 - **Goal**: Strangler steps 1–3 from
   [07-default-strategy.md §4](07-default-strategy.md#4-migration-plan-strangler-no-big-bang):
-  shadow-record revisions → adapter strategy → native strategy. Tune works on
-  a sandbox `GenomeWorkspace`; accept rule becomes `clawevolve/acceptance`
-  policy; pack/restore removed from the flow; decide D-2, D-3.
+  shadow-record revisions → black-box adapter strategy → native strategy.
+  Tune works on a sandbox from `ctx.workspace`; its accept rule becomes an
+  internal submission filter while acceptance moves to platform
+  verification; pack/restore removed from the flow; decide D-2, D-3.
 - **Depends on**: RSI-09, RSI-10, RSI-11, RSI-12.
 - **Done when**: `clawevolve/bot-evolution` produces the same or better
   results as legacy AgentEvolve on its own bench, through the platform, without
@@ -265,7 +272,8 @@ the rest.
 
 ### RSI-17 Archive selectors
 - Pareto-per-case (GEPA), MAP-Elites niches, clade metaproductivity (HGM)
-  as Selector plugins; Archive read model exports for proposers.
+  as options of a binding's `parent` field; Archive read model exports for
+  strategies.
 
 ### RSI-18 Cross-bot skill transfer
 - Promoted skills offered to Skill Center under existing governance (ADR

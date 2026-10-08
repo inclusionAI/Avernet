@@ -26,7 +26,7 @@ needs (codebase evidence in [09-research.md §2.1](09-research.md#21-bot-config-
 | No optimistic concurrency control. HTTP offers it through an `ETag` (a version tag the server returns with a document) and an `If-Match` request header (the client sends back the tag it read; the server rejects the write with `412 Precondition Failed` if the document changed since). `PUT /config-manifest` has neither | A strategy and a human editing at the same time silently overwrite each other; whoever writes last wins without knowing. Revisions solve this with compare-and-swap on refs (§3) |
 | Apply re-reads the current document; report does not say which bytes were applied | Cannot attribute behaviour or experience to a version |
 | Sources are moving refs (git branch, oss key) re-resolved each apply | A genome must be immutable: every source pinned to commit SHA / digest |
-| Whole-document PUT, category-atomic replace | Proposers must emit small, reviewable, itemized patches |
+| Whole-document PUT, category-atomic replace | Strategies must submit small, reviewable, itemized patches |
 | `MEMORY.md` / `IDENTITY.md` reserved and rejected | Learned memory is half of what self-improvement produces |
 | `engine_config` rejected in v1 | Model / temperature / reasoning budget are legitimate tunables |
 | A category left out of the document means "leave it untouched" | A revision must fully determine the bot; otherwise two applies of the same revision can produce different bots depending on prior state |
@@ -184,7 +184,7 @@ replaces nor extends it, and there is no duplicate rollback path.
 
 ## 4. Genome Patch
 
-The only output a Proposer may produce. Itemized and typed, following ACE's
+The only thing a strategy may submit. Itemized and typed, following ACE's
 finding that delta updates avoid context collapse.
 
 ```jsonc
@@ -321,7 +321,7 @@ Three extensions are needed:
    100–200 MiB each. Unconditional retention is acceptable for v1. Any later
    sweep may only remove blobs that no revision references, and must never
    remove a blob reachable from a `promoted` revision.
-3. **Readers outside Backend.** Proposers and evaluators in
+3. **Readers outside Backend.** Strategies and evaluators in
    `apps/evolution` read content through the Genome Registry API (or a
    materialised sandbox), never from the blob directory directly.
 
