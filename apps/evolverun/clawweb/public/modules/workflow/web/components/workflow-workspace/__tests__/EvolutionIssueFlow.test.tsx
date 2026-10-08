@@ -321,6 +321,8 @@ describe('issue and optimization flow', () => {
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
+    await userEvent.click(screen.getByRole('button', { name: '证据与历史' }))
+    await userEvent.click(screen.getByText('历史建议与任务（独立于本次修复）'))
     await userEvent.click(await screen.findByRole('button', { name: '应用建议' }))
     expect(screen.getByRole('dialog', { name: '选择 Bot 自动应用建议' })).toBeInTheDocument()
   })
@@ -355,7 +357,9 @@ describe('issue and optimization flow', () => {
 
     await userEvent.click(within(actionableIssue!).getByRole('button', { name: '查看' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
-    expect(within(drawer).getByText('建议总览')).toBeInTheDocument()
+    expect(within(drawer).getByText('问题原因总览')).toBeInTheDocument()
+    expect(within(drawer).queryByText('所选分析详情')).not.toBeInTheDocument()
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     expect(within(drawer).queryByText('本次修复范围')).not.toBeInTheDocument()
     expect(within(drawer).getByText('已有建议')).toBeInTheDocument()
     expect(within(drawer).getByText('相关分析记录')).toBeInTheDocument()
@@ -378,10 +382,11 @@ describe('issue and optimization flow', () => {
 
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(issue).not.toBeNull()
-    expect(within(issue!).getByText('影响 2 个运行')).toBeInTheDocument()
+    expect(within(issue!).getByText('问题累计涉及 2 个运行')).toBeInTheDocument()
 
     await userEvent.click(within(issue!).getByRole('button', { name: '查看' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     expect(within(drawer).getByRole('link', { name: /run-1/ })).toHaveAttribute(
       'href',
       '/runs/run-1?from=workspace&workspaceView=diagnosis&issueSignature=timeout%3Afetch-data&analysisId=AN-1',
@@ -416,6 +421,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(within(issue!).getByRole('button', { name: '查看' }))
 
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     expect(within(drawer).getByText('相关分析记录')).toBeInTheDocument()
     expect(within(drawer).queryByText('运行证据')).not.toBeInTheDocument()
 
@@ -437,6 +443,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(within(issue!).getByRole('button', { name: '查看' }))
 
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     expect(within(drawer).getByText('未找到所选分析详情，请重试或打开关联运行查看。')).toBeInTheDocument()
   })
 
@@ -475,7 +482,7 @@ describe('issue and optimization flow', () => {
     expect(await screen.findByRole('region', { name: '处理任务' })).toHaveTextContent('FIX-1')
     const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
     expect(within(issue).getByText('将超时阈值调整为 90 秒')).toBeInTheDocument()
-    expect(within(issue).getByText('内容 v2 · 1 个来源')).toBeInTheDocument()
+    expect(within(issue).getByText('本建议来源覆盖 1 个运行 · 1 条来源引用')).toBeInTheDocument()
     expect(within(issue).getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeChecked()
 
     await userEvent.click(screen.getByRole('button', { name: '查看任务' }))
@@ -528,6 +535,7 @@ describe('issue and optimization flow', () => {
     expect(issue).not.toBeNull()
     await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     await userEvent.click(within(drawer).getByText('历史建议与任务（独立于本次修复）'))
     expect(within(drawer).getByRole('button', { name: '应用建议' })).toBeInTheDocument()
   })
@@ -737,4 +745,87 @@ describe('issue and optimization flow', () => {
     expect(screen.getByText('Agent 正在生成修改方案')).toBeInTheDocument()
     expect(screen.getByText('工具调用已返回：workflow_edit')).toBeInTheDocument()
   })
+
+  it('shows each candidate directly and counts actual states instead of calling two pending items mixed', async () => {
+    repairApi.candidates.mockResolvedValue(repairPage({ items: [
+      { ...repairItem(), proposal: { summary: '提高超时阈值', operations: [{ op: 'replace', nodeId: 'fetch-data', path: 'timeoutSeconds', value: 90 }] } },
+      repairItem('item-2', '保留现有超时并增加重试'),
+    ] }))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    const checkbox = await screen.findByRole('checkbox', { name: '选择 提高超时阈值' })
+    expect(checkbox).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: '选择 保留现有超时并增加重试' })).toBeVisible()
+    expect(screen.getByText('待处理 2')).toBeInTheDocument()
+    expect(screen.queryByText('混合状态')).not.toBeInTheDocument()
+    expect(screen.getByRole('list', { name: '建议修改内容' })).toHaveTextContent('timeoutSeconds → 90')
+    expect(screen.queryByText('timeout:fetch-data')).not.toBeInTheDocument()
+  })
+
+  it('explains initial defaults and lets users inspect, remove and clear cross-page selections', async () => {
+    repairApi.candidates.mockImplementation((_workflowId: string, query: { page?: number }) => Promise.resolve(query.page === 2
+      ? repairPage({ items: [repairItem('item-21', '第二页建议')], page: 2, total: 21 })
+      : repairPage({ total: 21 })))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    expect(await screen.findByText(/已默认选择首次加载页的 1 项/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '下一页' }))
+    const second = await screen.findByRole('checkbox', { name: '选择 第二页建议' })
+    expect(second).not.toBeChecked()
+    expect(screen.getByText(/其中 1 项不在当前可见范围/)).toBeInTheDocument()
+    await userEvent.click(second)
+    await userEvent.click(screen.getByRole('button', { name: '查看已选' }))
+    const selected = screen.getByRole('dialog', { name: '已选修复建议' })
+    expect(within(selected).getByText('将超时阈值调整为 90 秒')).toBeInTheDocument()
+    expect(within(selected).getByText('第二页建议')).toBeInTheDocument()
+    await userEvent.click(within(selected).getByRole('button', { name: '移除 将超时阈值调整为 90 秒' }))
+    await userEvent.click(within(selected).getByRole('button', { name: '关闭' }))
+    expect(screen.getByRole('button', { name: '生成 Pack 草稿（1）' })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: '清空选择' }))
+    expect(screen.getByRole('button', { name: '生成 Pack 草稿（0）' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: '上一页' }))
+    expect(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).not.toBeChecked()
+  })
+
+  it('invalidates selection on source changes without silently selecting the new page', async () => {
+    repairApi.candidates.mockResolvedValueOnce(repairPage({ total: 21 })).mockResolvedValueOnce({
+      ...repairPage({ items: [repairItem('new-item', '新来源建议')], page: 2, total: 21 }), inputDigest: 'new-digest',
+    })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    await screen.findByRole('button', { name: '生成 Pack 草稿（1）' })
+    await userEvent.click(screen.getByRole('button', { name: '下一页' }))
+    expect(await screen.findByText('建议来源已更新，原选择已清空，请重新确认范围。')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '生成 Pack 草稿（0）' })).toBeDisabled()
+  })
+
+  it('selects standalone historical items with the current-page control', async () => {
+    lifecycle.hideGroups = true
+    repairApi.candidates.mockResolvedValue(repairPage())
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    await userEvent.click(await screen.findByRole('button', { name: '清空选择' }))
+    await userEvent.click(screen.getByRole('button', { name: '选择本页可处理项' }))
+    expect(screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })).toBeChecked()
+  })
+
+  it('loads analysis only in evidence and shares selection between the drawer and list', async () => {
+    repairApi.candidates.mockResolvedValue(repairPage())
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    const candidate = await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })
+    runAnalysis.mockClear()
+    const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
+    await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
+    const drawer = screen.getByRole('dialog', { name: '问题详情' })
+    expect(runAnalysis).not.toHaveBeenCalled()
+    await userEvent.click(within(drawer).getByRole('button', { name: '修复建议' }))
+    await userEvent.click(within(drawer).getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
+    expect(candidate).not.toBeChecked()
+    expect(runAnalysis).not.toHaveBeenCalled()
+    await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
+    expect(runAnalysis).toHaveBeenCalled()
+  })
+
 })

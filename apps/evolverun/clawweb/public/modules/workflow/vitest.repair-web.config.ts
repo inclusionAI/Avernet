@@ -9,6 +9,6 @@ export default {
   resolve: { alias: { '@avernet/clawweb-shared': fileURLToPath(new URL('../../shared', import.meta.url)) } },
   test: {
     environment: 'jsdom', globals: true, setupFiles: ['./web/test/setup.ts'],
-    include: ['web/components/workflow-workspace/repair-batch/__tests__/*.test.tsx', 'web/components/workflow-workspace/__tests__/EvolutionIssueFlow.test.tsx'],
+    include: ['web/components/workflow-workspace/repair-batch/__tests__/*.test.tsx', 'web/components/workflow-workspace/__tests__/EvolutionIssueFlow.test.tsx', 'web/components/workflow-workspace/__tests__/IssueSummary.test.tsx'],
   },
 }
