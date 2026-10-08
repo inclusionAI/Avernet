@@ -17,6 +17,8 @@ Provide one aggregate command/query in core, exposed through two thin HTTP surfa
 - Public: `GET`/`PUT /openapi/v1/bots/mcp/servers/{server_code}/config-groups` using the standard OpenAPI envelope and authenticated user identity.
 - Internal: `GET`/`POST /api/mcp/config-groups` using the existing internal success/data envelope. GET takes `server_code` as a query parameter; POST includes `server_code` in the body. It uses the authenticated staff user, not the legacy `bot_id=default` parameter.
 
+The new product UI uses the Public route and the legacy product UI uses the Internal route. Both adapters invoke the same core read/replace operation and persist the same user/Bot configuration; they differ only in HTTP identity, method, payload placement, and response envelope.
+
 The editable data is:
 
 ```json
