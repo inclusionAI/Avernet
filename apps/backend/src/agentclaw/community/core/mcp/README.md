@@ -18,8 +18,11 @@ provides:
   - "UnifiedConfig"
   - "read_unified_config"
   - "write_unified_config"
+  # Header-group Service API types live in scoped_config_contract; the flow
+  # implements this interface without making API consumers import the flow.
   - "HeaderGroup"
   - "ScopedMCPConfig"
+  - "MCPScopedConfigServiceProtocol"
   - "read_scoped_config"
   - "write_scoped_config"
   - "list_marketplace_servers"

@@ -31,7 +31,7 @@ from agentclaw.community.core.mcp.config_flow import (
     read_unified_config,
     write_unified_config,
 )
-from agentclaw.community.core.mcp.scoped_config_flow import (
+from agentclaw.community.core.mcp.scoped_config_contract import (
     HeaderGroup,
     ScopedMCPConfig,
 )

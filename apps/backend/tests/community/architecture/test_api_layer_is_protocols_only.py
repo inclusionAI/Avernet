@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -101,6 +103,23 @@ def _bases_include_protocol(cls: ast.ClassDef) -> bool:
 def test_api_root_exists() -> None:
     """Guard against silent skip if the path resolver drifts."""
     assert _API_ROOT.is_dir(), f"api/ root not found at {_API_ROOT}"
+
+
+def test_scoped_mcp_service_api_cold_import_skips_implementation() -> None:
+    """A Service API import must not load the concrete scoped-config flow."""
+    proof = (
+        "import agentclaw.community.api.mcp_scoped_config_service\n"
+        "import sys\n"
+        "assert 'agentclaw.community.core.mcp.scoped_config_flow' not in sys.modules\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", proof],
+        capture_output=True,
+        text=True,
+        cwd=_BACKEND_ROOT,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_api_layer_has_no_subdirectories() -> None:
