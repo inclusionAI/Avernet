@@ -1,135 +1,465 @@
-# Group Context API — Core Design Spec
+# Group Context API — Spec
 
-- **Date:** 2026-09-09
----
-
-## 1. Problem
-
-BCS 群聊中，多 Agent 协作需要共享记忆——游戏状态、帖子处理进度、投票结果、FAQ 等。当前 BCS 的 session 上下文由系统在 session 启动时一次性发送（`SessionContext` 系统消息，包含 group_id、session_id、session_input），bot 无法在运行时读写持久化的群组级信息。具体缺失能力：
-
-1. **群组级别的持续记忆。** SessionContext 只在 session 启动时发送一次，session 结束后信息丢失。群聊游戏需要跨 session 保留规则和玩家状态，bot 需要有 API 读写这些信息。
-2. **细粒度的可见范围控制。** 谁是卧底的底牌只有裁判和该玩家可见，投票结果只有裁判和狼人可见。需要支持按 users 列表控制可见范围。
-3. **版本取代与冲突解决。** 同一信息的多次更新（如玩家状态从"存活"变为"出局"），需要建立取代链，不修改旧数据，保证可追溯。
-4. **来源信任与审计。** 需要知道每条信息是谁写入的、从哪派生来的，事后可审计。
-
-本设计引入 **Group Context API**，为 BCS 群组提供受治理的共享记忆基础设施。
+- **Date:** 2026-10-08
+- **Version:** v3（精简版：API 定义 + 谁是卧底 walkthrough）
 
 ---
 
-## 2. ContextEntry
+## 1. Group Context 是什么
 
-ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数据面(是什么) / 策略面(能怎么用) / 治理面(经历过什么)。
+Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在运行时自由读写，
+不需要预先注册模板。每条 context 是一个带权限标签的字符串键值对。
 
-### 2.1 数据面 · 客观档案
+核心约束：
 
-框架注入、不可变、可验签。PEP 硬判定(allow/deny)的唯一依据。
+- 同 `(name, scope)` 下最多一条活跃版本。重复创建返回 conflict。
+- 更新走 supersede 取代链：旧版本保留（`valid_to` 回填），新版本写入。
+- 读 / 写权限由条目自身的 `visible_to` / `collect_from` 控制。
 
-| 字段 | 含义 | 示例 |
+---
+
+## 2. Context 条目模型
+
+| 字段 | 类型 | 含义 |
 |------|------|------|
-| **content** | 内容本体 | `"你的词语是：香蕉"` |
-| **origin** | 收集来源（出生地证明）。tenant_id / group_id / session_id / run_id / actor_id，框架注入，不可篡改 | `{group_id:"game-room-7", session_id:"sess-001", actor_id:"judge_bot"}` |
-| **provenance** | 信任链。ref（指向 origin）+ chain（派生链：extract/consolidate/propagate 逐跳追加）+ signature（框架签名，三者任一被改即失效） | `{ref: ctx_origin_msg_001, chain: [{op: extract, from: raw_msg_001}], signature: hs256(...)}` |
-| **time** | 双时间线。valid_from / valid_to（内容有效期，多数条目出生时为 ∞，被 supersede 时回填）+ tx_time（系统写入时间） | `valid_to` 被 supersede 时系统回填 |
+| `id` | bigint |存储主键|
+| `context_id` | string | 条目ID（服务端生成，不随版本更新变化） |
+| `name` | string | 版本标识。同 (name, scope) 互为版本链 |
+| `scope_level` | enum | 版本链作用域层级：`group` / `session` / `run` |
+| `scope` | string | 该层级对应的实例值（调用创建时填入） |
+| `content` | string | 内容本体 |
+| `visible_to` | string[] | 可见的 userId 列表。空数组 = 全员可见 |
+| `collect_from` | string[] | 可写的 userId 列表。不可为空 |
+| `supersedes` | string \| null | 取代链指针：我取代了哪个 id |
+| `change_reason` | string \| null | 取代原因（update 时可选传入） |
+| `valid_from` | int64 | 生效时间（Unix 毫秒） |
+| `valid_to` | int64 \| null | 失效时间。null = 当前活跃版本；被 supersede 时系统回填 |
+| `tx_time` | int64 | 系统写入时间（Unix 毫秒） |
 
+### 2.1 scope_level 与 scope 实例值
 
-### 2.2 数据面 · 推断注解
+`scope_level` 声明版本链的作用域层级。`scope` 是该层级的**实例值**，
+`scope_level` 由调用方传入，`scope` 由系统从 URL 参数生成。
+三种层级的id都是全局唯一的，且已经包含了层次信息，所以group context生成`scope` 时不进行拼接直接使用原始值。
 
-抽取器/后台可精化。只用于软判定与"加严"，永不放宽。
-**type (认知类型):**
-认知类型：episodic / semantic / procedural / working。被系统分析并回填，萃取器赋值，巩固时可改。检索时可作为过滤条件
+| scope_level | scope 格式 | 示例 |
+|---|---|---|
+| `group` | `{group_id}` | `game-room-7` |
+| `session` | `{session_id}` | `sess-001` |
+| `round` | `{round_id}` | `round_003` |
 
-**sensitivity（敏感程度）：**
+同一个 `(name, scope)` 组合内最多一条活跃版本。不同 `scope` 值的条目各自独立成链。
 
-floor（继承地板，由会话渠道策略客观决定，不可降）+ assessed（内容评估，抽取器只许上调）+ effective = max(floor, assessed)，PEP 只读此项
-```jsonc
+### 2.2 visible_to / collect_from
+
+- 两者都是 `string[]`（userId 列表）。
+- `visible_to` 为空数组表示全员可见。
+- `collect_from` 不可为空。
+- bot 在 **create 和 update 时都可以设置/修改** `visible_to` 和 `collect_from`。
+- 框架在检索/更新时验证：当前 `actor_id` 是否在 `visible_to` / `collect_from` 中。
+
+---
+
+## 3. API
+
+5 个端点，统一 POST。
+
+`group_id`（必填）、`session_id`（按场景选填）、`round_id`（按场景选填）固定在 url 的 param 中。
+
+`actor_id` 在 header 中由框架注入，`setSystemPrompt` 不填，其他 api 必填。
+
+以下每个请求示例省略这些框架注入字段，仅展示端点特有字段。
+
+### 3.1 add — 新增一条 context
+
+```
+POST /groupcontext/add
+```
+
+| 参数 | 类型 | 必填 | 含义 |
+|------|------|------|------|
+| `name` | string | 是 | context名字 |
+| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `content` | string | 是 | 内容（最大 4KB） |
+| `visible_to` | string[] | 是 | 可见 userId 列表（空=全员） |
+| `collect_from` | string[] | 是 | 可写 userId 列表（不可为空） |
+
+行为：
+1. 校验 `actor_id` 是否在 `collect_from` 中 → 否则 `permission_denied`
+2. 查同 `(name, scope)` 是否已有活跃版本 → 有则 `conflict`
+3. 写入新条目，返回成功
+
+响应，有效信息都是bot传入的，response保持简洁不重复展示数据：
+```json
 {
-    "floor":     "team",                             // 基础敏感度（由会话渠道策略客观决定，不可降）
-    "assessed":  "secret",                           // 内容评估敏感度（系统评估，只许上调）
-    "effective": "max(floor, assessed)"              // 实际生效的敏感度，用于传播、注入时 trigger 审批流程等
+   "status": "ok", 
+   "error_msg": null
 }
 ```
 
-**derived（置信度）：**
-由系统评估回填，用于检索结果排序
-```jsonc
+### 3.2 update — 更新一条 context（supersede）
+
+```
+POST /groupcontext/update
+```
+
+| 参数 | 类型 | 必填 | 含义 |
+|------|------|------|------|
+| `name` | string | 是 | context名字 |
+| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `content` | string | 否 | 新内容（不传则沿用旧值） |
+| `change_reason` | string | 否 | 取代原因 |
+
+行为：
+1. 根据 `scope_level` 计算出 `scope`
+2. 按 `(name, scope)` 查旧条目 → 不存在或没有唯一活跃版本则 `not_found`
+2. 校验 `actor_id` 是否在旧条目活跃版本的 `collect_from` 中 → 否则 `permission_denied`
+3. 原子操作：回填旧条目 `valid_to = tx_time` → 写入新条目（`supersedes` 指向旧 `context_id`，记录change_reason）
+4. 返回新 `context_id`
+
+响应：
+```json
 {
-    "confidence":         {"value": 0.82, "creator": "extractor@v2.3"},  // 自评置信度（排序/标记用，不做为过滤）
-    "mentioned_entities": ["cust_999"],               // 内容涉及的第三方实体
-    "topics":             ["定价","续约"],            // 话题域
-    "pii_suspected":      true,                     // 疑似敏感 → 触发复核/加严
+   "status": "not_found", 
+   "error_msg": "name=xx and scope=xx, group context not found"
 }
 ```
 
-### 2.3 策略面
+### 3.3 list — 列出当前 actor 可见/可写的 context
 
-条目级规则。默认值从 origin/全局 policy 推导。
+```
+POST /groupcontext/list
+```
 
-**flow（读写控制：谁能写、谁能看、能传多远）：**
+| 参数 | 类型 | 必填 | 默认值 | 含义 |
+|------|------|------|--------|------|
+| `scope_levels` | string[] | 否 | `["group","session","run"]` | 过滤 scope_level 范围 |
 
-| 字段 | 含义 | 示例 |
-|------|------|------|
-| **visible_to** | 谁可以读（如裁判+玩家两人可见底牌） | `{group_id: "game-room-7", user_ids: [judge_bot, player_1]}` |
-| **collect_from** | 谁可以写| `{tag: "game_room_admin"}` |
-| **propagate_to** | 能传播到多远 | 组内可传播，跨租户不可传播`{groups: 1, tenant: 0}` |
-| **allowed_purposes** | 允许出于什么目的使用 | `["投诉处理","账单核验"]` |
-| **redact_on_export** | 传播前是否脱敏 | true |
+行为：
+1. 按 `scope_levels` 计算出 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
+2. 保留 `actor_id` 在 `visible_to` 或 `collect_from` 中的条目（即可见或可写）
+3. 每个 `(name, scope)` 只返回一条活跃版本（`valid_to = null`）
+4. 每条附 `permission`：`R`（可读）、`W`（可写）、`WR`（可读可写）
+
+响应：
+```json
+{
+  "contexts": [
+    {
+      "name": "game_rule",
+      "scope_level": "group",
+      "content": "【谁是卧底游戏规则】…",
+      "valid_from": 1728000000000,
+      "permission": "R"
+    },
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": 1728374400000,
+      "permission": "WR"
+    }
+  ]
+}
+```
+
+### 3.4 get — 按 name 查询context
+
+```
+POST /groupcontext/get
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 含义 |
+|------|------|------|--------|------|
+| `name` | string | 是 | — | 精确匹配 name |
+| `scope_levels` | string[] | 否 | `["group","session","run"]` | 过滤 scope_level |
+| `limit` | int | 否 | `10` | 返回条数上限 |
+
+行为：
+1. 按 `scope_levels` 计算 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
+2. 保留 `actor_id` 在 `visible_to` 中的条目
+3. 每个 `(name, scope)` 只返回一条活跃版本
+4. 从细到粗排序（run → session → group）
+
+响应：
+```json
+{
+  "items": [
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": 1728374400000
+    }
+  ]
+}
+```
+
+### 3.5 setsystemprompt — 写入/更新 group 的 system prompt，仅bcn系统调用，bot不可调用
+
+```
+POST /groupcontext/setsystemprompt
+```
 
 
-**consistency（consistency model： 多写者冲突与陈旧度）：**
+| 参数 | 类型 | 必填 | 含义 |
+|------|------|------|------|
+| `name` | string | 是 | context名字 |
+| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `content` | string | 是 | system prompt 内容 |
+| `collect_from` | string[] | 是 | 可写 userId 列表 |
+| `visible_to` | string[] | 是 | 可见 userId 列表 |
 
-| 字段 | 取值 | 含义 |
-|------|------|------|
-| **domain** | string（支持 `{param}` 占位符） | 版本标识。同 domain 条目互为版本 |
-| **granularity** | `run` / `session` / `group` / `tenant` | 同 domain 条目在什么范围内互为版本 |
-| **freshness_class** | `volatile` / `stable` / `audit`（默认 `stable`） | 过期策略 |
-| **revalidate_due** | ISO 8601 / null | 过期时间兜底，仅 volatile 必填 |
+行为：
+1. 例如 `name = "system_prompt"`, `scope_level = "group"`,
+   计算出`scope = "{group_id}"`（由框架填入，调用方无需传）
+2. 同 `(name, scope)` 如已有活跃版本 → supersede 旧版本（不像 create 那样 conflict）
+3. 返回新 `context_id`
 
-**granularity：**
+> setsystemprompt 本质是 update-or-create：首次调用 create，后续调用自动 supersede。
 
-| 取值 | 示例 domain | 含义 |
-|------|-----------|------|
-| `run` | `intermediate_result` | 同 run 下互为版本，run 结束后不再更新 |
-| `session` | `player_state` | 同 session 下互为版本，不同 session 独立 |
-| `group` | `game_rule` | 同 group 下所有 session 共享一个版本 |
-| `tenant` | `cross_board_insight` | 跨 group |
+响应：与 add/update 同构，返回 `{"status":"ok","error_msg":null}`。
 
-> **granularity 的设计动机：** 每个 (domain, granularity) 在同一时刻均只有一条活跃版本（即 valid_to=null 的版本数 ≤ 1）。仅靠 domain 区分版本链不足以表达作用域——同一个 domain 名（如 `player_state`）在不同 session 下需要独立的版本链，否则跨 session 的状态会互相覆盖。granularity 显式声明版本链的作用域（run / session / group / tenant），让同一个 domain 在不同粒度下独立演进。例如 `player_state` 在 session A 记录玩家 1 的存活状态，在 session B 记录玩家 2 的状态，靠 `granularity=session` 自然隔离，互不干扰。retrieve 时按 granularity 分组逐组取活跃版本。
-> **多写者冲突如何解决：** 开放且信任llm写入，但必须留痕。llm 可以先查询后更新一个 context，每次 updateContext 都会 supersede 当前生效的一条，系统记录 linage 和 reason。
+### 3.6 错误码
 
-**freshness_class：**
+| HTTP | `status` | 适用接口 | 含义 |
+|------|----------|----------|------|
+| 200 | `ok` | 全部 | 成功 |
+| 400 | `invalid_param` | 全部 | 参数校验失败 |
+| 403 | `permission_denied` | add / update / setsystemprompt | 调用方不在 collect_from 中 |
+| 404 | `not_found` | update | 没有可以被更新的context |
+| 409 | `conflict` | add | 同 (name, scope) 已有活跃版本 |
+| 413 | `payload_too_large` | add / update / setsystemprompt | content 超上限（默认 4KB） |
+| 500 | `internal_error` | 全部 | 服务端内部错误 |
 
-| 取值 | 含义 | 示例 |
-|------|------|------|
-| `volatile` | 很快过期，需定期重验。过期后不可检索 | 大促政策（促销结束后自动失效），`revalidate_due` 必填 |
-| `stable`（默认） | 长期有效，被 supersede 时才失效 | `game_rule`、`faq` |
-| `audit` | 长期有效，写权限严格管控 | 告警根因结论 |
-
-**obligations（附带义务：使用开放，但必须做到这些）：**
-
-| 取值 | 含义 |
-|------|------|
-| `"注入时附置信度标记"` | context 注入 LLM prompt 时必须标注置信度 |
-| `"检索必须落审计"` | 每次检索必须写入审计日志 |
-
-
-### 2.4 治理面
-
-生命周期痕迹与指针。
-
-| 字段 | 含义 |
-|------|------|
-| **lineage** | 取代链（append-only 的"修改"实现）。supersedes（向上：我取代了谁）+ superseded_by（向下：谁取代了我）+ superseded_at（何时被取代）。系统自动维护——**不修改旧条目的数据内容**，但会维护旧条目的**生命周期字段**：`time.valid_to`。新条目写入时设 `lineage.supersedes` 指向旧条目 |
-| **verification** | 保鲜验证。last_verified_at（上次验证时间）+ verified_by（验证方） |
-| **governance** | owner（责任人，跨边界传播/遗忘的审批人）+ policy_version（生命周期受哪版 policy 管辖）+ audit_ref（审计日志指针）+ forget_request（遗忘请求留痕，归档 + 全读路径屏蔽） |
+错误响应格式：
+```json
+{ "status": "conflict", "error_msg": "player_word_1 already exists in sess-001" }
+```
 
 ---
 
-## 3. Scenario Walkthrough: 谁是卧底
+## 4. 场景 Walkthrough：谁是卧底
 
-- admin 在 group 创建时为 game-room-7 绑定 6 个 domain 策略（game_rule、player_word、game_status、player_speech、vote_result、player_state）
-- game_rule（domain=game_rule, granularity=group, freshness_class=stable）在 group 创建时自动生成一条 context 实例
-- session 启动时，master bot 调用 POST /groupcontext/status 获取当前权限视图：已存在的 contexts（game_rule 等）+ 可创建的 context_templates（player_word 等）
-- judge_bot 看到 `player_word` 的描述："需要为每位玩家单独调用一次"→ 调 5 次创建接口，每次传入不同 player_id
-- 玩家检索自己的底牌：系统按 visible_to 验证，仅包含自己时返回
-- 玩家冒充裁判写入：系统比对 actor_id ≠ 模板的 collect_from → deny
-- 裁判写入 player_state → 同 domain + granularity=session 下已有旧版本 → 系统自动回填旧条目 valid_to + 建立新条目的 lineage.supersedes
+### 设定
+
+- 群聊 `game-room-7`（group_id）
+- 本轮游戏 session `sess-001`
+- 5 个玩家：张三、李四、王五、赵六、钱七
+- 裁判 bot：`judge_bot`
+- 群管理员：`admin`
+
+### 4.1 裁判视角
+
+#### 4.1.1 查看现有 context
+
+```
+POST /groups/game-room-7/groupcontext/list
+scope_levels: ["group","session"]
+actor_id: judge_bot
+```
+
+响应：只有管理员预设的 `game_rule`。
+
+```json
+{
+  "contexts": [
+    {
+      "name": "game_rule",
+      "scope_level": "group",
+      "content": "【谁是卧底游戏规则】每轮每人描述自己的词语…",
+      "valid_from": 1728000000000,
+      "permission": "R"
+    }
+  ]
+}
+```
+
+#### 4.1.2 为每位玩家创建底牌（add ×5）
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+name: player_word_1
+scope_level: session
+content: 你的词语是：香蕉
+visible_to: [judge_bot, 张三]
+collect_from: [judge_bot]
+```
+
+响应：
+```json
+{ "status": "ok", "error_msg": null }
+```
+
+同样为李四(苹果)、王五(苹果)、赵六(香蕉)、钱七(苹果)创建 `player_word_2` 到 `player_word_5`，
+每人 `visible_to` 仅含裁判和本人。系统自动生成 `scope = game-room-7:sess-001`，每条 name 不同所以不冲突。
+
+#### 4.1.3 记录卧底对应关系（add）
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+name: player_role
+scope_level: session
+content: 平民词=苹果, 卧底词=香蕉。player_word_1(张三)和player_word_4(赵六)是卧底
+visible_to: [judge_bot]
+collect_from: [judge_bot]
+```
+
+响应：
+```json
+{ "status": "ok", "error_msg": null }
+```
+
+#### 4.1.4 写入玩家状态（add）
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/add
+name: player_state
+scope_level: session
+content: 张三存活、李四存活、王五存活、赵六存活、钱七存活
+visible_to: []           ← 全员可见
+collect_from: [judge_bot]
+```
+
+响应：
+```json
+{ "status": "ok", "error_msg": null }
+```
+
+#### 4.1.5 更新玩家状态（update）
+
+一轮投票后张三出局：
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/update
+name: player_state
+scope_level: session
+content: 张三出局、李四存活、王五存活、赵六存活、钱七存活
+change_reason: 第一轮投票
+```
+
+系统按 `scope = game-room-7:sess-001` 查到 `(name=player_state, scope=game-room-7:sess-001)` 的活跃版本，
+supersede 后写入新版本（新 `id`，`context_id` 不变）。
+
+响应：
+```json
+{ "status": "ok", "error_msg": null }
+```
+
+#### 4.1.6 查询所有底牌（裁判逐一 get）
+
+裁判想查每个玩家的底牌，逐一调用 get：
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+name: player_word_1
+scope_levels: [session]
+```
+
+响应：
+```json
+{
+  "items": [
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": 1728374400000
+    }
+  ]
+}
+```
+
+同样 get `player_word_2` 到 `player_word_5`。裁判因在每条 `visible_to` 中，都能看到。
+
+### 4.2 玩家视角（以张三为例）
+
+#### 4.2.1 查看自己可见的 context
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/list
+scope_levels: ["group","session"]
+actor_id: 张三
+```
+
+响应：看到 `game_rule`（全员）+ `player_word_1`（visible_to 含张三）+ `player_state`（全员）。
+
+```json
+{
+  "contexts": [
+    {
+      "name": "game_rule",
+      "scope_level": "group",
+      "content": "【谁是卧底游戏规则】每轮每人描述自己的词语…",
+      "valid_from": 1728000000000,
+      "permission": "R"
+    },
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": 1728374400000,
+      "permission": "R"
+    },
+    {
+      "name": "player_state",
+      "scope_level": "session",
+      "content": "张三出局、李四存活、王五存活、赵六存活、钱七存活",
+      "valid_from": 1728375000000,
+      "permission": "R"
+    }
+  ]
+}
+```
+
+注意：`player_role` 只有裁判在 `visible_to` 中，张三看不到。`player_word_2` 等也看不到。
+
+#### 4.2.2 查自己的底牌
+
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+name: player_word_1
+scope_levels: [session]
+actor_id: 张三
+```
+
+响应：
+```json
+{
+  "items": [
+    {
+      "name": "player_word_1",
+      "scope_level": "session",
+      "content": "你的词语是：香蕉",
+      "valid_from": 1728374400000
+    }
+  ]
+}
+```
+
+如果张三尝试 get `player_role`：
+```
+POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+name: player_role
+scope_levels: [session]
+actor_id: 张三
+```
+
+响应：
+```json
+{ "items": [] }
+```
+
+——不在 `visible_to` 中，返回空。**信息隔离靠 name + visible_to 共同实现**：不存在的 name 查不到，存在的 name 但不在 visible_to 里同样返回空。
+
+---
+
+## 5. 设计决策记录
+
+1. **没有模板。** bot 调用 add 时直接传所有参数，不需要预先注册模板。
+2. **没有 user 粒度。** 信息隔离靠不同的 name + visible_to 实现（如 `player_word_1` vs `player_word_2`），scope_level 只用 group / session / round。
+3. **没有 tenant 粒度。** 老板明确"租户先不要"。
+4. **visible_to / collect_from 修改暂不放入 update，待 owner 权限模型确定后再加。** 当前 update 只改 content。
+5. **add 同 (name, scope) 冲突报错。** agent 想覆盖旧内容用 update，语义更清晰。
+6. **setsystemprompt 是 update-or-create 语义。** 首次创建，后续自动 supersede，方便 agent 写 system prompt 不用管是否存在。
+7. **检索是精确 name 匹配，不支持通配符/前缀。** agent 想批量查用 list + 自行过滤。
