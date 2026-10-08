@@ -725,6 +725,39 @@ describe('issue and optimization flow', () => {
     expect(repairApi.create.mock.calls[2][0].requestId).not.toBe(firstId)
   })
 
+  it.each([
+    { state: 'pending', action: 'no_action', label: '暂不处理', nextState: 'no_action' },
+    { state: 'no_action', action: 'restore', label: '恢复', nextState: 'pending' },
+  ])('closes stale details after $action removes the item from the $state filter', async ({ state, action, label, nextState }) => {
+    let changed = false
+    const item = { ...repairItem(), state, stateVersion: 3 }
+    const updated = { ...item, state: nextState, stateVersion: 4 }
+    repairApi.candidates.mockImplementation((_workflowId, query) => Promise.resolve(repairPage({
+      items: query.state === 'all' || query.state === (changed ? nextState : state) ? [changed ? updated : item] : [],
+    })))
+    repairApi.item.mockImplementation(() => Promise.resolve(changed ? updated : item))
+    repairApi.disposition.mockImplementation(() => {
+      changed = true
+      return Promise.resolve({ itemId: item.itemId, state: nextState, stateVersion: 4, disposition: null })
+    })
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '建议状态' }), state)
+    await userEvent.click(await screen.findByRole('button', { name: '建议详情' }))
+    await userEvent.click(await screen.findByRole('button', { name: `${label} 将超时阈值调整为 90 秒` }))
+    const dialog = screen.getByRole('dialog', { name: action === 'restore' ? '恢复待处理' : '暂不处理' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '处置原因' }), '重新评估处理范围')
+    await userEvent.click(within(dialog).getByRole('button', { name: '确认' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: '建议详情' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '建议状态' }), nextState)
+    await userEvent.click(await screen.findByRole('button', { name: '建议详情' }))
+    const reopened = screen.getByRole('dialog', { name: '问题详情' })
+    await waitFor(() => expect(within(reopened).getByText(/"stateVersion": 4/)).toBeInTheDocument())
+    expect(within(reopened).getByRole('button', { name: `${action === 'restore' ? '暂不处理' : '恢复'} 将超时阈值调整为 90 秒` })).toBeEnabled()
+  })
+
   it('reuses a disposition request ID only for an exact retry', async () => {
     repairApi.candidates.mockResolvedValueOnce(repairPage())
     repairApi.disposition.mockRejectedValueOnce(new Error('response lost'))

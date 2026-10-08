@@ -354,6 +354,16 @@ function DiagnosisPanel({
     try {
       await repairBatches.disposition(disposition.item.itemId, { ...input, requestId: nextRequestId(input) })
       if (disposition.action === 'no_action') setSelectedRepairIds(current => current.filter(id => id !== disposition.item.itemId))
+      closeDetail()
+      setSelectionItems(current => {
+        const next = { ...current }
+        delete next[disposition.item.itemId]
+        return next
+      })
+      // State transitions keep the source digest; discard stale details and in-flight reads explicitly.
+      detailEpoch.current += 1
+      detailRequests.current.clear()
+      setRepairDetails({}); setRepairDetailLoading({}); setRepairDetailErrors({})
       setDisposition(null); setDispositionReason(''); resetRequestId(); setRepairRefresh(value => value + 1)
     } catch (error) { setRepairActionError(error instanceof Error ? error.message : String(error)) }
     finally { setRepairBusy(false) }
