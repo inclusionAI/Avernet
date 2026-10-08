@@ -17649,10 +17649,12 @@
           "enabled": true,
           "gmt_create": "2026-08-01T02:00:00+00:00",
           "gmt_modified": "2026-08-10T02:00:00+00:00",
+          "model": "qwen-max",
           "name": "morning-brief",
           "owner_id": "209800",
           "routine_id": "5f0f2c9a-b1c3-4f6e-9a0d-2e7c8b1d4a55",
           "runtime_stage": "draft",
+          "timeout_secs": 3600,
           "timezone": "Asia/Shanghai",
           "trigger": {
             "cron": "0 9 * * 1-5",
@@ -17697,6 +17699,18 @@
             "title": "Gmt Modified",
             "type": "string"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model the firing sessions run on; null when the routine has no override or the engine reports none — the bot's default model then applies.",
+            "title": "Model"
+          },
           "name": {
             "description": "Human-readable routine name.",
             "title": "Name",
@@ -17730,6 +17744,18 @@
             ],
             "description": "Which runtime holds this definition — 'draft', 'verify' or 'online' for a service bot, null otherwise. The same definition can exist in several runtimes; on a cross-bot list treat the pair (routine_id, runtime_stage) as the distinct row.",
             "title": "Runtime Stage"
+          },
+          "timeout_secs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long a single firing may run (seconds); null when the engine reports none.",
+            "title": "Timeout Secs"
           },
           "timezone": {
             "anyOf": [
@@ -17767,7 +17793,9 @@
           "bot_id": "20260813_a7k2m9p1",
           "command": "Summarize yesterday's tickets and post the brief.",
           "enabled": true,
+          "model": "qwen-max",
           "name": "morning-brief",
+          "timeout_secs": 3600,
           "timezone": "Asia/Shanghai",
           "trigger": {
             "cron": "0 9 * * 1-5",
@@ -17791,10 +17819,29 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model override for the fresh sessions this routine starts — the firing sessions run on this model instead of the bot's default. Omit or let it be null to keep using the bot's default model.",
+            "title": "Model"
+          },
           "name": {
             "description": "Human-readable routine name.",
             "title": "Name",
             "type": "string"
+          },
+          "timeout_secs": {
+            "default": 86400,
+            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; defaults to 86400 (a full day).",
+            "minimum": 1,
+            "title": "Timeout Secs",
+            "type": "integer"
           },
           "timezone": {
             "anyOf": [
@@ -17885,7 +17932,9 @@
         "example": {
           "command": "Summarize yesterday's tickets and post the brief.",
           "enabled": true,
+          "model": "qwen-max",
           "name": "morning-brief",
+          "timeout_secs": 3600,
           "timezone": "Asia/Shanghai",
           "trigger": {
             "cron": "0 9 * * 1-5",
@@ -17904,10 +17953,29 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model override for the fresh sessions this routine starts — the firing sessions run on this model instead of the bot's default. Omit or let it be null to keep using the bot's default model.",
+            "title": "Model"
+          },
           "name": {
             "description": "Human-readable routine name.",
             "title": "Name",
             "type": "string"
+          },
+          "timeout_secs": {
+            "default": 86400,
+            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; defaults to 86400 (a full day).",
+            "minimum": 1,
+            "title": "Timeout Secs",
+            "type": "integer"
           },
           "timezone": {
             "anyOf": [
@@ -17937,6 +18005,8 @@
       "RoutineUpdate": {
         "description": "Partial update of a routine. Omitted fields are left unchanged.",
         "example": {
+          "model": "qwen-max",
+          "timeout_secs": 1800,
           "timezone": "Asia/Shanghai",
           "trigger": {
             "cron": "30 8 * * 1-5",
@@ -17968,6 +18038,18 @@
             "description": "Arm (true) or disarm (false) the schedule; omit to keep.",
             "title": "Enabled"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New model override; omit to keep. Clearing a previously set override means sending a new, different model — this partial update cannot express 'back to the bot's default'.",
+            "title": "Model"
+          },
           "name": {
             "anyOf": [
               {
@@ -17979,6 +18061,19 @@
             ],
             "description": "New name; omit to keep.",
             "title": "Name"
+          },
+          "timeout_secs": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New per-firing timeout (seconds); omit to keep.",
+            "title": "Timeout Secs"
           },
           "timezone": {
             "anyOf": [
