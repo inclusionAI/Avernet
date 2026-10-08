@@ -1,4 +1,4 @@
 interface:
   display_name: "ClawInsight 验收分析"
   short_description: "按同来源修复后执行证据复核治理效果，解释验收结论和数据缺口"
-  default_prompt: "Use $clawweb-verification to assess the supplied post-repair evidence and explain the program's verification plan without inventing sessions, bypassing state/version checks, or treating no traffic as proof of repair."
+  default_prompt: "Use $clawweb-verification to assess the supplied post-repair evidence and explain the program's verification plan without inventing sessions, bypassing state/version checks, or treating failed/incomplete reads as an error-free observation period."

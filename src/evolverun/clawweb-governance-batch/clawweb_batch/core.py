@@ -247,16 +247,24 @@ def validate_request(request: dict) -> None:
     elif request["kind"] == "verify":
         if request["path"] not in {API_PREFIX + "/verification-results", API_PREFIX + "/verification-results/open"}:
             raise ValueError("invalid verification endpoint")
-        if set(payload) - {"improvementId", "version", "outcome", "newSessionCount", "lastRecurrenceAt"}:
-            raise ValueError("verification cannot change state/action type or allow zero-session closure")
+        if set(payload) - {"improvementId", "version", "outcome", "newSessionCount", "lastRecurrenceAt", "allowZeroSession"}:
+            raise ValueError("verification cannot change state/action type")
         for k in ("improvementId", "version"):
             if type(payload[k]) is not int or payload[k] < 1:
                 raise ValueError(f"invalid {k}")
         n = payload["newSessionCount"]
         if type(n) is not int or n < 0 or payload["outcome"] not in {"DISAPPEARED", "STILL_PRESENT", "INSUFFICIENT_DATA"}:
             raise ValueError("invalid verification outcome/count")
-        if payload["outcome"] != "INSUFFICIENT_DATA" and n < 1:
-            raise ValueError("no-traffic is not proof of repair or recurrence")
+        if payload["outcome"] == "STILL_PRESENT" and n < 1:
+            raise ValueError("recurrence requires an actual session")
+        if "allowZeroSession" in payload and not (payload["allowZeroSession"] is True
+                and request["path"] == API_PREFIX + "/verification-results"
+                and payload["outcome"] == "DISAPPEARED" and n == 0):
+            raise ValueError("zero-session confirmation is only valid for standard disappearance")
+        if (payload["outcome"] == "DISAPPEARED" and n == 0
+                and request["path"] == API_PREFIX + "/verification-results"
+                and payload.get("allowZeroSession") is not True):
+            raise ValueError("standard zero-session closure requires explicit confirmation")
         if payload["outcome"] == "STILL_PRESENT" and not payload.get("lastRecurrenceAt"):
             raise ValueError("recurrence needs timestamp")
     else:

@@ -183,7 +183,7 @@ class OpenClawAnalysis:
         # Keep full evidence in pipeline artifacts. Only relevant tasks enter explanation batches.
         ids = set(plan.get('checked_task_ids',[]))
         selected = [t for t in evidence.get('tasks',[]) if t.get('id') in ids]
-        header = {k:evidence.get(k) for k in ('schema','improvementId','version','boundary','legacy_root','coverage_complete')}
+        header = {k:evidence.get(k) for k in ('schema','improvementId','version','boundary','observation_start','checked_scope','legacy_root','coverage_complete')}
         header['full_task_count'] = len(evidence.get('tasks',[]))
         header['selected_task_count'] = len(selected)
         header['full_evidence_sha256'] = hashlib.sha256(json.dumps(evidence,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
@@ -203,7 +203,7 @@ class OpenClawAnalysis:
         for index,tasks in enumerate(batches,1):
             print(f'[verification_batch] {index}/{len(batches)} tasks={len(tasks)}',flush=True)
             subset={**header,'tasks':tasks,'batch_index':index,'batch_count':len(batches),
-                    'projection_notice':'Only mechanically matched tasks are shown; full history stays in evidence artifact.'}
+                    'projection_notice':'Only checked tasks in the declared observation window are shown; full collected evidence stays in the artifact.'}
             explanations.append(self.analyze('clawweb-verification',{'evidence':subset,
                 'plan':{'payload':plan['payload'],'reason':plan['reason']}},instruction))
         return {'improvementId':plan['payload']['improvementId'],'outcome':plan['payload']['outcome'],

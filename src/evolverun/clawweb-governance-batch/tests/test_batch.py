@@ -202,8 +202,13 @@ class VerificationTests(unittest.TestCase):
         p = self.plan(self.tasks)["payload"]
         self.assertEqual(p["outcome"], "STILL_PRESENT"); self.assertEqual(p["newSessionCount"], 2)
 
-    def test_no_traffic_never_closes(self):
-        self.assertEqual(self.plan([])["payload"]["outcome"], "INSUFFICIENT_DATA")
+    def test_no_traffic_closes_after_complete_observation(self):
+        payload = self.plan([])["payload"]
+        self.assertEqual(payload["outcome"], "DISAPPEARED")
+        self.assertEqual(payload["newSessionCount"], 0)
+        self.assertIs(payload["allowZeroSession"], True)
+        self.assertEqual(self.plan([], complete=False)["payload"]["outcome"], "INSUFFICIENT_DATA")
+        self.assertEqual(self.plan([], scope=False)["payload"]["outcome"], "INSUFFICIENT_DATA")
 
     def test_complete_scoped_success_and_observation_can_pass(self):
         tasks, _ = extract_tasks([session("fixed", code="SUCCESS", complete=1)], 100000)
@@ -219,6 +224,42 @@ class VerificationTests(unittest.TestCase):
         self.item["userGuidance"] = "legacy prose"
         p = self.plan(self.tasks)["payload"]
         self.assertEqual(p["outcome"], "INSUFFICIENT_DATA"); self.assertEqual(p["newSessionCount"], 0)
+
+    def test_legacy_no_metadata_can_close_on_complete_error_free_observation(self):
+        self.item["userGuidance"] = "old human-written evidence"
+        self.item["rootCauseSummary"] = "report query failed"
+        self.assertEqual(self.plan([])["payload"]["outcome"], "DISAPPEARED")
+        tasks, _ = extract_tasks([session("fixed", code="SUCCESS", complete=1)], 100000)
+        result = self.plan(tasks)
+        self.assertEqual(result["payload"]["outcome"], "DISAPPEARED")
+        self.assertEqual(result["payload"]["newSessionCount"], 0)  # no claimed item-specific match
+        self.assertEqual(result["checked_task_ids"], ["fixed:0"])
+
+    def test_failure_then_later_same_operation_success_can_pass(self):
+        tasks, _ = extract_tasks([session("failed", day="20260927"),
+                                 session("fixed", code="SUCCESS", complete=1)], 100000)
+        self.assertEqual(self.plan(tasks)["payload"]["outcome"], "DISAPPEARED")
+        tasks.reverse()
+        self.assertEqual(self.plan(tasks)["payload"]["outcome"], "DISAPPEARED")
+
+    def test_failure_after_success_stays_open(self):
+        tasks, _ = extract_tasks([session("fixed", day="20260927", code="SUCCESS", complete=1),
+                                 session("failed")], 100000)
+        self.assertEqual(self.plan(tasks)["payload"]["outcome"], "STILL_PRESENT")
+
+    def test_legacy_errors_not_fabricated_as_original_recurrence(self):
+        self.item["userGuidance"] = "old evidence"
+        self.assertEqual(self.plan(self.tasks)["payload"]["outcome"], "INSUFFICIENT_DATA")
+
+    def test_zero_traffic_before_observation_is_not_closed(self):
+        self.item["handledAt"] = NOW.isoformat()
+        self.assertEqual(self.plan([])["payload"]["outcome"], "INSUFFICIENT_DATA")
+
+    def test_open_zero_session_uses_open_contract_without_override(self):
+        self.item.update(status="ACTIVE", handledAt=None, gmtModified="2026-09-20T00:00:00Z")
+        result = plan_verification(self.item, "open", [], complete=True, now=NOW, current_scope_verified=True)
+        self.assertEqual(result["payload"]["outcome"], "DISAPPEARED")
+        self.assertNotIn("allowZeroSession", result["payload"])
 
     def test_server_guidance_wrapper_preserves_metadata(self):
         self.item["userGuidance"] = "根因：report fails\n补充说明：" + self.item["userGuidance"]
@@ -263,6 +304,8 @@ class FakeAnalyst:
 
 
 class FakeNAS:
+    def sources(self, *args):
+        return {"sources": [], "complete": False, "warnings": ["current source unavailable"]}
     def available(self): return [{"available": True}]
     def inspect(self, tasks, owner, bot): return []
     def scope_root(self, *args): return None

@@ -30,6 +30,45 @@ class NASReader:
                 return root
         return None
 
+    def sources(self, owner: str, bot: str) -> dict:
+        """Enumerate exact Owner+Bot runtime/agent directories, including idle bots.
+
+        Missing roots, symlinks and unreadable directories make coverage incomplete.
+        A missing/disabled Cron job is not itself an error; its runtime is still read.
+        """
+        import re
+        if any(not re.fullmatch(r"[\w.-]+", value) for value in (owner, bot)):
+            raise ValueError("invalid NAS identity")
+        sources, warnings = [], []
+        prefixes = (f"prod_staff_{owner}_openclaw_{bot}", f"prod_staff_{owner}_claude_code_{bot}")
+        for base in self.roots:
+            try:
+                for index, runtime in enumerate(base.iterdir()):
+                    if index >= 100000:
+                        warnings.append("runtime directory enumeration exceeds bound")
+                        break
+                    if not any(runtime.name == p or runtime.name.startswith(p + "_DEVICE-") for p in prefixes):
+                        continue
+                    if runtime.is_symlink() or not runtime.is_dir():
+                        warnings.append("nonregular runtime directory")
+                        continue
+                    agents = runtime / ".openclaw" / "agents"
+                    if not agents.resolve().is_relative_to(runtime.resolve()):
+                        warnings.append("agent directory escapes runtime")
+                        continue
+                    for agent in agents.iterdir():
+                        if agent.is_symlink():
+                            warnings.append("symlinked agent directory")
+                        elif agent.is_dir() and (agent / "sessions").is_dir():
+                            sources.append(str(agent))
+                        else:
+                            warnings.append("agent session directory unavailable")
+            except OSError:
+                warnings.append("runtime or agent directory unavailable")
+        if not sources:
+            warnings.append("no current Owner+Bot session sources")
+        return {"sources": sorted(set(sources)), "complete": not warnings, "warnings": warnings}
+
     def inspect(self, tasks: list[dict], owner: str, bot: str) -> list[dict]:
         result, seen = [], set()
         for task in tasks:

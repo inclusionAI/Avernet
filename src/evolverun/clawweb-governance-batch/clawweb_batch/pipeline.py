@@ -140,35 +140,50 @@ def run(cfg: Config, source: DataSource, center: EffectCenter, analyst: Analyst,
                 item = dict(listed)  # Queue is the authorized contract; protected action-detail is not required.
                 meta, boundary = metadata(item), item.get("handledAt") if lane == "standard" else item.get("gmtModified")
                 tasks, complete, scope_verified, warnings = [], False, False, []
+                observation_start = None
                 owner, bot = str(item["ownerUserId"]), str(item["botId"])
                 if boundary:
-                    # Even legacy items receive a bounded raw-log review. Without a trustworthy
-                    # root binding those findings are audit evidence, never an auto-close decision.
+                    # Check a full recent observation window, not an unbounded lifetime.
+                    # Old items need no machine signature to receive the same current-log read.
                     boundary_day = instant(str(boundary)).strftime("%Y%m%d")
-                    since = max(boundary_day, start) if not meta else boundary_day
-                    if since <= end and (datetime.strptime(end, "%Y%m%d") - datetime.strptime(since, "%Y%m%d")).days <= 30:
+                    days = 2 if lane == "standard" else 7
+                    observation_start = max(instant(str(boundary)), now - timedelta(days=days)).isoformat()
+                    since = max(boundary_day, (now - timedelta(days=days)).strftime("%Y%m%d"))
+                    if since <= end:
                         rows = source.sessions(owner, bot, since, end, cfg.verification_sessions)
                         tasks, warnings = extract_tasks(rows[:cfg.verification_sessions], cfg.max_message_bytes)
                         if any(t["user_id"] != owner or t["bot_id"] != bot for t in tasks):
                             raise ValueError("verification evidence crosses owner/bot scope")
                         covered = not warnings and len(rows) <= cfg.verification_sessions
-                        if meta:
-                            sig = meta["signature"]
-                            scope_verified = nas.scope_root(sig["source"], owner, bot) is not None
-                            day_end = datetime.strptime(end, "%Y%m%d").strftime("%Y-%m-%dT23:59:59+08:00")
-                            gap_start = (instant(day_end) if end < today else instant(now.strftime("%Y-%m-%dT00:00:00+08:00"))).isoformat()
-                            gap = nas.scan_since(sig["source"], owner, bot, gap_start, cfg.max_message_bytes)
+                        scopes = ({"sources": [meta["signature"]["source"]], "complete": True, "warnings": []}
+                                  if meta else nas.sources(owner, bot))
+                        warnings += scopes["warnings"]
+                        scope_verified = bool(scopes["sources"]) and scopes["complete"]
+                        complete = covered and scope_verified and not (set(day_range(since, end)) - set(watermark["paired_days"]))
+                        day_end = datetime.strptime(end, "%Y%m%d").strftime("%Y-%m-%dT23:59:59+08:00")
+                        gap_start = (instant(day_end) if end < today else instant(now.strftime("%Y-%m-%dT00:00:00+08:00"))).isoformat()
+                        if not meta:
+                            # Legacy absence decisions cover ALL current raw logs in the
+                            # observation window, not only sampled ODPS rows plus today's gap.
+                            gap_start = max(instant(str(boundary)), now - timedelta(days=days)).isoformat()
+                        for source_path in scopes["sources"]:
+                            scope_verified = scope_verified and nas.scope_root(source_path, owner, bot) is not None
+                            gap = nas.scan_since(source_path, owner, bot, gap_start, cfg.max_message_bytes)
+                            if any(t["user_id"] != owner or t["bot_id"] != bot for t in gap["tasks"]):
+                                raise ValueError("current verification evidence crosses owner/bot scope")
                             latest = {t["session_id"]: max(instant(x["end_time"]) for x in tasks if x["session_id"] == t["session_id"]) for t in tasks}
                             for t in gap["tasks"]:
                                 if t["session_id"] not in latest or instant(t["end_time"]) > latest[t["session_id"]]:
                                     tasks.append(t)
                             warnings += gap["warnings"]
-                            complete = covered and gap["complete"] and not (set(day_range(since, end)) - set(watermark["paired_days"]))
+                            complete = complete and gap["complete"] and not gap["warnings"]
                 evidence_file = f"verification-evidence/{lane}-{item['improvementId']}.json"
                 write_json(output / evidence_file, {"schema": 1, "improvementId": item["improvementId"],
                     "version": item["version"], "title": redact(str(item.get("title", ""))),
                     "root_summary": redact(str(item.get("rootCauseSummary", ""))), "boundary": boundary,
-                    "legacy_root": meta is None, "coverage_complete": complete, "warnings": warnings,
+                    "legacy_root": meta is None, "observation_start": observation_start,
+                    "checked_scope": "matched_operation" if meta else "owner_bot",
+                    "coverage_complete": complete, "warnings": warnings,
                     "tasks": tasks})
                 request = plan_verification(item, lane, tasks, complete=complete, now=now,
                                             current_scope_verified=scope_verified)

@@ -35,6 +35,10 @@ class Analyst(Protocol):
 class EvidenceStore(Protocol):
     def available(self) -> list[dict]: ...
 
+    def sources(self, owner: str, bot: str) -> dict:
+        """Enumerate all exact Owner+Bot sources; disclose incomplete coverage."""
+        ...
+
     def inspect(self, tasks: list[dict], owner: str, bot: str) -> list[dict]: ...
 
     def scope_root(self, source: str, owner: str, bot: str):

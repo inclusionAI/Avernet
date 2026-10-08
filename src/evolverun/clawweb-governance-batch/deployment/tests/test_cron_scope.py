@@ -41,7 +41,7 @@ class EvidenceBudgetTests(unittest.TestCase):
     def test_large_insufficient_evidence_never_calls_model(self):
         with tempfile.TemporaryDirectory() as tmp:
             a=self.analyst(tmp);a.analyze=Mock()
-            result=a.explain({'tasks':[{'text':'x'*300000}],'warnings':[]},{'payload':{'improvementId':32,'outcome':'INSUFFICIENT_DATA'},'reason':'legacy item has no verified signature'})
+            result=a.explain({'tasks':[{'text':'x'*300000}],'warnings':[]},{'payload':{'improvementId':32,'outcome':'INSUFFICIENT_DATA'},'reason':'incomplete history or current source scope unavailable'})
             a.analyze.assert_not_called();self.assertEqual(result['outcome'],'INSUFFICIENT_DATA')
     def test_related_tasks_batch_and_unrelated_excluded(self):
         with tempfile.TemporaryDirectory() as tmp:

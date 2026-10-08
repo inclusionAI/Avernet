@@ -89,7 +89,12 @@ any implicit auto-execution response fails closed.
 - Rejected same-root items are suppressed for the configured cooldown (default 15 days), require evidence newer than the rejection, and fail closed when the rejection timestamp is unavailable.
 - The analysis cache suppresses repeat model analysis when the data date, evidence, current source configuration and scoped history are unchanged.
 - Creation always uses `ASSIGN_OWNER` to preserve the manual-admin path.
-- Verification matches only the versioned root's same operation/source after the observation boundary.
+- Verification does not require versioned root metadata. Existing metadata can narrow operation/source matching;
+  legacy items receive complete Owner+Bot observation, with uncertain remaining errors kept open.
+- Complete error-free observation permits zero-session closure (e.g. a disabled Cron job). Read failures never do.
+- A later successful comparable operation can supersede earlier failures; later recurrence keeps the item open.
+- Existing server minimum waits remain 2 days (standard) / 7 days (open). Standard zero-session requests explicitly
+  confirm `allowZeroSession=true`; no forced status or action override is sent.
 - `INSUFFICIENT_DATA` is recorded locally but not posted, so the observation window is not restarted every run.
 
 ## Artifacts and retry
