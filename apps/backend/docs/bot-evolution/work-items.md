@@ -9,29 +9,14 @@
 
 ## Dependency graph
 
-```text
-P0  RSI-01 ADRs ─┬─► RSI-02 Genome schema ─► RSI-03 Genome Registry (P1) ─► RSI-04 Manifest v2 compat (P1)
-                 │                    │
-                 │                    └──────────────► RSI-05 Engine memory projection (P5)
-                 ├─► RSI-06 Plugin protocols + Job Protocol ─┬─► RSI-08 Evolution service skeleton (P2)
-                 └─► RSI-07 Evolution API + CLI contract ────┘            │
-                                                                          ├─► RSI-09 Strategy SDK + conformance kit (P2)
-                                                                          ├─► RSI-10 Experience Store + session export v2 (P2/P3)
-                                                                          ├─► RSI-11 Evaluation Service (P3/P4)
-                                                                          └─► RSI-12 Gate, review queue, promotion (P4)
-RSI-09 + RSI-10 + RSI-11 + RSI-12 ─► RSI-13 ClawEvolve onboarding (P3, strangler steps 1-3)
-RSI-01(DR-3) + RSI-07 ─► RSI-14 Bot principal scopes + `avn` bot skill (P5)
-RSI-05 + RSI-13 + RSI-14 ─► RSI-15 Memory consolidation strategy (P5)
-RSI-12 ─► RSI-16 Rollout: shadow/canary/auto-rollback (P4)
-RSI-13 ─► RSI-17 Archive selectors (Pareto / MAP-Elites / clade) (P6)
-RSI-12 ─► RSI-18 Cross-bot skill transfer via Skill Center (P6)
-RSI-10 ─► RSI-19 Training-data export (P6)
-RSI-08 ─► RSI-20 UI: runs, review queue, lineage (P4, frontend-nextgen or AgentEvolve interim)
-```
+![Work item dependency graph](images/work-items-deps.svg)
 
 Critical path to a first useful outcome: **RSI-01 → RSI-02 → RSI-03 → RSI-04**
 (versioned bots with real rollback). Critical path to "ClawEvolve on the
-platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
+platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13. Critical path to
+true recursion (level 3): RSI-21 recorded from the start, then RSI-23 → RSI-24.
+RSI-11 → RSI-22 gives service bots an automated verify gate independently of
+the rest.
 
 ---
 
@@ -68,7 +53,7 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 - **Module**: evolution (new), arch
 - **Goal**: Define each plugin kind's Protocol and JSON Schema I/O
   (ExperienceSource, Trigger, Selector, Analyzer, SuiteBuilder, Proposer,
-  Evaluator, AcceptancePolicy, Curator), lifecycle and failure semantics (R11),
+  Evaluator, AcceptancePolicy, Curator, MetaProposer), lifecycle and failure semantics (R11),
   isolation/capability declarations (R13), and the Job Protocol wire contract
   (claim/lease/fencing/heartbeat/complete/fail, artifact upload).
 - **Read first**: [strategy-sdk.md](strategy-sdk.md); ClawEvolve
@@ -149,17 +134,22 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 
 ## P3/P4 — Evaluation, governance, default strategy
 
-### RSI-11 Evaluation Service
-- **Module**: evolution, backend (`eval_env`)
-- **Goal**: Suites with platform-assigned splits (train/validation/holdout/
-  regression/safety), visibility rules per caller role, regression growth from
-  production failures, grader interface returning score + critique, ClawBench
-  as `platform/clawbench`, eval-bot materialisation through `eval_env`, paired
-  parent/candidate evaluation, optional budget-matched baseline.
-- **Read first**: [design.md C5](design.md#c5-evaluation-service);
-  [governance.md §2, §4](governance.md#2-the-gate); `clawbench-base`.
-- **Done when**: a candidate is evaluated in a sandbox eval bot with paired
-  baseline and per-split reports; proposer job inputs provably exclude holdout.
+### RSI-11 Verification Service (bot verification)
+- **Module**: evolution, backend (`eval_publish`, `eval_env`)
+- **Goal**: Implement [verification.md §3–§4](verification.md#3-verification-model):
+  suite registry seeded from the ClawWeb Bench model and ClawBench case
+  format; platform-assigned splits incl. sealed holdout and must-pass
+  regression/safety; `platform/clawbench` grader extracted from
+  `lib_grading`; local-sandbox and deployed-sandbox (eval env) executors;
+  paired comparator with repeated seeds and confidence intervals; judge
+  ensembles; verdict policy with ClawEvolve's `full_opt_gate` /
+  `candidate_opt_gate` made blocking; verification profiles.
+- **Read first**: [verification.md](verification.md) (§2 lists the existing
+  code to reuse); [governance.md §2, §4](governance.md#2-the-gate).
+- **Done when**: a candidate is verified in a sandbox with paired baseline and
+  per-split verdict; proposer job inputs provably exclude holdout,
+  regression, and safety; the same case files run unchanged under ClawBench
+  and the platform grader.
 
 ### RSI-12 Gate, review queue, promotion
 - **Module**: backend (gate floor, promotion), evolution (policy plugins)
@@ -187,6 +177,46 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 - **Goal**: `canary` ref for multi-instance bots; online metric comparison;
   optional auto-rollback; mapping to service-bot verify stage.
 - **Depends on**: RSI-12.
+
+### RSI-21 Experiment Ledger (H)
+- **Module**: evolution
+- **Goal**: Record every level-2 experiment with the schema in
+  [recursion.md §3](recursion.md#3-experiment-ledger-h) (including rejected
+  candidates and later online outcomes); derived mechanism metrics; filesystem
+  export for proposers; verifier-version tagging.
+- **Depends on**: RSI-08. Start recording as early as possible — level 3 is
+  only as good as the history it learns from.
+
+### RSI-22 Verification gate on service-bot publish and Quality Task
+- **Module**: backend
+- **Goal**: Optional automated verification gate on the service-bot
+  `VALIDATING → ONLINE_PUB` transition, using the Verification Service; point
+  the Quality Task at an in-repo grader plugin (alongside the external MASA
+  one) so the open-source build has a working bot-quality check.
+- **Depends on**: RSI-11.
+- **Done when**: a service bot whose verify-stage candidate fails a must-pass
+  case cannot be published without an explicit override, and the override is
+  audited.
+
+### RSI-23 Mechanism verification and offline replay
+- **Module**: evolution
+- **Goal**: (a) Offline replay tool over H for acceptance-policy changes,
+  generalising `calibrate_evolution_gates.py` / `replay_candidate_gate.py`;
+  (b) improvement-problem benchmark frozen from H and the mechanism
+  verification protocol of [recursion.md §5](recursion.md#5-mechanism-verification),
+  used first for **human-authored** strategy changes.
+- **Depends on**: RSI-11, RSI-13, RSI-21.
+- **Done when**: a change to the ClawEvolve tune prompt is accepted or
+  rejected by comparing verified improvement yield against the current
+  mechanism on held-out problems.
+
+### RSI-24 Automated meta-proposer
+- **Module**: evolution
+- **Goal**: A meta-strategy that reads H and proposes mechanism patches
+  (thresholds, prompts, operators, step order), adopted only through RSI-23
+  and human approval; bounds of [recursion.md §6](recursion.md#6-bounds-what-recursion-may-not-touch)
+  enforced by static checks.
+- **Depends on**: RSI-23.
 
 ### RSI-20 UI for runs, review queue, lineage
 - **Module**: frontend-nextgen (or AgentEvolve interim)
@@ -242,7 +272,7 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 | --- | --- | --- |
 | D-1 | Control-plane module placement | design.md §5 → RSI-01 |
 | D-2 | Long-term host of default strategy runners (TS vs Python) | default-strategy.md §6 → RSI-13 |
-| D-3 | ClawBench as platform default Evaluator | default-strategy.md §6 → RSI-11 |
+| D-3 | ClawBench as platform default grader | default-strategy.md §6 → RSI-11 |
 | D-4 | Workflow YAML as gene or separate artifact | default-strategy.md §6 |
 | D-5 | ClawMind analyzer contract; dormant analyzers wire-or-remove | default-strategy.md §6 |
 | D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | genome.md; RSI-03 |

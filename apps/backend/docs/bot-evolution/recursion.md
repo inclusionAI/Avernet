@@ -15,17 +15,7 @@ before it.
 | **2. Single system improvement** | S1 + task feedback → mechanism **M1** proposes change → candidate S′ runs in environment → **verify & accept** → S2 | The **system** (bot genome). Later tasks use S2 | **Bot verification** (S′ vs S1) | Strategy runs over Bot Genome — [design.md](design.md) |
 | **3. Recursive self-improvement** | experiment records **H** → improve M1 → **verify & adopt** M2 → M2 runs the following level-2 rounds | The **improvement mechanism** itself. M2 runs the next round | **Mechanism verification** (M2 vs M1) | This document |
 
-```text
-          ┌──────────────── Experiment Ledger H ◄──────────── experiment results ───────┐
-          │  every level-2 experiment: S, M, evidence, S′, verdicts, cost, outcome       │
-          ▼                                                                               │
-  Meta-proposer improves M1 ──► candidate M′ ──► Mechanism verification ──► adopt M2 ─┐  │
-                                                  (M′ vs M1 on held-out            │  │
-                                                   improvement problems)           │  │
-                                                                                   ▼  │
-   Level 2:  S1 ──feedback──► Mechanism (M1, later M2) ──propose──► S′ ──► Bot verification ──► S2
-                                                                    ⇅ env          (accept / reject)
-```
+![Level 3: improving the improvement mechanism](images/recursion.svg)
 
 No level guarantees improvement. Every change is verified, and a rejected
 candidate is a normal, recorded outcome. That outcome is evidence for H.
@@ -68,7 +58,7 @@ tenants follow or pin through their evolution policy.
 ## 3. Experiment Ledger (H)
 
 H is the **evidence base for level 3** and the selection pool for level 2.
-It extends the Archive (C7 in [design.md](design.md#c7-archive--lineage)) into
+It extends the Archive (C7 in [design.md](design.md#c7-experiment-ledger-h-and-archive)) into
 an explicit, queryable record of **improvement experiments**.
 
 An experiment is one level-2 attempt:

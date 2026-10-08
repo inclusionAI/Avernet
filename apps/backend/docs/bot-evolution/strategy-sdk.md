@@ -32,9 +32,10 @@
 | **Analyzer** | episodes, feedback, inbox items | `Findings` (`plan-source/v2`-compatible) | Optional |
 | **SuiteBuilder** | findings | candidate eval cases (platform assigns splits) | Optional |
 | **Proposer** | parent genome (read-only sandbox), findings, train-split failures with critiques, history | `GenomePatch[]` + rationale | **Required** |
-| **Evaluator** | genome revision, case set, budget | per-case scores + critiques + traces | Optional (default: platform ClawBench evaluator) |
+| **Evaluator** (Executor + Grader) | genome revision, case set, budget | per-case scores + critiques + traces | **Verifier-owned**: strategies select a verification profile and may contribute train-split cases, but graders and executors are registered and versioned by the verifier, not by strategies ([verification.md §3](verification.md#3-verification-model)) |
 | **AcceptancePolicy** | parent vs candidate eval results | accept / reject / continue + reason | Optional (default: no-regression + improvement on validation) |
 | **Curator** | whole genome + usage stats | `GenomePatch` (dedupe, retire, merge) | Optional; is a Proposer specialisation run on schedule |
+| **MetaProposer** | Experiment Ledger H (export), parent mechanism | mechanism patch | Level 3 only; may never target its own family or the verifier ([recursion.md](recursion.md)) |
 
 What is deliberately **not** a plugin: recording revisions, static checks,
 the platform floor of the gate, promotion, rollout, apply. These are
@@ -51,6 +52,7 @@ platform code (DR-2).
 | Evaluator | `clawbench-base/lib_grading.py` | DSPy metrics, Promptfoo, LangSmith evaluators |
 | AcceptancePolicy | `action_accept` (test > baseline), env-tunable gates, `calibrate_evolution_gates.py` | GEPA Pareto, DGM archive admission |
 | Selector | implicit latest | DGM, HGM clade-metaproductivity, MAP-Elites |
+| MetaProposer | hand-run: `calibrate_evolution_gates.py`, mutation operator library curation | Meta-Harness, ADAS, Promptbreeder (mutation prompts evolve), DGM self-modification |
 | Trigger | manual, failed-run observer, Insight monitoring | Hermes curator idle trigger, OpenClaw dreaming cron |
 
 ## 4. Strategy manifest

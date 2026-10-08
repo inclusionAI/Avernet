@@ -17,8 +17,12 @@ strategy's acceptance policy passes, and the patch's risk tier is approved
 (auto for low tiers under owner policy, human review otherwise; tools, script,
 and policy changes are locked by default and never auto-promoted).
 
-Evaluation suites, graders, and their configuration live outside the genome
-and are read-only to strategies and bots. Proposer inputs never include
+Verification is likewise platform-owned. Suites, graders, verification
+profiles, and protocols live outside the genome. They are read-only to
+strategies, bots, and the level-3 meta-loop, and change only through
+human-reviewed changes. A new improvement mechanism (strategy version)
+proposed by the meta-loop is adopted only after mechanism verification and
+human approval. Proposer inputs never include
 holdout, regression, or safety cases.
 
 Design: [`../governance.md`](../governance.md).

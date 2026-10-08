@@ -143,7 +143,18 @@ All under `apps/evolverun/`; nothing equivalent elsewhere in the repo.
 - **Evolvetrace**: observability; evolution tab mocked
   (`src/components/workflow-workspace/evolution-mock.ts`).
 
-### 2.3 Architecture constraints that shape this design
+### 2.3 Existing bot-quality evaluation code
+
+Full inventory, reuse plan, and gaps in
+[verification.md §2](verification.md#2-what-already-exists-in-the-codebase).
+Summary: ClawBench (case format, automated / rubric / hybrid graders) plus
+the ClawWeb Bench store is the only working bot grader, and it is OpenClaw-local.
+The backend eval env + Quality Task deploys isolated service-bot copies but
+delegates grading to an external service. The service-bot VERIFY stage runs
+no automated checks. ClawEvolve's regression, replication, and calibration
+gates exist but are advisory or unreachable from the canonical round.
+
+### 2.4 Architecture constraints that shape this design
 
 - `docs/arch/arch.rules.md`: R1 contracts; R3 Service vs Plugin APIs; R5/R14
   composition-root selection by config; R7 transport-agnostic core; R11

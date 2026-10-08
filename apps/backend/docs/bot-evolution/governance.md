@@ -17,7 +17,9 @@ platform trustworthy regardless of which strategy runs.
 | Propose changes | Strategies (Proposer), subject bots (inbox) | — |
 | Define what "better" means for a run | Strategy (AcceptancePolicy) | — |
 | Define what must never get worse | **Platform + owner** (regression, safety, holdout suites; platform floor) | Strategies, bots |
-| Run evaluations | **Platform** (Evaluation Service; strategy-supplied Evaluators run inside it under platform control) | Proposers |
+| Run evaluations | **Platform** (Verification Service, with verifier-owned executors and graders) | Proposers, strategies |
+| Change the verifier (suites, graders, profiles, protocols, thresholds) | **Humans**, through reviewed changes ([verification.md §7](verification.md#7-verifier-integrity)) | Any automated loop, including level 3 |
+| Adopt a new mechanism (level 3) | Platform mechanism gate + human approval | Meta-proposers |
 | Decide promotion | **Platform gate** + owner/reviewer per risk tier | Strategies, bots |
 | Change locked genes / policy | Owner, tenant admin | Strategies, bots |
 

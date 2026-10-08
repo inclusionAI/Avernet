@@ -51,7 +51,28 @@ three constraints that the design has to respect from day one:
 
 Non-goals are listed in the [README](README.md#non-goals-for-this-design-set).
 
-## 3. The loop
+## 3. Three levels and the loop
+
+The platform is built around three nested levels:
+
+![Three levels: agent, single system improvement, recursive self-improvement](images/levels.svg)
+
+1. **Agent** — the bot (S1) executes tasks against its environment. It
+   produces experience, but nothing about the bot changes.
+2. **Single system improvement** — an improvement mechanism (M1) uses task
+   feedback to propose a candidate S′. S′ runs, is **verified**, and only if
+   accepted becomes S2, which later tasks use. This is the strategy run
+   described in the rest of this section.
+3. **Recursive self-improvement** — the record of all improvement
+   experiments (H) is used to improve the **mechanism itself**. A candidate
+   M2 is **verified** to produce better verified improvements than M1 before
+   it takes over later rounds. See [recursion.md](recursion.md).
+
+Verification is the fixed point of all three levels: every change is
+verified, rejection is a normal outcome, and the verifier is never modified
+by any loop ([verification.md](verification.md)).
+
+### The level-2 loop
 
 Every approach surveyed — DSPy/GEPA, ACE, Voyager, DGM, AlphaEvolve,
 Anthropic Dreams, Hermes Curator, and ClawEvolve itself — reduces to one
@@ -59,32 +80,7 @@ Anthropic Dreams, Hermes Curator, and ClawEvolve itself — reduces to one
 platform owns the loop skeleton and the retention side; strategies own
 variation and contribute to selection.
 
-```text
-                    ┌──────────────────────── Experience Store ────────────────────────┐
-                    │ episodes (sessions/trajectories), feedback, eval traces,          │
-                    │ all tagged with the genome revision that produced them            │
-                    └───────────────▲──────────────────────────────┬───────────────────┘
-                                    │ ingest (ExperienceSource)     │ query
- Phenotype (bot @ revision R) ──────┘                               │
-        ▲                                                           ▼
-        │                         ┌─────────────── Evolution Run (orchestrator) ───────────────┐
-        │                         │ 1 Trigger        schedule | event | manual | bot request    │
-        │                         │ 2 Select parent  from Archive          (Selector plugin)    │
-        │                         │ 3 Analyze        experience → findings (Analyzer plugin)    │
-        │                         │ 4 Propose        parent + findings → GenomePatch (Proposer) │
-        │                         │ 5 Static checks  schema, policy, locked genes  (PLATFORM)   │
-        │                         │ 6 Evaluate       candidate in sandbox → scores  (Evaluator) │
-        │                         │ 7 Gate           strategy policy + platform floor          │
-        │                         │ 8 Retain         archive candidate + lineage    (PLATFORM)  │
-        │                         └──────────────┬──────────────────────────────────────────────┘
-        │                                        │ accepted candidate
-        │                                        ▼
-        │                         ┌─────────────── Promotion (PLATFORM) ───────────────┐
-        │                         │ risk tier → auto | review queue                    │
-        │                         │ rollout: shadow → canary → active (ref move)       │
-        └─────────────────────────┤ apply via Manifest / publish chain; rollback = ref │
-                                  └────────────────────────────────────────────────────┘
-```
+![Level-2 improvement loop and fast-loop inbox](images/loop.svg)
 
 Two speeds share this loop (pattern from Letta sleep-time agents and
 Anthropic Dreams):
@@ -100,29 +96,7 @@ Anthropic Dreams):
 
 ## 4. Components
 
-```text
-┌──────────────────────────── Surfaces ────────────────────────────┐
-│ REST /openapi/v1/evolution/*   Client SDK (py/ts)   `avn` CLI     │
-│ Strategy SDK (plugin authoring + local harness + conformance kit) │
-└──────────────┬───────────────────────────────────────────────────┘
-               │
-┌──────────────▼───────────── Evolution Control Plane ─────────────────────────────┐
-│ C1 Genome Registry   revisions, refs, patches, lineage, blobs (extends Manifest)  │
-│ C2 Experience Store  normalized episodes + feedback + eval traces                 │
-│ C3 Strategy Registry strategy manifests, plugin implementations, versions         │
-│ C4 Run Orchestrator  run/iteration state machine, budgets, job dispatch           │
-│ C5 Evaluation Service suites + splits, graders, sandbox eval bots, baselines      │
-│ C6 Gate & Promotion  platform floor checks, approvals, rollout, rollback          │
-│ C7 Archive & Lineage query API over all candidates/scores (read model)            │
-└──────────────┬──────────────────────────────┬────────────────────────────────────┘
-               │ Job Protocol (claim/heartbeat/report)          │ Manifest apply / publish
-┌──────────────▼──────────────┐               ┌─────────────────▼──────────────────┐
-│ Strategy Runners            │               │ Existing delivery                   │
-│ in-process plugins (py)     │               │ Backend Manifest apply → entities   │
-│ container workers (any lang)│               │ teclaw BotConfigArtifact / ARCA push│
-│ runner bots (via CLI+skill) │               │ Engine adapter owns physical layout │
-└─────────────────────────────┘               └─────────────────────────────────────┘
-```
+![Platform components and ownership](images/components.svg)
 
 ### C1 Genome Registry
 
@@ -179,7 +153,7 @@ output by digest, and enforces that steps only see what their contract
 allows (e.g. a Proposer never receives the held-out split). Generalizes
 ClawEvolve's `ce_tasks` / `ce_steps` / claim-report endpoints.
 
-### C5 Evaluation Service
+### C5 Verification Service
 
 Platform-owned and **read-only to strategies and bots**:
 
@@ -200,7 +174,10 @@ Platform-owned and **read-only to strategies and bots**:
   extra sampling) so a strategy has to beat "just try harder".
 
 ClawBench (`clawbench-base`) and ClawEvolve's plan stage become the default
-Evaluator and SuiteBuilder implementations.
+grader and SuiteBuilder implementations; the backend eval env
+(`eval_publish`) becomes the deployed-sandbox executor. The full protocol,
+the inventory of existing eval code, and its gaps are in
+[verification.md](verification.md).
 
 ### C6 Gate & Promotion
 
@@ -217,14 +194,27 @@ The only component that can move a bot's `active` ref. See
    bots, then active. **Rollback** is moving `active` back to any earlier
    revision and re-applying — no more one-step-only rollback.
 
-### C7 Archive & Lineage
+### C7 Experiment Ledger (H) and Archive
 
-A read model over C1 + C5: the genome tree for a bot, every candidate's
+Every improvement experiment (mechanism, parent, candidate, evidence,
+verdict, cost, later online outcome), including rejected ones — schema in
+[recursion.md §3](recursion.md#3-experiment-ledger-h). It is a read model over
+C1 + C5: the genome tree for a bot, every candidate's
 scores per split, which strategy and model produced it, what evidence it was
 based on, and who approved it. Selectors query it (latest-best, Pareto front
 per case, MAP-Elites niches, descendant-aware "clade" scores à la
 Huxley-Gödel Machine). Humans browse it in the UI. Proposers can be given a
 filesystem export of it (Meta-Harness found raw history beats summaries).
+It is also the evidence base for level 3.
+
+### Meta-loop (level 3)
+
+Runs the same loop with a **mechanism** (strategy version) as the target and
+**mechanism verification** as the verifier: a meta-proposer reads H, proposes
+a mechanism patch, and the candidate mechanism is compared against the active
+one on held-out improvement problems before adoption (human-approved by
+default). Mechanisms are versioned in C3 with the same revision/ref model as
+genomes. See [recursion.md](recursion.md).
 
 ## 5. Ownership and module placement
 
@@ -235,9 +225,9 @@ split:
 | --- | --- | --- |
 | Genome Registry (C1), Gate & Promotion (C6) | **Backend** | Owns desired state, Manifest, publish chain, tenancy, approvals. Promotion must sit beside apply. |
 | Physical projection of genome onto a workspace, memory import/export, session export | **Engine adapter** | Engine owns layout (ADR 0014/0017) and chat history. New engine-side contracts, no Backend paths. |
-| Run Orchestrator (C4), Strategy Registry (C3), Experience Store (C2), Evaluation Service (C5), Archive (C7) | **New module `apps/evolution`** (recommended) | Long-running, LLM-heavy, bursty work that should scale and fail independently of Backend request serving. |
+| Run Orchestrator (C4), Strategy Registry (C3), Experience Store (C2), Verification Service (C5), Experiment Ledger (C7), meta-loop | **New module `apps/evolution`** (recommended) | Long-running, LLM-heavy, bursty work that should scale and fail independently of Backend request serving. |
 | Strategy implementations | **Strategy authors** (incl. `apps/evolverun` for defaults) | Pluggable by definition. |
-| Sandbox eval bots | **Backend eval_env plugin + BaaS** | Seam already exists. |
+| Sandbox eval bots | **Backend `eval_publish` + eval_env plugins + BaaS** | Eval-env deployment exists (Quality Task); plugin seams are Noop stubs today. |
 | UI | `apps/frontend-nextgen` (later); AgentEvolve UI as interim | |
 
 **Open decision D-1 (module placement of the control plane).** Options:
@@ -263,6 +253,8 @@ during migration.
 | Plugin protocols (Analyzer, Proposer, Evaluator, Gate, Selector, Trigger, ExperienceSource, SuiteBuilder) | Plugin API | Orchestrator → strategy implementations |
 | Engine memory projection contract | Plugin API | Backend apply → Engine |
 | Engine session export contract (`session-export/v1` → v2) | Plugin API | Evolution → Engine |
+| Verification Service API + Executor/Grader plugin protocols | Service API + Plugin API | Orchestrator, publish flow, Quality Task → Verification |
+| Experiment Ledger schema + mechanism metrics | Data contract | Evolution → selectors, meta-loop, UI |
 | Bot evolution scopes for the bot principal | Admission contract | Gateway/Backend |
 
 Each one needs docs + conformance tests in the same change (R1, R25).
@@ -286,8 +278,10 @@ schedule because the failure-rate signal crossed a threshold.
    Patch (itemized: `identity/SOUL.md: replace section "Escalation"`,
    `skills/refund-policy: update SKILL.md`), plus rationale.
 6. Platform static checks pass; C1 records candidate `r41.c1` (parent `r41`).
-7. **Evaluator** (`clawbench`) runs parent and candidate on train +
-   validation in eval bots; C5 also runs regression + safety.
+7. **Verification** (C5, `platform/clawbench` graders) runs parent and
+   candidate paired, with repeated seeds, on train + validation in eval bots,
+   plus the hidden regression + safety suites; the verdict and evidence go to
+   H.
 8. **Gate**: strategy policy (`validation > parent` and paired win-rate ≥
    0.6) passes; platform floor passes; risk tier = T2 (persona + skill) →
    review queue.
@@ -305,9 +299,9 @@ schedule because the failure-rate signal crossed a threshold.
 | P1 Genome Registry | Manifest gains revisions, refs, If-Match, pinned resolution, apply-records-revision, any-depth rollback | **Yes** — versioned bots and real rollback, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded: ExperienceSource, sandboxed tune emitting patches, ClawBench evaluator, its acceptance rule as a Gate plugin | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
-| P4 Evaluation & governance | Suites with splits, regression growth, review queue, risk tiers, shadow/canary | Hardening |
-| P5 Bot-driven | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy | Fast loop |
-| P6 Open-ended | Archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
+| P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of acceptance policies over H | Hardening; the verify gate is useful for service bots on its own |
+| P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
+| P6 Open-ended | Automated meta-proposer (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
 
 Work items with dependencies: [work-items.md](work-items.md).
 
@@ -324,10 +318,11 @@ Out of scope, but the design keeps the door open at zero extra cost:
 
 | Risk | Mitigation |
 | --- | --- |
-| Gains are illusory (overfit to the strategy's own cases) | Holdout + regression suites owned by C5; budget-matched baseline; periodic re-audit of promoted revisions on fresh cases |
+| Gains are illusory (overfit to the strategy's own cases) | Holdout + regression suites owned by C5; paired statistics with confidence intervals; budget-matched baseline; periodic re-audit of promoted revisions on fresh cases |
+| Level 3 optimises noise or weakens the judge | Verifier is fixed and human-owned; mechanism verification on held-out improvement problems; depth bounded at 2; mechanism adoption human-approved |
 | Reward hacking / evaluator tampering | Evaluators and suites outside the genome; locked genes; diff audit for guardrail-touching edits; see governance |
 | Persona drift / context collapse | Itemized patches only; size-change thresholds; per-item provenance |
 | Memory/skill poisoning via trajectories | Experience is untrusted input to proposers; secret/PII scan on patches; risk tiers |
 | Cost blow-up | Per-run, per-bot, per-tenant budgets enforced by orchestrator, not strategy |
 | Platform built before demand | P1 is independently useful; P3 proves the abstraction on existing demand before P5/P6 |
-| Constitution friction (new module, new principal) | ADRs up front; conformance tests per protocol from P2 |
+| Constitution friction (new module, new principal) | Draft decisions up front; conformance tests per protocol from P2 |
