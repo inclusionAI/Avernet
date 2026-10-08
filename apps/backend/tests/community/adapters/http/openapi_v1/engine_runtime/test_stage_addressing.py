@@ -436,10 +436,10 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
-    # their bot-first address; engine restart and nodes also have no legacy
-    # alias. Session File is OpenAPI-only, yielding 27 current + 16 retiring
-    # operations.
-    assert len(engine_runtime) == 43
+    # their bot-first address; engine restart, default-config and nodes also
+    # have no legacy alias. Session File is OpenAPI-only, yielding 28 current
+    # + 16 retiring operations.
+    assert len(engine_runtime) == 44
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (

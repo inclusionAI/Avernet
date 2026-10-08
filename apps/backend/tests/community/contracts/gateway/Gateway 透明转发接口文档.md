@@ -354,7 +354,7 @@
 
 | 接口 | 入参 | 出参 |
 |---|---|---|
-| `GET /api/v1/cron` | query: `bot_id`(默认 all) | `{success, data: [{id, name, enabled(bool), schedule: {kind, expr, tz}, payload: {kind, message, timeout_secs}, session_target, state: {next_run_at_ms(int), last_run_at_ms(int), last_run_status, last_status, last_duration_ms(int), last_delivered(bool), last_delivery_status, consecutive_errors(int)}, notify: {enabled(bool), user_ids[]}, created_at_ms(int), updated_at_ms(int), bot_id, bot_name}]}` |
+| `GET /api/v1/cron` | query: `bot_id`(默认 all) | `{success, data: [{id, name, enabled(bool), schedule: {kind, expr, tz}, payload: {kind, message, timeout_secs, model(string|null)}, session_target, state: {next_run_at_ms(int), last_run_at_ms(int), last_run_status, last_status, last_duration_ms(int), last_delivered(bool), last_delivery_status, consecutive_errors(int)}, notify: {enabled(bool), user_ids[]}, created_at_ms(int), updated_at_ms(int), bot_id, bot_name}]}` |
 | `POST /api/v1/cron` | body: `bot_id`*, `name`*, `schedule`*, `command`*, `timezone`, `enabled`, `timeout_secs`, `model`, `notify{enabled,user_ids}` | `{success, data: {同列表单条含id}}` |
 | `GET /api/v1/cron/status` | query: `bot_id`* | `{success, data: {running(bool), job_count(int), enabled_count(int), next_run_at_ms, bot_id, bot_name}}` |
 | `GET /api/v1/cron/{taskId}` | path: `taskId`; query: `bot_id`* | 同列表单条 |

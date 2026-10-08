@@ -4620,7 +4620,18 @@ class BotService(BotServiceProtocol):
         """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
         ctx, strategy = resolve_restart_strategy(bot)
-        return await strategy.execute_restart(ctx, self.restart_bot, **kwargs)
+        from agentclaw.community.core.bot_management.engines.restart_contract import RestartServices
+
+        return await strategy.execute_restart(
+            ctx, self.restart_bot,
+            services=RestartServices(
+                repository=self._repository,
+                task_queue=self._task_queue_service,
+                get_bot=self.get_bot,
+                template_service=self._template_service,
+            ),
+            **kwargs,
+        )
 
     def restart_bot(
         self,

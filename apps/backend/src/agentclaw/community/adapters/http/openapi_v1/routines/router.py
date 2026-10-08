@@ -40,7 +40,14 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
-from .schemas import Routine, RoutineSpec, RoutineRun, RoutineUpdate, ScheduleTrigger
+from .schemas import (
+    Routine,
+    RoutineSpec,
+    RoutineRun,
+    RoutineUpdate,
+    ScheduleTrigger,
+    _coerce_timeout_secs,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"], route_class=PublicAPIRoute)
@@ -78,12 +85,16 @@ def _map_routine(data: dict) -> Routine:
 
     Field source: ``plugins/local/device_adapter_transport.py`` `_build_item`
     (``id`` / ``name`` / ``enabled`` / ``schedule{expr,tz}`` /
-    ``payload.message`` / ``created_at_ms`` / ``updated_at_ms``) plus the
-    top-level ``bot_id`` injected by ``_decorate_runtime_item`` in
-    ``cron_runtime_targets.py``.
+    ``payload.message`` / ``payload.timeout_secs`` / ``payload.model`` /
+    ``created_at_ms`` / ``updated_at_ms``) plus the top-level ``bot_id``
+    injected by ``_decorate_runtime_item`` in ``cron_runtime_targets.py``.
+    The environment settings live in the payload — nothing in the produce
+    chain ever reports them at the item top level.
     """
     sched = data.get("schedule") or {}
     payload = data.get("payload") or {}
+    model = payload.get("model")
+    timeout_secs = _coerce_timeout_secs(payload.get("timeout_secs"))
     return Routine(
         routine_id=str(data.get("id", "")),
         bot_id=str(data.get("bot_id", "")),
@@ -95,6 +106,8 @@ def _map_routine(data: dict) -> Routine:
         command=str(payload.get("message", "") or ""),
         enabled=bool(data.get("enabled", False)),
         timezone=sched.get("tz") or None,
+        model=str(model) if model else None,
+        timeout_secs=timeout_secs,
         gmt_create=_ms_to_iso(data.get("created_at_ms")),
         gmt_modified=_ms_to_iso(data.get("updated_at_ms")),
     )
@@ -183,20 +196,28 @@ async def create_routine(
 
     The schedule fires in the routine's timezone, which defaults to
     Asia/Shanghai when omitted. Each firing starts a fresh session and hands
-    the bot the command as its user message.
+    the bot the command as its user message; `model` overrides which model
+    those sessions run on and `timeout_secs` bounds how long one firing runs.
     """
     # Translation to the engine adapter cron body shape: schedule is the raw
     # cron expression STRING (not the nested {kind,expr,tz} dict — the adapter
-    # wraps it on read in device_adapter_transport._build_item), and timezone
-    # defaults to Asia/Shanghai to match legacy cron/router.py's create path.
+    # wraps it on read in device_adapter_transport._build_item), timezone
+    # defaults to Asia/Shanghai, and timeout_secs defaults in the schema —
+    # both to match legacy cron/router.py's create path. `timeout_secs` maps
+    # an explicit null back to the same default, so a read-back value copies
+    # into a create without tripping validation. `model` flows only when
+    # non-empty, exactly like the legacy create: an empty/absent override is
+    # left to the bot's default rather than sent as an empty string.
     adapter_body = {
         "name": body.name,
         "schedule": body.trigger.cron,
         "command": body.command,
         "timezone": body.timezone or "Asia/Shanghai",
         "enabled": body.enabled,
-        "timeout_secs": 86400,
+        "timeout_secs": body.timeout_secs if body.timeout_secs is not None else 86400,
     }
+    if body.model:
+        adapter_body["model"] = body.model
     result = await factory.create_cron(
         bot_id=bot_id,
         user_id=owner_id,
@@ -267,6 +288,15 @@ async def update_routine(
         update_body["timezone"] = body.timezone
     if body.enabled is not None:
         update_body["enabled"] = body.enabled
+    # Truthy like the create guard, not ``is not None``: an empty string is
+    # not an override the caller can mean, and the engine would store it in
+    # the payload only for every read to fold back to null. Symmetric with
+    # create keeps the two paths from drifting apart; null stays "keep" like
+    # every other partial-update field here.
+    if body.model:
+        update_body["model"] = body.model
+    if body.timeout_secs is not None:
+        update_body["timeout_secs"] = body.timeout_secs
     if body.trigger is not None:
         update_body["schedule"] = body.trigger.cron
     result = await factory.update_cron(

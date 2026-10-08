@@ -139,6 +139,9 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                 "kind": "message",
                 "message": body.get("command"),
                 "timeout_secs": body.get("timeout_secs", 86400),
+                # The engine's cron item carries the model override inside the
+                # payload; mirrors what the production adapters read back.
+                "model": body.get("model"),
             },
             "session_target": f"session:{cron_id}:user:default",
             "state": self._default_state(),
@@ -375,8 +378,14 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                         item["enabled"] = body["enabled"]
                     if "schedule" in body:
                         item["schedule"]["expr"] = body["schedule"]
+                    if "timezone" in body:
+                        item["schedule"]["tz"] = body["timezone"]
                     if "command" in body:
                         item["payload"]["message"] = body["command"]
+                    if "timeout_secs" in body:
+                        item["payload"]["timeout_secs"] = body["timeout_secs"]
+                    if "model" in body:
+                        item["payload"]["model"] = body["model"]
                 item["updated_at_ms"] = _BASE_MS + 1000
                 return {"success": True, "data": item}
             if method == "DELETE":

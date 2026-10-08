@@ -55,6 +55,16 @@
           "message": {
             "type": "string"
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "timeout_secs": {
             "type": "integer"
           }
@@ -65,6 +75,9 @@
           "timeout_secs"
         ],
         "additionalProperties": false
+      },
+      "runtime_stage": {
+        "type": "string"
       },
       "schedule": {
         "type": "object",
@@ -85,9 +98,6 @@
           "tz"
         ],
         "additionalProperties": false
-      },
-      "runtime_stage": {
-        "type": "string"
       },
       "session_target": {
         "type": "string"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -502,6 +503,31 @@ class TestImagePullPolicy:
         assert sidecar_container.image_pull_policy == "Always"
 
 
+class _FakeWsClient:
+    """模拟 kubernetes WSClient，仅实现 _exec_in_container 用到的接口。"""
+
+    def __init__(self, error_channel: str = "") -> None:
+        self._error_channel = error_channel
+
+    def run_forever(self, timeout: float | None = None) -> None:
+        pass
+
+    def is_open(self) -> bool:
+        return False
+
+    def read_channel(self, channel: int, timeout: float | None = 0) -> str:
+        if channel == 3:  # kubernetes.stream.ws_client.ERROR_CHANNEL
+            data, self._error_channel = self._error_channel, ""
+            return data
+        return ""
+
+    def read_stdout(self, timeout: float | None = None) -> str:
+        return ""
+
+    def read_stderr(self, timeout: float | None = None) -> str:
+        return ""
+
+
 class TestLocalK8sSandbox:
     """Tests for LocalK8sArcaSandbox."""
 
@@ -618,6 +644,158 @@ class TestLocalK8sSandbox:
         )
         sandbox._exec_in_container = MagicMock(return_value=MagicMock(exit_code=0))
         assert sandbox.update_outbound_rule(None, MagicMock()) is True
+
+    @patch("kubernetes.stream.stream")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_exec_in_container_returns_readable_error_on_container_not_found(
+        self, mock_core_cls, mock_stream, mock_client
+    ) -> None:
+        """容器重启空窗期 exec 应返回可读错误，而不是让 ValueError 逃逸。"""
+        message = (
+            'unable to upgrade connection: container not found ("envoy-sidecar")'
+        )
+        mock_stream.return_value = _FakeWsClient(
+            error_channel=json.dumps(
+                {
+                    "kind": "Status",
+                    "status": "Failure",
+                    "message": message,
+                    "details": {"causes": [{"message": message}]},
+                }
+            )
+        )
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+
+        result = sandbox._exec_in_container(
+            container_name="envoy-sidecar",
+            command=["curl", "-fsS", "http://127.0.0.1:38081/ready"],
+        )
+
+        assert result.exit_code == -1
+        assert "container not found" in result.stderr
+
+    @patch("kubernetes.stream.stream")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_exec_in_container_parses_nonzero_exit_code(
+        self, mock_core_cls, mock_stream, mock_client
+    ) -> None:
+        """常规失败：causes[0].message 为数字退出码时应原样返回。"""
+        mock_stream.return_value = _FakeWsClient(
+            error_channel=json.dumps(
+                {
+                    "kind": "Status",
+                    "status": "Failure",
+                    "message": "command terminated with non-zero exit code",
+                    "details": {"causes": [{"message": "42"}]},
+                }
+            )
+        )
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+
+        result = sandbox._exec_in_container(
+            container_name="bot-runtime",
+            command=["/bin/sh", "-c", "exit 42"],
+        )
+
+        assert result.exit_code == 42
+        assert result.stderr == ""
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_tolerates_sidecar_restart_window(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """重启空窗期 quitquitquit 报 container not found 时应继续等待就绪。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        not_found = MagicMock(
+            exit_code=-1,
+            stdout="",
+            stderr=(
+                'unable to upgrade connection: container not found ("envoy-sidecar")'
+            ),
+        )
+        sandbox._exec_in_container = MagicMock(
+            side_effect=[not_found, MagicMock(exit_code=0)]
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+        assert sandbox._exec_in_container.call_count == 2
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_tolerates_sidecar_admin_not_ready(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """sidecar admin port 未就绪时 quitquitquit 报 Connection refused 应继续等待就绪。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        refused = MagicMock(
+            exit_code=-1,
+            stdout="",
+            stderr=(
+                "curl: (7) Failed to connect to 127.0.0.1 port 38081 after 3 ms: "
+                "Connection refused"
+            ),
+        )
+        sandbox._exec_in_container = MagicMock(
+            side_effect=[refused, MagicMock(exit_code=0)]
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+        assert sandbox._exec_in_container.call_count == 2
 
 
 class TestResolveOutboundRule:
