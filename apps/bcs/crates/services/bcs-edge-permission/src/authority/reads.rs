@@ -20,7 +20,7 @@ use bcs_service_api::types::error::ServiceResult;
 /// SQL or in-memory implementation; bootstrap exposes only the trait) with
 /// no other state: authority queries are env-bound at the repo instance.
 pub struct BotAuthorityCoreServiceImpl {
-    authority: Arc<dyn BotAuthorityRepoPort>,
+    pub(super) authority: Arc<dyn BotAuthorityRepoPort>,
 }
 
 impl BotAuthorityCoreServiceImpl {
@@ -69,6 +69,31 @@ impl BotAuthorityCoreService for BotAuthorityCoreServiceImpl {
             self.authority.ownership(bot_id).await?;
         }
         self.authority.roles_for(pairs).await
+    }
+
+    // Task 4's mutation/listing delegation: the REPO owns the
+    // one-transaction validation/mutation/audit contract, so the Core
+    // forwards verbatim — no pre-reading the Bot here, because a
+    // validation outside the mutation transaction adds no authority
+    // (unlike the read-side validation-before-answer composition above).
+    // Contract docs: manager.rs + the trait definition; recording tests
+    // live in manager.rs.
+    async fn mutate_manager(
+        &self,
+        actor: bcs_service_api::types::AuditActor,
+        bot_id: &str,
+        mutation: bcs_service_api::types::ManagerMutation,
+    ) -> ServiceResult<bcs_service_api::types::ManagerMutationResult> {
+        self.authority.mutate_manager(actor, bot_id, mutation).await
+    }
+
+    async fn list_managers(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
+        self.authority.list_managers(bot_id, offset, limit).await
     }
 }
 
@@ -135,6 +160,24 @@ mod tests {
                 out.push(self.role(user_id, bot_id).await?);
             }
             Ok(out)
+        }
+
+        async fn mutate_manager(
+            &self,
+            _actor: bcs_service_api::types::AuditActor,
+            _bot_id: &str,
+            _mutation: bcs_service_api::types::ManagerMutation,
+        ) -> ServiceResult<bcs_service_api::types::ManagerMutationResult> {
+            unreachable!("read-side recording tests never mutate managers")
+        }
+
+        async fn list_managers(
+            &self,
+            _bot_id: &str,
+            _offset: u64,
+            _limit: u64,
+        ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
+            unreachable!("read-side recording tests never list managers")
         }
     }
 
@@ -281,6 +324,22 @@ mod tests {
                 pairs: &[(String, String)],
             ) -> ServiceResult<Vec<Option<BotAccessRelation>>> {
                 self.inner.roles_for(pairs).await
+            }
+            async fn mutate_manager(
+                &self,
+                actor: bcs_service_api::types::AuditActor,
+                bot_id: &str,
+                mutation: bcs_service_api::types::ManagerMutation,
+            ) -> ServiceResult<bcs_service_api::types::ManagerMutationResult> {
+                self.inner.mutate_manager(actor, bot_id, mutation).await
+            }
+            async fn list_managers(
+                &self,
+                bot_id: &str,
+                offset: u64,
+                limit: u64,
+            ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
+                self.inner.list_managers(bot_id, offset, limit).await
             }
         }
         let repo = Counting {

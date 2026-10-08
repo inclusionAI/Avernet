@@ -13,6 +13,7 @@ bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

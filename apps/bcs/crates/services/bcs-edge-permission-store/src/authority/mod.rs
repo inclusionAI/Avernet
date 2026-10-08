@@ -15,7 +15,9 @@
 //! rejecting the `owner`/`manager` kinds: role rows never turn into friend or
 //! runtime grants. Only this module reads them.
 
+mod audit;
 mod codec;
+mod manager;
 mod reads;
 
 pub use reads::DbBotAuthorityStore;

@@ -14,6 +14,7 @@
 //! and a batch mentioning any invalid Bot fails closed as a whole (spec
 //! §12.4/§13.5: batch reads failing to authorize must fail unified).
 
+mod manager;
 mod reads;
 
 pub use reads::BotAuthorityCoreServiceImpl;

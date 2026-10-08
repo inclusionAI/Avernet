@@ -95,6 +95,24 @@ mod tests {
         ) -> ServiceResult<Vec<Option<BotAccessRelation>>> {
             unimplemented!("the hook never answers through roles_for itself")
         }
+
+        async fn mutate_manager(
+            &self,
+            _actor: bcs_service_api::types::AuditActor,
+            _bot_id: &str,
+            _mutation: bcs_service_api::types::ManagerMutation,
+        ) -> ServiceResult<bcs_service_api::types::ManagerMutationResult> {
+            unimplemented!("the hook never performs manager mutations itself")
+        }
+
+        async fn list_managers(
+            &self,
+            _bot_id: &str,
+            _offset: u64,
+            _limit: u64,
+        ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
+            unimplemented!("the hook never lists managers itself")
+        }
     }
 
     fn clone_error(err: &ServiceError) -> ServiceError {

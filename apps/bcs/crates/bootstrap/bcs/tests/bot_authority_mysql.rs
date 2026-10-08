@@ -170,6 +170,119 @@ async fn mysql_authority_schema_conformance() {
     manager.close().await;
 }
 
+/// Plan Task 4 MySQL live conformance: concurrent manager MUTUAL revocation
+/// on real MySQL — FOR UPDATE row locking through the production
+/// `DbBotAuthorityStore::mysql` mutation must serialize so exactly ONE side
+/// revokes and the stale side surfaces 403, with one audit row recording
+/// the actual change (§5.4/§10). Ignored like the suite above: no MySQL
+/// server exists in this dev environment; CI runs it against its MySQL
+/// service, so live MySQL behavior stays UNVERIFIED locally.
+#[tokio::test]
+#[ignore = "requires BCS_TEST_MYSQL_URL; CI runs this test against its MySQL service"]
+async fn mysql_manager_mutation_concurrent_revocation_lock_order() {
+    use bcs_edge_permission_store::DbBotAuthorityStore;
+    use bcs_service_api::port::repo::BotAuthorityRepoPort;
+    use bcs_service_api::types::{AuditActor, ManagerMutation};
+    use std::collections::BTreeMap;
+
+    let url = std::env::var("BCS_TEST_MYSQL_URL")
+        .expect("BCS_TEST_MYSQL_URL must be set for the ignored MySQL contract");
+    let opts = mysql_async::Opts::from_url(&url).expect("valid BCS_TEST_MYSQL_URL");
+    let database = opts
+        .db_name()
+        .expect("BCS_TEST_MYSQL_URL includes a database name")
+        .to_string();
+    let mut config = bcs_config_api::MysqlDbConfig::new()
+        .with_database(&database)
+        .with_connection(bcs_config_api::mysql::MysqlConnectionConfig {
+            connection_type: "direct".to_string(),
+            host: Some(opts.ip_or_hostname().to_string()),
+            port: Some(opts.tcp_port()),
+            user: opts.user().map(str::to_string),
+            password: opts.pass().map(str::to_string),
+            extra: BTreeMap::new(),
+        })
+        .with_statement_protocol(bcs_config_api::StatementProtocol::Text);
+    // Two connections so the two mutations can truly contend for the row.
+    config.pool_size = 2;
+    config.min_pool_size = 2;
+    let manager = bcs_db_mysql::MysqlDbManager::new(config)
+        .await
+        .expect("open MySQL mutation datasource");
+    let plugin: std::sync::Arc<dyn DbPlugin> =
+        std::sync::Arc::new(bcs_db_mysql::MysqlDbPlugin::new(manager.clone(), database));
+    apply_full_mysql_chain(plugin.as_ref()).await;
+
+    let bot = "bot-mysql-mut";
+    for statement in [
+        "INSERT INTO bcs_bots (bot_uuid, name, env, ownership_version) \
+         VALUES ('bot-mysql-mut', 'MySQL Mut Bot', 'local', 1)",
+        "INSERT INTO bcs_bots (bot_uuid, name, env, actor_kind, status) \
+         VALUES ('human_user-a', 'a', 'local', 'human', 'online'), \
+                ('human_user-b', 'b', 'local', 'human', 'online'), \
+         ('human_user-c', 'c', 'local', 'human', 'online')",
+    ] {
+        plugin
+            .execute(DbStatement::new(statement))
+            .await
+            .expect("seed bot/actors");
+    }
+    for human in ["human_user-a", "human_user-b", "human_user-c"] {
+        let (kind, id) = if human == "human_user-a" { ("owner", "owner") } else { ("direct", "manual") };
+        plugin
+            .execute(DbStatement::new(format!(
+                "INSERT INTO edge_grants (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+                 status, originator_policy_type, originator_policy_data, \
+                 management_source_kind, management_source_id) \
+                 VALUES ('local', '{human}', '{bot}', '{}', 0, NULL, 'approved', 'same_as_from', \
+                 NULL, '{kind}', '{id}')",
+                if human == "human_user-a" { "owner" } else { "manager" }
+            )))
+            .await
+            .expect("seed role edge");
+    }
+
+    let repo = DbBotAuthorityStore::mysql(plugin.clone(), "local".to_string());
+    let (rm_b, rm_c) = tokio::join!(
+        async {
+            repo.mutate_manager(
+                AuditActor::Human { user_id: "user-b".into() },
+                bot,
+                ManagerMutation::RevokeNonTeam { user_id: "user-c".into() },
+            )
+            .await
+        },
+        async {
+            repo.mutate_manager(
+                AuditActor::Human { user_id: "user-c".into() },
+                bot,
+                ManagerMutation::RevokeNonTeam { user_id: "user-b".into() },
+            )
+            .await
+        },
+    );
+    let changed = [&rm_b, &rm_c]
+        .iter()
+        .filter(|result| result.as_ref().map(|r| r.changed).unwrap_or(false))
+        .count();
+    let forbidden = [&rm_b, &rm_c]
+        .iter()
+        .any(|result| matches!(
+            result,
+            Err(bcs_service_api::ServiceError::Authority(
+                bcs_service_api::types::error::AuthorityError::Forbidden(_)
+            ))
+        ));
+    assert_eq!(changed, 1, "exactly one concurrent revoke may change; got {rm_b:?} / {rm_c:?}");
+    assert!(forbidden, "the stale side must surface 403");
+    let rows = plugin
+        .query(DbStatement::new("SELECT COUNT(*) AS n FROM bot_manager_changes"))
+        .await
+        .expect("audit count");
+    assert_eq!(rows[0].get_i64("n").ok().flatten().expect("n"), 1);
+    manager.close().await;
+}
+
 /// Apply the full external MySQL chain 001..031 the way the runner/ops would:
 /// one file at a time, `--`-comment lines stripped, split on statement
 /// boundaries.

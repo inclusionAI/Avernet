@@ -32,11 +32,13 @@ use crate::common::{required_string, required_u64, service_db_error};
 ///
 /// Holds an `Arc<dyn DbPlugin>` + flavor + the env bound at construction
 /// (authority queries are env-isolated; env is a service-level concern and
-/// never a per-request input).
+/// never a per-request input). The fields are `pub(super)` so the sibling
+/// mutation/list modules (`manager.rs`, `audit.rs`) share the SAME store
+/// instance and its env binding.
 pub struct DbBotAuthorityStore {
-    db: Arc<dyn DbPlugin>,
-    flavor: DbSqlFlavor,
-    env: String,
+    pub(super) db: Arc<dyn DbPlugin>,
+    pub(super) flavor: DbSqlFlavor,
+    pub(super) env: String,
 }
 
 impl DbBotAuthorityStore {
@@ -92,7 +94,7 @@ impl DbBotAuthorityStore {
         Ok(Some(required_u64(&row, "ownership_version")?))
     }
 
-    fn corrupt(&self, bot_id: &str, detail: impl Into<String>) -> ServiceError {
+    pub(super) fn corrupt(&self, bot_id: &str, detail: impl Into<String>) -> ServiceError {
         ServiceError::Authority(AuthorityError::CorruptAuthority {
             bot_id: bot_id.to_string(),
             env: self.env.clone(),
@@ -220,6 +222,28 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             out.push(by_pair.get(&(from_id, bot_id.clone())).copied());
         }
         Ok(out)
+    }
+
+    // Task 4's mutation/listing methods: one-transaction validation +
+    // edge change + audit, and the validated manager page. The full
+    // contracts live in the trait docs; the SQL/engine implementation and
+    // the shared statement builders live in `manager.rs`/`audit.rs`.
+    async fn mutate_manager(
+        &self,
+        actor: bcs_domain::AuditActor,
+        bot_id: &str,
+        mutation: bcs_domain::ManagerMutation,
+    ) -> ServiceResult<bcs_domain::ManagerMutationResult> {
+        self.mutate_manager_inner(actor, bot_id, mutation).await
+    }
+
+    async fn list_managers(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<bcs_service_api::types::BotManagerList> {
+        self.list_managers_inner(bot_id, offset, limit).await
     }
 }
 
