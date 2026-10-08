@@ -351,14 +351,16 @@ describe('issue and optimization flow', () => {
     const actionableIssue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(actionableIssue).not.toBeNull()
     expect(actionableIssue).toHaveAttribute('data-layout', 'compact-issue-row')
-    expect(within(actionableIssue!).getByText(/查看问题、建议总览与原始证据/)).toBeInTheDocument()
+    expect(within(actionableIssue!).getByText('节点')).toBeInTheDocument()
+    expect(within(actionableIssue!).getByText('问题类型')).toBeInTheDocument()
+    expect(within(actionableIssue!).getByText('执行超时')).toBeInTheDocument()
     expect(within(actionableIssue!).queryByText('将超时阈值调整为 90 秒')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '已有建议跟进' })).not.toBeInTheDocument()
     expect(within(actionableIssue!).queryByRole('button', { name: '采纳' })).not.toBeInTheDocument()
 
     await userEvent.click(within(actionableIssue!).getByRole('button', { name: '问题详情' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
-    expect(within(drawer).getByText('问题原因总览')).toBeInTheDocument()
+    expect(within(drawer).getByRole('heading', { name: '问题原因' })).toBeInTheDocument()
     expect(within(drawer).queryByText('所选分析详情')).not.toBeInTheDocument()
     await userEvent.click(within(drawer).getByRole('button', { name: '证据与历史' }))
     expect(within(drawer).queryByText('本次修复范围')).not.toBeInTheDocument()
@@ -374,7 +376,7 @@ describe('issue and optimization flow', () => {
 
     const observingIssue = screen.getByText('render-report', { selector: 'span' }).closest('article')
     expect(observingIssue).not.toBeNull()
-    expect(within(observingIssue!).getByText(/查看问题、建议总览与原始证据/)).toBeInTheDocument()
+    expect(within(observingIssue!).getByRole('button', { name: '问题详情' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '查看建议' })).not.toBeInTheDocument()
   })
 
@@ -788,6 +790,22 @@ describe('issue and optimization flow', () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
     expect(await screen.findByText('修复任务与处理状态加载失败；问题与证据仍可查看。')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '问题详情' }).length).toBeGreaterThan(0)
+  })
+
+  it('distinguishes forbidden reads and removes stale statistics after a failed refresh', async () => {
+    repairApi.candidates.mockResolvedValueOnce(repairPage({ total: 223 }))
+      .mockRejectedValueOnce(Object.assign(new Error('API 403'), { status: 403,
+        body: JSON.stringify({ code: 'FORBIDDEN', requestId: '8c8ed247-2578-4439-8857-e6a6a83e1211' }) }))
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '进入修复处理' }))
+    expect(await screen.findByText('223')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('访问被拒绝（403）')
+    expect(screen.getByRole('alert')).toHaveTextContent('8c8ed247-2578-4439-8857-e6a6a83e1211')
+    expect(screen.queryByText('223')).not.toBeInTheDocument()
+    expect(screen.getByText('处理状态不可用')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /生成 Pack 草稿/ })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '问题详情' }).length).toBeGreaterThan(0)
   })
 

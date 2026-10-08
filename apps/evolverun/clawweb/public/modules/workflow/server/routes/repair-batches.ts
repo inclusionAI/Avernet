@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { RepairInboxFilter, RepairWorkbenchService } from '../contracts/repair-workbench.js';
 import { RepairBatchError, boundedRepairJson, MAX_REQUEST_BYTES } from '../contracts/repair-batch.js';
+import { finishRepairDiagnostic, recordRepairAccess, repairRequestDiagnostic, repairStage } from '../observability/repair-diagnostics.js';
 
 export type RepairAuthorize = (request: Request, workflowId: string, mode: 'view' | 'edit') => Promise<{ actorId: string; canEdit: boolean } | null>;
 function text(value: unknown, field: string): string {
@@ -32,6 +33,11 @@ function boolean(value: unknown, field: string, fallback = false): boolean {
 export function createRepairBatchesRouter(input: { service: RepairWorkbenchService; authorize: RepairAuthorize }): Router {
   const router = Router();
   const { service, authorize } = input;
+  router.use((request, response, next) => repairRequestDiagnostic(context => {
+    response.setHeader('X-Repair-Request-Id', context.requestId);
+    response.once('finish', () => finishRepairDiagnostic(context, request.method, request.route?.path ?? 'unmatched', response.statusCode));
+    next();
+  }));
   const handle = (fn: (request: Request, response: Response) => Promise<void>) => async (request: Request, response: Response) => {
     try {
       if (request.method !== 'GET') boundedRepairJson(request.body, MAX_REQUEST_BYTES);
@@ -46,16 +52,19 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
         console.error('[workflow-repair] request failed', {
           method: request.method,
           path: request.path,
+          requestId: response.getHeader('X-Repair-Request-Id'),
           error,
         });
-        response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR' });
+        response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR', requestId: response.getHeader('X-Repair-Request-Id') });
       }
     }
   };
   async function access(request: Request, response: Response, workflowId: string, mode: 'view' | 'edit') {
-    const actor = await authorize(request, workflowId, mode);
+    const actor = await repairStage('authorization', () => authorize(request, workflowId, mode));
+    recordRepairAccess({ workflowId, mode, actorId: actor?.actorId ?? null,
+      reason: actor && (mode === 'view' || actor.canEdit) ? 'ALLOWED' : 'HOST_DENIED' }, true);
     if (!actor || (mode === 'edit' && !actor.canEdit)) {
-      response.status(403).json({ error: 'Workflow access denied', code: 'FORBIDDEN' });
+      response.status(403).json({ error: 'Workflow access denied', code: 'FORBIDDEN', requestId: response.getHeader('X-Repair-Request-Id') });
       return null;
     }
     return actor;

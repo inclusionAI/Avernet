@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { repairStage } from '../observability/repair-diagnostics.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import {
   RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, validateRepairItem,
@@ -80,9 +81,9 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
 
   private async snapshot(db: IDatabase, workflowId: string, mode: 'summary' | 'full' = 'full', scope?: { itemIds?: readonly string[]; includeHistorical?: boolean }) {
     if (!identity(workflowId, 190)) fail('INVALID_INPUT', 'Invalid workflowId');
-    if (!(await db.query('SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?', [workflowId])).length) fail('WORKFLOW_NOT_FOUND', 'Workflow does not exist');
+    if (!(await repairStage('workflow_lookup', () => db.query('SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?', [workflowId]))).length) fail('WORKFLOW_NOT_FOUND', 'Workflow does not exist');
     const repo = new RepairBatchRepository(db);
-    const stored = await repo.listItems(workflowId);
+    const stored = await repairStage('stored_items', () => repo.listItems(workflowId));
     const byIdentity = new Map<string, StoredRepairItem>();
     const shadowed = new Set<string>();
     for (const item of stored) {
@@ -96,13 +97,13 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
     let sourceScope = scope;
     if (mode === 'full' && scope?.itemIds?.length) {
       const selected = new Set(scope.itemIds);
-      const summaries = await this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical });
+      const summaries = await repairStage('sources_summary', () => this.sources.load(db, workflowId, 'summary', { includeHistorical: scope.includeHistorical }));
       sourceScope = { ...scope, itemIds: summaries.filter(source => {
         const existing = byIdentity.get(identityKey(source.item, source.episodeKey));
         return selected.has(existing?.itemId ?? source.item.itemId);
       }).map(source => source.item.itemId) };
     }
-    const current = await this.sources.load(db, workflowId, mode, sourceScope);
+    const current = await repairStage(`sources_${mode}`, () => this.sources.load(db, workflowId, mode, sourceScope));
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -137,7 +138,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const snapshot = await this.snapshot(this.db, workflowId, 'summary', { includeHistorical });
       const scopedItems = includeHistorical ? snapshot.items : snapshot.items.filter(item =>
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification');
-      const revisions = await new RepairBatchRepository(this.db).listRevisions(workflowId);
+      const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
       const counts = Object.fromEntries((['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'] as RepairInboxFilter[])
