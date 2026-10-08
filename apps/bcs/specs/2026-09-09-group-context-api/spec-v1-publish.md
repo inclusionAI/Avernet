@@ -66,7 +66,7 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 
 `group_id`（必填）、`session_id`（按场景选填）、`round_id`（按场景选填）固定在 url 的 param 中。
 
-`actor_id` 在 header 中由框架注入，`setSystemPrompt` 不填，其他 api 必填。
+`actor_id` 在 header 中由框架注入，`systemset` 不填，其他 api 必填。
 
 以下每个请求示例省略这些框架注入字段，仅展示端点特有字段。
 
@@ -197,10 +197,10 @@ POST /groupcontext/get
 }
 ```
 
-### 3.5 setsystemprompt — 写入/更新 group 的 system prompt，仅bcn系统调用，bot不可调用
+### 3.5 systemset — 写入/更新 group 的 context，仅bcn系统调用，bot不可调用
 
 ```
-POST /groupcontext/setsystemprompt
+POST /groupcontext/systemset
 ```
 
 
@@ -208,7 +208,7 @@ POST /groupcontext/setsystemprompt
 |------|------|------|------|
 | `name` | string | 是 | context名字 |
 | `scope_level` | string | 是 | `group` / `session` / `round` |
-| `content` | string | 是 | system prompt 内容 |
+| `content` | string | 是 | context 内容 |
 | `collect_from` | string[] | 是 | 可写 userId 列表 |
 | `visible_to` | string[] | 是 | 可见 userId 列表 |
 
@@ -218,7 +218,7 @@ POST /groupcontext/setsystemprompt
 2. 同 `(name, scope)` 如已有活跃版本 → supersede 旧版本（不像 create 那样 conflict）
 3. 返回新 `context_id`
 
-> setsystemprompt 本质是 update-or-create：首次调用 create，后续调用自动 supersede。
+> systemset 本质是 update-or-create：首次调用 create，后续调用自动 supersede。
 
 响应：与 add/update 同构，返回 `{"status":"ok","error_msg":null}`。
 
@@ -228,10 +228,10 @@ POST /groupcontext/setsystemprompt
 |------|----------|----------|------|
 | 200 | `ok` | 全部 | 成功 |
 | 400 | `invalid_param` | 全部 | 参数校验失败 |
-| 403 | `permission_denied` | add / update / setsystemprompt | 调用方不在 collect_from 中 |
+| 403 | `permission_denied` | add / update / systemset | 调用方不在 collect_from 中 |
 | 404 | `not_found` | update | 没有可以被更新的context |
 | 409 | `conflict` | add / update | add：同 (name, scope) 已有活跃版本；update：并发 update 抢败 |
-| 413 | `payload_too_large` | add / update / setsystemprompt | content 超上限（默认 4KB） |
+| 413 | `payload_too_large` | add / update / systemset | content 超上限（默认 4KB） |
 | 500 | `internal_error` | 全部 | 服务端内部错误 |
 
 错误响应格式：
@@ -309,7 +309,7 @@ collect_from: [judge_bot]
 
 同一 session 内只有 2 条 word context，`name` 不同所以不冲突，系统按 `scope_level=session` 自动生成 `scope = sess-001`。
 
-> **底牌的分发方式（不是 API 调用，只是交互流程）**：裁判 bot 在群里私聊每位玩家 bot，
+> **底牌的分发方式（不是 API 调用，只是交互流程）**：裁判 bot 私聊每位玩家 bot，
 > 告诉卧底玩家"去查 `player_word_1`"、告诉平民玩家"去查 `player_word_2`"。
 > **玩家只知道自己是 1 还是 2，不知道自己 1=卧底 / 2=平民**——拿到词后，所有人所见都是一句普通的"你的词语是：X"，身份信息只有裁判的 `player_role` 里有（见 4.1.3）。
 > 玩家再自己 `get` 被告知的那条 name（见 4.2.2）拿词。信息隔离不靠 API 隔，靠 `visible_to`：玩家能 `get` 到的，正是他在 `visible_to` 里的那一条。
