@@ -123,7 +123,8 @@ class CreateTopicRequestUnified(AuthorRefRequest):
 
     The author is named explicitly (``author_type`` + ``author_id``); the
     declared author may be a human or a Bot. The product surface does not
-    distinguish topic kinds, so ``topic_type`` defaults to ``DISCUSSION``.
+    distinguish topic kinds; the Topic is persisted as ``DISCUSSION`` and
+    the write body carries no ``topic_type`` Flag.
     """
 
     client_request_id: str = Field(
@@ -140,10 +141,6 @@ class CreateTopicRequestUnified(AuthorRefRequest):
         min_length=1,
         max_length=MAX_BODY_LENGTH,
         description="Topic description. Leading and trailing whitespace is removed.",
-    )
-    topic_type: str = Field(
-        default=TOPIC_TYPE_DISCUSSION,
-        description="Topic type: DISCUSSION, POLL, or NOTICE.",
     )
 
 
@@ -183,7 +180,6 @@ class TopicCreated(BaseModel):
     topic_id: str = Field(
         description="Stable topic id. The same id is returned if the write is replayed."
     )
-    topic_type: str = Field(description="Topic type: DISCUSSION, POLL, or NOTICE.")
 
 
 class ReplyCreated(BaseModel):

@@ -7,10 +7,7 @@ import pytest
 from fastapi import Request, Response
 
 from agentclaw.community.adapters.http.bbs.router import (
-    close_topic_as_bot_internal,
     close_topic_internal,
-    create_human_reply_internal,
-    create_human_topic_internal,
     create_reply_internal,
     create_topic_internal,
     get_topic_internal,
@@ -20,11 +17,9 @@ from agentclaw.community.adapters.http.bbs.router import (
     router,
 )
 from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
-    CloseTopicRequestInternal,
-    CreateHumanTopicRequestInternal,
-    CreateReplyRequest,
-    CreateReplyRequestInternal,
-    CreateTopicRequest,
+    CloseTopicRequestUnified,
+    CreateReplyRequestUnified,
+    CreateTopicRequestUnified,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import Conflict, Forbidden, NotFound
@@ -71,7 +66,7 @@ def _post() -> ForumPostRecord:
     )
 
 
-def test_internal_router_mirrors_all_five_bbs_operations():
+def test_internal_router_mirrors_all_bbs_operations():
     operations = {
         (method, route.path)
         for mounted in (read_router, router)
@@ -80,26 +75,22 @@ def test_internal_router_mirrors_all_five_bbs_operations():
     }
 
     assert operations == {
-        # Content surface (Topic + Post).
+        # Content surface (Topic + Post) — reads.
         ("GET", "/api/v1/bbs/topics"),
         ("GET", "/api/v1/bbs/topics/{topic_id}"),
         ("GET", "/api/v1/bbs/topics/{topic_id}/posts"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/topics"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/topics/{topic_id}/close"),
+        # Content surface — unified writes (author declared in the body).
+        ("POST", "/api/v1/bbs/topics"),
+        ("POST", "/api/v1/bbs/topics/{topic_id}/posts"),
+        ("POST", "/api/v1/bbs/topics/{topic_id}/close"),
         # BBS Browse Loop — subscription (per Bot) + actor-aware feed.
         ("GET", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
         ("DELETE", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
         ("GET", "/api/v1/bots/{bot_id}/bbs/feed"),
-        ("GET", "/api/v1/bbs/browse-loop/subscriptions"),
-        ("GET", "/api/v1/bbs/browse-loop/subscriptions/{bot_id}"),
+        ("GET", "/api/v1/bbs/browse-subscriptions"),
         # BBS Browse Loop — manual triggers (A=framework / B=openclaw).
-        # Human-Write — internal mirror of the public /openapi/v1/bbs Human writes.
-        ("POST", "/api/v1/bbs/topics"),
-        ("POST", "/api/v1/bbs/topics/{topic_id}/posts"),
-        ("POST", "/api/v1/bbs/topics/{topic_id}/close"),
-        ("POST", "/api/v1/bbs/browse-loop/trigger-framework"),
+        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-register"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"),
@@ -114,6 +105,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
                 "keyword": "notice",
                 "status": "open",
                 "topic_type": None,
+                "author_id": None,
                 "page": 2,
                 "page_size": 10,
             }
@@ -134,6 +126,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
         keyword="notice",
         status="open",
         topic_type=None,
+        author_id=None,
         service=service,
     )
     topic = await get_topic_internal(
@@ -153,8 +146,18 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     assert posts.data is not None and posts.data.items[0].post_id == "post_1"
 
 
+# ---------------------------------------------------------------------------
+# BBS Unified Writes — internal /api/v1/bbs mirror tests
+# ---------------------------------------------------------------------------
+# Mirror of ``test_bbs_unified_write_endpoints.py`` (the public /openapi
+# surface): the internal /api/v1 surface delegates to the same
+# ``ForumServiceProtocol`` so the author-gating and idempotency semantics cannot
+# drift. ``author_type`` + ``author_id`` are declared in the body; there is no
+# ``bot_id`` path segment and no ``topic_type`` field.
+
+
 @pytest.mark.asyncio
-async def test_internal_topic_write_uses_path_bot_as_author():
+async def test_internal_topic_create_passes_body_author_as_bot_author():
     class Service:
         def create_topic(self, **kwargs):
             assert kwargs == {
@@ -163,19 +166,19 @@ async def test_internal_topic_write_uses_path_bot_as_author():
                 "client_request_id": "request-1",
                 "title": "Topic title",
                 "body": "Topic description",
-                "topic_type": "DISCUSSION",
             }
             return ForumTopicCreateResult(topic=_topic(), created=True)
 
     response = Response()
     payload = await create_topic_internal(
-        body=CreateTopicRequest(
+        body=CreateTopicRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
             client_request_id="request-1",
             title="Topic title",
             body="Topic description",
         ),
-        bot_id="bot-a",
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/topics"),
+        request=_request("POST", "/api/v1/bbs/topics"),
         response=response,
         service=Service(),
     )
@@ -185,48 +188,7 @@ async def test_internal_topic_write_uses_path_bot_as_author():
 
 
 @pytest.mark.asyncio
-async def test_internal_reply_write_preserves_idempotent_replay_status():
-    class Service:
-        def create_reply(self, **kwargs):
-            assert kwargs == {
-                "topic_id": "topic_1",
-                "author_type": "BOT",
-                "author_id": "bot-a",
-                "client_request_id": "request-2",
-                "body": "Reply body",
-            }
-            return ForumReplyCreateResult(post=_post(), created=False)
-
-    response = Response()
-    payload = await create_reply_internal(
-        body=CreateReplyRequest(
-            client_request_id="request-2",
-            body="Reply body",
-        ),
-        bot_id="bot-a",
-        topic_id="topic_1",
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_1/replies"),
-        response=response,
-        service=Service(),
-    )
-
-    assert response.status_code == 200
-    assert payload.data is not None and payload.data.post_id == "post_1"
-
-
-
-# ---------------------------------------------------------------------------
-# BBS Human-Write — internal /api/v1/bbs mirror tests
-# ---------------------------------------------------------------------------
-# Mirror of ``test_bbs_human_write_endpoints.py`` (the public /openapi surface),
-# confirming the internal /api/v1 surface produces identical idsempotency
-# and author-gating semantics, with ``author_id`` declared by body.
-
-
-@pytest.mark.asyncio
-async def test_create_human_topic_internal_passes_body_author_as_human_author():
-    """Internal create_topic carries ``author_id`` from body, fixed DISCUSSION type."""
-
+async def test_internal_topic_create_passes_body_author_as_human_author():
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -238,12 +200,13 @@ async def test_create_human_topic_internal_passes_body_author_as_human_author():
     service = Service()
     response = Response()
 
-    payload = await create_human_topic_internal(
-        body=CreateHumanTopicRequestInternal(
+    payload = await create_topic_internal(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
             client_request_id="req-internal-topic",
             title=" Topic title ",
             body=" Topic description ",
-            author_id="user-a",
         ),
         request=_request("POST", "/api/v1/bbs/topics"),
         response=response,
@@ -253,11 +216,8 @@ async def test_create_human_topic_internal_passes_body_author_as_human_author():
     assert response.status_code == 201
     assert payload.code == 201000
     assert payload.data is not None
-    assert payload.data.model_dump() == {
-        "topic_id": "topic_1",
-        "topic_type": "DISCUSSION",
-    }
-    # Author is the body-declared human, fixed DISCUSSION.
+    assert payload.data.model_dump() == {"topic_id": "topic_1"}
+    # Author is the body-declared human; no topic_type key is forwarded.
     assert service.calls == [
         {
             "op": "create_topic",
@@ -266,24 +226,24 @@ async def test_create_human_topic_internal_passes_body_author_as_human_author():
             "client_request_id": "req-internal-topic",
             "title": " Topic title ",
             "body": " Topic description ",
-            "topic_type": "DISCUSSION",
         }
     ]
 
 
 @pytest.mark.asyncio
-async def test_create_human_topic_internal_replay_returns_200_with_original_id():
+async def test_internal_topic_create_replay_returns_200_with_original_id():
     class ReplayService:
         def create_topic(self, **kwargs):
             return ForumTopicCreateResult(topic=_topic(), created=False)
 
     response = Response()
-    payload = await create_human_topic_internal(
-        body=CreateHumanTopicRequestInternal(
+    payload = await create_topic_internal(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
             client_request_id="req-internal-topic",
             title="Topic title",
             body="Topic description",
-            author_id="user-a",
         ),
         request=_request("POST", "/api/v1/bbs/topics"),
         response=response,
@@ -297,7 +257,38 @@ async def test_create_human_topic_internal_replay_returns_200_with_original_id()
 
 
 @pytest.mark.asyncio
-async def test_create_human_reply_internal_passes_body_author_as_human_author():
+async def test_internal_reply_create_passes_body_author_as_bot_author():
+    class Service:
+        def create_reply(self, **kwargs):
+            assert kwargs == {
+                "topic_id": "topic_1",
+                "author_type": "BOT",
+                "author_id": "bot-a",
+                "client_request_id": "request-2",
+                "body": "Reply body",
+            }
+            return ForumReplyCreateResult(post=_post(), created=False)
+
+    response = Response()
+    payload = await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="request-2",
+            body="Reply body",
+        ),
+        topic_id="topic_1",
+        request=_request("POST", "/api/v1/bbs/topics/topic_1/posts"),
+        response=response,
+        service=Service(),
+    )
+
+    assert response.status_code == 200
+    assert payload.data is not None and payload.data.post_id == "post_1"
+
+
+@pytest.mark.asyncio
+async def test_internal_reply_create_passes_body_author_as_human_author():
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -309,11 +300,12 @@ async def test_create_human_reply_internal_passes_body_author_as_human_author():
     service = Service()
     response = Response()
 
-    payload = await create_human_reply_internal(
-        body=CreateReplyRequestInternal(
+    payload = await create_reply_internal(
+        body=CreateReplyRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
             client_request_id="req-internal-reply",
             body=" Reply body ",
-            author_id="user-a",
         ),
         topic_id="topic_1",
         request=_request("POST", "/api/v1/bbs/topics/topic_1/posts"),
@@ -336,8 +328,17 @@ async def test_create_human_reply_internal_passes_body_author_as_human_author():
     ]
 
 
+# ---------------------------------------------------------------------------
+# BBS Topic close — internal /api/v1/bbs mirror tests
+# ---------------------------------------------------------------------------
+# The unified close route lets the author named in the body close a Topic only
+# if that declared author matches the stored topic author (both kind and id,
+# after the same case-fold and trim the create path applied). Mismatches
+# surface as 403; a missing Topic as 404; a LOCKED Topic as 409.
+
+
 @pytest.mark.asyncio
-async def test_close_topic_internal_closes_when_author_matches():
+async def test_internal_close_topic_closes_when_declared_author_matches():
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict] = []
@@ -354,8 +355,8 @@ async def test_close_topic_internal_closes_when_author_matches():
 
     service = Service()
     payload = await close_topic_internal(
+        body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
         topic_id="topic_1",
-        body=CloseTopicRequestInternal(author_id="user-a"),
         request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
         service=service,
     )
@@ -369,7 +370,7 @@ async def test_close_topic_internal_closes_when_author_matches():
 
 
 @pytest.mark.asyncio
-async def test_close_topic_internal_refuses_when_author_mismatch():
+async def test_internal_close_topic_refuses_when_author_id_mismatch():
     other_topic = dataclasses.replace(_topic(), author_type="HUMAN", author_id="user-b")
 
     class Service:
@@ -386,8 +387,8 @@ async def test_close_topic_internal_refuses_when_author_mismatch():
     service = Service()
     with pytest.raises(Forbidden):
         await close_topic_internal(
+            body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            body=CloseTopicRequestInternal(author_id="user-a"),
             request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
             service=service,
         )
@@ -395,8 +396,8 @@ async def test_close_topic_internal_refuses_when_author_mismatch():
 
 
 @pytest.mark.asyncio
-async def test_close_topic_internal_refuses_for_bot_authored_topic():
-    bot_topic = _topic()  # already author_type=BOT, author_id=bot-a
+async def test_internal_close_topic_refuses_when_author_kind_mismatch():
+    bot_topic = _topic()  # author_type=BOT, author_id=bot-a by default
 
     class Service:
         def __init__(self) -> None:
@@ -412,8 +413,8 @@ async def test_close_topic_internal_refuses_for_bot_authored_topic():
     service = Service()
     with pytest.raises(Forbidden):
         await close_topic_internal(
+            body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            body=CloseTopicRequestInternal(author_id="user-a"),
             request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
             service=service,
         )
@@ -421,7 +422,7 @@ async def test_close_topic_internal_refuses_for_bot_authored_topic():
 
 
 @pytest.mark.asyncio
-async def test_close_topic_internal_surfaces_not_found_when_topic_missing():
+async def test_internal_close_topic_surfaces_not_found_when_topic_missing():
     class MissingService:
         def get_topic(self, **kwargs):
             raise NotFound("topic not found")
@@ -431,128 +432,22 @@ async def test_close_topic_internal_surfaces_not_found_when_topic_missing():
 
     with pytest.raises(NotFound):
         await close_topic_internal(
+            body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_missing",
-            body=CloseTopicRequestInternal(author_id="user-a"),
             request=_request("POST", "/api/v1/bbs/topics/topic_missing/close"),
             service=MissingService(),
         )
 
 
-# ---------------------------------------------------------------------------
-# BBS bot close — internal mirror: POST /api/v1/bots/{bot_id}/bbs/topics/{topic_id}/close
-# The addressed Bot (from the path) may close only its own authored Topic.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_close_topic_as_bot_internal_closes_when_bot_is_author():
+async def test_internal_close_topic_surfaces_conflict_when_topic_locked():
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
         def get_topic(self, **kwargs):
             self.calls.append({"op": "get_topic", **kwargs})
-            return _topic()  # author_type=BOT, author_id=bot-a by default
-
-        def close_topic(self, **kwargs):
-            self.calls.append({"op": "close_topic", **kwargs})
-            return dataclasses.replace(_topic(), status="CLOSED")
-
-    service = Service()
-    payload = await close_topic_as_bot_internal(
-        bot_id="bot-a",
-        topic_id="topic_1",
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_1/close"),
-        service=service,
-    )
-
-    assert service.calls == [
-        {"op": "get_topic", "topic_id": "topic_1"},
-        {"op": "close_topic", "topic_id": "topic_1"},
-    ]
-    assert payload.data is not None
-    assert payload.data.model_dump() == {"topic_id": "topic_1", "status": "CLOSED"}
-
-
-@pytest.mark.asyncio
-async def test_close_topic_as_bot_internal_refuses_when_bot_is_not_author():
-    other_bot_topic = dataclasses.replace(_topic(), author_id="bot-b")
-
-    class Service:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        def get_topic(self, **kwargs):
-            self.calls.append({"op": "get_topic", **kwargs})
-            return other_bot_topic
-
-        def close_topic(self, **kwargs):
-            raise AssertionError("close_topic reached without an authorising get")
-
-    service = Service()
-    with pytest.raises(Forbidden):
-        await close_topic_as_bot_internal(
-            bot_id="bot-a",
-            topic_id="topic_1",
-            request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_1/close"),
-            service=service,
-        )
-    assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
-
-
-@pytest.mark.asyncio
-async def test_close_topic_as_bot_internal_refuses_for_human_authored_topic():
-    human_topic = dataclasses.replace(_topic(), author_type="HUMAN", author_id="user-a")
-
-    class Service:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        def get_topic(self, **kwargs):
-            self.calls.append({"op": "get_topic", **kwargs})
-            return human_topic
-
-        def close_topic(self, **kwargs):
-            raise AssertionError("close_topic reached for a HUMAN-authored topic")
-
-    service = Service()
-    with pytest.raises(Forbidden):
-        await close_topic_as_bot_internal(
-            bot_id="bot-a",
-            topic_id="topic_1",
-            request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_1/close"),
-            service=service,
-        )
-    assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
-
-
-@pytest.mark.asyncio
-async def test_close_topic_as_bot_internal_surfaces_not_found_when_topic_missing():
-    class MissingService:
-        def get_topic(self, **kwargs):
-            raise NotFound("topic not found")
-
-        def close_topic(self, **kwargs):
-            raise AssertionError("close_topic reached without an authorising get")
-
-    with pytest.raises(NotFound):
-        await close_topic_as_bot_internal(
-            bot_id="bot-a",
-            topic_id="topic_missing",
-            request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_missing/close"),
-            service=MissingService(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_close_topic_as_bot_internal_surfaces_conflict_when_topic_locked():
-    class Service:
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        def get_topic(self, **kwargs):
-            self.calls.append({"op": "get_topic", **kwargs})
-            return _topic()
+            return _topic()  # author_type=BOT, author_id=bot-a — declared author matches
 
         def close_topic(self, **kwargs):
             self.calls.append({"op": "close_topic", **kwargs})
@@ -560,10 +455,10 @@ async def test_close_topic_as_bot_internal_surfaces_conflict_when_topic_locked()
 
     service = Service()
     with pytest.raises(Conflict):
-        await close_topic_as_bot_internal(
-            bot_id="bot-a",
+        await close_topic_internal(
+            body=CloseTopicRequestUnified(author_type="BOT", author_id="bot-a"),
             topic_id="topic_1",
-            request=_request("POST", "/api/v1/bots/bot-a/bbs/topics/topic_1/close"),
+            request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [

@@ -281,10 +281,24 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # path, so the gate adjudicates the addressed owner (OwnerIdDep) and a
     # MEMBER-level Check admits any collaborator managing the bot -- the bar
     # the deleted /bots/{bot_id}/bbs/topics write carried before unification.
-    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public BBS browse-subscription join; operator declared as owner_user_id query, no addressed-owner grant on the wire"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public BBS browse-subscription cancel; bot_id path-only, no addressed-owner grant on the wire"),
     ("GET", "/openapi/v1/bbs/browse-subscriptions"):
         NoCheck("per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"),
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public per-Bot subscription read; owner is not assumed from the principal, no addressed owner on the wire"),
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/feed"):
+        NoCheck("public per-Bot Browse-Loop feed read; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework"):
+        NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"):
+        NoCheck("public B-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-register"):
+        NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"):
+        NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
     ("GET", "/openapi/v1/feedback"):
         NoCheck("tenant-wide feedback read; no addressed bot"),
     ("POST", "/openapi/v1/feedback"):

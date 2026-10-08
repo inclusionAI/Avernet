@@ -161,11 +161,8 @@ async def create_topic_unified(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
-        topic_type=body.topic_type,
     )
-    payload = TopicCreated(
-        topic_id=result.topic.topic_id, topic_type=result.topic.topic_type
-    )
+    payload = TopicCreated(topic_id=result.topic.topic_id)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
 
@@ -254,7 +251,7 @@ async def list_bbs_browse_subscriptions(
         "as an explicit query parameter, never resolved from or restricted to "
         "the logged-in caller -- app-to-app and cross-user callers may query "
         "any owner, exactly as the unified BBS writes declare their author. The "
-        "value is the same identifier as ``SubscriptionItem.owner_user_id``.",
+        "value is the same identifier as SubscriptionItem.owner_user_id.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[SubscriptionItem]]:

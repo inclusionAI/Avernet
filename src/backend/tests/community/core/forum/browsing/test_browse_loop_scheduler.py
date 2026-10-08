@@ -33,8 +33,17 @@ class _FakeRepository:
         self._items = tuple(_subscription(index) for index in range(count))
         self.calls: list[dict[str, object]] = []
 
-    def list_subscriptions(self, *, offset: int, limit: int, mode: str | None = None):
-        self.calls.append({"offset": offset, "limit": limit, "mode": mode})
+    def list_subscriptions(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        mode: str | None = None,
+        owner_user_id: str | None = None,
+    ):
+        self.calls.append(
+            {"offset": offset, "limit": limit, "mode": mode, "owner_user_id": owner_user_id}
+        )
         return BrowseSubscriptionPage(
             total=len(self._items),
             items=self._items[offset : offset + limit],
@@ -71,8 +80,18 @@ async def test_startup_restores_all_subscriptions_with_valid_page_size(monkeypat
     await scheduler.startup()
 
     assert repository.calls == [
-        {"offset": 0, "limit": 100, "mode": BROWSE_MODE_FRAMEWORK},
-        {"offset": 100, "limit": 100, "mode": BROWSE_MODE_FRAMEWORK},
+        {
+            "offset": 0,
+            "limit": 100,
+            "mode": BROWSE_MODE_FRAMEWORK,
+            "owner_user_id": None,
+        },
+        {
+            "offset": 100,
+            "limit": 100,
+            "mode": BROWSE_MODE_FRAMEWORK,
+            "owner_user_id": None,
+        },
     ]
     assert fake_scheduler.started is True
     assert len(fake_scheduler.jobs) == 101

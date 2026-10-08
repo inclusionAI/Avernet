@@ -93,12 +93,12 @@ def test_list_subscriptions_normalises_mode_and_pagination():
     svc.list_subscriptions(page=1, page_size=20, mode="OPENCLAW")
     last = _repo_calls(svc)[-1]
     assert last[0] == "list_subscriptions"
-    assert last[1] == {"offset": 0, "limit": 20, "mode": BROWSE_MODE_OPENCLAW}
+    assert last[1] == {"offset": 0, "limit": 20, "mode": BROWSE_MODE_OPENCLAW, "owner_user_id": None}
 
     # ``None`` mode is preserved (no filter applied).
     svc = _service()
     svc.list_subscriptions(page=3, page_size=5)
-    assert _repo_calls(svc)[-1][1] == {"offset": 10, "limit": 5, "mode": None}
+    assert _repo_calls(svc)[-1][1] == {"offset": 10, "limit": 5, "mode": None, "owner_user_id": None}
 
 
 def test_get_and_delete_subscription_delegate_normalised_bot_id():

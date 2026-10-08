@@ -291,6 +291,19 @@ _NO_USER_DIMENSION = {
     # query, never by a ``user_id`` axis -- a backend read keyed on the
     # declared owner, so it sits in the no-user-dimension set.
     ("get", f"{PUBLIC_API_PREFIX}/bbs/browse-subscriptions"),
+    # BBS Browse-Loop per-Bot reads + writes + manual triggers, exposed on the
+    # public surface: they address a bot by path but take only a verified
+    # principal (+ the declared owner_user_id query on join); the principal
+    # authorises the call and the owner names whose Bot is toggled, neither
+    # acts as an end user, so there is no user_id axis on the wire.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("delete", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/feed"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/trigger-framework"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/trigger-self"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/cron-register"),
+    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/cron-remove"),
     # BBS unified writes name the author in the request body (author_type +
     # author_id); they are backend-API writes reachable by humans, Bots and
     # app-to-app callers, so there is no user_id axis on the wire.
@@ -506,7 +519,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # BBS browse-subscription addressed-bot toggle (this edit): the two writes
 # under /openapi/v1/bots/{bot_id}/bbs/browse-subscription name the bot in the
 # path, so ``path`` grows 160 -> 162; ``query`` and ``none`` are unchanged.
-_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 116}
+# BBS public per-Bot reads + manual triggers (this edit): six new
+# /bots/{bot_id}/bbs routes (single-bot GET browse-subscription, GET feed,
+# and the four browse-loop triggers) name their bot in the path, so
+# ``path`` grows 162 -> 168; ``query`` and ``none`` are unchanged.
+_BOT_ID_PLACEMENT = {"path": 168, "query": 1, "none": 116}
 
 
 def _schema() -> dict:
@@ -691,7 +708,15 @@ def test_the_pinned_number_of_operations_take_it():
     # like the rest of the user-scoped addressed surface, so ``taking`` grows
     # 234 -> 236. The per-owner list GET /openapi/v1/bbs/browse-subscriptions is
     # declared (owner_id), not user-scoped, so it does not add to ``taking``.
-    assert len(taking) == 236
+    # BBS browse-subscription unification (this edit): the two addressed-Bot
+    # toggle writes no longer derive the owner from the logged-in caller via
+    # ``UserIdDep`` -- they declare the owner with the required ``owner_user_id``
+    # query and join the OPEN / NoCheck tier that the per-Bot reads already sit
+    # in, mirroring the unified BBS writes under /bbs (which declared the author
+    # in the body). The owner is named on the wire rather than resolved from the
+    # principal, so neither write names an end user and both drop out of
+    # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
+    assert len(taking) == 234
 
 
 def test_the_exempt_operations_take_none():

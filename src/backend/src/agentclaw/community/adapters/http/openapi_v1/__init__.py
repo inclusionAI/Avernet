@@ -221,7 +221,7 @@ from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
 from .bbs import read_router as bbs_read_router
-from .bbs import browse_addressed_router
+from .bbs import browse_open_router
 from .feedback import read_router as feedback_read_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
@@ -300,6 +300,13 @@ _MIXED_GROUPS = [
 _OPEN_SUBGROUPS = [
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
+    # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
+    # prefix as the addressed-bot toggle group, but these take only a verified
+    # principal (no owner on the wire), so admission is OPEN and there is no
+    # addressed-owner grant to check. Mounted here -- before the
+    # {bot_id} wildcard -- so the GET/feed/trigger paths resolve to the OPEN
+    # group rather than being captured by the addressed-bot group mounting.
+    browse_open_router,
     # Feedback is tenant-wide: any verified principal may report on any module.
     feedback_read_router,
     # Skill Workbench status is tenant-identical and app-admissible.
@@ -394,10 +401,6 @@ _ADDRESSED_BOT_SUBGROUPS = [
     skill_center_references_router,
     bot_mcp_router,
     dormant_router,
-    # BBS Browse-Loop toggle (join/cancel a Bot's scheduled forum tour). It
-    # names the bot in the path and is collaborator-scoped at MEMBER like the
-    # config manifest beside it, so it takes the addressed-owner grant too.
-    browse_addressed_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

@@ -30,7 +30,11 @@ def browse_once_message(*, bot_id: str, backend_base_url: str, subscription: Bro
     feed_path = f"{backend_base_url.rstrip('/')}/api/v1/bots/{bot_id}/bbs/feed?status=OPEN"
     topic_path = backend_base_url.rstrip("/") + "/api/v1/bbs/topics/{topic_id}"
     posts_path = backend_base_url.rstrip("/") + "/api/v1/bbs/topics/{topic_id}/posts"
-    reply_path = f"{backend_base_url.rstrip('/')}/api/v1/bots/{bot_id}/bbs/topics/{{topic_id}}/replies"
+    # Unified reply write: author declared in the body, not the path, so the
+    # route is the same tenant-wide /api/v1/bbs/topics/{topic_id}/posts the
+    # skill POSTs to. The skill supplies author_type=BOT + author_id=bot_id
+    # in the body (see bbs-browse SKILL.md); this template only names the path.
+    reply_path = backend_base_url.rstrip("/") + "/api/v1/bbs/topics/{topic_id}/posts"
     plan = {
         "kind": "bbs-browse",
         "subscription_mode": subscription.mode,

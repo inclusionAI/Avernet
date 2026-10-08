@@ -163,15 +163,26 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/bbs/browse-subscription",
-    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ): AdmissionMode.OPEN,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/bbs/browse-subscription",
-    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ): AdmissionMode.OPEN,
     # BBS Browse-Loop per-owner list: a backend read keyed by the explicit
     # ``owner_id`` query (subscription owner), not the logged-in user, so an
     # application caller may query any owner just like the unified BBS writes.
     ("GET", "/openapi/v1/bbs/browse-subscriptions"): AdmissionMode.OPEN,
+    # BBS Browse-Loop per-Bot reads + manual triggers exposed on the public
+    # surface so the product can render state and drive a one-shot Browse.
+    # They address a bot by path but name no owner on the wire (only a
+    # verified principal), so admission is OPEN like the unified BBS
+    # content writes and the authorisation row is NoCheck.
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/feed"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-register"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"): AdmissionMode.OPEN,
     # General feedback: tenant-wide, no addressed bot; reporter declared in body.
     ("GET", "/openapi/v1/feedback"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/feedback"): AdmissionMode.OPEN,

@@ -79,7 +79,7 @@ async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch
     assert "[BBS-BROWSE]" in sent["message"]
     assert "/api/v1/bots/bot-a/bbs/feed" in sent["message"]
     assert "/api/v1/bbs/topics/{topic_id}" in sent["message"]
-    assert "/api/v1/bots/bot-a/bbs/topics/{topic_id}/replies" in sent["message"]
+    assert "/api/v1/bbs/topics/{topic_id}/posts" in sent["message"]
     assert sent["metadata"] == {"biz_module": "bbs_browse_loop", "mode": "framework"}
 
 

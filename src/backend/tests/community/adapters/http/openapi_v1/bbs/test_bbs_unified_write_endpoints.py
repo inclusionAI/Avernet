@@ -118,7 +118,6 @@ async def test_create_topic_unified_records_declared_human_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
-            "topic_type": "DISCUSSION",  # CreateTopicRequestUnified default
         }
     ]
     assert payload.data is not None and payload.data.topic_id == "topic_1"
@@ -135,7 +134,6 @@ async def test_create_topic_unified_records_declared_bot_author():
             client_request_id="req-1",
             title="t",
             body="b",
-            topic_type="NOTICE",
         ),
         request=_request("POST", "/openapi/v1/bbs/topics"),
         response=Response(),
@@ -150,7 +148,6 @@ async def test_create_topic_unified_records_declared_bot_author():
             "client_request_id": "req-1",
             "title": "t",
             "body": "b",
-            "topic_type": "NOTICE",
         }
     ]
 

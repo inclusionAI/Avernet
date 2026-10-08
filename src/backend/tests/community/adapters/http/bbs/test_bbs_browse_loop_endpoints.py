@@ -17,7 +17,6 @@ from fastapi import Request, Response
 
 from agentclaw.community.adapters.http.bbs.router import (
     delete_subscription_internal,
-    get_subscription_by_bot_internal,
     get_subscription_internal,
     list_browse_feed_internal,
     list_subscriptions_internal,
@@ -28,9 +27,9 @@ from agentclaw.community.adapters.http.bbs.router import (
     upsert_subscription_internal,
 )
 from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+    BrowsSubscriptionJoinRequest,
     BrowseFeedTopicItem,
     SubscriptionItem,
-    UpsertSubscriptionRequest,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import PageParams
 from agentclaw.community.core.errors import NotFound
@@ -79,40 +78,6 @@ def _feed_item(*, topic_id: str, my_reply_count: int, topic_type: str = "DISCUSS
 
 
 @pytest.mark.asyncio
-async def test_upsert_subscription_creates_framework_registers_scheduler():
-    class Service:
-        def get_subscription(self, **kwargs):
-            return None  # new subscription
-
-        def upsert_subscription(self, **kwargs):
-            assert kwargs == {
-                "bot_id": "bot-a",
-                "owner_user_id": "111111",
-                "mode": "framework",
-                "note": None,
-            }
-            return BrowseSubscriptionUpsertResult(subscription=_record(), created=True)
-
-    response = Response()
-    cron_manager = _FakeCronManager()
-    scheduler = _FakeScheduler()
-    payload = await upsert_subscription_internal(
-        body=UpsertSubscriptionRequest(owner_user_id="111111", mode="framework"),
-        bot_id="bot-a",
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
-        response=response,
-        service=Service(),
-        cron_manager=cron_manager,
-        scheduler=scheduler,
-    )
-    assert response.status_code == 201
-    assert payload.data is not None and payload.data.bot_id == "bot-a"
-    # framework create -> register scheduler job; no Bot-side cron
-    assert scheduler.registered == ["bot-a"]
-    assert cron_manager.ensures == [] and cron_manager.removes == []
-
-
-@pytest.mark.asyncio
 async def test_upsert_subscription_openclaw_ensures_cron():
     class Service:
         def get_subscription(self, **kwargs):
@@ -129,12 +94,11 @@ async def test_upsert_subscription_openclaw_ensures_cron():
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
     payload = await upsert_subscription_internal(
-        body=UpsertSubscriptionRequest(
-            owner_user_id="111111", mode="openclaw", note="self cron"
-        ),
+        body=BrowsSubscriptionJoinRequest(note="self cron"),
         bot_id="bot-a",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
+        owner_user_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -163,10 +127,11 @@ async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_sche
     scheduler = _FakeScheduler()
     response = Response()
     await upsert_subscription_internal(
-        body=UpsertSubscriptionRequest(owner_user_id="111111", mode="openclaw"),
+        body=BrowsSubscriptionJoinRequest(),
         bot_id="bot-a",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
+        owner_user_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -174,35 +139,6 @@ async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_sche
     assert response.status_code == 200
     assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
     assert scheduler.unregistered == ["bot-a"]
-
-
-@pytest.mark.asyncio
-async def test_upsert_subscription_switch_openclaw_to_framework_removes_cron():
-    class Service:
-        def get_subscription(self, **kwargs):
-            return _record(mode="openclaw")  # old openclaw sub
-
-        def upsert_subscription(self, **kwargs):
-            return BrowseSubscriptionUpsertResult(
-                subscription=_record(mode="framework"),
-                created=False,
-            )
-
-    cron_manager = _FakeCronManager()
-    scheduler = _FakeScheduler()
-    response = Response()
-    await upsert_subscription_internal(
-        body=UpsertSubscriptionRequest(owner_user_id="111111", mode="framework"),
-        bot_id="bot-a",
-        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
-        response=response,
-        service=Service(),
-        cron_manager=cron_manager,
-        scheduler=scheduler,
-    )
-    assert response.status_code == 200
-    assert scheduler.registered == ["bot-a"]
-    assert cron_manager.removes == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
 
 
 @pytest.mark.asyncio
@@ -330,34 +266,24 @@ async def test_list_browse_feed_delegates_pagination_and_filters():
 
 
 @pytest.mark.asyncio
-async def test_list_subscriptions_routes_to_tenant_listing():
+async def test_list_subscriptions_routes_to_owner_user_id_listing():
+    """Mirror public /openapi/v1/bbs/browse-subscriptions: required owner_user_id."""
     class Service:
         def list_subscriptions(self, **kwargs):
-            assert kwargs == {"page": 1, "page_size": 20, "mode": "framework"}
+            assert kwargs == {
+                "owner_user_id": "111111",
+                "page": 1,
+                "page_size": 20,
+            }
             return BrowseSubscriptionPage(total=1, items=(_record(),))
 
     payload = await list_subscriptions_internal(
-        request=_request("GET", "/api/v1/bbs/browse-loop/subscriptions"),
+        request=_request("GET", "/api/v1/bbs/browse-subscriptions"),
         page_params=PageParams(),
-        mode="framework",
+        owner_user_id="111111",
         service=Service(),
     )
     assert payload.data is not None and payload.data.total == 1
-
-
-@pytest.mark.asyncio
-async def test_get_subscription_by_bot_reviews_under_read_router():
-    class Service:
-        def get_subscription(self, **kwargs):
-            assert kwargs == {"bot_id": "bot-a"}
-            return _record()
-
-    payload = await get_subscription_by_bot_internal(
-        bot_id="bot-a",
-        request=_request("GET", "/api/v1/bbs/browse-loop/subscriptions/bot-a"),
-        service=Service(),
-    )
-    assert payload.data is not None and payload.data.bot_id == "bot-a"
 
 
 class _FakeCronManager:
@@ -420,7 +346,7 @@ class _FakeRunner:
 async def test_trigger_framework_pushes_with_framework_mode():
     runner = _FakeRunner()
     payload = await trigger_framework_browse_internal(
-        request=_request("POST", "/api/v1/bbs/browse-loop/trigger-framework"),
+        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"),
         bot_id="bot-a",
         runner=runner,
     )
@@ -475,7 +401,7 @@ async def test_trigger_framework_propagates_runner_validation_error():
     runner = _FakeRunner(fail="validation")
     with pytest.raises(ValidationError):
         await trigger_framework_browse_internal(
-            request=_request("POST", "/api/v1/bbs/browse-loop/trigger-framework"),
+            request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-loop/trigger-framework"),
             bot_id="bot-a",
             runner=runner,
         )

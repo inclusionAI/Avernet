@@ -3,7 +3,7 @@
 These are the public /openapi/v1/bots/{bot_id}/bbs/browse-subscription writes.
 The surface is B-scheme only: the periodic forum tour is always driven by the
 OpenClaw cron, so the join exposes no trigger-mode selector and reads its owner
-off the resolved gate parameter (owner_id) rather than the request body. The
+off the required owner_user_id query parameter rather than the request body. The
 handlers are invoked directly with stubs for the forum service, the OpenClaw
 cron manager and the framework scheduler, so the assertions are about wiring
 (openclaw cron always installed on join, idempotent 201/200, mode swap and
@@ -114,8 +114,7 @@ async def test_upsert_creates_openclaw_cron_under_resolved_owner():
         bot_id="bot-a",
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
-        actor_id="u-actor",
-        owner_id="111111",
+        owner_user_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -153,8 +152,7 @@ async def test_upsert_no_body_joins_without_remark():
         bot_id="bot-a",
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
-        actor_id="u-actor",
-        owner_id="111111",
+        owner_user_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -185,8 +183,7 @@ async def test_upsert_swaps_legacy_framework_to_openclaw_unregisters_scheduler()
         bot_id="bot-a",
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
-        actor_id="u-actor",
-        owner_id="111111",
+        owner_user_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -219,8 +216,6 @@ async def test_delete_openclaw_subscription_removes_cron():
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
-        actor_id="u-actor",
-        owner_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -244,8 +239,6 @@ async def test_delete_legacy_framework_subscription_unregisters_scheduler():
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
-        actor_id="u-actor",
-        owner_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
@@ -269,8 +262,6 @@ async def test_delete_missing_subscription_is_idempotent():
     payload = await delete_bbs_browse_subscription(
         bot_id="bot-a",
         request=_request("DELETE", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
-        actor_id="u-actor",
-        owner_id="111111",
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
