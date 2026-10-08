@@ -235,7 +235,12 @@ impl DeliveryRuntime {
                                 let connection_id = started.transport_context_json.as_ref()
                                     .and_then(|v| v.get("connection_id")).and_then(|v| v.as_str()).map(str::to_owned);
                                 let abort_request_id = cmd.command_id.clone();
-                                let downstream_run_id = cmd.run_id.clone();
+                                // Provider aborts use a Bot/Session scope, so the wire run_id is None.
+                                // Keep the validated run identity for checking the abort response.
+                                let downstream_run_id = cmd.run_id.clone().or_else(|| started.transport_context_json.as_ref()
+                                    .and_then(|context| context.get("downstream_run_id"))
+                                    .and_then(|value| value.as_str()).map(str::to_owned))
+                                    .or_else(|| started.run_id.clone());
                                 abort_work.spawn(async move {
                                     let result = tokio::time::timeout(timeout, async {
                                         match connection_id {

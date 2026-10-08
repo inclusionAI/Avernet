@@ -562,11 +562,24 @@ async fn provider_worker_abort_requires_exclusive_active_run() {
 
 #[tokio::test]
 async fn runtime_times_out_worker_and_queues_manager_result_after_abort_ack() {
+    for provider in [false, true] {
+        assert_runtime_timeout_with_abort_ack(provider).await;
+    }
+}
+
+async fn assert_runtime_timeout_with_abort_ack(provider: bool) {
     use bcs_message_flow::delivery_runtime::{DeliveryRuntime, DeliveryRuntimeConfig};
     use std::time::Duration;
     let f = Fixture::new().await;
+    if provider {
+        f.support.registry.set_delivery_target("bot-observer",
+            support::FakeRegistryService::provider_target("bot-observer")).await;
+    }
     f.context("bot-observer").await;
     let (task_id, task) = f.dispatch().await;
+    if provider {
+        f.support.bot_delivery.set_provider_abort_run_ids(vec![task.run_id.clone().unwrap()]).await;
+    }
     let worker = DeliveryRuntime { policy:Some(f.live.clone()), service:f.service.clone(),
         preparation:Arc::new(QueuedGroupPreparation { flow:Arc::downgrade(&f.flow), deliveries:f.service.clone() }),
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
@@ -591,7 +604,9 @@ async fn runtime_times_out_worker_and_queues_manager_result_after_abort_ack() {
     let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
     assert_eq!(source.content["task_state"], "timed_out");
     assert!(source.content["task_result_text"].as_str().unwrap().contains("[任务超时]"));
-    assert_eq!(f.support.bot_delivery.aborts().await.len(), 1);
+    let aborts = f.support.bot_delivery.aborts().await;
+    assert_eq!(aborts.len(), 1);
+    assert_eq!(aborts[0].run_id.is_none(), provider);
     stop.send(true).unwrap();
     job.await.unwrap().unwrap();
 }
