@@ -257,3 +257,239 @@ def test_all_invalid_sample_terminals_report_execution_error_without_judge():
     result = sink.reports[0].data["result"]
     assert result["success"] is False
     assert result["exec_error"] == "multi_sample_all_failed"
+
+
+def _executor(*, bot=None, graph=None):
+    class _UnusedBot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError(f"unexpected bot call: {kwargs}")
+
+    return MultiSampleExecutor(
+        bot=bot or _UnusedBot(),
+        graph=graph,
+        context=_Context(),
+        formatter=_Formatter(),
+        sink=_Sink(),
+    )
+
+
+def test_start_rejects_non_multi_sample_and_tracks_successful_background_task():
+    async def _case():
+        executor = _executor()
+        node = _node()
+        node.run_info.extend_props["dispatch_samples"] = []
+        assert executor.start(node) is False
+
+        node.run_info.extend_props["dispatch_samples"] = [{}, {}]
+        completed = asyncio.Event()
+
+        async def _run(_node):
+            completed.set()
+
+        executor._run = _run
+        assert executor.start(node) is True
+        await completed.wait()
+        await asyncio.sleep(0)
+        assert executor._tasks == set()
+
+    asyncio.run(_case())
+
+
+def test_on_done_logs_background_exception(caplog):
+    async def _case():
+        executor = _executor()
+
+        async def _fail():
+            raise RuntimeError("background boom")
+
+        task = asyncio.create_task(_fail())
+        executor._tasks.add(task)
+        try:
+            await task
+        except RuntimeError:
+            pass
+        executor._on_done(task)
+        assert task not in executor._tasks
+
+    asyncio.run(_case())
+    assert "background execution crashed" in caplog.text
+
+
+def test_wait_until_running_handles_transition_query_failure_and_exhaustion(monkeypatch):
+    class _TransitionGraph:
+        def __init__(self):
+            self.calls = 0
+
+        def query_task_nodes(self, task_id, criteria):
+            assert task_id == "t1"
+            assert criteria.node_ids == ["n1"]
+            self.calls += 1
+            node = _node()
+            node.status = Status.RUNNING if self.calls == 2 else Status.PENDING
+            return [node]
+
+    class _FailingGraph:
+        def query_task_nodes(self, task_id, criteria):
+            raise RuntimeError("query unavailable")
+
+    class _PendingGraph:
+        def __init__(self):
+            self.calls = 0
+
+        def query_task_nodes(self, task_id, criteria):
+            self.calls += 1
+            return []
+
+    sleeps = 0
+
+    async def _no_sleep(_delay):
+        nonlocal sleeps
+        sleeps += 1
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_runner.multi_sample.asyncio.sleep",
+        _no_sleep,
+    )
+
+    async def _case():
+        transition = _TransitionGraph()
+        await _executor(graph=transition)._wait_until_running(_node())
+        assert transition.calls == 2
+
+        await _executor(graph=_FailingGraph())._wait_until_running(_node())
+
+        pending = _PendingGraph()
+        await _executor(graph=pending)._wait_until_running(_node())
+        assert pending.calls == 200
+
+    asyncio.run(_case())
+    assert sleeps == 201
+
+
+def test_execute_sample_converts_exception_to_failed_result():
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise LookupError("bot unavailable")
+
+    result = asyncio.run(
+        _executor(bot=_Bot())._execute_sample(
+            _node(), {"sample_id": "sample-x", "bot_id": "bot-x", "rank": 7}
+        )
+    )
+
+    assert result == {
+        "sample_id": "sample-x",
+        "bot_id": "bot-x",
+        "rank": 7,
+        "completed": False,
+        "success": False,
+        "output": None,
+        "gaps": [],
+        "error": "LookupError: bot unavailable",
+    }
+
+
+def test_select_best_falls_back_when_owner_missing_or_judge_selects_unknown_sample():
+    successful = [
+        {
+            "sample_id": "sample-1",
+            "bot_id": "bot-a",
+            "rank": 1,
+            "completed": True,
+            "success": True,
+            "output": "first",
+            "gaps": [],
+            "error": None,
+        },
+        {
+            "sample_id": "sample-2",
+            "bot_id": "bot-b",
+            "rank": 2,
+            "completed": True,
+            "success": True,
+            "output": "second",
+            "gaps": [],
+            "error": None,
+        },
+    ]
+
+    class _UnknownJudgeBot:
+        async def send_and_wait_async(self, **kwargs):
+            return {
+                "status": "COMPLETED",
+                "result": {
+                    "content": '{"selected_sample_id":"missing","reason":"bad"}'
+                },
+            }
+
+    async def _case():
+        ownerless = _node()
+        ownerless.node_run_graph.extend_props = {}
+        selected, meta = await _executor()._select_best(ownerless, successful)
+        assert selected["sample_id"] == "sample-1"
+        assert meta == {"mode": "rank_fallback", "reason": "owner_missing"}
+
+        selected, meta = await _executor(bot=_UnknownJudgeBot())._select_best(
+            _node(), successful
+        )
+        assert selected["sample_id"] == "sample-1"
+        assert meta["mode"] == "rank_fallback"
+        assert "unknown sample" in meta["reason"]
+
+    asyncio.run(_case())
+
+
+def test_owner_bot_id_uses_dashboard_fallback_and_tolerates_query_failure():
+    class _Snapshot:
+        extend_props = {"owner_bot_id": "dashboard-owner", "owner_user_id": "u9"}
+
+    class _DashboardGraph:
+        def query_task_dashboard(self, task_id):
+            assert task_id == "t1"
+            return _Snapshot()
+
+    class _FailingGraph:
+        def query_task_dashboard(self, task_id):
+            raise RuntimeError("dashboard unavailable")
+
+    node = _node()
+    node.node_run_graph.extend_props = {}
+
+    assert _executor(graph=_DashboardGraph())._owner_bot_id(node) == "dashboard-owner:u9"
+    assert _executor(graph=_FailingGraph())._owner_bot_id(node) == ""
+
+
+def test_task_executor_dispatch_routes_multi_sample_and_closes_without_poller():
+    from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
+        TaskExecutor,
+    )
+
+    executor = TaskExecutor(
+        bot=None,
+        bcs=None,
+        formatter=None,
+        context=None,
+        sink=None,
+        poller=None,
+    )
+    node = _node()
+    calls = []
+
+    class _MultiSample:
+        def can_handle(self, candidate):
+            calls.append(("can_handle", candidate.node_id))
+            return True
+
+        def start(self, candidate):
+            calls.append(("start", candidate.node_id))
+            return True
+
+    executor._multi_sample = _MultiSample()
+
+    async def _case():
+        assert await executor.dispatch([node]) == [True]
+        executor._persist_dispatch_ids(node)
+        await executor.aclose()
+
+    asyncio.run(_case())
+    assert calls == [("can_handle", "n1"), ("start", "n1")]

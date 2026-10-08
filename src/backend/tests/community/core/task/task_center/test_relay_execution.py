@@ -1796,3 +1796,44 @@ class TestRelayBbsReturnTrajectory:
 
         rows = [r for r in _relay_records(repo) if r.action_result == "bbs_return"]
         assert len(rows) == 1
+
+
+def test_relay_search_sampling_failure_is_observability_only(monkeypatch, caplog) -> None:
+    service, _ = _service()
+
+    def _fail_emit(*args, **kwargs):
+        raise RuntimeError("trajectory unavailable")
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_center.task_service_relay.emit_relay_event",
+        _fail_emit,
+    )
+    with caplog.at_level(logging.WARNING, logger="task.task_service"):
+        result = _run(
+            service.search_task_candidates(
+                query="补齐市场研究 gap", task_id="relay-task", node_id="node-x"
+            )
+        )
+    assert result["candidates"]
+    assert result["sample_count"] == 1
+    assert "trajectory sampling failed" in caplog.text
+
+
+def test_schedule_relay_bbs_selection_without_background_task_registry() -> None:
+    service, _ = _service()
+    target, _turn = _plan_pending_target(service, suffix="no-bg-registry")
+    del service._bg_tasks
+    started = asyncio.Event()
+
+    async def _start_run(nodes):
+        assert nodes[0].node_id == target
+        started.set()
+        return [True]
+
+    service._relay_adapter.runner.start_run = _start_run
+
+    async def _case():
+        service._schedule_relay_bbs_selection("relay-task", target)
+        await started.wait()
+
+    _run(_case())
