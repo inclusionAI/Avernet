@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
+from sqlalchemy.orm import Session
+
 if TYPE_CHECKING:
     from agentclaw.community.core.work_orders.models import (
         WorkOrderNotificationDraft,
@@ -43,9 +45,11 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
     ) -> WorkOrderReviewResult: ...
 
     @abstractmethod
-    def approve_auto_skill_editor_request(
-        self, *, work_order_id: int, env: str
-    ) -> WorkOrderReviewResult: ...
+    def apply_auto_skill_editor_request(
+        self, *, session: Session, work_order_id: int, env: str
+    ) -> None:
+        """Validate and write only the Grant in WorkOrder's open transaction."""
+        ...
 
     @staticmethod
     @abstractmethod
