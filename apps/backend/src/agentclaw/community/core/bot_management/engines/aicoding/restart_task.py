@@ -44,6 +44,8 @@ from .restart_state import (
     task_key,
 )
 
+from .restart_submission import find_rejection
+
 logger = get_logger()
 POLL_SECONDS = 3
 
@@ -136,17 +138,14 @@ class AicodingDurableRestartMixin:
 
         # Save template snapshots using their existing encryption/authorization
         # contract, not as plaintext credentials in a task-queue payload.
-        try:
-            self.apply_restart_extra_configs(
-                ctx,
-                kwargs.get("extra_configs"),
-                template_service=services.template_service,
-            )
-        except Exception:
-            logger.warning(
-                "coding restart template update failed; retaining stored config: bot_id=%s",
-                bot_id,
-            )
+        self.apply_restart_extra_configs(
+            ctx, kwargs.get("extra_configs"), template_service=services.template_service,
+        )
+        # Run the existing provider preparation BEFORE accepting the task or
+        # stopping business processes. Do not persist credential-bearing requests.
+        in_progress = services.preflight_restart(bot=bot, user_id=owner_id)
+        if in_progress is not None:
+            return in_progress
         payload = {
             "bot_id": bot_id,
             "owner_id": owner_id,
@@ -238,6 +237,11 @@ class AicodingRestartHandler:
             if record["phase"] == "WAITING_READY":
                 return self._observe(state, record)
             if record["phase"] == "RESTARTING":
+                # Recover a persisted provider handoff without issuing mutation.
+                self._capture_completion(state, payload)
+                record = journal(state.read())
+                if record.get("phase") == "WAITING_READY":
+                    return self._observe(state, record)
                 # A lease-lost worker may still be inside the mutation. Keep
                 # dedup ownership until its handoff appears or our deadline;
                 # never release the key merely because a delivery saw the fence.
@@ -284,9 +288,13 @@ class AicodingRestartHandler:
         except RestartSuperseded:
             return self._superseded(state)
         except Exception as error:
+            rejection = find_rejection(error)
+            if rejection is not None:
+                state.fail(str(rejection))
+                return Fail(str(rejection))
             if execution.fenced:
                 # Only observe durable provider intent; never reissue mutation
-                # after an ambiguous response. No hook in the shared lifecycle.
+                # after an ambiguous response.
                 self._capture_completion(state, payload)
                 return Reschedule(POLL_SECONDS)
             if (
@@ -294,7 +302,11 @@ class AicodingRestartHandler:
                 and journal(state.read()).get("phase") == "RESTARTING"
             ):
                 return Reschedule(POLL_SECONDS)
-            message = _failure_message(error, fenced=execution.fenced)
+            message = (
+                "备份已完成，但重启提交前准备失败；本次重启已终止，旧容器未执行替换"
+                if execution.verify_backup is not None
+                else _failure_message(error, fenced=execution.fenced)
+            )
             state.fail(message)
             logger.error(
                 "coding restart blocked: bot_id=%s operation_id=%s error_type=%s",

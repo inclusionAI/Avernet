@@ -134,6 +134,8 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
 
+from .restart_preparation import BaasRestartPreparationMixin
+
 logger = get_logger()
 
 # Restart idempotency guard TTL. The full device-allocation path has a p99 of
@@ -326,7 +328,7 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     return f"{date_part}_{random_part}"
 
 
-class BotService(BotServiceProtocol):
+class BotService(BaasRestartPreparationMixin, BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
     def __init__(
@@ -4629,6 +4631,7 @@ class BotService(BotServiceProtocol):
                 task_queue=self._task_queue_service,
                 get_bot=self.get_bot,
                 template_service=self._template_service,
+                preflight_restart=self._preflight_restart,
             ),
             **kwargs,
         )
@@ -4977,198 +4980,25 @@ class BotService(BotServiceProtocol):
         普通 restart 不传 migration_path，cmd 不拼 --source_dir；发布态迁移源
         只在 service bot 发布流程里传入。
         """
-        binding = self._device_service_provider().get_device(binding_id=binding_id)
-        bot_uuid = (
-            binding.get("device_id") if isinstance(binding, dict)
-            else getattr(binding, "device_id", None)
-        )
-        if not bot_uuid:
-            raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
-
+        from .restart_preparation import BaasRestartInProgress
         from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
             RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
             RESTART_REQUEST_ID_KEY,
             RESTART_WORKFLOW_BASELINE_KEY,
         )
 
-        raw_binding_props = (
-            binding.get("device_props", {})
-            if isinstance(binding, dict)
-            else (getattr(binding, "device_props", None) or {})
+        prepared = self._prepare_baas_restart(
+            bot_id=bot_id, user_id=user_id, binding_id=binding_id, bot=bot,
         )
-        binding_props = raw_binding_props if isinstance(raw_binding_props, dict) else {}
-        restart_request_id = binding_props.get(RESTART_REQUEST_ID_KEY)
-        restart_workflow_baseline = binding_props.get(RESTART_WORKFLOW_BASELINE_KEY)
-        has_durable_recovery_intent = (
-            isinstance(restart_request_id, str)
-            and bool(restart_request_id)
-            and isinstance(restart_workflow_baseline, int)
-            and not isinstance(restart_workflow_baseline, bool)
-            and restart_workflow_baseline >= 0
-        )
-        if has_durable_recovery_intent:
-            logger.info(
-                "[bot_service._restart_bot_baas] restart already has a durable "
-                "recovery intent: bot_id=%s binding_id=%s request_id=%s baseline=%s",
-                bot_id,
-                binding_id,
-                restart_request_id,
-                restart_workflow_baseline,
-            )
-            return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
-        if restart_request_id:
-            logger.warning(
-                "[bot_service._restart_bot_baas] ignoring legacy restart intent "
-                "without a valid workflow baseline: bot_id=%s binding_id=%s "
-                "request_id=%s baseline=%r",
-                bot_id,
-                binding_id,
-                restart_request_id,
-                restart_workflow_baseline,
-            )
-
-        active_engine = (bot.get("active_engine") or "").strip()
-        bot_type = bot.get("bot_type") or "personal"
-        bot_template_type = (bot.get("template_type") or "").strip()
-
-        # 先读取模板快照：BCN 能力门控与后续 BaaS restart 均使用同一份 resolved config。
-        try:
-            resolved_template_config = self._template_service.get_template_config(bot_id)
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] Failed to get template for bot %s: %s",
-                bot_id, e,
-            )
-            resolved_template_config = None
-
-        # BaaS 原地重启不会经过 start_bot，这里补齐启动链路的 BCN Provider 注册。
-        # 注册接口幂等：已注册时直接返回，也能重试创建阶段失败的注册。
-        should_register_bcn = self._should_register_bcn_provider(
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=bot_template_type,
-            template_config=resolved_template_config,
-        )
-        connection_mode = self._resolve_bcn_provider_connection_mode(
-            active_engine=active_engine,
-            bot_type=bot_type,
-        )
-        if should_register_bcn:
-            logger.info(
-                "[bot_service._restart_bot_baas] register bot to BCN as provider: "
-                "bot_id=%s active_engine=%s bot_type=%s template_type=%s connection_mode=%s",
-                bot_id,
-                active_engine,
-                bot_type,
-                bot_template_type,
-                connection_mode,
-            )
-            self._register_bot_to_bcn_as_provider(
-                bot_id=bot_id,
-                user_id=user_id,
-                owner_workno=bot.get("owner_id") or user_id,
-                bot_name=bot.get("bot_name") or bot_id,
-                bot_summary=bot.get("bot_desc") or "",
-                connection_mode=connection_mode,
-            )
-
-        # 普通 restart 入口只重启当前 bot，不使用发布态 build 产物目录。
-        # 发布态 verify/online 的重启由 PublishFlowService.restart_bot(publish_id) 处理。
-        mig: Optional[str] = None
-        restart_stage = (
-            PublishStage.DRAFT.value
-            if bot_type == "service"
-            else None
-        )
-
-        # resolved_template_config 已在 BCN 能力门控前读取，后续 BaaS restart 复用同一快照。
-        # 与 _allocate_device_async（create / arca-restart 路径）同口径构造
-        # extra_envs，并独立透传 template_config。extra_envs 提供引擎策略
-        # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
-        # template_config 提供沙箱覆写（envs / image / resource_spec）。两者
-        # 不能互相门控。
-        extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
-            bot_id=str(bot_id),
-            owner_id=user_id,
-            active_engine=active_engine,
-            bot_type=bot.get("bot_type", ""),
-            template_type=bot_template_type,
-            template_config=resolved_template_config,
-            log_context="bot_service._restart_bot_baas",
-        )
-        # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
-        # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
-        # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
-        # coding 模板或仅配置 envs/image/spec 的模板在 restart -> /update 时会
-        # 退化成默认 envs，丢失创建 Bot 时使用的沙箱覆写。
-        try:
-            device_template_config = self._attach_template_uid_context(
-                bot_id=str(bot_id),
-                user_id=user_id,
-                bot_type=bot.get("bot_type", ""),
-                engine_type=active_engine,
-                template_type=bot_template_type,
-                template_config=resolved_template_config,
-            )
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] Failed to attach template uid context for bot %s: %s",
-                bot_id, e,
-            )
-            device_template_config = resolved_template_config
-        device_template_config = overlay_image_pin_on_template_config(
-            device_template_config,
-            bot.get("ext"),
-        )
-
-        import uuid as _uuid
-        request_id = _uuid.uuid4().hex
-        template_uuid = self._resolve_baas_restart_template_uuid(
-            bot_id=bot_id,
-            user_id=user_id,
-            bot=bot,
-            template_config=resolved_template_config,
-        )
-        upgrade_kwargs = {
-            "bot_uuid": bot_uuid,
-            "bot": bot,
-            "owner_id": user_id,
-            "request_id": request_id,
-            "migration_path": mig,
-            # 个人 Bot / 服务 Bot 草稿的普通重启不走发布产物迁移，但仍按 NAS home 目录运行。
-            "mount_home_dir_storage": True,
-            # extra_envs 可能因引擎策略门控为 None；template_config 仍需透传，
-            # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
-            "extra_envs": extra_envs,
-            "template_config": device_template_config,
-        }
-        if restart_stage is not None:
-            upgrade_kwargs["stage"] = restart_stage
-        if template_uuid is not None:
-            upgrade_kwargs["template_uuid"] = template_uuid
-        image_policy_on_success = (
-            DEFAULT_IMAGE_POLICY_VALUE
-            if bot_type == "service"
-            and not self.is_teclaw_bot(active_engine)
-            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
-            else None
-        )
+        if isinstance(prepared, BaasRestartInProgress):
+            return prepared.bot
+        binding = prepared.binding
+        bot_uuid = prepared.bot_uuid
+        request_id = prepared.request_id
+        workflow_baseline = prepared.workflow_baseline
+        upgrade_kwargs = prepared.upgrade_kwargs
+        image_policy_on_success = prepared.image_policy_on_success
         baas_service = self._baas_service_provider()
-        try:
-            workflows = baas_service.list_bot_publishes(bot_uuid)
-            workflow_baseline = max(
-                (
-                    int(workflow["id"])
-                    for workflow in (workflows or [])
-                    if isinstance(workflow, dict)
-                    and str(workflow.get("id", "")).isdigit()
-                ),
-                default=0,
-            )
-        except Exception as e:
-            raise BotServiceError(
-                f"Failed to snapshot BaaS restart workflow baseline: {e}"
-            ) from e
 
         from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
             BAAS_RESTART_PUBLISH_POLL_TASK,
@@ -5225,10 +5055,14 @@ class BotService(BotServiceProtocol):
             self._device_binding_repo.update_status(
                 binding_id=binding_id, status=DeviceBindingStatus.PENDING
             )
-            if self._repository.update_by_owner(
-                bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
-            ) is None:
-                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
+            # Admission may already have persisted this state for deferred work.
+            # An unchanged PENDING must not be written a second time (some DB
+            # adapters report no affected row for an idempotent update).
+            if previous_bot_status != DeviceBindingStatus.PENDING.value:
+                if self._repository.update_by_owner(
+                    bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
+                ) is None:
+                    raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         except Exception as e:
             # No BaaS call has happened yet. Invalidate the queued task's request
             # identity and restore the previous visible lifecycle state.
@@ -5245,9 +5079,10 @@ class BotService(BotServiceProtocol):
                     binding_id=binding_id,
                     status=previous_binding_status or DeviceBindingStatus.ACTIVE.value,
                 )
-                self._repository.update_by_owner(
-                    bot_id, user_id, {"status": previous_bot_status}
-                )
+                if previous_bot_status != DeviceBindingStatus.PENDING.value:
+                    self._repository.update_by_owner(
+                        bot_id, user_id, {"status": previous_bot_status}
+                    )
             except Exception:
                 logger.exception(
                     "[bot_service._restart_bot_baas] failed to roll back restart preparation"
@@ -5257,7 +5092,27 @@ class BotService(BotServiceProtocol):
         # From this point on, every ambiguous failure is recoverable by the
         # pre-existing task. It either reads the stored publish id or adopts the
         # single workflow issued after workflow_baseline.
-        result = baas_service.upgrade_bot(**upgrade_kwargs)
+        def clear_restart_intent():
+            self._device_binding_repo.update_device_props(
+                binding_id=binding_id,
+                props={
+                    RESTART_REQUEST_ID_KEY: None,
+                    RESTART_WORKFLOW_BASELINE_KEY: None,
+                    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
+                },
+            )
+
+        ctx, strategy = resolve_restart_strategy(bot)
+        try:
+            result = baas_service.upgrade_bot(
+                **upgrade_kwargs, **strategy.restart_submission_options(ctx),
+            )
+        except Exception as error:
+            strategy.on_restart_submission_error(
+                ctx, error,
+                clear_intent=clear_restart_intent,
+            )
+            raise
         publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
         if publish_id is not None:
             restart_publish_id = str(publish_id)

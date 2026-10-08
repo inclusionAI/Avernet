@@ -93,7 +93,7 @@ def persisted(tmp_path):
         }
 
     ctx, strategy = resolve_restart_strategy(bot)
-    services = RestartServices(repo, queue, get_bot, Mock())
+    services = RestartServices(repo, queue, get_bot, Mock(), Mock(return_value=None))
     yield SimpleNamespace(
         repo=repo, queue=queue, strategy=strategy, ctx=ctx, services=services
     )

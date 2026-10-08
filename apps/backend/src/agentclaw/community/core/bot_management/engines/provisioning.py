@@ -254,6 +254,15 @@ class EngineProvisioningStrategy(ABC):
         """Async consumers use the same precondition; default performs no I/O."""
         return self.prepare_restart(ctx, **kwargs)
 
+    def restart_submission_options(self, ctx: BotProvisioningContext) -> dict:
+        """Optional provider call hooks; default leaves submission unchanged."""
+        return {}
+
+    def on_restart_submission_error(
+        self, ctx: BotProvisioningContext, error: Exception, *, clear_intent
+    ) -> None:
+        """Optional policy classification; default preserves the original error."""
+
     async def execute_restart(self, ctx: BotProvisioningContext, restart, *, services=None, **kwargs):
         """Default: inline lifecycle/result. Engines may return durable acceptance.
 
