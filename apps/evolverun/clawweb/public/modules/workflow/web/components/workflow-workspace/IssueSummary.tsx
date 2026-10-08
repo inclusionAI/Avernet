@@ -1,22 +1,30 @@
 import type { IssueGroupView } from './issue-groups';
 
 export default function IssueSummary({ group }: { group: IssueGroupView }) {
-  const statusText = group.aggregationStatus === 'queued' ? '正在生成聚合结论…'
-    : group.aggregationStatus === 'failed' ? '聚合失败，单次分析已保留；下次分析时会重试。'
-    : group.aggregationStatus === 'too_large' ? '诊断输入过多，暂不能生成完整聚合；请查看单次分析。'
-    : '尚未生成聚合结论；下一次运行分析完成后更新。';
+  const statusText = group.aggregationStatus === 'queued' ? '摘要生成中'
+    : group.aggregationStatus === 'failed' ? '聚合失败或等待超时'
+    : group.aggregationStatus === 'too_large' ? '聚合输入超出限制'
+    : group.aggregationStatus === 'completed' ? '摘要已生成' : '摘要尚未生成';
   const sources = group.summarySources ?? group.sources;
   const coveredRuns = new Set(sources.flatMap(source => source.flowIds?.length ? source.flowIds : [source.flowId])).size;
   const currentRuns = new Set(group.flowIds ?? group.sources.flatMap(source => source.flowIds?.length ? source.flowIds : [source.flowId])).size;
   return <section aria-label="问题原因总览">
-    <h4 className="text-xs font-semibold text-slate-900">问题原因总览</h4>
-    <p className="mt-2 text-xs text-slate-500">模型汇总的问题原因与依据，仅供参考；实际修复以勾选的原始建议为准。</p>
-    {group.aggregationStatus !== 'completed' && <p role="status" className="mt-2 text-xs text-amber-700">{statusText}</p>}
-    {!!group.aggregationInputSummary?.compactSources && <p className="mt-2 text-xs text-slate-500">本次聚合覆盖 {group.aggregationInputSummary.totalSources} 条诊断：
-      {group.aggregationInputSummary.fullSources} 条完整输入，{group.aggregationInputSummary.compactSources} 条精简输入。</p>}
-    {group.stale && <p className="mt-2 text-xs text-amber-700">以下为上次聚合，尚未覆盖最新分析。</p>}
+    <h4 className="text-sm font-semibold text-slate-900">问题原因</h4>
+    <div role="status" className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+      <p className={group.stale || group.aggregationStatus !== 'completed' ? 'font-medium text-amber-800' : 'font-medium'}>
+        {statusText}{group.stale ? ' · 摘要待更新' : ''}
+      </p>
+      {group.summary && <p>摘要依据 {coveredRuns} 个运行 · 当前关联 {currentRuns} 个运行</p>}
+      <details className="mt-1"><summary className="cursor-pointer">摘要说明</summary>
+        {group.stale && <p className="mt-1">保留历史摘要，尚未覆盖最新分析。原因依据与当前修复建议的来源范围可能不同。</p>}
+        {group.aggregationStatus === 'failed' && <p className="mt-1">本次聚合失败或排队超过等待时间，具体原因需查看聚合任务日志；原始分析仍保留在“证据与历史”。</p>}
+        {group.aggregationStatus === 'too_large' && <p className="mt-1">诊断输入超过聚合限制，可先查看“证据与历史”中的单次分析。</p>}
+        <p className="mt-1">模型归纳仅用于解释问题；实际修复范围以“修复建议”中明确勾选的建议为准。</p>
+        {!!group.aggregationInputSummary?.compactSources && <p className="mt-1">聚合输入 {group.aggregationInputSummary.totalSources} 条诊断：
+          {group.aggregationInputSummary.fullSources} 条完整输入，{group.aggregationInputSummary.compactSources} 条精简输入。</p>}
+      </details>
+    </div>
     {group.summary && <>
-      <p className="mt-2 text-xs text-slate-500">此摘要覆盖 {coveredRuns} 个运行 / 当前问题涉及 {currentRuns} 个运行。原因依据与当前建议来源可能不同。</p>
       <p className="mt-3 text-sm leading-6 text-slate-700">{group.summary.summary.length > 180 ? `${group.summary.summary.slice(0, 180)}…` : group.summary.summary}</p>
       {group.summary.summary.length > 180 && <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">展开完整摘要</summary>
         <p className="mt-2 whitespace-pre-wrap break-words leading-6">{group.summary.summary}</p></details>}

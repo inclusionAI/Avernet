@@ -1,4 +1,5 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { repairStage } from '../observability/repair-diagnostics.js';
 import { RepairBatchError, boundedRepairJson, canonicalRepairJson, digestRepairJson, MAX_FROZEN_BYTES,
   validateRepairItem, type RepairItem, type RepairItemState } from '../contracts/repair-batch.js';
 import type { RepairSourcePort } from '../contracts/repair-workbench.js';
@@ -83,8 +84,8 @@ const legacyPriority: Partial<Record<RepairItemState, number>> = {
 export function createRepairSourcePort(readers: RepairSourceReaders): RepairSourcePort {
   return { async load(db, workflowId, mode = 'full', scope) {
     const sinceMs = scope?.includeHistorical ? undefined : Date.now() - ACTIVE_LOOKBACK_MS;
-    const groups = await readers.groups(db, workflowId, { sinceMs });
-    const suggestions = (await readers.suggestions(db, workflowId, { sinceMs })).filter(row => {
+    const groups = await repairStage('source_groups', () => readers.groups(db, workflowId, { sinceMs }));
+    const suggestions = (await repairStage('source_suggestions', () => readers.suggestions(db, workflowId, { sinceMs }))).filter(row => {
       if (scope?.includeHistorical || lifecycleVisible(row.status)) return true;
       const modifiedAt = timestampMs(row.gmt_modified);
       return modifiedAt === null || modifiedAt >= sinceMs!;
@@ -158,7 +159,7 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       const evidence = new Map<string, RepairEvidenceSource>();
       // Avoid database parameter limits; never silently discard citations after the requested item set.
       for (let offset = 0; offset < eventIds.length; offset += 200) {
-        for (const row of await readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200))) {
+        for (const row of await repairStage('source_evidence', () => readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200)))) {
           if (row.workflow_id === workflowId) evidence.set(row.event_id, row);
         }
       }

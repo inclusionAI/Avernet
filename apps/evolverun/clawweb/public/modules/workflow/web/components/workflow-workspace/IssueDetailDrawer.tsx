@@ -5,6 +5,7 @@ import { useRunEvolutionAnalysis } from '../../api/hooks'
 import RunEvolutionAnalysis from '../evolution/RunEvolutionAnalysis'
 import { diffWorkflowPatchOperations, type DiagnosisCluster } from './evolution-utils'
 import IssueSummary from './IssueSummary'
+import IssueIdentity from './IssueIdentity'
 import DetailDrawer from './DetailDrawer'
 import { REMEDY_KIND } from './RemediesPanel'
 
@@ -66,8 +67,7 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
 
   return <DetailDrawer title="问题详情" onClose={onClose} header={<>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold text-slate-950">{cluster.node}</h3>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{cluster.mode}</span>
+            <IssueIdentity node={cluster.node} mode={cluster.mode} />
           </div>
           <p className="mt-1 text-xs text-slate-400">问题累计涉及 {cluster.runIds.length} 个运行</p>
       </>} navigation={<nav aria-label="问题详情分区" className="flex shrink-0 gap-2 border-b border-slate-200 px-5">

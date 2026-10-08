@@ -22,6 +22,9 @@
 修复建议按状态在服务端分页，每页 20 条，分页总数来自完整轻量快照而不是当前页估算；翻页和建议状态筛选不隐藏问题，问题数量与建议数量分别标注。
 首屏只读取诊断与证据引用，不读取 evidence payload；进入单条建议详情时再加载完整证据，列表和抽屉共享该项缓存，来源摘要变化后失效。
 问题摘要与修复控制面独立展示加载/错误，不因任一请求失败或等待而整页阻塞。问题摘要、候选列表和单项详情读取在 30 秒后中止并允许显式重试；不自动重试写请求。
+候选读取失败时清除上次候选快照、选择与详情缓存，处理统计显示未知，不回退为旧建议计数，也不开放旧应用入口。
+401、403、读取超时与服务异常分别提示；403 只说明访问被拒绝，不据此断定用户固定缺少权限。
+列表明确标注节点和问题类型，历史摘要以“摘要待更新”短标签标识；详情集中展示摘要状态及来源范围，不承诺未确认的自动重试。
 生成候选稿时服务端仍重新读取并冻结所选项的完整证据，不以轻量列表代替任务输入。
 
 默认候选范围只读取最近 30 天仍出现的问题，避免早已不复现的历史原因持续占据待处理列表，也缩小大工作流的首屏扫描范围。
@@ -40,6 +43,15 @@
 不会生成模拟候选，也不显示可点击的发布/灰度操作。复发归因、后续发布和新验证闭环不属于这次页面交付。
 
 ## HTTP 与服务边界
+
+### 请求诊断
+
+每次修复接口请求生成独立 `X-Repair-Request-Id`，403/500 响应正文也包含 `requestId`，便于浏览器与服务日志关联。
+日志关键词为 `[workflow-repair] request diagnostic`，每次请求用单行 JSON 记录实例、路由模板、状态码、已验证 actorId、工作流及授权结果。
+拒绝原因区分 `MISSING_IDENTITY`、`INSUFFICIENT_VIEW_SCOPE`、`INSUFFICIENT_EDIT_PERMISSION`；自定义 Host 鉴权器未提供细分原因时记录 `HOST_DENIED`。
+`stagesMs` 分别记录 principal、permissions、stored_items、sources_summary/full、source_groups/suggestions/evidence 和 revisions 耗时。
+这些阶段存在父子包含关系，不能直接求和；总耗时为 `elapsedMs`。并发请求上下文隔离，不记录请求头、Cookie、Token、Bot 列表或证据正文。
+部署后按同一请求编号比对成功与失败身份以及阶段耗时，再决定修复身份链路、权限数据或读取瓶颈；诊断日志本身不改变授权规则。
 
 工厂为 `createRepairWorkbenchService(db, sourcePort, executionPort?)` 和 `createRepairBatchesRouter({ service, authorize })`，挂载前缀 `/api/workflow-repairs`。路由只依赖服务接口，Host 注入已验证的登录与工作流权限。浏览器提供 itemId、摘要和反馈；proposal、证据、基线和 actor 由服务端决定。受限于部分 Bot 的运行查看权限不能读取整个工作流的修复批次。
 
