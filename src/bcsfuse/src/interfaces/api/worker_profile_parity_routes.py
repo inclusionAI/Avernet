@@ -15,6 +15,8 @@ All routes use existing public-safe stores (SQLite, InMemory) and do NOT depend 
 
 import os
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Any
 
@@ -61,6 +63,23 @@ from src.interfaces.api.schemas.profile_management_schemas import (
 
 logger = logging.getLogger(__name__)
 
+_LLM_ANALYSIS_EXECUTOR: Optional[ThreadPoolExecutor] = None
+_LLM_ANALYSIS_EXECUTOR_LOCK = threading.Lock()
+_LLM_ANALYSIS_MAX_WORKERS = 4
+
+
+def _get_llm_analysis_executor() -> ThreadPoolExecutor:
+    """Return the bounded executor used by background profile analysis."""
+    global _LLM_ANALYSIS_EXECUTOR
+    if _LLM_ANALYSIS_EXECUTOR is None:
+        with _LLM_ANALYSIS_EXECUTOR_LOCK:
+            if _LLM_ANALYSIS_EXECUTOR is None:
+                _LLM_ANALYSIS_EXECUTOR = ThreadPoolExecutor(
+                    max_workers=_LLM_ANALYSIS_MAX_WORKERS,
+                    thread_name_prefix="llm-analysis-",
+                )
+    return _LLM_ANALYSIS_EXECUTOR
+
 # Routers for R3 worker/profile routes
 # api_router: External product APIs — /api/v1 (always exposed, for 3rd-party callers like BCS)
 # mgmt_router: Management platform APIs — /v1 (always exposed, for admin portal)
@@ -94,6 +113,11 @@ def _get_profile_binding_store(request: Request):
 def _get_runtime_state_store(request: Request):
     """Get runtime state store from provider registry."""
     return request.app.state.context.registry.get('worker_runtime_state_store')
+
+
+def _get_audit_log_store(request: Request):
+    """Get worker audit log store from provider registry."""
+    return request.app.state.context.registry.get('worker_audit_log_store')
 
 
 def _require_auth(request: Request) -> None:
@@ -266,14 +290,20 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 ),
                 responsibilities=req.responsibilities if hasattr(req, 'responsibilities') else [],
                 domains=req.domains,
-                capabilities=[],
-                skills=[],
+                capabilities=req.capabilities or [
+                    {"name": "general", "level": "intermediate"},
+                ],
+                skills=req.skills,
                 resources=[],
                 state=WorkerState(
                     availability=availability,  # Phase 2.6.5: Use availability from request
-                    trust_level=TrustLevel.UNVERIFIED,  # Default to standard for sync
+                    trust_level=TrustLevel(req.trust_level),
                 ),
-                lifecycle_state=WorkerLifecycleState.INACTIVE,
+                # Match the internal import contract: a successfully synced
+                # Worker is visible to registry-aware recommendation as soon
+                # as the create commits. The later lifecycle write remains for
+                # existing Workers and must not be the only activation write.
+                lifecycle_state=WorkerLifecycleState.ACTIVE,
                 source_type=WorkerSourceType.API,
                 external_id=None,  # No external_id in SyncWorkerRequest
                 version=1,
@@ -292,12 +322,14 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             worker_dict["identity"]["name"] = req.name
             if req.description is not None:
                 worker_dict["identity"]["description"] = req.description
-            if req.domains:
-                worker_dict["domains"] = req.domains
+            worker_dict["responsibilities"] = req.responsibilities
+            worker_dict["domains"] = req.domains
             # Phase 2.6.5: Update availability from request
             worker_dict["state"]["availability"] = availability
             # Update active_profile_key
-            worker_dict['active_profile_key'] = f"{worker_id}:{profile_id}"
+            worker_dict['active_profile_key'] = (
+                req.profile_key or f"{worker_id}:{profile_id}"
+            )
 
             from src.domain.models.worker import Worker as WorkerModel
             updated_worker = WorkerModel.model_validate(worker_dict)
@@ -309,6 +341,21 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             if runtime_state_store is not None and update_runtime_state:
                 from src.application.services.worker_runtime_state_service import WorkerRuntimeStateService
                 from src.domain.models.worker_runtime_state import WorkerRuntimeState
+
+                previous_runtime_state = runtime_state_store.get_runtime_state(
+                    worker_id
+                )
+                if isinstance(previous_runtime_state, dict):
+                    previous_runtime_state = previous_runtime_state.get("state")
+                if previous_runtime_state is None:
+                    previous_runtime_state = (
+                        existing.state.runtime_state
+                        if existing is not None
+                        else WorkerRuntimeState.OFFLINE
+                    )
+                previous_runtime_state = WorkerRuntimeState(
+                    previous_runtime_state
+                )
 
                 # Upsert runtime state (set_runtime_state handles both create and update)
                 # Use effective_runtime_state from request (or default "online")
@@ -338,7 +385,22 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                             worker_store.update(updated_state_worker)
                             logger.info(f"[Workers R3 Sync] Worker.state.runtime_state updated to {effective_runtime_state}")
                         except Exception as e_state:
-                            logger.warning(f"[Workers R3 Sync] Failed to update worker.state.runtime_state: {e_state}")
+                            try:
+                                runtime_state_store.set_runtime_state(
+                                    worker_id=worker_id,
+                                    runtime_state=previous_runtime_state,
+                                    updated_by="sync-worker-rollback",
+                                )
+                            except Exception as rollback_error:
+                                logger.exception(
+                                    "[Workers R3 Sync] Failed to roll back runtime "
+                                    "state for %s: %s",
+                                    worker_id,
+                                    rollback_error,
+                                )
+                            raise RuntimeError(
+                                "failed to persist worker runtime-state mirror"
+                            ) from e_state
 
                     # Sync runtime_state + availability to vector store payloads (Faiss + Qdrant)
                     try:
@@ -456,7 +518,8 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     "worker_id": worker_id,  # CRITICAL: Include worker_id for ProfileResponse
                     "profile_id": profile_id,  # CRITICAL: Include profile_id for ProfileResponse
                     "soul_md": req.profile.soul_md or "",  # SOUL.md content
-                    "display_name": req.profile.display_name,
+                    "display_name": req.profile.display_name or req.name,
+                    "description": req.description,
                     "contents": merged_contents,
                     "skill_sets": req.profile.skill_sets,
                     "metadata": req.profile.metadata,
@@ -701,6 +764,53 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 f"[SYNC_PROFILE_SKIP] worker_id={worker_id}, profile_store_class=None, "
                 f"reason='profile_store provider not available'"
             )
+
+        # Preserve the internal sync contract: when capability verification is
+        # enabled, newly synced profile data must be re-verified before the
+        # worker can retain a higher trust level. Verification remains
+        # fail-open for registration, matching the previous OCB route.
+        from src.application.utils.drm_config_helper import (
+            is_capability_verify_enabled,
+        )
+
+        capability_verify_enabled = is_capability_verify_enabled()
+        if capability_verify_enabled is None:
+            from src.infra.config.feature_flags import FeatureFlags
+
+            capability_verify_enabled = FeatureFlags.is_capability_verify_enabled()
+        if capability_verify_enabled:
+            try:
+                from src.domain.events import (
+                    WorkerProfileCreatedEvent,
+                    get_event_bus,
+                )
+                from src.interfaces.api.dependencies.fusion_dependencies import (
+                    get_capability_verify_service,
+                )
+
+                verify_service = get_capability_verify_service()
+                if verify_service is not None:
+                    if not verify_service._running:
+                        await verify_service.start()
+                        logger.info("[SYNC] CapabilityVerifyService lazy-started")
+
+                    worker_store.update_trust_level(
+                        worker_id,
+                        TrustLevel.UNVERIFIED,
+                    )
+                    get_event_bus().publish(
+                        WorkerProfileCreatedEvent(worker_id=worker_id)
+                    )
+                    logger.info(
+                        "[SYNC] Capability verification scheduled: worker_id=%s",
+                        worker_id,
+                    )
+            except Exception as verification_error:
+                logger.warning(
+                    "[SYNC] Capability verification setup failed for %s: %s",
+                    worker_id,
+                    verification_error,
+                )
 
         # Return canonical response (root_original contract)
         logger.info(
@@ -1277,6 +1387,8 @@ async def update_worker_config(worker_id: str, request: Request, req: WorkerConf
                 detail={"code": "WORKER_NOT_FOUND", "message": f"Worker {worker_id} not found"}
             )
 
+        old_fusion_enable = worker.config.fusion_enable
+
         # Build config update
         config_update = req.config or {}
         if req.fusion_enable is not None:
@@ -1288,6 +1400,25 @@ async def update_worker_config(worker_id: str, request: Request, req: WorkerConf
 
         # Update worker with correct method signature
         updated_worker = store.update(worker)
+
+        audit_log_store = _get_audit_log_store(request)
+        if audit_log_store is not None:
+            from src.domain.models.worker_audit_log import (
+                WorkerAuditAction,
+                WorkerAuditLog,
+            )
+            from src.domain.models.worker_source_info import WorkerSourceType
+
+            audit_log_store.append_log(
+                WorkerAuditLog(
+                    worker_id=worker_id,
+                    action=WorkerAuditAction.CONFIG_CHANGED,
+                    old_value=str(old_fusion_enable),
+                    new_value=str(updated_worker.config.fusion_enable),
+                    source_type=WorkerSourceType.API,
+                    performed_by=request.query_params.get("updated_by"),
+                )
+            )
 
         # Get updated config
         updated_config = updated_worker.config
@@ -2275,23 +2406,43 @@ async def patch_profile(worker_id: str, profile_id: str, request: Request, req: 
         # Save updated profile
         profile_store.upsert_profile(worker_id, profile_id, current_data)
 
-        # Eager indexing if enabled
-        if os.getenv("ENABLE_EAGER_INDEXING", "false").lower() == "true":
+        # Keep vectors consistent with profile writes. The previous internal
+        # Profile service rebuilt whenever embedding-relevant content changed;
+        # gating this on ENABLE_EAGER_INDEXING could leave ECB summary updates
+        # searchable only after a later full rebuild.
+        vector_fields = {
+            'soul_md',
+            'agents_md',
+            'tools_md',
+            'boot_md',
+            'heartbeat_md',
+            'contents',
+            'contents_delete',
+            'skill_sets',
+        }
+        if vector_fields.intersection(updated_fields):
             import time
             start = time.time()
             try:
-                index_adapter = _get_index_sync_adapter(request)
-                if index_adapter:
-                    profile_key = f"{worker_id}:{profile_id}"
-                    index_adapter.sync_profile(worker_id, profile_key)
-                    elapsed_ms = int((time.time() - start) * 1000)
-                    logger.info(
-                        f"[PROFILE_EAGER_INDEX_RESULT] worker_id={worker_id}, "
-                        f"profile_id={profile_id}, profile_key={profile_key}, "
-                        f"result=success, elapsed_ms={elapsed_ms}"
-                    )
+                from src.interfaces.api.dependencies.fusion_dependencies import (
+                    _build_vector_index_for_worker,
+                )
+
+                success = _build_vector_index_for_worker(worker_id)
+                elapsed_ms = int((time.time() - start) * 1000)
+                logger.info(
+                    f"[PROFILE_INDEX_RESULT] worker_id={worker_id}, "
+                    f"profile_id={profile_id}, result={'success' if success else 'skipped'}, "
+                    f"elapsed_ms={elapsed_ms}"
+                )
             except Exception as e:
-                logger.warning(f"[PROFILE_EAGER_INDEX_RESULT] Failed: {e}")
+                logger.warning(f"[PROFILE_INDEX_RESULT] Failed: {e}")
+            try:
+                from src.interfaces.api.profile_routes import _trigger_index_sync
+
+                _trigger_index_sync(worker_id)
+            except Exception as e:
+                logger.warning(f"[PROFILE_INDEX_CACHE_RESET] Failed: {e}")
 
         # Return flat ProfileResponse
         return ProfileResponse(
@@ -2429,16 +2580,14 @@ async def _analyze_and_persist_async(
             from src.domain.models.worker_profile_content import WorkerProfileContent
 
             contents = profile_data.get("contents", {})
-            content = WorkerProfileContent(
-                worker_id=worker_id,
-                profile_id=profile_id,
-                soul_md=profile_data.get("soul_md") or profile_data.get("content", ""),
-                agents_md="",
-                tools_md="",
-                boot_md="",
-                metadata=profile_data.get("metadata", {}),
-                contents=contents,
-            )
+            content_data = dict(profile_data)
+            content_data.update({
+                "worker_id": worker_id,
+                "profile_id": profile_id,
+                "soul_md": profile_data.get("soul_md")
+                or profile_data.get("content", ""),
+            })
+            content = WorkerProfileContent.model_validate(content_data)
 
             logger.info(
                 f"[BG-LLM][{worker_id}] Starting analysis (attempt {attempt + 1}/{max_retries + 1})"
@@ -2446,7 +2595,11 @@ async def _analyze_and_persist_async(
 
             # 在线程池中执行同步 LLM 调用
             loop = asyncio.get_event_loop()
-            analysis = await loop.run_in_executor(None, analyzer.analyze, content)
+            analysis = await loop.run_in_executor(
+                _get_llm_analysis_executor(),
+                analyzer.analyze,
+                content,
+            )
 
             if not analysis.llm_success:
                 logger.warning(
@@ -2802,16 +2955,14 @@ async def _analyze_and_persist_async(
             from src.domain.models.worker_profile_content import WorkerProfileContent
 
             contents = profile_data.get("contents", {})
-            content = WorkerProfileContent(
-                worker_id=worker_id,
-                profile_id=profile_id,
-                soul_md=profile_data.get("soul_md") or profile_data.get("content", ""),
-                agents_md="",
-                tools_md="",
-                boot_md="",
-                metadata=profile_data.get("metadata", {}),
-                contents=contents,
-            )
+            content_data = dict(profile_data)
+            content_data.update({
+                "worker_id": worker_id,
+                "profile_id": profile_id,
+                "soul_md": profile_data.get("soul_md")
+                or profile_data.get("content", ""),
+            })
+            content = WorkerProfileContent.model_validate(content_data)
 
             logger.info(
                 f"[BG-LLM][{worker_id}] Starting analysis (attempt {attempt + 1}/{max_retries + 1})"
@@ -2819,7 +2970,11 @@ async def _analyze_and_persist_async(
 
             # 在线程池中执行同步 LLM 调用
             loop = asyncio.get_event_loop()
-            analysis = await loop.run_in_executor(None, analyzer.analyze, content)
+            analysis = await loop.run_in_executor(
+                _get_llm_analysis_executor(),
+                analyzer.analyze,
+                content,
+            )
 
             if not analysis.llm_success:
                 logger.warning(

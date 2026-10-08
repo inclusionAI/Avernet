@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_TAGS = 3
+_EMPTY_CAPABILITY_TAGS = frozenset({"无", "none", "null", "[]"})
 
 
 SYSTEM_PROMPT = "你是一个专业的企业 AI Bot 能力标签评估器。"
@@ -392,7 +393,10 @@ class ProfileAnalyzerService:
             return tags
 
         # 尝试匹配 "能力标签:" 前缀，如果有则取后面的内容
-        prefix_match = re.match(r"^标签列表[:：]\s*", section_content)
+        prefix_match = re.match(
+            r"^(?:能力标签|标签列表)[:：]\s*",
+            section_content,
+        )
         if prefix_match:
             section_content = section_content[prefix_match.end():].strip()
 
@@ -407,7 +411,18 @@ class ProfileAnalyzerService:
             if t.strip() and t.strip() not in ["能力标签:", "能力标签："]
         ]
 
-        return tags
+        return self._normalize_capability_tags(tags)
+
+    @staticmethod
+    def _normalize_capability_tags(tags: list[object]) -> list[str]:
+        """Drop empty LLM placeholders before they reach profile/vector storage."""
+        normalized = []
+        for raw_tag in tags:
+            tag = str(raw_tag).strip()
+            if not tag or tag.casefold() in _EMPTY_CAPABILITY_TAGS:
+                continue
+            normalized.append(tag)
+        return normalized
 
     def _build_semantic_profile(self, raw_text: str) -> Optional[str]:
         """
@@ -501,9 +516,9 @@ class ProfileAnalyzerService:
             ProfileAnalysisResult
         """
         semantic_profile = data.get("semantic_profile")
-        capability_tags = data.get("capability_tags", [])
-
-
+        capability_tags = self._normalize_capability_tags(
+            data.get("capability_tags", [])
+        )
         logger.info(
             f"[ProfileAnalyzer] 解析成功: tags={capability_tags}, "
             f"profile_len={len(semantic_profile) if semantic_profile else 0}"

@@ -142,6 +142,21 @@ class TestProfileAnalyzerServiceParseRawResponse:
         # 测试空标签
         assert service._extract_capability_tags("## 能力标签\n\n能力标签:") == []
 
+    @pytest.mark.parametrize("empty_marker", ["无", "none", "null", "[]"])
+    def test_semantically_empty_capability_tags_are_discarded(
+        self, service, empty_marker
+    ):
+        raw_text = f"## 能力标签\n\n能力标签: {empty_marker}"
+
+        assert service._extract_capability_tags(raw_text) == []
+
+    def test_structured_semantically_empty_capability_tags_are_discarded(self, service):
+        result = service._parse_structured_response(
+            {"semantic_profile": "无能力画像", "capability_tags": ["无", "none"]}
+        )
+
+        assert result.capability_tags == []
+
     def test_extract_section(self, service):
         """测试 section 提取（包括存在/不存在场景）"""
         raw_text = """## 职责定位
