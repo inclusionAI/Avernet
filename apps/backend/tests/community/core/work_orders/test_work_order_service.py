@@ -1439,16 +1439,6 @@ def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize
         notification_ids=[],
         status=WorkOrderEventStatus.PENDING,
     )
-    service._skill_collaborator_approval_handler.process_auto.return_value = (
-        WorkOrderReviewResult(
-            work_order_id=19,
-            status=WorkOrderStatus.APPROVED,
-            reviewer_user_id="SYSTEM",
-            review_remark=None,
-            reviewed_at=NOW,
-        )
-    )
-
     result = service.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         approval_mode=WorkOrderApprovalMode.AUTO,
@@ -1466,11 +1456,13 @@ def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize
     )
 
     assert result.status is WorkOrderEventStatus.APPROVED
-    service._skill_collaborator_approval_handler.process_auto.assert_called_once_with(
-        work_order_id=19
+    repo.apply_auto_skill_editor_request.assert_called_once_with(
+        work_order_id=19,
+        source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        env="dev",
     )
     repo.finalize_auto_approval.assert_not_called()
-    repo.create_auto_result_notifications.assert_called_once()
+    repo.create_auto_result_notifications.assert_not_called()
 
 
 def test_auto_skill_non_approved_handler_result_marks_order_failed():
@@ -1482,14 +1474,8 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
         notification_ids=[],
         status=WorkOrderEventStatus.PENDING,
     )
-    service._skill_collaborator_approval_handler.process_auto.return_value = (
-        WorkOrderReviewResult(
-            work_order_id=20,
-            status=WorkOrderStatus.FAILED,
-            reviewer_user_id="SYSTEM",
-            review_remark="failed",
-            reviewed_at=NOW,
-        )
+    repo.apply_auto_skill_editor_request.side_effect = RuntimeError(
+        "skill transaction failed"
     )
 
     result = service.create_work_order_event(
@@ -1510,4 +1496,9 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
 
     assert result.status is WorkOrderEventStatus.FAILED
     repo.mark_auto_approval_failed.assert_called_once()
+    assert "skill transaction failed" in repo.mark_auto_approval_failed.call_args.kwargs[
+        "review_remark"
+    ]
+    repo.create_auto_result_notifications.assert_called_once()
+    assert repo.create_auto_result_notifications.call_args.kwargs["status"] is WorkOrderStatus.FAILED
     repo.finalize_auto_approval.assert_not_called()
