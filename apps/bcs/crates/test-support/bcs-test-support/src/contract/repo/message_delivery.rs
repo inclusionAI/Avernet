@@ -316,6 +316,11 @@ async fn chat_error_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo:
     task_error.flow_kind = DeliveryFlowKind::Task;
     task_error.targets = command("unused-task", &[("manager", DeliveryType::Send)]).targets;
     task_error.targets[0].semantic_projection_json = serde_json::json!({"task":{"leg":"result"}});
+    // §12.5: the mutated projection is a DISTINCT logical command — it takes
+    // its own operation identity (one operation slot covers one logical
+    // step; reusing the parent id with a different message_id would be a
+    // same-slot content conflict in the store's audit lane).
+    task_error.operation = bcs_service_api::types::system_lane_operation("message-flow-test-seed");
     let admitted = repo.admit(task_error).await?;
     assert_eq!(admitted.deliveries.len(), 1);
     assert_eq!(admitted.deliveries[0].target_bot_id, "manager");
