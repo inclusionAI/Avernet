@@ -18,6 +18,7 @@ import jwt
 
 from agentclaw.community.api.space_service import SpaceServiceProtocol
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -120,6 +121,40 @@ def _seed_bot_editor_request(world) -> None:
         WorkOrderServiceProtocol,
         {"create_bot_editor_request": _create_bot_editor_request},
     )
+
+
+def _seed_editor_policy(world, *, owner_id: str = _USER_ID) -> None:
+    _enable_public_auth(world)
+    space = world.get(SpaceServiceProtocol).create_team(
+        name="Editor Policy Team", creator_id=owner_id
+    )
+    world.get(BotRepository).insert(
+        {
+            "bot_id": _BOT_ID,
+            "bot_name": "Editor Policy Bot",
+            "owner_id": owner_id,
+            "entity_id": owner_id,
+            "entity_type": "user",
+            "creator_id": owner_id,
+            "space_id": space.id,
+            "ext": {"preserved": "value"},
+        }
+    )
+
+
+def _assert_editor_policy_enabled(_response, world) -> None:
+    service = world.get(WorkOrderServiceProtocol)
+    assert service.get_bot_editor_request_policy(
+        bot_id=_BOT_ID, owner_id=_USER_ID, actor_id=_USER_ID
+    ) is True
+    bot = world.get(BotRepository).get_by_id_and_owner(_BOT_ID, _USER_ID)
+    assert bot["ext"]["preserved"] == "value"
+
+
+def _assert_other_owner_policy_unchanged(_response, world) -> None:
+    assert world.get(WorkOrderServiceProtocol).get_bot_editor_request_policy(
+        bot_id=_BOT_ID, owner_id=_OTHER_OWNER_ID, actor_id=_OTHER_OWNER_ID
+    ) is False
 
 
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
@@ -283,6 +318,78 @@ def create_bot_editor_request_happy():
 )
 def create_bot_editor_request_wrong_user():
     """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/editor-request-policy",
+    scenario="owner_reads_default",
+    seed=_seed_editor_policy,
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"auto_approve": False}}
+    ),
+)
+def get_editor_policy_owner():
+    """An Owner reads the disabled default through the real service."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/editor-request-policy",
+    scenario="owner_enables",
+    seed=_seed_editor_policy,
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _USER_ID},
+        json_body={"auto_approve": True},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"auto_approve": True}}
+    ),
+    extra_assertions=(_assert_editor_policy_enabled,),
+)
+def update_editor_policy_owner():
+    """The policy persists while unrelated Bot metadata is preserved."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/editor-request-policy",
+    scenario="non_owner_forbidden",
+    seed=lambda world: _seed_editor_policy(world, owner_id=_OTHER_OWNER_ID),
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _USER_ID, "entity_id": _OTHER_OWNER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=403, json_contains={"code": 403201}),
+)
+def get_editor_policy_non_owner():
+    """Naming another Owner does not grant access to their policy."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/editor-request-policy",
+    scenario="non_owner_forbidden",
+    seed=lambda world: _seed_editor_policy(world, owner_id=_OTHER_OWNER_ID),
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"user_id": _USER_ID, "entity_id": _OTHER_OWNER_ID},
+        json_body={"auto_approve": True},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=403, json_contains={"code": 403201}),
+    extra_assertions=(_assert_other_owner_policy_unchanged,),
+)
+def update_editor_policy_non_owner():
+    """A non-Owner cannot enable automatic grants."""
 
 
 # ── GET /openapi/v1/bots/work-orders ──────────────────────────────────────────────

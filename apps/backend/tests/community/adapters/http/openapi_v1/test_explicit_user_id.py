@@ -473,7 +473,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The user-level delegation (``/openapi/v1/bots/authorized-apps``: grant, list,
 #: withdraw) adds three account-level operations that address no bot — that is
 #: the record's meaning, not an omission — so ``none`` 106 → 109.
-_BOT_ID_PLACEMENT = {"path": 167, "query": 1, "none": 109}
+_BOT_ID_PLACEMENT = {"path": 169, "query": 1, "none": 109}
 
 
 def _schema() -> dict:
@@ -629,7 +629,8 @@ def test_the_pinned_number_of_operations_take_it():
     # (``/openapi/v1/bots/authorized-apps``: grant, list, withdraw) adds three
     # account-level operations that name the user they act for — the same
     # shape as the bot-scoped group one level down: 234 → 237.
-    assert len(taking) == 244
+    # Bot editor-request policy adds Owner-scoped GET and PATCH: 244 -> 246.
+    assert len(taking) == 246
 
 
 def test_the_exempt_operations_take_none():

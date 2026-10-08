@@ -219,7 +219,13 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
 
 def _editor_policy_identity(
     caller: ActingCallerDep,
-    entity_id: Annotated[str | None, Query(max_length=256)] = None,
+    entity_id: Annotated[
+        str | None,
+        Query(
+            max_length=256,
+            description="Owner of the Bot. Defaults to the current user.",
+        ),
+    ] = None,
     owner_id: Annotated[
         str | None,
         Query(max_length=256, deprecated=True, description=OWNER_ID_DESCRIPTION),

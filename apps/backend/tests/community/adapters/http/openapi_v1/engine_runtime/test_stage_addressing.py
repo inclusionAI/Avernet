@@ -171,6 +171,8 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/editors"),
     ("post", "/openapi/v1/bots/{bot_id}/editors"),
     ("post", "/openapi/v1/bots/{bot_id}/editor-requests"),
+    ("get", "/openapi/v1/bots/{bot_id}/editor-request-policy"),
+    ("patch", "/openapi/v1/bots/{bot_id}/editor-request-policy"),
     ("patch", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"),
     ("delete", "/openapi/v1/bots/{bot_id}/editors/me"),
