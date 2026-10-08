@@ -307,6 +307,11 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
             status,
             originator_policy_type,
             originator_policy_data,
+            // Source columns start with the Task 2 authority
+            // migration; currently all writers produce non-role
+            // (`none/none`) edges.
+            management_source_kind: _,
+            management_source_id: _,
         } = grant;
         let rules_val = json_to_db_value(&rules);
         let policy_data_val = json_to_db_value(&originator_policy_data);
@@ -1170,6 +1175,14 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
             &required_string(row, "originator_policy_type")?,
         )?,
         originator_policy_data: parse_json_opt(&optional_string(row, "originator_policy_data")?)?,
+        // Until the Task 2 authority migration adds the source
+        // columns, every persisted edge is a non-role edge: fixed
+        // `none/none` encoding (spec §5.1). Role kinds are
+        // rejected by `parse_grant_kind` until role sources
+        // carry their dedicated columns, so a missing source can
+        // never silently decode into a valid role edge.
+        management_source_kind: bcs_domain::NON_ROLE_SOURCE_KIND.to_string(),
+        management_source_id: bcs_domain::NON_ROLE_SOURCE_ID.to_string(),
     })
 }
 
@@ -1287,6 +1300,10 @@ fn parse_grant_kind(value: &str) -> ServiceResult<GrantKind> {
     match value {
         "permission_profile" => Ok(GrantKind::PermissionProfile),
         "rules" => Ok(GrantKind::Rules),
+        // Role kinds stay rejected at decode until the authority
+        // migration persists their dedicated source columns; a
+        // role row without source metadata must never decode
+        // into a valid non-role edge.
         other => Err(ServiceError::InternalError(format!(
             "unknown grant_kind: {}",
             other
@@ -1364,6 +1381,8 @@ fn grant_kind_str(kind: GrantKind) -> &'static str {
     match kind {
         GrantKind::PermissionProfile => "permission_profile",
         GrantKind::Rules => "rules",
+        GrantKind::Owner => "owner",
+        GrantKind::Manager => "manager",
     }
 }
 
@@ -1597,6 +1616,8 @@ mod tests {
             status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
             originator_policy_data: None,
+            management_source_kind: "none".into(),
+            management_source_id: "none".into(),
         }
     }
 

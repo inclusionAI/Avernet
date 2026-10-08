@@ -53,6 +53,9 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         status: EdgeStatus::Approved,
         originator_policy_type: OriginatorPolicyType::Any,
         originator_policy_data: None,
+        // Friend edges are non-role edges: fixed none/none encoding.
+        management_source_kind: bcs_domain::NON_ROLE_SOURCE_KIND.into(),
+        management_source_id: bcs_domain::NON_ROLE_SOURCE_ID.into(),
     };
     let edge_id = repo.insert_grant(edge.clone()).await.unwrap();
 

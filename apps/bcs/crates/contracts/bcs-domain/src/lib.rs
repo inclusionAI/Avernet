@@ -11,6 +11,7 @@
 
 pub mod actor;
 pub mod attachment;
+pub mod bot_authority;
 pub mod bot_provider;
 pub mod channel;
 pub mod collaboration;
@@ -24,6 +25,7 @@ pub mod message;
 pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
+pub mod ownership_transfer;
 pub mod proposal;
 pub mod provider;
 pub mod provider_registration_token;
@@ -37,6 +39,17 @@ pub mod system_message;
 pub mod task_ledger;
 
 pub use actor::{ActorKind, ActorRef, ActorStatus, EnsureHumanResult, EnsureOwnerEdgesResult, RelationEdge};
+pub use bot_authority::{
+    AuditActor, AuthorityShapeError, BotAccessRelation, DecodedRoleSource,
+    ManagementSource, ManagerMutation, ManagerMutationResult, OwnershipState,
+    decode_role_source, is_non_role_source,
+};
+pub use bot_authority::{
+    DIRECT_SOURCE_ID, DIRECT_SOURCE_KIND, INITIALIZED_OWNERSHIP_VERSION,
+    NON_ROLE_SOURCE_ID, NON_ROLE_SOURCE_KIND, OWNER_SOURCE_ID, OWNER_SOURCE_KIND,
+    ROLE_GRANT_REF_ID, UNINITIALIZED_OWNERSHIP_VERSION,
+};
+
 pub use attachment::{Attachment, AttachmentType};
 pub use channel::{
     BindingStatus, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
@@ -93,6 +106,7 @@ pub use opening_message::{
     MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
     OpeningMessageRenderContext, OpeningMessageScope, RenderedOpeningMessage,
 };
+pub use ownership_transfer::{TerminalReason, TransferAction, TransferStatus};
 pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,

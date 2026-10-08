@@ -30,8 +30,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 use bcs_domain::actor::ActorKind;
 use bcs_domain::edge_permission::{
-    AdmissionReason, AdmissionResult, AuthzContext, AuthzGrantRef, EdgeGrant, EdgeStatus,
-    FriendListEntry, GrantKind, GrantSource, OriginatorPolicyType, PermissionRequest, RequestKind,
+    AdmissionReason, AdmissionResult, AuthzContext, AuthzGrantRef, EdgeGrant,
+    FriendListEntry, GrantKind, GrantSource, PermissionRequest, RequestKind,
     RequestStatus,
 };
 use bcs_service_api::application::admission::AdmissionService;
@@ -1197,18 +1197,15 @@ impl DbConnectService {
         // Forward edge: caller → to_bot (ref = to_bot.default).
         let fwd_edge_id = self
             .edge_grants
-            .insert_grant(EdgeGrant {
-                edge_id: 0,
-                env: self.env.clone(),
-                from_id: caller.to_string(),
-                to_id: to_bot.to_string(),
-                grant_kind: GrantKind::PermissionProfile,
-                grant_ref_id: target_default,
-                rules: None,
-                status: EdgeStatus::Approved,
-                originator_policy_type: OriginatorPolicyType::Any,
-                originator_policy_data: None,
-            })
+            .insert_grant(EdgeGrant::new_non_role(
+                0,
+                self.env.clone(),
+                caller.to_string(),
+                to_bot.to_string(),
+                GrantKind::PermissionProfile,
+                target_default,
+                None,
+            ))
             .await?;
         edge_ids.push(fwd_edge_id);
 
@@ -1221,18 +1218,15 @@ impl DbConnectService {
 
             let rev_edge_id = self
                 .edge_grants
-                .insert_grant(EdgeGrant {
-                    edge_id: 0,
-                    env: self.env.clone(),
-                    from_id: to_bot.to_string(),
-                    to_id: caller.to_string(),
-                    grant_kind: GrantKind::PermissionProfile,
-                    grant_ref_id: caller_default,
-                    rules: None,
-                    status: EdgeStatus::Approved,
-                    originator_policy_type: OriginatorPolicyType::Any,
-                    originator_policy_data: None,
-                })
+                .insert_grant(EdgeGrant::new_non_role(
+                    0,
+                    self.env.clone(),
+                    to_bot.to_string(),
+                    caller.to_string(),
+                    GrantKind::PermissionProfile,
+                    caller_default,
+                    None,
+                ))
                 .await?;
             edge_ids.push(rev_edge_id);
             default_refs[1] = caller_default;
@@ -3294,18 +3288,15 @@ mod tests {
         let svc = service(&eg, &pp, &rq, &bc);
 
         svc.sync_add_friendship("human_1", "x:sync_keep").await.expect("sync add");
-        eg.insert_grant(EdgeGrant {
-            edge_id: 0,
-            env: "dev".to_string(),
-            from_id: "human_1".to_string(),
-            to_id: "x:sync_keep".to_string(),
-            grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: 4002,
-            rules: None,
-            status: EdgeStatus::Approved,
-            originator_policy_type: OriginatorPolicyType::Any,
-            originator_policy_data: None,
-        })
+        eg.insert_grant(EdgeGrant::new_non_role(
+            0,
+            "dev",
+            "human_1",
+            "x:sync_keep",
+            GrantKind::PermissionProfile,
+            4002,
+            None,
+        ))
         .await
         .expect("insert non-friend edge");
 
@@ -3357,18 +3348,15 @@ mod tests {
         let svc = service(&eg, &pp, &rq, &bc);
         svc.create_connect("human_1", "x:keep", None, None).await.expect("connect");
         // Manually insert a writer-profile edge with a different ref id.
-        eg.insert_grant(EdgeGrant {
-            edge_id: 4001,
-            env: "dev".to_string(),
-            from_id: "human_1".to_string(),
-            to_id: "x:keep".to_string(),
-            grant_kind: GrantKind::PermissionProfile,
-            grant_ref_id: 4002, // NOT the default
-            rules: None,
-            status: EdgeStatus::Approved,
-            originator_policy_type: OriginatorPolicyType::Any,
-            originator_policy_data: None,
-        })
+        eg.insert_grant(EdgeGrant::new_non_role(
+            4001,
+            "dev",
+            "human_1",
+            "x:keep",
+            GrantKind::PermissionProfile,
+            4002, // NOT the default
+            None,
+        ))
         .await
         .expect("insert writer edge");
 
@@ -3635,18 +3623,15 @@ mod tests {
         // Ensure the target has a default profile so has_friend_edge can resolve,
         // then insert a Rules edge (grant_kind=Rules, arbitrary ref) from→to.
         pp.ensure_default_profile("x:rules", "dev").await.expect("ensure default");
-        eg.insert_grant(EdgeGrant {
-            edge_id: 5001,
-            env: "dev".to_string(),
-            from_id: "human_1".to_string(),
-            to_id: "x:rules".to_string(),
-            grant_kind: GrantKind::Rules,
-            grant_ref_id: 5003,
-            rules: None,
-            status: EdgeStatus::Approved,
-            originator_policy_type: OriginatorPolicyType::Any,
-            originator_policy_data: None,
-        })
+        eg.insert_grant(EdgeGrant::new_non_role(
+            5001,
+            "dev",
+            "human_1",
+            "x:rules",
+            GrantKind::Rules,
+            5003,
+            None,
+        ))
         .await
         .expect("insert rules edge");
 
@@ -3674,18 +3659,15 @@ mod tests {
         let (eg, pp, _rq, bc, db) = assemble().await;
         seed_bot(&db, "x:radm", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         pp.ensure_default_profile("x:radm", "dev").await.expect("ensure default");
-        eg.insert_grant(EdgeGrant {
-            edge_id: 5002,
-            env: "dev".to_string(),
-            from_id: "human_1".to_string(),
-            to_id: "x:radm".to_string(),
-            grant_kind: GrantKind::Rules,
-            grant_ref_id: 5004,
-            rules: None,
-            status: EdgeStatus::Approved,
-            originator_policy_type: OriginatorPolicyType::Any,
-            originator_policy_data: None,
-        })
+        eg.insert_grant(EdgeGrant::new_non_role(
+            5002,
+            "dev",
+            "human_1",
+            "x:radm",
+            GrantKind::Rules,
+            5004,
+            None,
+        ))
         .await
         .expect("insert rules edge");
 

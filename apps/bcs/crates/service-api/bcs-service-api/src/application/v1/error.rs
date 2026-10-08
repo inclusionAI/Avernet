@@ -1,3 +1,5 @@
+use crate::types::error::AuthorityError;
+
 pub const ERROR_EVENT_SUBSCRIPTION_NOT_FOUND: &str = "event_subscription_not_found";
 pub const ERROR_EVENT_DELIVERY_NOT_FOUND: &str = "event_delivery_not_found";
 pub const ERROR_INVALID_EVENT_FILTER: &str = "invalid_event_filter";
@@ -14,6 +16,14 @@ pub const ERROR_INVITE_CODE_ALREADY_BOUND: &str = "invite_code_already_bound";
 pub const ERROR_INVITE_CODE_UNAVAILABLE: &str = "invite_code_unavailable";
 pub const ERROR_INVITE_CODE_NOT_APPLICABLE: &str = "invite_code_not_applicable";
 pub const ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED: &str = "invite_code_claim_limit_reached";
+
+/// Fixed spec codes for bot authority business branches
+/// (spec §11.2). `forbidden` reuses the vocabulary's own
+/// `forbidden` code via [`ApplicationError::Forbidden`].
+pub const ERROR_OWNERSHIP_NOT_INITIALIZED: &str = "ownership_not_initialized";
+pub const ERROR_CORRUPT_AUTHORITY: &str = "corrupt_authority";
+pub const ERROR_INVALID_SUBJECT: &str = "invalid_subject";
+pub const ERROR_AUTHORITY_CONFLICT: &str = "conflict";
 
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
@@ -162,6 +172,41 @@ impl ApplicationError {
         Self::QuotaExceeded {
             code: ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED.to_string(),
             message: message.into(),
+        }
+    }
+
+    /// Map a strongly-typed bot authority business failure to
+    /// the spec's fixed code (spec §11.2). Real storage/decode
+    /// failures NEVER arrive as `AuthorityError` — they stay on
+    /// `ServiceError`'s internal branches and map to
+    /// `internal_error` (no SQL leakage).
+    pub fn authority(err: AuthorityError) -> Self {
+        match &err {
+            // Uninitialized ownership on a visible resource:
+            // 409, never an automatic claim.
+            AuthorityError::OwnershipNotInitialized { bot_id, env } => {
+                Self::Conflict {
+                    code: ERROR_OWNERSHIP_NOT_INITIALIZED.to_string(),
+                    message: format!(
+                        "bot '{bot_id}' ownership is not initialized (env {env})"
+                    ),
+                }
+            }
+            // Corrupt authority data: consistency error, HTTP 500.
+            AuthorityError::CorruptAuthority { .. } => {
+                Self::Internal(err.to_string())
+            }
+            AuthorityError::Forbidden(message) => Self::forbidden_code(
+                err.fixed_code(),
+                message.clone(),
+            ),
+            AuthorityError::InvalidSubject(message) => {
+                Self::invalid(err.fixed_code(), message.clone())
+            }
+            AuthorityError::Conflict(message) => Self::conflict(
+                err.fixed_code(),
+                message.clone(),
+            ),
         }
     }
 

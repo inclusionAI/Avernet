@@ -1689,6 +1689,22 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
         ServiceError::ProviderNotReadyForDownlink { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotAlreadyBound { .. } => DeliveryErrorCode::InvalidOperation,
             ServiceError::ExistNonPublicBots { .. } => DeliveryErrorCode::InvalidOperation,
+        // Authority business branches carry no infrastructure failure
+        // type; classify by business semantics until the authority
+        // delivery path lands.
+        ServiceError::Authority(error) => match error {
+            bcs_service_api::types::error::AuthorityError::Forbidden(_) => {
+                DeliveryErrorCode::Forbidden
+            }
+            bcs_service_api::types::error::AuthorityError::CorruptAuthority {
+                ..
+            } => DeliveryErrorCode::Internal,
+            bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. }
+            | bcs_service_api::types::error::AuthorityError::InvalidSubject(_)
+            | bcs_service_api::types::error::AuthorityError::Conflict(_) => {
+                DeliveryErrorCode::InvalidOperation
+            }
+        },
     }
 }
 

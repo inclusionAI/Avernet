@@ -154,6 +154,68 @@ pub enum ServiceError {
     #[error("JSON error: {0}")]
     #[strum(serialize = "internal_error")]
     JsonError(#[from] serde_json::Error),
+
+    /// Strongly-typed bot authority business failure
+    /// (spec §11.2, plan Task 1). Real infrastructure failures keep
+    /// using the storage/internal error branches — only the enumerated
+    /// business branches below are carried here, and the application
+    /// layer maps them to the spec's fixed error codes.
+    #[error(transparent)]
+    Authority(#[from] AuthorityError),
+}
+
+/// Strongly-typed bot authority business branches (spec §5.1/§5.4/§11.2).
+///
+/// These are business outcomes, not infrastructure failures: decode
+/// failures/DB errors must stay on `ServiceError`'s internal/storage
+/// branches so they fail closed as 500, never as a mapped business
+/// code. The application layer maps each branch to the spec's fixed
+/// code; consumers must never match on error message strings.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AuthorityError {
+    /// The Bot's ownership has not been initialized
+    /// (`ownership_version = 0`); manager/ownership APIs return
+    /// 409/`ownership_not_initialized` and never auto-claim.
+    #[error("bot ownership is not initialized: bot '{bot_id}' (env {env})")]
+    OwnershipNotInitialized { bot_id: String, env: String },
+    /// Corrupt authority data (e.g. version > 0 but no/multiple owner
+    /// edge, unknown role source encoding); reported as a consistency
+    /// error and denied — never treated as an ordinary permission
+    /// result (spec §12.4).
+    #[error("corrupt authority data: bot '{bot_id}' (env {env}): {detail}")]
+    CorruptAuthority {
+        bot_id: String,
+        env: String,
+        detail: String,
+    },
+    /// The authenticated caller is not allowed to perform this action
+    /// on the visible resource (403/`forbidden`).
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+    /// A subject of the operation is not a resolvable legal actor for
+    /// it (400; e.g. unresolvable transfer recipient for the authorized
+    /// initiator, Human treated as a transfer Bot).
+    #[error("invalid subject: {0}")]
+    InvalidSubject(String),
+    /// Business-level conflict with persisted authority state
+    /// (409; e.g. pending transfer slot, idempotency conflict,
+    /// already-final mutation state).
+    #[error("conflict: {0}")]
+    Conflict(String),
+}
+
+impl AuthorityError {
+    /// The fixed spec error code this branch maps to in the
+    /// application layer (spec §11.2).
+    pub fn fixed_code(&self) -> &'static str {
+        match self {
+            Self::OwnershipNotInitialized { .. } => "ownership_not_initialized",
+            Self::CorruptAuthority { .. } => "corrupt_authority",
+            Self::Forbidden(_) => "forbidden",
+            Self::InvalidSubject(_) => "invalid_subject",
+            Self::Conflict(_) => "conflict",
+        }
+    }
 }
 
 /// Result type for service operations.
@@ -214,7 +276,27 @@ impl ServiceError {
             // IoError/JsonError may contain file paths, line numbers, or other
             // internal details - never expose to clients
             Self::IoError(_) | Self::JsonError(_) => serde_json::Value::Null,
-            Self::ExistNonPublicBots { bots } => {
+            Self::Authority(err) => {
+                match err {
+                    AuthorityError::OwnershipNotInitialized {
+                        bot_id,
+                        env,
+                    }
+                    | AuthorityError::CorruptAuthority {
+                        bot_id,
+                        env,
+                        ..
+                    } => serde_json::json!({
+                        "bot_id": bot_id,
+                        "env": env,
+                    }),
+                    AuthorityError::Forbidden(reason)
+                    | AuthorityError::InvalidSubject(reason)
+                    | AuthorityError::Conflict(reason) => {
+                        serde_json::json!({ "reason": reason })
+                    }
+                }
+            }            Self::ExistNonPublicBots { bots } => {
                 let bot_list: Vec<serde_json::Value> = bots
                     .iter()
                     .map(|(uuid, name)| serde_json::json!({
