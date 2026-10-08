@@ -1,7 +1,7 @@
 # Governance — gating, safety, rollout
 
 > Status: DRAFT. Proposed decision:
-> [ADR 0020](../../adr/0020-promotion-is-platform-owned.md).
+> [DR-2](decisions/0002-promotion-is-platform-owned.md).
 
 Self-improvement that the improver can grade is self-deception at scale. The
 literature is consistent on this (DGM removed its own hallucination markers;

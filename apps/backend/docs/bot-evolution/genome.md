@@ -2,7 +2,7 @@
 
 > Status: DRAFT. Builds on the Bot Config Manifest
 > (`apps/backend/docs/bot-config-manifest/`). Proposed decision:
-> [ADR 0019](../../adr/0019-bot-genome-is-the-unit-of-evolution.md).
+> [DR-1](decisions/0001-bot-genome-is-the-unit-of-evolution.md).
 
 ## 1. Why not just use the Manifest as-is?
 
@@ -191,7 +191,7 @@ know engine paths). Proposed **Engine memory projection contract**
   goes through the BotConfigArtifact contract like other categories.
 
 This requires amending the "reserved files are never touched" rule — hence
-it is called out in ADR 0019 as a consequence and must be confirmed with the
+it is called out in DR-1 as a consequence and must be confirmed with the
 engine owners. **Until RSI-05 lands, memory evolution is limited to a
 platform-managed file (e.g. `LESSONS.md`) declared as a persona file** — a
 safe interim that needs no engine change.

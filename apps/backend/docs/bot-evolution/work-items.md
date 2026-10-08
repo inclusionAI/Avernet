@@ -3,9 +3,9 @@
 > Status: DRAFT. Each item is sized for one follow-up session to take through
 > SDD (spec → plan → tasks → implement) or, for design-only items, to a
 > reviewed contract document. Start each with the documents listed under
-> *Read first*. Cross-module items get `docs/specs/YYYY-MM-DD-<topic>/`;
-> single-module items get `<module>/specs/YYYY-MM-DD-<topic>/` (see
-> `CONTEXT-MAP.md`).
+> *Read first*. Implementation specs go in the owning module's specs
+> directory (`apps/backend/specs/YYYY-MM-DD-<topic>/`,
+> `engine/adapter/specs/…`); design-level additions extend this directory.
 
 ## Dependency graph
 
@@ -20,7 +20,7 @@ P0  RSI-01 ADRs ─┬─► RSI-02 Genome schema ─► RSI-03 Genome Registry 
                                                                           ├─► RSI-11 Evaluation Service (P3/P4)
                                                                           └─► RSI-12 Gate, review queue, promotion (P4)
 RSI-09 + RSI-10 + RSI-11 + RSI-12 ─► RSI-13 ClawEvolve onboarding (P3, strangler steps 1-3)
-RSI-01(0021) + RSI-07 ─► RSI-14 Bot principal scopes + `avn` bot skill (P5)
+RSI-01(DR-3) + RSI-07 ─► RSI-14 Bot principal scopes + `avn` bot skill (P5)
 RSI-05 + RSI-13 + RSI-14 ─► RSI-15 Memory consolidation strategy (P5)
 RSI-12 ─► RSI-16 Rollout: shadow/canary/auto-rollback (P4)
 RSI-13 ─► RSI-17 Archive selectors (Pareto / MAP-Elites / clade) (P6)
@@ -37,17 +37,18 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 
 ## P0 — Contracts and decisions
 
-### RSI-01 Accept or revise the three ADRs
+### RSI-01 Accept or revise the three draft decisions
 - **Module**: arch
-- **Goal**: Owners decide ADR 0019 (genome = unit of evolution, built on
-  Manifest), 0020 (promotion is platform-owned), 0021 (bot principal for the
+- **Goal**: Owners decide DR-1 (genome = unit of evolution, built on
+  Manifest), DR-2 (promotion is platform-owned), DR-3 (bot principal for the
   evolution surface). Also decide open decision D-1 (control-plane module
   placement) from [design.md §5](design.md#5-ownership-and-module-placement).
 - **Read first**: [design.md](design.md), [genome.md](genome.md),
   [governance.md](governance.md), [interfaces.md §6](interfaces.md#6-authentication-and-authorization).
-- **Deliverable**: ADRs moved to `accepted` (or revised); D-1 recorded.
+- **Deliverable**: DR-1..DR-3 accepted (promoted to `docs/adr/` with the next
+  free numbers) or revised; D-1 recorded.
 - **Done when**: each ADR has an owner, and the engine owners have
-  explicitly signed off on the memory consequence in 0019.
+  explicitly signed off on the memory consequence in DR-1.
 
 ### RSI-02 Genome schema and patch format
 - **Module**: backend (contract), engine (review)
@@ -57,7 +58,7 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
   and from Manifest schema v1.
 - **Read first**: [genome.md](genome.md); `manifest-schema.zh-CN.md`;
   `schema/validator.py`.
-- **Deliverable**: `docs/specs/<date>-bot-genome-schema/` with schema files,
+- **Deliverable**: `apps/backend/specs/<date>-bot-genome-schema/` with schema files,
   examples, and a compatibility table against Manifest v1.
 - **Done when**: every Manifest v1 example round-trips into a revision;
   every patch op has a defined risk tier; reviewers agree on locked-gene
@@ -197,7 +198,7 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 
 ### RSI-14 Bot principal scopes and `avn` bot skill
 - **Module**: gateway, backend, evolution, (bcs-cli conventions)
-- **Goal**: Implement ADR 0021: bot principal admission for evolution
+- **Goal**: Implement DR-3: bot principal admission for evolution
   endpoints only, scopes from interfaces §6 enforced via authorization hook;
   `avn` binary delivered via Manifest `cli_tools`; subject-bot and runner-bot
   `SKILL.md`; inbox and observation endpoints with rate limits.
@@ -210,7 +211,7 @@ platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13.
 - **Goal**: `export_memory` / `project_memory(mode)` contract, capability
   matrix entries, OpenClaw implementation, teclaw artifact field proposal;
   amend reserved-file rule accordingly.
-- **Depends on**: RSI-02, ADR 0019 accepted.
+- **Depends on**: RSI-02, DR-1 accepted.
 - **Interim**: until done, memory evolution uses a platform-managed persona
   file (e.g. `LESSONS.md`).
 

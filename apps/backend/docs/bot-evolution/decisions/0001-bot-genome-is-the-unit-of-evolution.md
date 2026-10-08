@@ -1,6 +1,6 @@
 # Bot Genome is the unit of evolution, built on the Bot Config Manifest
 
-Status: proposed.
+Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision
 
@@ -27,7 +27,7 @@ engine-owned. This requires an engine memory projection contract and
 amends the current rule that `MEMORY.md` and `IDENTITY.md` are never touched
 by apply: the engine, not Backend, decides how curated items are projected.
 
-Design: `docs/specs/2026-10-08-bot-evolution-platform/genome.md`.
+Design: [`../genome.md`](../genome.md).
 
 ## Consequences
 

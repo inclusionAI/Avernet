@@ -21,28 +21,36 @@ self-improvement (RSI) loops over any Avernet bot, where
 3. the loop can be driven by **deterministic code** (API / SDK), by **an
    operator or CI** (CLI), or by **a bot** (the same CLI, scoped to a bot
    principal), all over one contract;
-4. **promotion is platform-owned**: no strategy and no bot can write to a live
-   bot directly. Everything goes candidate → evaluate → gate → promote, with
-   lineage and rollback.
+4. **verification is platform-owned**: no strategy and no bot can write to a
+   live bot directly. Everything goes candidate → verify → gate → promote,
+   with lineage and rollback;
+5. **the mechanism improves too** (true RSI): the experiment history H is
+   used to propose a better mechanism M2, which is adopted only after it is
+   verified to produce better verified improvements than M1. The verifier
+   itself stays fixed and human-owned.
 
 ## Reading order
 
 | # | Document | Answers |
 | --- | --- | --- |
-| 1 | [design.md](design.md) | The architecture: components, loop, ownership, module placement, phasing |
+| 1 | [design.md](design.md) | The architecture: three levels, components, loop, ownership, module placement, phasing |
 | 2 | [genome.md](genome.md) | What an evolved bot *is*: the Bot Genome, and how it extends the Manifest |
-| 3 | [strategy-sdk.md](strategy-sdk.md) | How evolution is pluggable: plugin kinds, strategy manifests, execution bindings |
-| 4 | [interfaces.md](interfaces.md) | API vs SDK vs CLI, and how bots drive evolution (advice on point 3) |
-| 5 | [default-strategy.md](default-strategy.md) | How ClawEvolve and the other existing pipelines are onboarded as defaults |
-| 6 | [governance.md](governance.md) | Gating, risk tiers, anti-reward-hacking, sandboxing, rollout, budgets |
-| 7 | [research.md](research.md) | Industry survey and codebase evidence these decisions rest on |
-| 8 | [work-items.md](work-items.md) | Numbered work items for follow-up sessions, with dependencies |
+| 3 | [verification.md](verification.md) | How we know a change is good: bot verification (S′ vs S) and mechanism verification (M′ vs M), and what eval code already exists |
+| 4 | [recursion.md](recursion.md) | Level 3: improving the improvement mechanism from the Experiment Ledger H, safely |
+| 5 | [strategy-sdk.md](strategy-sdk.md) | How evolution is pluggable: plugin kinds, strategy manifests, execution bindings |
+| 6 | [interfaces.md](interfaces.md) | API vs SDK vs CLI, and how bots drive evolution |
+| 7 | [default-strategy.md](default-strategy.md) | How ClawEvolve and the other existing pipelines are onboarded as defaults |
+| 8 | [governance.md](governance.md) | Gating, risk tiers, anti-reward-hacking, sandboxing, rollout, budgets |
+| 9 | [research.md](research.md) | Industry survey and codebase evidence these decisions rest on |
+| 10 | [work-items.md](work-items.md) | Numbered work items for follow-up sessions, with dependencies |
 
-Proposed ADRs (drafted in this change, status `proposed`):
+Draft decision records (status `proposed`). They live here while under
+discussion; once accepted, each is promoted to `docs/adr/` with the next free
+ADR number:
 
-- [`docs/adr/0019-bot-genome-is-the-unit-of-evolution.md`](../../adr/0019-bot-genome-is-the-unit-of-evolution.md)
-- [`docs/adr/0020-promotion-is-platform-owned.md`](../../adr/0020-promotion-is-platform-owned.md)
-- [`docs/adr/0021-bot-principal-for-evolution-surface.md`](../../adr/0021-bot-principal-for-evolution-surface.md)
+- [DR-1 — Bot Genome is the unit of evolution](decisions/0001-bot-genome-is-the-unit-of-evolution.md)
+- [DR-2 — Promotion is platform-owned](decisions/0002-promotion-is-platform-owned.md)
+- [DR-3 — Bot principal for the evolution surface](decisions/0003-bot-principal-for-evolution-surface.md)
 
 ## Glossary (local to this design until it stabilises)
 
@@ -58,7 +66,11 @@ Proposed ADRs (drafted in this change, status `proposed`):
 | **Candidate** | A Genome Revision proposed during a run, not yet promoted. |
 | **Gate** | The platform-owned decision point that accepts/rejects a candidate, using the strategy's acceptance policy *plus* non-negotiable platform checks. |
 | **Promotion** | Moving a bot's `active` ref to a revision and applying it through the existing Manifest / publish chain. |
-| **Archive** | Every candidate ever produced, with lineage and scores. Nothing is deleted; it is the selection pool. |
+| **Archive / Experiment Ledger (H)** | Every improvement experiment ever run (mechanism, parent, candidate, evidence, verdict, cost, online outcome). Nothing is deleted; it is the level-2 selection pool and the level-3 evidence base. |
+| **Mechanism (M)** | The improvement mechanism: a strategy version plus its prompts, operators, parameters, and models. Versioned like a genome, so it can itself be improved (level 3). |
+| **Bot verification** | Deciding whether a candidate bot S′ is better than its parent S, on platform-owned suites. |
+| **Mechanism verification** | Deciding whether a candidate mechanism M′ produces better *verified* improvements than M on held-out improvement problems. |
+| **Verifier** | Suites, graders, gate floor, and verification protocols. Human-owned; never modified by any automated loop. |
 
 ## Non-goals for this design set
 

@@ -38,7 +38,7 @@
 
 What is deliberately **not** a plugin: recording revisions, static checks,
 the platform floor of the gate, promotion, rollout, apply. These are
-platform code (ADR 0020).
+platform code (DR-2).
 
 ## 3. Evidence each kind is real (R19)
 

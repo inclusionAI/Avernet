@@ -1,6 +1,6 @@
 # Promotion of evolved bot revisions is platform-owned
 
-Status: proposed.
+Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision
 
@@ -21,7 +21,7 @@ Evaluation suites, graders, and their configuration live outside the genome
 and are read-only to strategies and bots. Proposer inputs never include
 holdout, regression, or safety cases.
 
-Design: `docs/specs/2026-10-08-bot-evolution-platform/governance.md`.
+Design: [`../governance.md`](../governance.md).
 
 ## Consequences
 

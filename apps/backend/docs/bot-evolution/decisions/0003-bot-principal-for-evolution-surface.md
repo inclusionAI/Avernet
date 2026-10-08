@@ -1,6 +1,6 @@
 # Admit bot principals to the evolution surface with self-scoped permissions
 
-Status: proposed.
+Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 
 ## Decision
 
@@ -24,7 +24,7 @@ and its scopes; services check scopes through the authorization hook.
 Bots reach the surface through the `avn` CLI and a shipped skill, delivered by
 Manifest `cli_tools`, following the `bcs-cli` precedent.
 
-Design: `docs/specs/2026-10-08-bot-evolution-platform/interfaces.md`.
+Design: [`../interfaces.md`](../interfaces.md).
 
 ## Consequences
 
@@ -39,6 +39,6 @@ Design: `docs/specs/2026-10-08-bot-evolution-platform/interfaces.md`.
 - **Restore the bot→owner fallback.** Rejected: gives a bot its owner's full
   authority, including promotion.
 - **Engine-native self-edit tools only.** Rejected: per-engine, unreviewed
-  writes; violates engine neutrality and ADR 0020.
+  writes; violates engine neutrality and DR-2.
 - **MCP server instead of CLI.** Deferred: can be generated from the same API
   later for engines without `exec`.

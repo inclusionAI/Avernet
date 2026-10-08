@@ -157,7 +157,7 @@ All under `apps/evolverun/`; nothing equivalent elsewhere in the repo.
   `apps/backend/tests/community/contracts/`. Relevant existing seam:
   `plugin_api/eval_env/` (EvalEnvLifecycle, VersionSync, …).
 - OpenAPI v1 refuses `bot` principals (deliberate removal of bot→owner
-  fallback) — hence ADR 0021.
+  fallback) — hence DR-3.
 - `bcs-cli` is the precedent for a bot-facing CLI with a SKILL.md and
   session-file auth.
 - Engine owns physical layout (ADR 0014, 0017); Backend must not add engine

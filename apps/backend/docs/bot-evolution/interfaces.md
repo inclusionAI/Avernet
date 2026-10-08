@@ -135,7 +135,7 @@ Generate an MCP adapter from OpenAPI later (P6) if an engine lacks `exec`.
 
 ## 6. Authentication and authorization
 
-OpenAPI v1 refuses `bot` principals today, deliberately. ADR 0021 proposes
+OpenAPI v1 refuses `bot` principals today, deliberately. DR-3 proposes
 re-admitting bots **only** for the evolution surface with explicit scopes:
 
 | Scope | Granted to | Allows |

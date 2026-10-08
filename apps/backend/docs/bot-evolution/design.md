@@ -301,7 +301,7 @@ schedule because the failure-rate signal crossed a threshold.
 
 | Phase | Outcome | Usable on its own? |
 | --- | --- | --- |
-| P0 Contracts | ADRs 0019–0021 accepted; genome schema, job protocol, plugin protocols, API sketch reviewed | — |
+| P0 Contracts | DR-1–DR-3 accepted; genome schema, job protocol, plugin protocols, API sketch reviewed | — |
 | P1 Genome Registry | Manifest gains revisions, refs, If-Match, pinned resolution, apply-records-revision, any-depth rollback | **Yes** — versioned bots and real rollback, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded: ExperienceSource, sandboxed tune emitting patches, ClawBench evaluator, its acceptance rule as a Gate plugin | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
