@@ -277,14 +277,28 @@ actor_id: judge_bot
 }
 ```
 
-#### 4.1.2 为每位玩家创建底牌（add ×5）
+#### 4.1.2 创建两张底牌（add ×2：卧底词 + 平民词）
+
+裁判只为本轮建 **两条** context：`player_word_1` 是卧底词、`player_word_2` 是平民词。
+哪几位玩家是"卧底"、哪几位是"平民"，靠每条 context 的 `visible_to` 来分发——卧底玩家名单写进 `player_word_1` 的 `visible_to`，平民玩家名单写进 `player_word_2` 的 `visible_to`。
+
+本局设定：卧底是张三、赵六，平民是李四、王五、钱七；卧底词=香蕉，平民词=苹果。
 
 ```
 POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
-name: player_word_1
+name: player_word_1        ← 卧底词
 scope_level: session
 content: 你的词语是：香蕉
-visible_to: [judge_bot, 张三]
+visible_to: [judge_bot, 张三, 赵六]      ← 卧底玩家 + 裁判
+collect_from: [judge_bot]
+```
+
+```
+POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
+name: player_word_2        ← 平民词
+scope_level: session
+content: 你的词语是：苹果
+visible_to: [judge_bot, 李四, 王五, 钱七]  ← 平民玩家 + 裁判
 collect_from: [judge_bot]
 ```
 
@@ -293,12 +307,12 @@ collect_from: [judge_bot]
 { "status": "ok", "error_msg": null }
 ```
 
-同样为李四(苹果)、王五(苹果)、赵六(香蕉)、钱七(苹果)创建 `player_word_2` 到 `player_word_5`，
-每人 `visible_to` 仅含裁判和本人。系统自动生成 `scope = sess-001`，每条 name 不同所以不冲突。
+同一 session 内只有 2 条 word context，`name` 不同所以不冲突，系统按 `scope_level=session` 自动生成 `scope = sess-001`。
 
-> **底牌的分发方式（不是 API 调用，只是交互流程）**：context 写好后，裁判 bot 在群里私聊每位玩家 bot，
-> 告诉他"去查 `player_word_1`" / "去查 `player_word_2`"。玩家再自己 `get` 对应 name（见 4.2.2）拿到自己的词。
-> 信息隔离不靠 API 隔，靠 `visible_to` —— 裁判只告诉玩家他该查的那条 name，玩家也只能 `get` 到自己在 `visible_to` 里的条目。
+> **底牌的分发方式（不是 API 调用，只是交互流程）**：裁判 bot 在群里私聊每位玩家 bot，
+> 告诉卧底玩家"去查 `player_word_1`"、告诉平民玩家"去查 `player_word_2`"。
+> **玩家只知道自己是 1 还是 2，不知道自己 1=卧底 / 2=平民**——拿到词后，所有人所见都是一句普通的"你的词语是：X"，身份信息只有裁判的 `player_role` 里有（见 4.1.3）。
+> 玩家再自己 `get` 被告知的那条 name（见 4.2.2）拿词。信息隔离不靠 API 隔，靠 `visible_to`：玩家能 `get` 到的，正是他在 `visible_to` 里的那一条。
 
 #### 4.1.3 记录卧底对应关系（add）
 
@@ -306,7 +320,7 @@ collect_from: [judge_bot]
 POST /groupcontext/add?groupId=game-room-7&sessionId=sess-001
 name: player_role
 scope_level: session
-content: 平民词=苹果, 卧底词=香蕉。player_word_1(张三)和player_word_4(赵六)是卧底
+content: 卧底词=香蕉(player_word_1)，平民词=苹果(player_word_2)。卧底玩家=张三、赵六；平民玩家=李四、王五、钱七
 visible_to: [judge_bot]
 collect_from: [judge_bot]
 ```
@@ -352,9 +366,9 @@ supersede 后写入新版本（新 `id`，`context_id` 不变）。
 { "status": "ok", "error_msg": null }
 ```
 
-#### 4.1.6 查询所有底牌（裁判逐一 get）
+#### 4.1.6 查询底牌（裁判 get）
 
-裁判想查每个玩家的底牌，逐一调用 get：
+裁判想核对两张底牌，分别 get `player_word_1` 和 `player_word_2`：
 
 ```
 POST /groupcontext/get?groupId=game-room-7&sessionId=sess-001
@@ -376,7 +390,7 @@ scope_levels: [session]
 }
 ```
 
-同样 get `player_word_2` 到 `player_word_5`。裁判因在每条 `visible_to` 中，都能看到。
+裁判在两条 `visible_to` 中，都能查到。需要时同样 get `player_role` 看身份对应关系。
 
 ### 4.2 玩家视角（以张三为例）
 
@@ -418,7 +432,7 @@ actor_id: 张三
 }
 ```
 
-注意：`player_role` 只有裁判在 `visible_to` 中，张三看不到。`player_word_2` 等也看不到。
+注意：`player_role` 只有裁判在 `visible_to` 中，张三看不到；`player_word_2`（平民词）也不在张三的 `visible_to` 里，所以张三**连平民的词是什么都不知道**，更无从知道自己拿的 `player_word_1` 是卧底词。卧底/平民的不对称，全靠 `visible_to` 把对方那条隔掉。
 
 #### 4.2.2 查自己的底牌
 
