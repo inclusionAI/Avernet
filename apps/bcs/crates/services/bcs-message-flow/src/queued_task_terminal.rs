@@ -43,7 +43,8 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
             terminal.event_payload["reason"] = reason.clone();
         }
     }
-    let reply = normalize_result(flow, reply, &task, &terminal, result_text, normalized)?;
+    let reply = normalize_result(flow, reply, &task, &terminal, result_text, normalized,
+        crate::task_failure::is_task_timeout(row))?;
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?;
     let mut current = row.clone();
     for _ in 0..3 {
@@ -97,18 +98,19 @@ async fn result_admission(flow: &BcsMessageFlow, group: &bcs_domain::Group, sess
         )
         .await?
     };
-    normalize_result(flow, reply, &task, cmd, result_text, normalized)
+    normalize_result(flow, reply, &task, cmd, result_text, normalized, false)
 }
 
 fn normalize_result(flow: &BcsMessageFlow,
     mut reply: bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries,
     task: &TaskIntent, cmd: &BotEventCommand, result_text: &str, normalized: crate::run_reply::RunReply,
+    timed_out: bool,
 ) -> ServiceResult<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries> {
     // The canonical result carries the response-mode projection. The full run
     // body is retained in the same source so recovery never relies on final alone.
     let result_text = match cmd.state {
         ChatEventState::Final => result_text.to_string(),
-        _ => crate::task_failure::callback_text(task, cmd, !normalized.display.is_empty()),
+        _ => crate::task_failure::callback_text_with_timeout(task, cmd, !normalized.display.is_empty(), timed_out),
     };
     reply.message.run_id = cmd.run_id.clone();
     reply.message_id = result_message_id(&task.task_id);
@@ -116,6 +118,7 @@ fn normalize_result(flow: &BcsMessageFlow,
         "task_result_text":result_text, "text":normalized.text,
         "task_state":match cmd.state {
             ChatEventState::Final => "completed",
+            ChatEventState::Aborted if timed_out => "timed_out",
             ChatEventState::Aborted => "cancelled",
             _ => "failed",
         },
