@@ -77,7 +77,13 @@ async fn commit(
             mutated_at_ms: 1_787_028_000_000,
             mutation,
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect("eventful mutation commits")
@@ -373,7 +379,13 @@ async fn add_participant_eventful_mutation_refuses_non_public_bot_on_public_grou
                 actor_is_public: false,
             },
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("non-public bot must be refused on a public Group");
@@ -400,7 +412,13 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutated_at_ms: 1,
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Closed),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("missing group");
@@ -415,7 +433,13 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutated_at_ms: 1,
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Closed),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("stale expected_version");
@@ -430,7 +454,13 @@ async fn eventful_guards_reject_missing_group_and_empty_or_stale_patches() {
             mutated_at_ms: 1,
             mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch::default()),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("empty patch");
@@ -461,7 +491,13 @@ async fn eventful_event_checks_reject_env_mismatch_and_deletion_events() {
             mutated_at_ms: 1_787_028_000_000,
             mutation: GroupEventfulMutation::UpdateStatus(GroupStatus::Completed),
             event: Some(cross_env),
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("cross-env Event must be rejected");
@@ -477,7 +513,13 @@ async fn eventful_event_checks_reject_env_mismatch_and_deletion_events() {
             mutated_at_ms: 1_787_028_000_000,
             mutation: GroupEventfulMutation::Delete,
             event: Some(deletion_event),
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-eventful".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-eventful".to_string(),
+                effective_actor_id: "conformance-eventful".to_string(),
+            },
+        },
         })
         .await
         .expect_err("Delete plus an Event must be rejected");

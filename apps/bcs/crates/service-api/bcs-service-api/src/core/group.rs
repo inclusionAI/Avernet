@@ -59,13 +59,14 @@ pub struct GroupMutationCommand {
     pub correlation_id: Option<String>,
     pub trace_id: Option<String>,
     pub mutation: GroupMutationKind,
-    /// Caller-side audit identity (spec §12.5): when present, the owning
-    /// store commits an `applied` ordinary-business audit row in the SAME
+    /// REQUIRED caller-side audit identity (spec §12.5): the owning store
+    /// commits an `applied` ordinary-business audit row in the SAME
     /// transaction as the business mutation and its Event, and an audit
     /// failure rolls the whole mutation back. Production application lanes
     /// always construct this from an authenticated principal (Human/Bot) or
-    /// an honest system actor.
-    pub operation: Option<crate::types::BotOperationContext>,
+    /// an honest system actor; there is no `None` fallback that silently
+    /// skips the audit (the Task 10 carry-forward made this non-Option).
+    pub operation: crate::types::BotOperationContext,
 }
 
 /// Validate sender_routes against group participants.

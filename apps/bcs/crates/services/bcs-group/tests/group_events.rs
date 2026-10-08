@@ -49,7 +49,13 @@ fn command(group_id: &str, mutation: GroupMutationKind) -> GroupMutationCommand 
         correlation_id: Some("request-1".to_string()),
         trace_id: None,
         mutation,
-        operation: None,
+operation: bcs_service_api::types::BotOperationContext {
+            operation_id: format!("op-{group_id}"),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "group-events-test".to_string(),
+                effective_actor_id: "group-events-test".to_string(),
+            },
+        },
     }
 }
 

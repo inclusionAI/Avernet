@@ -238,17 +238,12 @@ impl GroupRepoPort for MemoryGroupRepo {
         // closure fails), so state, Event and audit publish together or not
         // at all. No restore path is needed because nothing else has
         // committed when staging fails.
-        let audit_record = command.operation.as_ref().map(|operation| {
-            crate::action_audit::eventful_mutation_audit_record(
-                &command,
-                operation,
-                &self.audit_env(),
-            )
-        });
-        let mut staged_audit = match audit_record.as_ref() {
-            Some(record) => Some(self.stage_action_audit(record).await?),
-            None => None,
-        };
+        let audit_record = crate::action_audit::eventful_mutation_audit_record(
+            &command,
+            &command.operation,
+            &self.audit_env(),
+        );
+        let mut staged_audit = Some(self.stage_action_audit(&audit_record).await?);
 
         if let Some(event) = command.event.as_ref() {
             let event_store =
@@ -267,10 +262,8 @@ impl GroupRepoPort for MemoryGroupRepo {
                     } else {
                         groups.insert(command.group_id.clone(), candidate.clone());
                     }
-                    if let (Some(record), Some(audits)) =
-                        (audit_record.as_ref(), staged_audit.as_mut())
-                    {
-                        Self::publish_staged_action_audit(audits, record);
+                    if let Some(audits) = staged_audit.as_mut() {
+                        Self::publish_staged_action_audit(audits, &audit_record);
                     }
                     Ok(())
                 })
@@ -289,10 +282,8 @@ impl GroupRepoPort for MemoryGroupRepo {
                 event_store
                     .commit_group_deletion(&command.group_id, env, command.mutated_at_ms, || {
                         groups.remove(&command.group_id);
-                        if let (Some(record), Some(audits)) =
-                            (audit_record.as_ref(), staged_audit.as_mut())
-                        {
-                            Self::publish_staged_action_audit(audits, record);
+                        if let Some(audits) = staged_audit.as_mut() {
+                            Self::publish_staged_action_audit(audits, &audit_record);
                         }
                         Ok(())
                     })
@@ -303,15 +294,14 @@ impl GroupRepoPort for MemoryGroupRepo {
                 // embedded callers. Without an Event Store there can be no
                 // subscriptions or pending deliveries to reconcile.
                 groups.remove(&command.group_id);
-                if let (Some(record), Some(audits)) = (audit_record.as_ref(), staged_audit.as_mut())
-                {
-                    Self::publish_staged_action_audit(audits, record);
+                if let Some(audits) = staged_audit.as_mut() {
+                    Self::publish_staged_action_audit(audits, &audit_record);
                 }
             }
         } else {
             groups.insert(command.group_id.clone(), candidate.clone());
-            if let (Some(record), Some(audits)) = (audit_record.as_ref(), staged_audit.as_mut()) {
-                Self::publish_staged_action_audit(audits, record);
+            if let Some(audits) = staged_audit.as_mut() {
+                Self::publish_staged_action_audit(audits, &audit_record);
             }
         }
         Ok(candidate)

@@ -343,7 +343,7 @@ async fn eventful_mutable_patch_reports_a_missing_routing_lock_as_a_conflict() {
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+            operation: BotOperationContext { operation_id: format!("op-group-store-tests"), actor: BotOperationActor::System { system_id: "group-store-tests".to_string(), effective_actor_id: "group-store-tests".to_string() } },
         })
         .await
         .expect_err("a missing guarded lock row must be reported as a conflict");

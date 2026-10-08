@@ -99,10 +99,9 @@ impl MySqlGroupStore {
             // and the committed business state visible), the replay is an
             // idempotent completion — report the committed state. Any
             // other mismatch keeps the optimistic-version Conflict.
-            if let Some(operation) = command.operation.as_ref() && current.version == command.expected_version + 1
-            {
+            if current.version == command.expected_version + 1 {
                 let record =
-                    eventful_mutation_audit_record(&command, operation, &self.env);
+                    eventful_mutation_audit_record(&command, &command.operation, &self.env);
                 let rows = self
                     .db
                     .plugin()
@@ -495,53 +494,52 @@ impl MySqlGroupStore {
         // Same-transaction ordinary-business audit (spec §12.5, plan Task 10):
         // the audit INSERT joins the business write + its Event in ONE
         // transaction, so an audit failure rolls everything back.
-        let audit_record = command.operation.as_ref().map(|operation| {
-            eventful_mutation_audit_record(&command, operation, &self.env)
-        });
-        if let Some(record) = audit_record.as_ref() {
-            steps.push(DbTransactionStep::Execute(group_action_audit_insert(record)));
-        }
+        let audit_record =
+            eventful_mutation_audit_record(&command, &command.operation, &self.env);
+        steps.push(DbTransactionStep::Execute(group_action_audit_insert(&audit_record)));
         if let Err(error) = self.db.plugin().transaction(steps).await {
-            if let Some(record) = audit_record.as_ref() {
-                // A same-slot audit INSERT means either a genuine injected
-                // failure or a replay of an operation whose earlier attempt
-                // FULLY committed. Probe the slot (spec §12.5): identical
-                // content + the commit actually visible = idempotent replay
-                // of the whole mutation; different content = conflict; no
-                // row = genuine failure (audit never happened, the whole
-                // transaction rolled back leaving no partial success).
-                let probe = self
-                    .db
-                    .plugin()
-                    .query(audit_slot_select(record))
-                    .await
-                    .map_err(|error| ServiceError::InternalError(error.to_string()));
-                match probe {
-                    Ok(rows) if !rows.is_empty() => {
-                        audit_slot_retry_classified(record, rows, &error.to_string())?;
-                        // Identical byte content in the slot: the earlier
-                        // attempt fully committed, so this retry is an
-                        // idempotent completion — report the committed
-                        // state (or the removed snapshot for a Delete).
-                        match self.try_get(&command.group_id).await {
-                            Ok(Some(group)) if !deleting => return Ok(group),
-                            _ if deleting => return Ok(terminal),
-                            Ok(_) => return Ok(terminal),
-                            Err(error) => {
-                                return Err(ServiceError::InternalError(error.to_string()))
-                            }
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(classify_error) => return Err(classify_error),
-                }
-            }
+            // A missing guarded lock row is a checked, specific conflict
+            // channel: classify it BEFORE the audit-slot replay probe so a
+            // probe against a wrapper/fake driver cannot misattribute the
+            // missing-lock race to audit replay classification.
             if routing_policy_snapshot.is_some() && transaction_lock_row_is_missing(&error) {
                 self.cache.write().await.remove(&command.group_id);
                 return Err(ServiceError::Conflict(format!(
                     "Group '{}' routing policy changed concurrently",
                     command.group_id
                 )));
+            }
+            // A same-slot audit INSERT means either a genuine injected
+            // failure or a replay of an operation whose earlier attempt
+            // FULLY committed. Probe the slot (spec §12.5): identical
+            // content + the commit actually visible = idempotent replay
+            // of the whole mutation; different content = conflict; no
+            // row = genuine failure (audit never happened, the whole
+            // transaction rolled back leaving no partial success).
+            let probe = self
+                .db
+                .plugin()
+                .query(audit_slot_select(&audit_record))
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()));
+            match probe {
+                Ok(rows) if !rows.is_empty() => {
+                    audit_slot_retry_classified(&audit_record, rows, &error.to_string())?;
+                    // Identical byte content in the slot: the earlier
+                    // attempt fully committed, so this retry is an
+                    // idempotent completion — report the committed
+                    // state (or the removed snapshot for a Delete).
+                    match self.try_get(&command.group_id).await {
+                        Ok(Some(group)) if !deleting => return Ok(group),
+                        _ if deleting => return Ok(terminal),
+                        Ok(_) => return Ok(terminal),
+                        Err(error) => {
+                            return Err(ServiceError::InternalError(error.to_string()))
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(classify_error) => return Err(classify_error),
             }
             return Err(ServiceError::InternalError(format!(
                 "Eventful Group mutation failed: {error}"

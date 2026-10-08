@@ -54,11 +54,13 @@ pub struct CommitGroupEventfulMutation {
     /// `None` only when Eventing is disabled. When present, the Event must be
     /// committed in the same transaction as the business mutation.
     pub event: Option<AppendEventRecord>,
-    /// Caller-side audit identity (spec §12.5). When present, the store
-    /// commits an ordinary-business `applied` audit row in the SAME
-    /// transaction as the business mutation and its Event; an audit INSERT
-    /// failure rolls the whole transaction back, leaving no partial success.
-    pub operation: Option<BotOperationContext>,
+    /// REQUIRED caller-side audit identity (spec §12.5). The store commits
+    /// an ordinary-business `applied` audit row in the SAME transaction as
+    /// the business mutation and its Event; an audit INSERT failure rolls the
+    /// whole transaction back, leaving no partial success. There is no
+    /// `None` fallback that silently skips the audit (the Task 10
+    /// carry-forward made this non-Option).
+    pub operation: BotOperationContext,
 }
 
 /// Repository contract for group persistence implementations.

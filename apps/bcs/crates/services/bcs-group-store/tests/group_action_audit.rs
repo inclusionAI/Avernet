@@ -209,7 +209,7 @@ async fn sqlite_patch_commits_the_applied_audit_with_both_human_identities() {
                 ..Default::default()
             }),
             event: None,
-            operation: Some(human_operation("staff-1", "audit-group")),
+            operation: human_operation("staff-1", "audit-group"),
         })
         .await
         .expect("patch with an audit context commits");
@@ -244,7 +244,7 @@ async fn sqlite_patch_commits_the_applied_audit_with_both_human_identities() {
             ..Default::default()
         }),
         event: None,
-        operation: Some(bot_operation("driver")),
+        operation: bot_operation("driver"),
     })
     .await
     .expect("bot-only patch commits");
@@ -283,7 +283,7 @@ async fn sqlite_audit_insert_failure_rolls_back_state_and_event_with_no_residue(
                 ..Default::default()
             }),
             event: None,
-            operation: Some(human_operation("staff-1", "rollback-group")),
+            operation: human_operation("staff-1", "rollback-group"),
         })
         .await
         .expect_err("the audit INSERT failure must fail the whole mutation");
@@ -321,7 +321,7 @@ async fn sqlite_audit_insert_failure_rolls_back_state_and_event_with_no_residue(
             ..Default::default()
         }),
         event: None,
-        operation: Some(human_operation("staff-1", "rollback-group")),
+        operation: human_operation("staff-1", "rollback-group"),
     })
     .await
     .expect("retry after disarm succeeds");
@@ -352,7 +352,7 @@ async fn sqlite_identical_replay_completes_idempotently_while_a_conflicting_slot
                 ..Default::default()
             }),
             event: None,
-            operation: Some(operation.clone()),
+            operation: operation.clone(),
         })
         .await
         .expect("first attempt succeeds");
@@ -374,7 +374,7 @@ async fn sqlite_identical_replay_completes_idempotently_while_a_conflicting_slot
                 ..Default::default()
             }),
             event: None,
-            operation: Some(operation.clone()),
+            operation: operation.clone(),
         })
         .await;
     match replay {
@@ -410,7 +410,7 @@ async fn sqlite_identical_replay_completes_idempotently_while_a_conflicting_slot
                 ..Default::default()
             }),
             event: None,
-            operation: Some(conflicting),
+            operation: conflicting,
         })
         .await
         .expect_err("different content in the same slot is a conflict");
@@ -444,7 +444,7 @@ async fn memory_publishes_state_and_audit_together_or_not_at_all() {
                 ..Default::default()
             }),
             event: None,
-            operation: Some(human_operation("staff-1", "memory-audit")),
+            operation: human_operation("staff-1", "memory-audit"),
         })
         .await
         .expect("memory mutation publishes");
@@ -472,7 +472,7 @@ async fn memory_publishes_state_and_audit_together_or_not_at_all() {
                 ..Default::default()
             }),
             event: None,
-            operation: Some(human_operation("staff-1", "memory-audit")),
+            operation: human_operation("staff-1", "memory-audit"),
         })
         .await
         .expect_err("armed audit failure discards the whole mutation");
@@ -596,7 +596,7 @@ async fn memory_evented_mutation_failure_rolls_back_state_event_and_audit() {
                 "evt-audit-1",
                 "group.updated",
             )),
-            operation: Some(human_operation("staff-1", "memory-evented")),
+            operation: human_operation("staff-1", "memory-evented"),
         })
         .await
         .expect("event-ful mutation with audit commits");
@@ -634,13 +634,13 @@ async fn memory_evented_mutation_failure_rolls_back_state_event_and_audit() {
                 "evt-audit-2",
                 "group.updated",
             )),
-            operation: Some(BotOperationContext {
+            operation: BotOperationContext {
                 operation_id: "op-memory-evented-2".to_string(),
                 actor: BotOperationActor::Human {
                     user_id: "staff-1".to_string(),
                     effective_actor_id: "human_staff-1".to_string(),
                 },
-            }),
+            },
         })
         .await
         .expect_err("the armed audit failure must fail the whole mutation");
@@ -753,7 +753,7 @@ async fn memory_evented_deletion_failure_rolls_back_group_subscription_and_audit
             mutated_at_ms: 1_787_028_200_000,
             mutation: GroupEventfulMutation::Delete,
             event: None,
-            operation: Some(human_operation("staff-1", "memory-delete-audit")),
+            operation: human_operation("staff-1", "memory-delete-audit"),
         })
         .await
         .expect_err("the armed audit failure must fail the whole deletion");

@@ -448,10 +448,10 @@ pub(crate) fn group_mutation_command(
         // the typed operator projects from the authenticated mutation actor
         // only — Human keeps the trusted staff number, Bot/System keep
         // their own identity — and never from a request body.
-        operation: Some(BotOperationContext {
+        operation: BotOperationContext {
             operation_id: uuid::Uuid::new_v4().to_string(),
             actor: event_actor_operation(actor_id),
-        }),
+        },
     }
 }
 

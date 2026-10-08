@@ -139,7 +139,7 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+            operation: bcs_service_api::types::BotOperationContext { operation_id: format!("op-group-human-notify-contract"), actor: bcs_service_api::types::BotOperationActor::System { system_id: "group-human-notify-contract".to_string(), effective_actor_id: "group-human-notify-contract".to_string() } },
         })
         .await
         .expect("eventful mode patch");
@@ -168,7 +168,7 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+            operation: bcs_service_api::types::BotOperationContext { operation_id: format!("op-group-human-notify-contract"), actor: bcs_service_api::types::BotOperationActor::System { system_id: "group-human-notify-contract".to_string(), effective_actor_id: "group-human-notify-contract".to_string() } },
         })
         .await;
     assert!(

@@ -506,7 +506,7 @@ impl GroupService for GroupServiceImpl {
                 correlation_id: None,
                 trace_id: None,
                 mutation: GroupMutationKind::PatchMutableFields(persistence_patch),
-                operation: Some(group_operation_context(&principal)),
+                operation: group_operation_context(&principal),
             })
             .await
             .map_err(map_service_error)?;
@@ -763,7 +763,7 @@ impl GroupService for GroupServiceImpl {
                             actor_id: command.actor_id.clone(),
                             mode,
                         },
-                        operation: Some(group_operation_context(&principal)),
+                        operation: group_operation_context(&principal),
                     })
                     .await
                     .map_err(map_service_error)?;
@@ -800,7 +800,7 @@ impl GroupService for GroupServiceImpl {
                         message_view_scope,
                         mode: command.mode,
                     },
-                    operation: Some(group_operation_context(&principal)),
+                    operation: group_operation_context(&principal),
                 })
                 .await
                 .map_err(map_service_error);

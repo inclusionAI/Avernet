@@ -87,7 +87,7 @@ pub(crate) async fn update_group_status(
                 status,
                 reason: reason.into(),
             },
-            operation: Some(operation),
+            operation: operation.clone(),
         })
         .await
         .map(|_| ())

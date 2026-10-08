@@ -187,7 +187,13 @@ async fn sqlite_eventful_notify_mode_patch_round_trips_and_bumps_version() {
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect("commit eventful notify-mode patch");
@@ -291,7 +297,13 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect("apply transactional delivery patch");
@@ -305,7 +317,13 @@ async fn sqlite_delivery_patches_persist_canonical_routing_policy_json() {
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect("apply repeated transactional delivery patch");
@@ -393,7 +411,13 @@ async fn sqlite_transactional_delivery_patch_rejects_stringified_routing_policy_
                 ..Default::default()
             }),
             event: None,
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect_err("stringified routing policy must not be overwritten");
@@ -729,7 +753,13 @@ async fn sqlite_group_member_add_commits_version_event_and_target_atomically() {
                 "group.participant.added",
                 None,
             )),
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect("commit Group update");
@@ -775,7 +805,13 @@ async fn sqlite_group_member_add_rolls_back_when_event_append_fails() {
                 "group.participant.added",
                 Some("missing-cause"),
             )),
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect_err("missing causation Event must fail the unit of work");
@@ -819,7 +855,13 @@ async fn memory_group_member_add_rolls_back_when_event_append_fails() {
                 "group.participant.added",
                 Some("missing-cause"),
             )),
-            operation: None,
+    operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
         })
         .await
         .expect_err("missing causation Event must fail the unit of work");
@@ -978,7 +1020,13 @@ fn group_deletion() -> CommitGroupEventfulMutation {
         mutated_at_ms: 1_787_028_200_000,
         mutation: GroupEventfulMutation::Delete,
         event: None,
-        operation: None,
+operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "op-conformance-group-repo".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-group-repo".to_string(),
+                effective_actor_id: "conformance-group-repo".to_string(),
+            },
+        },
     }
 }
 
