@@ -50,7 +50,7 @@ pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
     InviteCodeBindingView, InviteCodeService, InternalBotAttributesService,
-    PatchBotInternalAttributes, UserVisibility,
+    PatchBotInternalAttributes, UserVisibility, BotAuthorityHook,
 };
 pub use application::system_message::resolve_session_topic;
 pub use application::interaction::{
@@ -204,7 +204,7 @@ pub use port::{
     StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
     ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
-    BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
+    BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext, BotAuthorityRepoPort,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotRunScope, BotRunTransportOwner, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState,
@@ -284,6 +284,7 @@ pub use core::{
     BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
     BotRegistryCoreService,
+    BotAuthorityCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,
     ContextBotSummary, HiddenMentionInfo, ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,

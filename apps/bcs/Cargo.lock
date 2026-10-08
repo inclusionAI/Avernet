@@ -1094,14 +1094,17 @@ name = "bcs-edge-permission-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-bot-store",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-service-api",
  "bcs-test-support",
  "hex",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
 ]

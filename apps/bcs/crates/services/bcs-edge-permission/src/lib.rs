@@ -6,6 +6,11 @@
 //! `PermissionRequestRepoPort`) plus the T12 [`BotActorConfigRepoPort`] narrow
 //! read of `bcs_bots`.
 //!
+//! `authority` (plan Task 3) holds the strict authority resolution core
+//! ([`BotAuthorityCoreServiceImpl`]) — kept separate from Connect; the
+//! application-layer `BotAuthorityHook` composes on it and never touches
+//! the repo port directly.
+//!
 //! The service holds an injected `env` (env-isolation: every repo call is
 //! scoped to it) and builds friend edges per D3:
 //!
@@ -50,6 +55,9 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::{EdgePermissionFriendSyncService, ServiceError, ServiceResult};
 use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
+
+pub mod authority;
+pub use authority::BotAuthorityCoreServiceImpl;
 
 /// Generate a fresh external request id (a bare UUID v4, simple form — no
 /// prefix). The internal bigint PK (`permission_requests.id`) is assigned by

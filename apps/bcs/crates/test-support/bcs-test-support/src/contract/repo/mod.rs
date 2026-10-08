@@ -3,11 +3,16 @@
 //! Concrete repository implementations call these functions from
 //! `tests/conformance_*.rs`.
 
+pub mod bot_authority;
 pub mod edge_grant;
 pub mod message_delivery;
 pub mod permission_profile;
 pub mod permission_request;
 
+pub use bot_authority::{
+    AuthorityHarnessDriver, AuthorityRepoHarness, bot_authority_core_service_contract_tests,
+    bot_authority_repo_port_contract_tests,
+};
 pub use edge_grant::run_edge_grant_repo_contract;
 pub use permission_profile::run_permission_profile_repo_contract;
 pub use permission_request::run_permission_request_repo_contract;

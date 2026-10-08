@@ -26,6 +26,12 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # compile (same versions as the bcs crate that owns the file). sha2 is a
 # regular dependency above.
 hex = { workspace = true }
+# tests/conformance_bot_authority.rs drives the shared authority contract:
+# the SQL driver (DbBotAuthorityStore), the in-memory MemoryBotRepo driver,
+# and the production Core over both.
+bcs-edge-permission = { workspace = true }
+bcs-bot-store = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

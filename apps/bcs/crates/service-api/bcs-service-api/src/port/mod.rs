@@ -105,6 +105,7 @@ pub use repo::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
+    BotAuthorityRepoPort,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
