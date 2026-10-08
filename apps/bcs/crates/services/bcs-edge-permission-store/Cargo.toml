@@ -21,6 +21,11 @@ tracing = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+# tests/authority_transaction_capability.rs pulls bootstrap migrations.rs in
+# via #[path] (same pattern as bcs-message-store); it needs sha2/hex to
+# compile (same versions as the bcs crate that owns the file). sha2 is a
+# regular dependency above.
+hex = { workspace = true }
 
 [lints]
 workspace = true

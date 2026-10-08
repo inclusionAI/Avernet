@@ -213,3 +213,6 @@ bcs-test-support = { workspace = true }
 serial_test = "3"
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }
+# tests/bot_authority_mysql.rs: the ignored MySQL conformance test parses
+# BCS_TEST_MYSQL_URL the same way the event-store contract does.
+mysql_async = { workspace = true }
