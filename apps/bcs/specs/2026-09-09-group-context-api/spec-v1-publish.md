@@ -25,7 +25,7 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 | `id` | bigint |存储主键|
 | `context_id` | string | 条目ID（服务端生成，不随版本更新变化） |
 | `name` | string | 版本标识。同 (name, scope) 互为版本链 |
-| `scope_level` | enum | 版本链作用域层级：`group` / `session` / `run` |
+| `scope_level` | enum | 版本链作用域层级：`group` / `session` / `round` |
 | `scope` | string | 该层级对应的实例值 |
 | `content` | string | 内容本体 |
 | `visible_to` | string[] | 可见的 userId 列表。空数组 = 全员可见 |
@@ -79,7 +79,7 @@ POST /groupcontext/add
 | 参数 | 类型 | 必填 | 含义 |
 |------|------|------|------|
 | `name` | string | 是 | context名字 |
-| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `scope_level` | string | 是 | `group` / `session` / `round` |
 | `content` | string | 是 | 内容（最大 4KB） |
 | `visible_to` | string[] | 是 | 可见 userId 列表（空=全员） |
 | `collect_from` | string[] | 是 | 可写 userId 列表（不可为空） |
@@ -106,7 +106,7 @@ POST /groupcontext/update
 | 参数 | 类型 | 必填 | 含义 |
 |------|------|------|------|
 | `name` | string | 是 | context名字 |
-| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `scope_level` | string | 是 | `group` / `session` / `round` |
 | `content` | string | 否 | 新内容（不传则沿用旧值） |
 | `change_reason` | string | 否 | 取代原因 |
 
@@ -147,7 +147,7 @@ POST /groupcontext/list
 
 | 参数 | 类型 | 必填 | 默认值 | 含义 |
 |------|------|------|--------|------|
-| `scope_levels` | string[] | 否 | `["group","session","run"]` | 过滤 scope_level 范围 |
+| `scope_levels` | string[] | 否 | `["group","session","round"]` | 过滤 scope_level 范围 |
 
 行为：
 1. 按 `scope_levels` 计算出 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
@@ -186,14 +186,14 @@ POST /groupcontext/get
 | 参数 | 类型 | 必填 | 默认值 | 含义 |
 |------|------|------|--------|------|
 | `name` | string | 是 | — | 精确匹配 name |
-| `scope_levels` | string[] | 否 | `["group","session","run"]` | 过滤 scope_level |
+| `scope_levels` | string[] | 否 | `["group","session","round"]` | 过滤 scope_level |
 | `limit` | int | 否 | `10` | 返回条数上限 |
 
 行为：
 1. 按 `scope_levels` 计算 `scope` 实例值列表，根据  `(name, scope)` 过滤条目
 2. 保留 `actor_id` 在 `visible_to` 中的条目
 3. 每个 `(name, scope)` 只返回一条活跃版本
-4. 从细到粗排序（run → session → group）
+4. 从细到粗排序（round → session → group）
 
 响应：
 ```json
@@ -219,7 +219,7 @@ POST /groupcontext/setsystemprompt
 | 参数 | 类型 | 必填 | 含义 |
 |------|------|------|------|
 | `name` | string | 是 | context名字 |
-| `scope_level` | string | 是 | `group` / `session` / `run` |
+| `scope_level` | string | 是 | `group` / `session` / `round` |
 | `content` | string | 是 | system prompt 内容 |
 | `collect_from` | string[] | 是 | 可写 userId 列表 |
 | `visible_to` | string[] | 是 | 可见 userId 列表 |
