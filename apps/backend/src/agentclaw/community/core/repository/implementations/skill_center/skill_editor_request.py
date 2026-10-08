@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from injector import inject
+from sqlalchemy import or_
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
@@ -25,6 +26,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderApproverStatus,
     WorkOrderBizType,
     WorkOrderDecision,
@@ -34,6 +36,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderReviewResult,
     WorkOrderStatus,
+    SYSTEM_REVIEWER_USER_ID,
     notification_title_for,
     skill_collaborator_applicant_display,
 )
@@ -239,6 +242,11 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                     WorkOrderModel.id == work_order_id,
                     WorkOrderModel.biz_type
                     == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    WorkOrderModel.status == WorkOrderStatus.PENDING.value,
+                    or_(
+                        WorkOrderModel.approval_mode.is_(None),
+                        WorkOrderModel.approval_mode == WorkOrderApprovalMode.MANUAL.value,
+                    ),
                     WorkOrderModel.env == env,
                 )
                 .with_for_update()
@@ -246,7 +254,10 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             if order is None:
                 raise WorkOrderNotFoundError("Skill editor work order not found")
-            if order.status != WorkOrderStatus.PENDING.value:
+            if (
+                order.status != WorkOrderStatus.PENDING.value
+                or order.approval_mode == WorkOrderApprovalMode.AUTO.value
+            ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")
             try:
                 data = json.loads(order.biz_data or "{}")
@@ -405,6 +416,91 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 review_remark=review_remark,
                 reviewed_at=reviewed_at,
             )
+
+    def apply_auto_skill_editor_request(self, *, work_order_id: int, env: str) -> None:
+        """Grant Skill access for an AUTO order without changing its state."""
+        with self._db.transactional_orm_session() as db:
+            order = (
+                db.query(WorkOrderModel)
+                .filter(
+                    WorkOrderModel.id == work_order_id,
+                    WorkOrderModel.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                    WorkOrderModel.approval_mode == "AUTO",
+                    WorkOrderModel.status == WorkOrderStatus.PROCESSING.value,
+                    WorkOrderModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderAlreadyProcessedError("AUTO Skill work order is not processing")
+            try:
+                data = json.loads(order.biz_data or "{}")
+                space_id, skill_id = int(data["space_id"]), int(data["skill_id"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "work-order Skill identity is invalid"
+                ) from exc
+            if str(skill_id) != order.biz_id:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "work-order Skill identity is inconsistent"
+                )
+            binding = db.query(SkillSpaceBinding).filter(
+                SkillSpaceBinding.space_id == space_id,
+                SkillSpaceBinding.skill_id == skill_id,
+                SkillSpaceBinding.env == env,
+            ).with_for_update().one_or_none()
+            skill = db.query(Skill.id).filter(
+                Skill.id == skill_id, Skill.env == env
+            ).with_for_update().one_or_none()
+            space = db.query(SpaceModel.id).filter(
+                SpaceModel.id == space_id,
+                SpaceModel.space_type == SpaceType.TEAM.value,
+                SpaceModel.env == env,
+                SpaceModel.deleted_at.is_(None),
+            ).with_for_update().one_or_none()
+            if binding is None or skill is None or space is None:
+                raise WorkOrderNotFoundError("work-order Space Skill not found")
+            member = db.query(SpaceMemberModel.id).filter(
+                SpaceMemberModel.space_id == space_id,
+                SpaceMemberModel.user_id == order.applicant_user_id,
+                SpaceMemberModel.status == "ACTIVE",
+                SpaceMemberModel.env == env,
+            ).first()
+            if member is None:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "applicant is no longer an active Team Space member"
+                )
+            grant = db.query(SkillGrant).filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == order.applicant_user_id,
+                SkillGrant.env == env,
+            ).with_for_update().one_or_none()
+            if grant is not None and grant.role == "OWNER" and grant.status == "ACTIVE":
+                raise WorkOrderSkillApplicantAlreadyEditorError(
+                    "applicant is now the Skill Owner"
+                )
+            if grant is None:
+                grant = SkillGrant(
+                    skill_id=skill_id,
+                    user_id=order.applicant_user_id,
+                    role="MANAGER",
+                    status="ACTIVE",
+                    owner_slot=None,
+                    granted_by=SYSTEM_REVIEWER_USER_ID,
+                    grant_reason=order.apply_reason,
+                    env=env,
+                )
+                db.add(grant)
+            else:
+                grant.role = "MANAGER"
+                grant.status = "ACTIVE"
+                grant.owner_slot = None
+                grant.granted_by = SYSTEM_REVIEWER_USER_ID
+                grant.grant_reason = order.apply_reason
+                grant.revoked_at = None
+                grant.revoked_by = None
+            db.flush()
 
     @staticmethod
     def reroute_pending_reviewer(

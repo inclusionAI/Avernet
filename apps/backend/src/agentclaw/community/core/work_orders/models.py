@@ -14,6 +14,9 @@ class WorkOrderApprovalMode(StrEnum):
     AUTO = "AUTO"
 
 
+SYSTEM_REVIEWER_USER_ID = "SYSTEM"
+
+
 class WorkOrderStatus(StrEnum):
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
@@ -25,6 +28,7 @@ class WorkOrderStatus(StrEnum):
 class WorkOrderEventStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
+    FAILED = "FAILED"
     CREATED = "CREATED"
 
 
@@ -401,10 +405,13 @@ class WorkOrderDetail(BaseModel):
 
 
 class WorkOrderApprovalContext(BaseModel):
-    """Canonical source event and state used before an external callback."""
+    """Canonical source event and state used before an external callback.
+
+    AUTO callbacks have no human approver record; MANUAL callers must provide one.
+    """
 
     work_order: WorkOrderRecord
-    approver: WorkOrderApproverRecord
+    approver: WorkOrderApproverRecord | None
     source_event_type: str | None
 
 

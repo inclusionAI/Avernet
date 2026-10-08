@@ -628,6 +628,29 @@ def test_create_friend_event_requires_callback_contract(
     repository.create_work_order_event.assert_not_called()
 
 
+def test_auto_work_order_rejects_applicant_other_than_actor() -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderAccessDeniedError, match="applicant must be"):
+        service.create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="friend-auto",
+            event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+            applicant_user_id="someone-else",
+            approver_user_ids=["result-recipient"],
+            recipient_user_ids=[],
+            title="friend request",
+            content=None,
+            apply_reason=None,
+            biz_data={"request_ids": ["request-auto"]},
+            actor_id="actor-auto",
+        )
+
+    repository.create_work_order_event.assert_not_called()
+
+
 def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> None:
     callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
     callbacks.requires_callback.return_value = True
@@ -647,7 +670,7 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
         biz_id="friend-auto",
         event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
-        applicant_user_id="applicant-auto",
+        applicant_user_id="actor-auto",
         approver_user_ids=["ignored-approver"],
         recipient_user_ids=[],
         title="friend request",

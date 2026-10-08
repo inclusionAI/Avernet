@@ -34,6 +34,11 @@ class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol)
         self._repository = repository
         self._env_provider = env_provider
 
+    def process_auto(self, *, work_order_id: int) -> None:
+        self._repository.apply_auto_skill_editor_request(
+            work_order_id=work_order_id, env=self._env_provider()
+        )
+
     def process(
         self,
         *,

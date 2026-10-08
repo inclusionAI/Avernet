@@ -106,13 +106,12 @@ def test_auto_event_is_created_pending_without_result_notice(db) -> None:
     assert created.status.value == "PENDING"
     with db.orm_session() as session:
         order = session.query(WorkOrderModel).one()
-        approver = session.query(WorkOrderApproverModel).one()
         assert order.status == WorkOrderStatus.PENDING.value
-        assert approver.status == WorkOrderApproverStatus.PENDING.value
+        assert session.query(WorkOrderApproverModel).count() == 0
         assert session.query(WorkOrderNotificationModel).count() == 0
 
 
-def test_auto_finalize_only_approves_effective_reviewer(db) -> None:
+def test_auto_finalize_records_system_reviewer_without_approver_rows(db) -> None:
     repository = _work_orders(db)
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
@@ -131,32 +130,27 @@ def test_auto_finalize_only_approves_effective_reviewer(db) -> None:
     )
     repository.claim_auto_approval(
         work_order_id=created.work_order_id,
-        reviewer_user_id="final-approver",
+        reviewer_user_id="SYSTEM",
         env="dev",
     )
-    with db.transactional_orm_session() as session:
-        session.query(WorkOrderApproverModel).filter(
-            WorkOrderApproverModel.work_order_id == created.work_order_id,
-            WorkOrderApproverModel.approver_user_id == "first-approver",
-        ).update({WorkOrderApproverModel.status: WorkOrderApproverStatus.CANCELLED.value})
-
     repository.finalize_auto_approval(
         work_order_id=created.work_order_id,
-        reviewer_user_id="final-approver",
+        reviewer_user_id="SYSTEM",
         env="dev",
     )
 
     with db.orm_session() as session:
-        states = {
-            item.approver_user_id: item.status
-            for item in session.query(WorkOrderApproverModel)
-            .filter(WorkOrderApproverModel.work_order_id == created.work_order_id)
-            .all()
-        }
-    assert states == {
-        "first-approver": WorkOrderApproverStatus.CANCELLED.value,
-        "final-approver": WorkOrderApproverStatus.APPROVED.value,
-    }
+        order = session.query(WorkOrderModel).filter(
+            WorkOrderModel.id == created.work_order_id
+        ).one()
+        status = order.status
+        reviewer_user_id = order.reviewer_user_id
+        approver_count = session.query(WorkOrderApproverModel).filter(
+            WorkOrderApproverModel.work_order_id == created.work_order_id
+        ).count()
+    assert status == WorkOrderStatus.APPROVED.value
+    assert reviewer_user_id == "SYSTEM"
+    assert approver_count == 0
 
 def _space_skills(db) -> SpaceSkillRepository:
     return SpaceSkillRepository(db, _skill_editor_requests(db))
@@ -1083,6 +1077,12 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         apply_reason="join",
         env="dev",
     )
+    # The endpoint's historical helper creates NULL/legacy MANUAL rows; explicit
+    # MANUAL rows from the unified event endpoint must also remain reviewable.
+    with db.transactional_orm_session() as session:
+        session.query(WorkOrderModel).filter(
+            WorkOrderModel.id == record.id
+        ).update({WorkOrderModel.approval_mode: "MANUAL"})
     assert record.status is WorkOrderStatus.PENDING
     assert record.work_order_no.startswith("WO")
     assert record.biz_data is None

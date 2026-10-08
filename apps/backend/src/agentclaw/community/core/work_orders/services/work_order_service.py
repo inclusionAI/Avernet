@@ -66,6 +66,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
     WorkOrderEventStatus,
+    SYSTEM_REVIEWER_USER_ID,
     skill_collaborator_applicant_display,
 )
 from agentclaw.community.core.work_orders.protocols import (
@@ -152,10 +153,11 @@ class WorkOrderService(WorkOrderServiceProtocol):
         actor_id = self._required_text(
             actor_id, limit=256, error=WorkOrderAccessDeniedError
         )
+        actor_id = actor_id.strip()
         applicant = (applicant_user_id or actor_id).strip()
         if not applicant:
             raise WorkOrderInvalidEventError("applicant_user_id must not be blank")
-        if approval_mode is WorkOrderApprovalMode.MANUAL and applicant != actor_id:
+        if applicant != actor_id:
             raise WorkOrderAccessDeniedError("applicant must be the current user")
         approvers = list(
             dict.fromkeys(user.strip() for user in approver_user_ids if user.strip())
@@ -196,12 +198,10 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     "manual approval events require approvers and no recipients"
                 )
             if approval_mode is WorkOrderApprovalMode.AUTO:
-                if not approvers:
+                if not approvers or recipients:
                     raise WorkOrderInvalidEventError(
-                        "auto approval events require approver_user_ids"
+                        "auto approval events require approver_user_ids and no recipient_user_ids"
                     )
-                if not recipients:
-                    recipients = [applicant]
         elif event_category is NotificationCategory.NOTICE:
             if not recipients or approvers or applicant_user_id is not None:
                 raise WorkOrderInvalidEventError(
@@ -247,17 +247,16 @@ class WorkOrderService(WorkOrderServiceProtocol):
             and event_category is NotificationCategory.APPROVAL
             and result.work_order_id is not None
         ):
-            approver_id = approvers[-1]
             self._repository.claim_auto_approval(
                 work_order_id=result.work_order_id,
-                reviewer_user_id=approver_id,
+                reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
                 env=get_current_env(),
             )
             try:
                 if self._decision_callbacks.requires_callback(event_type):
                     context = self._repository.get_approval_context(
                         work_order_id=result.work_order_id,
-                        reviewer_user_id=approver_id,
+                        reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
                         env=get_current_env(),
                     ).model_copy(update={"source_event_type": event_type})
                     self._decision_callbacks.dispatch(
@@ -267,49 +266,65 @@ class WorkOrderService(WorkOrderServiceProtocol):
                         credential=callback_auth or WorkOrderCallbackCredential(headers={}),
                     )
                 if biz_type == WorkOrderBizType.SPACE_JOIN.value:
-                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
-                    self._review_space_join(
-                        detail=detail,
-                        actor_id=approver_id,
-                        review_remark=None,
-                        target_status=WorkOrderStatus.APPROVED,
+                    self._repository.apply_auto_space_join(
+                        work_order_id=result.work_order_id, env=get_current_env()
                     )
                 elif biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
-                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
-                    self._review_bot_editor_request(
-                        detail=detail,
-                        actor_id=approver_id,
-                        review_remark=None,
-                        target_status=WorkOrderStatus.APPROVED,
+                    detail = self.get_detail(
+                        work_order_id=result.work_order_id, actor_id=applicant
                     )
+                    data = _business_data(detail.work_order.biz_data)
+                    bot_id = str(data.get("bot_id") or "")
+                    owner_id = str(data.get("owner_id") or "")
+                    self._repository.apply_auto_bot_editor_request(
+                        work_order_id=result.work_order_id, env=get_current_env()
+                    )
+                    if bot_id and owner_id:
+                        self._collaborators.on_collaboration_changed(
+                            bot_id, owner_id, get_current_env()
+                        )
                 elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
-                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
-                    self._skill_collaborator_approval_handler.process(
-                        detail=detail,
-                        actor_id=approver_id,
-                        review_remark=None,
-                        target_status=WorkOrderStatus.APPROVED,
+                    self._skill_collaborator_approval_handler.process_auto(
+                        work_order_id=result.work_order_id
                     )
+                elif biz_type == WorkOrderBizType.BOT_FRIEND.value:
+                    if not self._decision_callbacks.requires_callback(event_type):
+                        raise WorkOrderInvalidEventError(
+                            "AUTO friend approval requires a registered business callback"
+                        )
                 else:
-                    self._repository.process_approval(
-                        work_order_id=result.work_order_id,
-                        reviewer_user_id=approver_id,
-                        decision=WorkOrderDecision.APPROVED,
-                        review_remark=None,
-                        env=get_current_env(),
-                        source_event_type=event_type,
+                    raise WorkOrderInvalidEventError(
+                        f"AUTO callback is not implemented for {biz_type}"
                     )
             except Exception as exc:
                 self._repository.mark_auto_approval_failed(
                     work_order_id=result.work_order_id,
-                    reviewer_user_id=approver_id,
                     review_remark=f"AUTO approval failed: {str(exc)[:480]}",
                     env=get_current_env(),
                 )
-                raise
+                self._repository.create_auto_result_notifications(
+                    work_order_id=result.work_order_id,
+                    recipient_user_ids=approvers,
+                    biz_type=biz_type,
+                    biz_id=biz_id,
+                    source_event_type=event_type,
+                    status=WorkOrderStatus.FAILED,
+                    review_remark=f"AUTO approval failed: {str(exc)[:480]}",
+                    env=get_current_env(),
+                )
+                return result.model_copy(update={"status": WorkOrderEventStatus.FAILED})
             self._repository.finalize_auto_approval(
                 work_order_id=result.work_order_id,
-                reviewer_user_id=approver_id,
+                env=get_current_env(),
+            )
+            self._repository.create_auto_result_notifications(
+                work_order_id=result.work_order_id,
+                recipient_user_ids=approvers,
+                biz_type=biz_type,
+                biz_id=biz_id,
+                source_event_type=event_type,
+                status=WorkOrderStatus.APPROVED,
+                review_remark=None,
                 env=get_current_env(),
             )
             result = result.model_copy(update={"status": WorkOrderEventStatus.APPROVED})
@@ -377,6 +392,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
         if decision is WorkOrderDecision.REJECTED and normalized is None:
             raise WorkOrderInvalidRemarkError("review remark is required")
         detail = self.get_detail(work_order_id=work_order_id, actor_id=actor_id)
+        if (
+            detail.work_order.approval_mode is WorkOrderApprovalMode.AUTO
+            or detail.work_order.status is not WorkOrderStatus.PENDING
+        ):
+            raise WorkOrderAlreadyProcessedError(
+                "manual approval only accepts MANUAL + PENDING work orders"
+            )
         if detail.work_order.biz_type == WorkOrderBizType.SPACE_JOIN.value:
             return self._review_space_join(
                 detail=detail,
@@ -418,6 +440,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
         if self._decision_callbacks.requires_callback(source_event_type):
             if (
                 context.work_order.status is not WorkOrderStatus.PENDING
+                or context.approver is None
                 or context.approver.status is not WorkOrderApproverStatus.PENDING
             ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")

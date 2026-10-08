@@ -78,13 +78,7 @@ class _WorkOrderCreationRepository:
     ) -> WorkOrderEventCreatedResult:
         approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
         if event_category is NotificationCategory.APPROVAL:
-            recipients = (
-                recipient_user_ids
-                if approval_mode is WorkOrderApprovalMode.AUTO
-                else approver_user_ids
-            )
-            if approval_mode is WorkOrderApprovalMode.AUTO and not recipients:
-                recipients = [applicant_user_id] if applicant_user_id else []
+            recipients = approver_user_ids
         else:
             recipients = recipient_user_ids
         if not recipients:
@@ -120,15 +114,16 @@ class _WorkOrderCreationRepository:
                 db.add(row)
                 db.flush()
                 work_order_id, work_order_no = row.id, row.work_order_no
-                for user_id in approver_user_ids:
-                    approver = self._Approver(
-                        work_order_id=row.id,
-                        approver_user_id=user_id,
-                        status=WorkOrderApproverStatus.PENDING.value,
-                        reviewed_at=None,
-                        env=env,
-                    )
-                    db.add(approver)
+                if not is_auto:
+                    for user_id in approver_user_ids:
+                        approver = self._Approver(
+                            work_order_id=row.id,
+                            approver_user_id=user_id,
+                            status=WorkOrderApproverStatus.PENDING.value,
+                            reviewed_at=None,
+                            env=env,
+                        )
+                        db.add(approver)
 
                 # AUTO effects are executed by the service after this
                 # transaction commits.

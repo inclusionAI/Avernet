@@ -184,6 +184,9 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
         env: str,
     ) -> WorkOrderReviewResult: ...
 
+    @abstractmethod
+    def apply_auto_skill_editor_request(self, *, work_order_id: int, env: str) -> None: ...
+
     @staticmethod
     @abstractmethod
     def reroute_pending_reviewer(

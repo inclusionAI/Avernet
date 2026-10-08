@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,8 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    SYSTEM_REVIEWER_USER_ID,
+    WorkOrderApprovalMode,
     WorkOrderApproverStatus,
     WorkOrderBizType,
     WorkOrderDecision,
@@ -352,6 +354,11 @@ class _BotEditorWorkOrderRepository:
                 .filter(
                     self._WorkOrder.id == work_order_id,
                     self._WorkOrder.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value,
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                    or_(
+                        self._WorkOrder.approval_mode.is_(None),
+                        self._WorkOrder.approval_mode == WorkOrderApprovalMode.MANUAL.value,
+                    ),
                     self._WorkOrder.env == env,
                 )
                 .with_for_update()
@@ -359,10 +366,10 @@ class _BotEditorWorkOrderRepository:
             )
             if work_order is None:
                 raise WorkOrderNotFoundError("Bot editor work order not found")
-            if work_order.status not in {
-                WorkOrderStatus.PENDING.value,
-                WorkOrderStatus.PROCESSING.value,
-            }:
+            if (
+                work_order.status != WorkOrderStatus.PENDING.value
+                or work_order.approval_mode == WorkOrderApprovalMode.AUTO.value
+            ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")
 
             try:
@@ -498,6 +505,83 @@ class _BotEditorWorkOrderRepository:
                 review_remark=review_remark,
                 reviewed_at=reviewed_at,
             )
+
+    def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None:
+        """Grant Bot collaboration for an AUTO order without finalizing it."""
+        with self._db.transactional_orm_session() as db:
+            order = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.biz_type
+                    == WorkOrderBizType.BOT_COLLABORATOR.value,
+                    self._WorkOrder.approval_mode
+                    == WorkOrderApprovalMode.AUTO.value,
+                    self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
+                    self._WorkOrder.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderAlreadyProcessedError("AUTO Bot work order is not processing")
+            try:
+                data = json.loads(order.biz_data or "{}")
+                bot_pk = int(data["bot_pk"])
+                bot_id = str(data["bot_id"])
+                owner_id = str(data["owner_id"])
+                space_id = int(data["space_id"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise WorkOrderBotEditorRequestNotAllowedError(
+                    "work-order Bot identity is invalid"
+                ) from exc
+            bot = db.query(self._Bot).filter(
+                self._Bot.id == bot_pk,
+                self._Bot.bot_id == bot_id,
+                self._Bot.owner_id == owner_id,
+                self._Bot.space_id == space_id,
+                self._Bot.env == env,
+                self._Bot.is_delete == 0,
+            ).with_for_update().one_or_none()
+            if bot is None:
+                raise WorkOrderNotFoundError("work-order Bot not found")
+            member = (
+                db.query(self._Member.id)
+                .filter(
+                    self._Member.space_id == space_id,
+                    self._Member.user_id == order.applicant_user_id,
+                    self._Member.status == "ACTIVE",
+                    self._Member.env == env,
+                )
+                .first()
+            )
+            if member is None:
+                raise WorkOrderBotEditorRequestNotAllowedError(
+                    "applicant is no longer an active Team Space member"
+                )
+            collaborator = (
+                db.query(self._Collaborator.id)
+                .filter(
+                    self._Collaborator.bot_pk == bot_pk,
+                    self._Collaborator.user_id == order.applicant_user_id,
+                    self._Collaborator.env == env,
+                )
+                .first()
+            )
+            if collaborator is None:
+                db.add(
+                    self._Collaborator(
+                        bot_pk=bot_pk,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        user_id=order.applicant_user_id,
+                        user_name=order.applicant_user_id,
+                        role=CollaboratorRole.MEMBER.value,
+                        operator_id=SYSTEM_REVIEWER_USER_ID,
+                        env=env,
+                    )
+                )
+            db.flush()
 
 
 def _auto_approve(raw: str | None) -> bool:

@@ -51,3 +51,6 @@ class SkillCollaboratorApprovalHandlerProtocol(Protocol):
         review_remark: str | None,
         target_status: WorkOrderStatus,
     ) -> WorkOrderReviewResult: ...
+
+    @abstractmethod
+    def process_auto(self, *, work_order_id: int) -> None: ...

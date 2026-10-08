@@ -505,7 +505,7 @@ def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
         "biz_type": "BOT_FRIEND",
         "biz_id": "friend-1",
         "event_type": "HUMAN2BOT_FRIEND_APPLIED",
-        "applicant_user_id": "applicant-1",
+        "applicant_user_id": "owner-1",
         "approver_user_ids": [],
         "recipient_user_ids": [],
         "title": "Friend request",
