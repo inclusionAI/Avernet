@@ -85,18 +85,16 @@ def _map_routine(data: dict) -> Routine:
 
     Field source: ``plugins/local/device_adapter_transport.py`` `_build_item`
     (``id`` / ``name`` / ``enabled`` / ``schedule{expr,tz}`` /
-    ``payload.message`` / ``payload.timeout_secs`` / ``created_at_ms`` /
-    ``updated_at_ms``) plus the top-level ``bot_id`` injected by
-    ``_decorate_runtime_item`` in ``cron_runtime_targets.py``. ``model`` is
-    read from either the item top level or its payload — whichever the
-    engine's shape carries.
+    ``payload.message`` / ``payload.timeout_secs`` / ``payload.model`` /
+    ``created_at_ms`` / ``updated_at_ms``) plus the top-level ``bot_id``
+    injected by ``_decorate_runtime_item`` in ``cron_runtime_targets.py``.
+    The environment settings live in the payload — nothing in the produce
+    chain ever reports them at the item top level.
     """
     sched = data.get("schedule") or {}
     payload = data.get("payload") or {}
+    model = payload.get("model")
     timeout_secs = _coerce_timeout_secs(payload.get("timeout_secs"))
-    if timeout_secs is None:
-        timeout_secs = _coerce_timeout_secs(data.get("timeout_secs"))
-    model = data.get("model") or payload.get("model")
     return Routine(
         routine_id=str(data.get("id", "")),
         bot_id=str(data.get("bot_id", "")),
@@ -205,8 +203,10 @@ async def create_routine(
     # cron expression STRING (not the nested {kind,expr,tz} dict — the adapter
     # wraps it on read in device_adapter_transport._build_item), timezone
     # defaults to Asia/Shanghai, and timeout_secs defaults in the schema —
-    # both to match legacy cron/router.py's create path. `model` flows only
-    # when set, exactly like the legacy create: an empty/absent override is
+    # both to match legacy cron/router.py's create path. `timeout_secs` maps
+    # an explicit null back to the same default, so a read-back value copies
+    # into a create without tripping validation. `model` flows only when
+    # non-empty, exactly like the legacy create: an empty/absent override is
     # left to the bot's default rather than sent as an empty string.
     adapter_body = {
         "name": body.name,
@@ -214,7 +214,7 @@ async def create_routine(
         "command": body.command,
         "timezone": body.timezone or "Asia/Shanghai",
         "enabled": body.enabled,
-        "timeout_secs": body.timeout_secs,
+        "timeout_secs": body.timeout_secs if body.timeout_secs is not None else 86400,
     }
     if body.model:
         adapter_body["model"] = body.model
@@ -288,7 +288,12 @@ async def update_routine(
         update_body["timezone"] = body.timezone
     if body.enabled is not None:
         update_body["enabled"] = body.enabled
-    if body.model is not None:
+    # Truthy like the create guard, not ``is not None``: an empty string is
+    # not an override the caller can mean, and the engine would store it in
+    # the payload only for every read to fold back to null. Symmetric with
+    # create keeps the two paths from drifting apart; null stays "keep" like
+    # every other partial-update field here.
+    if body.model:
         update_body["model"] = body.model
     if body.timeout_secs is not None:
         update_body["timeout_secs"] = body.timeout_secs

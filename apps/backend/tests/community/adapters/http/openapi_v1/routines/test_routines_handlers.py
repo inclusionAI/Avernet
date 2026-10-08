@@ -173,31 +173,23 @@ def test_map_routine_bot_metadata_defaults_to_none():
 def test_map_routine_carries_execution_environment_fields():
     """Model and per-firing timeout read off the adapter item, as set at create.
 
-    ``timeout_secs`` lives in the item payload (``device_adapter_transport
-    ._build_item``); ``model`` may sit on the item top level or in the payload,
-    so either shape maps through.
+    Both live in the item payload — ``device_adapter_transport._build_item``
+    stores them there, and the production adapters read ``payload.model`` /
+    ``payload.timeout_secs`` back; nothing in the produce chain reports them
+    at the item top level.
     """
     r = _map_routine(
-        _adapter_dict(
-            payload={"kind": "message", "message": "echo hi", "timeout_secs": 3600},
-            model="qwen-max",
-        )
-    )
-    assert r.model == "qwen-max"
-    assert r.timeout_secs == 3600
-
-    r_payload_model = _map_routine(
         _adapter_dict(
             payload={
                 "kind": "message",
                 "message": "echo hi",
-                "timeout_secs": 1800,
-                "model": "qwen-plus",
+                "timeout_secs": 3600,
+                "model": "qwen-max",
             }
         )
     )
-    assert r_payload_model.model == "qwen-plus"
-    assert r_payload_model.timeout_secs == 1800
+    assert r.model == "qwen-max"
+    assert r.timeout_secs == 3600
 
 
 def test_map_routine_environment_fields_default_to_none():
@@ -207,21 +199,20 @@ def test_map_routine_environment_fields_default_to_none():
     assert r.timeout_secs is None
 
 
-def test_map_routine_environment_falls_back_to_top_level_timeout():
-    """A payload without ``timeout_secs`` falls back to a top-level value."""
-    r = _map_routine(_adapter_dict(payload={"kind": "message", "message": "x"}, timeout_secs="1800"))
-    assert r.timeout_secs == 1800
-
-
 def test_map_routine_ignores_unusable_environment_values():
     """Unparsable or non-positive timeouts read as "not reported" (None)."""
     r = _map_routine(
         _adapter_dict(
-            payload={"kind": "message", "message": "x", "timeout_secs": "soon"},
-            timeout_secs=-5,
+            payload={"kind": "message", "message": "x", "timeout_secs": "soon"}
         )
     )
     assert r.timeout_secs is None
+    r_non_positive = _map_routine(
+        _adapter_dict(
+            payload={"kind": "message", "message": "x", "timeout_secs": -5}
+        )
+    )
+    assert r_non_positive.timeout_secs is None
 
 
 # ── list_routines handler wiring (Phase 1 Task 2) ──────────────────────
@@ -561,6 +552,31 @@ async def test_create_routine_defaults_environment_fields():
 
 
 @pytest.mark.asyncio
+async def test_create_routine_explicit_null_timeout_secs_falls_back_to_default():
+    """The read model legitimately answers ``timeout_secs: null`` (engine
+    reported none), so a caller copying a read routine back into a create
+    must not trip a 422 — explicit null lands on the same 86400 default."""
+    service = _StubCronCreateService(_adapter_dict())
+    body = RoutineSpec(
+        name="cron1",
+        trigger=ScheduleTrigger(cron="0 9 * * *"),
+        command="echo hi",
+        timeout_secs=None,
+    )
+
+    await create_routine(
+        bot_id="bot-x",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    assert service.last_call_kwargs["body"]["timeout_secs"] == 86400
+
+
+@pytest.mark.asyncio
 async def test_create_routine_reads_x_trace_id_from_request():
     service = _StubCronCreateService(_adapter_dict())
     request = _request_with_trace("trace-create-1")
@@ -802,6 +818,27 @@ async def test_update_routine_passes_model_and_timeout_secs():
 
     sent_body = service.last_call_kwargs["body"]
     assert sent_body == {"model": "qwen-max", "timeout_secs": 1800}
+
+
+@pytest.mark.asyncio
+async def test_update_routine_ignores_empty_string_model():
+    """An empty-string model update is skipped like on create: the engine
+    would store ``payload.model = ""`` only for every read to fold it back to
+    null — a value set that cannot be seen nor cleared is not a setting."""
+    service = _StubCronUpdateService(_adapter_dict())
+    body = RoutineUpdate(model="")
+
+    await update_routine(
+        routine_id="t1",
+        body=body,
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    assert service.last_call_kwargs["body"] == {}
 
 
 def test_spec_rejects_non_positive_timeout_secs():

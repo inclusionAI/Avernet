@@ -76,6 +76,66 @@ async def test_relay_runs_end_to_end_over_transport(world) -> None:
 
 
 @pytest.mark.asyncio
+async def test_relay_round_trips_the_execution_environment_over_transport(world):
+    """The in-memory store must keep up with the cron contract it simulates.
+
+    The openapi create/update write ``timeout_secs``, ``model`` and
+    ``timezone``; a store that silently drops any of them turns the local
+    single-box loop — the one place a change is supposed to be write-then-test
+    — into a 200/201 fake success with the field gone.
+    """
+    make_staff_user(world, user_id="u_owner")
+    binding_id = make_active_local_device(world, owner_id="u_owner")
+    make_bot(
+        world,
+        bot_id="bot_x",
+        owner_id="u_owner",
+        owner_name="Owner",
+        bot_type="service",
+        status="ACTIVE",
+        binding_id=binding_id,
+    )
+
+    relay = world.get(CronRelayService)
+
+    created = await relay.forward_request(
+        bot_id="bot_x",
+        user_id="u_owner",
+        nick_name="Owner",
+        method="POST",
+        path="/api/cron",
+        body={
+            "name": "env-cron",
+            "schedule": "0 9 * * *",
+            "command": "hi",
+            "model": "qwen-max",
+            "timeout_secs": 3600,
+        },
+    )
+    assert created["success"] is True
+    assert created["data"]["payload"]["model"] == "qwen-max"
+    assert created["data"]["payload"]["timeout_secs"] == 3600
+
+    task_id = created["data"]["id"]
+    updated = await relay.forward_request(
+        bot_id="bot_x",
+        user_id="u_owner",
+        nick_name="Owner",
+        method="PUT",
+        path=f"/api/cron/{task_id}",
+        body={
+            "timezone": "UTC",
+            "model": "qwen-plus",
+            "timeout_secs": 1800,
+        },
+    )
+    assert updated["success"] is True
+    assert updated["data"]["schedule"]["tz"] == "UTC"
+    assert updated["data"]["payload"]["model"] == "qwen-plus"
+    assert updated["data"]["payload"]["timeout_secs"] == 1800
+
+
+@pytest.mark.asyncio
 async def test_transport_streams_registered_materialized_content(world) -> None:
     transport = world.get(DeviceAdapterTransport)
     assert isinstance(transport, InMemoryDeviceAdapterTransport)

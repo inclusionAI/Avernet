@@ -17904,11 +17904,18 @@
             "type": "string"
           },
           "timeout_secs": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "default": 86400,
-            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; defaults to 86400 (a full day).",
-            "minimum": 1,
-            "title": "Timeout Secs",
-            "type": "integer"
+            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; null or omitted falls back to 86400 (a full day), so a read-back value copies back safely.",
+            "title": "Timeout Secs"
           },
           "timezone": {
             "anyOf": [
@@ -18038,11 +18045,18 @@
             "type": "string"
           },
           "timeout_secs": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "default": 86400,
-            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; defaults to 86400 (a full day).",
-            "minimum": 1,
-            "title": "Timeout Secs",
-            "type": "integer"
+            "description": "How long a single firing of the routine may run, in seconds — a run that exceeds it is cut off. Positive; null or omitted falls back to 86400 (a full day), so a read-back value copies back safely.",
+            "title": "Timeout Secs"
           },
           "timezone": {
             "anyOf": [

@@ -29,8 +29,10 @@ _TIMEZONE_DESC = (
 
 # The two execution-environment settings the retiring internal cron contract
 # (adapters/http/cron) always carried: which model the firing session runs
-# with, and how long one firing may run before it is cut off. Stated once and
-# reused across create/update/read so the three cannot drift.
+# with, and how long one firing may run before it is cut off. Published once,
+# on the create body — the retiring address inherits this shape by
+# subclassing, while read and update carry their own wording because their
+# field semantics genuinely differ (nullable readback, omit-to-keep).
 _MODEL_DESC = (
     "Model override for the fresh sessions this routine starts — the firing "
     "sessions run on this model instead of the bot's default. Omit or let "
@@ -39,7 +41,8 @@ _MODEL_DESC = (
 
 _TIMEOUT_SECS_DESC = (
     "How long a single firing of the routine may run, in seconds — a run "
-    "that exceeds it is cut off. Positive; defaults to 86400 (a full day)."
+    "that exceeds it is cut off. Positive; null or omitted falls back to "
+    "86400 (a full day), so a read-back value copies back safely."
 )
 
 
@@ -195,7 +198,10 @@ class RoutineSpec(BaseModel):
     command: str = Field(description=_COMMAND_DESC)
     timezone: str | None = Field(default=None, description=_TIMEZONE_DESC)
     model: str | None = Field(default=None, description=_MODEL_DESC)
-    timeout_secs: int = Field(
+    # Optional rather than plain int: a read-back ``null`` (engine reported no
+    # timeout) must copy back into a create without tripping a 422 — the read
+    # model legitimately answers null, so the create model has to accept it.
+    timeout_secs: int | None = Field(
         default=86400, ge=1, description=_TIMEOUT_SECS_DESC
     )
     enabled: bool = Field(

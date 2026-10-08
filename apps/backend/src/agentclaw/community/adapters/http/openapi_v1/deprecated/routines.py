@@ -63,7 +63,11 @@ class RoutineCreate(RoutineSpec):
     # dropped from ``RoutineSpec``'s, this model would publish an example
     # missing the one field it *requires*. The current model has the opposite
     # problem for the opposite reason, which is why neither can borrow the
-    # other's.
+    # other's. Inheritance replaces ``json_schema_extra`` wholesale, so every
+    # field this subclass shares with its parent has to be re-listed here or
+    # the published example silently drops it — the trap the old comment
+    # already warned about, sprung once ``model``/``timeout_secs`` joined
+    # the parent.
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -72,6 +76,8 @@ class RoutineCreate(RoutineSpec):
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",
                 "timezone": "Asia/Shanghai",
+                "model": "qwen-max",
+                "timeout_secs": 3600,
                 "enabled": True,
             }
         }
