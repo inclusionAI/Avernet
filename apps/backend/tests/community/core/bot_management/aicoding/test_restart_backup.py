@@ -641,3 +641,22 @@ async def test_other_engine_ignores_durable_restart_key():
         device_id='target', target_runtime=runtime, restart_key='restart:publish:prod',
     )
     assert not runtime.mock_calls
+
+
+def test_ordinary_backup_budget_includes_time_already_spent_in_queue():
+    import time
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
+        BACKUP_TIMEOUT, current_restart,
+    )
+
+    assert BACKUP_TIMEOUT == backup.DEADLINE_SECONDS == 1500
+    context_reset_handle = current_restart.set(SimpleNamespace(payload={
+        "started_at": time.time() - BACKUP_TIMEOUT - 1,
+    }))
+    execute = Mock()
+    try:
+        with pytest.raises(TimeoutError):
+            prepare(execute)
+        execute.assert_not_called()
+    finally:
+        current_restart.reset(context_reset_handle)
