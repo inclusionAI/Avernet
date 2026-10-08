@@ -561,3 +561,84 @@ async fn sqlite_missing_retired_and_human_rows_fail_closed() {
     assert!(repo.delete_human_actor("user-plain", operation("admin-1")).await.unwrap());
     assert!(!repo.delete_human_actor("user-plain", operation("admin-1")).await.unwrap());
 }
+
+#[tokio::test]
+async fn sqlite_human_deletion_converges_when_a_grant_races_the_first_attempt() {
+    // A manager grant commits between the pre-read (held-role count = 1)
+    // and the first write attempt: the held-edge expectation drifts and the
+    // first attempt rolls back. The deletion must re-read the FRESH held
+    // count and converge inside its own retry budget — not exhaust the
+    // budget against the stale expectation and surface Conflict.
+    let db = sqlite().await;
+    let injected = InjectedStepDb::new(db.clone());
+    let repo = persistent(injected.clone());
+    assert!(
+        repo.create_registration_if_absent_with_initialization(
+            "bot-race".into(),
+            caps("grant-race"),
+            "owner-registration",
+            "token-race",
+            human_init("user-owner"),
+        )
+        .await
+        .unwrap()
+    );
+    assert!(repo.ensure_human_actor("user-mgr", "Manager").await.unwrap().created);
+    seed_manager_edge(db.as_ref(), "bot-race", "user-mgr").await;
+    assert_eq!(
+        approved_role_edge_count_from(db.as_ref(), "human_user-mgr").await,
+        1
+    );
+    // One-shot racer: a team-sourced manager grant commits on a separate
+    // autocommit right before the first deletion attempt's transaction.
+    let env = bcs_config::resolve_env_str();
+    injected.arm_racing_write(
+        "actor_kind = 'human'",
+        "INSERT INTO edge_grants (env, from_id, to_id, grant_kind, grant_ref_id, rules, \
+         status, originator_policy_type, originator_policy_data, \
+         management_source_kind, management_source_id) \
+         VALUES (?, ?, ?, 'manager', 0, NULL, 'approved', 'same_as_from', NULL, \
+                 'team', 'team-race')",
+        vec![
+            bcs_db_api::DbValue::from(env.as_str()),
+            bcs_db_api::DbValue::from("human_user-mgr"),
+            bcs_db_api::DbValue::from("bot-race"),
+        ],
+    );
+    // One call: the internal retry loop must absorb the drifted count
+    // (this is the RED assertion — the stale-expectation defect ends in
+    // Err(Conflict) here).
+    let deleted = repo
+        .delete_human_actor("user-mgr", operation("admin-1"))
+        .await
+        .unwrap();
+    assert!(
+        deleted,
+        "the deletion converges within its retry budget after the drifted first attempt"
+    );
+    assert!(repo.try_get("human_user-mgr").await.unwrap().is_none());
+    // Real row projections: the racer's edge and the seeded edge are BOTH
+    // withdrawn by the converged deletion, the owned Bot survives, and the
+    // audit recorded the one committed deletion.
+    assert_eq!(
+        approved_role_edge_count_from(db.as_ref(), "human_user-mgr").await,
+        0,
+        "no edge held by the deleted Human may survive, including the racer's"
+    );
+    assert!(repo.try_get("bot-race").await.unwrap().is_some());
+    assert_eq!(
+        approved_owner_edge_count(db.as_ref(), "bot-race").await,
+        1
+    );
+    assert_eq!(
+        scalar(
+            db.as_ref(),
+            "SELECT COUNT(*) AS value FROM bcs_bot_action_audits \
+             WHERE resource_id = 'human_user-mgr' AND action = 'delete' AND phase = 'applied'",
+            vec![],
+        )
+        .await,
+        1,
+        "exactly one lifecycle audit row survives the retried (rolled-back-then-committed) deletion"
+    );
+}

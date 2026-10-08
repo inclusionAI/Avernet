@@ -44,8 +44,11 @@ use super::ownership_initialization::sanitized;
 use super::{MemoryBotRepo, PersistentBotRepo, Value, resolve_env};
 
 /// Optimistic-write attempts before surfacing a retryable conflict: each
-/// attempt re-validates, so genuine states settle into their business
-/// branch long before this budget is spent.
+/// attempt re-validates AND re-pins its held-edge expectation to the
+/// freshly re-read count, so a grant or revocation landing between the
+/// read and an attempt genuinely settles into its business branch long
+/// before this budget is spent (a drifted count is absorbed by the next
+/// attempt, not replayed against the stale expectation until exhaustion).
 const MAX_DELETION_ATTEMPTS: usize = 3;
 
 /// Lifecycle audit record for one committed deletion (the store fills
@@ -236,10 +239,16 @@ impl PersistentBotRepo {
             .flatten()
             .unwrap_or(0) as u64;
 
+        // The held-edge expectation is an optimistic pin, RE-FRESHED after
+        // every drift (from the re-validation read), not a value captured
+        // once at the pre-read: a grant or revocation landing between the
+        // read and an attempt must converge on the next attempt instead of
+        // failing the same expected-count check until the budget is spent.
+        let mut expected_held_role_edges = held_role_edges;
         let mut last_conflict = None;
         for _ in 0..MAX_DELETION_ATTEMPTS {
             match self
-                .delete_human_once(&human_id, operation, held_role_edges, &env)
+                .delete_human_once(&human_id, operation, expected_held_role_edges, &env)
                 .await
             {
                 Ok(deleted) => return Ok(deleted),
@@ -248,9 +257,13 @@ impl PersistentBotRepo {
                     last_conflict = Some(error);
                     // Re-validate against the new state: a newly live owned
                     // Bot turns the retry into Forbidden; a vanished Human
-                    // into Ok(false).
+                    // into Ok(false); a still-consistent state retries with
+                    // a FRESHLY re-read held-edge count.
                     match self.delete_human_revalidate(&human_id, staff_no).await {
-                        Ok(Recheck::Retry) => continue,
+                        Ok(Recheck::Retry(fresh_held_role_edges)) => {
+                            expected_held_role_edges = fresh_held_role_edges;
+                            continue;
+                        }
                         Ok(Recheck::DeletedBySomeoneElse) => return Ok(false),
                         Ok(Recheck::LiveOwner) => {
                             return Err(ServiceError::Authority(AuthorityError::Forbidden(
@@ -373,7 +386,9 @@ impl PersistentBotRepo {
         Ok(true)
     }
 
-    /// Re-read the branches after a drifted attempt.
+    /// Re-read the branches after a drifted attempt. The `Retry` branch
+    /// returns the FRESH held-role-edge count so the next attempt pins to
+    /// the current state.
     async fn delete_human_revalidate(
         &self,
         human_id: &str,
@@ -388,7 +403,11 @@ impl PersistentBotRepo {
                            ON b.bot_uuid = o.to_id AND b.env = o.env \
                           WHERE o.env = h.env AND o.from_id = h.bot_uuid \
                             AND o.grant_kind = 'owner' AND o.status = 'approved' \
-                            AND COALESCE(b.is_deleted, 0) = 0) AS live_owned_bots \
+                            AND COALESCE(b.is_deleted, 0) = 0) AS live_owned_bots, \
+                        (SELECT COUNT(*) FROM edge_grants e \
+                          WHERE e.env = h.env AND e.from_id = h.bot_uuid \
+                            AND e.status = 'approved' \
+                            AND e.grant_kind IN ('owner', 'manager')) AS held_role_edges \
                  FROM bcs_bots h \
                  WHERE h.bot_uuid = ? AND h.env = ?",
                 vec![Value::from(human_id), Value::from(env.as_str())],
@@ -404,14 +423,21 @@ impl PersistentBotRepo {
         if row.get_i64("live_owned_bots").ok().flatten().unwrap_or(0) > 0 {
             return Ok(Recheck::LiveOwner);
         }
+        let held_role_edges = row
+            .get_i64("held_role_edges")
+            .ok()
+            .flatten()
+            .unwrap_or(0) as u64;
         let _ = staff_no;
-        Ok(Recheck::Retry)
+        Ok(Recheck::Retry(held_role_edges))
     }
 }
 
 enum Recheck {
-    /// The state changed but remains deletable: one more guarded attempt.
-    Retry,
+    /// The state changed but remains deletable: one more guarded attempt,
+    /// re-pinned to the freshly re-read held-edge count (the stale-count
+    /// defect made every retry fail the same check instead of converging).
+    Retry(u64),
     /// Another writer deleted the Human (or it vanished): report false.
     DeletedBySomeoneElse,
     /// The Human became a live owner: Forbidden, deletion rolled back.

@@ -345,13 +345,21 @@ pub const DELETE_AUDIT_MARKER: &str = "INTO bcs_bot_action_audits";
 pub struct InjectedStepDb {
     db: Arc<dyn DbPlugin>,
     armed: StdMutex<Option<&'static str>>,
+    /// Test-only: a write that is committed through the underlying handle
+    /// (a genuinely separate autocommit) immediately BEFORE the next
+    /// transaction whose steps match `target` — the deterministic
+    /// between-the-pre-read-and-the-attempt racing writer, no sleeps.
+    pending_race: StdMutex<Option<PendingRace>>,
 }
+
+pub type PendingRace = (String, DbStatement);
 
 impl InjectedStepDb {
     pub fn new(db: Arc<dyn DbPlugin>) -> Arc<Self> {
         Arc::new(Self {
             db,
             armed: StdMutex::new(None),
+            pending_race: StdMutex::new(None),
         })
     }
 
@@ -361,6 +369,15 @@ impl InjectedStepDb {
 
     pub fn disarm(&self) {
         *self.armed.lock().unwrap() = None;
+    }
+
+    /// Arm a one-shot racing write: before the next transaction whose SQL
+    /// contains `target`, commit `sql`/`params` standalone (autocommit), so
+    /// the raced-in state is visible to that transaction's guards but was
+    /// never visible to the caller's earlier pre-read.
+    pub fn arm_racing_write(&self, target: &str, sql: &str, params: Vec<bcs_db_api::DbValue>) {
+        *self.pending_race.lock().unwrap() =
+            Some((target.to_string(), DbStatement::with_params(sql, params)));
     }
 }
 
@@ -378,22 +395,35 @@ impl DbPlugin for InjectedStepDb {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        // The deterministic racing writer: commit the armed statement
+        // standalone (a real separate commit) the moment the matching
+        // transaction is about to start. The guard is consumed before any
+        // await so the async block stays Send.
+        let pending_race = self.pending_race.lock().unwrap().take();
+        if let Some((target, statement)) = pending_race {
+            let matches = steps.iter().any(|step| match step {
+                DbTransactionStep::Query(inner) => inner.sql().contains(&target),
+                DbTransactionStep::Execute(inner) => inner.sql().contains(&target),
+                DbTransactionStep::ExecuteChecked { statement: inner, .. } => {
+                    inner.sql().contains(&target)
+                }
+            });
+            if matches {
+                self.db.execute(statement).await?;
+            }
+        }
         let marker = self.armed.lock().unwrap().take();
         let mut steps = steps;
         if let Some(marker) = marker {
-            let mut index = 0;
-            for (position, step) in steps.iter().enumerate() {
+            for step in steps.iter_mut() {
                 let sql = match step {
                     DbTransactionStep::Query(statement) => statement.sql(),
                     DbTransactionStep::Execute(statement) => statement.sql(),
                     DbTransactionStep::ExecuteChecked { statement, .. } => statement.sql(),
                 };
                 if sql.contains(marker) {
-                    index = position;
-                    steps[index] = DbTransactionStep::ExecuteChecked {
-                        statement: DbStatement::new(
-                            "SELECT 1 FROM bcs_ownership_failure_injection",
-                        ),
+                    *step = DbTransactionStep::ExecuteChecked {
+                        statement: DbStatement::new("SELECT 1 FROM bcs_ownership_failure_injection"),
                         expected_affected_rows: 1,
                     };
                     break;
