@@ -56,6 +56,34 @@ def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
     )
 
 
+def _parse_exec_error_channel(resp: Any) -> tuple[int, str]:
+    """替代 WSClient.returncode：容器重启空窗期 exec 报 container not
+    found 时 Status 的 causes[0].message 是错误文本而非数字退出码，
+    库内 int() 会抛 ValueError，这里返回 (-1, 可读错误消息)。"""
+    from kubernetes.stream.ws_client import ERROR_CHANNEL
+
+    if resp.is_open():
+        return 0, ""
+    raw = resp.read_channel(ERROR_CHANNEL) or ""
+    if not raw:
+        return 0, ""
+    try:
+        status = yaml.safe_load(raw) or {}
+    except yaml.YAMLError:
+        return -1, raw
+    if not isinstance(status, dict):
+        return -1, str(status)
+    if status.get("status") == "Success":
+        return 0, ""
+    causes = (status.get("details") or {}).get("causes") or []
+    if causes:
+        try:
+            return int(causes[0].get("message")), ""
+        except (TypeError, ValueError):
+            pass
+    return -1, str(status.get("message") or raw)
+
+
 class _ExecResult:
     """命令执行结果占位对象。"""
 
@@ -208,10 +236,15 @@ class LocalK8sArcaSandbox(ArcaSandbox):
             )
             resp.run_forever(timeout=timeout_in_millis / 1000.0)
             elapsed = time.monotonic() - started
+            exit_code, exec_error = _parse_exec_error_channel(resp)
+            if exec_error:
+                logger.warning(
+                    "local_k8s: exec failed in %s: %s", container_name, exec_error
+                )
             return _ExecResult(
-                exit_code=resp.returncode if resp.returncode is not None else 0,
+                exit_code=exit_code,
                 stdout=resp.read_stdout() or "",
-                stderr=resp.read_stderr() or "",
+                stderr=(resp.read_stderr() or "") or exec_error,
                 elapsed_time=elapsed,
             )
         except ApiException as e:
@@ -277,8 +310,8 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 f"{sidecar_container_name}: {result.stderr or result.stdout}"
             )
 
-    def _wait_for_sidecar_ready(self, timeout_seconds: float = 15.0) -> None:
-        """等待 sidecar 的 Envoy admin /ready 恢复。"""
+    def _wait_for_sidecar_ready(self, timeout_seconds: float = 60.0) -> None:
+        """等待 sidecar 的 Envoy admin /ready 恢复（kubelet 重启退避可达 40s+）。"""
         sidecar_container_name = self._require_sidecar_container_name()
         deadline = time.monotonic() + timeout_seconds
         last_error = "no readiness probe executed"
@@ -323,7 +356,19 @@ class LocalK8sArcaSandbox(ArcaSandbox):
             "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
         )
 
-        self._restart_sidecar()
+        try:
+            self._restart_sidecar()
+        except RuntimeError as e:
+            # 重启空窗期（上一实例已退出、kubelet 尚未重建）exec 会报
+            # container not found；新实例启动时会加载已更新的 ConfigMap，
+            # 无需重发 quitquitquit，直接等待就绪。
+            if "container not found" not in str(e):
+                raise
+            logger.warning(
+                "local_k8s: sidecar %s missing (recreating), skip restart: %s",
+                self._sidecar_container_name,
+                e,
+            )
         self._wait_for_sidecar_ready()
         logger.info(
             "local_k8s: refreshed sidecar %s/%s/%s without rolling deployment",
