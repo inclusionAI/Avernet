@@ -93,17 +93,21 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     /// Idempotent manual manager mutation (spec §5.4/§6, plan Task 4).
     ///
     /// ONE-TRANSACTION semantics, binding for every implementation:
-    /// - All validation happens inside the mutation transaction on the
-    ///   serialized Bot boundary (the same lock the Task 2 primitives
-    ///   proved): the actor still holds a current owner-or-manager role
-    ///   (Gate 0: managers may re-grant/revoke other managers) — a current
-    ///   authority check performed outside the transaction adds no
-    ///   authority; the subject is a live human of the store's env
-    ///   (`AuthorityError::InvalidSubject`); the subject is not the owner
-    ///   (`AuthorityError::Conflict` — the owner changes only through the
-    ///   transfer flow); the Bot exists (`BotNotFound`), is initialized
-    ///   (`OwnershipNotInitialized`) and has a unique approved owner
-    ///   (`CorruptAuthority`).
+    /// - The authoritative validation happens INSIDE the mutation
+    ///   transaction on the serialized Bot boundary (the same lock the
+    ///   Task 2 primitives proved), expressed as conditions of the
+    ///   changing statements themselves (so pre-transaction reads are
+    ///   fast paths, never authority sources): the actor still holds a
+    ///   current owner-or-manager role (Gate 0: managers may
+    ///   re-grant/revoke other managers); the Bot is live and initialized
+    ///   with its unique approved owner slot (`BotNotFound` /
+    ///   `OwnershipNotInitialized` / `CorruptAuthority`); the subject is a
+    ///   live human of the store's env (`AuthorityError::InvalidSubject`);
+    ///   the subject is not the owner (`AuthorityError::Conflict` — the
+    ///   owner changes only through the transfer flow). Only `Human`
+    ///   actors may mutate managers; `Service`/`System` actors are
+    ///   rejected fail-closed and must never be able to alias a
+    ///   `human_<uid>` role-edge subject.
     /// - `GrantDirect` is idempotent: an already-approved direct edge is
     ///   `changed=false`; a previously revoked row RESTORES under the same
     ///   row id (never INSERT-IGNORE + revoked semantics); a fresh row is

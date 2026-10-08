@@ -42,13 +42,17 @@ pub trait BotAuthorityCoreService: Send + Sync {
     ) -> ServiceResult<Vec<Option<BotAccessRelation>>>;
 
     /// Idempotently grant/revoke one Human's non-team manager sources on
-    /// one Bot, validating the actor, the subject and the Bot INSIDE the
-    /// store's single mutation transaction (spec §5.4/§6, plan Task 4):
-    /// the actor must still hold a current owner-or-manager role (Gate 0:
-    /// current managers may re-grant/revoke other managers), the subject
-    /// must be a live human of the same env and must not be the owner,
-    /// and the mutation must never touch `team/*` sources (team sources
-    /// are written only by the team-sync lane, never through this port).
+    /// one Bot, with the authoritative validation enforced INSIDE the
+    /// store's single mutation transaction as conditions of the changing
+    /// statements themselves (spec §5.4/§6, plan Task 4): the actor must
+    /// still hold a current owner-or-manager role (Gate 0: current
+    /// managers may re-grant/revoke other managers), the subject must be
+    /// a live human of the same env and must not be the owner, the Bot
+    /// must be live/initialized with its unique owner slot, and the
+    /// mutation must never touch `team/*` sources (team sources are
+    /// written only by the team-sync lane, never through this port).
+    /// Only `Human` actors may mutate managers — `Service`/`System` are
+    /// rejected fail-closed before any from_id matching.
     ///
     /// The repo owns the atomicity contract: validation, edge writes and
     /// the `bot_manager_changes` audit append commit together or not at

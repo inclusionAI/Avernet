@@ -384,12 +384,20 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
             | ManagerMutation::RevokeNonTeam { user_id } => user_id.clone(),
         };
         let subject_from_id = human_actor_id(&subject_user_id);
+        // Structural fail-closed FIRST: manager mutations belong to the current
+        // HUMAN owner/managers (Gate 0). A Service/System identifier must
+        // never be allowed to alias a `human_<uid>` role-edge subject, so
+        // non-Human actors never reach the authorization match below
+        // (their governed lanes own their own contracts).
         let actor_from_id = match &actor {
             AuditActor::Human { user_id } => human_actor_id(user_id),
-            // Service/system actors hold no role edges; validation below
-            // fails them closed (team sync owns its own lane).
-            AuditActor::Service { service_id } => service_id.clone(),
-            AuditActor::System { name } => name.clone(),
+            AuditActor::Service { .. } | AuditActor::System { .. } => {
+                return Err(ServiceError::Authority(AuthorityError::Forbidden(format!(
+                    "manager mutations are performed by the current Human owner/managers; \
+                     this actor kind must use its governed lane (actor kind '{}')",
+                    actor.kind_str()
+                ))))
+            }
         };
         // Liveness pre-checks with sequential guards (the `ownership`()
         // pattern: the registry map excludes soft-deleted rows, and the

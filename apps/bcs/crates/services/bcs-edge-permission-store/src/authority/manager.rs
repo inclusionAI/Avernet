@@ -106,14 +106,23 @@ impl super::reads::DbBotAuthorityStore {
         subject_user_id: &str,
         mutation: &ManagerMutation,
     ) -> Result<ManagerMutationResult, MutateAttempt> {
-        let subject_from_id = human_actor_id(subject_user_id);
+        // Structural fail-closed FIRST: manager mutations belong to the
+        // current Human owner/managers (Gate 0). A Service/System identifier
+        // must never be allowed to alias a `human_<uid>` role-edge
+        // `from_id`, so non-Human actors never reach an XY-bound statement.
         let actor_from_id = match &actor {
             AuditActor::Human { user_id } => human_actor_id(user_id),
-            // Service/system actors hold no role edges; the guard fails the
-            // write closed (they must use their own governed lanes).
-            AuditActor::Service { service_id } => service_id.clone(),
-            AuditActor::System { name } => name.clone(),
+            AuditActor::Service { .. } | AuditActor::System { .. } => {
+                return Err(MutateAttempt::Service(ServiceError::Authority(
+                    AuthorityError::Forbidden(format!(
+                        "manager mutations are performed by the current Human owner/managers; \
+                         this actor kind must use its governed lane (actor kind '{}')",
+                        actor.kind_str()
+                    )),
+                )))
+            }
         };
+        let subject_from_id = human_actor_id(subject_user_id);
 
         // -- Validated read transaction: aggregate + team sources ------------
         let validated = self
@@ -342,6 +351,7 @@ impl super::reads::DbBotAuthorityStore {
             &self.env,
             bot_id,
             subject_user_id,
+            subject_from_id,
             actor,
             actor_from_id,
             operation_id,
@@ -401,13 +411,26 @@ impl super::reads::DbBotAuthorityStore {
             &self.env,
             bot_id,
             subject_user_id,
+            subject_from_id,
             actor,
             actor_from_id,
             operation_id,
         );
         // The brief's revoke predicate (only direct/ownership_transfer match;
-        // team/* rows stay) extended with the same in-transaction actor guard
-        // the audit used, so a drift between the two is impossible.
+        // team/* rows stay) extended with the SAME in-transaction mutation
+        // guards the audit used, so the changing write can never touch a
+        // state the validated plan no longer describes.
+        let mut revoke_params = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::from(bot_id),
+            DbValue::from(subject_from_id),
+        ];
+        revoke_params.extend(super::audit::mutation_guard_params(
+            &self.env,
+            bot_id,
+            actor_from_id,
+            subject_from_id,
+        ));
         let revoke_update = DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'revoked', gmt_modified = {} \
@@ -416,16 +439,9 @@ impl super::reads::DbBotAuthorityStore {
                    AND management_source_kind IN ('direct', 'ownership_transfer') \
                    AND {}",
                 self.flavor.now(),
-                super::audit::actor_still_authorized_guard(),
+                super::audit::mutation_guards(),
             ),
-            vec![
-                DbValue::from(self.env.as_str()),
-                DbValue::from(bot_id),
-                DbValue::from(subject_from_id),
-                DbValue::from(self.env.as_str()),
-                DbValue::from(bot_id),
-                DbValue::from(actor_from_id),
-            ],
+            revoke_params,
         );
         let results = self
             .db
@@ -588,8 +604,10 @@ impl super::reads::DbBotAuthorityStore {
     /// Fresh single-slot insert of the direct/manual manager edge, guarded
     /// by the whole mutation contract inside the write transaction: the
     /// slot must be truly empty (no approved and no revoked row — the
-    /// unique key allows exactly one row in ANY status) and the actor must
-    /// still hold authority (Guard 0 re-check evaluated in-transaction).
+    /// unique key allows exactly one row in ANY status) AND the shared
+    /// in-transaction mutation guards must hold (actor still authorized,
+    /// subject is a live human, subject is not the owner; see
+    /// `audit::mutation_guards`).
     fn grant_insert_statement(
         &self,
         bot_id: &str,
@@ -601,6 +619,23 @@ impl super::reads::DbBotAuthorityStore {
             DbSqlFlavor::Sqlite => "",
             DbSqlFlavor::Mysql => " FROM DUAL",
         };
+        let mut params = vec![
+            DbValue::from(env),
+            DbValue::from(subject_from_id),
+            DbValue::from(bot_id),
+            DbValue::from(env),
+            DbValue::from(bot_id),
+            DbValue::from(subject_from_id),
+            DbValue::from(env),
+            DbValue::from(bot_id),
+            DbValue::from(subject_from_id),
+        ];
+        params.extend(super::audit::mutation_guard_params(
+            env,
+            bot_id,
+            actor_from_id,
+            subject_from_id,
+        ));
         DbStatement::with_params(
             &format!(
                 "INSERT INTO edge_grants \
@@ -620,34 +655,34 @@ impl super::reads::DbBotAuthorityStore {
                          AND t.management_source_kind = 'direct' \
                          AND t.management_source_id = 'manual' AND t.status = 'revoked') \
                    AND {}",
-                super::audit::actor_still_authorized_guard(),
+                super::audit::mutation_guards(),
             ),
-            vec![
-                DbValue::from(env),
-                DbValue::from(subject_from_id),
-                DbValue::from(bot_id),
-                DbValue::from(env),
-                DbValue::from(bot_id),
-                DbValue::from(subject_from_id),
-                DbValue::from(env),
-                DbValue::from(bot_id),
-                DbValue::from(subject_from_id),
-                DbValue::from(env),
-                DbValue::from(bot_id),
-                DbValue::from(actor_from_id),
-            ],
+            params,
         )
     }
 
     /// RESTORE of the previously revoked direct/manual row: exactly the one
     /// revoked source row returns to `approved` under the SAME id — never a
-    /// second slot, never INSERT IGNORE.
+    /// second slot, never INSERT IGNORE. The shared in-transaction mutation
+    /// guards hold alongside the row conditions (see
+    /// `audit::mutation_guards`).
     fn grant_restore_statement(
         &self,
         bot_id: &str,
         subject_from_id: &str,
         actor_from_id: &str,
     ) -> DbStatement {
+        let mut params = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::from(bot_id),
+            DbValue::from(subject_from_id),
+        ];
+        params.extend(super::audit::mutation_guard_params(
+            &self.env,
+            bot_id,
+            actor_from_id,
+            subject_from_id,
+        ));
         DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'approved', gmt_modified = {} \
@@ -656,16 +691,9 @@ impl super::reads::DbBotAuthorityStore {
                    AND status = 'revoked' \
                    AND {}",
                 self.flavor.now(),
-                super::audit::actor_still_authorized_guard(),
+                super::audit::mutation_guards(),
             ),
-            vec![
-                DbValue::from(self.env.as_str()),
-                DbValue::from(bot_id),
-                DbValue::from(subject_from_id),
-                DbValue::from(self.env.as_str()),
-                DbValue::from(bot_id),
-                DbValue::from(actor_from_id),
-            ],
+            params,
         )
     }
 

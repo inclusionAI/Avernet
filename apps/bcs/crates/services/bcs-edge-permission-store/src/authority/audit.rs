@@ -15,8 +15,6 @@
 use bcs_db_api::{DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::AuditActor;
 
-use bcs_service_api::port::repo::bot_authority::human_actor_id;
-
 /// `bot_manager_changes` column list written by the audit INSERT SELECT.
 pub(super) const MANAGER_CHANGE_COLUMNS: &str = "audit_id, env, bot_id, subject_user_id, \
      edge_id, management_source_kind, management_source_id, action, actor_kind, actor_id, \
@@ -31,35 +29,85 @@ fn audit_id_expr(flavor: &DbSqlFlavor) -> &'static str {
     }
 }
 
-/// The actor-still-authorized re-check, evaluated inside the mutation
-/// transaction: the mutation's changing statements (and their audits)
-/// select only rows a CURRENT owner/approved-manager actor may still
-/// change. The guard is row-based: the actor's role edge must live on the
-/// same env/Bot as the mutation.
+/// The FULL in-transaction mutation guard family shared by every changing
+/// statement and its batched audit: the validated predicates of
+/// `mutate_manager` are re-proved against CURRENT rows under the write
+/// lock, so the phase-1 read stays a fast path and can never authorize a
+/// stale mutation (plan/spec §5.4: 事务内检查 actor 仍有权、目标是同 env
+/// live Human、目标非 owner):
 ///
-/// The guard's `?` is the actor's EDGE row subject (`human_<user_id>`);
-/// service/system actors hold no role edges, so a mutation driven by them
-/// matches nothing and fails closed.
-pub(super) fn actor_still_authorized_guard() -> &'static str {
-    "EXISTS (SELECT 1 FROM edge_grants ar \
-       WHERE ar.env = ? AND ar.to_id = ? AND ar.from_id = ? \
-         AND ar.grant_kind IN ('owner', 'manager') AND ar.status = 'approved')"
+/// - the Bot is live and ownership-initialized (version > 0) in this env;
+/// - its unique approved owner slot exists (the schema's partial unique
+///   index keeps `EXISTS` == exactly one);
+/// - the ACTOR still holds a current owner/manager role on the Bot;
+/// - the SUBJECT is a live human actor of the same env;
+/// - the SUBJECT is NOT the owner (owner changes only via the transfer
+///   flow).
+///
+/// Binding order (12 `?`): `(bot_id, env, env, bot_id, env, bot_id,
+/// actor_from_id, subject_from_id, env, env, bot_id, subject_from_id)`.
+pub(super) fn mutation_guards() -> &'static str {
+    "EXISTS (SELECT 1 FROM bcs_bots tb \
+         WHERE tb.bot_uuid = ? AND tb.env = ? \
+           AND tb.ownership_version > 0 AND COALESCE(tb.is_deleted, 0) = 0) \
+     AND EXISTS (SELECT 1 FROM edge_grants os \
+         WHERE os.env = ? AND os.to_id = ? \
+           AND os.grant_kind = 'owner' AND os.status = 'approved') \
+     AND EXISTS (SELECT 1 FROM edge_grants ar \
+         WHERE ar.env = ? AND ar.to_id = ? AND ar.from_id = ? \
+           AND ar.grant_kind IN ('owner', 'manager') AND ar.status = 'approved') \
+     AND EXISTS (SELECT 1 FROM bcs_bots th \
+         WHERE th.bot_uuid = ? AND th.env = ? AND th.actor_kind = 'human' \
+           AND COALESCE(th.is_deleted, 0) = 0) \
+     AND NOT EXISTS (SELECT 1 FROM edge_grants so \
+         WHERE so.env = ? AND so.to_id = ? AND so.from_id = ? \
+           AND so.grant_kind = 'owner' AND so.status = 'approved')"
 }
 
-/// Parameters shared by every audit statement's SELECT/WHERE tail:
+/// The parameters bound into [`mutation_guards`], in its documented order.
+pub(super) fn mutation_guard_params(
+    env: &str,
+    bot_id: &str,
+    actor_from_id: &str,
+    subject_from_id: &str,
+) -> Vec<DbValue> {
+    vec![
+        // tb (live, initialized bot row)
+        DbValue::from(bot_id),
+        DbValue::from(env),
+        // os (unique approved owner slot exists)
+        DbValue::from(env),
+        DbValue::from(bot_id),
+        // ar (actor still authorized)
+        DbValue::from(env),
+        DbValue::from(bot_id),
+        DbValue::from(actor_from_id),
+        // th (subject is a live same-env human)
+        DbValue::from(subject_from_id),
+        DbValue::from(env),
+        // so (subject is not the owner)
+        DbValue::from(env),
+        DbValue::from(bot_id),
+        DbValue::from(subject_from_id),
+    ]
+}
+
+/// Parameters shared by every audit statement's SELECT/WHERE tail, in
+/// binding order: the SELECT-list literals
 /// `(operation_id_prefix, subject_user_id, actor_kind, actor_id,
-///   operation_id, env, bot_id, subject_from_id, guard env, guard bot_id,
-///   guard actor_from_id)` — in binding order.
+///   operation_id)`, then the row_conditions' `(env, bot_id,
+///   subject_from_id)`, then the [`mutation_guards`] tail.
 #[allow(clippy::too_many_arguments)]
 fn audit_params(
     env: &str,
     bot_id: &str,
     subject_user_id: &str,
+    subject_from_id: &str,
     actor: &AuditActor,
     actor_from_id: &str,
     operation_id: &str,
 ) -> Vec<DbValue> {
-    vec![
+    let mut params = vec![
         DbValue::from(operation_id),
         DbValue::from(subject_user_id),
         DbValue::from(actor.kind_str()),
@@ -67,17 +115,19 @@ fn audit_params(
         DbValue::from(operation_id),
         DbValue::from(env),
         DbValue::from(bot_id),
-        DbValue::from(human_actor_id(subject_user_id)),
-        DbValue::from(env),
-        DbValue::from(bot_id),
-        DbValue::from(actor_from_id),
-    ]
+        DbValue::from(subject_from_id),
+    ];
+    params.extend(mutation_guard_params(env, bot_id, actor_from_id, subject_from_id));
+    params
 }
 
 /// Batched audit INSERT SELECT for one mutation of the subject's manager
 /// edges. `row_conditions` is the SAME row-selection text the mutation's
-/// changing statement uses (status/kind/source conditions); the audit and
-/// the change therefore always name the same rows inside the one lock.
+/// changing statement uses (status/kind/source conditions), and the shared
+/// [`mutation_guards`] tail re-proves the validated predicates against
+/// CURRENT rows inside the one lock; the audit and the change therefore
+/// always name the same rows, and neither can touch a state the validated
+/// plan no longer describes.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn manager_change_audit_statement(
     flavor: &DbSqlFlavor,
@@ -86,6 +136,7 @@ pub(super) fn manager_change_audit_statement(
     env: &str,
     bot_id: &str,
     subject_user_id: &str,
+    subject_from_id: &str,
     actor: &AuditActor,
     actor_from_id: &str,
     operation_id: &str,
@@ -97,10 +148,18 @@ pub(super) fn manager_change_audit_statement(
                management_source_id, '{action}', ?, ?, ? \
              FROM edge_grants \
              WHERE {row_conditions} \
-               AND {actor_guard}",
+               AND {guards}",
             audit_id = audit_id_expr(flavor),
-            actor_guard = actor_still_authorized_guard(),
+            guards = mutation_guards(),
         ),
-        audit_params(env, bot_id, subject_user_id, actor, actor_from_id, operation_id),
+        audit_params(
+            env,
+            bot_id,
+            subject_user_id,
+            subject_from_id,
+            actor,
+            actor_from_id,
+            operation_id,
+        ),
     )
 }
