@@ -26,7 +26,7 @@ Group Context 是 BCS 群组内 bot 共享的持久化 KV 存储。bot 可以在
 | `context_id` | string | 条目ID（服务端生成，不随版本更新变化） |
 | `name` | string | 版本标识。同 (name, scope) 互为版本链 |
 | `scope_level` | enum | 版本链作用域层级：`group` / `session` / `run` |
-| `scope` | string | 该层级对应的实例值（调用创建时填入） |
+| `scope` | string | 该层级对应的实例值 |
 | `content` | string | 内容本体 |
 | `visible_to` | string[] | 可见的 userId 列表。空数组 = 全员可见 |
 | `collect_from` | string[] | 可写的 userId 列表。不可为空 |
@@ -112,15 +112,29 @@ POST /groupcontext/update
 
 行为：
 1. 根据 `scope_level` 计算出 `scope`
-2. 按 `(name, scope)` 查旧条目 → 不存在或没有唯一活跃版本则 `not_found`
-2. 校验 `actor_id` 是否在旧条目活跃版本的 `collect_from` 中 → 否则 `permission_denied`
-3. 原子操作：回填旧条目 `valid_to = tx_time` → 写入新条目（`supersedes` 指向旧 `context_id`，记录change_reason）
-4. 返回新 `context_id`
+2. 查 `(name, scope)` 的活跃版本（`valid_to IS NULL`）：
+   - 0 条 → `not_found`
+   - >1 条 → `not_found`（属不变量破坏，正常路径不应出现，需同时告警）
+3. 校验 `actor_id` 是否在该活跃版本 `collect_from` 中 → 否则 `permission_denied`
+4. 单 DB 事务内原子 supersede：
+   a. CAS 回填旧版本：
+      `UPDATE ... SET valid_to = :tx_time WHERE context_id = :old_id AND valid_to IS NULL`
+      影响行数 = 0 → 旧版本已被并发 update 抢先 supersede，回滚并返回 `conflict`
+   b. 写入新条目（`supersedes = :old_id`，记录 `change_reason`），提交
+5. 返回成功
+
+> **并发与唯一活跃版本保证**
+> - 并发 **add** 写同 `(name, scope)` 的第二条活跃版本 → 由部分唯一索引
+>   `UNIQUE (name, scope) WHERE valid_to IS NULL` 拒绝，返回 `conflict`。
+> - 并发 **update** 抢同一活跃版本 → 回填用的 `valid_to IS NULL` CAS 让其中一方影响 0 行而回滚，
+>   返回 `conflict`；抢赢的一方正常 supersede。最终同一 `(name, scope)` 永远只有一条活跃版本，
+>   不会出现双活跃或静默成功。
+> - `(name, scope, valid_to)` 建联合索引以支撑上述查询与 CAS。
 
 响应：
 ```json
 {
-   "status": "not_found", 
+   "status": "not_found",
    "error_msg": "name=xx and scope=xx, group context not found"
 }
 ```
@@ -228,7 +242,7 @@ POST /groupcontext/setsystemprompt
 | 400 | `invalid_param` | 全部 | 参数校验失败 |
 | 403 | `permission_denied` | add / update / setsystemprompt | 调用方不在 collect_from 中 |
 | 404 | `not_found` | update | 没有可以被更新的context |
-| 409 | `conflict` | add | 同 (name, scope) 已有活跃版本 |
+| 409 | `conflict` | add / update | add：同 (name, scope) 已有活跃版本；update：并发 supersede 抢败（CAS 影响 0 行） |
 | 413 | `payload_too_large` | add / update / setsystemprompt | content 超上限（默认 4KB） |
 | 500 | `internal_error` | 全部 | 服务端内部错误 |
 
@@ -292,7 +306,7 @@ collect_from: [judge_bot]
 ```
 
 同样为李四(苹果)、王五(苹果)、赵六(香蕉)、钱七(苹果)创建 `player_word_2` 到 `player_word_5`，
-每人 `visible_to` 仅含裁判和本人。系统自动生成 `scope = game-room-7:sess-001`，每条 name 不同所以不冲突。
+每人 `visible_to` 仅含裁判和本人。系统自动生成 `scope = sess-001`，每条 name 不同所以不冲突。
 
 #### 4.1.3 记录卧底对应关系（add）
 
@@ -338,7 +352,7 @@ content: 张三出局、李四存活、王五存活、赵六存活、钱七存�
 change_reason: 第一轮投票
 ```
 
-系统按 `scope = game-room-7:sess-001` 查到 `(name=player_state, scope=game-room-7:sess-001)` 的活跃版本，
+系统按 `scope = sess-001` 查到 `(name=player_state, scope=sess-001)` 的活跃版本，
 supersede 后写入新版本（新 `id`，`context_id` 不变）。
 
 响应：
@@ -377,7 +391,7 @@ scope_levels: [session]
 #### 4.2.1 查看自己可见的 context
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/list
+POST /groupcontext/list?group_id=group-room-7&session_id=sess-001
 scope_levels: ["group","session"]
 actor_id: 张三
 ```
@@ -417,7 +431,7 @@ actor_id: 张三
 #### 4.2.2 查自己的底牌
 
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+POST /groupcontext/get?group_id=group-room-7&session_id=sess-001
 name: player_word_1
 scope_levels: [session]
 actor_id: 张三
@@ -439,7 +453,7 @@ actor_id: 张三
 
 如果张三尝试 get `player_role`：
 ```
-POST /groups/game-room-7/sessions/sess-001/groupcontext/get
+POST /groupcontext/get?group_id=group-room-7&session_id=sess-001
 name: player_role
 scope_levels: [session]
 actor_id: 张三
@@ -451,15 +465,3 @@ actor_id: 张三
 ```
 
 ——不在 `visible_to` 中，返回空。**信息隔离靠 name + visible_to 共同实现**：不存在的 name 查不到，存在的 name 但不在 visible_to 里同样返回空。
-
----
-
-## 5. 设计决策记录
-
-1. **没有模板。** bot 调用 add 时直接传所有参数，不需要预先注册模板。
-2. **没有 user 粒度。** 信息隔离靠不同的 name + visible_to 实现（如 `player_word_1` vs `player_word_2`），scope_level 只用 group / session / round。
-3. **没有 tenant 粒度。** 老板明确"租户先不要"。
-4. **visible_to / collect_from 修改暂不放入 update，待 owner 权限模型确定后再加。** 当前 update 只改 content。
-5. **add 同 (name, scope) 冲突报错。** agent 想覆盖旧内容用 update，语义更清晰。
-6. **setsystemprompt 是 update-or-create 语义。** 首次创建，后续自动 supersede，方便 agent 写 system prompt 不用管是否存在。
-7. **检索是精确 name 匹配，不支持通配符/前缀。** agent 想批量查用 list + 自行过滤。
