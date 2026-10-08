@@ -55,7 +55,7 @@ self-improvement，RSI）循环，其中：
 
 - [DR-1 —— Bot 基因组是进化的单元](decisions/0001-bot-genome-is-the-unit-of-evolution.zh-CN.md)
 - [DR-2 —— 晋升归平台所有](decisions/0002-promotion-is-platform-owned.zh-CN.md)
-- [DR-3 —— 进化接口面上的 bot 主体](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)
+- [DR-3 —— 进化接口面上的 bot 主体](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)（**已推迟**：先确定 bot 如何与平台通信）
 
 ## 术语表（在本设计稳定之前仅在本设计内有效）
 

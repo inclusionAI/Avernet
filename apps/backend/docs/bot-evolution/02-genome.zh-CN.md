@@ -142,7 +142,7 @@ Manifest 变更，而不是基因组独有的新增）。
 | `canary` | 金丝雀实例上的修订版 | 仅晋升 |
 | `draft` | 所有者进行中的手动编辑 | 所有者（UI/API） |
 | `candidate/<run>/<n>` | 一次运行中的候选 | 编排器 |
-| `inbox/<id>` | bot 提交的补丁草稿（快循环） | Bot principal |
+| `inbox/<id>` | bot 提交的补丁草稿（快循环；随 DR-3 已推迟） | Bot principal |
 
 引用更新采用比较并交换（compare-and-swap，`expected_revision`），从而弥补
 并发编辑的缺口。

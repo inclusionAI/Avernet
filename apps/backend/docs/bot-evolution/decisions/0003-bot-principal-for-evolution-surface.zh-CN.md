@@ -2,7 +2,9 @@
 
 > English version: [0003-bot-principal-for-evolution-surface.md](0003-bot-principal-for-evolution-surface.md)
 
-状态：proposed（决策草案；接受后晋升到 `docs/adr/`）。
+状态：**已推迟**。将先确定 bot 如何与平台通信，然后再重新审视本记录。在此之前，
+OpenAPI v1 在所有端点（包括进化接口面）上继续拒绝 bot 主体，进化策略作业
+worker 以平台服务而非 bot 的身份运行。下文是起草时的提议，保留作为输入。
 
 ## 决策
 

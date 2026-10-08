@@ -80,10 +80,11 @@ Dreams、Hermes Curator，以及 ClawEvolve 本身——都可以归结为在一
 - **慢循环 / 离线循环** —— 一次进化策略运行。批量、有预算、经过评估。例如
   ClawEvolve 的优化轮次、GEPA 风格的 prompt 优化器、每晚的记忆整合
   （「dream」）作业。
-- **快循环 / 循环内捕获** —— 被改进 Bot 在会话中途注意到某件事（「这种工具
-  调用模式已经失败了三次」），并通过 CLI 记录一条**观察**或一份**补丁草稿**。
-  这些内容进入按 bot 划分的*提议收件箱*；它们是慢循环的输入，不经过步骤
-  5–8 永远不会到达线上 bot。
+- **快循环 / 循环内捕获** *（随 DR-3 已推迟）* —— 被改进 Bot 在会话中途注意到
+  某件事（「这种工具调用模式已经失败了三次」），并记录一条**观察**或一份
+  **补丁草稿**。这些内容将进入按 bot 划分的*提议收件箱*；它们是慢循环的输入，
+  不经过步骤 5–8 永远不会到达线上 bot。bot 如何与平台通信尚未确定，因此这条
+  路径不在第一轮迭代范围内。
 
 ## 4. 组件
 
@@ -134,9 +135,13 @@ policy）中。一次运行会记录它所使用的确切进化策略版本。�
 ### C4 运行编排器
 
 一个持久化的运行状态机（`queued → running → completed | failed |
-cancelled | budget_exhausted`）。它在绑定的触发条件满足时启动绑定，冻结进化
+cancelled | budget_exhausted`）。提交运行是幂等的，并返回一个运行 id；状态
+通过该 id 查询。它在绑定的触发条件满足时启动绑定，冻结进化
 策略版本、参数、父版本和预算，以恰好被授予的能力构建 `StrategyContext`，然后
-在进程内或通过作业协议（Job Protocol）调用策略唯一的 `run(ctx)` 方法。它强制
+在进程内或通过作业协议（Job Protocol）调用策略唯一的 `run(ctx)` 方法。
+每次运行都是一个带租约的作业：如果进程崩溃，租约到期后该运行会以相同的运行
+id 重新派发。策略自行持久化并恢复自己的进度；平台不提供检查点 API
+（[05-strategy-sdk.zh-CN.md §7](05-strategy-sdk.zh-CN.md#7-运行生命周期)）。它强制
 执行预算和租约，并保证任何隐藏内容都不会到达策略（例如封存用例）。它泛化了
 ClawEvolve 的 `ce_tasks` / `ce_steps` / claim-report 端点。
 
@@ -236,7 +241,7 @@ ClawBench（`clawbench-base`）成为默认的评分器；backend 评测环境
 | 引擎会话导出契约（`session-export/v1` → v2） | Plugin API | Evolution → Engine |
 | 验证服务 API + Executor/Grader 插件协议 | Service API + Plugin API | 编排器、发布流程、Quality Task → Verification |
 | 实验记录 schema + 改进机制指标 | 数据契约 | Evolution → 选择器、元循环、UI |
-| 面向 bot 主体的 bot 进化作用域 | 准入契约 | Gateway/Backend |
+| 面向 bot 主体的 bot 进化作用域 *（随 DR-3 已推迟）* | 准入契约 | Gateway/Backend |
 
 每一份契约都需要在同一次变更中提供文档 + 一致性测试（R1、R25）。
 
@@ -262,7 +267,7 @@ ClawBench（`clawbench-base`）成为默认的评分器；backend 评测环境
    判定和证据写入 H；策略看到的判定只带汇总值。
 7. **门禁**：判定为 `accept`，且平台底线通过；风险等级 = T2（人设 + skill），
    因此候选进入评审队列。
-8. 已经等待判定的策略，可以从被接受的修订版开始下一轮。
+8. 策略按候选 id 查询到判定后，可以从被接受的修订版开始下一轮。
 9. 所有者在 UI 中（或通过 `avn evolve review`）评审 diff + 验证报告，并批准。
 10. 晋升：`active → r42`，`previous → r41`；通过 Manifest 应用；对于服务型
     bot，通过 draft → verify → publish 作为下一个版本发布。
@@ -273,12 +278,12 @@ ClawBench（`clawbench-base`）成为默认的评分器；backend 评测环境
 
 | 阶段 | 产出 | 能否单独使用？ |
 | --- | --- | --- |
-| P0 契约 | DR-1–DR-3 被接受；基因组 schema、策略端口与能力目录、作业协议、API 草图完成评审 | — |
+| P0 契约 | DR-1 和 DR-2 被接受（DR-3 已推迟）；基因组 schema、策略端口与能力目录、作业协议、API 草图完成评审 | — |
 | P1 基因组注册表 | Manifest 获得修订版、引用、比较并交换（CAS）、钉住解析、apply 记录修订版、回退到任意更早的修订版 | **能**——版本化的 bot，独立于 RSI |
 | P2 进化核心 | `apps/evolution` 骨架、运行编排器、作业协议、进化策略注册表、API + SDK + CLI 骨架、一个通过一致性测试的简单参考进化策略（手工补丁 + 确定性评估器） | 能，用于脚本化改进 |
 | P3 默认策略 | ClawEvolve 作为黑盒策略接入：会话导出提供方、产出补丁的沙箱化 tune、验证服务中的 ClawBench 评分器 | 能——在平台上对任意 OpenClaw bot 提供今天的 AgentEvolve 能力 |
 | P4 验证与治理 | 验证服务（配对统计、密封的封存集、必过用例集、评审模型集成）、发布流程的 verify 门禁、评审队列、风险等级、影子 / 金丝雀、基于 H 对验证配置与提交过滤进行离线重放 | 加固；verify 门禁本身就对服务型 bot 有用 |
-| P5 bot 驱动 + 机制验证 | bot 主体作用域、作为 bot 工具的 `avn` + SKILL.md、提议收件箱、记忆投影契约、整合（「dream」）进化策略；用于验证改进机制变更的改进问题基准 | 快循环；进化策略的回归测试 |
+| P5 bot 驱动 + 机制验证 | bot 驱动部分随 DR-3 已推迟（bot 主体作用域、作为 bot 工具的 `avn` + SKILL.md、提议收件箱）。范围内：记忆投影契约、整合（「dream」）进化策略；用于验证改进机制变更的改进问题基准 | 快循环；进化策略的回归测试 |
 | P6 开放式 | 自动化的元策略（第 3 层）、归档选择器（Pareto/MAP-Elites/clade）、通过 Skill Center 的跨 bot skill 迁移、训练数据导出、更多引擎 | 研究级 |
 
 **第一轮迭代范围。** 第一轮迭代聚焦于第 2 层：改进 bot，并由平台负责验证

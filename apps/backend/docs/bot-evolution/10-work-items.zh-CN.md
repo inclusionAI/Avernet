@@ -25,13 +25,14 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ### RSI-01 接受或修订三项决策草案
 - **模块**：arch
-- **目标**：由所有者决定 DR-1（基因组 = 进化单位，构建于 Manifest 之上）、
-  DR-2（晋升由平台所有）、DR-3（进化接口面使用 Bot 主体）。同时决定
+- **目标**：由所有者决定 DR-1（基因组 = 进化单位，构建于 Manifest 之上）和
+  DR-2（晋升由平台所有）。DR-3（进化接口面使用 Bot 主体）已推迟，直到 Bot 与
+  平台的通信方式确定为止。同时决定
   [01-design.zh-CN.md §5](01-design.zh-CN.md#5-归属与模块放置) 中的待决事项 D-1
   （控制面模块放置）。
 - **先读**：[01-design.zh-CN.md](01-design.zh-CN.md)、[02-genome.zh-CN.md](02-genome.zh-CN.md)、
   [08-governance.zh-CN.md](08-governance.zh-CN.md)、[06-interfaces.zh-CN.md §6](06-interfaces.zh-CN.md#6-认证与授权)。
-- **交付物**：DR-1..DR-3 被接受（以下一个可用编号晋升到 `docs/adr/`）或被修订；
+- **交付物**：DR-1 和 DR-2 被接受（以下一个可用编号晋升到 `docs/adr/`）或被修订；
   记录 D-1。
 - **完成标准**：每份 ADR 都有所有者，且引擎所有者已明确签字认可 DR-1 中关于
   记忆的后果。
@@ -53,11 +54,13 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ### RSI-06 策略端口、能力目录与作业协议
 - **模块**：evolution（新增）、arch
 - **目标**：定义策略端口（`run(ctx)`）、`StrategyContext`、
-  候选 / 提交 / 判定、注册记录 schema、首个能力目录（`experience.sessions@1`、
-  `experience.feedback@1`、`agents@1`、`evaluate.train@1`）及其按引擎的提供方
-  契约、进化策略配置（evolution policy，即绑定）schema 与绑定检查、运行生命周期
-  与失败语义（R11）、隔离（R13），以及每个 `ctx` 调用在作业协议（Job Protocol）
-  中的映射。
+  候选 / 判定（提交返回候选 id；判定按 id 查询）、注册记录 schema、首个能力
+  目录（`experience.sessions@1`、`experience.feedback@1`、`agents@1`、
+  `evaluate.train@1`）及其按引擎的提供方契约、进化策略配置（evolution policy，
+  即绑定）schema 与绑定检查、运行生命周期与失败语义（R11）：幂等的运行提交并
+  返回运行 id、崩溃后以相同运行 id 重新派发的带租约作业、由策略自行负责的进度
+  持久化（平台不提供检查点 API）；隔离（R13）；以及每个 `ctx` 调用在作业协议
+  （Job Protocol）中的映射。
 - **先读**：[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)；ClawEvolve
   `official-stage-catalog.json`、`routes/internal/evolve.ts`；
   `docs/arch/protocol-contract-tests.md`。
@@ -103,20 +106,23 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ### RSI-08 进化服务骨架
 - **模块**：evolution（新的 `apps/evolution`，依据 D-1）
-- **目标**：遵循后端 DI/插件约定的服务脚手架；带预算的进化运行编排器状态机；
+- **目标**：遵循后端 DI/插件约定的服务脚手架；带预算、幂等运行提交（幂等键 →
+  运行 id）以及租约到期后重新派发的作业租约的进化运行编排器状态机；
   进化策略注册表；作业协议端点；带绑定检查与触发的进化策略配置（绑定）；面向
   singlebox 的本地 profile（SQLite、进程内进化策略）；一个参考进化策略
   `platform/manual-patch`（提交一个提供的补丁；用确定性检查验证），用于端到端
   演练整个循环。
 - **依赖**：RSI-06、RSI-07、RSI-03。
 - **完成标准**：singlebox 故事：用参考进化策略启动运行 → 记录候选 → 门禁 →
-  晋升 → Bot 更新 → 回滚。
+  晋升 → Bot 更新 → 回滚；用相同幂等键重复启动会返回相同的运行 id；在运行中途
+  杀掉 worker 会导致以相同运行 id 重新派发。
 
 ### RSI-09 进化策略 SDK 与一致性测试套件
 - **模块**：evolution
 - **目标**：Python 策略 SDK：`EvolutionStrategy` 基类、类型化模型、进程内与
   作业协议两种 `StrategyContext` 实现、`WorkspaceFactory`（物化 / `to_patch`）、
-  带 OpenClaw 提供方的 `AgentRunner`、带模拟平台的本地 harness、策略一致性测试
+  带 OpenClaw 提供方的 `AgentRunner`、带模拟平台的本地 harness（能够杀掉并
+  重新派发一次运行，以测试策略自身的恢复）、策略一致性测试
   套件、`avn strategy dev|test|publish`。
 - **依赖**：RSI-06、RSI-08。
 - **完成标准**：由平台团队之外的人仅凭 SDK 文档编写一个示例第三方进化策略
@@ -161,7 +167,9 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   [07-default-strategy.zh-CN.md §4](07-default-strategy.zh-CN.md#4-迁移计划绞杀者模式不做一次性切换)
   中的绞杀者步骤 1–3：影子记录修订版 → 黑盒适配器进化策略 → 原生进化策略。
   Tune 在由 `ctx.workspace` 得到的沙箱上工作；它的接纳规则变为内部提交过滤，
-  而接受与否转由平台验证决定；从流程中移除 pack/restore；决定 D-2、D-3。
+  而接受与否转由平台验证决定；从流程中移除 pack/restore；ClawEvolve 将其轮次
+  状态持久化到自己的存储中，以运行 id 为键（今天的 `ce_tasks` / `ce_steps` 即可
+  承担），使重新派发的运行能够继续；决定 D-2、D-3。
 - **依赖**：RSI-09、RSI-10、RSI-11、RSI-12。
 - **完成标准**：`clawevolve/bot-evolution` 通过平台、在不触碰线上工作区的
   情况下，在其自身 bench 上取得与旧版 AgentEvolve 相同或更好的结果。
@@ -216,7 +224,8 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ## P5 — Bot 驱动的进化
 
-### RSI-14 Bot 主体 scope 与 `avn` Bot skill
+### RSI-14 Bot 主体 scope 与 `avn` Bot skill *（已推迟）*
+- **状态**：随 DR-3 已推迟，直到 Bot 与平台的通信方式确定为止。不要领取。
 - **模块**：gateway、backend、evolution（遵循 bcs-cli 约定）
 - **目标**：实现 DR-3：Bot 主体仅能访问进化端点，interfaces §6 中的 scope 通过
   授权 hook 强制执行；`avn` 二进制通过 Manifest `cli_tools` 交付；被改进 Bot 与
@@ -239,7 +248,8 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   [07-default-strategy.zh-CN.md §5](07-default-strategy.zh-CN.md#5-第二个非-clawevolve-默认策略记忆整合)
   实现 `platform/consolidate-memory` —— 第二个非 ClawEvolve 的默认进化策略，
   用以证明可插拔性（R19）。
-- **依赖**：RSI-05（或过渡方案）、RSI-13、RSI-14。
+- **依赖**：RSI-05（或过渡方案）、RSI-13。由 Bot 记录的观察需等待 RSI-14
+  （已推迟）；在此之前，该进化策略使用反馈和片段。
 
 ## P6 — 开放式探索
 

@@ -34,7 +34,7 @@
 | **策略（Strategy）** | 实现 `run(ctx)` 的代码，加上它的注册记录（§3） | 策略作者 | 新的策略版本 |
 | **能力（Capability）** | 策略可使用的上下文中一个具名、带版本的部分，来自平台所有的能力目录（§4） | 平台 | 平台契约变更 |
 | **绑定（Binding）** | Bot 进化策略配置（evolution policy）中的一个条目：用哪个策略、何时运行、可以改什么、如何验证、预算、参数（§5） | Bot 所有者 / 租户管理员 | 任何时候 |
-| **运行（Run）** | 一个绑定的一次执行，策略版本、参数、父版本和预算在开始时冻结（§7） | 平台 | — |
+| **运行（Run）** | 一个绑定的一次执行，策略版本、参数、父版本和预算在开始时冻结；提交时返回的运行 id 是它唯一的句柄（§7） | 平台 | — |
 | **StrategyContext** | 运行通向平台的唯一一扇门：始终授予的部分，加上策略所需的能力（§6） | 平台 | — |
 | **候选 → 判定** | 策略提交的一个基因组补丁，以及平台对它的验证结果（§6） | 策略 → 平台 | — |
 
@@ -179,7 +179,9 @@ class StrategyContext(Protocol):
     workspace: WorkspaceFactory                     # materialise(revision) → sandbox dir; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
-    async def submit(self, c: Candidate) -> Submission: ...
+    attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
+    async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
+    async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -189,12 +191,15 @@ class StrategyContext(Protocol):
 
 - **候选** = 针对某个基础修订版的基因组补丁、理由、证据 id，以及可选的自报指标
   （向评审者展示，绝不用于接受判断）。
-- **提交** = 已记录的候选修订版 id，加上 `await verdict()`。判定结果为
-  `accept`、`reject` 或 `inconclusive`，只附带验证**汇总值**，绝不包含逐用例的
-  隐藏数据。
-- `submit` 是幂等的：候选 id 是补丁的内容哈希，因此重试提交不会产生重复。
-- 策略**可以在一次运行内等待判定**。ClawEvolve 这类多轮策略会在上一个被接受的
-  候选之上构建下一轮。等待时间受绑定的 `max_wall_clock_s` 约束。
+- `submit` 记录候选并立即返回它的**候选 id**；它不等待验证。它是幂等的：候选
+  id 是补丁的内容哈希，因此重试提交（包括重新派发后重复的提交，§7）会返回相同
+  的 id，不会产生重复。
+- **判定** = 按候选 id 查询的结果：状态为 `pending`、`accept`、`reject` 或
+  `inconclusive`，只附带验证**汇总值**，绝不包含逐用例的隐藏数据。id 是唯一的
+  句柄；没有回调，也没有阻塞调用。
+- ClawEvolve 这类多轮策略会在上一个被接受的候选之上构建下一轮，它会按 id 查询
+  判定，直到状态不再是 `pending`。在此期间运行保持 `running`，这段时间计入绑定
+  的 `max_wall_clock_s`。
 - 提交什么由策略自己选择（由它的启发式决定什么值得提交）。候选是否被接受由平台
   选择：先按绑定的验证配置进行验证，再经过门禁和风险等级
   （[08-governance.zh-CN.md §2](08-governance.zh-CN.md#2-门禁)）。
@@ -207,10 +212,32 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 - **开始：** 编排器冻结策略版本、参数、父版本和预算；以恰好被授予的能力构建
   上下文；并预留预算。
-- **进行中：** 每次模型调用和评估都计入预算。作业 worker 运行持有一个带
-  fencing token 的租约；租约丢失时，运行以 `failed` 结束。
+- **进行中：** 每次模型调用和评估都计入预算。
 - **结束：** 在失败、取消或预算耗尽之前做出的提交会被保留，并仍然接受验证。
   每个提交，无论被接受还是被拒绝，都会连同策略版本一起记录到实验记录 H 中。
+
+### 7.1 按 id 提交与查询状态
+
+启动一次运行（触发条件满足，或调用方通过 Evolution API，
+[06-interfaces.zh-CN.md](06-interfaces.zh-CN.md)）会返回一个**运行 id**。提交
+是幂等的，并由平台保证：调用方发送一个幂等键，使用相同键的重复提交会返回同一个
+运行 id，而不会启动第二次运行。此后，运行 id 是唯一的句柄：调用方通过它查询
+状态、提交和判定。下一层同样如此：策略的 `ctx.submit` 返回一个候选 id，判定
+通过该 id 查询（§6）。
+
+### 7.2 崩溃与重启
+
+工作在平台和策略之间划分：
+
+| 关注点 | 所有者 | 方式 |
+| --- | --- | --- |
+| 运行记录、其冻结的输入、已花费的预算和已提交的候选 | 平台 | 在 `submit` 或运行提交返回之前持久化 |
+| 发现运行的进程已死亡 | 平台 | 每次运行都是一个**带租约的作业**。worker（或进程内宿主）续租；租约到期时（进程崩溃、硬件故障、重启），作业回到 `queued`，并以相同的运行 id 和 `ctx.attempt + 1` 重新派发。fencing token 会拒绝旧持有者的调用。超过 `max_attempts` 后，运行以 `failed` 结束 |
+| 策略自身的进度（轮次编号、搜索状态、历史） | 策略 | 策略把所需的任何内容持久化到**自己的存储**中，以运行 id 为键，并在重新派发时重新加载并继续。平台不提供检查点 API，也从不读取这部分状态；它的形态因策略而异 |
+
+重新派发的运行使用相同的冻结输入和相同的预算：之前各次尝试花掉的预算不会退回。
+由于 `submit` 是幂等的，策略在崩溃前已提交过的候选如果再次提交，会得到相同的
+候选 id。
 
 ## 8. 同一端口上的两个层级
 
@@ -235,27 +262,30 @@ ClawEvolve 的调优。对编排器而言，这只是另一个策略。
 | `runtime.kind` | 如何运行 | `ctx` 如何到达 |
 | --- | --- | --- |
 | `in_process` | 由 `apps/evolution` 组合根加载的 Python 包，通过配置选择（R5/R14） | 直接的 Python 对象 |
-| `job_worker` | 容器镜像（任意语言），或使用 `avn` CLI 的执行者 Bot | 下面的作业协议：每个 `ctx` 调用对应一个 HTTP 端点 |
+| `job_worker` | 容器镜像（任意语言） | 下面的作业协议：每个 `ctx` 调用对应一个 HTTP 端点 |
 
 ### 作业协议
 
 ```text
-POST /evolution/v1/jobs:claim                       {worker_id, strategy_ids[]} → job {run_id, params, parent, budget, granted}
-POST /evolution/v1/jobs/{id}/heartbeat              (lease extension; fencing token)
+POST /evolution/v1/jobs:claim                       {worker_id, strategy_ids[]} → job {run_id, attempt, params, parent, budget, granted, fencing_token}
+POST /evolution/v1/jobs/{id}/heartbeat              lease renewal; an expired lease re-queues the job (§7.2)
 GET  /evolution/v1/runs/{run}/parent                ctx.parent
 GET  /evolution/v1/runs/{run}/content/{digest}      file bytes of the parent / workspace
 GET  /evolution/v1/runs/{run}/experience/sessions   ctx.experience.sessions   (if granted)
 GET  /evolution/v1/runs/{run}/experience/feedback   ctx.experience.feedback   (if granted)
 POST /evolution/v1/runs/{run}/agents:run            ctx.agents.run            (if granted)
 POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.train        (if granted)
-POST /evolution/v1/runs/{run}/candidates            ctx.submit → {revision_id}
-GET  /evolution/v1/runs/{run}/candidates/{id}/verdict
+POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
+GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
 
 所有载荷都是带 JSON Schema 的 JSON。worker 不会获得任何访问 Bot 的凭证；未被
-授予的能力所对应的端点返回 `403`。
+授予的能力所对应的端点返回 `403`；携带过期 fencing token 的调用返回 `409`。
+
+worker 是由平台运行的容器。以 Bot 充当 worker（「执行者 Bot」）随 DR-3 一起已推迟
+（[decisions/0003](decisions/0003-bot-principal-for-evolution-surface.zh-CN.md)）。
 
 ## 10. 示例
 
@@ -265,22 +295,32 @@ POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retrya
 ```python
 class ClawEvolveStrategy(EvolutionStrategy):
     async def run(self, ctx):
-        findings = diagnose(await ctx.experience.sessions(days=ctx.params["window_days"]))
-        await ctx.evaluate.add_train_cases(plan_bench(findings))          # platform assigns splits
-        base = ctx.parent
-        for round_no in range(ctx.params["max_rounds"]):
-            ws = await ctx.workspace.materialise(base)                   # sandbox, not the live bot
-            await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
-                                 prompt=build_tune_prompt(findings, history))
-            train = await ctx.evaluate.train(ws)                         # replaces its own bench step
-            if train.score <= history.best_train:
-                continue                                                 # its own heuristic
-            sub = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=..., evidence=findings.ids))
-            verdict = await sub.verdict()                                # the platform decides
-            history.record(round_no, train, verdict)
-            if verdict.accepted:
-                base = verdict.revision                                  # next round builds on it
-        return RunSummary(rounds=round_no + 1)
+        state = await self.store.load(ctx.run_id)                        # its own storage, not the platform's
+        if state is None:                                                # first attempt
+            findings = diagnose(await ctx.experience.sessions(days=ctx.params["window_days"]))
+            await ctx.evaluate.add_train_cases(plan_bench(findings))      # platform assigns splits
+            state = State(findings=findings, base=ctx.parent.id, next_round=0)
+            await self.store.save(ctx.run_id, state)
+        while state.next_round < ctx.params["max_rounds"]:
+            if state.pending is None:
+                ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
+                await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
+                                     prompt=build_tune_prompt(state.findings, state.history))
+                train = await ctx.evaluate.train(ws)                     # replaces its own bench step
+                if train.score > state.best_train:                       # its own heuristic
+                    state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
+                                                               evidence=state.findings.ids))
+                    await self.store.save(ctx.run_id, state)             # survives a crash from here on
+            if state.pending is not None:
+                verdict = await ctx.verdict(state.pending)               # the platform decides
+                if verdict.status == "pending":
+                    await asyncio.sleep(ctx.params["poll_s"]); continue
+                if verdict.status == "accept":
+                    state.base = verdict.revision                        # next round builds on it
+                state.pending = None
+            state.next_round += 1
+            await self.store.save(ctx.run_id, state)
+        return RunSummary(rounds=state.next_round)
 ```
 
 **另一个团队用另一种语言编写的优化器。** 一个 TypeScript 编写的 GEPA 风格提示词
@@ -312,7 +352,8 @@ class ClawEvolveStrategy(EvolutionStrategy):
 
 - **策略测试套件**（由作者运行；在某个版本可以在开发环境之外被绑定之前，也由
   C3 运行）：候选必须通过补丁模式和本次运行 `allowed_genes` 的校验；策略只使用
-  被授予的能力；它会在取消和 `BudgetExhausted` 时停止；重复提交同一候选是幂等的。
+  被授予的能力；它会在取消和 `BudgetExhausted` 时停止；重复提交同一候选是幂等的；在运行中途杀掉策略并再次派发
+  同一运行 id，既不会产生重复候选，也不会超出预算。
 - **能力提供方**（由平台和引擎适配器运行）：每个目录条目针对每个引擎提供方都有
   一个契约测试，遵循 `docs/arch/protocol-contract-tests.md`。
 
@@ -320,7 +361,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
 
 | 策略 | 形态 | 如何适配端口 |
 | --- | --- | --- |
-| ClawEvolve（`apps/evolverun`） | 多轮 调优 → 基准测试 → 评审 | 黑盒；`agents`、`experience.sessions`、`evaluate.train`；在轮次之间等待判定 |
+| ClawEvolve（`apps/evolverun`） | 多轮 调优 → 基准测试 → 评审 | 黑盒；`agents`、`experience.sessions`、`evaluate.train`；在轮次之间按候选 id 查询判定 |
 | `platform/consolidate-memory`（[07-default-strategy.zh-CN.md §5](07-default-strategy.zh-CN.md#5-第二个非-clawevolve-默认策略记忆整合)） | 定时将观察整合为记忆条目 | 黑盒；仅 `experience.feedback`；每次运行一个提交 |
 | GEPA / OPRO 风格优化器 | 带反思式变异的种群搜索 | 黑盒；用 `evaluate.train` 作为适应度；提交最佳候选 |
 | 编码智能体策略（Meta-Harness 风格） | 智能体在完整历史下编辑文件 | 黑盒；`workspace` + `agents` |
