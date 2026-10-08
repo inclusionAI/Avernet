@@ -110,7 +110,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Grant 的 Owner/Manager 与 Space Membership 分别校验。编辑租约无 TTL/renew；Team 写入校验 holder/fencing token，修订冲突由 revision CAS 处理。发布入口由 Repository 在事务中协调租约和冻结，不能凭旧讨论给 Router 增加未实现的 token 参数。
 - 发布成功后清除当前 Draft；升级从精确 Published Version 创建后继 Draft。`published_version_draft.py` 优先读取 Canonical Store，缺失时按 SC 精确版本恢复。
 - 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、非 FAILED Attempt、成员/Installation、编辑工单等外部事实存在时仅清除 Draft；没有这些事实时清理自身关联并删除 Skill，允许清除仅剩 FAILED Attempt 的首次草稿。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
-- Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。内部 `process_auto(work_order_id)` 已提供可信 AUTO 完成入口：只处理已 claim 的 `PROCESSING`、无人工审批人记录的工单，在事务内复核未下线 Skill、团队成员及绑定开关，完成 Manager Grant、`APPROVED`/`SYSTEM` 与申请人通知；当前用户申请入口在开关为真时仍抛异常，直至 WorkOrder AUTO 分发和 Skill 调用集成。
+- Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在人工审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。AUTO 的可信内部入口是 `SkillEditorRequestRepositoryProtocol.apply_auto_skill_editor_request(session, work_order_id, env)`：只处理已 claim 的 `PROCESSING`、无人工审批人记录的工单，在 WorkOrder 提供的同一事务内复核未下线 Skill、团队成员及绑定开关，仅写 Manager Grant，不自行提交；工单终态与申请人通知由 WorkOrder 在该事务内完成。当前用户申请入口在开关为真时仍抛异常，直至 WorkOrder AUTO 分发和 Skill 调用集成。
 
 发布链路读 `services/space_skill_publication_service.py`、`services/space_skill_publication_task.py`、`publication_contract.py` 及 Publication Repository：
 
