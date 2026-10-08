@@ -14,9 +14,10 @@
 ![Work item dependency graph](images/work-items-deps.svg)
 
 Critical path to a first useful outcome: **RSI-01 → RSI-02 → RSI-03 → RSI-04**
-(versioned bots with real rollback). Critical path to "ClawEvolve on the
-platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13. Critical path to
-true recursion (level 3): RSI-21 recorded from the start, then RSI-23 → RSI-24.
+(versioned bots that can go back to any earlier revision). Critical path to "ClawEvolve on the
+platform": add RSI-06 → RSI-08 → RSI-09/10/11/12 → RSI-13. Level 3
+(RSI-23 → RSI-24) is out of the first iteration, which focuses on level 2;
+RSI-21 still records experiments from the start.
 RSI-11 → RSI-22 gives service bots an automated verify gate independently of
 the rest.
 
@@ -89,17 +90,20 @@ the rest.
 - **Read first**: [02-genome.md §2–§4](02-genome.md#2-shape); `core/bot_config_manifest/`.
 - **Done when**: create revision from manifest, from patch; diff any two;
   move refs with conflict detection; conformance + unit tests; singlebox
-  acceptance story "edit → revision → apply → rollback two versions back".
+  acceptance story "edit → revision → apply → go back two revisions by
+  promoting an earlier one".
 
 ### RSI-04 Manifest v2 compatibility layer
 - **Module**: backend
 - **Goal**: Existing `/config-manifest` endpoints become views over the
-  registry; apply reports record `revision_id`; `metadata` key accepted; any-
-  revision rollback for personal bots; service-bot publish records
-  `revision_id` and rollback eligibility generalised.
+  registry; apply reports record `revision_id`; content-store source so apply
+  can read pinned content by digest; promoting any earlier revision works for
+  personal bots (via apply) and service bots (as the next published version,
+  with `revision_id` on the publish record). The existing service-bot
+  rollback feature is not changed.
 - **Depends on**: RSI-03.
 - **Done when**: all existing manifest tests pass unchanged; new tests for
-  revision attribution and multi-step rollback.
+  revision attribution and going back by promoting an earlier revision.
 
 ## P2 — Evolution core
 
@@ -187,8 +191,10 @@ the rest.
   [04-recursion.md §3](04-recursion.md#3-experiment-ledger-h) (including rejected
   candidates and later online outcomes); derived mechanism metrics; filesystem
   export for proposers; verifier-version tagging.
-- **Depends on**: RSI-08. Start recording as early as possible — level 3 is
-  only as good as the history it learns from.
+- **Depends on**: RSI-08. In the first iteration this is the level-2
+  archive and audit trail; deriving mechanism metrics for level 3 can wait,
+  but recording should start early because level 3 is only as good as the
+  history it learns from.
 
 ### RSI-22 Verification gate on service-bot publish and Quality Task
 - **Module**: backend
@@ -201,7 +207,7 @@ the rest.
   case cannot be published without an explicit override, and the override is
   audited.
 
-### RSI-23 Mechanism verification and offline replay
+### RSI-23 Mechanism verification and offline replay (later, level 3)
 - **Module**: evolution
 - **Goal**: (a) Offline replay tool over H for acceptance-policy changes,
   generalising `calibrate_evolution_gates.py` / `replay_candidate_gate.py`;
@@ -213,7 +219,7 @@ the rest.
   rejected by comparing verified improvement yield against the current
   mechanism on held-out problems.
 
-### RSI-24 Automated meta-proposer
+### RSI-24 Automated meta-proposer (later, level 3)
 - **Module**: evolution
 - **Goal**: A meta-strategy that reads H and proposes mechanism patches
   (thresholds, prompts, operators, step order), adopted only through RSI-23

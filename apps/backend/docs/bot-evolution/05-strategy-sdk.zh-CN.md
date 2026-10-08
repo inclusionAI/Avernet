@@ -54,12 +54,12 @@ rollout、apply。这些是平台代码（DR-2）。
 
 ## 4. 策略清单
 
-一个进化策略是在 C3 中注册的、带版本的文档。与所有平台持有的记录一样，它以
-规范 JSON 存储；作者可以用 YAML 编写（[02-genome.zh-CN.md §7.3](02-genome.zh-CN.md#73-序列化规范-json)）。
+一个进化策略是在 C3 中注册的、带版本的 JSON 文档。与本设计中所有新增内容一样，
+它在编写和存储时都是 JSON；只有现有的 Bot Config Manifest 保持 YAML
+（[02-genome.zh-CN.md §7.3](02-genome.zh-CN.md#73-序列化规范-json)）。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Authors may write the same document as YAML; it is stored as canonical JSON.
 {
   "strategy_schema": 1,
   "id": "clawevolve/bot-evolution",

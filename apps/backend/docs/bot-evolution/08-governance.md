@@ -96,8 +96,10 @@ Assigned per patch op; a patch takes the max of its ops.
   against `active`; auto-rollback rule optional per policy.
 - **Promote**: move `active`, set `previous`, apply through Manifest /
   publish chain; record `revision_id` on the apply report.
-- **Rollback**: any `promoted` revision can be re-promoted; one command
-  (`avn genome rollback --to <rev>`), audited.
+- **Going back**: promote an earlier revision again (`avn genome promote
+  --revision r41`). It is a normal, audited promotion: for a service bot it
+  is published as the next version through the existing publish flow. The
+  existing service-bot rollback feature is not involved.
 - **Never delete**: rejected and retired revisions are archived.
 
 ## 7. Data handling

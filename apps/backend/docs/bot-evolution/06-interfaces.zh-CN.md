@@ -44,7 +44,9 @@ POST   /bots/{bot}/genome/revisions                {base, patch} | {manifest}   
 GET    /bots/{bot}/genome/revisions/{rev}/diff?against={rev}
 GET    /bots/{bot}/genome/refs
 PUT    /bots/{bot}/genome/refs/draft               {revision, expected_revision}
-POST   /bots/{bot}/genome/rollback                 {to_revision, reason}           (promotion path)
+POST   /bots/{bot}/genome/promotions               {revision, reason}              (owner / gate; going back = promoting an earlier revision)
+GET    /bots/{bot}/genome/content/{digest}         → bytes (authorized against the bot)
+PUT    /bots/{bot}/genome/content                  bytes → {digest}
 
 # Evolution (apps/evolution)
 GET    /evolution/strategies                       ?engine=&gene=
@@ -99,7 +101,7 @@ POST   /bots/{bot}/evolution/evaluations           evaluate a revision on a suit
 命令树（示意）：
 
 ```text
-avn genome  show|log|diff|refs|rollback|patch apply --dry-run
+avn genome  show|log|diff|refs|promote|content get|put|patch apply --dry-run
 avn evolve  run start|status|cancel|report  ·  strategies list|show  ·  policy get|set
 avn evolve  review list|show|approve|reject
 avn evolve  inbox submit|list                     # 被改进 Bot

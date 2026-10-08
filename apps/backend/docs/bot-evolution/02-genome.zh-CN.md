@@ -8,8 +8,9 @@
 
 ## 1. 为什么不直接沿用 Manifest？
 
-Manifest（Bot 配置清单）是为 teclaw 接入而构建的，它是正确的**基础**：
-引擎中立、声明式、在包括 teclaw 在内的所有引擎上收敛，只通过现有核心服务
+Manifest（Bot 配置清单）的初衷是让用户自行管理 bot 的资产：他们把 skill、
+persona 文件、资源、MCP 和 CLI 工具保存在自己的源中，并在一份由平台 apply 的
+文档中声明它们。它是正确的**基础**：引擎中立、声明式、在包括 teclaw 在内的所有引擎上收敛，只通过现有核心服务
 apply，并且已经具备能力矩阵和仅追加（append-only）的 apply 报告。复用它意味着
 进化可以免费获得面向所有引擎的交付能力。
 
@@ -20,15 +21,15 @@ apply，并且已经具备能力矩阵和仅追加（append-only）的 apply 报
 | --- | --- |
 | 每个 bot 一行可变记录，没有修订历史，没有内容哈希 | 谱系、归档、可复现、回滚到任意时间点 |
 | 没有父指针 | 谱系树；感知后代的选择 |
-| 没有 If-Match / ETag | 进化策略与人工并发编辑时会静默地相互覆盖 |
+| 没有乐观并发控制。HTTP 通过 `ETag`（服务器随文档一起返回的版本标签）和 `If-Match` 请求头（客户端回传它读到的标签；如果文档在此之后已被修改，服务器以 `412 Precondition Failed` 拒绝写入）提供这种能力。`PUT /config-manifest` 两者都没有 | 进化策略与人工同时编辑时会静默地相互覆盖；最后写入的一方胜出，却毫不知情。修订版通过对引用进行比较并交换（CAS）解决这一问题（§3） |
 | apply 重新读取当前文档；报告不说明 apply 的是哪些字节 | 无法把行为或经验归因到某个版本 |
 | 源是移动引用（git 分支、oss key），每次 apply 都重新解析 | 基因组必须不可变：每个源都钉住到 commit SHA / digest |
 | 整文档 PUT，按类别原子替换 | 提议器必须产出小而可审查、逐项列出的补丁 |
 | `MEMORY.md` / `IDENTITY.md` 被保留且被拒绝 | 习得的记忆是自改进产出的一半 |
 | v1 拒绝 `engine_config` | 模型 / temperature / 推理预算都是合理的可调参数 |
 | 文档中省略某个类别意味着「保持不动」 | 一个修订版必须完整决定 bot；否则同一修订版 apply 两次，可能因先前状态不同而得到不同的 bot |
-| 拒绝未知键；没有元数据 | 需要来源记录和注解 |
-| 回滚仅限一步且仅限 service bot | 需要对每个 bot 回滚到任意已接纳的修订版 |
+| 没有存放元数据的位置：未知键会被拒绝 | 进化需要**来源记录**（某个版本由谁或什么产生：一个人、一次策略运行、一个 bot；基于哪些证据，例如情景（episode）和发现（finding）；使用了哪个补丁）和**注解**（自由形式的标签，例如审查备注或实验标签）。它们保存在修订版记录上（§2），而不是 Manifest 文档内部，因此 Manifest schema 无需为此改变 |
+| 个人 bot 无法回到更早的配置；服务型 bot 有自己的发布回滚（回退一步） | 回退（go back）必须对每个 bot 都可用，并且能回到任意更早的修订版。在 RSI 中这不是一个单独的回滚功能：回退意味着再次晋升一个更早的修订版，并像其他任何晋升一样被 apply（§3） |
 
 ## 2. 结构
 
@@ -67,33 +68,33 @@ Manifest 变更，而不是基因组独有的新增）。
                    "actor": "clawevolve/bot-evolution@2"},
     "created_at": "2026-10-08T03:12:00Z",
     "status": "candidate",                        // draft | candidate | accepted | rejected | promoted | archived
-    "patch_from_parent": "blob:sha256:…",         // the Genome Patch that produced it
+    "patch_from_parent": "sha256:…",             // digest of the stored Genome Patch that produced it
     "evidence": ["episode:ep_91", "episode:ep_97", "finding:f_12"],
     "evaluations": ["eval:ev_301", "eval:ev_302"] // links into C5, not embedded scores
   },
   "spec": {                                       // the evolvable content (authored / proposed)
     "persona": [                                  // == manifest.identity, but pinned
-      {"type": "SOUL.md", "blob": "sha256:…"},
-      {"type": "AGENTS.md", "blob": "sha256:…"}
+      {"type": "SOUL.md", "digest": "sha256:…"},
+      {"type": "AGENTS.md", "digest": "sha256:…"}
     ],
     "skills": [
       {"name": "refund-policy", "origin": {"kind": "center", "version": "center://…@v7"}},  // pinned Center version, not copied
-      {"name": "quality-check", "blob": "sha256:…", "origin": {"kind": "local"}}          // bot-owned: stored as a blob
+      {"name": "quality-check", "digest": "sha256:…", "origin": {"kind": "local"}}          // bot-owned: content stored, referenced by digest
     ],
     "memory": {                                   // NEW — see §5
       "mode": "seed",                             // seed | replace | merge
-      "items_blob": "sha256:…"                    // itemized memory set (not a raw MEMORY.md)
+      "items_digest": "sha256:…"                  // itemized memory set (not a raw MEMORY.md)
     },
-    "resources": [{"path": "data/kb/", "blob": "sha256:…"}],
+    "resources": [{"path": "data/kb/", "digest": "sha256:…"}],
     "tools": {
-      "mcp": [{"server_code": "mcp.x.meet", "config_blob": "sha256:…"}],
-      "cli_tools": [{"name": "shopctl", "blob": "sha256:…", "version": "2.3.0"}]
+      "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:…"}],
+      "cli_tools": [{"name": "shopctl", "digest": "sha256:…", "version": "2.3.0"}]
     },
     "engine_config": {                            // allowlisted keys only; no floats in hashed content
       "model": "provider/model-x",
       "reasoning_effort": "medium"
     },
-    "script": {"blob": "sha256:…"}                // carried, but LOCKED for evolution by default
+    "script": {"digest": "sha256:…"}                // carried, but LOCKED for evolution by default
   },
   "policy": {                                     // NOT evolvable — copied forward verbatim by the platform
     "locked_genes": ["script", "tools.mcp", "policy"],
@@ -106,16 +107,18 @@ Manifest 变更，而不是基因组独有的新增）。
 
 设计要点：
 
-- **内容寻址的 blob。** 文件内容按 digest 引用，存放在现有的 Manifest 内容存储
-  中（§7）。共享某个文件的两个修订版共享同一个 blob。diff 成本很低。
+- **摘要，而非内容。** `digest`（`sha256:…`）是文件字节的*地址*，而不是字节
+  本身。字节只在现有的 Manifest 内容存储中存放一次，需要时按摘要（digest）
+  获取（§7.1）。共享某个文件的两个修订版共享同一份字节，因此存储是去重的，
+  diff 成本也很低。
 - **钉住，而非浮动。** 当从一份使用移动引用 `sources` 的 Manifest 记录修订版时，
-  平台会解析这些引用并存储 blob。浮动的 Manifest 是*输入*；修订版是*事实*。
+  平台会解析这些引用并存储字节。浮动的 Manifest 是*输入*；修订版是*事实*。
 - **完整，而非部分。** 从一份部分 Manifest 文档记录修订版时，所有被省略的类别
   都从父修订版（首个修订版则从 bot 的当前状态）补全，因此存储下来的修订版是
   完整的。为 apply 编译修订版时总是输出所有类别。
 - **Center skill 钉住版本，而不复制。** Skill Center 已经存储了不可变、受治理的
   版本（ADR 0010）。修订版记录 Center 版本；只有 bot 自有的 skill 以及来自
-  git/OSS 的内容才以 blob 形式存储。
+  git/OSS 的内容才存放在内容存储中。
 - **`spec` 与 `policy`。** `policy` 归 bot 所有者 / 平台所有，永远不归进化策略
   所有。平台底线会拒绝任何触及它的补丁。「工具和权限变更只能由人完成」正是在
   这里通过结构而非约定来强制执行的。
@@ -123,7 +126,8 @@ Manifest 变更，而不是基因组独有的新增）。
   已经被拒绝。它们仍然是基因组的一部分，以保证修订版完整，但除非所有者解锁，
   否则处于锁定状态。
 - **规范 JSON。** 修订版以 RFC 8785 规范 JSON 存储，id 对 `{spec, policy}`
-  计算哈希；YAML 仅作为人工编写的输入被接受（§7.3）。
+  计算哈希。本设计中所有新增内容都只使用 JSON；Bot Config Manifest 保持现有的
+  YAML 形式（§7.3）。
 - **元数据引用评估，而从不内嵌评估。** 分数存放在 C5 中，在归档读模型中进行
   关联；基因组保持为纯粹的定义。
 
@@ -134,7 +138,7 @@ Manifest 变更，而不是基因组独有的新增）。
 | 引用 | 含义 | 谁来移动它 |
 | --- | --- | --- |
 | `active` | bot 当前运行的版本 | 仅晋升 |
-| `previous` | 上一个 `active`（便于一键回滚） | 仅晋升 |
+| `previous` | 上一个 `active`，用于快速「回退」 | 仅晋升 |
 | `canary` | 金丝雀实例上的修订版 | 仅晋升 |
 | `draft` | 所有者进行中的手动编辑 | 所有者（UI/API） |
 | `candidate/<run>/<n>` | 一次运行中的候选 | 编排器 |
@@ -148,10 +152,17 @@ Manifest 变更，而不是基因组独有的新增）。
 向后兼容的 `active`）移动到该修订版，然后 apply」。现有客户端感知不到任何变化；
 该行变成 `active` 的一个投影。
 
-**与 service bot 发布的关系。** 一个发布版本已经会冻结一个
-`BotConfigArtifact`。对 service bot 而言，晋升 = 记录修订版，以从该修订版编译
-出的 artifact 运行 draft → verify → publish，并在发布记录上存储 `revision_id`。
-回滚资格规则随之泛化：任何 `promoted` 修订版都可以被重新晋升。
+**回退就是晋升，而不是一个新的回滚功能。** 在 RSI 中，「回滚」到 `r41`
+意味着再次晋升 `r41`。由于 id 是内容哈希，不会创建新的修订版：`active` 引用
+移回 `r41`，引用日志记录这次移动及其执行者和原因。对平台其余部分而言，这只是
+「apply 这个修订版」，与任何向前的晋升完全相同：
+
+- **个人 bot：** 修订版通过 Manifest apply 被应用。
+- **服务型 bot：** 修订版通过现有的 draft → verify → publish 流程，作为
+  **下一个发布版本**发出，并在发布记录上存储 `revision_id`。
+
+现有的服务型 bot 回滚功能保持不变。RSI 既不替代也不扩展它，也不存在重复的
+回滚路径。
 
 ## 4. 基因组补丁
 
@@ -170,7 +181,8 @@ Manifest 变更，而不是基因组独有的新增）。
        {"kind": "insert_after", "anchor": "## Tone", "content": "…"}
      ]},
     {"op": "skill.add", "name": "invoice-lookup",
-     "files": {"SKILL.md": "…", "scripts/lookup.py": "blob:sha256:…"}},
+     "files": {"SKILL.md": "…",                         // small text: inline
+               "scripts/lookup.py": {"digest": "sha256:…"}}},   // larger file: uploaded first, referenced by digest
     {"op": "skill.update", "name": "refund-policy",
      "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ …"}]},
     {"op": "memory.add",                                // itemized memory, see §5
@@ -190,7 +202,7 @@ Manifest 变更，而不是基因组独有的新增）。
 - 改动超过文件可配置比例（默认 40%）的 `file.edit` 会被标记为 `rewrite`，
   并提升风险等级。
 - 每个 op 都映射到一个**风险等级**（[08-governance.md §3](08-governance.zh-CN.md#3-风险等级)）。
-- 补丁大小、文件数量和 blob 大小限制与 Manifest 的限制保持一致。
+- 补丁大小、文件数量和文件大小限制与 Manifest 的限制保持一致。
 
 补丁可以组合：一次包含多个已接纳迭代的运行可以压缩（squash）为一个补丁供审查，
 而归档保留每一步。
@@ -228,11 +240,13 @@ Manifest 变更，而不是基因组独有的新增）。
 1. 修订版表 + 引用 + CAS（P1）。
 2. apply 报告记录 `revision_id` 和编译后文档的 digest（P1）。
 3. 在修订版上记录钉住后的解析结果（P1）；即使从部分文档记录，修订版也是完整的。
-4. `metadata` / `annotations` 顶层键，apply 时忽略（P1）。
-5. 为一个键白名单启用 `engine_config` 类别（P3/P4）。
-6. 带模式的 `memory` 类别（P5，依赖 RSI-05）。
-7. 个人 bot 和 service bot 均支持回滚到任意修订版（P1）。
-8. Manifest 内容存储接受带补丁来源记录的「产出」（非拉取）内容（P2）。
+4. 为一个键白名单启用 `engine_config` 类别（P3/P4）。
+5. 带模式的 `memory` 类别（P5，依赖 RSI-05）。
+6. 面向 apply 的内容存储源：条目可以指向平台自有内容存储中的某个摘要，而不是
+   外部源。apply 在每次拉取后本就会读取该存储，因此这只是跳过了拉取（P1）。
+7. Manifest 内容存储接受带补丁来源记录的「产出」（非拉取）内容（P2）。
+
+来源记录和注解不需要修改 Manifest：它们存放在修订版记录上。
 
 ## 7. 存储
 
@@ -249,7 +263,22 @@ Manifest apply 管线已经为它拉取的所有内容保存了平台自己的�
   （bot、源 URL、凭证*名称*、apply）。该表不存字节。
 - **保留策略**在 v1 中是无条件的：不删除、不清扫、没有 TTL。
 
-基因组修订版引用的就是这个存储中的 blob，不存在第二份副本。需要三项扩展：
+基因组修订版按摘要引用的就是这个存储中的内容，不存在第二份副本。
+
+**如何根据摘要获取内容。** 摘要只是一个地址。要获取字节：
+
+- **在 Backend 内部，** `ManifestContentService.read(digest)` 返回位于
+  `<root>/blobs/<hex[:2]>/<hex64>` 的字节，并在读取时重新校验哈希。
+- **在 Backend 外部**（UI、CLI、提议器、评估器），由基因组注册表 API 提供
+  `GET /bots/{bot}/genome/content/{digest}`。它针对该 bot 进行授权，因此摘要
+  本身并不构成访问凭据。新内容通过 `PUT /bots/{bot}/genome/content` 上传，
+  该接口返回内容的摘要。
+- **在 apply 时，** 编译修订版会输出按摘要指向内容存储的 Manifest 条目（§6
+  第 6 项）。apply 把这些字节交给物化器，方式与今天处理拉取到的内容完全相同。
+- **Center skill** 在修订版中没有摘要；它们通过钉住的版本经由 Skill Center
+  解析。
+
+需要三项扩展：
 
 1. **产出内容的写入路径。** 目前每个存储事件都是一次*拉取*（`source_url` 必填）。
    由提议器创建的内容（例如编辑后的 `SKILL.md` 或新的记忆条目）从未被拉取过，
@@ -290,10 +319,12 @@ Manifest apply 管线已经为它拉取的所有内容保存了平台自己的�
 - **校验。** 每种记录类型都有 JSON Schema（RSI-02、RSI-06），与
   `BotConfigArtifact` 已在使用的机制（`artifact.schema.json`）相同，也是
   OpenAPI 的基础。
-- **YAML 仅作为人工编写的输入。** 人仍可以用 YAML 编写 Bot Config Manifest 文档
-  和策略清单。记录修订版时只解析一次输入，补全被省略的类别、钉住来源，然后存储
-  规范 JSON。人工编写的原文作为来源记录 blob 保留，因此其中的注释不会丢失，但它
-  永远不是被哈希或被交换的形式。
+- **所有新增内容只使用 JSON。** 策略清单、补丁、作业输入与输出，以及本设计
+  引入的所有其他记录，在编写和存储时都是 JSON。
+- **Bot Config Manifest 保持 YAML。** 它是一个现有契约，不做改变。当从一份
+  Manifest 文档记录修订版时，只解析一次 YAML，补全被省略的类别、钉住来源，然后
+  存储规范 JSON。原始 YAML 作为来源记录保留，因此其中的注释不会丢失，但它永远
+  不是被哈希或被交换的形式。
 
 为什么不用 YAML 作为存储形式：它没有规范序列化（同一份数据可以有多种写法，因此
 无法直接哈希）；它的隐式类型在 YAML 1.1 与 1.2 之间、以及不同库之间都不一致

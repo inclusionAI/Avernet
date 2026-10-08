@@ -5,6 +5,11 @@
 > Status: DRAFT. This is what makes the platform *recursive* self-improvement
 > rather than repeated single improvements. Read [03-verification.md](03-verification.md)
 > first; recursion is only as trustworthy as its verifier.
+>
+> **Scope:** level 3 is a later concern. The first iteration focuses on
+> level 2 (improving bots). This document fixes the level-3 design early so
+> level-2 contracts (mechanism revisions, the Experiment Ledger H) do not
+> block it later.
 
 ## 1. Three levels
 

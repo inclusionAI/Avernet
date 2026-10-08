@@ -194,8 +194,11 @@ The only component that can move a bot's `active` ref. See
    `test > baseline`, Pareto dominance, paired win-rate.
 3. **Risk tier** of the patch decides auto-promote vs human review.
 4. **Rollout**: optional shadow (verify stage), canary for multi-instance
-   bots, then active. **Rollback** is moving `active` back to any earlier
-   revision and re-applying — no more one-step-only rollback.
+   bots, then active. **Going back** is promoting an earlier revision
+   again: `active` moves back and the revision is applied like any other
+   promotion (as the next published version for a service bot). It works for
+   personal and service bots and does not touch the existing service-bot
+   rollback feature.
 
 ### C7 Experiment Ledger (H) and Archive
 
@@ -299,12 +302,20 @@ schedule because the failure-rate signal crossed a threshold.
 | Phase | Outcome | Usable on its own? |
 | --- | --- | --- |
 | P0 Contracts | DR-1–DR-3 accepted; genome schema, job protocol, plugin protocols, API sketch reviewed | — |
-| P1 Genome Registry | Manifest gains revisions, refs, If-Match, pinned resolution, apply-records-revision, any-depth rollback | **Yes** — versioned bots and real rollback, independent of RSI |
+| P1 Genome Registry | Manifest gains revisions, refs, compare-and-swap, pinned resolution, apply-records-revision, going back to any earlier revision | **Yes** — versioned bots, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded: ExperienceSource, sandboxed tune emitting patches, ClawBench evaluator, its acceptance rule as a Gate plugin | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
 | P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of acceptance policies over H | Hardening; the verify gate is useful for service bots on its own |
 | P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
 | P6 Open-ended | Automated meta-proposer (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
+
+**First iteration scope.** The first iteration focuses on level 2:
+improving bots, with platform-owned verification (P0–P4, plus the parts of
+P5 that the default strategies need). Level 3, improving the mechanism
+itself ([04-recursion.md](04-recursion.md)), is designed here so the level-2
+contracts do not block it, but it is a later concern. The only level-3
+groundwork in the first iteration is recording experiments in the ledger H,
+which level 2 needs anyway for the archive and audit.
 
 Work items with dependencies: [10-work-items.md](10-work-items.md).
 

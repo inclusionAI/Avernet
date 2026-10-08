@@ -22,7 +22,8 @@ digest and stored in the existing manifest content store; Skill Center skills
 are referenced by pinned Center version rather than copied.
 
 Revisions are stored as RFC 8785 canonical JSON and identified by the
-SHA-256 of `{spec, policy}`. YAML is accepted only as authored input.
+SHA-256 of `{spec, policy}`. The Bot Config Manifest stays YAML as today;
+everything new introduced here is JSON only.
 
 Revisions carry parent pointers, a readable per-bot sequence number,
 provenance (who or what created them, from which evidence), and status. Named refs (`active`, `previous`, `canary`,
@@ -43,14 +44,16 @@ Design: [`../02-genome.md`](../02-genome.md).
 
 ## Consequences
 
-- Versioned bots, attributable experience, and rollback to any promoted
-  revision become available independently of any evolution strategy.
+- Versioned bots, attributable experience, and going back to any earlier
+  revision become available independently of any evolution strategy. Going
+  back is promoting an earlier revision again, applied like any promotion.
 - Manifest storage changes from one mutable row to revisions + refs; apply
   reports record the revision applied.
 - Engine owners must agree to the memory projection contract before memory
   is evolvable; until then curated lessons use a platform-managed persona file.
-- Service-bot publish records reference a revision id; rollback eligibility
-  generalises from one step to any promoted revision.
+- For service bots, promoting a revision publishes it as the next version
+  through the existing publish flow, and the publish record references the
+  revision id. The existing service-bot rollback feature is unchanged.
 
 ## Alternatives
 

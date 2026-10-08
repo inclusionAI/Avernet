@@ -25,11 +25,14 @@ self-improvement (RSI) loops over any Avernet bot, where
    principal), all over one contract;
 4. **verification is platform-owned**: no strategy and no bot can write to a
    live bot directly. Everything goes candidate → verify → gate → promote,
-   with lineage and rollback;
+   with lineage, and going back is promoting an earlier revision;
 5. **the mechanism improves too** (true RSI): the experiment history H is
    used to propose a better mechanism M2, which is adopted only after it is
    verified to produce better verified improvements than M1. The verifier
    itself stays fixed and human-owned.
+
+**First iteration:** levels 1–2 (improving bots, with verification). Level 3
+(item 5) is designed so nothing blocks it, but it comes later.
 
 ## Reading order
 

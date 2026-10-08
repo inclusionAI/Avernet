@@ -59,13 +59,13 @@ platform code (DR-2).
 
 ## 4. Strategy manifest
 
-A strategy is a versioned document registered in C3. Like every
-platform-owned record it is stored as canonical JSON; authors may write it in
-YAML ([02-genome.md §7.3](02-genome.md#73-serialization-canonical-json)).
+A strategy is a versioned JSON document registered in C3. Like everything
+new in this design it is JSON both when authored and when stored; only the
+existing Bot Config Manifest stays YAML
+([02-genome.md §7.3](02-genome.md#73-serialization-canonical-json)).
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Authors may write the same document as YAML; it is stored as canonical JSON.
 {
   "strategy_schema": 1,
   "id": "clawevolve/bot-evolution",
