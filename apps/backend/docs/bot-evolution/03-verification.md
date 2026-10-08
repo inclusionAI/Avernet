@@ -37,7 +37,7 @@ of platform code are excluded.
 | **ClawWeb Bench store** | `apps/evolverun/clawweb/public/shared/server/schema.ts` (`cm_bench_domains/templates/template_versions/runs/task_results/artifacts`), `routes/bench.ts` | Versioned suites (domain = suite), published templates with `source_hash`, run and per-case results with breakdown and transcripts | **Live** (also in OSS edition) | Data model seed for the **Suite registry** and **Verification results** |
 | **ClawEvolve splits** | `clawevolve-plan/clawevolve_plan/bench/split.py`, `clawevolve_bench_plan_run.py:185-211`, `clawevolve_optimize_run.py:1140-1330` | Train/test domains, session-grouped leakage-safe split, validation ids redacted from tune/review prompts, cases and graders frozen | **Live** | **Split assignment + visibility rules** |
 | **ClawEvolve gates** | `clawevolve_optimize_run.py`: `action_accept` `:6256`, `candidate_static_gate` `:2666`, `candidate_opt_gate` `:5675-5958`, `full_opt_gate` `:5862-5947`, `replicate-validation` `:6380-6520`, evaluation identity `:3604-3745` | Accept iff test score > baseline. Regression budget, protected signals, and paired seeded replication exist but are **advisory or unreachable** | Accept live; rest dormant | **Comparator + verdict policy** building blocks (pure functions) |
-| **Gate calibration / replay** | `clawevolve-skills/scripts/calibrate_evolution_gates.py`, `replay_candidate_gate.py` | Golden corpus of labelled historical decisions + adversarial scenarios. Reports precision/recall of gates. Offline replay of gates on stored rounds | Live tooling | Seed of **verifier calibration** and of **mechanism verification** for acceptance-policy changes |
+| **Gate calibration / replay** | `clawevolve-skills/scripts/calibrate_evolution_gates.py`, `replay_candidate_gate.py` | Golden corpus of labelled historical decisions + adversarial scenarios. Reports precision/recall of gates. Offline replay of gates on stored rounds | Live tooling | Seed of **verifier calibration** and of **mechanism verification** for changes to verification profiles and submission filters |
 | **Diagnose → plan** | `clawevolve-diagnose/clawevolve_diagnose/judge/*`, `clawevolve-plan/bench/case_contract.py`, `template_builder.py` | LLM session judge mines good/bad cases from real sessions and turns them into bench cases | Live | **Regression-suite growth** from production failures |
 | **Backend eval env + Quality Task** | `core/service_bot/services/publish_flow/eval_publish_mixin.py:33-185`, `core/quality/services/task_processor.py:36-44,304-329`, `adapters/http/quality/router.py`; seams `plugin_api/eval_env/*`, BaaS `spi/eval_env/` | Deploys an isolated, TTL-bound copy of a service bot at `PublishStage.EVAL`, routes eval sessions by tag, then calls an **external** grader (MASA `/eval/start`, `/eval/progress`). Results stored opaquely | Wired, but grader external; eval_env plugin protocols are unused Noop stubs; no scheduler | **Sandbox executor** for deployed bots (the real phenotype, any engine) |
 | **Service-bot VERIFY stage** | `publish_flow_service.py:150,174,386-397` | Deploys a verify-environment bot and waits for manual "go online" | Live, **no automated checks** | Attachment point for a **verification gate** on publish |
@@ -161,7 +161,7 @@ In verification terms:
   suites, with cost, regression rate, and false-acceptance rate.
 - The **comparator** is the same paired-statistics machinery, at problem
   granularity.
-- **Acceptance-policy changes** can be screened cheaply by replaying stored
+- **Changes to verification profiles or submission filters** can be screened cheaply by replaying stored
   candidates through the new policy and measuring precision/recall against
   labelled outcomes. This is exactly what `calibrate_evolution_gates.py` and
   `replay_candidate_gate.py` do today, so they become the screening tool.
@@ -179,7 +179,7 @@ In verification terms:
   against human labels, gate precision/recall on the golden corpus
   (extending `calibrate_evolution_gates.py` from gates to judges), and
   holdout freshness.
-- **Hidden**: proposer and meta-proposer inputs never include holdout,
+- **Hidden**: strategy and meta-strategy inputs never include holdout,
   regression, or safety cases. Validation is exposed only as aggregates. The
   orchestrator enforces this; prompts do not.
 - **Tamper-evident**: grader code and case content are content-addressed. A

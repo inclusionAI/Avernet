@@ -108,7 +108,7 @@ avn evolve  inbox submit|list                     # 被改进 Bot
 avn evolve  observe "<note>" --episode <id>       # 被改进 Bot
 avn experience episodes|feedback
 avn job     claim|input|heartbeat|upload|complete|fail   # 执行者 Bot / worker
-avn strategy dev|test|publish                     # 进化策略作者（封装插件 SDK 测试环境）
+avn strategy dev|test|publish                     # 进化策略作者（封装策略 SDK 测试环境）
 ```
 
 ### bot skill
@@ -145,7 +145,7 @@ OpenAPI v1 目前有意拒绝 `bot` 主体。DR-3 提议**仅**在进化接入�
 | `experience:write:self` | 被改进 Bot | 为自身提交观察和反馈 |
 | `inbox:write:self` | 被改进 Bot | 为自身提交补丁草稿 |
 | `run:request:self` | 被改进 Bot（由所有者选择开启） | 在预算内请求运行一个*已启用*的进化策略 |
-| `evolution:runner` | 执行者 Bot / worker | 为已注册的插件 id 认领作业；读取作业输入；上传输出 |
+| `evolution:runner` | 执行者 Bot / worker | 为已注册的策略 id 认领作业；针对其已认领的运行调用作业协议 |
 | — | 仅限所有者/管理员/策略 | 晋升、回滚、修改策略、启用进化策略、触碰锁定基因 |
 
 bot 凭据来自现有的 Passport/AgentPass 签发；网关以 `kind: bot` 和 scope 签署

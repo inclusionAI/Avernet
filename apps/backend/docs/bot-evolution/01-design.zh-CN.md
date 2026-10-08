@@ -106,9 +106,9 @@ Manifest**：一个修订版*编译成*一份钉住的 Manifest 文档加上一�
 一份规范化的、引擎中立的记录，描述 bot 做了什么以及结果如何：
 
 - **片段（Episode）** —— 一次会话或一条任务轨迹：消息、工具调用、工具结果、
-  耗时、模型、成本、结果。由一个**经验源**（ExperienceSource）插件从引擎专属
-  格式规范化而来（默认：`clawevolve-diagnose/acquisition/` 中的 OpenClaw 会话
-  JSONL 读取器）。
+  耗时、模型、成本、结果。由引擎的会话导出从引擎专属格式规范化而来（即
+  `experience.sessions` 能力背后的提供方；`clawevolve-diagnose/acquisition/`
+  中的 OpenClaw 读取器是起点）。
 - **反馈（Feedback）** —— 用户评分、纠正、任务结果、BCS 协作结果、
   run-evidence 事件（TaskGuard）。
 - **评估轨迹（Eval trace）** —— 每一次评估 rollout，带有评分器分数和文字
@@ -124,29 +124,32 @@ ClawEvolve 中，是起点），C2 保存规范化、带索引、有保留期限
 
 ### C3 进化策略注册表
 
-存储**策略清单**（用哪些插件、以什么 flow、带什么参数和预算）以及**插件实现**
-（有版本，带声明的能力、隔离等级和一致性状态）。一次运行会记录它所使用的确切
-进化策略版本。它泛化了 ClawEvolve 的 `official-stage-catalog.json` +
-`ce_stage_skill_implementations`。详见 [05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)。
+存储**策略注册记录**（id、版本、运行时，以及策略 `needs` 的目录能力）、它们的
+一致性状态，以及**能力目录**本身。按 bot 的**绑定**（一个 bot 使用哪些策略、
+何时运行、可以改什么、预算、参数）存放在该 bot 的进化策略配置（evolution
+policy）中。一次运行会记录它所使用的确切进化策略版本。它泛化了 ClawEvolve 的
+`official-stage-catalog.json` + `ce_stage_skill_implementations`。详见
+[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)。
 
 ### C4 运行编排器
 
-一个持久化的状态机：`Run → Iteration → Step`。它解析进化策略，强制执行预算
-（token、金额、墙钟时间、rollout 次数、迭代次数），通过作业协议（Job
-Protocol）把步骤分派给插件，按摘要持久化每一个输入和输出，并确保步骤只能看到
-其契约允许的内容（例如提议器永远收不到封存划分）。它泛化了 ClawEvolve 的
-`ce_tasks` / `ce_steps` / claim-report 端点。
+一个持久化的运行状态机（`queued → running → completed | failed |
+cancelled | budget_exhausted`）。它在绑定的触发条件满足时启动绑定，冻结进化
+策略版本、参数、父版本和预算，以恰好被授予的能力构建 `StrategyContext`，然后
+在进程内或通过作业协议（Job Protocol）调用策略唯一的 `run(ctx)` 方法。它强制
+执行预算和租约，并保证任何隐藏内容都不会到达策略（例如封存用例）。它泛化了
+ClawEvolve 的 `ce_tasks` / `ce_steps` / claim-report 端点。
 
 ### C5 验证服务
 
 归平台所有，**对进化策略和 bot 只读**：
 
-- **用例集（Suites）**，带强制划分：`train`（提议器可以看到失败用例）、
-  `validation`（门禁使用；提议器只能看到汇总结果）、`holdout`（仅供门禁和定期
+- **用例集（Suites）**，带强制划分：`train`（策略可以看到失败用例）、
+  `validation`（门禁使用；策略只能看到汇总结果）、`holdout`（仅供门禁和定期
   审计使用）、`regression`（从生产失败和以往已修复的用例自动增长）、`safety`。
-- **评分器（Graders）**：确定性检查、基于评分细则的 LLM 评审模型（最好与提议器
+- **评分器（Graders）**：确定性检查、基于评分细则的 LLM 评审模型（最好与策略
   属于不同的模型家族）、混合式。每个评分器都返回 `score + critique`，因为反思式
-  提议器（GEPA、ClawEvolve tune）需要点评。
+  策略（GEPA、ClawEvolve tune）需要点评。
 - **沙箱执行**：候选通过现有的 `plugin_api/eval_env/` 接缝
   （`EvalEnvLifecycle`、`VersionSync`）被物化为一个临时的**评测 Bot**，因此
   评估走的是真实的 apply / 交付路径，而不是模拟。
@@ -154,9 +157,8 @@ Protocol）把步骤分派给插件，按摘要持久化每一个输入和输出
   并可选地加入一个**预算匹配基线**（父版本 + 额外采样），使进化策略必须胜过
   「只是多试几次」。
 
-ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评分器和
-用例集构建器（SuiteBuilder）实现；backend 评测环境（`eval_publish`）成为
-部署式沙箱执行器。完整协议、现有评测代码的清单及其缺口见
+ClawBench（`clawbench-base`）成为默认的评分器；backend 评测环境
+（`eval_publish`）成为部署式沙箱执行器。完整协议、现有评测代码的清单及其缺口见
 [03-verification.zh-CN.md](03-verification.zh-CN.md)。
 
 ### C6 门禁与晋升
@@ -166,8 +168,9 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 
 1. **平台底线**（进化策略不可覆盖）：schema 有效、锁定基因未被改动、无密钥、
    无权限提升、在 `regression`/`safety` 用例集上的回退不超出容差、未超出预算。
-2. **进化策略的接纳策略**（可插拔）：例如 ClawEvolve 的 `test > baseline`、
-   Pareto 支配、配对胜率。
+2. 在绑定的验证配置下得出的**验证判定**。所有者可以选择更严格的配置；进化策略
+   不能放宽它。ClawEvolve 自己的 `test > baseline` 规则成为它决定提交什么的
+   内部过滤条件。
 3. 补丁的**风险等级**决定自动晋升还是人工评审。
 4. **发布（Rollout）**：可选的影子阶段（verify 阶段）、面向多实例 bot 的金丝雀，
    然后才是 active。**回退（go back）**就是再次晋升一个更早的修订版：
@@ -180,15 +183,16 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 每一次改进实验（改进机制、父版本、候选、证据、判定、成本、后续线上结果），
 包括被拒绝的实验——schema 见 [04-recursion.zh-CN.md §3](04-recursion.zh-CN.md#3-实验记录h)。
 它是 C1 + C5 之上的一个读模型：某个 bot 的基因组树、每个候选在各划分上的分数、
-由哪个进化策略和模型产生、基于哪些证据、由谁批准。选择器查询它（latest-best、
-按用例的 Pareto 前沿、MAP-Elites 生态位、Huxley-Gödel Machine 式的考虑后代的
-「clade」分数）。人在 UI 中浏览它。提议器可以拿到它的文件系统导出
-（Meta-Harness 发现原始历史优于摘要）。它也是第 3 层的证据基础。
+由哪个进化策略和模型产生、基于哪些证据、由谁批准。`active` 之外的父版本选择
+（latest-best、按用例的 Pareto 前沿、MAP-Elites 生态位、Huxley-Gödel Machine
+式的考虑后代的「clade」分数）是绑定 `parent` 字段的后续选项，它们会查询它。
+人在 UI 中浏览它。进化策略可以拿到它的文件系统导出（Meta-Harness 发现原始历史
+优于摘要）。它也是第 3 层的证据基础。
 
 ### 元循环（第 3 层）
 
 以**改进机制**（进化策略版本）为目标、以**机制验证**为验证器，运行同一个
-循环：元提议器读取 H，提出一个改进机制补丁，候选改进机制在被采用之前，要在
+循环：元策略读取 H，提出一个改进机制补丁，候选改进机制在被采用之前，要在
 封存的改进问题上与当前 active 的改进机制进行比较（默认需人工批准）。改进机制
 在 C3 中以与基因组相同的修订版 / 引用模型进行版本管理。见
 [04-recursion.zh-CN.md](04-recursion.zh-CN.md)。
@@ -224,8 +228,10 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 | 基因组 schema + 补丁格式 | 数据契约，有版本 | 所有人 |
 | 基因组注册表 API | Service API | Evolution、UI、CLI → Backend |
 | Evolution API（`/openapi/v1/evolution/*`） | Service API | SDK/CLI/UI → Evolution |
-| 作业协议（claim / heartbeat / input / output / report） | Plugin API（线协议） | 编排器 ↔ 进程外插件 |
-| 插件协议（Analyzer、Proposer、Evaluator、Gate、Selector、Trigger、ExperienceSource、SuiteBuilder） | Plugin API | 编排器 → 进化策略实现 |
+| 策略端口（`run(ctx)`）、`StrategyContext`、候选 / 判定、注册记录 | Plugin API | 编排器 → 进化策略实现 |
+| 能力目录（每个条目一份契约，带按引擎的提供方） | Plugin API | 进化策略 → 平台 / 引擎提供方 |
+| 作业协议（每个 `ctx` 调用对应一个 HTTP 端点） | Plugin API（线协议） | 编排器 ↔ 作业 worker 策略 |
+| 进化策略配置（evolution policy，按 bot 的绑定） | 数据契约 | 所有者、UI、CLI → Evolution |
 | 引擎记忆投影契约 | Plugin API | Backend apply → Engine |
 | 引擎会话导出契约（`session-export/v1` → v2） | Plugin API | Evolution → Engine |
 | 验证服务 API + Executor/Grader 插件协议 | Service API + Plugin API | 编排器、发布流程、Quality Task → Verification |
@@ -239,25 +245,27 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 进化策略 `clawevolve/bot-evolution@2`，bot `support-agent`，触发原因：失败率
 信号越过阈值，因此在每晚定时触发。
 
-1. 编排器创建 Run，冻结进化策略版本和预算（`max_iterations: 3, max_usd: 20`）。
-2. **选择器**（`latest-active`）选定父版本 = `active` 修订版 `r41`。
-3. **分析器**（`clawevolve-diagnose`）向 C2 查询 `r41` 最近 7 天的片段，对其
-   进行评判，聚类根因，产出带可重放用例的 `plan-source/v2` 发现项。
-4. **用例集构建器**（`clawevolve-plan`）把发现项转换为用例集用例；C5 分配划分
-   （train/validation；holdout 和 regression 是预先存在的，对进化策略不可见）。
-5. **提议器**（`clawevolve-tune` + `clawevolve-review`）在一个从 `r41` 物化出来
-   的**沙箱工作区**中工作，返回一个基因组补丁（逐项列出：
-   `identity/SOUL.md: replace section "Escalation"`、
+1. 该 bot 针对 `clawevolve/bot-evolution@2.0.0` 的绑定按其定时计划触发。编排器
+   创建 Run，并冻结进化策略版本、参数（`max_rounds: 3`）、预算
+   （`max_usd: 20`）和父版本（`active` = 修订版 `r41`）。
+2. 它构建一个授予 `experience.sessions`、`agents`（OpenClaw）和
+   `evaluate.train` 的 `StrategyContext`，然后调用 `run(ctx)`。
+3. 在策略内部，ClawEvolve 的诊断逻辑读取 `r41` 最近 7 天的片段，聚类根因，并
+   添加可重放的训练用例（平台分配划分；封存集和回归集保持隐藏）。
+4. 它的 tune 智能体编辑一个从 `r41` 物化出来的**沙箱工作区**；
+   `ctx.evaluate.train` 为结果打分；策略提交一个基因组补丁（逐项列出：
+   `persona/SOUL.md: replace section "Escalation"`、
    `skills/refund-policy: update SKILL.md`）以及理由。
-6. 平台静态检查通过；C1 记录候选 `r41.c1`（父版本 `r41`）。
-7. **验证**（C5，`platform/clawbench` 评分器）在评测 Bot 中以重复种子配对运行
-   父版本和候选，覆盖 train + validation，外加隐藏的回归集 + 安全集；判定和
-   证据写入 H。
-8. **门禁**：进化策略的接纳策略（`validation > parent` 且配对胜率 ≥ 0.6）通过；
-   平台底线通过；风险等级 = T2（人设 + skill）→ 进入评审队列。
-9. 所有者在 UI 中（或通过 `avn evolve review`）评审 diff + 评估报告，并批准。
+5. 平台静态检查通过；C1 记录候选修订版 `r42`（父版本 `r41`）。
+6. **验证**（C5，`platform/clawbench` 评分器）在绑定的验证配置下，于评测 Bot
+   中以重复种子配对运行父版本和候选，覆盖 validation，外加隐藏的回归集和安全集。
+   判定和证据写入 H；策略看到的判定只带汇总值。
+7. **门禁**：判定为 `accept`，且平台底线通过；风险等级 = T2（人设 + skill），
+   因此候选进入评审队列。
+8. 已经等待判定的策略，可以从被接受的修订版开始下一轮。
+9. 所有者在 UI 中（或通过 `avn evolve review`）评审 diff + 验证报告，并批准。
 10. 晋升：`active → r42`，`previous → r41`；通过 Manifest 应用；对于服务型
-    bot，走 draft → verify → publish。
+    bot，通过 draft → verify → publish 作为下一个版本发布。
 11. 从此以后的片段都带有 `r42`。下一次运行可以比较 `r41` 与 `r42` 的线上结果
     （在线验证；自动回滚规则可选）。
 
@@ -265,13 +273,13 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 
 | 阶段 | 产出 | 能否单独使用？ |
 | --- | --- | --- |
-| P0 契约 | DR-1–DR-3 被接受；基因组 schema、作业协议、插件协议、API 草图完成评审 | — |
+| P0 契约 | DR-1–DR-3 被接受；基因组 schema、策略端口与能力目录、作业协议、API 草图完成评审 | — |
 | P1 基因组注册表 | Manifest 获得修订版、引用、比较并交换（CAS）、钉住解析、apply 记录修订版、回退到任意更早的修订版 | **能**——版本化的 bot，独立于 RSI |
 | P2 进化核心 | `apps/evolution` 骨架、运行编排器、作业协议、进化策略注册表、API + SDK + CLI 骨架、一个通过一致性测试的简单参考进化策略（手工补丁 + 确定性评估器） | 能，用于脚本化改进 |
-| P3 默认策略 | ClawEvolve 接入：经验源、产出补丁的沙箱化 tune、ClawBench 评估器、其接纳规则作为门禁插件 | 能——在平台上对任意 OpenClaw bot 提供今天的 AgentEvolve 能力 |
-| P4 验证与治理 | 验证服务（配对统计、密封的封存集、必过用例集、评审模型集成）、发布流程的 verify 门禁、评审队列、风险等级、影子 / 金丝雀、基于 H 对接纳策略进行离线重放 | 加固；verify 门禁本身就对服务型 bot 有用 |
+| P3 默认策略 | ClawEvolve 作为黑盒策略接入：会话导出提供方、产出补丁的沙箱化 tune、验证服务中的 ClawBench 评分器 | 能——在平台上对任意 OpenClaw bot 提供今天的 AgentEvolve 能力 |
+| P4 验证与治理 | 验证服务（配对统计、密封的封存集、必过用例集、评审模型集成）、发布流程的 verify 门禁、评审队列、风险等级、影子 / 金丝雀、基于 H 对验证配置与提交过滤进行离线重放 | 加固；verify 门禁本身就对服务型 bot 有用 |
 | P5 bot 驱动 + 机制验证 | bot 主体作用域、作为 bot 工具的 `avn` + SKILL.md、提议收件箱、记忆投影契约、整合（「dream」）进化策略；用于验证改进机制变更的改进问题基准 | 快循环；进化策略的回归测试 |
-| P6 开放式 | 自动化的元提议器（第 3 层）、归档选择器（Pareto/MAP-Elites/clade）、通过 Skill Center 的跨 bot skill 迁移、训练数据导出、更多引擎 | 研究级 |
+| P6 开放式 | 自动化的元策略（第 3 层）、归档选择器（Pareto/MAP-Elites/clade）、通过 Skill Center 的跨 bot skill 迁移、训练数据导出、更多引擎 | 研究级 |
 
 **第一轮迭代范围。** 第一轮迭代聚焦于第 2 层：改进 bot，并由平台负责验证
 （P0–P4，加上默认进化策略所需的 P5 部分）。第 3 层，即改进改进机制本身
@@ -298,7 +306,7 @@ ClawBench（`clawbench-base`）和 ClawEvolve 的 plan 阶段成为默认的评�
 | 第 3 层优化的是噪声，或削弱了评审模型 | 验证器固定且由人负责；在封存的改进问题上进行机制验证；深度上限为 2；改进机制的采用需人工批准 |
 | 奖励投机 / 篡改评估器 | 评估器和用例集位于基因组之外；锁定基因；对涉及护栏的编辑进行 diff 审计；见治理文档 |
 | 人设漂移 / 上下文坍缩 | 只允许逐项补丁；大小变化阈值；逐条目的来源记录 |
-| 通过轨迹进行的记忆 / skill 投毒 | 经验对提议器而言是不可信输入；对补丁进行密钥 / PII 扫描；风险等级 |
+| 通过轨迹进行的记忆 / skill 投毒 | 经验对策略而言是不可信输入；对补丁进行密钥 / PII 扫描；风险等级 |
 | 成本失控 | 按运行、按 bot、按租户的预算由编排器强制执行，而不是由进化策略执行 |
 | 平台先于需求建成 | P1 可独立使用；P3 在 P5/P6 之前先在现有需求上验证该抽象 |
 | 与宪章的摩擦（新模块、新主体） | 预先起草决策；从 P2 起每个协议都有一致性测试 |

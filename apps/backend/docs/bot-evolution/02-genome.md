@@ -300,7 +300,7 @@ get the bytes:
 
 - **Inside Backend,** `ManifestContentService.read(digest)` returns the bytes
   at `<root>/blobs/<hex[:2]>/<hex64>` and re-verifies the hash on read.
-- **Outside Backend** (UI, CLI, proposers, evaluators), the Genome Registry
+- **Outside Backend** (UI, CLI, strategies, evaluators), the Genome Registry
   API serves `GET /bots/{bot}/genome/content/{digest}`. It is authorized
   against the bot, so a digest is not a capability by itself. New content is
   uploaded with `PUT /bots/{bot}/genome/content`, which returns its digest.
@@ -313,7 +313,7 @@ get the bytes:
 Three extensions are needed:
 
 1. **A write path for produced content.** Today every store event is a
-   *fetch* (`source_url` is required). Content created by a proposer, such
+   *fetch* (`source_url` is required). Content created by a strategy, such
    as an edited `SKILL.md` or a new memory item, was never fetched. It needs
    a store call whose provenance is the producing patch and run.
 2. **Retention for the archive.** The archive keeps every candidate. Most
@@ -335,10 +335,10 @@ before RSI-02 fixes the patch schema.
 | Option | For | Against |
 | --- | --- | --- |
 | **DB revisions + existing content-addressed store** (recommended) | Tenancy, ACL, queries over lineage and status, reuses the manifest content store, fits Backend patterns | Need our own diff/merge tooling |
-| Git repository per bot | Free history, diff, blame; proposers already speak git | Multi-tenant hosting, ACL, querying across bots, GC — a new infrastructure dependency |
+| Git repository per bot | Free history, diff, blame; coding agents already speak git | Multi-tenant hosting, ACL, querying across bots, GC — a new infrastructure dependency |
 
 Recommendation: DB-native, plus a **git export** (`avn genome export
---format git`) so humans and coding-agent proposers can work on a familiar
+--format git`) so humans and coding-agent strategies can work on a familiar
 filesystem history (the Meta-Harness lesson) without git being the source of
 truth.
 

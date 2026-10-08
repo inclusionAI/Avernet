@@ -50,19 +50,21 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **完成标准**：每个 Manifest v1 示例都能往返转换为修订版；每种补丁操作都有
   明确的风险等级；评审者就锁定基因的默认值达成一致。
 
-### RSI-06 插件协议与作业协议
+### RSI-06 策略端口、能力目录与作业协议
 - **模块**：evolution（新增）、arch
-- **目标**：定义每种插件类型的 Protocol 与 JSON Schema 输入/输出
-  （ExperienceSource、Trigger、Selector、Analyzer、SuiteBuilder、Proposer、
-  Evaluator、AcceptancePolicy、Curator、MetaProposer）、生命周期与失败语义（R11）、
-  隔离/能力声明（R13），以及作业协议（Job Protocol）的线上契约
-  （claim/lease/fencing/heartbeat/complete/fail、artifact 上传）。
+- **目标**：定义策略端口（`run(ctx)`）、`StrategyContext`、
+  候选 / 提交 / 判定、注册记录 schema、首个能力目录（`experience.sessions@1`、
+  `experience.feedback@1`、`agents@1`、`evaluate.train@1`）及其按引擎的提供方
+  契约、进化策略配置（evolution policy，即绑定）schema 与绑定检查、运行生命周期
+  与失败语义（R11）、隔离（R13），以及每个 `ctx` 调用在作业协议（Job Protocol）
+  中的映射。
 - **先读**：[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)；ClawEvolve
   `official-stage-catalog.json`、`routes/internal/evolve.ts`；
   `docs/arch/protocol-contract-tests.md`。
-- **交付物**：契约文档 + schema 文件；策略清单 schema。
-- **完成标准**：ClawEvolve 的 diagnose/plan/tune/bench/accept 输入/输出都能
-  无损地用这些 schema 表达（通过映射表核对）。
+- **交付物**：契约文档 + JSON Schema 文件。
+- **完成标准**：ClawEvolve 的轮次循环可以完全基于上下文编写，而无需绕过它
+  （用 05-strategy-sdk 中 §10 的草图核对），并且一个非 ClawEvolve 的进化策略
+  （记忆整合）能以一组不同的能力适配。
 
 ### RSI-07 进化 API 与 CLI 契约
 - **模块**：evolution、backend、gateway
@@ -102,18 +104,20 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ### RSI-08 进化服务骨架
 - **模块**：evolution（新的 `apps/evolution`，依据 D-1）
 - **目标**：遵循后端 DI/插件约定的服务脚手架；带预算的进化运行编排器状态机；
-  进化策略注册表；作业协议端点；面向 singlebox 的本地 profile（SQLite、进程内
-  worker）；一个参考进化策略 `platform/manual-patch`（Proposer = 提供的补丁，
-  Evaluator = 确定性检查），用于端到端演练整个循环。
+  进化策略注册表；作业协议端点；带绑定检查与触发的进化策略配置（绑定）；面向
+  singlebox 的本地 profile（SQLite、进程内进化策略）；一个参考进化策略
+  `platform/manual-patch`（提交一个提供的补丁；用确定性检查验证），用于端到端
+  演练整个循环。
 - **依赖**：RSI-06、RSI-07、RSI-03。
 - **完成标准**：singlebox 故事：用参考进化策略启动运行 → 记录候选 → 门禁 →
   晋升 → Bot 更新 → 回滚。
 
 ### RSI-09 进化策略 SDK 与一致性测试套件
 - **模块**：evolution
-- **目标**：Python 插件 SDK（模型、基类、JobWorker、`GenomeWorkspace` 的物化 /
-  diff 转补丁、带 OpenClaw 实现的 AgentRunner 抽象）、本地 harness、pytest
-  一致性测试套件、`avn strategy dev|test|publish`。
+- **目标**：Python 策略 SDK：`EvolutionStrategy` 基类、类型化模型、进程内与
+  作业协议两种 `StrategyContext` 实现、`WorkspaceFactory`（物化 / `to_patch`）、
+  带 OpenClaw 提供方的 `AgentRunner`、带模拟平台的本地 harness、策略一致性测试
+  套件、`avn strategy dev|test|publish`。
 - **依赖**：RSI-06、RSI-08。
 - **完成标准**：由平台团队之外的人仅凭 SDK 文档编写一个示例第三方进化策略
   （例如 OPRO 风格的人设优化器），并通过一致性测试。
@@ -139,15 +143,15 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   `candidate_opt_gate` 变为阻断式的判定策略；验证 profile。
 - **先读**：[03-verification.zh-CN.md](03-verification.zh-CN.md)（§2 列出了可复用的
   现有代码）；[08-governance.zh-CN.md §2、§4](08-governance.zh-CN.md#2-门禁)。
-- **完成标准**：候选在沙箱中完成验证，带配对基线与按划分的判定；可证明提议器
+- **完成标准**：候选在沙箱中完成验证，带配对基线与按划分的判定；可证明策略
   作业输入不包含封存集、回归集和安全集；同一批用例文件无需修改即可在 ClawBench
   和平台评分器下运行。
 
 ### RSI-12 门禁、评审队列与晋升
-- **模块**：backend（门禁底线、晋升）、evolution（策略插件）
-- **目标**：平台底线检查、风险等级分配、AcceptancePolicy 插件执行、带 diff +
-  评估报告的评审队列、审批、所有者策略（启用的进化策略、自动晋升上限、预算、
-  调度）、审计事件、熔断开关。
+- **模块**：backend（门禁底线、晋升）、evolution（绑定）
+- **目标**：平台底线检查、风险等级分配、基于绑定验证配置下验证判定的门禁、带
+  diff + 验证报告的评审队列、审批、所有者策略（绑定、自动晋升上限）、审计事件、
+  熔断开关。
 - **完成标准**：T1 在策略允许下自动晋升；T2 等待审批；T3 在锁定时被拒绝；所有
   决定均有审计。
 
@@ -155,9 +159,9 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：evolverun、evolution
 - **目标**：执行
   [07-default-strategy.zh-CN.md §4](07-default-strategy.zh-CN.md#4-迁移计划绞杀者模式不做一次性切换)
-  中的绞杀者步骤 1–3：影子记录修订版 → 适配器进化策略 → 原生进化策略。Tune 在
-  沙箱 `GenomeWorkspace` 上工作；接纳规则变为 `clawevolve/acceptance` 策略；
-  从流程中移除 pack/restore；决定 D-2、D-3。
+  中的绞杀者步骤 1–3：影子记录修订版 → 黑盒适配器进化策略 → 原生进化策略。
+  Tune 在由 `ctx.workspace` 得到的沙箱上工作；它的接纳规则变为内部提交过滤，
+  而接受与否转由平台验证决定；从流程中移除 pack/restore；决定 D-2、D-3。
 - **依赖**：RSI-09、RSI-10、RSI-11、RSI-12。
 - **完成标准**：`clawevolve/bot-evolution` 通过平台、在不触碰线上工作区的
   情况下，在其自身 bench 上取得与旧版 AgentEvolve 相同或更好的结果。
@@ -172,7 +176,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **模块**：evolution
 - **目标**：按 [04-recursion.zh-CN.md §3](04-recursion.zh-CN.md#3-实验记录h) 中的
   schema 记录每一次第 2 层实验（包括被拒绝的候选及其后续的线上结果）；派生的
-  机制指标；面向提议器的文件系统导出；验证器版本标记。
+  机制指标；面向策略的文件系统导出；验证器版本标记。
 - **依赖**：RSI-08。在第一轮迭代中，它是第 2 层的归档与审计轨迹；为第 3 层
   派生改进机制指标可以推迟，但记录应尽早开始，因为第 3 层的效果取决于它所学习
   的历史。
@@ -188,7 +192,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 
 ### RSI-23 机制验证与离线重放（之后，第 3 层）
 - **模块**：evolution
-- **目标**：(a) 基于 H 的离线重放工具，用于接纳策略的变更，泛化
+- **目标**：(a) 基于 H 的离线重放工具，用于验证配置与提交过滤的变更，泛化
   `calibrate_evolution_gates.py` / `replay_candidate_gate.py`；
   (b) 从 H 冻结得到的改进问题基准，以及
   [04-recursion.zh-CN.md §5](04-recursion.zh-CN.md#5-机制验证) 中的机制验证协议，
@@ -197,7 +201,7 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **完成标准**：对 ClawEvolve tune prompt 的一次修改，通过在留出问题上将已验证
   的改进收益与当前机制对比，被接受或拒绝。
 
-### RSI-24 自动化元提议器（之后，第 3 层）
+### RSI-24 自动化元策略（之后，第 3 层）
 - **模块**：evolution
 - **目标**：一个读取 H 并提议机制补丁（阈值、prompt、算子、步骤顺序）的元进化
   策略，只能经由 RSI-23 与人工批准才被采纳；由静态检查强制执行
@@ -240,8 +244,8 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ## P6 — 开放式探索
 
 ### RSI-17 归档选择器
-- 将逐用例 Pareto（GEPA）、MAP-Elites 生态位、分支元生产力（HGM）实现为
-  Selector 插件；为提议器导出归档读模型。
+- 将逐用例 Pareto（GEPA）、MAP-Elites 生态位、分支元生产力（HGM）实现为绑定
+  `parent` 字段的选项；为进化策略导出归档读模型。
 
 ### RSI-18 跨 Bot skill 迁移
 - 已晋升的 skill 在现有治理（ADR 0010）下提供给 Skill Center；在采纳前针对每个

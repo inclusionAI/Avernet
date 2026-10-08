@@ -15,9 +15,9 @@ self-improvement，RSI）循环，其中：
 
 1. **进化的单元**是一个有版本、不可变的 bot 制品——*Bot 基因组*（Bot
    Genome）——构建在现有的 Bot Config Manifest 之上；
-2. bot **如何**进化是一个**可插拔的进化策略**（提议器、评估器、门禁、
-   触发器），其他团队可以用 SDK 编写并注册，而无需修改平台；ClawEvolve 成为
-   第一个、也是默认的进化策略；
+2. bot **如何**进化是一个**可插拔的进化策略**：一个 `run(ctx)` 端口，其他团队
+   用 SDK 实现并注册，而无需修改平台。每个 bot 通过绑定选择自己的进化策略；
+   ClawEvolve 成为第一个、也是默认的进化策略；
 3. 循环可以由**确定性代码**（API / SDK）驱动，由**运维人员或 CI**（CLI）
    驱动，也可以由**一个 bot** 驱动（同一个 CLI，作用域限定为 bot 主体），三者
    共用同一份契约；
@@ -43,7 +43,7 @@ self-improvement，RSI）循环，其中：
 | 2 | [02-genome.zh-CN.md](02-genome.zh-CN.md) | 一个被进化的 bot *是*什么：Bot 基因组，以及它如何扩展 Manifest |
 | 3 | [03-verification.zh-CN.md](03-verification.zh-CN.md) | 如何判断一次变更是好的：Bot 验证（S′ 对比 S）与机制验证（M′ 对比 M），以及已有哪些评测代码 |
 | 4 | [04-recursion.zh-CN.md](04-recursion.zh-CN.md) | 第 3 层：基于实验记录 H 安全地改进改进机制 |
-| 5 | [05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md) | 进化如何做到可插拔：插件类型、策略清单、执行绑定 |
+| 5 | [05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md) | 进化如何做到可插拔：唯一的策略端口、能力目录、按 bot 的绑定、运行时 |
 | 6 | [06-interfaces.zh-CN.md](06-interfaces.zh-CN.md) | API、SDK 与 CLI 的区别，以及 bot 如何驱动进化 |
 | 7 | [07-default-strategy.zh-CN.md](07-default-strategy.zh-CN.md) | ClawEvolve 及其他现有管线如何作为默认策略接入 |
 | 8 | [08-governance.zh-CN.md](08-governance.zh-CN.md) | 门禁、风险等级、反奖励投机、沙箱、发布、预算 |
@@ -63,13 +63,15 @@ self-improvement，RSI）循环，其中：
 | --- | --- |
 | **Bot 基因组（Bot Genome）** | 单个 bot 可进化的声明式定义：人设文件、skill、记忆种子、资源、工具、引擎配置。一经记录即不可变；以内容哈希标识。 |
 | **基因组修订版（Genome Revision）** | 基因组的一个已记录版本，带有父指针、来源记录和状态。 |
-| **基因组补丁（Genome Patch）** | 从一个修订版到另一个修订版的、有类型的、逐项列出的变更。这是提议器唯一可以产出的东西。 |
+| **基因组补丁（Genome Patch）** | 从一个修订版到另一个修订版的、有类型的、逐项列出的变更。这是进化策略唯一可以提交的东西。 |
 | **表型（Phenotype）** | 应用某个修订版后产生的运行中的 bot（引擎 + 工作区）。只被观测，从不被进化直接编辑。 |
 | **经验（Experience）** | 从表型中收集的、规范化后的片段（episode）（会话 / 轨迹）、反馈和评估轨迹。 |
-| **进化策略（Strategy）** | 由插件（分析器、提议器、评估器、门禁、选择器、触发器）组成的有版本的组合，定义一个 bot *如何*进化。 |
-| **进化运行（Evolution Run）** | 针对一个 bot（或一条谱系）对某个进化策略的一次执行，由迭代、候选、评估和决策组成。 |
+| **进化策略（Strategy）** | 只有一个方法 `run(ctx)` 的有版本代码，为一个 bot 提议候选；注册时附带它 `needs` 的目录能力。 |
+| **能力（Capability）** | 策略上下文中归平台所有、带版本的一个部分（例如 `experience.sessions@1`），按引擎划分提供方。 |
+| **绑定（Binding）** | bot 进化策略配置（evolution policy）中的一个条目：用哪个进化策略、触发、父版本、允许的基因、验证配置、预算、参数。 |
+| **进化运行（Evolution Run）** | 针对一个 bot 对某个绑定的一次执行，所有内容在开始时冻结；它提交候选并接收判定。 |
 | **候选（Candidate）** | 在一次运行中提出、尚未晋升的基因组修订版。 |
-| **门禁（Gate）** | 归平台所有的决策点，使用进化策略的接纳策略*加上*不可协商的平台检查，来接受或拒绝一个候选。 |
+| **门禁（Gate）** | 归平台所有的决策点，使用绑定验证配置下的验证判定*加上*不可协商的平台检查，来接受或拒绝一个候选。 |
 | **晋升（Promotion）** | 将 bot 的 `active` 引用（ref）移动到某个修订版，并通过现有的 Manifest / 发布链路应用它。 |
 | **归档 / 实验记录 H（Archive / Experiment Ledger (H)）** | 曾经运行过的每一次改进实验（改进机制、父版本、候选、证据、判定、成本、线上结果）。不删除任何内容；它是第 2 层的选择池，也是第 3 层的证据基础。 |
 | **改进机制（M）（Mechanism (M)）** | 改进机制：一个进化策略版本，加上它的 prompt、算子、参数和模型。像基因组一样有版本，因此它本身也可以被改进（第 3 层）。 |

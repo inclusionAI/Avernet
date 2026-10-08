@@ -165,13 +165,13 @@ strategy (for example, held-out cases). Generalizes ClawEvolve's `ce_tasks` /
 
 Platform-owned and **read-only to strategies and bots**:
 
-- **Suites** with mandatory splits: `train` (proposer may see failures),
-  `validation` (gate uses it; proposer sees only aggregates), `holdout`
+- **Suites** with mandatory splits: `train` (the strategy may see failures),
+  `validation` (gate uses it; the strategy sees only aggregates), `holdout`
   (gate and periodic audit only), `regression` (grows automatically from
   production failures and previously fixed cases), `safety`.
 - **Graders**: deterministic checks, rubric LLM judges (preferably a
-  different model family from the proposer), hybrid. Every grader returns
-  `score + critique` because reflective proposers (GEPA, ClawEvolve tune)
+  different model family from the strategy's models), hybrid. Every grader returns
+  `score + critique` because reflective strategies (GEPA, ClawEvolve tune)
   need the critique.
 - **Sandbox execution**: a candidate is materialised into an ephemeral
   **eval bot** via the existing `plugin_api/eval_env/` seam
@@ -223,7 +223,7 @@ It is also the evidence base for level 3.
 ### Meta-loop (level 3)
 
 Runs the same loop with a **mechanism** (strategy version) as the target and
-**mechanism verification** as the verifier: a meta-proposer reads H, proposes
+**mechanism verification** as the verifier: a meta-strategy reads H, proposes
 a mechanism patch, and the candidate mechanism is compared against the active
 one on held-out improvement problems before adoption (human-approved by
 default). Mechanisms are versioned in C3 with the same revision/ref model as
@@ -317,9 +317,9 @@ schedule because the failure-rate signal crossed a threshold.
 | P1 Genome Registry | Manifest gains revisions, refs, compare-and-swap, pinned resolution, apply-records-revision, going back to any earlier revision | **Yes** — versioned bots, independent of RSI |
 | P2 Evolution core | `apps/evolution` skeleton, run orchestrator, job protocol, strategy registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic evaluator) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded as a black-box strategy: session export provider, sandboxed tune emitting patches, ClawBench graders in the Verification Service | Yes — today's AgentEvolve on any OpenClaw bot through the platform |
-| P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of acceptance policies over H | Hardening; the verify gate is useful for service bots on its own |
+| P4 Verification & governance | Verification Service (paired stats, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow/canary, offline replay of verification profiles and submission filters over H | Hardening; the verify gate is useful for service bots on its own |
 | P5 Bot-driven + mechanism verification | Bot principal scopes, `avn` as bot tool + SKILL.md, proposal inbox, memory projection contract, consolidation ("dream") strategy; improvement-problem benchmark for verifying mechanism changes | Fast loop; regression tests for strategies |
-| P6 Open-ended | Automated meta-proposer (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
+| P6 Open-ended | Automated meta-strategy (level 3), archive selectors (Pareto/MAP-Elites/clade), cross-bot skill transfer via Skill Center, training-data export, additional engines | Research-grade |
 
 **First iteration scope.** The first iteration focuses on level 2:
 improving bots, with platform-owned verification (P0–P4, plus the parts of
@@ -348,7 +348,7 @@ Out of scope, but the design keeps the door open at zero extra cost:
 | Level 3 optimises noise or weakens the judge | Verifier is fixed and human-owned; mechanism verification on held-out improvement problems; depth bounded at 2; mechanism adoption human-approved |
 | Reward hacking / evaluator tampering | Evaluators and suites outside the genome; locked genes; diff audit for guardrail-touching edits; see governance |
 | Persona drift / context collapse | Itemized patches only; size-change thresholds; per-item provenance |
-| Memory/skill poisoning via trajectories | Experience is untrusted input to proposers; secret/PII scan on patches; risk tiers |
+| Memory/skill poisoning via trajectories | Experience is untrusted input to strategies; secret/PII scan on patches; risk tiers |
 | Cost blow-up | Per-run, per-bot, per-tenant budgets enforced by orchestrator, not strategy |
 | Platform built before demand | P1 is independently useful; P3 proves the abstraction on existing demand before P5/P6 |
 | Constitution friction (new module, new principal) | Draft decisions up front; conformance tests per protocol from P2 |

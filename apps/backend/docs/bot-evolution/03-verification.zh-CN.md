@@ -34,7 +34,7 @@
 | **ClawWeb Bench store** | `apps/evolverun/clawweb/public/shared/server/schema.ts`（`cm_bench_domains/templates/template_versions/runs/task_results/artifacts`）、`routes/bench.ts` | 有版本的用例集（domain = 用例集）、带 `source_hash` 的已发布模板、运行记录及带明细和对话记录的逐用例结果 | **在用**（OSS 版本中也有） | **用例集注册表**和**验证结果**的数据模型雏形 |
 | **ClawEvolve 划分** | `clawevolve-plan/clawevolve_plan/bench/split.py`、`clawevolve_bench_plan_run.py:185-211`、`clawevolve_optimize_run.py:1140-1330` | 训练/测试 domain、按会话分组的防泄漏划分、验证集 id 在 tune/review 提示词中被隐去、用例和评分器被冻结 | **在用** | **划分分配 + 可见性规则** |
 | **ClawEvolve 门禁** | `clawevolve_optimize_run.py`：`action_accept` `:6256`、`candidate_static_gate` `:2666`、`candidate_opt_gate` `:5675-5958`、`full_opt_gate` `:5862-5947`、`replicate-validation` `:6380-6520`、评估标识 `:3604-3745` | 当且仅当测试分数 > 基线时接纳。回归预算、受保护信号和成对带种子复现都存在，但只是**建议性的或不可达** | 接纳在用；其余休眠 | **比较器 + 判定策略**的构建块（纯函数） |
-| **门禁校准 / 回放** | `clawevolve-skills/scripts/calibrate_evolution_gates.py`、`replay_candidate_gate.py` | 由带标签的历史决策 + 对抗场景组成的黄金语料库。报告门禁的精确率/召回率。基于已存储轮次离线回放门禁 | 在用工具 | **验证器校准**以及针对接纳策略变更的**机制验证**的雏形 |
+| **门禁校准 / 回放** | `clawevolve-skills/scripts/calibrate_evolution_gates.py`、`replay_candidate_gate.py` | 由带标签的历史决策 + 对抗场景组成的黄金语料库。报告门禁的精确率/召回率。基于已存储轮次离线回放门禁 | 在用工具 | **验证器校准**以及针对验证配置与提交过滤变更的**机制验证**的雏形 |
 | **诊断 → 计划** | `clawevolve-diagnose/clawevolve_diagnose/judge/*`、`clawevolve-plan/bench/case_contract.py`、`template_builder.py` | LLM 会话评审从真实会话中挖掘好/坏用例，并将其转为 bench 用例 | 在用 | 从生产故障中**扩充回归集** |
 | **Backend 评测环境 + Quality Task** | `core/service_bot/services/publish_flow/eval_publish_mixin.py:33-185`、`core/quality/services/task_processor.py:36-44,304-329`、`adapters/http/quality/router.py`；接缝 `plugin_api/eval_env/*`、BaaS `spi/eval_env/` | 在 `PublishStage.EVAL` 部署一个隔离的、受 TTL 约束的 service bot 副本，按标签路由评测会话，然后调用一个**外部**评分器（MASA `/eval/start`、`/eval/progress`）。结果以不透明方式存储 | 已接通，但评分器在外部；eval_env 插件协议是未使用的 Noop 桩；没有调度器 | 面向已部署 bot 的**沙箱执行器**（真实表型，任意引擎） |
 | **Service-bot VERIFY 阶段** | `publish_flow_service.py:150,174,386-397` | 部署一个验证环境 bot，并等待人工「上线」 | 在用，**没有自动化检查** | **验证门禁**在发布流程上的挂载点 |
@@ -71,12 +71,13 @@
 | **执行器** | 修订版运行的地方。*本地沙箱*（物化的工作区 + 引擎 CLI，ClawBench 风格；快速、便宜）或*部署沙箱*（经由 `eval_publish` 的评测 Bot；真实交付路径，任意引擎） |
 | **评分器** | `automated`、`rubric_judge`、`hybrid`、`ensemble`。每个评分器都返回 `score + critique + breakdown` |
 | **比较器** | 逐用例成对差值、多次重复种子、置信区间、胜率 |
-| **验证配置（profile）** | 有版本的策略：使用哪些划分、多少个种子、哪个执行器、阈值、显著性水平、回归容忍度。由验证器拥有，被进化策略引用 |
+| **验证配置（profile）** | 有版本的策略：使用哪些划分、多少个种子、哪个执行器、阈值、显著性水平、回归容忍度。由验证器拥有，按绑定选择 |
 | **判定** | `accept` / `reject` / `inconclusive`，附带逐划分证据、成本和验证器版本 |
 
-执行器和评分器是**由验证器拥有的插件类型**，不属于进化策略。进化策略可以*请求*
-某个配置，并通过其用例集构建器（SuiteBuilder）*添加*训练集用例。它不得更改
-评分器、封存集、回归集或安全集。
+执行器和评分器是**由验证器拥有的插件**，不属于进化策略。绑定选择验证配置
+（所有者可以选择更严格的配置，绝不能选择更宽松的）。进化策略可以通过
+`ctx.evaluate.add_train_cases()` *添加*训练集用例。它不得更改评分器、封存集、
+回归集或安全集。
 
 ## 4. Bot 验证协议（第 2 层）
 
@@ -107,7 +108,7 @@
    成本不超出容忍度，或要求它胜过一个预算匹配的基线（额外采样的 S1）。
 9. **判定**，并将证据写入 H。
 
-默认判定策略（进化策略可以收紧，不能放宽）：
+默认判定策略（绑定可以选择更严格的配置，绝不能选择更宽松的）：
 
 ```text
 accept  ⇔ floor ok ∧ sanity ok ∧ safety: no new failures ∧ regression: within tolerance
@@ -140,7 +141,7 @@ inconclusive ⇔ otherwise  → strategy may spend more budget (more seeds/cases
 - 一次**执行**是在沙箱中进行的一次完整第 2 层运行，其输出本身由 §4 验证。
 - **分数**是在该问题隐藏用例集上经验证的改进收益，附带成本、回归率和误接纳率。
 - **比较器**是同一套成对统计机制，只是粒度为问题级。
-- **接纳策略变更**可以通过把已存储的候选回放过新策略、并以带标签的结果为准
+- **验证配置或提交过滤的变更**可以通过把已存储的候选回放过新策略、并以带标签的结果为准
   测量精确率/召回率，来进行低成本筛查。这正是 `calibrate_evolution_gates.py`
   和 `replay_candidate_gate.py` 目前所做的，因此它们成为筛查工具。
   筛查不等于采纳。
@@ -154,7 +155,7 @@ inconclusive ⇔ otherwise  → strategy may spend more budget (more seeds/cases
 - **经过校准**：定期度量验证器本身。对照人工标签的评审模型准确率、在黄金语料库
   上的门禁精确率/召回率（将 `calibrate_evolution_gates.py` 从门禁扩展到评审
   模型），以及封存集的新鲜度。
-- **隐藏**：提议器和元提议器的输入从不包含封存集、回归集或安全集用例。验证集
+- **隐藏**：策略和元策略的输入从不包含封存集、回归集或安全集用例。验证集
   只以聚合形式暴露。这由编排器强制执行，而不是靠提示词。
 - **可发现篡改**：评分器代码和用例内容都是内容寻址的。若候选编辑了类似防护
   规则或评估指令的文本，会被打上标记并提升风险等级。

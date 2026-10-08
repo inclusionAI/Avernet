@@ -83,7 +83,7 @@ An experiment is one level-2 attempt:
 | `online_outcome` | Live metrics of S2 vs S1 after promotion (delayed join) |
 
 Negative results are first-class records: rejected candidates, regressions,
-rollbacks and wasted budget. That is what lets a meta-proposer learn
+rollbacks and wasted budget. That is what lets a meta-strategy learn
 "operator X keeps failing on bots of type Y", the way ClawEvolve's operator
 library would want to.
 
@@ -111,7 +111,7 @@ mechanism verification.
 3. **Analyze H**: find patterns in failed or wasted experiments (operators
    with low yield, thresholds that let regressions through, steps that burn
    budget without effect).
-4. **Meta-propose**: a **meta-proposer** (itself a plugin, e.g. a coding
+4. **Meta-propose**: a **meta-strategy** (itself a strategy, e.g. a coding
    agent given a filesystem export of H, the Meta-Harness pattern) emits a
    **mechanism patch**: tune a threshold, rewrite the tune prompt section on
    persona edits, add an operator, swap the evaluator mix, reorder steps.
@@ -151,10 +151,10 @@ known fix.
 
 **Protocol.**
 
-1. Split improvement problems into **mechanism-train** (the meta-proposer may
+1. Split improvement problems into **mechanism-train** (the meta-strategy may
    see outcomes) and **mechanism-holdout** (used only here), stratified by
    engine and bot type. Holdout problems should come from bots the
-   meta-proposer never saw.
+   meta-strategy never saw.
 2. Run M1 and M′ on the same holdout problems with the **same budget** and
    multiple seeds. Each run is a full level-2 run in sandbox eval bots, so its
    output is verified by bot verification exactly as in production.
@@ -186,7 +186,7 @@ weakening its own judge, which is the Darwin Gödel Machine failure.
 | The **verifier**: suites, splits, graders, platform gate floor, meta-verification protocol, significance thresholds | It defines "better". If the loop can edit it, gains become meaningless |
 | Locked genes and `policy` sections of bot genomes | Owner authority (DR-2) |
 | Budgets, kill switches, risk-tier table | Safety envelope |
-| The meta-proposer's ability to modify itself or its own verifier | Prevents unbounded self-reference |
+| The meta-strategy's ability to modify itself or its own verifier | Prevents unbounded self-reference |
 
 Rules:
 
@@ -224,10 +224,10 @@ it before those exist would optimise noise.
 1. **Record H from day one** (with RSI-08 and RSI-13). It is cheap and is the
    prerequisite for everything below.
 2. **Offline replay** (P4): port `calibrate_evolution_gates.py` /
-   `replay_candidate_gate.py` into a replay tool over H for acceptance-policy
+   `replay_candidate_gate.py` into a replay tool over H for verification-profile and submission-filter
    changes. Humans adopt.
 3. **Improvement-problem benchmark** (P5): freeze problems from H and run the
    mechanism-verification protocol for human-authored mechanism changes. This
    alone is valuable: it is a regression test for strategies.
-4. **Automated meta-proposer** (P6): let a meta-strategy propose mechanism
+4. **Automated meta-strategy** (P6): let a meta-strategy propose mechanism
    patches, adopted only through §5 and human approval.

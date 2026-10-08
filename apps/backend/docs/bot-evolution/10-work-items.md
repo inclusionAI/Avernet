@@ -160,7 +160,7 @@ the rest.
 - **Read first**: [03-verification.md](03-verification.md) (§2 lists the existing
   code to reuse); [08-governance.md §2, §4](08-governance.md#2-the-gate).
 - **Done when**: a candidate is verified in a sandbox with paired baseline and
-  per-split verdict; proposer job inputs provably exclude holdout,
+  per-split verdict; strategy job inputs provably exclude holdout,
   regression, and safety; the same case files run unchanged under ClawBench
   and the platform grader.
 
@@ -197,7 +197,7 @@ the rest.
 - **Goal**: Record every level-2 experiment with the schema in
   [04-recursion.md §3](04-recursion.md#3-experiment-ledger-h) (including rejected
   candidates and later online outcomes); derived mechanism metrics; filesystem
-  export for proposers; verifier-version tagging.
+  export for strategies; verifier-version tagging.
 - **Depends on**: RSI-08. In the first iteration this is the level-2
   archive and audit trail; deriving mechanism metrics for level 3 can wait,
   but recording should start early because level 3 is only as good as the
@@ -216,7 +216,7 @@ the rest.
 
 ### RSI-23 Mechanism verification and offline replay (later, level 3)
 - **Module**: evolution
-- **Goal**: (a) Offline replay tool over H for acceptance-policy changes,
+- **Goal**: (a) Offline replay tool over H for changes to verification profiles and submission filters,
   generalising `calibrate_evolution_gates.py` / `replay_candidate_gate.py`;
   (b) improvement-problem benchmark frozen from H and the mechanism
   verification protocol of [04-recursion.md §5](04-recursion.md#5-mechanism-verification),
@@ -226,7 +226,7 @@ the rest.
   rejected by comparing verified improvement yield against the current
   mechanism on held-out problems.
 
-### RSI-24 Automated meta-proposer (later, level 3)
+### RSI-24 Automated meta-strategy (later, level 3)
 - **Module**: evolution
 - **Goal**: A meta-strategy that reads H and proposes mechanism patches
   (thresholds, prompts, operators, step order), adopted only through RSI-23
