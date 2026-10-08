@@ -3,6 +3,10 @@
 > 中文版：[03-verification.zh-CN.md](03-verification.zh-CN.md)
 
 > Status: DRAFT. This is the "verify & accept" box in every improvement loop.
+> Scope: **how** the platform measures whether a candidate is better (test
+> suites, graders, statistics, verdicts). Who may decide what, and the rules
+> around promotion (gate, risk tiers, approvals, sandboxing, rollout, budgets,
+> audit), are in [08-governance.md](08-governance.md).
 > It is platform-owned (DR-2) and is the anchor that recursion may not move
 > ([04-recursion.md §6](04-recursion.md#6-bounds-what-recursion-may-not-touch)).
 

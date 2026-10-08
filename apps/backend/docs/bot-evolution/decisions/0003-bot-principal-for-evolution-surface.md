@@ -7,7 +7,7 @@ Status: proposed (draft decision record; promote to `docs/adr/` on acceptance).
 ## Decision
 
 OpenAPI v1 currently refuses `bot` principals, and the bot→owner fallback was
-removed deliberately. This ADR re-admits bots **only** for the evolution
+removed deliberately. This decision record admits bots **only** to the new evolution
 surface (genome read, experience, inbox, run requests, and runner jobs), with
 explicit scopes instead of owner impersonation:
 

@@ -4,6 +4,10 @@
 
 > Status: DRAFT. Proposed decision:
 > [DR-2](decisions/0002-promotion-is-platform-owned.md).
+> Scope: **who** may decide what, and the rules around promotion (gate, risk
+> tiers, approvals, sandboxing, rollout, budgets, audit). **How** a candidate
+> is measured (suites, graders, statistics, verdicts) is in
+> [03-verification.md](03-verification.md).
 
 Self-improvement that the improver can grade is self-deception at scale. The
 literature is consistent on this (DGM removed its own hallucination markers;

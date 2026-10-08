@@ -13,14 +13,21 @@
 2. **One door out.** A strategy reaches the platform only through the
    context it is given. It cannot promote, read held-out tests, touch the
    live bot, or read platform storage. Isolation and budgets are therefore
-   enforced in one place, whatever the strategy is.
+   enforced in one place, whatever the strategy is. (A **budget** is the
+   per-run spending limit set in the bot's binding: model spend in USD,
+   wall-clock time, and evaluation rollouts. Every model call and evaluation
+   is charged through `ctx.budget`, and the run stops when it runs out.)
 3. **Strategies propose; the platform decides.** A strategy submits
    candidates. Recording, verification, the gate, and promotion stay
    platform-owned (DR-2).
 4. **Facts about code are registered; choices about bots are configured.**
-   What a strategy version needs is fixed and registered with it. Which
-   strategies a bot uses, and how, is per-bot configuration that changes at
-   any time.
+   Some information is true of a strategy version no matter which bot uses
+   it. For example, "ClawEvolve 2.0 drives OpenClaw agents and reads
+   conversation history". That is recorded once, when the version is
+   registered (§3). Other information is a decision about one bot. For
+   example, "bot_123 runs ClawEvolve nightly, may change persona and skills,
+   and has a $20 budget". That lives in the bot's binding (§5), and the
+   owner can change it at any time without touching the strategy.
 5. **Few concepts, defined once.** Every term below has one definition; no
    field restates another (for example, engine compatibility is derived from
    `needs`, not declared separately).
@@ -47,9 +54,12 @@ class EvolutionStrategy(Protocol):
     async def run(self, ctx: StrategyContext) -> RunSummary: ...
 ```
 
-The registration record is stored in the Strategy Registry (C3) when a
-version is registered. It is data, not a method, because the platform needs
-it without running the strategy's code (for example, before a job-worker
+**Registering** a strategy version tells the platform that it exists: where
+its code runs (`runtime`) and which capabilities it needs (`needs`). Only a
+registered version that passes the conformance kit (§11) can be bound to
+bots. Registration produces the record below, stored in the Strategy
+Registry (C3). It is data, not a method, because the platform needs it
+without running the strategy's code (for example, before a job-worker
 container exists):
 
 ```jsonc
@@ -86,8 +96,54 @@ OpenClaw), which is how a binding check knows what a bot can supply.
 | `agents@1` `{engines}` | `ctx.agents.run(engine, …)` | Run an engine agent inside a sandbox workspace | The engine list must include the bot's engine |
 | `evaluate.train@1` | `ctx.evaluate.train(…)`, `ctx.evaluate.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques; adding train cases | Validation, holdout, regression, and safety stay hidden |
 
-Adding an entry is a reviewed platform change. A breaking change publishes a
-new version (`@2`) so registered strategies keep working.
+**What `@1` means.** The number after `@` is the version of the
+*capability's contract* (its methods and data shapes), not the version of a
+strategy. A strategy states which contract version it was written against.
+If the platform later changes `experience.sessions` in an incompatible way
+(for example, a different episode format), it publishes
+`experience.sessions@2` and keeps serving `@1` to strategies registered
+against `@1`. Adding an entry or a version is a reviewed platform change.
+
+### 4.1 What capabilities look like
+
+Each capability is a small, typed API on the context. Two examples:
+
+```python
+# experience.sessions@1
+async def sessions(self, *, days: int, limit: int = 500,
+                   revision: str | None = None) -> list[Episode]: ...
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// One Episode returned by ctx.experience.sessions(days=7)
+{
+  "episode_id": "ep_91",
+  "revision_id": "sha256:a90b…",            // the genome revision the bot was running
+  "started_at": "2026-10-07T09:12:00Z",
+  "turns": [
+    {"role": "user", "text": "Can I get a refund for half of my order?"},
+    {"role": "assistant", "text": "…", "tool_calls": [{"name": "order_lookup", "args": {"id": "A17"}}]},
+    {"role": "tool", "name": "order_lookup", "result": "…"}
+  ],
+  "outcome": {"status": "user_corrected", "feedback": "partial refunds are allowed"},
+  "redactions": ["email", "phone"]           // personal data removed before the strategy sees it
+}
+```
+
+```python
+# agents@1 — registered as {"agents@1": {"engines": ["openclaw"]}}
+async def run(self, engine: str, *, agent: str, workspace: Workspace,
+              prompt: str, timeout_s: int = 1800) -> AgentResult: ...
+```
+
+`engines` lists the engines this strategy can drive. A call with any other
+engine is refused, and a binding to a bot whose engine is not in the list
+is rejected (§5). For example, ClawEvolve's tune step calls
+`ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws, prompt=…)`.
+The platform starts that agent inside the sandbox `ws`, not on the live bot,
+and returns its transcript and exit status. Files it changed stay in `ws`
+until the strategy turns them into a patch.
 
 ## 5. Binding: which strategies a bot uses
 
@@ -183,13 +239,22 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 | Tier | What a team writes | When to use |
 | --- | --- | --- |
-| **Black box** | A whole strategy: `run(ctx)` plus a registration record | An existing engine with its own inner loop (ClawEvolve, a GEPA-style optimizer, a coding-agent loop). This is the default way to plug in |
-| **Composed** | One step for `platform/composed`, a built-in strategy whose params are a flow of small steps (for example: analyze → propose) | Reusing most of an existing strategy and swapping one piece (for example, only a better failure analyzer) |
+| **Black box** | A whole strategy: `run(ctx)`, registered with the platform (§3) | An existing engine with its own inner loop (ClawEvolve, a GEPA-style optimizer, a coding-agent loop). This is the default way to plug in, and the only tier in the first iteration |
+| **Composed** *(later)* | One small step that plugs into `platform/composed` | Reusing most of an existing strategy and swapping one piece |
 
-Both tiers look identical to the orchestrator. The composed tier's step
-types (analyzer, proposer, and so on) are defined only when a second team
-actually needs to swap a piece (R19: abstract after two examples). Until
-then, ClawEvolve and other strategies plug in as black boxes.
+The composed tier exists for teams that have a better *piece*, not a whole
+strategy. `platform/composed` is itself an ordinary strategy shipped by the
+platform. Its params list a sequence of small steps, and it calls each step
+in turn. For example, suppose a team has a better way to find the root
+causes of failures, but no tuning loop of its own. Instead of writing a
+complete strategy, it would write one "analyze" step. A binding would then
+run `platform/composed` with params such as
+`{"steps": ["team-x/root-cause-analyzer@1", "clawevolve/tune@2"]}`, reusing
+ClawEvolve's tuning. To the orchestrator, this is just another strategy.
+
+The step types (analyze, propose, and so on) are defined only when a second
+team actually needs to swap a piece (R19: abstract after two examples).
+Until then, ClawEvolve and other strategies plug in as black boxes.
 
 ## 9. Runtimes
 
