@@ -15,14 +15,19 @@ acquiring that same lock. The strategy never sees, acquires, or releases the
 lock: acquire/release/async hand-off ownership stays entirely in the original
 caller, so a prepare failure leaves no lock to clean up and a verify failure
 flows through the caller's existing `finally` release. The default strategy
-returns no verifier and never probes devices. Existing duplicate handling,
-stop/start/update, status transitions and allocation lock hand-off remain
-untouched. No lock repository or TTL changes are required.
+returns no verifier and never probes devices. The synchronous stop/start/update and allocation lock hand-off remain in
+BotService. Ordinary HTTP coding restart now admits a durable task before this
+precondition; its pending projection and operation journal are owned by the
+coding strategy. No restart-lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
-resolves the strategy and calls its `execute_restart` contract; coding offloads
-the original synchronous restart method, while default engines execute inline.
-The original synchronous Service API is unchanged. Published restart
+resolves the strategy and calls its `execute_restart` contract; explicit
+`aicoding` / `claude_code` engines enqueue durable work and commit PENDING before
+returning. Default engines execute inline. The coding worker calls the original
+synchronous restart method with the original callback signature. The worker
+supplies a stable backup operation ID and a CAS mutation fence through the
+coding-owned execution context; direct synchronous callers retain their gate.
+See `apps/backend/specs/2026-10-08-aicoding-durable-restart/spec.md`. Published restart
 and caller upgrade each invoke the coding precondition before replacement.
 Ordinary publication, instance creation/reuse and workflow adoption are not
 backup operations. Instance consumers call `prepare_restart_async`, which delegates to the same

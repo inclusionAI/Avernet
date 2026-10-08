@@ -271,22 +271,29 @@ class AicodingRestartBackupMixin:
         release. Verification failure propagates through the caller's existing
         error path, which owns lock release.
         """
+        from .restart_state import current_restart
+        execution = current_restart.get()
+        if execution is not None:
+            execution.check_target(ctx, kwargs.get('binding_id'))
+            kwargs['operation_id'] = execution.operation_id
         if device_service_provider is not None and kwargs.get('binding_id') is not None:
             kwargs['device_service'] = device_service_provider()
         kwargs['operation_id'] = _operation_id(
             kwargs.get('operation_id'), kwargs.pop('restart_key', None)
         )
-        return self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
+        verify = self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
+        if execution is None:
+            return verify
+
+        def verify_and_fence():
+            verify()
+            execution.fence_mutation()
+        return verify_and_fence
 
     async def prepare_restart_async(self, ctx, **kwargs):
         verify = await asyncio.to_thread(self.prepare_restart, ctx, **kwargs)
         if verify is not None:
             await asyncio.to_thread(verify)
-
-    async def execute_restart(self, ctx, restart, **kwargs):
-        # Keep the existing lifecycle callback signature unchanged. The coding
-        # precondition generates a fresh operation id in prepare_restart.
-        return await asyncio.to_thread(restart, **kwargs)
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
                         bot_repository=None, device_id=None, target_runtime=None,
@@ -358,6 +365,13 @@ class AicodingRestartBackupMixin:
             target = binding.get('device_id') if isinstance(binding, dict) else getattr(binding, 'device_id', None)
             if not isinstance(target, str) or not target:
                 raise RestartBackupError('missing_device', '无法定位当前旧实例，禁止跳过重启备份')
+            from .restart_state import current_restart
+            execution = current_restart.get()
+            if execution is not None and (
+                target != execution.payload['device_id']
+                or _field(binding, 'device_provider') != execution.payload['provider']
+            ):
+                raise RestartBackupError('target_changed', '目标容器已变化，禁止替换')
             provider = _field(binding, 'device_provider')
             if provider == 'baas':
                 # Existing BaaS inventory/POST contracts also work for FAILED

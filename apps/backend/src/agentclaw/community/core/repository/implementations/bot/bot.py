@@ -63,6 +63,8 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotRepository as BotRepositoryProtocol,
 )
 
+from .ext_cas import BotExtCompareAndSet
+
 logger = get_logger()
 
 # Prod's exact ``update_by_owner`` allowlist. Any field not here
@@ -93,6 +95,7 @@ def _as_naive(dt: datetime) -> datetime:
 
 
 class BotRepository(
+    BotExtCompareAndSet,
     BotDeviceProviderQueries,
     BotReachabilityQueries,
     BotQuotaQueries,
@@ -627,39 +630,6 @@ class BotRepository(
                 )
             )
         if rowcount == 0:
-            return None
-        return self.get_by_id_and_owner(bot_id, owner_id)
-
-    def compare_and_set_ext(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        expected_ext: Optional[Dict[str, Any]],
-        ext: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
-        """Whole-column ``ext`` CAS scoped by owner, env, and live row."""
-        expected_json = json.dumps(expected_ext) if expected_ext is not None else None
-        ext_json = json.dumps(ext)
-        with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.bot_id == bot_id,
-                self.Model.owner_id == owner_id,
-                self.Model.is_delete == 0,
-                self._env(),
-            )
-            if expected_json is None:
-                query = query.filter(self.Model.ext.is_(None))
-            else:
-                query = query.filter(self.Model.ext == expected_json)
-            affected = query.update(
-                {
-                    self.Model.ext: ext_json,
-                    self.Model.gmt_modified: func.now(),
-                },
-                synchronize_session=False,
-            )
-        if affected == 0:
             return None
         return self.get_by_id_and_owner(bot_id, owner_id)
 

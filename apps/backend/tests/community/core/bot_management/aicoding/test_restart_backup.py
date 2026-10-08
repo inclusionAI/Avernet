@@ -324,31 +324,29 @@ async def test_http_dispatch_preserves_non_coding_execution_thread(engine):
 
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.asyncio
-async def test_coding_execution_keeps_event_loop_available(engine):
+async def test_coding_admission_keeps_event_loop_available(engine):
     import asyncio
     import threading
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     service = Mock()
     service.get_bot.return_value = {'active_engine': engine}
     started, release = threading.Event(), threading.Event()
-    current_thread = threading.get_ident()
-
-    def operation(**kwargs):
+    def submit(*args):
         started.set()
         assert release.wait(5)
-        return threading.get_ident()
-
-    service.restart_bot.side_effect = operation
-    task = asyncio.create_task(BotService.restart_bot_async(service, bot_id='b', user_id='o'))
-    try:
-        for _ in range(100):
-            if started.is_set():
-                break
-            await asyncio.sleep(.01)
-        assert started.is_set() and not task.done()
-    finally:
-        release.set()
-    assert await task != current_thread
+        return {'status': 'PENDING'}
+    with patch.object(AicodingProvisioningStrategy, '_submit_restart', side_effect=submit):
+        task = asyncio.create_task(BotService.restart_bot_async(service, bot_id='b', user_id='o'))
+        try:
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await asyncio.sleep(.01)
+            assert started.is_set() and not task.done()
+        finally:
+            release.set()
+        assert await task == {'status': 'PENDING'}
+    service.restart_bot.assert_not_called()
 
 
 def test_default_hook_is_lock_free_noop():
@@ -610,18 +608,14 @@ def test_async_service_contract_matches_implementation():
 
 
 @pytest.mark.asyncio
-async def test_http_restart_preserves_lifecycle_callback_signature():
-    calls = []
-
-    def restart(*, bot_id, user_id):
-        calls.append((bot_id, user_id))
-        return {'status': 'PENDING'}
-
-    result = await AicodingProvisioningStrategy('aicoding').execute_restart(
-        None, restart, bot_id='bot', user_id='owner',
-    )
-    assert result == {'status': 'PENDING'}
-    assert calls == [('bot', 'owner')]
+async def test_http_restart_requires_durable_queue_for_coding():
+    ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
+    restart = Mock()
+    with pytest.raises(RuntimeError, match='任务队列不可用'):
+        await AicodingProvisioningStrategy('aicoding').execute_restart(
+            ctx, restart, bot_id='b', user_id='o',
+        )
+    restart.assert_not_called()
 
 
 @pytest.mark.asyncio

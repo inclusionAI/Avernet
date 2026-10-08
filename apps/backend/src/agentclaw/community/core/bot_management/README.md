@@ -17,6 +17,7 @@ provides:
   - "RenderScreenService"
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
+  - "AicodingRestartLifecycle"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
@@ -102,3 +103,19 @@ Create-with-manifest freezes `nick_name` in the durable job's `spec` at submissi
 so background completion does not depend on request identity context. Jobs queued
 before this field was introduced remain readable and fall back to their `user_id`.
 This requires no database migration and does not backfill historical Bot rows.
+
+## Ordinary coding restart
+
+Only explicit `aicoding` / `claude_code` strategies durably admit ordinary restart
+requests. `engines/aicoding/restart_task.py` owns the queue handler, admission and
+read-only status projection; `restart_state.py` owns the ext journal and mutation
+fence. `RestartDispatchMixin` and the provisioning hooks are engine-neutral.
+`get_bot_status` preserves the Bot-shaped service contract while `/status` keeps
+its existing response fields. Runtime `get_bot` reads remain unchanged, so Caller
+and published-service restart consumers do not consume a status overlay.
+
+The queue and Bot repository provide existing dedup and ext CAS primitives.
+Repository CAS can optionally transition status and fence the expected lifecycle
+snapshot; legacy ext-only calls retain their behavior. No table or frontend
+migration is needed. See the 2026-10-08 durable-restart spec for failure/recovery
+boundaries and validation.

@@ -20,6 +20,10 @@ class BotServiceProtocol(Protocol):
     # ── Queries ────────────────────────────────────────────────────────
     def get_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
+    def get_bot_status(self, bot_id: str, user_id: str) -> dict:
+        """Bot-shaped runtime view including engine-owned restart progress."""
+        ...
+
     def get_bot_by_id(self, bot_id: str) -> Any: ...
 
     def get_bot_classification(
@@ -84,7 +88,7 @@ class BotServiceProtocol(Protocol):
     def restart_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
     async def restart_bot_async(self, **kwargs: Any) -> Any:
-        """Same lifecycle/result as restart_bot; engine policy controls offloading."""
+        """Bot-shaped result; engine policy may durably accept work before completion."""
         ...
 
     def release_bot_for_others(self, *args: Any, **kwargs: Any) -> Any: ...
