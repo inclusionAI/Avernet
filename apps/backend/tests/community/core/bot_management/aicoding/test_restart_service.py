@@ -415,3 +415,54 @@ def test_real_client_failed_final_fence_never_posts():
             migration_path=None, before_submit=Mock(side_effect=RuntimeError("receipt changed")),
         )
     service._post_bots_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "moltis", "hermes", "unknown"])
+async def test_other_engines_keep_original_pending_write(lifecycle, engine):
+    s = lifecycle
+    s.repo.bot.update(active_engine=engine, status="PENDING")
+    update = s.repo.update_by_owner
+    s.repo.update_by_owner = Mock(side_effect=update)
+    with patch.object(s.service, "_restart_bot_baas", wraps=s.service._restart_bot_baas) as provider:
+        with patch.object(AicodingRestartBackupMixin, "_prepare_restart") as backup:
+            await s.service.restart_bot_async(bot_id="b", user_id="o")
+    assert not s.queue.tasks
+    assert provider.call_count == 1
+    assert "prepare_only" not in provider.call_args.kwargs
+    backup.assert_not_called()
+    pending_writes = [c for c in s.repo.update_by_owner.call_args_list
+                      if c.args[2].get("status") == "PENDING"]
+    assert len(pending_writes) == 1  # Old behavior, even when already PENDING.
+    assert "before_submit" not in s.platform.upgrade_bot.call_args.kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "moltis"])
+async def test_other_engines_keep_original_preparation_rollback(lifecycle, engine):
+    s = lifecycle
+    s.repo.bot.update(active_engine=engine, status="PENDING")
+    s.repo.update_by_owner = Mock(side_effect=[None, deepcopy(s.repo.bot)])
+    with pytest.raises(Exception, match="Bot not found while preparing restart"):
+        await s.service.restart_bot_async(bot_id="b", user_id="o")
+    s.platform.upgrade_bot.assert_not_called()
+    writes = [c.args[2] for c in s.repo.update_by_owner.call_args_list]
+    assert writes == [{"status": "PENDING"}, {"status": "PENDING"}]
+    assert not s.queue.tasks
+
+
+def test_prepare_only_preserves_original_preparation_without_execution(lifecycle):
+    s = lifecycle
+    update = s.repo.update_by_owner
+    s.repo.update_by_owner = Mock(side_effect=update)
+    result = s.service._restart_bot_baas(
+        bot_id="b", user_id="o", binding_id=7, bot=deepcopy(s.repo.bot),
+        prepare_only=True,
+    )
+    assert result is None
+    s.platform.list_bot_publishes.assert_called_once()
+    s.platform.upgrade_bot.assert_not_called()
+    s.repo.update_by_owner.assert_not_called()
+    s.service._device_binding_repo.update_status.assert_not_called()
+    s.service._device_binding_repo.update_device_props.assert_not_called()
+    assert not s.queue.provider_tasks

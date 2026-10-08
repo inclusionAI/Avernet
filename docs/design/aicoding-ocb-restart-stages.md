@@ -50,9 +50,13 @@ operations without a provable handoff still expire rather than replay mutation.
 
 ### Neutral shared-path changes
 
-- Extract existing provider preparation into `BaasRestartPreparationMixin`, used
-  by both preflight and actual execution; pass the collaborator via RestartServices.
-- Skip an already-PENDING Bot status write (including redundant rollback).
+- Keep the original provider preparation in BotService; expose a default-off
+  `prepare_only` boundary before task creation/status writes/remote submission.
+  Aicoding alone opts into this preflight via the passed RestartServices callback.
+  The previously extracted `restart_preparation.py` and mixin are removed.
+- Let strategy policy decide whether admission already wrote PENDING. The default
+  returns True and preserves every other engine's original write AND rollback;
+  only an owned coding/BaaS task suppresses the duplicate write.
 - Add default-no-op submission-policy hooks; no coding engine literals or backup
   decisions in BotService.
 - Add optional `before_submit` to the OCB BaaS client and its protocol. This is an
@@ -72,15 +76,19 @@ Existing restart, published/Caller, status-error and protocol suites are run.
 No live deployment or online Bot recovery is performed by this patch.
 
 Large-file debt: BotService and the OCB BaaS client already exceed the repository
-1000-line source guideline in the base revision. BotService is reduced by
-extracting preparation; the client receives only a generic callback. Splitting
+1000-line source guideline in the base revision. Preserve existing code placement
+and restrict changes to generic policy/phase hooks; the client receives only a
+generic callback. Splitting
 these whole services is intentionally deferred to a dedicated refactor rather
 than mixed into this lifecycle fix. New source modules stay below 1000 lines;
 no CI allowlist or gate is weakened. This existing size debt remains a rollout
 review item, not a claim that all repository gates passed.
 
 Validated locally on 2026-10-08 with Python 3.12 and the locked Backend
-workspace dependencies: **2710 tests passed** (bot_management, service_bot
+workspace dependencies: **2717 tests passed** (bot_management, service_bot
 services, Caller restart backup, service API conformance and protocol-base
 ordering). Targeted undefined-name checks and `git diff --check` passed.
+The additional isolation regressions assert default-engine PENDING writes and
+rollback remain exactly as before and preparation-only calls do not enqueue or
+mutate lifecycle status.
 Full-repository CI / Singlebox E2E and a live pre-environment restart were not run.

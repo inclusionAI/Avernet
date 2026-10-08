@@ -37,6 +37,15 @@ def find_rejection(error: Exception) -> RestartSubmissionRejected | None:
 
 
 class AicodingSubmissionMixin:
+    def should_mark_restart_pending(self, ctx, bot: dict) -> bool:
+        execution = current_restart.get()
+        if execution is None or execution.payload["provider"] != "baas":
+            return True
+        execution.check_target(ctx, bot.get("binding_id"))
+        # Only this coding operation already wrote PENDING during admission.
+        # Do not alter idempotent-write semantics for other engines or callers.
+        return bot.get("status") != "PENDING"
+
     def restart_submission_options(self, ctx) -> dict:
         execution = current_restart.get()
         if execution is None or execution.payload["provider"] != "baas":

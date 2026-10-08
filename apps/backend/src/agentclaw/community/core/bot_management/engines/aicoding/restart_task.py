@@ -143,9 +143,13 @@ class AicodingDurableRestartMixin:
         )
         # Run the existing provider preparation BEFORE accepting the task or
         # stopping business processes. Do not persist credential-bearing requests.
-        in_progress = services.preflight_restart(bot=bot, user_id=owner_id)
-        if in_progress is not None:
-            return in_progress
+        if binding.get("device_provider") == "baas":
+            in_progress = services.preflight_restart(
+                bot_id=bot_id, user_id=owner_id,
+                binding_id=bot["binding_id"], bot=bot, prepare_only=True,
+            )
+            if in_progress is not None:
+                return in_progress
         payload = {
             "bot_id": bot_id,
             "owner_id": owner_id,

@@ -129,7 +129,7 @@ def setup():
     }
     service._repository, service._task_queue_service = repo, queue
     service._template_service = Mock()
-    service._preflight_restart = Mock(return_value=None)
+    service._restart_bot_baas = Mock(return_value=None)
     ctx, strategy = resolve_restart_strategy(repo.bot)
     services = RestartServices(repo, queue, service.get_bot, service._template_service, Mock(return_value=None))
     progress = Mock(return_value={"status": "PENDING"})
