@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,7 +173,6 @@ def test_json_extract_skips_unbalanced_fence_before_valid_fence():
 
 
 def test_artifact_service_error_and_reference_helper_branches():
-    from types import SimpleNamespace
 
     from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
         TaskArtifactService,
@@ -223,3 +223,76 @@ def test_artifact_service_error_and_reference_helper_branches():
     assert TaskArtifactService(repo=_NoMatchRepo())._previous_for(
         "t1", "n1", 0, ArtifactKind.NODE_RESULT
     ) is None
+
+
+def test_remaining_domain_dispatch_and_scheduler_branches():
+    from unittest.mock import MagicMock
+
+    from agentclaw.community.core.task.task_discovery.scheduler import (
+        TaskDiscoveryScheduler,
+    )
+    from agentclaw.community.core.task.task_dispatch.search import TaskSearch
+    from agentclaw.community.core.task.task_dispatch.strategies import (
+        _multi_sample_result,
+    )
+
+    with pytest.raises(ValueError):
+        AcceptanceVerdict(1)
+
+    scheduler = TaskDiscoveryScheduler(discovery_service=MagicMock())
+    import asyncio
+
+    asyncio.run(scheduler.shutdown())
+
+    service = TaskSearch.__new__(TaskSearch)
+    assert service._project_candidate({"bot_id": "b1", "recommend": "bad"}) == {
+        "bot_uuid": "b1"
+    }
+    assert _multi_sample_result([], 2).miss_reason == "no_candidates"
+    assert _multi_sample_result([{"not_an_identity": True}], 2).miss_reason == (
+        "no_candidates"
+    )
+
+
+def test_artifact_service_without_resource_repository_rejects_file():
+    from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
+        TaskArtifactService,
+    )
+
+    service = TaskArtifactService(repo=object())
+    assert service._resolve_file_meta({"resource_id": "sr_missing"}, "t1", "n1") is None
+
+
+def test_graph_support_remaining_guard_and_error_branches():
+
+    from agentclaw.community.core.task.task_context.task_graph_support import (
+        _attach_done_output_artifacts,
+        _relay_output_value,
+        list_bbs_tasks_overview,
+    )
+
+    assert _relay_output_value({"other": "value"}) == {"other": "value"}
+    assert list_bbs_tasks_overview(SimpleNamespace(_graph_repo=None), 1, 10) == ([], 0)
+
+    class _BadArtifact:
+        scope = SimpleNamespace(node_id="n1")
+
+        def to_dict(self):
+            raise RuntimeError("broken manifest")
+
+    output = SimpleNamespace(node_id="n1", artifacts=[])
+    owner = SimpleNamespace(
+        _artifact_service=SimpleNamespace(
+            list_artifacts_for_task=lambda _task_id: [_BadArtifact()]
+        )
+    )
+    _attach_done_output_artifacts(owner, "t1", [output])
+    assert output.artifacts == []
+
+    owner._artifact_service = SimpleNamespace(
+        list_artifacts_for_task=lambda _task_id: (_ for _ in ()).throw(
+            RuntimeError("artifact read failed")
+        )
+    )
+    _attach_done_output_artifacts(owner, "t1", [output])
+    assert output.artifacts == []
