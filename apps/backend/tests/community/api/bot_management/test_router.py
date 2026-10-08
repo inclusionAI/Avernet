@@ -632,6 +632,47 @@ class TestGetBotStatus:
 # ---------------------------------------------------------------------------
 
 class TestUpdateBot:
+    def test_collaborator_cannot_write_editor_policy_via_legacy_ext(self, client):
+        tc, svc, _ = client
+        with patch(
+            "agentclaw.community.core.bot_collaborator.interceptor.collaborator.CollaboratorPermissionInterceptor.before",
+            new=AsyncMock(side_effect=lambda ctx: ctx),
+        ):
+            response = tc.put(
+                "/api/bots/default?owner_id=someone-else",
+                json={"ext": {"editor_request_auto_approve": True}},
+            )
+        assert response.json()["error_code"] == 403
+        assert (
+            response.json()["message"]
+            == "Only the Bot owner can change editor request policy"
+        )
+        svc.update_bot.assert_not_called()
+
+    def test_owner_can_write_editor_policy_via_legacy_ext(self, client):
+        tc, svc, _ = client
+        response = tc.put(
+            "/api/bots/default", json={"ext": {"editor_request_auto_approve": True}}
+        )
+        assert response.json()["success"] is True
+        assert (
+            svc.update_bot.call_args.kwargs["ext"]["editor_request_auto_approve"]
+            is True
+        )
+
+    def test_collaborator_unrelated_ext_update_unchanged(self, client):
+        tc, svc, _ = client
+        with patch(
+            "agentclaw.community.core.bot_collaborator.interceptor.collaborator.CollaboratorPermissionInterceptor.before",
+            new=AsyncMock(side_effect=lambda ctx: ctx),
+        ):
+            response = tc.put(
+                "/api/bots/default?owner_id=someone-else",
+                json={"ext": {"read_only_rules": []}},
+            )
+        assert response.json()["success"] is True
+        assert svc.update_bot.call_args.kwargs["ext"] == {"read_only_rules": []}
+
     def test_success(self, client):
         tc, svc, passport = client
         resp = tc.put("/api/bots/default", json={"bot_name": "NewName"})

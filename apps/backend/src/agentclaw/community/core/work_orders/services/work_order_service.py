@@ -338,6 +338,36 @@ class WorkOrderService(WorkOrderServiceProtocol):
             env=get_current_env(),
         )
 
+    def get_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+    ) -> bool:
+        return self._repository.get_bot_editor_request_policy(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            env=get_current_env(),
+        )
+
+    def update_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        auto_approve: bool,
+    ) -> bool:
+        return self._repository.update_bot_editor_request_policy(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            auto_approve=auto_approve,
+            env=get_current_env(),
+        )
+
     def create_bot_editor_request(
         self,
         *,
@@ -391,7 +421,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyEditorError(
                 "applicant already has Bot editor access"
             )
-        return self._repository.create_bot_editor_request(
+        record = self._repository.create_bot_editor_request(
             bot_pk=int(bot["id"]),
             bot_id=bot_id,
             bot_name=str(bot.get("bot_name") or bot_id),
@@ -402,6 +432,11 @@ class WorkOrderService(WorkOrderServiceProtocol):
             apply_reason=reason,
             env=get_current_env(),
         )
+        if record.status is WorkOrderStatus.APPROVED:
+            self._collaborators.on_collaboration_changed(
+                bot_id, owner_id, get_current_env()
+            )
+        return record
 
     def create_space_join_request(
         self, *, space_id: int, applicant_user_id: str, reason: str | None

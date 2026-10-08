@@ -240,7 +240,10 @@ def _bot_editor_service():
     )
 
 
-def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
+@pytest.mark.parametrize("auto_approved", [False, True])
+def test_create_bot_editor_request_enforces_eligibility_and_delegates(
+    auto_approved,
+) -> None:
     (
         service,
         repository,
@@ -262,7 +265,10 @@ def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
     member_management.can_manage_collaborators.return_value = True
     access.require_space_reference.return_value = _space()
     collaborator_repository.get_by_bot_and_user.return_value = None
-    repository.create_bot_editor_request.return_value = _work_order()
+    record = _work_order()
+    if auto_approved:
+        record = record.model_copy(update={"status": WorkOrderStatus.APPROVED})
+    repository.create_bot_editor_request.return_value = record
 
     result = service.create_bot_editor_request(
         bot_id="bot-17",
@@ -271,7 +277,13 @@ def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
         reason="  joint editing  ",
     )
 
-    assert result == _work_order()
+    assert result == record
+    if auto_approved:
+        service._collaborators.on_collaboration_changed.assert_called_once_with(
+            "bot-17", "owner-1", "dev"
+        )
+    else:
+        service._collaborators.on_collaboration_changed.assert_not_called()
     access.require_space_member.assert_called_once_with(
         space_id=7, user_id="applicant-1"
     )
@@ -285,6 +297,23 @@ def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
         applicant_name="applicant-1",
         apply_reason="joint editing",
         env="dev",
+    )
+
+
+def test_editor_request_policy_delegates_authenticated_actor_and_environment() -> None:
+    service, repository, *_ = _bot_editor_service()
+    repository.get_bot_editor_request_policy.return_value = False
+    repository.update_bot_editor_request_policy.return_value = True
+    identity = dict(bot_id="bot-1", owner_id="owner-1", actor_id="actor-1")
+    assert service.get_bot_editor_request_policy(**identity) is False
+    repository.get_bot_editor_request_policy.assert_called_once_with(
+        **identity, env="dev"
+    )
+    assert (
+        service.update_bot_editor_request_policy(**identity, auto_approve=True) is True
+    )
+    repository.update_bot_editor_request_policy.assert_called_once_with(
+        **identity, auto_approve=True, env="dev"
     )
 
 

@@ -8,12 +8,16 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from agentclaw.community.core.bot_collaborator.models import (
     BotCollaboratorModel,
     CollaboratorRole,
 )
-from agentclaw.community.core.spaces.repository.models import SpaceMemberModel
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
@@ -60,6 +64,73 @@ class _BotEditorWorkOrderRepository:
     def _new_no() -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         return f"WO{stamp}{uuid4().hex[:10].upper()}"
+
+    def _policy_bot(
+        self, db: Session, *, bot_id: str, owner_id: str, actor_id: str, env: str
+    ) -> BotModel:
+        # COSEC: the addressed owner is not proof of the caller's ownership.
+        if actor_id != owner_id:
+            raise WorkOrderAccessDeniedError("Bot owner role required")
+        bot = (
+            db.query(self._Bot)
+            .filter(
+                self._Bot.bot_id == bot_id,
+                self._Bot.owner_id == actor_id,
+                self._Bot.env == env,
+                self._Bot.is_delete == 0,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if bot is None:
+            raise WorkOrderNotFoundError("Bot not found")
+        space = (
+            db.query(SpaceModel.id)
+            .filter(
+                SpaceModel.id == bot.space_id,
+                SpaceModel.env == env,
+                SpaceModel.space_type == "TEAM",
+                SpaceModel.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if space is None:
+            raise WorkOrderBotEditorRequestNotAllowedError("Team Space Bot required")
+        return bot
+
+    def get_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        env: str,
+    ) -> bool:
+        with self._db.transactional_orm_session() as db:
+            bot = self._policy_bot(
+                db, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, env=env
+            )
+            return _auto_approve(bot.ext)
+
+    def update_bot_editor_request_policy(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        auto_approve: bool,
+        env: str,
+    ) -> bool:
+        with self._db.transactional_orm_session() as db:
+            bot = self._policy_bot(
+                db, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, env=env
+            )
+            # Merge under the same Bot row lock used by request creation.
+            ext = json.loads(bot.ext or "{}")
+            ext["editor_request_auto_approve"] = auto_approve
+            bot.ext = json.dumps(ext, ensure_ascii=False)
+            db.flush()
+        return auto_approve
 
     def create_bot_editor_request(
         self,
@@ -178,6 +249,11 @@ class _BotEditorWorkOrderRepository:
             )
             db.add(row)
             db.flush()
+            if _auto_approve(bot.ext):
+                self._auto_approve_request(db, row, bot, applicant_user_id, env)
+                db.flush()
+                db.refresh(row)
+                return row.to_record()
             db.add(
                 self._Approver(
                     work_order_id=row.id,
@@ -204,6 +280,60 @@ class _BotEditorWorkOrderRepository:
             db.flush()
             db.refresh(row)
             return row.to_record()
+
+    def _auto_approve_request(
+        self,
+        db: Session,
+        row: WorkOrderModel,
+        bot: BotModel,
+        applicant_user_id: str,
+        env: str,
+    ) -> None:
+        """Persist the policy decision, grant and notice in the creation transaction."""
+        reviewed_at = db.execute(select(func.now())).scalar_one()
+        data = json.loads(row.biz_data)
+        data["approval_mode"] = "auto"
+        row.biz_data = json.dumps(data, ensure_ascii=False)
+        row.status = WorkOrderStatus.APPROVED.value
+        # No human reviewer/approver is fabricated for a policy decision.
+        row.review_remark = "Automatically approved by Bot editor request policy"
+        row.reviewed_at = reviewed_at
+        db.add(
+            self._Collaborator(
+                bot_pk=bot.id,
+                bot_id=bot.bot_id,
+                owner_id=bot.owner_id,
+                user_id=applicant_user_id,
+                user_name=applicant_user_id,
+                role=CollaboratorRole.MEMBER.value,
+                operator_id=bot.owner_id,
+                env=env,
+            )
+        )
+        db.add(
+            self._Notification(
+                work_order_id=row.id,
+                recipient_user_id=applicant_user_id,
+                notification_category=NotificationCategory.NOTICE.value,
+                event_type=WorkOrderEventType.BOT_COLLABORATOR_REVIEWED.value,
+                biz_type=WorkOrderBizType.BOT_COLLABORATOR.value,
+                biz_id=bot.bot_id,
+                title=notification_title_for(
+                    WorkOrderEventType.BOT_COLLABORATOR_REVIEWED.value,
+                    WorkOrderMessageTitle.BOT_COLLABORATOR_APPROVED.value,
+                ),
+                content=json.dumps(
+                    {
+                        "text": WorkOrderMessageContent.BOT_COLLABORATOR_APPROVED.value.format(
+                            bot_name=bot.bot_name
+                        ),
+                        "approval_mode": "auto",
+                    },
+                    ensure_ascii=False,
+                ),
+                env=env,
+            )
+        )
 
     def review_bot_editor_request(
         self,
@@ -365,6 +495,14 @@ class _BotEditorWorkOrderRepository:
                 review_remark=review_remark,
                 reviewed_at=reviewed_at,
             )
+
+
+def _auto_approve(raw: str | None) -> bool:
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("editor_request_auto_approve") is True
 
 
 def _bot_pk_from_business_data(raw: str | None) -> int | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
@@ -31,7 +31,7 @@ class WorkOrderStatus(_DocumentedEnum):
 
     __descriptions__ = {
         "PENDING": "Awaiting review.",
-        "APPROVED": "Approved by an authorized reviewer.",
+        "APPROVED": "Approved by an authorized reviewer or the Bot's auto-approval policy.",
         "REJECTED": "Rejected by an authorized reviewer.",
     }
 
@@ -262,6 +262,16 @@ class SpaceJoinRequestCreated(BaseModel):
         description="Human-readable work-order number, when one exists."
     )
     status: WorkOrderStatus = Field(description="Initial work-order status.")
+
+
+class BotEditorRequestPolicy(BaseModel):
+    """Owner-managed approval policy for new Team Space Bot editor requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    auto_approve: StrictBool = Field(
+        description="Automatically approve new eligible editor requests. Defaults to false when unset; existing pending requests are unchanged."
+    )
 
 
 class CreateBotEditorRequest(BaseModel):
