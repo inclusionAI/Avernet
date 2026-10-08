@@ -555,12 +555,21 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-api-http",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-config",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
+ "bcs-relation",
+ "bcs-route-security",
  "bcs-service-api",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -225,8 +225,13 @@ impl RegisterService for RegisterServiceImpl {
             })
             .await
             .map_err(|_| ApplicationError::internal("bot connect failed"))?;
-        if let Err(error) = self
-            .bot_onboarding
+        // The verified register token IS the trusted owner scope (spec 13.3):
+        // `admin_onboard_bot` binds it under the onboarding use case, which
+        // consumes the plan-Task-5 first-ownership initialization. A required
+        // persistence write failure is a registration failure — the former
+        // warn-and-return-success branch is intentionally removed (plan
+        // Task 6: no 2xx "fix later").
+        self.bot_onboarding
             .admin_onboard_bot(AdminBotOnboardCommand {
                 bot_uuid: connect.bot_uuid.clone(),
                 name: Some(bot_name.to_string()),
@@ -241,13 +246,7 @@ impl RegisterService for RegisterServiceImpl {
                 }),
             })
             .await
-        {
-            tracing::warn!(
-                bot_uuid = %connect.bot_uuid,
-                error = %error,
-                "register: admin_onboard_bot failed after connect"
-            );
-        }
+            .map_err(|_| ApplicationError::internal("bot onboard failed"))?;
         Ok(BotRegistration {
             bot_name: bot_name.to_string(),
             bot_uuid: connect.bot_uuid,
@@ -593,7 +592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn onboard_failure_is_swallowed() {
+    async fn onboard_failure_fails_registration() {
         let (svc, _, onboarding) = service(false, true);
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
@@ -602,7 +601,7 @@ mod tests {
             })
             .await
             .expect("issue");
-        let registration = svc
+        let register_result = svc
             .register_bot(RegisterBot {
                 mode: None,
                 provider_bot_ref: None,
@@ -610,9 +609,11 @@ mod tests {
                 token: token_view.token,
                 bot_name: "ok-name".to_string(),
             })
-            .await
-            .expect("onboard failure must not fail registration");
-        assert_eq!(registration.bot_uuid, "bot-1");
+            .await;
+        // Spec 13.3: a required onboarding write failure must not return a
+        // fake success ("no 2xx fix-later"); the swallowed-warning branch is
+        // intentionally removed (plan Task 6).
+        assert!(register_result.is_err());
         assert!(onboarding.onboarded.lock().expect("onboard lock").is_empty());
     }
 }

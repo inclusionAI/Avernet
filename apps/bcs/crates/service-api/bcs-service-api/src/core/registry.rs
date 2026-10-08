@@ -81,6 +81,31 @@ pub trait BotRegistryCoreService: Send + Sync {
         Err(ServiceError::InternalError("atomic registration creation is not configured".into()))
     }
 
+    /// Governed first-ownership initialization of an EXISTING live Bot whose
+    /// authority is still uninitialized (`ownership_version = 0`), consuming
+    /// the trusted [`crate::types::OwnershipInitialization`] (plan Task 5
+    /// store lane; spec §13.3). The Bot/Provider creation itself goes through
+    /// [`create_registration_if_absent`](Self::create_registration_if_absent)
+    /// and the Provider membership ports; this is the claim entry for trusted
+    /// first-registration contexts whose Bot already exists.
+    ///
+    /// Branches: a missing or soft-deleted Bot is `BotNotFound`; an already
+    /// initialized Bot is `ServiceError::Authority(AuthorityError::Conflict)`
+    /// — callers must treat that as "already initialized, never re-claim",
+    /// not as a failure to propagate. Any step failure rolls the whole claim
+    /// back and must fail the surrounding registration (spec §13.3: no 2xx
+    /// "fix later").
+    async fn initialize_existing_ownership(
+        &self,
+        _bot_id: &str,
+        _initialization: crate::types::OwnershipInitialization,
+    ) -> ServiceResult<bcs_domain::OwnershipState> {
+        let _ = (_bot_id, _initialization);
+        Err(ServiceError::InternalError(
+            "governed ownership initialization is not configured".into(),
+        ))
+    }
+
     /// Register or update a bot.
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 

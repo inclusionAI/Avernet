@@ -170,8 +170,13 @@ impl Bot {
             ))
         })?;
 
+        // Plan Task 6 (spec 13.3): a delivery switch is NOT a trusted
+        // first-registration context — it never claims ownership and never
+        // rewrites owner/manager/version/`created_by` of an initialized Bot.
+        // `created_by` is only filled when empty (first-writer-wins); the
+        // former unconditional overwrite reset the creator on every switch.
         self.registry
-            .save_created_by(bot_id, owner_staff_no, true)
+            .save_created_by(bot_id, owner_staff_no, false)
             .await?;
         let nick_name = self.resolve_owner_nick_name(owner_staff_no).await;
         self.registry

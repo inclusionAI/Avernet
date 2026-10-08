@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::core::provider::BotWebhookChange;
+use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::{AuditActor, OwnershipInitialization};
 use bcs_service_api::{
     ActorKind, BotCatalogCleanupPort, BotControlPlaneCoreService, BotRegistryCoreService,
     BotTaskModesQuery,
@@ -84,10 +86,37 @@ impl ProviderManagement {
     }
 
     async fn ensure_owner_binding(&self, bot_uuid: &str, staff_no: &str) -> ServiceResult<()> {
+        // Materialize the Human row with the directory-resolved name FIRST so
+        // the claim's ensure-human below preserves it (first-writer-wins on
+        // the Human row's fields).
         let nick_name = self.resolve_owner_nick_name(staff_no).await;
         self.registry
             .ensure_human_actor(staff_no, &nick_name)
             .await?;
+
+        // Trusted first-registration claim for the Provider-admin lane
+        // (plan Task 6, spec 13.3): the Provider registration validated the
+        // admin credential upstream, so the ref's single owner staff_no is a
+        // trusted scope — not an arbitrary body value. The claim is the
+        // plan-Task-5 governed store lane: exactly one committed atomic
+        // initialization; an already initialized Bot (Conflict) means "never
+        // re-claim, never rewrite" and is a no-op; any other failure is a
+        // required registration write failure and propagates.
+        let initialization = OwnershipInitialization {
+            owner_user_id: staff_no.to_string(),
+            actor: AuditActor::Human {
+                user_id: staff_no.to_string(),
+            },
+            operation_id: uuid::Uuid::new_v4().to_string(),
+        };
+        match self
+            .registry
+            .initialize_existing_ownership(bot_uuid, initialization)
+            .await
+        {
+            Ok(_) | Err(ServiceError::Authority(AuthorityError::Conflict(_))) => {}
+            Err(other) => return Err(other),
+        }
         let human_id = format!("human_{}", staff_no);
         let env = bcs_config::resolve_env_str();
         self.relation
