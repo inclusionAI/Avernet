@@ -3,16 +3,19 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import React from 'react';
 
 const Popover = PopoverPrimitive.Root;
+const PopoverAnchor = PopoverPrimitive.Anchor;
 const PopoverTrigger = PopoverPrimitive.Trigger;
 
 /** Popover：用于轻量非模态内容，复杂表单应使用 Modal 或 Drawer。 */
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = 'center', sideOffset = 6, collisionPadding = 8, ...props }, ref) => (
-  <PopoverPrimitive.Portal>
+>(({ className, align = 'center', sideOffset = 6, collisionPadding = 8, forceMount, ...props }, ref) => (
+  // forceMount 需同时透传 Portal 与 Content,否则关闭态内容仍被整体卸载(Presence 在 Portal 这层)。
+  <PopoverPrimitive.Portal forceMount={forceMount}>
     <PopoverPrimitive.Content
       ref={ref}
+      forceMount={forceMount}
       align={align}
       sideOffset={sideOffset}
       collisionPadding={collisionPadding}
@@ -27,4 +30,4 @@ const PopoverContent = React.forwardRef<
 ));
 PopoverContent.displayName = PopoverPrimitive.Content.displayName;
 
-export { Popover, PopoverContent, PopoverTrigger };
+export { Popover, PopoverAnchor, PopoverContent, PopoverTrigger };

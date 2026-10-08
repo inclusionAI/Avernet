@@ -94,7 +94,7 @@ describe('AppShell responsive off-canvas nav (一级)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
     expect(screen.getByTestId('drawer-content')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '对话协作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '对话' })).toBeInTheDocument();
   });
 
   it('selecting a nav item navigates and closes the drawer', () => {
@@ -102,9 +102,9 @@ describe('AppShell responsive off-canvas nav (一级)', () => {
     mockHistoryPush.mockClear();
     renderShell();
     fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
-    fireEvent.click(screen.getByRole('button', { name: '对话协作' }));
+    fireEvent.click(screen.getByRole('button', { name: '对话' }));
 
-    expect(mockHistoryPush).toHaveBeenCalledWith('/workspace');
+    expect(mockHistoryPush).toHaveBeenCalledWith('/workspace/chat');
     expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
   });
 
@@ -129,6 +129,46 @@ describe('AppShell responsive off-canvas nav (一级)', () => {
     renderShell();
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
     expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell 移动抽屉隐藏全局工作身份', () => {
+  it('低于 lg：打开真实发现群组导航抽屉时不渲染工作身份切换器，导航菜单仍存在', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/collaboration-square/groups';
+
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发现' })).toBeInTheDocument();
+    expect(screen.queryByTestId('identity-switcher')).not.toBeInTheDocument();
+  });
+
+  it('低于 lg：我的任务路由打开抽屉也不渲染工作身份切换器', () => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = '/work/my-task';
+    useWorkspaceStore.setState({
+      activeIdentityId: 'human-1',
+      identities: [{ id: 'human-1', kind: 'user', displayName: '真实用户', online: true }],
+    });
+
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+
+    expect(screen.queryByTestId('identity-switcher')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell 移动导航不展示全局工作身份', () => {
+  it.each(['/ticket-center', '/work/my-task'])('%s 导航抽屉保留菜单但无全局身份入口', (pathname) => {
+    mockViewport.desktop = false;
+    mockLocation.pathname = pathname;
+    renderShell();
+    fireEvent.click(screen.getByRole('button', { name: '打开导航' }));
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '对话' })).toBeInTheDocument();
+    expect(screen.queryByTestId('identity-switcher')).not.toBeInTheDocument();
   });
 });
 

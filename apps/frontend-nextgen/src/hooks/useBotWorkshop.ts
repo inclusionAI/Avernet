@@ -5,7 +5,7 @@ import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import { botHealthCheckService } from '@/services/botHealthCheck';
-import type { BotDomain } from '@/services/botWorkshop';
+import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
@@ -61,6 +61,9 @@ export function useBotWorkshop() {
   const navigation = useBotWorkshopNavigation();
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
   const currentOpenApiUserId = currentUser.status === 'available' ? currentUser.value?.trim() || undefined : undefined;
+  const canCreateLocal = currentSpace?.spaceType === 'PERSONAL';
+  const localCreateRestriction = '桌面 Bot 仅支持在个人空间创建和运维';
+  const localCreateDisabledReason = canCreateLocal ? undefined : localCreateRestriction;
   const load = useCallback(
     async (options?: { silent?: boolean }) => {
       if (!requestIdentity.ready || !spaceInitialized || !spaceId) return;
@@ -214,13 +217,27 @@ export function useBotWorkshop() {
             : undefined,
         )
       : [],
-    openCreateLocal: () => state.setCreateScenario('local'),
+    localCreateDisabledReason,
+    openCreateLocal: () => {
+      if (!canCreateLocal) {
+        toast.error(localCreateRestriction);
+        return;
+      }
+      state.setCreateScenario('local');
+    },
     openCreateCloud: () => state.setCreateScenario('cloud'),
     closeCreate: () => {
       createFlow.cancelAuthorization();
       state.setCreateScenario(undefined);
     },
-    submitCreate: createFlow.submitCreate,
+    submitCreate: async (input: BotCreateInput) => {
+      if (input.scenario === 'local' && !canCreateLocal) {
+        const error = new Error(localCreateRestriction);
+        toast.error(error.message);
+        throw error;
+      }
+      await createFlow.submitCreate(input);
+    },
     runAction,
     ...locks,
     ...accessControl,

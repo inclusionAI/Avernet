@@ -1,4 +1,4 @@
-import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
+import { serializeConversationRoute } from '@/domain/conversation';
 import type { BotDomain } from '@/services/botWorkshop';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
@@ -34,9 +34,7 @@ export function useBotWorkshopNavigation() {
     workspace.selectBotSession(null);
     if (!workspace.expandedBotIds[botId]) workspace.toggleBotExpanded(botId);
     workspace.setBotExpandedSection(botId, 'mine');
-    history.push(
-      `/workspace?${serializeWorkspaceRoute({ view: 'chat', currentIdentityId: user.id, targetBotId: botId })}`,
-    );
+    history.push(`/workspace/chat?${serializeConversationRoute({ section: 'managed', botId, origin: 'mine' })}`);
   }, []);
   return { openDetail, openConversation };
 }

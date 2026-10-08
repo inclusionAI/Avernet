@@ -1,183 +1,173 @@
 /** @jest-environment jsdom */
-import WorkspacePage from '@/pages/Workspace';
-import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+// 页面边界身份接线测试。
+// Task 10 退休旧 /workspace 混合页(含 Bot 身份只读好友分支)后,本文件以新页面边界为准:
+// - /workspace/chat 固定登录 Human 视角:即便协作群侧的全局工作身份是 Bot,
+//   对话页目录仍按登录用户 userId 加载,不再依赖 activeIdentity.kind 分支;
+// - /workspace/collaboration 保留既有身份语义:legacy `current=`(旧 bot= 群链接)
+//   身份照常回填全局身份 Store,协作群区域挂载。
+import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 
-let mockComposerDeps: {
-  beforeSend?: (content: string) => Promise<void> | void;
-} | null = null;
-
-const mockWorkspace = {
-  isTestUser: false,
-  activeIdentityId: 'human_user-101',
-  activeIdentity: { id: 'human_user-101', kind: 'user', displayName: '旧身份名称', online: true },
-  availableViews: ['chat', 'group'],
-  currentUserId: 'user-101',
-  currentUserDisplayName: '认证用户',
-  currentUserAvatarUrl: 'https://example.test/avatar.png',
-  botSessions: {
-    selectedSession: null as BotChatSessionView | null,
-    renameSessionOnFirstMessage: jest.fn(),
-  },
-  botChatTarget: null,
-  botFriendConversation: {
-    humanFriends: [],
-    botFriends: [],
-    humanLoading: false,
-    botLoading: false,
-    humanError: null,
-    botError: null,
-    settled: true,
-    reloadHuman: jest.fn(),
-    reloadBot: jest.fn(),
-    selectedFriend: null,
-    sessions: {
-      expandedFriendUserId: null,
-      sessions: [],
-      selectedSession: null,
-      loading: false,
-      error: null,
-      hasMore: false,
-      isLoadingMore: false,
-      loadMoreError: null,
-      toggleFriend: jest.fn(),
-      selectSession: jest.fn(),
-      retry: jest.fn(),
-      loadMore: jest.fn(),
-    },
-    history: {
-      messages: [],
-      loading: false,
-      error: null,
-      hasMore: false,
-      isLoadingMore: false,
-      loadMoreError: null,
-      retry: jest.fn(),
-      loadMore: jest.fn(),
-    },
-  },
-  botChat: { chat: { messages: [], isRequesting: false, isDefaultMessagesRequesting: false, retryCount: 0 } },
-  expandedBotIds: {},
-  panelRef: { current: null },
-  chatBots: [] as ChatBotView[],
-  friendBots: [] as ChatBotView[],
-  draft: '',
-  setDraft: jest.fn(),
+const humanIdentity = { userId: '101', displayName: '张三', online: true };
+const managedBot = {
+  botId: 'bot-a:1',
+  realBotId: 'bot-a',
+  ownerId: '1',
+  displayName: '管理 Bot',
+  online: true,
+  chatable: true,
 };
 
-jest.mock('@/hooks/useWorkspace', () => ({ useWorkspace: () => mockWorkspace }));
-jest.mock('@/pages/Workspace/hooks/useWorkspacePage', () => ({
-  useWorkspacePage: () => ({ view: 'chat', setView: () => {} }),
+let mockedSearchParams = new URLSearchParams();
+
+jest.mock('@/hooks/useHumanIdentity', () => ({
+  useHumanIdentity: () => ({ identity: humanIdentity, status: 'ready' }),
 }));
+
+jest.mock('@umijs/max', () => ({
+  history: { replace: jest.fn(), push: jest.fn() },
+  useLocation: () => ({
+    search: mockedSearchParams.toString(),
+    pathname: '/workspace/chat',
+  }),
+  useSearchParams: () => [mockedSearchParams, jest.fn()],
+}));
+
 jest.mock('@/hooks/useMediaQuery', () => ({ useMinWidth: () => true }));
-jest.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
-jest.mock('@/hooks/useTaskExecution', () => ({ useTaskExecution: () => ({}) }));
-jest.mock('@/hooks/useTaskExecuteFromCard', () => ({ useTaskExecuteFromCard: () => {} }));
-jest.mock('@/hooks/useComposerSend', () => ({
-  useComposerSend: (_taskExecution: unknown, deps: typeof mockComposerDeps) => {
-    mockComposerDeps = deps;
-    return () => {};
+
+const mockListDirectory = jest.fn().mockResolvedValue({
+  ok: true,
+  data: { managedBots: [managedBot], friendBots: [], hasAgentCodingBots: false },
+});
+
+jest.mock('@/services/workspace/conversationService', () => ({
+  conversationService: {
+    listDirectory: (...args: unknown[]) => mockListDirectory(...(args as [])) as unknown,
+    listManagedSessions: jest.fn().mockResolvedValue({ ok: true, data: { items: [], total: 0, page: 1 } }),
+    listFriendBotSessions: jest.fn().mockResolvedValue({ ok: true, data: { items: [], total: 0, page: 1 } }),
   },
 }));
-jest.mock('@/pages/Workspace/hooks/useBotSessionFilesFeature', () => ({ useBotSessionFilesFeature: () => ({}) }));
-jest.mock('@/pages/Workspace/hooks/useChatUrlSync', () => ({ useChatUrlSync: () => {} }));
-jest.mock('@/pages/Workspace/hooks/useBotFriendChatUrlSync', () => ({ useBotFriendChatUrlSync: () => {} }));
-jest.mock('@/services/workspace', () => ({ buildAgentCodingChatPath: () => '/workspace' }));
-jest.mock('@/services/workspace/botSessionService', () => ({ resolveUserId: (id: string) => id }));
-jest.mock('@/components/Workspace/ChatPanel/BotModelSelector', () => ({ BotModelSelectorContainer: () => null }));
-jest.mock('@/components/Workspace/TaskComposerMenu', () => ({ ComposerCapabilitiesMenu: () => null }));
-jest.mock('@/pages/Workspace/components/AgentCodingGuide', () => ({ AgentCodingGuide: () => null }));
-jest.mock('@/pages/Workspace/components/ChatSessionSidebarSlot', () => ({ ChatSessionSidebarSlot: () => null }));
-jest.mock('@/pages/Workspace/BotFriendWorkspaceArea', () => ({
-  BotFriendWorkspaceArea: () => <div data-testid="bot-friend-workspace-area" />,
+
+jest.mock('@/services/workspace/managedBotConversationService', () => ({
+  managedBotConversationService: {
+    loadFriendUsers: jest.fn().mockResolvedValue({ ok: true, data: [] }),
+    listOtherSessions: jest.fn().mockResolvedValue({ ok: true, data: { items: [], total: 0, page: 1 } }),
+    listOtherMessages: jest.fn().mockResolvedValue({
+      ok: true,
+      data: { messages: [], page: 1, total: 0, rawCount: 0, hasMore: false },
+    }),
+  },
 }));
-jest.mock('@/pages/Workspace/GroupWorkspaceArea', () => ({ GroupWorkspaceArea: () => null }));
-// 只替换接收端，不替换页面的真实分支和参数装配逻辑。
-jest.mock('@/components/Workspace/ChatPanel', () => ({
-  ChatPanel: (props: { authenticatedUserId?: string; authenticatedUserName?: string; mode?: string }) => (
-    <div
-      data-testid="page-chat-panel"
-      data-user-id={props.authenticatedUserId}
-      data-user-name={props.authenticatedUserName}
-      data-mode={props.mode}
-    />
+
+jest.mock('@/services/workspace/botSessionService', () => ({
+  botSessionService: {
+    updateSessionTitle: jest.fn().mockResolvedValue({ ok: true, data: { sessionId: 's1', title: 't' } }),
+    clearContext: jest.fn().mockResolvedValue({ ok: true, data: null }),
+    createSession: jest.fn(),
+    toggleFavorite: jest.fn(),
+  },
+  resolveUserId: (id: string) => id,
+}));
+
+// botChat 是既有产品(useBotChat);页边界测试只关心装配,内部会话通道用桩件。
+jest.mock('@/pages/Workspace/hooks/useBotChat', () => ({
+  useBotChat: () => ({
+    chat: { onRequest: jest.fn(), messages: [], isRequesting: false },
+    send: jest.fn(),
+    stop: jest.fn(),
+    reconnect: jest.fn(),
+    reloadHistory: jest.fn(),
+    loadMoreHistory: jest.fn(),
+    hasMoreHistory: false,
+    isLoadingMoreHistory: false,
+    connectionStatus: 'disconnected',
+    supportState: { phase: 'idle' },
+  }),
+}));
+
+// 交互舞台只替换接收端;身份接线断言不依赖其内部。
+jest.mock('@/pages/Workspace/Chat/ConversationInteractiveStage', () => ({
+  ConversationInteractiveStage: () => <div data-testid="interactive-stage" />,
+}));
+
+// 协作群区域替换为接收端:断言页面按 Human 身份装配并保持挂载。
+jest.mock('@/pages/Workspace/GroupWorkspaceArea', () => ({
+  GroupWorkspaceArea: ({ userIdentityName }: { userIdentityName?: string }) => (
+    <div data-testid="group-workspace-area" data-user-name={userIdentityName} />
   ),
 }));
 
+jest.mock('@/services/workspace/sessionService', () => ({
+  sessionService: { getSessionDetail: jest.fn() },
+}));
+
+const ConversationPage = (
+  require('@/pages/Workspace/Chat/ConversationPage') as typeof import('@/pages/Workspace/Chat/ConversationPage')
+).default;
+const CollaborationPage = (
+  require('@/pages/Workspace/Collaboration') as typeof import('@/pages/Workspace/Collaboration')
+).default;
+
 beforeEach(() => {
-  mockComposerDeps = null;
-  mockWorkspace.isTestUser = false;
-  mockWorkspace.activeIdentityId = 'human_user-101';
-  mockWorkspace.activeIdentity = { id: 'human_user-101', kind: 'user', displayName: '旧身份名称', online: true };
-  mockWorkspace.currentUserDisplayName = '认证用户';
-  mockWorkspace.chatBots = [];
-  mockWorkspace.friendBots = [];
-  mockWorkspace.botSessions.selectedSession = null;
-  mockWorkspace.botSessions.renameSessionOnFirstMessage.mockReset();
+  mockListDirectory.mockClear();
+  mockedSearchParams = new URLSearchParams();
+  // 身份 Store 是模块级单例,测试间复位,避免工作身份串号。
+  useWorkspaceStore.getState().resetWorkspace();
+  useConversationStore.setState({ ...conversationInitialState });
 });
 
-it.each([
-  { isTestUser: false, mode: 'bot' },
-  { isTestUser: true, mode: 'support' },
-])('$mode 页面分支向 ChatPanel 传递认证身份而非旧工作身份名称', ({ isTestUser, mode }) => {
-  mockWorkspace.isTestUser = isTestUser;
-
-  render(<WorkspacePage />);
-
-  expect(screen.getByTestId('page-chat-panel')).toHaveAttribute('data-mode', mode);
-  expect(screen.getByTestId('page-chat-panel')).toHaveAttribute('data-user-id', 'user-101');
-  expect(screen.getByTestId('page-chat-panel')).toHaveAttribute('data-user-name', '认证用户');
-});
-
-it('真实用户认证名称更新后重新传递给 Bot 单聊组件', () => {
-  const { rerender } = render(<WorkspacePage />);
-  mockWorkspace.currentUserDisplayName = '更新后的认证用户';
-
-  rerender(<WorkspacePage />);
-
-  expect(screen.getByTestId('page-chat-panel')).toHaveAttribute('data-user-name', '更新后的认证用户');
-});
-
-it('Bot 身份对话渲染独立的只读好友会话区域', () => {
-  mockWorkspace.activeIdentityId = 'bot-a:327325';
-  mockWorkspace.activeIdentity = { id: 'bot-a:327325', kind: 'bot', displayName: '皮皮虾', online: true };
-
-  render(<WorkspacePage />);
-
-  expect(screen.getByTestId('bot-friend-workspace-area')).toBeInTheDocument();
-  expect(screen.queryByTestId('page-chat-panel')).not.toBeInTheDocument();
-});
-
-it('用户身份单聊把原始首条正文接入会话自动重命名 beforeSend', async () => {
-  const bot = {
-    botId: 'bot-a:327325',
-    realBotId: 'bot-a',
-    ownerId: '327325',
-    displayName: '皮皮虾',
-    online: true,
-    chatable: true,
-  };
-  const session = {
-    sessionId: 'session-1',
-    botId: bot.botId,
-    title: '新会话',
-    messageCount: 0,
-    gmtModified: '',
-    gmtCreate: '',
-  };
-  mockWorkspace.chatBots = [bot];
-  mockWorkspace.botSessions.selectedSession = session;
-  mockWorkspace.botSessions.renameSessionOnFirstMessage.mockResolvedValue(true);
-
-  render(<WorkspacePage />);
-  await mockComposerDeps?.beforeSend?.('  第一条原始消息  ');
-
-  expect(mockWorkspace.botSessions.renameSessionOnFirstMessage).toHaveBeenCalledWith(
-    bot,
-    session,
-    '  第一条原始消息  ',
+it('全局工作身份是 Bot 时,/workspace/chat 仍用登录 Human 目录(不再有 Bot 只读分支)', async () => {
+  // 协作群侧把工作身份切到 Bot;对话页不得读取该身份。
+  useWorkspaceStore.getState().setIdentities(
+    [
+      { id: 'user-101', kind: 'user', displayName: '张三', online: true },
+      { id: 'b1', kind: 'bot', displayName: '皮皮虾', online: true },
+    ],
+    'b1',
   );
+
+  render(<ConversationPage />);
+
+  // 目录按登录用户 userId 加载(Human 固定视角),而非 Bot 工作身份。
+  await waitFor(() => expect(mockListDirectory).toHaveBeenCalledWith('101'));
+  expect(await screen.findByText('张三管理的 Bot')).toBeInTheDocument();
+});
+
+it('全局工作身份是 Bot 时,/workspace/chat 不渲染 Bot 身份只读好友区域', async () => {
+  useWorkspaceStore.getState().setIdentities(
+    [
+      { id: 'user-101', kind: 'user', displayName: '张三', online: true },
+      { id: 'b1', kind: 'bot', displayName: '皮皮虾', online: true },
+    ],
+    'b1',
+  );
+
+  render(<ConversationPage />);
+
+  expect(await screen.findByText('张三管理的 Bot')).toBeInTheDocument();
+  expect(screen.queryByTestId('bot-friend-workspace-area')).not.toBeInTheDocument();
+  expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
+});
+
+it('/workspace/collaboration 保留既有身份语义:legacy bot= 身份照常回填 Store', async () => {
+  mockedSearchParams = new URLSearchParams('current=b1');
+  useWorkspaceStore.getState().setIdentities(
+    [
+      { id: 'user-101', kind: 'user', displayName: '张三', online: true },
+      { id: 'b1', kind: 'bot', displayName: '皮皮虾', online: true },
+    ],
+    'user-101',
+  );
+
+  render(<CollaborationPage />);
+
+  // 协作页沿用 useWorkspacePage 的 current= 身份 hydration(旧群链接兼容面)。
+  await waitFor(() => expect(useWorkspaceStore.getState().activeIdentityId).toBe('b1'));
+  // 页面挂载协作群区域,且登录 Human 展示信息照常透传。
+  expect(screen.getByTestId('group-workspace-area')).toBeInTheDocument();
+  expect(screen.getByTestId('group-workspace-area')).toHaveAttribute('data-user-name', '张三');
 });

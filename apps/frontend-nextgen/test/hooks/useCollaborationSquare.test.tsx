@@ -540,7 +540,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
     expect(legacyCreateGroupSession).not.toHaveBeenCalled();
     expect(history.push).toHaveBeenCalledWith(
-      '/workspace?tab=group&current=human_900003&group=group-real-session&session=session-real-group&membership=session_only',
+      '/workspace/collaboration?current=human_900003&group=group-real-session&session=session-real-group&membership=session_only',
     );
 
     unmount();
@@ -667,9 +667,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: false });
     expect(legacyConversation).not.toHaveBeenCalled();
-    expect(history.push).toHaveBeenCalledWith(
-      '/workspace?tab=chat&current=human_900003&bot=bot-1%3A2088&session=session-1',
-    );
+    expect(history.push).toHaveBeenCalledWith('/workspace/chat?bot=bot-1%3A2088&session=session-1');
 
     unmount();
   });
@@ -694,9 +692,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(requestFriendship).not.toHaveBeenCalled();
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: true });
-    expect(history.push).toHaveBeenCalledWith(
-      '/workspace?tab=chat&current=human_900003&bot=owned-bot&session=session-owned',
-    );
+    expect(history.push).toHaveBeenCalledWith('/workspace/chat?bot=owned-bot&session=session-owned');
 
     unmount();
   });
@@ -744,9 +740,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext);
-    expect(history.push).toHaveBeenCalledWith(
-      '/workspace?tab=chat&current=human_900003&bot=bot-direct-friend&session=session-direct',
-    );
+    expect(history.push).toHaveBeenCalledWith('/workspace/chat?bot=bot-direct-friend&session=session-direct');
 
     unmount();
   });

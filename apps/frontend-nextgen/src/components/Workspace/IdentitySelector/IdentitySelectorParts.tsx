@@ -6,30 +6,27 @@ import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
 import { Check, ChevronDown, Info } from 'lucide-react';
-import { forwardRef } from 'react';
+import { forwardRef, type ReactNode } from 'react';
 
 function isAvatarUrl(avatar: string): boolean {
   return /^https?:\/\//.test(avatar);
 }
 
-export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed';
+export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration';
 
-/**
- * 非折叠布局的头部标签区（sidebar / default 两形态）：
- * - 标题与说明 Tooltip 支持定制（headerLabel / headerTooltip，缺省保持全局默认文案）；
- * - default 形态在未定制标题且身份多于 1 个时显示「可切换其他协作身份」副提示。
- * 从 index.tsx 抽出（TC-G005 文件体积拆分，行为不变）。
- */
+/** 非折叠布局头部标签区，保留 default/sidebar 标题与 Tooltip 合同。 */
 export function IdentitySectionHeader({
   layout,
   headerLabel,
   headerTooltip,
   showSwitchHint,
+  action,
 }: {
   layout: IdentitySelectorLayout;
   headerLabel?: string;
   headerTooltip?: string;
   showSwitchHint: boolean;
+  action?: ReactNode;
 }) {
   const sidebarLayout = layout === 'sidebar';
   const defaultTooltipText =
@@ -40,45 +37,47 @@ export function IdentitySectionHeader({
       <div
         className={cn(
           'flex items-center gap-1 px-1 text-xs text-foreground',
-          sidebarLayout ? 'pb-1 font-semibold' : 'font-medium',
+          sidebarLayout ? 'pb-1 font-semibold' : layout === 'collaboration' ? 'font-semibold' : 'font-medium',
         )}
       >
         <span>{sidebarLayout ? headerLabel ?? '工作身份' : headerLabel ?? '当前协作身份'}</span>
         {showSwitchHint ? (
           <span className="text-[10px] font-normal text-muted-foreground">可切换其他协作身份</span>
         ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              role="img"
-              aria-label={sidebarLayout ? '工作身份说明' : '协作身份说明'}
-              tabIndex={0}
-              className={cn(
-                'inline-flex cursor-help items-center text-muted-foreground',
-                sidebarLayout && 'relative top-px text-muted-foreground/70',
-              )}
-            >
-              <Info className={sidebarLayout ? 'h-3 w-3' : 'h-3.5 w-3.5'} aria-hidden />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{defaultTooltipText}</TooltipContent>
-        </Tooltip>
+        {layout !== 'collaboration' || headerTooltip ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                role="img"
+                aria-label={sidebarLayout ? '工作身份说明' : '协作身份说明'}
+                tabIndex={0}
+                className={cn(
+                  'inline-flex cursor-help items-center text-muted-foreground',
+                  sidebarLayout && 'relative top-px text-muted-foreground/70',
+                )}
+              >
+                <Info className={sidebarLayout ? 'h-3 w-3' : 'h-3.5 w-3.5'} aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{defaultTooltipText}</TooltipContent>
+          </Tooltip>
+        ) : null}
+        {action ? <span className="ml-auto shrink-0">{action}</span> : null}
       </div>
     </TooltipProvider>
   );
 }
-
 export function IdentityAvatar({
   identity,
   size = 'md',
   userAvatarUrl,
 }: {
   identity: Identity;
-  size?: 'xs' | 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   userAvatarUrl?: string;
 }) {
   const avatarUrl = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
-  const avatarSize = size === 'xs' ? 24 : size === 'sm' ? 32 : 36;
+  const avatarSize = size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
   return (
     <span className="shrink-0">
       <Avatar
@@ -119,10 +118,14 @@ export function IdentityDetails({
   identity,
   compact = false,
   summaryOnly = false,
+  userIdLabel = '工号',
+  nameClassName,
 }: {
   identity: Identity;
   compact?: boolean;
   summaryOnly?: boolean;
+  userIdLabel?: string;
+  nameClassName?: string;
 }) {
   const identityLabel = summaryOnly
     ? identity.kind === 'user'
@@ -135,7 +138,7 @@ export function IdentityDetails({
   return (
     <span className="min-w-0 flex-1 text-left">
       <span className="flex min-w-0 items-center gap-1.5">
-        <span className={cn('truncate font-medium text-foreground', compact ? 'text-xs' : 'text-sm')}>
+        <span className={cn('truncate font-medium text-foreground', compact ? 'text-xs' : 'text-sm', nameClassName)}>
           {identity.name}
         </span>
         {identityLabel ? (
@@ -149,7 +152,7 @@ export function IdentityDetails({
       </span>
       {!summaryOnly && identity.kind === 'user' && (
         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-          工号：{resolveOpenApiUserId(identity.id)}
+          {userIdLabel}：{resolveOpenApiUserId(identity.id)}
         </span>
       )}
       {!summaryOnly && identity.kind === 'bot' && (
@@ -173,6 +176,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
   ({ identity, open, layout, userAvatarUrl, className, ...buttonProps }, ref) => {
     const sidebarLayout = layout === 'sidebar';
     const collapsedLayout = layout === 'collapsed';
+    const collaborationLayout = layout === 'collaboration';
     const navigationLayout = sidebarLayout || collapsedLayout;
 
     return (
@@ -185,10 +189,12 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
         className={cn(
           collapsedLayout
             ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
+            : collaborationLayout
+            ? 'h-auto min-h-10 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground hover:bg-muted hover:text-foreground'
             : 'h-auto w-full justify-between gap-2 text-left',
           sidebarLayout
             ? 'min-h-9 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
-            : !collapsedLayout && 'min-h-10 rounded-lg px-2 py-1',
+            : !collapsedLayout && !collaborationLayout && 'min-h-10 rounded-lg px-2 py-1',
           navigationLayout && open && 'border-primary',
           className,
         )}
@@ -201,11 +207,20 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
           )
         ) : (
           <>
-            <IdentityAvatar identity={identity} size={sidebarLayout ? 'xs' : 'sm'} userAvatarUrl={userAvatarUrl} />
-            <IdentityDetails identity={identity} compact={sidebarLayout} summaryOnly={sidebarLayout} />
+            <IdentityAvatar
+              identity={identity}
+              size={sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
+              userAvatarUrl={userAvatarUrl}
+            />
+            <IdentityDetails
+              identity={identity}
+              compact={sidebarLayout || collaborationLayout}
+              summaryOnly={sidebarLayout}
+              userIdLabel={collaborationLayout ? '用户 ID' : undefined}
+            />
             <ChevronDown
               className={cn(
-                sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',
+                collaborationLayout ? 'h-3 w-3' : sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',
                 'shrink-0 text-muted-foreground transition-transform',
                 open && 'rotate-180',
               )}

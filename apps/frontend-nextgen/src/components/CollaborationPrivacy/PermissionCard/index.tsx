@@ -1,14 +1,10 @@
 import { Badge } from '@/components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
-import { Switch } from '@/components/ui/Switch';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
 import { Copy, RefreshCw } from 'lucide-react';
-import { botFriendApprovalSection, botVisibilitySection } from '../botVisibilityCopy';
-import { ControlStateTooltip, LabelHelpTooltip } from '../HelpTooltip';
-import { RelationCard } from '../RelationCard';
-import { RequestList } from '../RequestList';
+import { BotAbilitySettings, BotVisibilitySettings, FriendApprovalSettings } from '../settingsSections';
 
 interface PermissionCardProps {
   bot: CollaborationBot;
@@ -22,38 +18,11 @@ interface PermissionCardProps {
   onViewFriendApprovalScope: (bot: CollaborationBot) => void;
 }
 
-interface SettingRowProps {
-  label: string;
-  description: string;
-  checked: boolean;
-  disabled: boolean;
-  busy: boolean;
-  status?: string;
-  statusReason?: string;
-  onChange: (checked: boolean) => void;
-}
-
-function SettingRow({ label, description, checked, disabled, busy, status, statusReason, onChange }: SettingRowProps) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <div className="min-w-0 flex-1">
-        <p className="m-0 text-sm font-medium text-foreground">{label}</p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {status && <Badge tone="neutral">{status}</Badge>}
-        {status && statusReason && <ControlStateTooltip label={label} status={status} content={statusReason} />}
-        <Switch
-          checked={checked}
-          disabled={disabled || busy}
-          aria-label={`${checked ? '关闭' : '开启'}${label}`}
-          onCheckedChange={onChange}
-        />
-      </div>
-    </div>
-  );
-}
-
+/**
+ * 协作权限页面的 Bot 权限卡。
+ * 三组配置分区（协作能力 / Bot 可见性 / Bot 好友审批）已提取为 settingsSections 共享组件，
+ * 供 BotWorkshop「通用配置」弹窗复用（collab-permission-entry-migration）。
+ */
 export function PermissionCard({
   bot,
   busyAction,
@@ -66,8 +35,6 @@ export function PermissionCard({
   onViewFriendApprovalScope,
 }: PermissionCardProps) {
   const disabledReason = bot.joinedBcn ? undefined : '加入 BCN 后才能修改协作权限';
-  const directBusy = (setting: DirectSetting) => busyAction === `${bot.id}:${setting}`;
-  const friendDisabledByScope = bot.publication.user.scope === 'none' && bot.publication.bot.scope === 'none';
   const refreshBusy = busyAction === `${bot.id}:refresh`;
   return (
     <Card className="overflow-hidden">
@@ -113,107 +80,17 @@ export function PermissionCard({
         )}
         <div className="grid items-start gap-6 lg:grid-cols-2">
           <section className="min-w-0">
-            <div className="mb-3 flex items-center">
-              <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">协作能力</h4>
-            </div>
-            <div className="divide-y divide-border">
-              <SettingRow
-                label="参与协作群聊"
-                description="控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。"
-                checked={bot.collaborationStatus === 'online'}
-                disabled={!bot.joinedBcn || bot.collaborationStatus === 'offline'}
-                busy={directBusy('collaborationStatus')}
-                onChange={(checked) => onToggleDirect(bot, 'collaborationStatus', checked ? 'online' : 'hidden')}
-              />
-              <SettingRow
-                label="公开 Bot 画像"
-                description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
-                checked={bot.profilePublic}
-                disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}
-                busy={directBusy('profilePublic')}
-                status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
-                statusReason={
-                  bot.profilePublicStatus === 'unavailable'
-                    ? '该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性'
-                    : undefined
-                }
-                onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
-              />
-              <SettingRow
-                label="任务认领"
-                description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。"
-                checked={bot.taskClaimingEnabled}
-                disabled={!bot.joinedBcn}
-                busy={directBusy('taskClaimingEnabled')}
-                onChange={(checked) => onToggleDirect(bot, 'taskClaimingEnabled', checked)}
-              />
-              <SettingRow
-                label="Dream Mode"
-                description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。"
-                checked={bot.dreamModelEnabled}
-                disabled={!bot.joinedBcn}
-                busy={directBusy('dreamModelEnabled')}
-                onChange={(checked) => onToggleDirect(bot, 'dreamModelEnabled', checked)}
-              />
-            </div>
+            <BotAbilitySettings bot={bot} busyAction={busyAction} onToggleDirect={onToggleDirect} />
           </section>
           <div className="min-w-0 space-y-6 lg:border-l lg:border-border lg:pl-6">
             <section>
-              <div className="mb-3 flex items-center gap-1.5">
-                <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">
-                  {botVisibilitySection.title}
-                </h4>
-                <LabelHelpTooltip label={botVisibilitySection.title} content={botVisibilitySection.description} />
-              </div>
-              <div className="divide-y divide-border">
-                <RelationCard
-                  audience="user"
-                  config={bot.publication.user}
-                  pending={bot.pendingPublications.user}
-                  disabled={!bot.joinedBcn}
-                  onEdit={() => onEditPublication(bot, 'user')}
-                  onViewScope={() => onViewScope(bot, 'user')}
-                />
-                <RelationCard
-                  audience="bot"
-                  config={bot.publication.bot}
-                  pending={bot.pendingPublications.bot}
-                  disabled={!bot.joinedBcn}
-                  onEdit={() => onEditPublication(bot, 'bot')}
-                  onViewScope={() => onViewScope(bot, 'bot')}
-                />
-              </div>
+              <BotVisibilitySettings bot={bot} onEditPublication={onEditPublication} onViewScope={onViewScope} />
             </section>
             <section className="border-t border-border pt-5">
-              <div className="mb-3 flex items-center gap-1.5">
-                <h4 className="text-xs font-semibold tracking-wide text-muted-foreground">
-                  {botFriendApprovalSection.title}
-                </h4>
-                <LabelHelpTooltip
-                  label={botFriendApprovalSection.title}
-                  content={
-                    <>
-                      {botFriendApprovalSection.descriptionLeading}
-                      <a
-                        href={botFriendApprovalSection.approvalEntryPath}
-                        className="font-medium text-primary hover:opacity-80"
-                      >
-                        {botFriendApprovalSection.approvalEntryLabel}
-                      </a>
-                      {botFriendApprovalSection.descriptionTrailing}
-                    </>
-                  }
-                />
-              </div>
-              <RequestList
-                config={bot.friendApproval}
-                disabled={!bot.joinedBcn || friendDisabledByScope}
-                disabledReason={
-                  disabledReason ??
-                  (friendDisabledByScope ? botVisibilitySection.disabledFriendApprovalReason : undefined)
-                }
-                onEdit={() => onEditFriendApproval(bot)}
-                onViewScope={() => onViewFriendApprovalScope(bot)}
+              <FriendApprovalSettings
+                bot={bot}
+                onEditFriendApproval={onEditFriendApproval}
+                onViewFriendApprovalScope={onViewFriendApprovalScope}
               />
             </section>
           </div>

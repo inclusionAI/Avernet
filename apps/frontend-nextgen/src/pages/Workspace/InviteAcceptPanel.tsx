@@ -2,6 +2,7 @@ import { MessageViewScopeField } from '@/components/MessageViewScope';
 import { Button, Empty, Spin } from '@/components/ui';
 import { DEFAULT_MESSAGE_VIEW_SCOPE } from '@/domain/collaboration/messageViewScope';
 import type { MessageViewScope } from '@/domain/collaboration/types';
+import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 import { useInviteAccept } from '@/pages/Workspace/hooks/useInviteAccept';
 import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -13,7 +14,7 @@ import { toast } from 'sonner';
  *
  * Action 全部经 `useInviteAccept` 下发（mount 时校验 token、`accept()` 提交接受）；
  * 组件不直接 import `invitationService`，保持组件层级约束。
- * 已加入 / 成功加入后跳转到 `/workspace?tab=group[&group=#groupId]`。
+ * 已加入 / 成功加入后跳转到 `/workspace/collaboration[?group=#groupId]`。
  */
 export function InviteAcceptPanel() {
   const params = useParams<{ token?: string; type?: string }>();
@@ -34,23 +35,22 @@ export function InviteAcceptPanel() {
     setNavigated(true);
     if (targetType === 'group' && targetId) {
       toast.info(alreadyJoined ? '已加入该协作群' : '已加入协作群');
-      navigate(`/workspace?tab=group&group=${encodeURIComponent(targetId)}`);
+      navigate(`/workspace/collaboration?${serializeWorkspaceRoute({ groupId: targetId })}`);
       return;
     }
     if (targetType === 'session' && targetId) {
       toast.info(alreadyJoined ? '已加入该会话' : '已加入会话');
-      const groupParam = groupId ? `group=${encodeURIComponent(groupId)}&` : '';
-      navigate(`/workspace?tab=group&${groupParam}session=${encodeURIComponent(targetId)}`);
+      navigate(`/workspace/collaboration?${serializeWorkspaceRoute({ groupId, sessionId: targetId })}`);
       return;
     }
     if (alreadyJoined) {
       toast.info('已加入该协作邀请');
-      navigate('/workspace?tab=group');
+      navigate('/workspace/collaboration');
       return;
     }
     // session 目标但暂未解析到所属群，或 409 无 target 信息：回到协作群列表。
     toast.info('已加入协作邀请');
-    navigate('/workspace?tab=group');
+    navigate('/workspace/collaboration');
   }, [status, alreadyJoined, groupId, navigated, navigate, targetId, targetType]);
 
   if (status === 'loading') {

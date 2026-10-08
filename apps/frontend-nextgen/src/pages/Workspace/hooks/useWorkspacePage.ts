@@ -18,10 +18,10 @@ export interface UseWorkspacePageResult {
 }
 
 /**
- * Workspace URL ↔ Store 同步：
- * - URL 是刷新、分享和浏览器导航的输入；current= 表示当前身份，bot= 表示 Human→Bot 目标，human= 表示 Bot→Human 目标；
+ * 协作群页 URL ↔ Store 同步（/workspace/collaboration）：
+ * - URL 是刷新、分享和浏览器导航的输入；current= 表示当前身份，group/session/membership 表示群选中和视角；
  * - Store 是 SPA 内交互状态真源，URL hydration 完成后再投影回规范 query；
- * - 群聊旧链接中的 bot= 仍由 workspaceRoute parser 兼容为身份参数。
+ * - 旧群链接中的 bot= 仍由 workspaceRoute parser 兼容为身份参数。
  */
 export function useWorkspacePage(): UseWorkspacePageResult {
   const [searchParams] = useSearchParams();
@@ -62,11 +62,10 @@ export function useWorkspacePage(): UseWorkspacePageResult {
     useWorkspaceStore.getState().setView(next);
   }, []);
 
-  // 群聊 Store → URL 投影。单聊投影由 useChatUrlSync 复用同一个 serializer。
+  // 群聊 Store → URL 投影（对话页投影走 useConversationUrlSync）。
   useEffect(() => {
     if (!urlHydrated || view !== 'group') return;
     const next = serializeWorkspaceRoute({
-      view: 'group',
       currentIdentityId: activeIdentityId,
       groupId: selectedGroupId,
       sessionId: selectedSessionId,

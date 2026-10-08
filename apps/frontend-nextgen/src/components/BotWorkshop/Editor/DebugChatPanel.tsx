@@ -1,18 +1,20 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
+import { DebugChatComposer } from '@/components/BotWorkshop/Editor/DebugChatComposer';
+import { BotModelSelector } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
+import { useBotModels } from '@/pages/Workspace/hooks/useBotModels';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
+import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { Loader2, Plus, RefreshCw, Send, Square } from 'lucide-react';
+import { FileText, Loader2, Plus, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -44,6 +46,24 @@ function ThinkingReply({ botName }: { botName: string }) {
   );
 }
 
+function DebugMessageContent({ content }: { content: string }) {
+  const parsed = parseDebugChatMessageContent(content);
+  return (
+    <div className="mt-1 space-y-1.5">
+      {parsed.fileNames.map((name, index) => (
+        <span
+          key={`${name}-${index}`}
+          className="flex w-fit max-w-full items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1 text-xs"
+        >
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{name}</span>
+        </span>
+      ))}
+      {parsed.text ? <p className="m-0 whitespace-pre-wrap text-xs leading-5">{parsed.text}</p> : null}
+    </div>
+  );
+}
+
 export function DebugChatPanel({
   bot,
   runtimeStage,
@@ -56,7 +76,6 @@ export function DebugChatPanel({
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
-  const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [creatingSession, setCreatingSession] = useState(false);
   const chatBot = useMemo<ChatBotView>(
@@ -76,6 +95,11 @@ export function DebugChatPanel({
     [bot.ownerId, ownerId],
   );
   const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries);
+  const handleSessionModelChange = useCallback((_botId: string, sessionId: string, model: string) => {
+    setSessions((items) => items.map((item) => (item.sessionId === sessionId ? { ...item, model } : item)));
+    setSession((current) => (current?.sessionId === sessionId ? { ...current, model } : current));
+  }, []);
+  const botModels = useBotModels(chatBot, session, identityId, handleSessionModelChange);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -111,11 +135,6 @@ export function DebugChatPanel({
       setCreatingSession(false);
     }
   };
-  const send = () => {
-    if (!draft.trim()) return;
-    debug.send(draft);
-    setDraft('');
-  };
   const connection =
     debug.connectionStatus === 'connected'
       ? { text: '在线', tone: 'success' as const }
@@ -137,6 +156,13 @@ export function DebugChatPanel({
             {chatBot.runtimeStage === 'online' ? '线上' : chatBot.runtimeStage === 'verify' ? '预发' : '草稿'}环境
           </p>
         </div>
+        <BotModelSelector
+          models={botModels.models}
+          activeModelId={botModels.activeModelId}
+          loading={botModels.isLoadingModels}
+          disabled={!session}
+          onSelect={(modelId) => void botModels.selectModel(modelId)}
+        />
         <Button
           variant="ghost"
           size="icon"
@@ -200,7 +226,7 @@ export function DebugChatPanel({
                       Thinking...
                     </p>
                   ) : (
-                    <p className="m-0 mt-1 whitespace-pre-wrap text-xs leading-5">{message.content}</p>
+                    <DebugMessageContent content={message.content} />
                   )}
                 </div>
               </div>
@@ -211,27 +237,16 @@ export function DebugChatPanel({
           </>
         )}
       </div>
-      <div className="border-t border-border p-4">
-        <Card className="flex items-center gap-2 rounded-2xl p-2 shadow-none">
-          <Input
-            value={draft}
-            disabled={!session}
-            placeholder="输入调试消息，Enter 发送"
-            className="border-0 shadow-none focus-visible:ring-0"
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') send();
-            }}
-          />
-          <Button
-            size="icon"
-            disabled={!session || (!debug.chat.isRequesting && !draft.trim())}
-            aria-label={debug.chat.isRequesting ? '停止生成' : '发送'}
-            leftIcon={debug.chat.isRequesting ? <Square className="size-4" /> : <Send className="size-4" />}
-            onClick={debug.chat.isRequesting ? debug.stop : send}
-          />
-        </Card>
-      </div>
+      <DebugChatComposer
+        key={session?.sessionId ?? 'no-session'}
+        botId={chatBot.realBotId}
+        sessionId={session?.sessionId ?? null}
+        userId={identityId}
+        ownerId={chatBot.ownerId}
+        isRequesting={debug.chat.isRequesting}
+        onSend={debug.send}
+        onStop={debug.stop}
+      />
     </aside>
   );
 }

@@ -3,6 +3,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
 import type { BotDomain } from '@/domain/botWorkshop';
 import type { BotCollaborator, BotSpaceMember, BotSpaceOption } from '@/services/botWorkshop/botManagementService';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
@@ -16,17 +17,31 @@ interface Props {
   operation?: string;
   collaborators: BotCollaborator[];
   members: BotSpaceMember[];
+  autoApproveEditorRequests?: boolean;
+  policyError?: string;
   onClose: () => void;
   onChangeSpace: (id: number) => Promise<void>;
   onCreateTeamAndChangeSpace: (name: string) => Promise<void>;
   onAddCollaborator: (userId: string, name: string | undefined, role: BotCollaborator['role']) => Promise<boolean>;
   onUpdateCollaborator: (id: number, role: BotCollaborator['role']) => Promise<void>;
   onRemoveCollaborator: (id: number) => Promise<void>;
+  onEditorRequestPolicyChange: (autoApprove: boolean) => Promise<void>;
   onRequestAccess: (reason: string) => Promise<void>;
 }
 
 export function BotAccessModal(props: Props) {
-  const { mode, bot, spaces, loading, operation, collaborators, members, onClose } = props;
+  const {
+    mode,
+    bot,
+    spaces,
+    loading,
+    operation,
+    collaborators,
+    members,
+    autoApproveEditorRequests,
+    policyError,
+    onClose,
+  } = props;
   const [spaceId, setSpaceId] = useState('');
   const [selectedUser, setSelectedUser] = useState<BotSpaceMember>();
   const [memberQuery, setMemberQuery] = useState('');
@@ -115,6 +130,21 @@ export function BotAccessModal(props: Props) {
           </div>
         ) : (
           <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+              <div className="min-w-0 flex-1">
+                <p className="m-0 text-sm font-medium text-foreground">编辑权限申请自动通过</p>
+                <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">
+                  开启后，他人申请该 Bot 编辑权限时无需 Owner 审批，直接生效；关闭后需 Owner 手动审批。
+                </p>
+                {policyError ? <p className="m-0 mt-1 text-xs text-destructive">{policyError}</p> : null}
+              </div>
+              <Switch
+                checked={Boolean(autoApproveEditorRequests)}
+                disabled={loading || operation === 'policy' || Boolean(policyError)}
+                aria-label={`${autoApproveEditorRequests ? '关闭' : '开启'}编辑权限申请自动通过`}
+                onCheckedChange={(checked) => void props.onEditorRequestPolicyChange(checked)}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <Input

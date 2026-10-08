@@ -24,7 +24,7 @@ export default function Welcome() {
       </div>
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-8 pb-20 pt-12">
         {/* 待补挂载位:接入方式 <section id="access"> */}
-        <HeroSection onEnter={() => history.push('/workspace')} />
+        <HeroSection onEnter={() => history.push('/workspace/chat')} />
         <div className="mt-20">
           <ScenariosSection />
         </div>

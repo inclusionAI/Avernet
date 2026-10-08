@@ -42,13 +42,12 @@ export function useCreateGroupSessionFlow(
         notifySuccess('会话创建成功');
         setTarget(null);
         const search = serializeWorkspaceRoute({
-          view: 'group',
           currentIdentityId: humanBotContext?.actorId,
           groupId: group.id,
           sessionId: result.sessionId,
           membership: result.memberSource ? 'session_only' : 'direct',
         });
-        history.push(`/workspace?${search}`);
+        history.push(`/workspace/collaboration?${search}`);
       });
     },
     [humanBotContext, runBusy, target],

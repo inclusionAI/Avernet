@@ -10,6 +10,8 @@ interface IdentityCardProps {
   avatarUrl?: string;
   authenticatedIdentity?: HumanIdentity;
   showDepartment?: boolean;
+  /** 是否展示工号行；Open Core「个人信息」弹窗按形态关闭（collab-permission-entry-migration AC-13），页面默认展示。 */
+  showEmployeeNumber?: boolean;
   syncing: boolean;
   onSync: () => void;
 }
@@ -19,6 +21,7 @@ export function IdentityCard({
   avatarUrl,
   authenticatedIdentity,
   showDepartment = true,
+  showEmployeeNumber = true,
   syncing,
   onSync,
 }: IdentityCardProps) {
@@ -33,7 +36,7 @@ export function IdentityCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <p className="m-0 text-base font-semibold text-foreground">{displayName}</p>
-              <span className="text-xs text-muted-foreground">工号 {employeeNumber}</span>
+              {showEmployeeNumber ? <span className="text-xs text-muted-foreground">工号 {employeeNumber}</span> : null}
             </div>
             {showDepartment ? (
               <div className="mt-1 flex min-w-0 items-start gap-1">

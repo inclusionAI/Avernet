@@ -7,6 +7,7 @@ export function useBotEngineConfig(botId: string | null, ownerId: string | undef
   const [config, setConfig] = useState<BotEngineConfig>({});
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     setConfig({});
@@ -37,5 +38,22 @@ export function useBotEngineConfig(botId: string | null, ownerId: string | undef
     }
   }, [botId, config, isOwner, ownerId]);
 
-  return { config: isOwner ? config : {}, setConfig, loading, load, save };
+  const restoreDefaults = useCallback(async () => {
+    if (!botId || !isOwner || restoring) throw new Error('仅 Bot Owner 可恢复默认配置');
+    setRestoring(true);
+    try {
+      const defaults = await botEditorService.loadDefaultEngineConfig(botId, ownerId);
+      await botEditorService.saveEngineConfig(botId, defaults, ownerId);
+      setConfig(defaults);
+      setLoaded(true);
+      toast.success('已恢复默认配置');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '恢复默认配置失败');
+      throw error;
+    } finally {
+      setRestoring(false);
+    }
+  }, [botId, isOwner, ownerId, restoring]);
+
+  return { config: isOwner ? config : {}, setConfig, loading, restoring, load, save, restoreDefaults };
 }

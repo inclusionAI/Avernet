@@ -12,7 +12,7 @@ export default function NotFound() {
         你访问的页面可能已被移除、重命名，或暂时不可用。
       </p>
       <div className="mt-6 flex items-center gap-3">
-        <Button onClick={() => history.push('/workspace')}>返回工作台</Button>
+        <Button onClick={() => history.push('/workspace/chat')}>返回工作台</Button>
         <Button variant="outline" onClick={() => window.history.back()}>
           返回上一页
         </Button>

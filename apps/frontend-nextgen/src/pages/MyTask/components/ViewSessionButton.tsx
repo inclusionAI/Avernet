@@ -6,9 +6,9 @@ import { MessageCircle } from 'lucide-react';
 
 /**
  * 查看会话：按 session 形态 / 任务来源分流跳转路由。
- * - 协作群(source_type=coop_group 或 session 以 bcs_grp_ 开头) → tab=group 视图，
- *   groupId 优先取 source_group_id，缺失时从 bcs_grp session 截取前缀(workspace 亦可异步反查)。
- * - 单 bot → tab=chat 视图，需 owner_bot_id + owner_user_id 拼成 bot_id:user_id。
+ * - 协作群(source_type=coop_group 或 session 以 bcs_grp_ 开头) → 协作群页(/workspace/collaboration)，
+ *   groupId 优先取 source_group_id，缺失时从 bcs_grp session 截取前缀(协作群页亦可异步反查)。
+ * - 单 bot → 对话页(/workspace/chat)，需 owner_bot_id + owner_user_id 拼成 bot_id:user_id。
  */
 export function ViewSessionButton({ record }: { record: TaskListItem }) {
   const sessionId =

@@ -10,11 +10,11 @@ beforeEach(() => {
   useWorkspaceStore.getState().setIdentities([user, bot], user.id);
 });
 
-describe('hydrateWorkspaceRoute', () => {
+describe('hydrateWorkspaceRoute(协作群 hydration)', () => {
   it('falls back to the user identity when current points to an unknown identity', () => {
     useWorkspaceStore.getState().setActiveIdentity(bot.id);
 
-    hydrateWorkspaceRoute(parseWorkspaceRoute('tab=group&current=unknown&group=g1'));
+    hydrateWorkspaceRoute(parseWorkspaceRoute('current=unknown&group=g1'));
 
     expect(useWorkspaceStore.getState()).toMatchObject({
       activeIdentityId: user.id,
@@ -23,45 +23,32 @@ describe('hydrateWorkspaceRoute', () => {
     });
   });
 
-  it('hydrates a Bot identity friend Human and Session from chat URL', () => {
-    hydrateWorkspaceRoute(parseWorkspaceRoute('tab=chat&current=bot-1&human=447147&session=dm1'));
+  it('hydrates a Bot identity group deep link with group, session and membership', () => {
+    hydrateWorkspaceRoute(parseWorkspaceRoute('current=bot-1&group=g1&session=s1&membership=session_only'));
 
     expect(useWorkspaceStore.getState()).toMatchObject({
       activeIdentityId: bot.id,
-      view: 'chat',
-      expandedFriendUserId: '447147',
-      selectedFriendUserSessionId: 'dm1',
-      expandedBotIds: {},
-      selectedBotSessionId: null,
+      view: 'group',
+      selectedGroupId: 'g1',
+      selectedSessionId: 's1',
+      membership: 'session_only',
+      expandedGroupIds: { g1: true },
     });
   });
 
-  it('keeps Bot and Human chat target parameters isolated by identity kind', () => {
-    hydrateWorkspaceRoute(parseWorkspaceRoute('tab=chat&current=bot-1&bot=target&session=dm1'));
-    expect(useWorkspaceStore.getState()).toMatchObject({
-      activeIdentityId: bot.id,
-      view: 'chat',
-      expandedFriendUserId: null,
-      selectedFriendUserSessionId: null,
-      expandedBotIds: {},
-      selectedBotSessionId: null,
-    });
-
-    hydrateWorkspaceRoute(parseWorkspaceRoute('tab=chat&current=human-1&human=447147&session=dm2'));
-    expect(useWorkspaceStore.getState()).toMatchObject({
-      activeIdentityId: user.id,
-      view: 'chat',
-      expandedFriendUserId: null,
-      selectedFriendUserSessionId: null,
-      expandedBotIds: {},
-      selectedBotSessionId: null,
-    });
-  });
-
-  it('keeps the active Bot for the legacy internal tab=group URL without identity or session', () => {
+  it('keeps the active identity for a collaboration URL without identity or session', () => {
     useWorkspaceStore.getState().setActiveIdentity(bot.id);
 
-    hydrateWorkspaceRoute(parseWorkspaceRoute('tab=group'));
+    hydrateWorkspaceRoute(parseWorkspaceRoute('group=g1'));
+
+    expect(useWorkspaceStore.getState().activeIdentityId).toBe(bot.id);
+    expect(useWorkspaceStore.getState().selectedGroupId).toBe('g1');
+  });
+
+  it('passes through a non-explicit query without touching the store', () => {
+    useWorkspaceStore.getState().setActiveIdentity(bot.id);
+
+    hydrateWorkspaceRoute(parseWorkspaceRoute(''));
 
     expect(useWorkspaceStore.getState().activeIdentityId).toBe(bot.id);
   });
@@ -69,9 +56,17 @@ describe('hydrateWorkspaceRoute', () => {
   it('prefills a group deep link while identities are still loading', () => {
     useWorkspaceStore.getState().reset();
 
-    const result = hydrateWorkspaceRoute(parseWorkspaceRoute('tab=group&group=g1&session=s1'));
+    const result = hydrateWorkspaceRoute(parseWorkspaceRoute('group=g1&session=s1'));
 
     expect(result.status).toBe('waiting_for_identities');
     expect(useWorkspaceStore.getState()).toMatchObject({ selectedGroupId: 'g1', selectedSessionId: 's1' });
+  });
+
+  it('maps a session-only deep link to an unresolved group session when the group is missing', () => {
+    hydrateWorkspaceRoute(parseWorkspaceRoute('session=orphan-session'));
+
+    const state = useWorkspaceStore.getState();
+    expect(state.activeIdentityId).toBe(user.id);
+    expect(state.selectedGroupId).toBeNull();
   });
 });

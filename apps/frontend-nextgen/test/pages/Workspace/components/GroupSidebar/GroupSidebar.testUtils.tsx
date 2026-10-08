@@ -63,8 +63,6 @@ export const baseGroup = {
 
 export function makeProps(partial: Partial<React.ComponentProps<typeof GroupSidebar>> = {}) {
   return {
-    view: 'group' as 'chat' | 'group',
-    onViewChange: jest.fn(),
     viewerKind: 'user' as const,
     groups: [baseGroup],
     isLoading: false,

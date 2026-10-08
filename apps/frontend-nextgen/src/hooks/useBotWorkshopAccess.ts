@@ -16,6 +16,8 @@ interface AccessState {
   members: BotSpaceMember[];
   loading: boolean;
   operation?: string;
+  autoApproveEditorRequests?: boolean;
+  policyError?: string;
 }
 
 export function useBotWorkshopAccess(currentUserId: string | undefined, reload: () => Promise<void>) {
@@ -31,12 +33,27 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
           setAccess({ mode, bot, spaces, members: [], loading: false });
         } else if (mode === 'authorize') {
           if (!bot.spaceId || !currentUserId) throw new Error('缺少空间或用户身份，无法授权');
-          const [editors, members] = await Promise.all([
+          const [editors, members, policy] = await Promise.all([
             botManagementService.listCollaborators(bot.id),
             botManagementService.listSpaceMembers(bot.spaceId, currentUserId),
+            botManagementService
+              .getEditorRequestPolicy(bot.id)
+              .then((autoApprove) => ({ autoApprove }))
+              .catch((error: unknown) => ({
+                autoApprove: false,
+                error: error instanceof Error ? error.message : '编辑权限申请策略加载失败',
+              })),
           ]);
           setCollaborators(editors);
-          setAccess({ mode, bot, spaces: [], members, loading: false });
+          setAccess({
+            mode,
+            bot,
+            spaces: [],
+            members,
+            loading: false,
+            autoApproveEditorRequests: policy.autoApprove,
+            policyError: 'error' in policy ? policy.error : undefined,
+          });
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '权限信息加载失败');
@@ -136,6 +153,23 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '移除协作者失败');
       } finally {
+        setAccess((value) => ({ ...value, operation: undefined }));
+      }
+    },
+    updateEditorRequestPolicy: async (autoApprove: boolean) => {
+      if (!access.bot || access.mode !== 'authorize') return;
+      setAccess((value) => ({ ...value, operation: 'policy' }));
+      try {
+        const applied = await botManagementService.updateEditorRequestPolicy(access.bot.id, autoApprove);
+        setAccess((value) => ({
+          ...value,
+          operation: undefined,
+          autoApproveEditorRequests: applied,
+          policyError: undefined,
+        }));
+        toast.success('编辑权限申请策略已更新');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '编辑权限申请策略更新失败');
         setAccess((value) => ({ ...value, operation: undefined }));
       }
     },

@@ -138,7 +138,7 @@ const singleBotViaGroupNode: TaskNodeView = {
 };
 
 describe('NodeListView 群绕过单 bot(actual_run_mode 覆盖)', () => {
-  it('真实单 bot 但物理走群 session:执行者显示 bot 名,跳转走协作群 URL(tab=group)', () => {
+  it('真实单 bot 但物理走群 session:执行者显示 bot 名,跳转走协作群 URL(/workspace/collaboration)', () => {
     const onOpenGroupSession = jest.fn();
     const { container } = render(
       <NodeListView
@@ -153,9 +153,9 @@ describe('NodeListView 群绕过单 bot(actual_run_mode 覆盖)', () => {
     // 执行者展示 bot 名(非群名)
     expect(screen.getByText('技术栈概览Bot')).toBeInTheDocument();
     expect(screen.queryByText('BCS协作群')).toBeNull();
-    // 跳转链接按物理群 session 走协作群视图(tab=group),而非单 bot tab=chat
-    expect(container.querySelector('a[href*="tab=group"]')).not.toBeNull();
-    expect(container.querySelector('a[href*="tab=chat"]')).toBeNull();
+    // 跳转链接按物理群 session 走协作群页(/workspace/collaboration),而非单 bot /workspace/chat
+    expect(container.querySelector('a[href^="/workspace/collaboration?"]')).not.toBeNull();
+    expect(container.querySelector('a[href^="/workspace/chat?"]')).toBeNull();
     // 可下钻点击触发副屏会话 tab
     fireEvent.click(screen.getByRole('button', { name: '查看执行会话 技术栈概览Bot' }));
     expect(onOpenGroupSession).toHaveBeenCalledWith(singleBotViaGroupNode);
@@ -254,7 +254,7 @@ const groupNodeEmptyAssignee: TaskNodeView = {
 };
 
 describe('NodeListView 协作群节点 assignee 为空', () => {
-  it('群会话即使 assignee 为空也渲染「新开页面查看会话」协作群链接(tab=group)并可下钻', () => {
+  it('群会话即使 assignee 为空也渲染「新开页面查看会话」协作群链接(/workspace/collaboration)并可下钻', () => {
     const onOpenGroupSession = jest.fn();
     const { container } = render(
       <NodeListView
@@ -268,11 +268,11 @@ describe('NodeListView 协作群节点 assignee 为空', () => {
     expect(screen.getByText('协作群会话')).toBeInTheDocument();
     expect(screen.queryByText('未分配')).toBeNull();
     // 新开页面链接:走协作群 URL,带 group=,不因 assignee 空而缺失
-    const link = container.querySelector('a[href*="tab=group"][href*="group=bcs_grp_empty_assignee"]');
+    const link = container.querySelector('a[href^="/workspace/collaboration?"][href*="group=bcs_grp_empty_assignee"]');
     expect(link).not.toBeNull();
     expect(link).toHaveAttribute('target', '_blank');
-    // 不走单 bot tab=chat
-    expect(container.querySelector('a[href*="tab=chat"]')).toBeNull();
+    // 不走单 bot /workspace/chat
+    expect(container.querySelector('a[href^="/workspace/chat?"]')).toBeNull();
     // 副屏下钻仍可用(不被 isUnassigned 关掉)
     fireEvent.click(screen.getByRole('button', { name: '查看执行会话 协作群会话' }));
     expect(onOpenGroupSession).toHaveBeenCalledWith(groupNodeEmptyAssignee);
