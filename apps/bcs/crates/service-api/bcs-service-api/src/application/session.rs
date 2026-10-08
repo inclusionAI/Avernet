@@ -80,6 +80,17 @@ pub struct CompleteSessionCallbackCommand {
 
 #[async_trait]
 pub trait SessionManagementService: Send + Sync {
+    async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> {
+        Err(ServiceError::InternalError("session registry validation unsupported".into()).into())
+    }
+
+    async fn ensure_direct_session(&self, _id: &str) -> Result<crate::port::repo::session_registry::SessionRegistration, SessionUseCaseError> {
+        Err(ServiceError::InternalError("session registry is not configured".into()).into())
+    }
+    async fn session_registration(&self, _id: &str) -> Result<Option<crate::port::repo::session_registry::SessionRegistration>, SessionUseCaseError> {
+        Err(ServiceError::InternalError("session registry is not configured".into()).into())
+    }
+
     async fn create_or_reactivate(
         &self,
         cmd: CreateOrReactivateCommand,

@@ -93,7 +93,7 @@ pub async fn run(
                     if !matches!(tokio::time::timeout(Duration::from_secs(2), publish_status(&flow, &row)).await, Ok(Ok(()))) {
                         tracing::warn!("delivery state event failed; status API remains authoritative");
                     }
-                    if row.state.kind != DeliveryType::Send { continue; }
+                    if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a || row.state.kind != DeliveryType::Send { continue; }
                     let entry = pending.entry(row.source_message_id.clone()).or_default();
                     if entry.rows.get(&row.delivery_id).is_none_or(|old| old.state.state_version < row.state.state_version) {
                         entry.rows.insert(row.delivery_id.clone(), row);
@@ -151,6 +151,10 @@ async fn publish_status(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
 ) -> bcs_service_api::ServiceResult<()> {
+    if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
+        if let Some(direct) = &flow.direct_chat { direct.reconcile_direct(row).await?; }
+        return Ok(());
+    }
     crate::queued_task::restore(flow, row).await?;
     use bcs_service_api::{
         FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryTarget, ServiceError,

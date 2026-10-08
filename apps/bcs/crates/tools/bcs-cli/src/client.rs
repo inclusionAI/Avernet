@@ -124,6 +124,7 @@ pub struct BcsClient {
 /// introduces no new on-wire fields.
 #[derive(Debug, Clone)]
 pub struct ChatRunOutcome {
+    pub delivery: Option<bcs_protocol::ChatRunDeliverySummary>,
     /// Did the run reach a success state?
     /// sync = `ChatRunState::Completed`; detach = `Running` or `Completed`.
     pub delivered: bool,
@@ -1231,19 +1232,19 @@ impl BcsClient {
                 return Ok(Self::timeout_outcome(submit, overall_timeout));
             }
             let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
-            match self
-                .chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))
-                .await
+            match tokio::time::timeout(remaining,
+                self.chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))).await
             {
-                Ok(status) => {
+                Ok(Ok(status)) => {
                     since_version = status.version;
                     if status.is_terminal() {
                         return Ok(Self::terminal_outcome(&status));
                     }
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     return Ok(Self::poll_error_outcome(submit, &err.to_string()));
                 }
+                Err(_) => return Ok(Self::timeout_outcome(submit, overall_timeout)),
             }
         }
     }
@@ -1273,11 +1274,10 @@ impl BcsClient {
                 return Ok(Self::timeout_outcome(submit, overall_timeout));
             }
             let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
-            match self
-                .chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))
-                .await
+            match tokio::time::timeout(remaining,
+                self.chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))).await
             {
-                Ok(status) => {
+                Ok(Ok(status)) => {
                     match status.state {
                         ChatRunState::Completed | ChatRunState::Running => {
                             return Ok(Self::running_outcome(&status));
@@ -1294,9 +1294,10 @@ impl BcsClient {
                     }
                     since_version = status.version;
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     return Ok(Self::poll_error_outcome(submit, &err.to_string()));
                 }
+                Err(_) => return Ok(Self::timeout_outcome(submit, overall_timeout)),
             }
         }
     }
@@ -1312,6 +1313,7 @@ impl BcsClient {
     fn terminal_outcome(status: &ChatRunStatusResponse) -> ChatRunOutcome {
         let delivered = matches!(status.state, ChatRunState::Completed);
         ChatRunOutcome {
+            delivery: status.delivery.clone(),
             delivered,
             submitted: true,
             run_id: Some(status.run_id.clone()),
@@ -1330,6 +1332,7 @@ impl BcsClient {
     /// response was received — unlike timeout/poll_error which use submit).
     fn running_outcome(status: &ChatRunStatusResponse) -> ChatRunOutcome {
         ChatRunOutcome {
+            delivery: status.delivery.clone(),
             delivered: true,
             submitted: true,
             run_id: Some(status.run_id.clone()),
@@ -1350,6 +1353,7 @@ impl BcsClient {
         overall_timeout: Duration,
     ) -> ChatRunOutcome {
         ChatRunOutcome {
+            delivery: submit.delivery.clone(),
             delivered: false,
             submitted: true,
             run_id: Some(submit.run_id.clone()),
@@ -1370,6 +1374,7 @@ impl BcsClient {
     /// response (already known); the error is preserved in `error_message`.
     fn poll_error_outcome(submit: &ChatRunSubmitResponse, error: &str) -> ChatRunOutcome {
         ChatRunOutcome {
+            delivery: submit.delivery.clone(),
             delivered: false,
             submitted: true,
             run_id: Some(submit.run_id.clone()),
@@ -2042,6 +2047,16 @@ impl BcsClient {
         let result: FusionResponse = response.json().await.context("Invalid fusion response")?;
 
         Ok(result)
+    }
+
+    pub fn admitted_outcome(submit: &ChatRunSubmitResponse) -> ChatRunOutcome {
+        let state = submit.status.as_deref().unwrap_or("pending");
+        ChatRunOutcome {
+            delivery: submit.delivery.clone(), delivered: matches!(state, "running" | "completed"),
+            submitted: true, run_id: Some(submit.run_id.clone()), session_id: Some(submit.session_id.clone()),
+            bot_uuid: Some(submit.bot_uuid.clone()), state: state.into(), response_content: None,
+            error_message: None, content_truncated: false,
+        }
     }
 }
 
@@ -3587,8 +3602,8 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_version_header_advertises_version_2() {
-        assert_eq!(BCS_CHAT_VERSION, "2");
+    fn test_chat_version_header_advertises_version_3() {
+        assert_eq!(BCS_CHAT_VERSION, "3");
     }
 
     #[test]
@@ -4144,6 +4159,174 @@ mod tests {
         assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
     }
 
+    fn queued_submit() -> ChatRunSubmitResponse {
+        serde_json::from_value(serde_json::json!({
+            "run_id": "run-queued", "bot_uuid": "bot-target", "session_id": "session-queued",
+            "status": "pending", "delivery": {
+                "delivery_id": "delivery-queued", "message_id": "message-queued",
+                "status": "queued", "wait_reason": "lane_busy", "state_version": 1
+            }
+        })).unwrap()
+    }
+
+    fn queued_status(state: &str, delivery: &str, version: u64) -> serde_json::Value {
+        serde_json::json!({
+            "run_id": "run-queued", "bot_uuid": "bot-target", "from_bot_id": "bot-source",
+            "session_id": "session-queued", "state": state, "response": {"content": "answer"},
+            "created_at_ms": 1, "updated_at_ms": version, "expires_at_ms": 9999999,
+            "version": version, "is_terminal": matches!(state, "completed" | "failed" | "cancelled"),
+            "delivery": {"delivery_id": "delivery-queued", "message_id": "message-queued",
+                "status": delivery, "state_version": version}
+        })
+    }
+
+    #[test]
+    fn test_durable_admission_distinguishes_queued_from_rejected() {
+        let mut submit = queued_submit();
+        let admitted = BcsClient::admitted_outcome(&submit);
+        assert!(admitted.admission_succeeded());
+        assert!(!admitted.delivered);
+        assert_eq!(admitted.run_id.as_deref(), Some("run-queued"));
+        assert_eq!(admitted.session_id.as_deref(), Some("session-queued"));
+        assert_eq!(admitted.delivery.unwrap().wait_reason.as_deref(), Some("lane_busy"));
+        for status in ["rejected_capacity", "failed", "expired", "cancelled"] {
+            submit.delivery.as_mut().unwrap().status = status.into();
+            assert!(!BcsClient::admitted_outcome(&submit).admission_succeeded(), "{status}");
+        }
+        // Older servers omit queue metadata and may omit the initial status.
+        submit.delivery = None;
+        submit.status = None;
+        assert!(BcsClient::admitted_outcome(&submit).admission_succeeded());
+        for state in ["running", "completed"] {
+            submit.status = Some(state.into());
+            assert!(BcsClient::admitted_outcome(&submit).delivered);
+        }
+        submit.status = Some("failed".into());
+        assert!(!BcsClient::admitted_outcome(&submit).admission_succeeded());
+    }
+
+    #[tokio::test]
+    async fn test_queued_run_keeps_polling_to_requested_state() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
+        for until_running in [false, true] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET")).and(path("/chat/runs/run-queued"))
+                .respond_with(|request: &wiremock::Request| {
+                    let version = request.url.query_pairs()
+                        .find(|(key, _)| key == "since_version")
+                        .unwrap().1.parse::<u64>().unwrap();
+                    let (state, delivery) = match version {
+                        0 => ("pending", "queued"),
+                        1 => ("submitted", "dispatching"),
+                        2 => ("running", "running"),
+                        _ => ("completed", "completed"),
+                    };
+                    ResponseTemplate::new(200).insert_header("connection", "close")
+                        .set_body_json(queued_status(state, delivery, version + 1))
+                }).mount(&server).await;
+            let client = BcsClient::new(server.uri());
+            let submit = queued_submit();
+            let outcome = if until_running {
+                client.chat_poll_run_until_running(&submit, 10, Duration::from_secs(10)).await
+            } else {
+                client.chat_poll_run(&submit, 10, Duration::from_secs(10)).await
+            }.unwrap();
+            let expected = if until_running { "running" } else { "completed" };
+            assert_eq!(outcome.state, expected, "requests: {:?}", server.received_requests().await.unwrap().iter().map(|r| r.url.as_str()).collect::<Vec<_>>());
+            assert!(outcome.delivered);
+            assert_eq!(outcome.delivery.unwrap().status, expected);
+            assert_eq!(outcome.response_content.as_deref(), if until_running { None } else { Some("answer") });
+            let requests = server.received_requests().await.unwrap();
+            assert_eq!(requests.len(), if until_running { 3 } else { 4 });
+            assert!(requests.iter().all(|r| r.method.as_str() == "GET"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_queued_run_deadline_bounds_slow_status_without_cancelling() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
+        for until_running in [false, true] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET")).and(path("/chat/runs/run-queued"))
+                .respond_with(ResponseTemplate::new(200)
+                    .set_body_json(queued_status("pending", "queued", 2))
+                    .set_delay(Duration::from_secs(2)))
+                .mount(&server).await;
+            let client = BcsClient::new(server.uri());
+            let submit = queued_submit();
+            let start = tokio::time::Instant::now();
+            let outcome = if until_running {
+                client.chat_poll_run_until_running(&submit, 5000, Duration::from_millis(100)).await
+            } else {
+                client.chat_poll_run(&submit, 5000, Duration::from_millis(100)).await
+            }.unwrap();
+            assert!(start.elapsed() < Duration::from_secs(1));
+            assert_eq!(outcome.state, "timeout");
+            assert!(outcome.submitted);
+            assert_eq!(outcome.run_id.as_deref(), Some("run-queued"));
+            assert_eq!(outcome.session_id.as_deref(), Some("session-queued"));
+            assert_eq!(outcome.delivery.unwrap().delivery_id, "delivery-queued");
+            let requests = server.received_requests().await.unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].method.as_str(), "GET");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_queued_run_poll_errors_preserve_durable_identity() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/chat/runs/run-queued"))
+            .respond_with(ResponseTemplate::new(503)).mount(&server).await;
+        let client = BcsClient::new(server.uri());
+        let submit = queued_submit();
+        for until_running in [false, true] {
+            let outcome = if until_running {
+                client.chat_poll_run_until_running(&submit, 10, Duration::from_secs(10)).await
+            } else {
+                client.chat_poll_run(&submit, 10, Duration::from_secs(10)).await
+            }.unwrap();
+            assert_eq!(outcome.state, "poll_error");
+            assert_eq!(outcome.run_id.as_deref(), Some("run-queued"));
+            assert_eq!(outcome.session_id.as_deref(), Some("session-queued"));
+            assert_eq!(outcome.delivery.unwrap().message_id, "message-queued");
+            assert!(outcome.error_message.unwrap().contains("503"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_queued_run_terminal_failure_is_not_running_success() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
+        for state in ["failed", "cancelled"] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET")).and(path("/chat/runs/run-queued"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(queued_status(state, state, 2)))
+                .mount(&server).await;
+            let outcome = BcsClient::new(server.uri())
+                .chat_poll_run_until_running(&queued_submit(), 10, Duration::from_secs(10)).await.unwrap();
+            assert!(!outcome.delivered);
+            assert!(!outcome.admission_succeeded());
+            assert_eq!(outcome.delivery.unwrap().status, state);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chat_run_cancel_preserves_unknown_delivery_state() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::{method, path}};
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/chat/runs/run-queued/cancel"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "run_id": "run-queued", "cancelled": false, "state": "running",
+                "response": {"content": ""}, "version": 3,
+                "delivery": {"delivery_id": "delivery-queued", "message_id": "message-queued",
+                    "status": "cancel_unknown", "state_version": 3}
+            }))).expect(1).mount(&server).await;
+        let cancelled = BcsClient::new(server.uri()).chat_run_cancel("run-queued").await.unwrap();
+        assert!(!cancelled.cancelled);
+        assert_eq!(cancelled.state, ChatRunState::Running);
+        assert_eq!(cancelled.delivery.unwrap().status, "cancel_unknown");
+    }
+
     #[test]
     fn test_non_chat_headers_omit_chat_version() {
         let client = BcsClient::new("http://localhost:21000");
@@ -4353,5 +4536,12 @@ mod tests {
             body.get("ttl").is_none(),
             "legacy `ttl` key must not be sent (silently ignored by the DTO), was: {body}"
         );
+    }
+}
+
+impl ChatRunOutcome {
+    pub fn admission_succeeded(&self) -> bool {
+        self.submitted && matches!(self.state.as_str(), "pending" | "submitted" | "running" | "completed")
+            && self.delivery.as_ref().is_none_or(|d| !matches!(d.status.as_str(), "rejected_capacity" | "failed" | "expired" | "cancelled"))
     }
 }

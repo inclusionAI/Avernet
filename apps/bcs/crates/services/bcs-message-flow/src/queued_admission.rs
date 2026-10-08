@@ -148,6 +148,9 @@ pub async fn find_managed_run(
             crate::storage_retry::managed_storage, lookup).await
     } else { lookup().await }
         .map_err(|_| ServiceError::InternalError("managed run lookup failed".into()))?;
+    if rows.iter().any(|row| row.flow_kind == DeliveryFlowKind::DirectA2a && !matches_run(row)) {
+        return Err(ServiceError::InvalidOperation { message: "direct event scope mismatch".into(), request_id: None });
+    }
     if let Some(row) = rows.into_iter().find(&matches_run) {
         return Ok(Some(row));
     }

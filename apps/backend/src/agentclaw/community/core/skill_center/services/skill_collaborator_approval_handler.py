@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from agentclaw.community.core.repository.protocols.work_orders import (
-    WorkOrderRepositoryProtocol,
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderInvalidRemarkError,
@@ -25,10 +25,12 @@ from agentclaw.community.core.work_orders.models import (
 from agentclaw.community.core.work_orders.protocols import (
     SkillCollaboratorApprovalHandlerProtocol,
 )
+
+
 class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol):
     def __init__(
         self,
-        repository: WorkOrderRepositoryProtocol,
+        repository: SkillEditorRequestRepositoryProtocol,
         env_provider: Callable[[], str],
     ) -> None:
         self._repository = repository
@@ -85,6 +87,12 @@ class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol)
             target_status=target_status,
             notification=notification,
             env=self._env_provider(),
+        )
+
+    def process_auto(self, *, work_order_id: int):
+        """Called only by WorkOrder's trusted AUTO dispatcher after its claim."""
+        return self._repository.approve_auto_skill_editor_request(
+            work_order_id=work_order_id, env=self._env_provider()
         )
 
 

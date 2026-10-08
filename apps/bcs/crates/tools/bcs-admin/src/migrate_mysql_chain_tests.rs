@@ -126,10 +126,11 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=30\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=31\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=30).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=31).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
+        assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
         history_window_tests::verify_history_windows(global).await?;
         let records = chain_history(db).await?;
@@ -154,6 +155,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         db.execute(DbStatement::new("INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, tags_json) VALUES ('chain-group', 'chain-bot', 'member', 'test', '[\"keep\"]')")).await?;
         db.execute(DbStatement::new("INSERT INTO bcs_groups (group_id, status, driver_bot, env) VALUES ('chain-group', 'active', 'chain-driver', 'test')")).await?;
         db.execute(DbStatement::new("INSERT INTO bcs_state_machine_definition_snapshots (env, run_id, group_id, session_id, group_version, definition_id, definition_version, definition_content_hash, snapshot_json) VALUES ('test', 'legacy-run', 'chain-group', 'chain-session', 1, 'legacy', 1, REPEAT('a', 64), '{\"version\":1}')")).await?;
+        db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, participants, current_msg_seq) VALUES ('test', 'chain-session', 'chain-group', '[]', 7)")).await?;
         for &(version, _, current, archived) in MYSQL_SYNTAX_REVISIONS {
             let updated = db.execute(DbStatement::with_params(
                 "UPDATE bcs_schema_migrations SET checksum = ?, applied_at = '2026-01-01 00:00:00' WHERE version = ? AND checksum = ?",
@@ -163,9 +165,15 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=10\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=11\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_chain_columns(db).await?;
+        assert_direct_queue_indexes(db).await?;
+        let row = db.query(DbStatement::new("SELECT session_type, current_msg_seq FROM bcs_session_registry WHERE env = 'test' AND session_id = 'chain-session'")).await?.remove(0);
+        assert_eq!(db_get_column::<String>(&row, "session_type")?, "group");
+        assert_eq!(bcs_db_api::db_get_column_opt::<i64>(&row, "current_msg_seq")?, None);
+        let row = db.query(DbStatement::new("SELECT current_msg_seq FROM bcs_group_sessions WHERE env = 'test' AND session_id = 'chain-session'")).await?.remove(0);
+        assert_eq!(db_get_column::<i64>(&row, "current_msg_seq")?, 7);
         let row = db.query(DbStatement::new("SELECT human_mention_notify_mode FROM bcs_groups WHERE group_id = 'chain-group' AND env = 'test'")).await?.remove(0);
         assert_eq!(db_get_column::<String>(&row, "human_mention_notify_mode")?, "all");
         let row = db.query(DbStatement::new("SELECT tags_json, message_view_scope FROM bcs_group_participants WHERE bot_uuid = 'chain-bot'")).await?.remove(0);
@@ -210,6 +218,8 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
+        ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
+        ("bcs_chat_runs", vec!["delivery_id", "source_message_id"]),
         ("bcs_messages", vec!["owner_bot_id", "visibility_domain", "audience_kind", "audience_actor_ids_json"]),
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
@@ -251,6 +261,23 @@ async fn assert_history_lookup_plans(db: &dyn DbPlugin) -> Result<()> {
             assert!(!index.is_empty());
             println!("history identity lookup: column={column} keys={count} index={index} rows={}", db_get_column::<i64>(&rows[0], "rows")?);
         }
+    }
+    Ok(())
+}
+
+async fn assert_direct_queue_indexes(db: &dyn DbPlugin) -> Result<()> {
+    for (table, index, non_unique, columns) in [
+        ("bcs_session_registry", "uk_session_registry", 0, vec!["env", "session_id"]),
+        ("bcs_messages", "uk_session_seq", 0, vec!["env", "session_id", "session_seq"]),
+        ("bcs_chat_runs", "idx_env_delivery", 1, vec!["env", "delivery_id"]),
+    ] {
+        let rows = db.query(DbStatement::with_params(
+            "SELECT COLUMN_NAME AS col, NON_UNIQUE AS non_unique FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ? ORDER BY seq_in_index",
+            vec![DbValue::from(table), DbValue::from(index)],
+        )).await?;
+        let actual = rows.iter().map(|row| db_get_column::<String>(row, "col")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
+        assert_eq!(actual, columns, "{table}.{index}");
+        for row in rows { assert_eq!(db_get_column::<i64>(&row, "non_unique")?, non_unique, "{table}.{index}"); }
     }
     Ok(())
 }

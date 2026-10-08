@@ -623,7 +623,7 @@ bcs_cli() {
     fi
     command_path="$sub"
     case "$sub" in
-        friend|channel|visibility|session|service|collaboration|collaborate)
+        friend|channel|visibility|session|service|collaboration|collaborate|chat-run)
             [[ -n "$nested" && "$nested" != -* ]] && command_path="$sub $nested"
             ;;
     esac

@@ -49,6 +49,7 @@ use crate::protocol_context::{group_context_input, group_type_wire};
 use crate::task_store::TaskStore;
 
 pub struct BcsMessageFlow {
+    pub direct_chat: Option<Arc<crate::a2a_chat::A2aChat>>,
     pub group: Arc<dyn GroupCoreService>,
     pub routing: Arc<dyn RoutingCoreService>,
     pub registry: Arc<dyn BotRegistryCoreService>,
@@ -96,6 +97,7 @@ impl BcsMessageFlow {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         Self {
+            direct_chat: None,
             group,
             routing,
             registry,
@@ -131,6 +133,8 @@ impl BcsMessageFlow {
         }
     }
 
+    pub fn with_direct_chat(mut self, direct: Arc<crate::a2a_chat::A2aChat>) -> Self { self.direct_chat = Some(direct); self }
+
     pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
         self.coordination_intents = port;
         self
@@ -145,6 +149,7 @@ impl BcsMessageFlow {
     pub fn retain_terminal_events(self: &Arc<Self>) {
         let _ = self.terminal_owner.set(Arc::downgrade(self));
         self.system_queue.bind(self);
+        if let Some(direct) = &self.direct_chat { direct.bind_queue(self); }
     }
 
     pub fn system_queue_port(&self) -> Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService> {

@@ -412,3 +412,19 @@ async fn run_reply_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: 
     assert!(repo.admit(rejected).await?.duplicate);
     Ok(())
 }
+
+/// Session ownership is a prerequisite for Direct A2A atomic admission.
+/// Invoke with a fresh Memory or migrated SQL Session repository.
+pub async fn direct_a2a_session_registry_contract_tests(repo: &dyn bcs_service_api::port::repo::SessionRepoPort) {
+    use bcs_service_api::port::repo::NewSessionParams;
+        repo.validate_session_registry().await.unwrap();
+        let id = "group-1:12345678";
+        let group = repo.create("group-1", NewSessionParams { id: Some(id.into()), ..Default::default() });
+        let direct = repo.ensure_direct_session(id);
+        let (group, direct) = tokio::join!(group, direct);
+        assert_ne!(group.is_ok(), direct.is_ok(), "exactly one session type can win");
+        let id = "direct-only";
+        let (a,b) = tokio::join!(repo.ensure_direct_session(id), repo.ensure_direct_session(id));
+        assert_eq!(a.unwrap(), b.unwrap());
+        repo.validate_session_registry().await.unwrap();
+}

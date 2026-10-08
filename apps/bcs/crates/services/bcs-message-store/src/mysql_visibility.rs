@@ -3,6 +3,7 @@ use super::*;
 fn visibility_domain_name(domain: MessageVisibilityDomain) -> &'static str {
     match domain {
         MessageVisibilityDomain::Chat => "chat",
+        MessageVisibilityDomain::DirectA2a => "direct_a2a",
         MessageVisibilityDomain::ManagerWorker => "manager_worker",
         MessageVisibilityDomain::StateMachine => "state_machine",
     }
@@ -13,7 +14,7 @@ pub(crate) fn serialize_visibility(
 ) -> Result<(&'static str, Option<&'static str>, Option<String>), MessageRepoError> {
     if matches!(
         msg.visibility_domain,
-        MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine
+        MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine | MessageVisibilityDomain::DirectA2a
     ) && msg.audience.is_none()
     {
         return Err(MessageRepoError::StorageError(
@@ -61,6 +62,7 @@ fn parse_visibility_domain(
 ) -> Result<Option<MessageVisibilityDomain>, MessageRepoError> {
     match raw {
         None | Some("") => Ok(None),
+        Some("direct_a2a") => Ok(Some(MessageVisibilityDomain::DirectA2a)),
         Some("chat") => Ok(Some(MessageVisibilityDomain::Chat)),
         Some("manager_worker") => Ok(Some(MessageVisibilityDomain::ManagerWorker)),
         Some("state_machine") => Ok(Some(MessageVisibilityDomain::StateMachine)),

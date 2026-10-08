@@ -67,12 +67,12 @@ async fn sqlite_version_30_upgrade_adds_default_all_and_is_repeatable() -> DbRes
     );
     let history = db.query(DbStatement::new(history_sql)).await?;
     assert_eq!(&history[..30], old_history.as_slice());
-    assert_eq!(history.len(), 31);
+    assert_eq!(history.len(), 32);
     let record = applied_sqlite_migration(&db, 31)
         .await?
         .expect("version 31 must be recorded");
     assert_eq!(record.name, "group_human_mention_notify_mode");
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(31));
+    assert_eq!(current_sqlite_version(&db, true).await?, Some(32));
     let columns = column_names(&db, "bcs_groups").await?;
     assert!(
         columns
@@ -83,7 +83,7 @@ async fn sqlite_version_30_upgrade_adds_default_all_and_is_repeatable() -> DbRes
     // A second runner invocation must be a no-op: new checksums stay valid and
     // no additional history rows appear.
     run_sqlite_migrations(&db).await?;
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(31));
+    assert_eq!(current_sqlite_version(&db, true).await?, Some(32));
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, history);
     Ok(())
 }
