@@ -1,3 +1,8 @@
+# Plan Task 12 (BCS bot owner/manager authority cutover): invitation writes
+# authorize a Human through the CURRENT live owner/manager role, never the
+# `created_by` historical creation fact; a Group/Session acting-Bot member
+# qualifies only via a Bot the Human currently owns or manages. All
+# friend-connection writes carry the required §12.5 operator audit context.
 CreateInvitationRequest:
   type: object
   additionalProperties: false

@@ -361,6 +361,14 @@ impl MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `create/session/applied` for a membership record being created.
+        let audit_record = create_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             if transaction_lock_row_is_missing(&error) {
                 // The CAS lock row vanished: a concurrent writer changed or
@@ -524,6 +532,14 @@ impl MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `delete/session/applied` for a membership record being removed.
+        let audit_record = remove_participant_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             if transaction_lock_row_is_missing(&error) {
                 // The CAS lock row vanished: a concurrent writer changed or

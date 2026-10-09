@@ -27,9 +27,17 @@ pub fn router(state: ApiState) -> Router {
             state.clone(),
             verify_principal::<ApiState>,
         ));
-    Router::new()
+    let mut app = Router::new()
         .merge(protected)
         .merge(openapi::public_router())
-        .merge(internal::public_router())
-        .with_state(state)
+        .merge(internal::public_router());
+    // Task 13 (spec §6.1): the credential-bound team-manager sources
+    // slice is merged OUTSIDE the generic Principal/invite-code
+    // middleware boundary, and only once the composition root armed the
+    // team credential lane (`ApiState::team_manager_routes_enabled`).
+    // Unconfigured: the team write routes do not exist at all.
+    if state.team_manager_routes_enabled() {
+        app = app.merge(internal::team_manager_sources_router());
+    }
+    app.with_state(state)
 }

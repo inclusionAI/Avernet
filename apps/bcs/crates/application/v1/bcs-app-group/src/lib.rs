@@ -23,7 +23,9 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
-use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
+use bcs_service_api::types::{
+    BotOperationActor, BotOperationContext, EventActor, EventActorType, OpeningMessageScope,
+};
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
     CollaborationDefinitionRef, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -33,7 +35,7 @@ use bcs_service_api::{
     GroupMutableFieldsPatch, GroupParticipantView, GroupRemoveMemberCommand, GroupStrategy,
     GroupUseCaseError, ParticipantMode, RelationCoreService, RoutingMode, RoutingPolicy,
     RuntimeParticipantBinding, ServiceError, SessionManagementService, StartStateMachineRunCommand,
-    generated_group_id,
+    HumanSponsorship, generated_group_id,
 };
 use serde_json::Value;
 use tokio::task::JoinHandle;
@@ -55,12 +57,21 @@ pub struct GroupServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    // Retained in the constructed facade for interface stability; the
+    // §12.4 authority cutover moved every Human→Bot decision to
+    // `authority`, so `relation` may legitimately be unread on this branch.
+    #[allow(dead_code)]
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     management: Arc<dyn GroupManagementService>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     event_subscription_provisioner: Option<Arc<dyn GroupEventSubscriptionProvisioner>>,
+    authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
+    // Retained alongside the §12.4 cutover (see `relation`) for interface
+    // stability; `GroupServiceConfig.relation_env` has no remaining reader
+    // in the facade.
+    #[allow(dead_code)]
     config: GroupServiceConfig,
 }
 
@@ -375,6 +386,7 @@ impl GroupServiceImpl {
         relation: Arc<dyn RelationCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         management: Arc<dyn GroupManagementService>,
+        authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
         config: GroupServiceConfig,
     ) -> Self {
         Self {
@@ -387,6 +399,7 @@ impl GroupServiceImpl {
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             collaboration_runtime: None,
             event_subscription_provisioner: None,
+            authority,
             config,
         }
     }
@@ -686,6 +699,36 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
             ApplicationError::forbidden("Actors are not collaboration-eligible")
         }
         other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+/// Map a `BotAuthorityHook` resolution failure (spec §12.4): typed authority
+/// branches keep their fixed codes; storage/decode failures stay internal
+/// with no SQL leakage.
+fn map_authority_hook_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Authority(authority) => ApplicationError::authority(authority),
+        other => ApplicationError::internal(other.to_string()),
+    }
+}
+
+/// Caller-side audit identity of one facade mutation (spec §12.5): built
+/// from the AUTHENTICATED Principal after the use case's authorization —
+/// never taken from a request body. The Human keeps the trusted User ID and
+/// the effective actor stays the authenticated Human actor (management may
+/// further resolve an act-as Bot); a Bot principal stays a verified Bot.
+fn group_operation_context(principal: &Principal) -> BotOperationContext {
+    BotOperationContext {
+        operation_id: uuid::Uuid::new_v4().to_string(),
+        actor: match principal {
+            Principal::Human(human) => BotOperationActor::Human {
+                user_id: human.subject.id.clone(),
+                effective_actor_id: format!("human_{}", human.subject.id),
+            },
+            Principal::Bot(bot) => BotOperationActor::Bot {
+                bot_id: bot.bot_uuid.clone(),
+            },
+        },
     }
 }
 

@@ -107,7 +107,18 @@ async fn noop_group_mutations_fail_closed_on_missing_groups() {
         Err(ServiceError::GroupNotFound(id)) if id == missing
     ));
     assert!(matches!(
-        service.update_workspace(missing, Workspace::default()).await,
+        service
+            .update_workspace(
+                missing,
+                Workspace::default(),
+                bcs_service_api::types::BotOperationContext {
+                    operation_id: "contract-test-operation".to_string(),
+                    actor: bcs_service_api::types::BotOperationActor::Bot {
+                        bot_id: "driver".to_string(),
+                    },
+                },
+            )
+            .await,
         Err(ServiceError::GroupNotFound(id)) if id == missing
     ));
     assert!(matches!(

@@ -181,7 +181,12 @@ impl GroupCoreService for FakeGroupCoreService {
         Ok(())
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        _operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<()> {
         let mut groups = self.groups.write().await;
         let group = groups
             .get_mut(id)

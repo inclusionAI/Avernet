@@ -43,6 +43,14 @@ method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
 # The coverage runner is a local test launcher, so explicitly provide the same
 # non-production Principal key to both the BCS child and the E2E client.
 export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+# Task 20: same contract for the team-manager sync credential lane — the
+# singlebox child (which arms [team_manager_sync] in the generated runtime
+# config and passes this key into the BCS process) is a child process whose
+# exports die at exit, so re-export the local-only default here for the
+# e2e.sh child that mints the trusted platform credential
+# (bot_authority.sh story_team_manager_sources_platform_sync). Without it the
+# endpoint-coverage gate's --extra-router slice would stay unhittable.
+export BCS_TEAM_MANAGER_SYNC_SIGNING_KEY="${BCS_TEAM_MANAGER_SYNC_SIGNING_KEY:-local-only-bcs-team-manager-sync-signing-key}"
 source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 
 skip_start=0
@@ -200,6 +208,18 @@ if [[ -x "$cov_cli_bin" ]]; then
 else
   echo "WARN: instrumented bcs-cli not found at $cov_cli_bin; e2e cli cases will use the src/bcs/target/debug fallback or cargo run." >&2
 fi
+# The governed ownership-migrate maintenance binary is built by the same
+# instrumented `cargo build --workspace` (crate bcs [[bin]] target). The
+# e2e.sh child must receive its path explicitly or
+# story_ownership_migrate_maintenance_binary_probes cannot exercise the
+# usage contract at all (command -v misses: the coverage target dir is not
+# on PATH), so the story would silently skip.
+cov_migrate_bin="$bcs_dir/target/cov-e2e/llvm-cov-target/debug/bcs-ownership-migrate"
+if [[ -x "$cov_migrate_bin" ]]; then
+  export BCS_MIGRATE_BIN="$cov_migrate_bin"
+else
+  echo "WARN: instrumented bcs-ownership-migrate not found at $cov_migrate_bin; the maintenance-binary e2e story will skip its usage probes." >&2
+fi
 
 # 2. Run e2e (curl hits :21000, exercising the instrumented bcs; profraw is
 #    appended continuously). Do not let e2e failure abort aggregation: the
@@ -224,6 +244,17 @@ export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
 if [[ "$e2e_status" -ne 0 ]]; then
   echo "WARN: e2e exited with $e2e_status; continuing to flush profraw and aggregate coverage." >&2
+  # Failure-branch-only diagnostics: surface the server-side tail of bcs.log so
+  # the CI log shows the 500/4xx causes (panics, SQL errors, guard denials)
+  # without downloading artifacts. bcs_log resolves to the same file the
+  # endpoint-coverage hit log uses (see above); tolerate a missing file.
+  if [[ -f "$bcs_log" ]]; then
+    echo "--- bcs.log tail (post-failure diagnostics; last 120 lines) ---"
+    tail -n 120 "$bcs_log" || true
+    echo "--- end of bcs.log tail ---"
+  else
+    echo "WARN: bcs log not found at $bcs_log; cannot print server-side diagnostics." >&2
+  fi
 fi
 
 # 3 & 4 & 5: stop bcs (SIGTERM flush) -> stop bots -> aggregate.
@@ -331,12 +362,21 @@ if [[ "$no_stop" -eq 0 ]]; then
   # registered in bcs-http's router.rs, which does this e2e run exercise? Diff
   # the BCS_DEBUG hit log (collected above) against the parsed endpoint set.
   # See scripts/adapters_endpoint_coverage.py for the over/under-count self-checks.
+  # Task 20: the credential-gated team-manager sources slice is mounted OUTSIDE
+  # bcs-http's router.rs (axum .nest at /api/v1/bots in bcs-api-http), so it
+  # joins the SAME denominator via --extra-router — parsed from the slice's own
+  # .route calls, prefixed to match the access log's MatchedPath. The
+  # bot_authority e2e suite drives the slice's PUT sync and POST/DELETE member
+  # repairs (plus the uncredentialed 401/404 probes), so the 100% gate holds
+  # with the slice counted. Bots-manager-slice GET/mine coverage stays where it
+  # always was: the v1 openapi routes are a separate contract contract suite.
   endpoint_txt="$cov_dir/endpoint_coverage.txt"
   endpoint_xml="$cov_dir/endpoint_coverage.xml"
   # The script prints only a short summary to stdout (no per-endpoint detail);
   # the full covered/uncovered lists go to the .txt and structured .xml files.
   ( cd "$bcs_dir" && python3 scripts/adapters_endpoint_coverage.py \
       --router crates/adapters/http/bcs-http/src/router.rs \
+      --extra-router /api/v1/bots:crates/adapters/http/bcs-api-http/src/v1/internal/routes/team_manager_sources.rs \
       --log "$bcs_log" \
       --out-txt "$endpoint_txt" \
       --out-xml "$endpoint_xml" \

@@ -13,7 +13,7 @@ use bcs_service_api::port::repo::{ChatRunCompletionPolicy, ChatRunRecord, ChatRu
 use bcs_service_api::ChatResponseMode;
 
 fn record(run_id: &str, expires_at_ms: u64) -> ChatRunRecord {
-    ChatRunRecord::new(
+    let mut record = ChatRunRecord::new(
         run_id.to_string(),
         "bot".to_string(),
         "from".to_string(),
@@ -23,7 +23,16 @@ fn record(run_id: &str, expires_at_ms: u64) -> ChatRunRecord {
         Some("http-chat-async".to_string()),
         ChatResponseMode::Full,
         ChatRunCompletionPolicy::WaitForFinal,
-    )
+    );
+    // §12.5: each create command carries an honest operation context
+    // (verified Bot lane in these engine fixtures).
+    record.operation = Some(bcs_service_api::types::BotOperationContext {
+        operation_id: format!("run-store-engine-tests:{run_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "from".to_string(),
+        },
+    });
+    record
 }
 
 #[tokio::test]

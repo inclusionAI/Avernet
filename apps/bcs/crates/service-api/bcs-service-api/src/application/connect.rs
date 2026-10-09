@@ -2,11 +2,24 @@
 //!
 //! Route-facing; called by `routes/friends.rs`. Orchestrates `PermissionRequestRepo`,
 //! `EdgeGrantRepo`, `PermissionProfileRepo` (wired in a later installment).
+//!
+//! Plan Task 12 (spec §12.5 + §12.2): every WRITE of the friend lifecycle
+//! carries the REQUIRED [`BotOperationContext`] supplied by the delivery
+//! adapter after caller authentication — the store writes the business row
+//! and its `bcs_bot_action_audits` record in the same transaction, and the
+//! lane never invents (or silently downgrades to System) an operator. The
+//! connect lane also owns the acting-actor authorization question: a Human
+//! may only act as a Bot the CURRENT authority facts (owner/manager) cover,
+//! never via the legacy `created_by` fallback or a Bot-ID suffix. Role
+//! lifecycle audits (`bot_manager_changes`) are a different table and are
+//! never touched here (permission-request decisions and role mutations stay
+//! separate lifecycles, spec §12.3).
 use async_trait::async_trait;
 use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 
 use crate::core::error::ServiceResult;
 use crate::principal::RequestAuthHeaders;
+use crate::types::BotOperationContext;
 pub use crate::port::repo::edge_grant::FriendListQuery;
 
 /// Enriched page; ordering and filtered total are supplied by the repository.
@@ -56,13 +69,33 @@ pub struct RequestsPage {
 
 #[async_trait]
 pub trait ConnectService: Send + Sync {
+    /// Whether the verified Human `staff_no` may act as `requested_actor_id`
+    /// (plan Task 12, spec §12.1(5)/§12.4). This is the application-owned
+    /// acting-actor question: the adapter resolves IDENTITY ONLY and this
+    /// service answers the authorization from the CURRENT authority facts
+    /// (owner/manager role on the exact Bot), never from `created_by`, a
+    /// Bot-ID suffix or a signed claim. Fail-closed default: an unconfigured
+    /// authority answer denies.
+    async fn authorize_acting_actor(
+        &self,
+        _staff_no: &str,
+        _requested_actor_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(false)
+    }
+
     /// Human→Bot: 1 request (+1 edge on approve). Bot↔Bot: 2 requests (+2 edges).
+    ///
+    /// `operation` is the REQUIRED audit context of this use case (spec
+    /// §12.5); a new command missing its context is rejected, never
+    /// recorded as a forged System operator.
     async fn create_connect(
         &self,
         caller: &str,
         to_bot: &str,
         message: Option<String>,
         request_auth: Option<RequestAuthHeaders>,
+        operation: BotOperationContext,
     ) -> ServiceResult<ConnectResult>;
 
     /// Owner (or auto) approves; same-tx builds edge(s) + back-fills request.edge_id.
@@ -75,6 +108,7 @@ pub trait ConnectService: Send + Sync {
         request_id: &str,
         decider: &str,
         request_auth: Option<RequestAuthHeaders>,
+        operation: BotOperationContext,
     ) -> ServiceResult<Vec<u64>>;
 
     async fn reject(
@@ -82,10 +116,18 @@ pub trait ConnectService: Send + Sync {
         request_id: &str,
         decider: &str,
         reason: Option<String>,
+        operation: BotOperationContext,
     ) -> ServiceResult<()>;
 
-    /// Caller withdraws a pending request.
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()>;
+    /// Caller withdraws a pending request. `operator` is the acting actor
+    /// id, verified by the service against the request's creator before the
+    /// decision persists.
+    async fn cancel(
+        &self,
+        request_id: &str,
+        operator: &str,
+        operation: BotOperationContext,
+    ) -> ServiceResult<()>;
 
     /// Fetch a request by id for delivery-layer authorization checks.
     async fn get_request(&self, request_id: &str) -> ServiceResult<PermissionRequest>;
@@ -100,6 +142,7 @@ pub trait ConnectService: Send + Sync {
         caller: &str,
         target: &str,
         request_auth: Option<RequestAuthHeaders>,
+        operation: BotOperationContext,
     ) -> ServiceResult<Vec<u64>>;
 
     /// Friend list (any direction, default-profile edge), enriched.

@@ -302,6 +302,7 @@ impl SessionManagementService for RecordingSessions {
         sid: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         self.complete_calls.lock().await.push(sid.to_string());
         let s = self.session.lock().await.clone();
@@ -312,6 +313,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by complete tests")
     }
@@ -320,6 +322,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by complete tests")
     }
@@ -329,6 +332,7 @@ impl SessionManagementService for RecordingSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by complete tests")
     }
@@ -337,6 +341,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not used by complete tests")
     }

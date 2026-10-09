@@ -65,6 +65,12 @@ delivery state machine or resume nonterminal streams from durable metadata.
 
 - `cargo test --package bcs-bot --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-bot --all-targets --manifest-path src/bcs/Cargo.toml`
+- R25 conformance registration for `OwnershipMigration` /
+  `OwnershipMigrationCore` runs in
+  `bootstrap/bcs/tests/conformance_ownership_migration.rs` (the bootstrap
+  crate owns the migration chain + store wiring the harnesses drive),
+  against the shared `ownership_migration_service_contract_tests` and
+  `ownership_migration_core_service_contract_tests` harnesses.
 
 BotCore resolves binding webhook overrides before the optional Provider default. Gateway registration validates an effective endpoint before writes; address-only PATCH validates Provider ownership and preserves capabilities. Explicit receiver failures do not select a fallback endpoint.
 

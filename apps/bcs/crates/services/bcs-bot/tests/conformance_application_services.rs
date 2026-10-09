@@ -359,7 +359,6 @@ async fn actor_directory_passes_application_contract() {
     let svc = ActorDirectory::new(
         registry,
         friend,
-        Arc::new(NoopRelationCoreService),
         worker_profiles,
         candidate_search,
     );

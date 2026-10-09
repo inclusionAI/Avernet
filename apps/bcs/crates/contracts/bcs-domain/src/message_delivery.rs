@@ -115,6 +115,11 @@ pub struct PersistedMessageDelivery {
     /// Stable bounded-history selection; references/UTF-8 offsets only, no body.
     #[serde(default)]
     pub context_selection_json: Option<serde_json::Value>,
+    /// §12.5 admitted snapshot link: the operation that admitted this
+    /// delivery. NULL (None) on pre-cutover history rows — legal on reads;
+    /// NEW admissions always carry one and the store rejects a missing one.
+    #[serde(default)]
+    pub operation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

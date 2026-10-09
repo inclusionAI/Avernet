@@ -27,6 +27,7 @@ use bcs_service_api::application::v1::{
     InvitationState, InvitationTargetType, ListBotFriendRequests, ListBotFriendships, Page,
     RejectFriendRequest, DeleteBotFriendship,
 };
+use bcs_service_api::application::v1::BotAuthorityHook;
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, FriendCoreService, Group, GroupCoreService,
@@ -46,6 +47,58 @@ use bcs_app_invitation::{
 };
 
 const SECRET: &[u8] = b"test-invite-secret-32-bytes-long!!";
+
+/// Stand-in for the production authority hook over the REAL strict core.
+/// The fixture bots are onboarded through the legacy test seeding path where
+/// the FIRST trusted registration initializes the creator as owner (spec
+/// §13.3), so `can_manage` mirrors the initialization reality (creator ==
+/// initial owner) plus an explicit manager map for role-parity cases. It
+/// records every question so tests can assert the facade actually consulted
+/// the live role facts instead of `created_by` string matching.
+struct FixtureAuthorityHook {
+    bots: Arc<BotCore>,
+    managers: std::sync::Mutex<Vec<(String, String)>>,
+    questions: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait::async_trait]
+impl BotAuthorityHook for FixtureAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        self.questions
+            .lock()
+            .unwrap()
+            .push((user_id.to_string(), bot_id.to_string()));
+        if self
+            .managers
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(user, bot)| user == user_id && bot == bot_id)
+        {
+            return Ok(true);
+        }
+        let bot = self.bots.get(bot_id).await;
+        let is_owner = bot
+            .and_then(|bot| bot.created_by)
+            .map(|owner| owner == user_id)
+            .unwrap_or(false);
+        if !is_owner {
+            // Missing/uninitialized authority stays a deny for non-init
+            // callers — never an inferred allow from a name suffix.
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        if self.can_manage(user_id, bot_id).await? {
+            return Ok(());
+        }
+        Err(ServiceError::Forbidden(format!(
+            "user '{user_id}' is not the owner of bot '{bot_id}'"
+        )))
+    }
+}
 
 struct Fixture {
     service: InvitationFriendshipServiceImpl,
@@ -83,6 +136,9 @@ impl Fixture {
             group: groups.clone(),
             session: sessions.clone(),
             system_message: Arc::new(NoopSystemMessageService),
+            // The join paths this fixture drives never resolve Human
+            // control: the Noop mine projection denies (fail-closed).
+            bot_query: Arc::new(bcs_test_support::NoopBotQueryService),
             token_secret: SECRET.to_vec(),
             default_ttl_seconds: 3600,
             base_url: None,
@@ -100,7 +156,12 @@ impl Fixture {
             InvitationFriendshipServiceConfig {
                 default_ttl_seconds: 3600,
             },
-        );
+        )
+        .with_authority(Arc::new(FixtureAuthorityHook {
+            bots: bots.clone(),
+            managers: std::sync::Mutex::new(Vec::new()),
+            questions: std::sync::Mutex::new(Vec::new()),
+        }));
         Self {
             service,
             groups,
@@ -131,6 +192,11 @@ impl Fixture {
                 default_ttl_seconds: 3600,
             },
         )
+        .with_authority(Arc::new(FixtureAuthorityHook {
+            bots: self.bots.clone(),
+            managers: std::sync::Mutex::new(Vec::new()),
+            questions: std::sync::Mutex::new(Vec::new()),
+        }))
     }
 
     async fn add_bot(&self, bot_uuid: &str) {
@@ -259,6 +325,16 @@ impl Fixture {
             .await
             .expect("group exists for session");
         let params = NewSessionParams {
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!(
+                    "invitation-test-{}",
+                    uuid::Uuid::new_v4()
+                ),
+                actor: bcs_service_api::types::BotOperationActor::Human {
+                    user_id: "staff-1".into(),
+                    effective_actor_id: "human_staff-1".into(),
+                },
+            },
             session_kind: SessionKind::Chat,
             participants,
             group_version: Some(group.version),
@@ -1662,12 +1738,12 @@ struct FriendListConnect {
 
 #[async_trait]
 impl bcs_service_api::application::connect::ConnectService for FriendListConnect {
-    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
-    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
-    async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { unreachable!() }
-    async fn cancel(&self, _: &str) -> ServiceResult<()> { unreachable!() }
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
+    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn reject(&self, _: &str, _: &str, _: Option<String>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { unreachable!() }
+    async fn cancel(&self, _: &str, _: &str, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<()> { unreachable!() }
     async fn get_request(&self, _: &str) -> ServiceResult<bcs_domain::edge_permission::PermissionRequest> { unreachable!() }
-    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>, _: bcs_service_api::types::BotOperationContext) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn list_requests(&self, _: &str, _: bcs_service_api::application::connect::RequestDirection, _: Option<bcs_domain::edge_permission::RequestStatus>, _: u32, _: u32) -> ServiceResult<bcs_service_api::application::connect::RequestsPage> { unreachable!() }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
         panic!("V1 must not fetch the full friend list")

@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::{AuditActor, OwnershipInitialization};
 use bcs_service_api::{
     ActorKind, AdminBotOnboardCommand, BindingChannels, BotCapabilities, BotOnboardCommand,
     BotOnboardResult, BotOnboardingService, BotRegistryCoreService, EnsureBotCommand,
@@ -204,7 +206,44 @@ impl BotOnboarding {
             return Ok(());
         }
 
-        let overwrite = bot_uuid.ends_with(&identity.staff_no);
+        // Trusted first-ownership claim (plan Task 6, spec 13.3): the
+        // `actor_identity.staff_no` arrives only from verified registration
+        // credentials (the register token subject, an authenticated Human
+        // identity on the onboard routes, or the Provider registration
+        // lanes) — never from an arbitrary request body. The claim runs the
+        // plan-Task-5 governed store lane: exactly one committed atomic
+        // initialization (version 0 → 1, unique approved owner edge, Human
+        // actor materialization, default-profile ensure, initialization
+        // audit) for a still-uninitialized live Bot; an already initialized
+        // Bot is a Conflict that this lane treats as "never re-claim,
+        // never rewrite". Any other failure is a required-write failure and
+        // propagates (no swallow — the register facade turns it into a
+        // failed registration).
+        let initialization = OwnershipInitialization {
+            owner_user_id: identity.staff_no.clone(),
+            actor: AuditActor::Human {
+                // The trusted Human performing this operation is the verified
+                // staff identity itself; owner and operator are the same
+                // credential subject on every entry that reaches here.
+                user_id: identity.staff_no.clone(),
+            },
+            // Service-generated, unique per operation (never client input).
+            operation_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let claimed = match self
+            .registry
+            .initialize_existing_ownership(bot_uuid, initialization)
+            .await
+        {
+            Ok(_) => true,
+            Err(ServiceError::Authority(AuthorityError::Conflict(_))) => false,
+            Err(other) => return Err(other),
+        };
+
+        // `created_by` keeps its legacy (display/history) purpose and is only
+        // force-overwritten by the legacy owner-suffix rule on the trusted
+        // FIRST claim; an already-initialized Bot is never reset here.
+        let overwrite = claimed && bot_uuid.ends_with(&identity.staff_no);
         self.registry
             .save_created_by(bot_uuid, &identity.staff_no, overwrite)
             .await?;
@@ -231,6 +270,8 @@ impl BotOnboarding {
         // profile is missing, so admission will fall back to `public_default`
         // until repair (ETL reconciliation catches this). Spec §8.3 prefers a
         // same-tx write; this is degraded until a cross-store transaction lands.
+        // The authority-side default above (the initialization claim) IS
+        // committed atomically by the plan-Task-5 store lane.
         //
         // Seed the bot's default permission profile (wildcard-allow) — idempotent;
         // D12 rule 2: never overwrites an existing default. Spec §5.1.1.
@@ -538,6 +579,9 @@ mod tests {
         binding_index: Mutex<HashMap<(String, String), String>>,
         onboarded: Mutex<HashSet<String>>,
         saved_created_by: Mutex<Vec<(String, String, bool)>>,
+        /// Recording lifecycle core: the trusted first-ownership claims the
+        /// onboarding lanes perform (bot_id, owner_user_id, operation_id).
+        claims: Mutex<Vec<(String, String, String)>>,
     }
 
     impl StaticRegistry {
@@ -570,6 +614,7 @@ mod tests {
                         .collect(),
                 ),
                 saved_created_by: Mutex::new(Vec::new()),
+                claims: Mutex::new(Vec::new()),
             }
         }
 
@@ -702,6 +747,25 @@ mod tests {
 
         async fn has_been_onboarded(&self, bot_id: &str) -> bool {
             self.onboarded.lock().await.contains(bot_id)
+        }
+
+        async fn initialize_existing_ownership(
+            &self,
+            bot_id: &str,
+            initialization: bcs_service_api::types::OwnershipInitialization,
+        ) -> ServiceResult<bcs_domain::OwnershipState> {
+            // Recording twin of the plan-Task-5 governed lane for the local
+            // unit tests: a live version-0 bot claims; the higher-level
+            // (already initialized) branch is not modeled here.
+            self.claims.lock().await.push((
+                bot_id.to_string(),
+                initialization.owner_user_id.clone(),
+                initialization.operation_id.clone(),
+            ));
+            Ok(bcs_domain::OwnershipState {
+                owner_user_id: initialization.owner_user_id,
+                ownership_version: 1,
+            })
         }
 
         async fn save_created_by(

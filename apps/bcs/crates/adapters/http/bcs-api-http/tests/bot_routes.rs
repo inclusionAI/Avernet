@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_config_api::ManifestConfig;
+use bcs_api_http::v1::openapi::MyBot as MyBotDto;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::*;
 use bcs_test_support::{NoopChannelService, NoopCollaborationRuntimeService};
@@ -286,10 +287,16 @@ impl BotService for FakeBotService {
         Ok(Bot::Physical(physical_bot()))
     }
 
-    async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
+    async fn list_mine(
+        &self,
+        command: ListMyBots,
+    ) -> Result<Page<MyBot>, ApplicationError> {
         *self.mine.lock().expect("mine lock") = Some(command);
         Ok(Page {
-            items: vec![Bot::Human(human_bot())],
+            items: vec![MyBot {
+                bot: Bot::Human(human_bot()),
+                access_relation: BotAccessRelation::Owner,
+            }],
             total: 1,
             offset: 2,
             limit: 3,
@@ -670,6 +677,59 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(
         mine_body["data"]["items"][0]["friend_check_in_strategy"],
         "APPROVAL"
+    );
+    // Task 9 wire contract: Bot fields stay FLATTENED and every item
+    // carries the REQUIRED `access_relation` label, enum owner|manager —
+    // decoded through the strict response DTO (a missing label or an
+    // unknown relation must fail to decode, never default).
+    assert_eq!(mine_body["data"]["items"][0]["access_relation"], "owner");
+    assert_eq!(mine_body["data"]["items"][0]["bot_id"], "human_staff-1");
+    assert!(
+        mine_body["data"]["items"][0].get("bot").is_none(),
+        "mine items flatten Bot fields; no nested bot object"
+    );
+    let decoded: MyBotDto =
+        serde_json::from_value(mine_body["data"]["items"][0].clone())
+            .expect("the mine item decodes through the strict DTO");
+    assert_eq!(decoded.bot.bot_id(), "human_staff-1");
+    assert_eq!(decoded.access_relation, BotAccessRelation::Owner);
+    let missing_label = serde_json::json!({
+        "bot_id": "human_staff-1",
+        "kind": "human",
+        "name": "Human",
+        "visibility": "protected",
+        "status": "online",
+        "env": "dev",
+        "user_visibility": "protected",
+        "friend_ext": {},
+        "friend_check_in_strategy": "APPROVAL",
+        "created_at": 1,
+        "updated_at": 2
+    });
+    assert!(
+        serde_json::from_value::<MyBotDto>(missing_label)
+            .is_err(),
+        "an item missing access_relation is a contract violation, never a default owner"
+    );
+    let unknown_label =
+        serde_json::from_value::<MyBotDto>(serde_json::json!({
+        "bot_id": "human_staff-1",
+        "kind": "human",
+        "name": "Human",
+        "visibility": "protected",
+        "status": "online",
+        "env": "dev",
+        "user_visibility": "protected",
+        "friend_ext": {},
+        "friend_check_in_strategy": "APPROVAL",
+        "created_at": 1,
+        "updated_at": 2,
+        "access_relation": "creator",
+    }))
+    .expect_err("labels outside owner|manager must be rejected");
+    assert!(
+        unknown_label.to_string().contains("unknown variant"),
+        "the decode error must expose the controlled owner|manager vocabulary: {unknown_label}"
     );
 
     let candidates = service.candidates.lock().expect("candidates lock");

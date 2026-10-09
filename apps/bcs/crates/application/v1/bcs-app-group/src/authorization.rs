@@ -19,6 +19,25 @@ impl GroupServiceImpl {
             })
     }
 
+    /// Eligibility form of `can_manage` (spec §12.4): an UNINITIALIZED Bot is
+    /// a plain non-match for enumeration-style questions (view-actor
+    /// candidates, act-as candidates, detail-read participants) so callers
+    /// who do not already manage the Bot learn nothing; corrupt or other
+    /// failures keep their typed branches and propagate.
+    async fn authority_allows_quietly(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        match self.authority.can_manage(user_id, bot_id).await {
+            Ok(allowed) => Ok(allowed),
+            Err(ServiceError::Authority(
+                bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. },
+            )) => Ok(false),
+            Err(other) => Err(map_authority_hook_error(other)),
+        }
+    }
+
     pub(crate) async fn resolve_view_actor(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
@@ -43,8 +62,17 @@ impl GroupServiceImpl {
             }
             other => other,
         })?;
+        // Authority cutover (spec §8.1/§12.4): the explicit Bot perspective is
+        // allowed iff the Human CURRENTLY owns or manages that exact Bot —
+        // never by `created_by` — and does not require friendship. This is
+        // an EXPLICIT resource-perspective choice, so the typed
+        // ownership_not_initialized branch surfaces instead of a silent deny.
         if bot.actor_kind == ActorKind::Bot
-            && bot.created_by.as_deref() == Some(user.id.as_str())
+            && self
+                .authority
+                .can_manage(&user.id, requested)
+                .await
+                .map_err(map_authority_hook_error)?
         {
             Ok(requested.to_string())
         } else {
@@ -77,27 +105,29 @@ impl GroupServiceImpl {
             return Ok(());
         }
 
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
+        match principal {
+            // Human sponsorship (spec §8.3): public OR live authority over
+            // the Bot; no `created_by`, no creator edges.
+            Principal::Human(human) => {
+                if self
+                    .authority_allows_quietly(&human.subject.id, bot_uuid)
+                    .await?
+                {
+                    return Ok(());
+                }
             }
-            let creator_edge = self
-                .relation
-                .get_edge(&principal_actor_id, bot_uuid, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
-                return Ok(());
+            // Bot principals keep the existing public/friendship
+            // reachability contract.
+            Principal::Bot(_) => {
+                if self
+                    .friends
+                    .try_are_friends(&principal_actor_id, bot_uuid)
+                    .await
+                    .map_err(map_service_error)?
+                {
+                    return Ok(());
+                }
             }
-        }
-
-        if self
-            .friends
-            .try_are_friends(&principal_actor_id, bot_uuid)
-            .await
-            .map_err(map_service_error)?
-        {
-            return Ok(());
         }
 
         Err(ApplicationError::forbidden(format!(
@@ -123,28 +153,34 @@ impl GroupServiceImpl {
                 .iter()
                 .any(|actor_id| actor_id == &principal_actor_id)),
             Principal::Human(human) => {
-                let owned_bot_ids = self
-                    .registry
-                    .try_list_bots_by_creator(&human.subject.id)
-                    .await
-                    .map_err(map_service_error)?
-                    .into_iter()
-                    .filter(|bot| bot.actor_kind == ActorKind::Bot)
-                    .map(|bot| bot.bot_uuid)
-                    .collect::<HashSet<_>>();
-                Ok(group.participants.iter().any(|participant| {
-                    participant.actor_kind == ActorKind::Bot
-                        && owned_bot_ids.contains(&participant.bot_uuid)
-                }))
+                // Authority cutover (spec §8.2 Group/Session detail read:
+                // managed Bot gets owner parity; §12.4 forbids created_by):
+                // readable iff the Human currently owns/manages one of the
+                // Group's Bot participants (or participates directly, which
+                // is handled earlier in this method via participants check).
+                for participant in group
+                    .participants
+                    .iter()
+                    .filter(|participant| participant.actor_kind == ActorKind::Bot)
+                {
+                    if self
+                        .authority_allows_quietly(&human.subject.id, &participant.bot_uuid)
+                        .await?
+                    {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
         }
     }
 
-    /// The effective Human principal may act as itself or as an owned Bot
-    /// originator. The effective Bot principal may act only as itself. Anything
-    /// else is forbidden. This is stricter than legacy `authorize_originator`
-    /// (which lets any human designate any originator); it is a V1 gate and
-    /// legacy `POST /groups` is unaffected.
+    /// Spec §8.3: only an authenticated Human caller may select themselves —
+    /// `human_{U}` — as the originator; the sponsored Bots enter as driver and
+    /// participants. A Human never origins as someone else, and never as a
+    /// Bot (ownership no longer plays that role, spec §12.2). The effective
+    /// Bot principal may act only as itself. Legacy `POST /groups` is
+    /// unaffected (its own `authorize_originator` lane).
     pub(crate) async fn authorize_originator(
         &self,
         principal: &Principal,
@@ -153,22 +189,18 @@ impl GroupServiceImpl {
         if principal.actor_id() == originator {
             return Ok(());
         }
-        let bot = self.load_bot(originator).await.map_err(|error| match error {
-            ApplicationError::NotFound { .. } => ApplicationError::forbidden(format!(
-                "Authenticated Principal cannot act as originator '{originator}'"
-            )),
-            other => other,
-        })?;
-        if bot.actor_kind != ActorKind::Bot {
-            return Err(ApplicationError::invalid(
-                "invalid_originator",
-                "originator must be a Bot Actor",
-            ));
-        }
-        if let Principal::Human(human) = principal {
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(());
+        // Structural arm (kept from the pre-cutover contract): a REGISTERED
+        // non-Bot originator (e.g. another Human actor) is a shape error;
+        // unregistered ids and Bots ineligible under §8.3.1 are forbidden.
+        match self.registry.try_get(originator).await {
+            Ok(Some(actor)) if actor.actor_kind != ActorKind::Bot => {
+                return Err(ApplicationError::invalid(
+                    "invalid_originator",
+                    "originator must be a Bot Actor",
+                ));
             }
+            Ok(_) => {}
+            Err(error) => return Err(map_service_error(error)),
         }
         Err(ApplicationError::forbidden(format!(
             "Authenticated Principal cannot act as originator '{originator}'"
@@ -273,15 +305,14 @@ impl GroupServiceImpl {
             if bot.actor_kind != ActorKind::Bot {
                 continue;
             }
-            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
-                return Ok(Some(actor_id));
-            }
-            let creator_edge = self
-                .relation
-                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
-                .await
-                .map_err(map_service_error)?;
-            if creator_edge.is_some_and(|edge| edge.is_creator) {
+            // Authority cutover (spec §8.2/§12.4): the Human may act as a
+            // Bot iff they CURRENTLY own or manage it — judged live, never
+            // from `created_by` or creator edges (§12.2). Enumeration over
+            // candidates stays quiet on uninitialized Bots.
+            if self
+                .authority_allows_quietly(&human.subject.id, &actor_id)
+                .await?
+            {
                 return Ok(Some(actor_id));
             }
         }

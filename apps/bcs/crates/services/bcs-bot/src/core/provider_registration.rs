@@ -6,6 +6,7 @@ use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::provider_registration::*;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::bot_provider::BotProviderRecord;
+use bcs_service_api::types::{AuditActor, OwnershipInitialization};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
@@ -167,18 +168,42 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             bot_uuid: new_bot_uuid(), bot_token: new_session_token(),
             webhook_url: command.webhook_url,
         };
-        self.registrations.create_provider_bot(BotProviderRecord {
-            bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
-            provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
-            webhook_url: record.webhook_url.clone(), is_deleted: false,
-        }, BotCapabilities {
-            name: Some(record.bot_name.clone()), visibility: "protected".into(),
-            // Match Provider-admin registration for both connection modes:
-            // AgentPass identifies this Bot by its Provider's external ref.
-            agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
-                .then(|| record.provider_bot_ref.clone()),
-            ..BotCapabilities::default()
-        }, &record.owner, &record.bot_token).await?;
+        // First-ownership initialization trusted scope (plan Task 6, spec 13.3):
+        // `record.owner` is the signed v2 register token's Human subject (the
+        // token is the only credential of the anonymous redemption and BCS
+        // re-authorizes it here) — never an arbitrary request body. The
+        // Bot/Provider INSERT, the ownership CAS (version 0 → 1), the unique
+        // approved owner edge, the Human actor materialization, the
+        // default-profile ensure, the initialization audit row and the
+        // gateway binding all commit in ONE plan-Task-5 transaction; any
+        // required write failure rolls the whole registration back (no 2xx
+        // "fix later", no credential replay).
+        let initialization = OwnershipInitialization {
+            owner_user_id: record.owner.clone(),
+            actor: AuditActor::Human {
+                user_id: record.owner.clone(),
+            },
+            // Service-generated, unique per operation (never client input).
+            operation_id: uuid::Uuid::new_v4().to_string(),
+        };
+        self.registrations.create_provider_bot_with_initialization(
+            BotProviderRecord {
+                bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+                provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
+                webhook_url: record.webhook_url.clone(), is_deleted: false,
+            },
+            BotCapabilities {
+                name: Some(record.bot_name.clone()), visibility: "protected".into(),
+                // Match Provider-admin registration for both connection modes:
+                // AgentPass identifies this Bot by its Provider's external ref.
+                agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
+                    .then(|| record.provider_bot_ref.clone()),
+                ..BotCapabilities::default()
+            },
+            &record.owner,
+            &record.bot_token,
+            initialization,
+        ).await?;
         self.registry
             .ensure_human_actor(&record.owner, &record.owner)
             .await?;

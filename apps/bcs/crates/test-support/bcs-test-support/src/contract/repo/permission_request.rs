@@ -13,6 +13,16 @@ use bcs_service_api::port::repo::PermissionRequestRepoPort;
 /// Covers `insert` (idempotent on PK `request_id`), `get` (including missing →
 /// `None`), `list_inbox` (with and without status filter), `decide` (status +
 /// decided_by + decided_at mutation), and `backfill_edge_id`.
+fn contract_operation(label: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("permission-request-conformance-{label}"),
+        actor: bcs_service_api::types::BotOperationActor::Human {
+            user_id: "85020".to_string(),
+            effective_actor_id: "human_85020".to_string(),
+        },
+    }
+}
+
 pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort + ?Sized>(
     repo: &T,
     env: &str,
@@ -34,7 +44,10 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         decided_by: None,
         decided_at: None,
     };
-    repo.insert(req).await.expect("insert request");
+    repo
+        .insert(req, &contract_operation("profile-conformance"))
+        .await
+        .expect("insert request");
 
     // get — pending request round-trips, edge_id unset.
     let got = repo.get(&request_id, env).await.expect("found");
@@ -79,6 +92,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
         RequestStatus::Approved,
         "owner",
         Some("ok"),
+        &contract_operation("profile-approve"),
     )
     .await
     .expect("decide");
@@ -90,7 +104,7 @@ pub async fn run_permission_request_repo_contract<T: PermissionRequestRepoPort +
     assert_eq!(got2.decision_reason.as_deref(), Some("ok"), "decision_reason set");
 
     // backfill_edge_id — annotate the approved request with its new edge.
-    repo.backfill_edge_id(&request_id, env, 3001)
+    repo.backfill_edge_id(&request_id, env, 3001, &contract_operation("profile-backfill"))
         .await
         .expect("backfill_edge_id");
     let got3 = repo.get(&request_id, env).await.expect("found after backfill");

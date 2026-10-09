@@ -180,6 +180,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     let now = chrono::Utc::now().timestamp_millis();
     service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-young".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
@@ -189,6 +190,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(channel.outbound().await.is_empty(), "queued hints wait ten seconds");
     let admitted = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
         targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
@@ -212,15 +214,16 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     let failed = service.transition(DeliveryTransitionCommand { delivery_id: running.delivery_id.clone(), expected_state_version: running.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::Failed,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     assert_eq!(failed.last_error_code.as_deref(), Some("bot_terminal_error"));
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a terminal chat error has its own safe channel feedback and must not also emit a generic delivery hint");
     let rejected = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-rejected".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now, expire_at_ms: None, event: None,
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
@@ -230,11 +233,11 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let rejected = service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::TransportRejected,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
@@ -245,7 +248,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 4 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
@@ -280,6 +283,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
     let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     let now = chrono::Utc::now().timestamp_millis();
     let admitted = service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: "im-expiring".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: Some(now + 1_000), event: None,
         targets: ["bot-driver", "bot-observer"].into_iter().map(|bot| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
@@ -297,7 +301,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a queued target keeps the actionable queue reaction visible");
     let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
@@ -305,7 +309,7 @@ async fn expired_im_reaction_waits_until_no_target_remains_queued() {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
         now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
@@ -336,6 +340,7 @@ async fn reaction_delivery_is_bounded_to_one_provider_call_per_tick() {
     let now = chrono::Utc::now().timestamp_millis();
     for index in 1..=2 {
         service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None,
             message_id: format!("im-bounded-{index}"), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
             targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
@@ -5263,6 +5268,7 @@ impl SessionManagementService for RecordingSessionManagement {
         session_id: &str,
         output: Option<Value>,
         error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         self.completed
             .write()
@@ -5285,6 +5291,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -5293,6 +5300,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -5302,6 +5310,7 @@ impl SessionManagementService for RecordingSessionManagement {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -5310,6 +5319,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }

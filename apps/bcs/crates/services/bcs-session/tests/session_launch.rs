@@ -220,12 +220,50 @@ impl Fixture {
         ));
         let runtime = Arc::new(RecordingRuntime::default());
         let system_message = Arc::new(RecordingSystemMessage::default());
+        let authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(CreatedByAuthorityHook { bots: bots.clone() });
         let service = SessionLaunchApplication::new(
             bots.clone(),
             groups.clone(),
             sessions.clone(),
             runtime.clone(),
             system_message.clone(),
+            authority,
+        );
+        Self {
+            service,
+            bots,
+            groups,
+            sessions,
+            session_repo,
+            runtime,
+            system_message,
+        }
+    }
+
+    /// Variation of [`Fixture::new`] with an explicit LIVE authority double
+    /// (the final-review cutover tests: can_manage answers only from seeded
+    /// role facts, never from `created_by`).
+    fn with_authority(
+        authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
+    ) -> Self {
+        let bots = Arc::new(BotCore::memory());
+        let group_repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
+        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+        let session_repo = Arc::new(MemorySessionRepo::new());
+        let sessions = Arc::new(SessionManagementServiceImpl::new(
+            session_repo.clone(),
+            group_repo,
+        ));
+        let runtime = Arc::new(RecordingRuntime::default());
+        let system_message = Arc::new(RecordingSystemMessage::default());
+        let service = SessionLaunchApplication::new(
+            bots.clone(),
+            groups.clone(),
+            sessions.clone(),
+            runtime.clone(),
+            system_message.clone(),
+            authority,
         );
         Self {
             service,
@@ -276,6 +314,7 @@ fn request(
 ) -> SessionLaunchRequest {
     SessionLaunchRequest {
         caller,
+        operator_user_id: None,
         group_id: group_id.to_string(),
         requested_creator: requested_creator.map(str::to_string),
         title: None,
@@ -859,7 +898,7 @@ async fn reactivate_replaces_input_and_preserves_other_session_fields() {
         .clear();
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
     fixture
@@ -925,7 +964,7 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
         .expect("create");
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
     fixture
@@ -990,7 +1029,7 @@ async fn reactivate_rejects_session_from_another_group() {
         .expect("create");
     fixture
         .sessions
-        .complete_if_running(&created.session.id, None, None)
+        .complete_if_running(&created.session.id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete");
 
@@ -1006,4 +1045,151 @@ async fn reactivate_rejects_session_from_another_group() {
         result,
         Err(SessionLaunchError::SessionNotFound(_))
     ));
+}
+
+/// Launch-test authority double: resolves the SAME `created_by` facts the
+/// fixtures seed (spec §12.2 makes clear this is a test-only shortcut —
+/// production resolves through the real role edges).
+struct CreatedByAuthorityHook {
+    bots: Arc<BotCore>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for CreatedByAuthorityHook {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<bool> {
+        use bcs_service_api::BotRegistryCoreService;
+        match self.bots.get(bot_id).await {
+            Some(bot) => Ok(bot.created_by.as_deref() == Some(user_id)),
+            None => Err(bcs_service_api::ServiceError::BotNotFound(
+                bot_id.to_string(),
+            )),
+        }
+    }
+
+    async fn require_owner(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<()> {
+        if self
+            .can_manage(user_id, bot_id)
+            .await
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            Err(bcs_service_api::ServiceError::Unauthorized(
+                "test authority: not the fixture owner".to_string(),
+            ))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Final-review cutover (spec §12.2/§12.4): human group access at launch
+// resolves through the LIVE authority hook, never the historical
+// `created_by` listing.
+// ---------------------------------------------------------------------------
+
+/// Map-backed LIVE authority double: answers ONLY from seeded role facts
+/// (owner or manager — both are "control" for can_manage), never from
+/// `created_by`, mirroring the parity fixtures of the V1 facades.
+struct SeededAuthority {
+    roles: Mutex<std::collections::BTreeMap<(String, String), bool>>,
+}
+
+impl SeededAuthority {
+    fn new() -> Self {
+        Self {
+            roles: Mutex::new(std::collections::BTreeMap::new()),
+        }
+    }
+
+    fn control(&self, user_id: &str, bot_id: &str) {
+        self.roles
+            .lock()
+            .unwrap()
+            .insert((user_id.to_string(), bot_id.to_string()), true);
+    }
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for SeededAuthority {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        Ok(self
+            .roles
+            .lock()
+            .unwrap()
+            .get(&(user_id.to_string(), bot_id.to_string()))
+            .copied()
+            .unwrap_or(false))
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Forbidden(format!(
+            "user '{user_id}' is not the owner of bot '{bot_id}'"
+        )))
+    }
+}
+
+/// A group whose HUMAN caller is not a participant qualifies only through a
+/// Bot participant they CURRENTLY control. After a completed ownership
+/// transfer, the FORMER owner (still the historical `created_by`) is DENIED.
+#[tokio::test]
+async fn former_owner_without_live_role_is_denied_launch() {
+    let authority = Arc::new(SeededAuthority::new());
+    let fixture = Fixture::with_authority(authority);
+    // The registry still carries the historical creation fact — exactly the
+    // post-transfer shape the old lane wrongly trusted.
+    fixture.add_bot("driver", "alice").await;
+    fixture
+        .add_group(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await;
+    // `alice` has NO live role: the driver's ownership moved on to `bob`.
+
+    let result = fixture
+        .service
+        .create(CreateSessionLaunch {
+            request: request(human("alice"), "group-1", None),
+        })
+        .await;
+    assert!(
+        matches!(result, Err(SessionLaunchError::Forbidden(_))),
+        "a former owner (historical created_by, no live role) must NOT launch, got {:?}",
+        result.map(|_| "()")
+    );
+}
+
+/// A legitimate MANAGER of a participating Bot — with NO historical
+/// creation fact at all — may launch (under-grant fix, AC08).
+#[tokio::test]
+async fn live_manager_may_launch_through_participant_bot() {
+    let authority = Arc::new(SeededAuthority::new());
+    authority.control("manager-1", "driver");
+    let fixture = Fixture::with_authority(authority);
+    fixture.add_bot("driver", "alice").await;
+    fixture
+        .add_group(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await;
+
+    let outcome = fixture
+        .service
+        .create(CreateSessionLaunch {
+            request: request(human("manager-1"), "group-1", None),
+        })
+        .await
+        .expect("a live manager of a participating Bot may launch");
+    assert_eq!(outcome.session.created_by.as_deref(), Some("human_manager-1"));
 }

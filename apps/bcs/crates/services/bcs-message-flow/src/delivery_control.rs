@@ -94,6 +94,10 @@ pub async fn cancel_latest_queued(
     };
     visible(flow, &command.caller, &session, &actor, message).await?;
 
+    // §12.5 (plan Task 12 fix round): the queued-message cancel is an
+    // EXTERNALLY initiated new command — its operation context is REQUIRED
+    // and the managed layer derives one sub-operation per cancelled row.
+    let cancel_operation = crate::caller_operation_context(&command.caller, "cancel-queued");
     let mut cancelled = Vec::new();
     for row in rows.into_iter().filter(|row| {
         row.source_message_id == message_id
@@ -111,6 +115,7 @@ pub async fn cancel_latest_queued(
                 reply: None,
                 transport_context_json: None,
                 deadline_at_ms: None,
+                operation: cancel_operation.clone(),
             })
             .await
         {
@@ -178,6 +183,9 @@ pub async fn resolve(
         actor_id: Some(actor.clone()), reply: None,
         transport_context_json: Some(serde_json::json!({"reason": command.reason.trim()})),
         deadline_at_ms: None,
+        // §12.5: authorized-Human manual resolution is EXTERNALLY initiated;
+        // its operation context is REQUIRED.
+        operation: crate::caller_operation_context(&command.caller, "resolve-delivery"),
     }).await.map_err(|error| match error {
         ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_)) =>
             ServiceError::InternalError("delivery resolution persistence failed".into()),
@@ -402,7 +410,9 @@ pub async fn cancel(
         match service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested, now_ms,
             request_id: None, actor_id: Some(actor.clone()), reply: None, transport_context_json: None,
-            deadline_at_ms: Some(now_ms.saturating_add(30_000)) }).await {
+            deadline_at_ms: Some(now_ms.saturating_add(30_000)),
+            // §12.5: the delivery cancel is EXTERNALLY initiated; REQUIRED.
+            operation: crate::caller_operation_context(&command.caller, "cancel-delivery") }).await {
             Ok(updated) => results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)), error: None }),
             Err(error) => {
                 if matches!(error, ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_))) {

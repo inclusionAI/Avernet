@@ -346,6 +346,15 @@ impl MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `update/session/applied` audit row commits with the completion CAS
+        // and its Event in ONE transaction; any failure rolls all of it back.
+        let audit_record = update_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             ServiceError::Conflict(format!(
                 "Session '{}' changed during completion: {error}",

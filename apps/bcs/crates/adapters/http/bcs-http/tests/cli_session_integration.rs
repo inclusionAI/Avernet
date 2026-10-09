@@ -129,6 +129,7 @@ impl SessionManagementService for MockSessions {
         _session_id: &str,
         _output: Option<Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -137,6 +138,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -145,6 +147,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -154,6 +157,7 @@ impl SessionManagementService for MockSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -162,6 +166,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -263,6 +268,7 @@ async fn start_server() -> ServerFixture {
         sessions,
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedAuthorityHook),
     ));
     services.group_message_history = Arc::new(EmptyHistory);
 
@@ -399,4 +405,27 @@ async fn cli_session_messages_returns_array() {
         body
     );
     assert_eq!(body.as_array().unwrap().len(), 0);
+}
+
+struct FailClosedAuthorityHook;
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for FailClosedAuthorityHook {
+    async fn can_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Ok(false)
+    }
+
+    async fn require_owner(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Unauthorized(
+            "no authority facts in this integration test".to_string(),
+        ))
+    }
 }

@@ -1035,14 +1035,7 @@ async fn create_session_returns_created_and_forwards_principal() {
     {
         let created = session.created.lock().expect("create lock");
         let created = created.as_ref().expect("create command");
-        assert_eq!(
-            created.caller,
-            SessionCaller::Human {
-                actor_id: "human_staff-1".into(),
-                owner_id: "staff-1".into(),
-                display_name: None,
-            }
-        );
+        assert_eq!(created.caller.user.as_ref().expect("human caller").id, "staff-1");
         assert_eq!(created.group_id, "group-1");
         assert_eq!(created.title.as_deref(), Some("Planning"));
         assert_eq!(
@@ -1103,14 +1096,7 @@ async fn create_session_accepts_explicit_authenticated_human_actor() {
 
     let created = session.created.lock().expect("create lock");
     let created = created.as_ref().expect("create command");
-    assert_eq!(
-        created.caller,
-        SessionCaller::Human {
-            actor_id: "human_staff-1".into(),
-            owner_id: "staff-1".into(),
-            display_name: None,
-        }
-    );
+    assert_eq!(created.caller.user.as_ref().expect("human caller").id, "staff-1");
     assert_eq!(created.acting_bot_id.as_deref(), Some("human_staff-1"));
     assert_eq!(created.creator_role, Some(ParticipantRole::Observer));
 }
@@ -1148,10 +1134,8 @@ async fn create_session_accepts_bot_identity_and_raw_string_input() {
     let created = session.created.lock().expect("create lock");
     let created = created.as_ref().expect("create command");
     assert_eq!(
-        created.caller,
-        SessionCaller::Bot {
-            bot_uuid: "bot-1".into()
-        }
+        created.caller.bot.as_ref().expect("bot caller").bot_uuid,
+        "bot-1"
     );
     assert_eq!(created.input, Some(json!("run this task")));
 }

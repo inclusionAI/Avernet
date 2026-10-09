@@ -11,7 +11,9 @@ use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
-use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope, OpeningMessageScope};
+use bcs_service_api::application::v1::BotAuthorityHook;
+use bcs_service_api::types::bot_operation::BotOperationActor;
+use bcs_service_api::types::{BotOperationContext, EventActor, EventActorType, MessageViewScope, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
@@ -19,7 +21,7 @@ use bcs_service_api::{
     DmCreateCommand, DmCreateResult, FriendCoreService, Group as DomainGroup,
     GroupAddMemberCommand, GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
     GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
-    GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
+    GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService, HumanSponsorship,
     GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantModeResult,
     GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
     GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
@@ -80,6 +82,10 @@ pub struct GroupManagement {
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
+    /// Live Human→Bot authority (spec §8/§12.4). Production instances get
+    /// this wired by bootstrap; without it the sponsorship/authority paths
+    /// fail CLOSED rather than falling back to `created_by`.
+    authority: Option<Arc<dyn BotAuthorityHook>>,
 }
 
 pub struct GroupManagementWithRuntimeCleanup {
@@ -256,6 +262,7 @@ impl GroupManagement {
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
+            authority: None,
         }
     }
 
@@ -292,6 +299,15 @@ impl GroupManagement {
     /// after the V1 facade has verified Principal-to-driver eligibility.
     pub fn for_v1_openapi(mut self) -> Self {
         self.v1_openapi_create_policy = true;
+        self
+    }
+
+    /// Wire the live Human→Bot authority hook (spec §8/§12.4). The
+    /// Human-sponsorship and managed-Bot predicates verify CURRENT
+    /// qualification through it instead of trusting `created_by` or any
+    /// request string.
+    pub fn with_authority(mut self, authority: Arc<dyn BotAuthorityHook>) -> Self {
+        self.authority = Some(authority);
         self
     }
 
@@ -428,6 +444,36 @@ pub(crate) fn group_mutation_command(
         correlation_id: None,
         trace_id: None,
         mutation,
+        // Same-transaction ordinary-business audit identity (spec §12.5):
+        // the typed operator projects from the authenticated mutation actor
+        // only — Human keeps the trusted staff number, Bot/System keep
+        // their own identity — and never from a request body.
+        operation: BotOperationContext {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            actor: event_actor_operation(actor_id),
+        },
+    }
+}
+
+/// Typed audit identity of a legacy mutation caller (spec §12.5): the
+/// caller_actor_id at these boundaries is the actor the delivery adapter
+/// authenticated — `human_<staff_no>` for Humans, a verified Bot id, or the
+/// fixed `system` identifier for internal maintenance lanes.
+pub(crate) fn event_actor_operation(actor_id: &str) -> BotOperationActor {
+    if let Some(staff_no) = actor_id.strip_prefix("human_") {
+        BotOperationActor::Human {
+            user_id: staff_no.to_string(),
+            effective_actor_id: actor_id.to_string(),
+        }
+    } else if actor_id == "system" {
+        BotOperationActor::System {
+            system_id: "system".to_string(),
+            effective_actor_id: "system".to_string(),
+        }
+    } else {
+        BotOperationActor::Bot {
+            bot_id: actor_id.to_string(),
+        }
     }
 }
 

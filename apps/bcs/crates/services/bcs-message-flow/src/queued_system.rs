@@ -102,7 +102,10 @@ impl SystemMessageQueueService for QueuedSystemAdmission {
             let event = crate::queued_admission::prepare_message_event(&flow, &message_id, &message)?;
             commands.push(AdmitMessageDeliveries { display_message: None, message_id, message,
                 flow_kind: DeliveryFlowKind::System, targets, now_ms,
-                expire_at_ms: expiry, event });
+                expire_at_ms: expiry, event,
+                // §12.5: system notification fan-out has no Human/Bot
+                // caller — an HONEST System identity, never a forged Human.
+                operation: bcs_service_api::types::system_lane_operation("queued-system-notify") });
             origins.push(origin);
         }
         let admitted = service.admit_batch(commands).await.map_err(|error|

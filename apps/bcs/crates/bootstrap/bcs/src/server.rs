@@ -42,7 +42,9 @@ use crate::plugins::{
 use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, GatewayPrincipalTrust};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_api_http::{ApiState, PrincipalVerifier};
-use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
+use bcs_app_bot::{
+    BotAuthorityHookImpl, BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl,
+};
 use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
 use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
@@ -316,6 +318,7 @@ fn build_eventing_runtime_blocking(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
     allow_local_test_endpoints: bool,
 ) -> crate::Result<crate::eventing_wiring::EventingRuntime> {
     std::thread::scope(|scope| {
@@ -330,6 +333,7 @@ fn build_eventing_runtime_blocking(
                         sessions,
                         collaboration_runtime,
                         registry,
+                        authority,
                         allow_local_test_endpoints,
                     ))
             })
@@ -1631,6 +1635,8 @@ fn build_candidate_search_bindings(
 fn build_openapi_v1_state(
     config: &BcsConfig,
     invite_token_secret: Vec<u8>,
+    authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
+    management: &crate::authority_wiring::BotManagementWiring,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -1661,6 +1667,7 @@ fn build_openapi_v1_state(
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
     >,
+    bot_query: Arc<dyn bcs_service_api::BotQueryService>,
 ) -> (
     ApiState,
     Arc<dyn bcs_service_api::InternalBotAttributesService>,
@@ -1686,6 +1693,7 @@ fn build_openapi_v1_state(
         friends.clone(),
         connect_service.clone(),
         candidate_search,
+        Arc::clone(&authority_hook),
         BotServiceConfig {
             env: relation_env.clone(),
         },
@@ -1703,6 +1711,7 @@ fn build_openapi_v1_state(
         relation.clone(),
         sessions.clone(),
         group_management,
+        authority_hook.clone(),
         GroupServiceConfig {
             relation_env: relation_env.clone(),
         },
@@ -1721,12 +1730,12 @@ fn build_openapi_v1_state(
             groups.clone(),
             registry.clone(),
             friends.clone(),
-            relation,
+            authority_hook.clone(),
             session_repo,
             group_message_history,
             collaboration_runtime.clone(),
             system_message.clone(),
-            SessionServiceConfig { relation_env },
+            SessionServiceConfig {},
         )
         .with_participant_view_bindings(participant_view_bindings),
     );
@@ -1742,6 +1751,11 @@ fn build_openapi_v1_state(
         sessions.clone(),
         groups.clone(),
         registry.clone(),
+        authority_hook.clone(),
+        // Live mine union (spec §12.4, final-review cutover): the V1 file
+        // facade's caller identities resolve through the owner/manager
+        // union — never the historical `created_by` listing.
+        bot_query.clone(),
         system_message.clone(),
         Arc::new(session_file_url_projector.clone()),
     ));
@@ -1753,6 +1767,10 @@ fn build_openapi_v1_state(
             group: groups,
             session: sessions,
             system_message,
+            // Live mine union (spec §12.4, final-review cutover): the
+            // Human-side invite authorization resolves through the owner/
+            // manager union, never the historical `created_by` listing.
+            bot_query: bot_query.clone(),
             token_secret: invite_token_secret.clone(),
             default_ttl_seconds: config.invite.default_ttl_seconds,
             base_url: config.invite.base_url.clone(),
@@ -1772,7 +1790,11 @@ fn build_openapi_v1_state(
                 default_ttl_seconds: config.invite.default_ttl_seconds,
             },
         )
-        .with_friend_connection_service(connect_service),
+        .with_friend_connection_service(connect_service)
+        // Plan Task 12: the V1 friend/invitation acting-actor and
+        // manage-resource questions resolve through the live authority hook;
+        // `created_by` is no longer an authorization answer.
+        .with_authority(authority_hook),
     );
     let register_service: Arc<dyn bcs_service_api::application::v1::RegisterService> =
         Arc::new(bcs_app_register::RegisterServiceImpl::new(
@@ -1792,8 +1814,7 @@ fn build_openapi_v1_state(
         judge_available,
     ));
 
-    (
-        ApiState::new(
+    let api_state = ApiState::new(
             group_service,
             session_service.clone(),
             session_service,
@@ -1803,6 +1824,13 @@ fn build_openapi_v1_state(
             principal_verifier,
         )
         .with_bot_service(bot_service)
+        // Plan Task 18: the Human-only manager/transfer facades and the
+        // trusted team sync facade (None keeps the team write routes
+        // unmounted) — mounted HERE, by the composition root, so the v1
+        // routes answer through the one live authority instead of the
+        // fail-closed unconfigured default.
+        .with_bot_manager_service(management.bot_manager.clone())
+        .with_ownership_transfer_service(management.ownership_transfer.clone())
         .with_invite_code_service(invite_code_service)
         .with_invite_code_gate_enabled(invite_code_gate_enabled)
         .with_public_invite_code_claim_enabled(public_invite_code_claim_enabled)
@@ -1817,9 +1845,15 @@ fn build_openapi_v1_state(
                 .as_str()
                 .to_string(),
             config.manifest.clone(),
-        ),
-        internal_bot_attributes_service,
-    )
+        );
+    // The credential-bound team slice mounts ONLY when the composition
+    // root resolved real signing-key material (`None` keeps the routes
+    // unmounted entirely — never an anonymous lane).
+    let api_state = match management.team_manager_sync.clone() {
+        Some(team) => api_state.with_team_manager_sync_service(team),
+        None => api_state,
+    };
+    (api_state, internal_bot_attributes_service)
 }
 
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
@@ -2170,6 +2204,33 @@ impl Default for BcsServerState {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        // Task 9 + Task 18: the memory bot store is also the bot authority
+        // repo (one lifecycle/authority critical section), and the whole
+        // management facade bundle assembles over that ONE lane — the same
+        // composition order as the durable constructor, with the team sync
+        // section resolved at the same startup boundary (a dedicated
+        // runtime handles the async secret read, exactly like the Gateway
+        // Principal verifier build in `BcsServer::new`).
+        let authority_core = crate::authority_wiring::memory_authority_core(bot_repo.clone());
+        let team_manager_sync = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Runtime::new()
+                        .expect("temp runtime for team-manager sync resolution")
+                        .block_on(crate::authority_wiring::resolve_team_manager_sync_service(
+                            &config.team_manager_sync,
+                            authority_core.clone(),
+                            group_session_secret_access.clone(),
+                            &crate::env::resolve_env(),
+                        ))
+                })
+                .join()
+                .expect("team-manager sync resolution thread panicked")
+        })
+        .expect("team manager sync configuration must be valid");
+        let authority_management =
+            crate::authority_wiring::management_wiring_over_core(authority_core, team_manager_sync);
+        let authority_hook = authority_management.hook.clone();
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -2236,6 +2297,11 @@ impl Default for BcsServerState {
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_uplink_config(config.uplink.clone())
             .with_bot_core(bot_core_arc.clone())
+            // Task 12 fix round: `/bots/my` reads the controllable union
+            // through the control plane, so the production bot_query MUST be
+            // control-plane-wired (the missing wiring made the prod route
+            // fail with "requires .with_control_plane").
+            .with_control_plane(provider_control_plane.clone())
             .with_organization(organization_core.clone())
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(
@@ -2287,6 +2353,17 @@ impl Default for BcsServerState {
                 .with_bot_runtime(bot_use_cases.clone())
                 .with_event_record_factory(group_event_factory.clone())
                 .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
+        );
+        // Task 18: the WS protected writer is the last consumer of the ONE
+        // authority lane — enqueue/dequeue authorizations of protected
+        // workbench frames now consult live committed authority (absent
+        // this call the registry answers InvalidateBinding fail-closed).
+        frontend_connections.set_delivery_authorization(
+            crate::authority_wiring::build_delivery_authorization_service(
+                authority_management.core.clone(),
+                sessions.clone(),
+                session_repo.clone(),
+            ),
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
@@ -2426,7 +2503,8 @@ impl Default for BcsServerState {
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
             .with_participant_view_bindings(frontend_connections.clone())
             .with_outbound_url_guard(outbound_url_guard.clone())
-            .with_bot_runtime(bot_use_cases.clone()),
+            .with_bot_runtime(bot_use_cases.clone())
+            .with_authority(authority_hook.clone()),
         );
         let group_proposals = Arc::new(GroupProposalUseCases::new(
             sessions.clone(),
@@ -2504,6 +2582,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
             system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,
@@ -2526,13 +2605,14 @@ impl Default for BcsServerState {
             None,
         );
         let actor_directory: Arc<dyn bcs_service_api::ActorDirectoryService> =
-            Arc::new(bcs_bot::ActorDirectory::new(
-                bot_registry.clone(),
-                friend_store.clone(),
-                relation_store.clone(),
-                candidate_search.worker_profiles,
-                candidate_search.legacy,
-            ),
+            Arc::new(
+                bcs_bot::ActorDirectory::new(
+                    bot_registry.clone(),
+                    friend_store.clone(),
+                    candidate_search.worker_profiles,
+                    candidate_search.legacy,
+                )
+                .with_authority(authority_hook.clone()),
         );
         let collaboration_templates = build_standalone_collaboration_template_service(&config);
         let invite_code_service =
@@ -2544,6 +2624,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             false,
         )
         .expect("default Eventing configuration must initialize");
@@ -2554,9 +2635,14 @@ impl Default for BcsServerState {
                 config.onboard_binding_enabled,
                 config.default_visibility.clone(),
             ));
+        // The authority hook was hoisted before the group wiring so the
+        // Group facade and GroupManagement share the SAME live authority.
+        let authority_hook = authority_hook.clone();
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
+            authority_hook,
+            &authority_management,
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -2585,6 +2671,7 @@ impl Default for BcsServerState {
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
+            bot_use_cases.clone(),
         );
         let channel_runtime = build_channel_runtime(
             &config,
@@ -2664,6 +2751,9 @@ impl Default for BcsServerState {
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
+            .bot_manager(authority_management.bot_manager.clone())
+            .ownership_transfer(authority_management.ownership_transfer.clone())
+            .team_manager_sync(authority_management.team_manager_sync.clone())
             .build()
             .expect("services must be fully wired");
 
@@ -2979,16 +3069,17 @@ fn build_use_case_bundle(
     callback_url_guard: OutboundUrlGuard,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     profile_store: Arc<dyn bcs_service_api::port::repo::PermissionProfileRepoPort>,
+    authority_hook: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
 ) -> UseCaseBundle {
     let candidate_search =
         build_candidate_search_bindings(config, bot_registry.clone(), friend.clone(), fuse_client);
     let actor_directory = bcs_bot::ActorDirectory::new(
         bot_registry.clone(),
         friend.clone(),
-        relation.clone(),
         candidate_search.worker_profiles,
         candidate_search.legacy,
-    );
+    )
+    .with_authority(authority_hook.clone());
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_uplink_config(config.uplink.clone())
@@ -3049,7 +3140,8 @@ fn build_use_case_bundle(
         .with_channel_binding_cleanup(channel_binding_cleanup)
         .with_participant_view_bindings(participant_view_bindings)
         .with_outbound_url_guard(callback_url_guard.clone())
-        .with_bot_runtime(bot_use_cases.clone()),
+        .with_bot_runtime(bot_use_cases.clone())
+        .with_authority(authority_hook.clone()),
     );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());
@@ -3803,6 +3895,33 @@ impl BcsServer {
         assert!(!config.message_delivery.flow_enabled.group,
             "managed Group delivery requires the durable async server constructor");
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        // Task 9 + Task 18: the memory bot store is also the bot authority
+        // repo (one lifecycle/authority critical section), and the whole
+        // management facade bundle assembles over that ONE lane; the team
+        // sync section resolves at the same startup boundary (the in-memory
+        // constructor is synchronous, so a dedicated runtime performs the
+        // async secret read — the `BcsServer::new` Gateway Principal
+        // precedent).
+        let authority_core = crate::authority_wiring::memory_authority_core(bot_repo.clone());
+        let team_manager_sync = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Runtime::new()
+                        .expect("temp runtime for team-manager sync resolution")
+                        .block_on(crate::authority_wiring::resolve_team_manager_sync_service(
+                            &config.team_manager_sync,
+                            authority_core.clone(),
+                            group_session_secret_access.clone(),
+                            &crate::env::resolve_env(),
+                        ))
+                })
+                .join()
+                .expect("team-manager sync resolution thread panicked")
+        })
+        .expect("team manager sync configuration must be valid");
+        let authority_management =
+            crate::authority_wiring::management_wiring_over_core(authority_core, team_manager_sync);
+        let authority_hook = authority_management.hook.clone();
         let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -3876,6 +3995,11 @@ impl BcsServer {
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_uplink_config(config.uplink.clone())
             .with_bot_core(bot_core_arc.clone())
+            // Task 12 fix round: `/bots/my` reads the controllable union
+            // through the control plane, so the production bot_query MUST be
+            // control-plane-wired (the missing wiring made the prod route
+            // fail with "requires .with_control_plane").
+            .with_control_plane(provider_control_plane.clone())
             .with_organization(organization_core.clone())
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(
@@ -3928,6 +4052,17 @@ impl BcsServer {
                 .with_bot_runtime(bot_use_cases.clone())
                 .with_event_record_factory(group_event_factory.clone())
                 .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
+        );
+        // Task 18: the WS protected writer is the last consumer of the ONE
+        // authority lane — enqueue/dequeue authorizations of protected
+        // workbench frames now consult live committed authority (absent
+        // this call the registry answers InvalidateBinding fail-closed).
+        frontend_connections.set_delivery_authorization(
+            crate::authority_wiring::build_delivery_authorization_service(
+                authority_management.core.clone(),
+                sessions.clone(),
+                session_repo.clone(),
+            ),
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
@@ -4056,6 +4191,7 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
             Arc::new(bcs_test_support::NoopPermissionProfileRepo),
+            authority_hook.clone(),
         );
         let (message_flow, channel_slot) =
             finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
@@ -4119,6 +4255,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             use_cases.system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,
@@ -4144,12 +4281,18 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
+        // The authority hook was hoisted before the group wiring so the
+        // Group facade and GroupManagement share the SAME live authority.
+        let authority_hook = authority_hook.clone();
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
+            authority_hook,
+            &authority_management,
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -4178,6 +4321,7 @@ impl BcsServer {
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
+            use_cases.bot_query.clone(),
         );
 
         // Build services bundle
@@ -4271,6 +4415,9 @@ impl BcsServer {
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
+            .bot_manager(authority_management.bot_manager.clone())
+            .ownership_transfer(authority_management.ownership_transfer.clone())
+            .team_manager_sync(authority_management.team_manager_sync.clone())
             .build()
             .expect("services must be fully wired");
 
@@ -4411,6 +4558,31 @@ impl BcsServer {
             )
         })?;
         let db_kind = infrastructure_plugins.db_kind();
+        // Plan Task 18 (spec §13 composition order): the authority lane is
+        // the FIRST datasource consumer of the composition root — a
+        // datasource without bot-authority store wiring fails the startup
+        // here, before any other store is built.
+        let authority_env = crate::env::resolve_env();
+        let authority_repo_lane =
+            crate::authority_wiring::db_bot_authority_lane(db_plugin.clone(), &db_kind, &authority_env)?;
+        let authority_core = authority_repo_lane.into_core();
+        // The trusted team-manager sync facade resolves at the same startup
+        // boundary: enabled-without-material is a configuration error (the
+        // lane is never mounted anonymously), disabled stays unmounted.
+        let team_manager_sync = crate::authority_wiring::resolve_team_manager_sync_service(
+            &config.team_manager_sync,
+            authority_core.clone(),
+            group_session_secret_access.clone(),
+            &authority_env,
+        )
+        .await?;
+        // One authority Core over the one selected datasource serves the
+        // hook, the manager/transfer/team facades, the friend lane, the
+        // Session connection paths and the WS protected writer.
+        let authority_management = crate::authority_wiring::management_wiring_over_core(
+            authority_core,
+            team_manager_sync,
+        );
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);
         let provider_repos = db_provider_repos(db_plugin.clone(), &db_kind, config.provider_http.downlink_detection_source);
@@ -4643,16 +4815,30 @@ impl BcsServer {
                 ),
                 None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
             };
-        let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
-            edge_grant_store.clone(),
-            profile_store.clone(),
-            request_store.clone(),
-            bot_config_store.clone(),
-            user_directory.clone(),
-            friend_connect_notification,
-            friend_auth_sync.clone(),
-            edge_permission_env,
-        ));
+        // Plan Task 12 (spec §12.3/§12.4): the friend lane resolves the
+        // CURRENT owner (approval-notification recipient, friend-scope
+        // owner lookups) and its acting-actor authorizations through the
+        // strict authority core — while the external FriendAuthSyncPort
+        // keeps its historical backend addressing, and role lifecycles
+        // never trigger that sync.
+        // Task 18: the friend lane now consumes the ONE hoisted authority
+        // Core (the same lane the composition root assembled first) — the
+        // same selected datasource, no second authority instantiation.
+        let connect_authority_core: Arc<dyn bcs_service_api::core::BotAuthorityCoreService> =
+            authority_management.core.clone();
+        let connect_service_impl = Arc::new(
+            bcs_edge_permission::DbConnectService::new(
+                edge_grant_store.clone(),
+                profile_store.clone(),
+                request_store.clone(),
+                bot_config_store.clone(),
+                user_directory.clone(),
+                friend_connect_notification,
+                friend_auth_sync.clone(),
+                edge_permission_env,
+            )
+            .with_authority(connect_authority_core),
+        );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
             connect_service_impl.clone();
         let edge_permission_friend_sync: Arc<dyn bcs_service_api::EdgePermissionFriendSyncService> =
@@ -4772,6 +4958,17 @@ impl BcsServer {
                 message_repo,
             )
         };
+        // Task 18: the WS protected writer consumes the SAME hoisted
+        // authority Core — protected workbench frames re-authorize
+        // against live committed authority at enqueue and dequeue (an
+        // unwired registry stays fail-closed with InvalidateBinding).
+        frontend_connections.set_delivery_authorization(
+            crate::authority_wiring::build_delivery_authorization_service(
+                authority_management.core.clone(),
+                sessions.clone(),
+                session_repo.clone(),
+            ),
+        );
         if config.bot_run_context_store == "redis"
             && infrastructure_plugins.cache_kind() != CachePluginKind::Redis
         {
@@ -4899,6 +5096,11 @@ impl BcsServer {
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl.clone();
+        // Task 18: the hook and the whole manager/transfer/team facade
+        // bundle were hoisted to the composition root's FIRST step — the
+        // Group facade, GroupManagement, the Session lanes and the v1
+        // routes all consume the SAME live authority (`authority_management`).
+        let authority_hook = authority_management.hook.clone();
         let use_cases = build_use_case_bundle(
             &config,
             message_flow_builder.system_queue_port(),
@@ -4927,6 +5129,7 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
             profile_store.clone(),
+            authority_hook.clone(),
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
@@ -4999,6 +5202,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             use_cases.system_message.clone(),
+            authority_hook.clone(),
         ));
         let group_management = maybe_wrap_group_management(
             &config,
@@ -5032,6 +5236,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             local_eventing_endpoints_allowed(),
         )
         .await?;
@@ -5041,8 +5246,11 @@ impl BcsServer {
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
+
             &config,
             invite_token_secret.clone(),
+            authority_hook,
+            &authority_management,
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -5071,6 +5279,7 @@ impl BcsServer {
             frontend_connections.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
+            use_cases.bot_query.clone(),
         );
 
         // Build services bundle
@@ -5169,6 +5378,9 @@ impl BcsServer {
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
             .session_files(session_file_service)
+            .bot_manager(authority_management.bot_manager.clone())
+            .ownership_transfer(authority_management.ownership_transfer.clone())
+            .team_manager_sync(authority_management.team_manager_sync.clone())
             .build()
             .expect("services must be fully wired");
 

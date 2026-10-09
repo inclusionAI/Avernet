@@ -28,10 +28,16 @@ use bcs_service_api::port::repo::{
     RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
+use bcs_service_api::types::BotOperationContext;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
+};
+
+use crate::action_audit::{
+    collect_state_audit_record, create_session_audit_record, remove_participant_audit_record,
+    session_action_audit_insert, update_session_audit_record,
 };
 
 // ---------------------------------------------------------------------------
@@ -249,6 +255,15 @@ impl MySqlSessionStore {
                 })?;
             steps.extend(event_plan.steps);
         }
+
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `create/session/applied` audit row joins the Session INSERT (and
+        // its participants side-table rows and its Event) in ONE transaction,
+        // so an audit INSERT failure rolls the whole creation back. The
+        // operation context is REQUIRED on `NewSessionParams` — there is no
+        // fallback that silently skips the audit.
+        let audit_record = create_session_audit_record(&params.operation, &self.env, &session_id);
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
 
         self.db
             .transaction(steps)
@@ -745,9 +760,9 @@ impl SessionRepoPort for MySqlSessionStore {
 
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> { self.repo_delete(session_id).await }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_collect(session_id, bot_uuid).await }
+    async fn collect(&self, session_id: &str, bot_uuid: &str, operation: &BotOperationContext) -> ServiceResult<()> { self.repo_collect(session_id, bot_uuid, operation).await }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_uncollect(session_id, bot_uuid).await }
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str, operation: &BotOperationContext) -> ServiceResult<()> { self.repo_uncollect(session_id, bot_uuid, operation).await }
 
     async fn list_collected_by_group(
         &self,

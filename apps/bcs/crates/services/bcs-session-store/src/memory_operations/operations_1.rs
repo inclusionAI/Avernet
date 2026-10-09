@@ -21,8 +21,17 @@ impl MemorySessionRepo {
             }
             check_group_claim(&registry, &id)?;
             let sess = session_from_params(id.clone(), group_id, &params, now);
+            // Same-critical-section audit (spec §12.5): stage first so an
+            // armed audit failure discards the creation; the row publishes
+            // WITH the session INSERT (all-or-nothing). Staging sits after the
+            // read-only claim check and BEFORE the first mutating claim
+            // commit, so a failure leaves no partial business effect.
+            let record =
+                create_session_audit_record(&params.operation, &self.audit_env(), &id);
+            let mut staged_audit = self.stage_action_audit(&record).await?;
             commit_group_claim(&mut registry, &id);
             insert_session(&mut st, sess.clone());
+            Self::publish_staged_action_audit(&mut staged_audit, &record);
             return Ok(sess);
         }
 
@@ -36,8 +45,17 @@ impl MemorySessionRepo {
             }
             check_group_claim(&registry, &id)?;
             let sess = session_from_params(id.clone(), group_id, &params, now);
+            // Same-critical-section audit (spec §12.5): stage first so an
+            // armed audit failure discards the creation; the row publishes
+            // WITH the session INSERT (all-or-nothing). Staging sits after the
+            // read-only claim check and BEFORE the first mutating claim
+            // commit, so a failure leaves no partial business effect.
+            let record =
+                create_session_audit_record(&params.operation, &self.audit_env(), &id);
+            let mut staged_audit = self.stage_action_audit(&record).await?;
             commit_group_claim(&mut registry, &id);
             insert_session(&mut st, sess.clone());
+            Self::publish_staged_action_audit(&mut staged_audit, &record);
             return Ok(sess);
         }
 
@@ -81,10 +99,21 @@ impl MemorySessionRepo {
                 "session {session_id} already exists"
             )));
         }
+        // Same-critical-section audit (spec §12.5): the staged row publishes
+        // INSIDE the event store's business closure, so the Session INSERT,
+        // its registry claim, its Event and the audit row publish together or
+        // not at all.
+        let record = create_session_audit_record(
+            &command.params.operation,
+            &self.audit_env(),
+            &session_id,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 commit_group_claim(&mut registry, &session_id);
                 insert_session(&mut state, candidate.clone());
+                Self::publish_staged_action_audit(&mut staged_audit, &record);
                 Ok(())
             })
             .await
@@ -171,11 +200,19 @@ impl MemorySessionRepo {
         candidate.updated_at = now;
         candidate.completed_at = Some(now);
         validate_session_event_scope(&candidate, &command.event)?;
+        // Same-critical-section audit (spec §12.5); see add_participant_with_event.
+        let record = update_session_audit_record(
+            &command.operation,
+            &self.audit_env(),
+            &command.session_id,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 state
                     .sessions
                     .insert(command.session_id.clone(), candidate.clone());
+                Self::publish_staged_action_audit(&mut staged_audit, &record);
                 Ok(())
             })
             .await
@@ -329,11 +366,21 @@ impl MemorySessionRepo {
         join_map.insert(bot_uuid, serde_json::json!(candidate.current_msg_seq));
         candidate.participant_join_seq = Some(serde_json::Value::Object(join_map));
         validate_session_event_scope(&candidate, &command.event)?;
+        // Same-critical-section audit (spec §12.5): the staged row publishes
+        // INSIDE the event store's business closure — state, Event and audit
+        // publish together or not at all.
+        let record = create_session_audit_record(
+            &command.operation,
+            &self.audit_env(),
+            &command.session_id,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 state
                     .sessions
                     .insert(command.session_id.clone(), candidate.clone());
+                Self::publish_staged_action_audit(&mut staged_audit, &record);
                 Ok(())
             })
             .await
@@ -380,6 +427,13 @@ impl MemorySessionRepo {
         }
         candidate.updated_at = now_ms();
         validate_session_event_scope(&candidate, &command.event)?;
+        // Same-critical-section audit (spec §12.5); see add_participant_with_event.
+        let record = remove_participant_audit_record(
+            &command.operation,
+            &self.audit_env(),
+            &command.session_id,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 state
@@ -388,6 +442,7 @@ impl MemorySessionRepo {
                 state.collected.retain(|key, _| {
                     !(key.0 == command.session_id && key.1 == command.bot_uuid)
                 });
+                Self::publish_staged_action_audit(&mut staged_audit, &record);
                 Ok(())
             })
             .await
@@ -451,11 +506,19 @@ impl MemorySessionRepo {
         }
         candidate.updated_at = now_ms();
         validate_session_event_scope(&candidate, &command.event)?;
+        // Same-critical-section audit (spec §12.5); see add_participant_with_event.
+        let record = update_session_audit_record(
+            &command.operation,
+            &self.audit_env(),
+            &command.session_id,
+        );
+        let mut staged_audit = self.stage_action_audit(&record).await?;
         event_store
             .commit_business_mutation(&command.event, || {
                 state
                     .sessions
                     .insert(command.session_id.clone(), candidate.clone());
+                Self::publish_staged_action_audit(&mut staged_audit, &record);
                 Ok(())
             })
             .await

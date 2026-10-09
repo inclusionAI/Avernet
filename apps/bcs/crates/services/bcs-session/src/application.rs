@@ -35,11 +35,7 @@ use bcs_service_api::port::{
     EventRecordFactoryPort, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
     FrontendDeliveryTarget, NewEvent,
 };
-
-use bcs_service_api::types::MessageViewScope;
-
-use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
-
+use bcs_service_api::types::{BotOperationContext, EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, MessageViewScope};
 use bcs_service_api::{
     ActorKind, BotRuntimeConnectionService, CollaborationRuntimeService, GroupStrategy,
     Participant, ParticipantMode, ParticipantRole, ServiceError, Session, SessionKind,

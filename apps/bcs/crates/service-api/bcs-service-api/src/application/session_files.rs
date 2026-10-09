@@ -8,6 +8,7 @@ use bcs_storage_api::{ByteStream, PresignGetTicket};
 
 use crate::port::repo::{SessionFileListPage, SessionFileListParams};
 use crate::ServiceError;
+use crate::types::BotOperationContext;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionFileUseCaseError {
@@ -48,6 +49,9 @@ pub struct PrepareUploadCommand {
     pub size: u64,
     pub mime_type: String,
     pub caller: ActorRef,
+    /// REQUIRED audit identity (spec §12.5): `create/session_file/applied`
+    /// committed with the metadata INSERT in one transaction.
+    pub operation: BotOperationContext,
     // NOTE: prepare/upload/list/download are participant-gated (HTTP `ensure_session_member`),
     // NOT owner-gated — no `caller_identities` here. `owner` is recorded from `caller`.
 }
@@ -81,6 +85,10 @@ pub struct DeleteFileCommand {
     pub caller_identities: Vec<String>,        // [caller.actor_id] + owned bot_uuids (HTTP `caller_identities()`)
     pub session_creator: Option<String>,       // session.created_by
     pub driver_bot: Option<String>,            // group.driver_bot
+    /// REQUIRED audit identity (spec §12.5): `delete/session_file/admitted`
+    /// is persisted before the backend I/O and the final metadata DELETE +
+    /// `delete/session_file/completed` commit in ONE transaction.
+    pub operation: BotOperationContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +98,10 @@ pub struct ShareMintCommand {
     pub caller: ActorRef,
     pub ttl_seconds: Option<u64>,
     pub caller_identities: Vec<String>,
+    /// REQUIRED audit identity (spec §12.5): `share/session_file/admitted`
+    /// precedes the mint and `share/session_file/completed` follows it
+    /// (share has no metadata change; both phases are standalone records).
+    pub operation: BotOperationContext,
     /// session 自身 participants 的 bot_uuid/actor_id，由 HTTP 从 `sess.participants`
     /// 解析（与 `ensure_session_member` 同源）。分享鉴权 = caller 是否为 session 成员。
     pub session_participants: Vec<String>,
@@ -146,6 +158,7 @@ pub trait SessionFileService: Send + Sync {
         &self,
         session_id: &str,
         file_id: &str,
+        operation: &BotOperationContext,
     ) -> Result<SessionFile, SessionFileUseCaseError>;
 
     async fn delete_file(
@@ -184,6 +197,7 @@ pub trait SessionFileService: Send + Sync {
         session_id: &str,
         file_id: &str,
         ttl_seconds: u64,
+        operation: &BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError>;
 
     /// Verify share token (no session auth), return the file (must be Ready).
@@ -203,5 +217,9 @@ pub trait SessionFileService: Send + Sync {
     async fn sweep_expired_pending(&self) -> Result<u64, SessionFileUseCaseError>;
 
     /// Best-effort cleanup of all files in a session (called by delete_session hook).
-    async fn delete_all_for_session(&self, session_id: &str) -> Result<u64, SessionFileUseCaseError>;
+    async fn delete_all_for_session(
+        &self,
+        session_id: &str,
+        operation: &BotOperationContext,
+    ) -> Result<u64, SessionFileUseCaseError>;
 }

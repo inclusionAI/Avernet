@@ -78,6 +78,38 @@ fn session_to_json_with_state_machine_run(
 /// (seeded from the group at creation, then evolving independently); this
 /// mirrors `human_has_group_access` but judges membership against
 /// `session.participants` rather than `group.participants`.
+/// Bot ids the Human currently CONTROLS, resolved through the application
+/// `BotQueryService::list_my_bots` (the Task-12 mine projection: live
+/// owner/manager union, never the historical `created_by` listing — plan
+/// Task 12 fix round, spec §12.4).
+pub(crate) async fn current_controllable_bot_ids(
+    state: &HttpAppState,
+    staff_no: &str,
+) -> Vec<String> {
+    match state
+        .services
+        .bot_query
+        .list_my_bots(bcs_service_api::MyBotsCommand {
+            staff_no: staff_no.to_string(),
+            offset: 0,
+            limit: 500,
+            active_only: false,
+        })
+        .await
+    {
+        Ok(page) => page.items.into_iter().map(|bot| bot.bot_uuid).collect(),
+        Err(error) => {
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %error,
+                staff_no,
+                "legacy session route failed to resolve the controllable Bot union; failing closed"
+            );
+            Vec::new()
+        }
+    }
+}
+
 pub(crate) async fn human_has_session_access(
     state: &HttpAppState,
     session: &bcs_service_api::Session,
@@ -87,12 +119,12 @@ pub(crate) async fn human_has_session_access(
     if session.participants.iter().any(|p| p.bot_uuid == actor_id) {
         return true;
     }
-    let owned = state.services.registry.list_bots_by_creator(staff_no).await;
-    owned.iter().any(|b| {
+    let controlled = current_controllable_bot_ids(state, staff_no).await;
+    controlled.iter().any(|bot_id| {
         session
             .participants
             .iter()
-            .any(|p| p.bot_uuid == b.bot_uuid)
+            .any(|p| p.bot_uuid == *bot_id)
     })
 }
 
@@ -105,7 +137,19 @@ pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> 
         }
         bcs_service_api::SessionUseCaseError::Conflict(s) => (StatusCode::CONFLICT, s.clone()),
         bcs_service_api::SessionUseCaseError::Internal(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            // Sanitize at the legacy boundary (final review, Finding 2): the
+            // full cause stays SERVER-SIDE (tracing), the client body is a
+            // fixed generic text — never the raw authority/store diagnostics
+            // (e.g. "corrupt authority data: …" or SQL fragments).
+            tracing::error!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %e,
+                "legacy session route: internal error (details withheld from the client body)"
+            );
+                        (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal session error".to_string(),
+            )
         }
     };
     (code, Json(serde_json::json!({"error": msg}))).into_response()
@@ -210,11 +254,22 @@ fn session_launch_error_to_legacy(error: SessionLaunchError) -> Response {
         )
             .into_response(),
         SessionLaunchError::Runtime(error) => collaboration_error_to_response(error),
-        SessionLaunchError::Internal(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": error.to_string()})),
-        )
-            .into_response(),
+        SessionLaunchError::Internal(error) => {
+            // Sanitize at the legacy boundary (final review, Finding 2): the
+            // raw authority/store diagnostics (corrupt authority rows, SQL
+            // fragments) stay SERVER-SIDE; the client body is the fixed
+            // generic text.
+            tracing::error!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %error,
+                "legacy session launch: internal error (details withheld from the client body)"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal session launch error"})),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -244,6 +299,10 @@ pub async fn create_session_for_group(
     let session_id = body.session_id;
     let request = SessionLaunchRequest {
         caller,
+        // Legacy lane: no AuthenticatedCaller flows through here, so the
+        // launch audit falls back to the SessionCaller-derived identity
+        // (Human launches keep the Human; Bot-only stay Bot-only).
+        operator_user_id: None,
         group_id,
         requested_creator: body.created_by,
         title: body.session_title,
@@ -349,7 +408,7 @@ pub async fn list_sessions_for_group(
         // this check any caller could enumerate any bot's collected sessions
         // in any group (BOLA).
         match resolve_collector_bot(&state, &headers, &uri, Some(bot_uuid)).await {
-            Ok(authorized_bot) => {
+            Ok((authorized_bot, _authorized_caller)) => {
                 if authorized_bot != bot_uuid {
                     return (
                         StatusCode::FORBIDDEN,
@@ -422,22 +481,17 @@ pub async fn list_sessions_for_group(
     // added only to a session, not to group.participants) can only see
     // sessions they themselves are in. Formal group members see all.
     //
-    // Bug fix #11: Human caller must be expanded to {actor_id, ...owned bots}
-    // so a Human who owns a driver-bot in the group is treated as formal
-    // (legacy server.rs:12767-12782).
+    // Bug fix #11 (+ plan Task 12 fix round): a Human caller expands to
+    // {actor_id, ...currently controlled bots} so a Human controlling a
+    // participant Bot in the group is treated as formal. The set comes from
+    // the live mine union (owner/manager role facts) through the application
+    // `BotQueryService`, not the retired creation listing.
     let caller_actor = resolve_group_chat_caller(&state, &headers, &uri).await.ok();
     let caller_ids: Vec<String> = match &caller_actor {
         Some(GroupChatCaller::Bot { bot_uuid }) => vec![bot_uuid.clone()],
         Some(GroupChatCaller::Human(h)) => {
             let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
-            }
+            ids.extend(current_controllable_bot_ids(&state, &h.staff_no).await);
             ids
         }
         None => Vec::new(),
@@ -563,7 +617,11 @@ pub async fn patch_session(
         match state
             .services
             .session_management
-            .update_title(&sid, Some(title))
+            .update_title(
+                &sid,
+                Some(title),
+                &legacy_lane_operation_context("patch-session"),
+            )
             .await
         {
             Ok(s) => return Json(s).into_response(),
@@ -658,18 +716,16 @@ pub async fn complete_session(
         }
     };
 
-    // 5. Caller must be driver (bot itself, or Human who owns the driver bot)
+    // 5. Caller must be driver (bot itself, or a Human who CURRENTLY owns or
+    // manages the driver Bot — live mine union, not the creation listing).
     let is_driver = match &caller {
         GroupChatCaller::Bot { bot_uuid } => group.driver_bot == *bot_uuid,
         GroupChatCaller::Human(h) => {
             h.actor_id == group.driver_bot
-                || state
-                    .services
-                    .registry
-                    .list_bots_by_creator(&h.staff_no)
+                || current_controllable_bot_ids(&state, &h.staff_no)
                     .await
                     .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot)
+                    .any(|bot_id| *bot_id == group.driver_bot)
         }
     };
     if !is_driver {
@@ -690,7 +746,12 @@ pub async fn complete_session(
     match state
         .services
         .session_management
-        .complete_if_running(&sid, output, error)
+        .complete_if_running(
+            &sid,
+            output,
+            error,
+            &caller_operation_context(&caller),
+        )
         .await
     {
         Ok(Some(session)) => {
@@ -845,7 +906,11 @@ pub async fn add_session_participant(
     match state
         .services
         .session_management
-        .add_participant(&sid, participant.clone())
+        .add_participant(
+            &sid,
+            participant.clone(),
+            &legacy_lane_operation_context("add-participant"),
+        )
         .await
     {
         Ok(s) => {
@@ -911,20 +976,18 @@ pub async fn remove_session_participant(
         })
         .unwrap_or((None, None, None));
 
-    // Authorization: self, owner, session creator/caller_principal, or coordinator.
+    // Authorization: self, owner, session creator/caller_principal, or
+    // coordinator.
     let is_self = caller_id == bot_uuid;
-    // COSEC: Human authority includes only Bots owned by the authenticated
-    // staff identity. This lets a Human act as a Bot-valued Session manager
-    // without trusting any caller-supplied actor id.
+    // COSEC (plan Task 12 fix round): a Human may act only for Bots the
+    // CURRENT owner/manager live-role facts place under their control — the
+    // mine union through the application `BotQueryService`, never the
+    // historical `list_bots_by_creator` creation listing and never a
+    // caller-supplied actor id.
     let owned_bot_ids = match &caller {
-        GroupChatCaller::Human(h) => state
-            .services
-            .registry
-            .list_bots_by_creator(&h.staff_no)
-            .await
-            .into_iter()
-            .map(|b| b.bot_uuid)
-            .collect::<Vec<_>>(),
+        GroupChatCaller::Human(h) => {
+            current_controllable_bot_ids(&state, &h.staff_no).await
+        }
         GroupChatCaller::Bot { .. } => Vec::new(),
     };
     let human_owns_actor = |actor_id: &str| owned_bot_ids.iter().any(|id| id == actor_id);
@@ -996,10 +1059,14 @@ pub async fn remove_session_participant(
         ActorKind::Bot
     };
 
-    match state
+match state
         .services
         .session_management
-        .remove_participant(&sid, &bot_uuid)
+        .remove_participant(
+            &sid,
+            &bot_uuid,
+            &legacy_lane_operation_context("remove-participant"),
+        )
         .await
     {
         Ok(s) => {
@@ -1134,10 +1201,13 @@ pub async fn update_session_participant_mode(
                     participant.bot_name = human.nick_name.clone();
                     participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
                     participant.message_view_scope = message_view_scope;
+                    // The authenticated Human materializes its own actor
+                    // entry: the audit carries that Human's dual identity.
+                    let human_ctx = caller_operation_context(&caller);
                     return match state
                         .services
                         .session_management
-                        .add_participant(&sid, participant)
+                        .add_participant(&sid, participant, &human_ctx)
                         .await
                     {
                         Ok(session) => Json(session_to_json(&session)).into_response(),
@@ -1159,6 +1229,7 @@ pub async fn update_session_participant_mode(
                 .into_response();
         }
 
+        let human_ctx = caller_operation_context(&caller);
         match state
             .services
             .session_management
@@ -1167,6 +1238,7 @@ pub async fn update_session_participant_mode(
                 &bot_uuid,
                 mode,
                 message_view_scope,
+                &human_ctx,
             )
             .await
         {
@@ -1185,7 +1257,11 @@ pub async fn update_session_participant_mode(
                 return match state
                     .services
                     .session_management
-                    .add_participant(&sid, participant)
+                    .add_participant(
+                        &sid,
+                        participant,
+                        &caller_operation_context(&caller),
+                    )
                     .await
                 {
                     Ok(session) => Json(session_to_json(&session)).into_response(),
@@ -1226,10 +1302,11 @@ pub async fn update_session_participant_mode(
         }
     });
 
+    let participant_operation = caller_operation_context(&caller);
     let result = state
         .services
         .session_management
-        .update_participant_mode(&sid, &bot_uuid, mode)
+        .update_participant_mode(&sid, &bot_uuid, mode, &participant_operation)
         .await;
 
     match result {
@@ -1274,17 +1351,23 @@ pub async fn update_session_participant_mode(
                     bcs_service_api::ParticipantRole::Observer,
                 );
                 participant.bot_name = Some(actor_name.clone());
+                let materialize_operation = caller_operation_context(&caller);
                 match state
                     .services
                     .session_management
-                    .add_participant(&sid, participant)
+                    .add_participant(&sid, participant, &materialize_operation)
                     .await
                 {
                     Ok(_) => {
                         match state
                             .services
                             .session_management
-                            .update_participant_mode(&sid, &bot_uuid, mode)
+                            .update_participant_mode(
+                                &sid,
+                                &bot_uuid,
+                                mode,
+                                &materialize_operation,
+                            )
                             .await
                         {
                             Ok(s) => {
@@ -1436,10 +1519,11 @@ pub async fn session_chat(
             .nick_name
             .clone()
             .or_else(|| Some(human.staff_no.clone()));
+        let join_operation = caller_operation_context(&caller);
         sess = match state
             .services
             .session_management
-            .add_participant(&sid, participant.clone())
+            .add_participant(&sid, participant.clone(), &join_operation)
             .await
         {
             Ok(updated) => updated,
@@ -1749,10 +1833,8 @@ async fn resolve_session_history_view(
                 }) {
                     return Err(forbidden());
                 }
-                let owned = state.services.bot_query.list_bots_by_creator(&human.staff_no)
-                    .await
-                    .map_err(|error| super::bots::bot_use_case_error_to_http(error).into_response())?;
-                if !owned.iter().any(|bot| bot.bot_uuid == requested) {
+                let controlled = current_controllable_bot_ids(state, &human.staff_no).await;
+                if !controlled.iter().any(|bot_id| bot_id == requested) {
                     return Err(forbidden());
                 }
                 return Ok(ResolvedSessionHistoryView {
@@ -1946,14 +2028,17 @@ pub async fn delete_session(
 
     // The session creator, the driver bot, or a human who owns the creator or
     // driver bot may delete the session.
+    // A former creator keeps delete rights only while a CURRENT owner or
+    // manager role fact for the creator/driver Bot survives (plan Task 12
+    // fix round: the creation listing is not an authority answer).
     let authorized = if caller_id == session_creator || caller_id == driver_bot {
         true
     } else if caller_id.starts_with("human_") {
         let staff_no = caller_id.trim_start_matches("human_");
-        let owned_bots = state.services.registry.list_bots_by_creator(staff_no).await;
-        owned_bots
+        let controlled = current_controllable_bot_ids(&state, staff_no).await;
+        controlled
             .iter()
-            .any(|b| b.bot_uuid == session_creator || b.bot_uuid == driver_bot)
+            .any(|bot_id| bot_id == session_creator || bot_id == driver_bot)
     } else {
         false
     };
@@ -1977,7 +2062,16 @@ pub async fn delete_session(
             match state
                 .services
                 .session_files
-                .delete_all_for_session(&sid)
+                .delete_all_for_session(
+                    &sid,
+                    // Batch cleanup after a session deletion: an honest
+                    // system cleanup actor (spec §12.5) — the deleting
+                    // caller's identity lives on the session-delete audit
+                    // lane, not on this best-effort reconciliation.
+                    &bcs_service_api::types::system_lane_operation(
+                        "bcs-http-session-file-cleanup",
+                    ),
+                )
                 .await
             {
                 Ok(n) => tracing::info!(
@@ -2009,8 +2103,8 @@ pub async fn delete_session(
 //
 // Mark / unmark a session as collected by a bot. Caller resolves via
 // resolve_group_chat_caller (bot token -> that bot; human cookie -> must
-// supply an owned bot via the `participant` body/query field, ownership
-// checked via registry.list_bots_by_creator).
+// supply a controlled bot via the `participant` body/query field; control
+// is judged from the CURRENT mine union (owner/manager live roles).
 // ---------------------------------------------------------------
 
 #[derive(Debug, Deserialize, Default)]
@@ -2021,12 +2115,103 @@ pub struct CollectSessionRequest {
     pub participant: Option<String>,
 }
 
+
+/// REQUIRED audit identity (spec §12.5) for a legacy route mutation, built
+/// from the identity the legacy adapter actually authenticated: a Bot token
+/// records the verified Bot; a Human caller records the trusted staff number
+/// plus the Human's own actor as the effective actor. Routes that carry no
+/// authenticated identity record an honest System lane with a fixed
+/// identifier — never a forged Human and never an audit-skipping `None`.
+/// Audit identity of a legacy collect/uncollect request: the resolved
+/// collector is the effective actor; the HUMAN caller (when the request was
+/// Human-driven) stays recorded as the operator so a manager-driven collect
+/// never degrades into a bare Bot row (spec §12.5).
+pub(crate) fn legacy_collect_operation(
+    caller: &GroupChatCaller,
+    collector: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    match caller {
+        GroupChatCaller::Human(human) => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy-collect:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: human.staff_no.clone(),
+                effective_actor_id: collector.to_string(),
+            },
+        },
+        GroupChatCaller::Bot { bot_uuid } => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy-collect:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: bot_uuid.clone(),
+            },
+        },
+    }
+}
+
+pub(crate) fn caller_operation_context(
+    caller: &GroupChatCaller,
+) -> bcs_service_api::types::BotOperationContext {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: bot_uuid.clone(),
+            },
+        },
+        GroupChatCaller::Human(human) => bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: human.staff_no.clone(),
+                effective_actor_id: human.actor_id.clone(),
+            },
+        },
+    }
+}
+
+/// Audit identity for a legacy route that resolved only a bare actor id
+/// (`human_<staff>` or a Bot uuid): a Human id keeps the dual identity; a
+/// Bot id records the Bot acting as itself.
+pub(crate) fn actor_id_operation_context(
+    actor_id: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    if let Some(staff_no) = actor_id.strip_prefix("human_") {
+        bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: staff_no.to_string(),
+                effective_actor_id: actor_id.to_string(),
+            },
+        }
+    } else {
+        bcs_service_api::types::BotOperationContext {
+            operation_id: format!("bcs-http-legacy:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: actor_id.to_string(),
+            },
+        }
+    }
+}
+
+/// Audit identity for legacy mutation or maintenance lanes that carry no
+/// authenticated identity at all: an HONEST system actor per spec §12.5 —
+/// the row never claims a Human and never silently skips the audit.
+pub(crate) fn legacy_lane_operation_context(
+    lane: &str,
+) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("bcs-http-legacy-{lane}:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: format!("bcs-http-legacy-{lane}"),
+            effective_actor_id: format!("bcs-http-legacy-{lane}"),
+        },
+    }
+}
+
 async fn resolve_collector_bot(
     state: &HttpAppState,
     headers: &HeaderMap,
     uri: &Uri,
     participant: Option<&str>,
-) -> Result<String, Response> {
+) -> Result<(String, GroupChatCaller), Response> {
     let caller = match resolve_group_chat_caller(state, headers, uri).await {
         Ok(c) => c,
         Err(_) => {
@@ -2038,7 +2223,9 @@ async fn resolve_collector_bot(
         }
     };
     match caller {
-        GroupChatCaller::Bot { bot_uuid } => Ok(bot_uuid),
+        GroupChatCaller::Bot { bot_uuid } => {
+            Ok((bot_uuid.clone(), GroupChatCaller::Bot { bot_uuid }))
+        }
         GroupChatCaller::Human(h) => {
             let bot_uuid = participant.ok_or_else(|| {
                 (
@@ -2050,13 +2237,10 @@ async fn resolve_collector_bot(
                 )
                     .into_response()
             })?;
-            let owns = state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
+            let owns = current_controllable_bot_ids(&state, &h.staff_no)
                 .await
                 .iter()
-                .any(|b| b.bot_uuid == bot_uuid);
+                .any(|bot_id| bot_id == &bot_uuid);
             if !owns {
                 return Err((
                     StatusCode::FORBIDDEN,
@@ -2067,7 +2251,7 @@ async fn resolve_collector_bot(
                 )
                     .into_response());
             }
-            Ok(bot_uuid.to_string())
+            Ok((bot_uuid.to_string(), GroupChatCaller::Human(h)))
         }
     }
 }
@@ -2079,15 +2263,16 @@ pub async fn collect_session(
     uri: Uri,
     Json(body): Json<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector =
+    let (collector, collector_caller) =
         match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
             Ok(b) => b,
             Err(resp) => return resp,
         };
+    let collect_operation = legacy_collect_operation(&collector_caller, &collector);
     match state
         .services
         .session_management
-        .collect(&sid, &collector)
+        .collect(&sid, &collector, &collect_operation)
         .await
     {
         Ok(()) => Json(serde_json::json!({"collected": true, "session_id": sid})).into_response(),
@@ -2102,15 +2287,16 @@ pub async fn uncollect_session(
     uri: Uri,
     Query(body): Query<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector =
+    let (collector, collector_caller) =
         match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
             Ok(b) => b,
             Err(resp) => return resp,
         };
+    let collect_operation = legacy_collect_operation(&collector_caller, &collector);
     match state
         .services
         .session_management
-        .uncollect(&sid, &collector)
+        .uncollect(&sid, &collector, &collect_operation)
         .await
     {
         Ok(()) => Json(serde_json::json!({"collected": false, "session_id": sid})).into_response(),
@@ -2123,4 +2309,108 @@ mod tests {
     // Session message history tests are in bcs-message-flow/src/group_history.rs
     // alongside the session_history_request_params and resolve_session_history_source_bots
     // functions that power the service layer.
+
+    use super::*;
+    use axum::body::to_bytes;
+    use futures::FutureExt;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing::instrument::WithSubscriber;
+
+    fn body_string(response: Response) -> String {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .now_or_never()
+            .expect("body read")
+            .expect("body ok");
+        String::from_utf8(bytes.to_vec()).expect("UTF-8 body")
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A corrupt-authority error carrying the exact diagnostic fragments
+    /// (SQL, internal row detail) that must NEVER reach a client body.
+    fn corrupt_authority_error() -> bcs_service_api::ServiceError {
+        bcs_service_api::ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::CorruptAuthority {
+                bot_id: "bot-secret".to_string(),
+                env: "prod".to_string(),
+                detail: "SELECT owner FROM edge_grants -- row detail: 3 owner edges"
+                    .to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn session_launch_internal_error_body_hides_authority_detail() {
+        let error = SessionLaunchError::Internal(corrupt_authority_error());
+        let response = session_launch_error_to_legacy(error);
+        assert_eq!(response.status().as_u16(), 500);
+        let body = body_string(response);
+        assert_eq!(body, r#"{"error":"internal session launch error"}"#);
+    }
+
+    #[test]
+    fn session_use_case_internal_error_body_hides_service_detail() {
+        let error = bcs_service_api::SessionUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError(
+                "SQLSTATE[23000] Integrity constraint violation: bot-secret,state=corrupt"
+                    .to_string(),
+            ),
+        );
+        let response = session_error_to_response(&error);
+        assert_eq!(response.status().as_u16(), 500);
+        let body = body_string(response);
+        assert_eq!(body, r#"{"error":"internal session error"}"#);
+    }
+
+    #[test]
+    fn sanitized_internal_renderers_keep_the_cause_in_the_server_side_log() {
+        // The full cause stays observable SERVER-SIDE: the same render call
+        // that ships the generic body emits the raw diagnostics to tracing.
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || writer.clone())
+            .finish();
+        async {
+            let error = SessionLaunchError::Internal(corrupt_authority_error());
+            let response = session_launch_error_to_legacy(error);
+            // client body: sanitized
+            assert_eq!(
+                body_string(response),
+                r#"{"error":"internal session launch error"}"#
+            );
+            let second = bcs_service_api::SessionUseCaseError::Internal(
+                corrupt_authority_error(),
+            );
+            let response = session_error_to_response(&second);
+            assert_eq!(body_string(response), r#"{"error":"internal session error"}"#);
+        }
+        .with_subscriber(subscriber)
+        .now_or_never()
+        .expect("render runs synchronously");
+
+        let text = String::from_utf8(buffer.0.lock().unwrap().clone())
+            .expect("UTF-8 log output");
+        assert!(
+            text.contains("corrupt authority data"),
+            "the server-side log must retain the full cause"
+        );
+        assert!(
+            text.contains("SELECT owner FROM edge_grants"),
+            "the server-side log must retain the SQL/row detail"
+        );
+    }
 }

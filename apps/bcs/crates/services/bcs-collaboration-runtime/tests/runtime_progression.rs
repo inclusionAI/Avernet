@@ -1413,6 +1413,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         .add_participant(
             &started.view.run.session_id,
             Participant::human("human_2002", ParticipantRole::Observer),
+            &bcs_service_api::types::system_lane_operation("bcs-testop"),
         )
         .await
         .expect("add a Human after prompt activation");
@@ -1421,6 +1422,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             &started.view.run.session_id,
             "human_1001",
             MessageViewScope::Participant,
+            &bcs_service_api::types::system_lane_operation("bcs-testop"),
         )
         .await
         .expect("participant scope is a message projection preference");

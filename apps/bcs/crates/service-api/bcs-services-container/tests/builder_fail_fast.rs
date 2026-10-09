@@ -1,7 +1,8 @@
 use bcs_services_container::{BuilderError, ServicesBuilder};
 use bcs_test_support::{
     NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService, NoopBotDeliveryPort,
-    NoopBotDiscoveryService, NoopBotManagementService, NoopBotOnboardingService,
+    NoopBotDiscoveryService, NoopBotManagementService, NoopBotManagerService,
+    NoopBotOnboardingService, NoopBotOwnershipTransferService,
     NoopBotQueryService, NoopBotRegistryCoreService, NoopBotRunContextPort,
     NoopBotRuntimeConnectionService, NoopChannelService, NoopCollaborationRuntimeService,
     NoopCollaborationTemplateService, NoopFriendCoreService,
@@ -80,6 +81,8 @@ fn build_succeeds_when_all_required_services_set() {
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .session_files(Arc::new(NoopSessionFileService))
+        .bot_manager(Arc::new(NoopBotManagerService))
+        .ownership_transfer(Arc::new(NoopBotOwnershipTransferService))
         .build()
         .expect("all required services are wired");
     assert!(Arc::ptr_eq(&services.registry, &services.registry));
@@ -127,4 +130,6 @@ fn fully_wired_builder_without_organization_management() -> ServicesBuilder {
         .channel(Arc::new(NoopChannelService))
         .secret(Arc::new(NoopSecretService))
         .session_files(Arc::new(NoopSessionFileService))
+        .bot_manager(Arc::new(NoopBotManagerService))
+        .ownership_transfer(Arc::new(NoopBotOwnershipTransferService))
 }

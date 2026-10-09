@@ -3,6 +3,117 @@
 use super::*;
 
 impl GroupManagement {
+    /// Live Human→Bot can_manage through the wired authority hook
+    /// (spec §8/§12.4). Fails CLOSED when no hook is wired — `created_by`,
+    /// creator edges and Bot-ID suffixes never substitute authority.
+    pub(crate) async fn human_can_manage_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        let hook = self.authority.as_ref().ok_or_else(|| {
+            GroupUseCaseError::Forbidden(
+                "Human→Bot authority is not configured for this operation".to_string(),
+            )
+        })?;
+        hook.can_manage(user_id, bot_id)
+            .await
+            .map_err(GroupUseCaseError::Service)
+    }
+
+    /// Enumeration-style control question for the legacy caller lanes
+    /// (final-review cutover, spec §12.2/§12.4): does the Human CURRENTLY
+    /// own or manage the exact Bot? Any hook failure — no hook wired,
+    /// missing bot, uninitialized or corrupt authority — is a plain DENY
+    /// (fail-closed, never an error page on these read-style lanes), and
+    /// the historical `created_by` value is never consulted as a
+    /// substitute grant. Unlike [`Self::human_maybe_manages_bot`] (which
+    /// propagates typed authority failures for mutation-target questions)
+    /// these caller-eligibility lanes read a failed lookup as "not a
+    /// grant": a retired driver Bot can never wedge them into an error.
+    pub(crate) async fn human_presently_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        let Some(hook) = self.authority.as_ref() else {
+            tracing::warn!(
+                user_id,
+                bot_id,
+                "group lane: Human→Bot authority is not configured; denying"
+            );
+            return Ok(false);
+        };
+        match hook.can_manage(user_id, bot_id).await {
+            Ok(allowed) => Ok(allowed),
+            Err(error) => {
+                tracing::warn!(
+                    user_id,
+                    bot_id,
+                    error = %error,
+                    "group lane: Human→Bot authority lookup failed; denying"
+                );
+                Ok(false)
+            }
+        }
+    }
+
+    /// Eligibility form: an UNINITIALIZED Bot is a plain non-match for
+    /// enumeration-style questions (spec §12.4: callers who do not already
+    /// manage the Bot must learn nothing); corrupt and other typed
+    /// failures still propagate.
+    pub(crate) async fn human_maybe_manages_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        match self.human_can_manage_bot(user_id, bot_id).await {
+            Ok(allowed) => Ok(allowed),
+            Err(GroupUseCaseError::Service(ServiceError::Authority(
+                bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. },
+            ))) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Validate the trusted Human sponsorship credential of a command
+    /// (spec §8.3): the credential itself must name the Human the boundary
+    /// authenticated (`expected_user_id`), and every sponsored decision later
+    /// re-verifies CURRENT qualification via [`Self::human_can_manage_bot`] —
+    /// the credential is never trusted as a bare string.
+    pub(crate) fn verify_sponsorship_identity(
+        &self,
+        sponsorship: &HumanSponsorship,
+        expected_user_id: &str,
+    ) -> Result<(), GroupUseCaseError> {
+        if sponsorship.user_id != expected_user_id {
+            return Err(GroupUseCaseError::Forbidden(format!(
+                "Human sponsorship credential must identify the authenticated human '{}'",
+                expected_user_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// The Human sponsorship predicate over one target Bot
+    /// (spec §8.3):
+    /// ```text
+    /// human sponsor = not hidden AND (public OR authority.can_manage(human, bot))
+    /// ```
+    pub(crate) async fn sponsorship_allows_bot(
+        &self,
+        sponsor_user_id: &str,
+        bot: &RegisteredBot,
+    ) -> Result<bool, GroupUseCaseError> {
+        if bot.status == ActorStatus::Hidden {
+            return Ok(false);
+        }
+        if bot.capabilities.visibility == "public" {
+            return Ok(true);
+        }
+        self.human_can_manage_bot(sponsor_user_id, &bot.bot_uuid).await
+    }
+
     pub(crate) async fn authorize_originator(
         &self,
         caller_actor_id: Option<&str>,
@@ -307,6 +418,19 @@ impl GroupManagement {
             return Ok(());
         }
 
+        // Authority cutover (spec §8.2/§12.4): a Human who currently owns or
+        // manages the target Bot may DM it without any legacy creator fact.
+        // Public Bots never reach this point — the public arm below keeps the
+        // DM lane independent of any ownership initialization.
+        if target.capabilities.visibility != "public"
+            && self.authority.is_some()
+            && self
+                .human_can_manage_bot(staff_no, &target.bot_uuid)
+                .await?
+        {
+            return Ok(());
+        }
+
         let has_relation = self
             .has_bidirectional_relation_or_friendship(human_actor_id, &target.bot_uuid)
             .await?;
@@ -345,6 +469,32 @@ impl GroupManagement {
         let staff_no = human_actor_id
             .strip_prefix("human_")
             .unwrap_or(human_actor_id);
+        // The act-as check is meaningful only when the caller actor is a
+        // real Bot; a Human originator/driver acting as themselves is not
+        // an act-as at all (legacy parity: human actors have no
+        // authority edge of their own).
+        let caller_is_bot = self
+            .registry
+            .try_get(bot_id)
+            .await
+            .map(|actor| actor.is_some_and(|actor| actor.actor_kind == ActorKind::Bot))
+            .unwrap_or(false);
+        if !caller_is_bot {
+            return Ok(());
+        }
+        // Authority cutover (spec §12.4): when the live hook is wired, a
+        // Human acting AS a Bot is judged by the CURRENT owner/manager edges
+        // only — never by `created_by` (spec §12.2 forbids the fallback).
+        if self.authority.is_some() {
+            return if self.human_can_manage_bot(staff_no, bot_id).await? {
+                Ok(())
+            } else {
+                Err(GroupUseCaseError::Forbidden(format!(
+                    "Not authorized as bot '{}'",
+                    bot_id
+                )))
+            };
+        }
         let bot = self.registry.get(bot_id).await.ok_or_else(|| {
             GroupUseCaseError::Forbidden(format!("Not authorized as bot '{}'", bot_id))
         })?;
@@ -412,6 +562,25 @@ impl GroupManagement {
         self.authorize_human_owner(cmd.human_actor_id.as_deref(), caller)
             .await?;
         self.ensure_group_coordinator(&group, caller, "add members")?;
+        // Order pins the brief: the group-management authorization above must
+        // pass BEFORE any sponsorship claim is looked at. Once reached, the
+        // sponsorship credential must be anchored to the verified Human
+        // context of this command (never a bare request string).
+        if let Some(sponsor) = cmd.human_sponsorship.as_ref() {
+            let trusted_human = cmd
+                .human_actor_id
+                .as_deref()
+                .and_then(|actor| actor.strip_prefix("human_"))
+                .or_else(|| caller.strip_prefix("human_"));
+            match trusted_human {
+                Some(staff_no) => self.verify_sponsorship_identity(sponsor, staff_no)?,
+                None => {
+                    return Err(GroupUseCaseError::Forbidden(
+                        "Human sponsorship requires a verified Human caller context".to_string(),
+                    ));
+                }
+            }
+        }
         Ok((caller.to_string(), group))
     }
 
@@ -450,7 +619,10 @@ impl GroupManagement {
         let actor_id = bound_actor_id.ok_or(WorkbenchUseCaseError::Unauthorized)?;
         let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
 
-        if human_has_group_access(self.registry.as_ref(), group, actor_id, staff_no).await {
+        if self
+            .human_may_view_group_participants(group, actor_id, staff_no)
+            .await?
+        {
             return Ok(WorkbenchAuthorizedHuman {
                 actor_id: actor_id.to_string(),
                 staff_no: staff_no.to_string(),
@@ -458,6 +630,75 @@ impl GroupManagement {
         }
 
         Err(WorkbenchUseCaseError::ForbiddenGroupAccess)
+    }
+
+    /// Workbench group access (spec §8.1/§12.4): with the live hook wired, a
+    /// bound Human sees groups they participate in OR whose Bot participants
+    /// they CURRENTLY own/manage — no `created_by`/Bot-ID-suffix fallback.
+    /// Without a hook (legacy lanes) the original created_by heuristic stays.
+    async fn human_may_view_group_participants(
+        &self,
+        group: &DomainGroup,
+        actor_id: &str,
+        staff_no: &str,
+    ) -> Result<bool, WorkbenchUseCaseError> {
+        if self.authority.is_none() {
+            return Ok(human_has_group_access(
+                self.registry.as_ref(),
+                group,
+                actor_id,
+                staff_no,
+            )
+            .await);
+        }
+        if group
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == actor_id)
+        {
+            return Ok(true);
+        }
+        for participant in group.participants.iter().filter(|p| p.is_bot()) {
+            match self.human_maybe_manages_bot(staff_no, &participant.bot_uuid).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    return Err(WorkbenchUseCaseError::Service(ServiceError::InternalError(
+                        error.to_string(),
+                    )))
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// May the bound Human send as `from_actor_id` (spec §8.2: managing the
+    /// Bot grants the owner's message parity)? Same hook-first rule as
+    /// [`Self::human_may_view_group_participants`].
+    async fn human_may_act_as_sender(
+        &self,
+        from_actor_id: &str,
+        staff_no: &str,
+    ) -> Result<bool, WorkbenchUseCaseError> {
+        let Some(bot) = self.registry.get(from_actor_id).await else {
+            return Ok(false);
+        };
+        if bot.actor_kind != ActorKind::Bot {
+            return Ok(false);
+        }
+        if self.authority.is_none() {
+            return Ok(bot_belongs_to_staff(
+                from_actor_id,
+                bot.created_by.as_deref(),
+                staff_no,
+            ));
+        }
+        match self.human_can_manage_bot(staff_no, from_actor_id).await {
+            Ok(allowed) => Ok(allowed),
+            Err(error) => Err(WorkbenchUseCaseError::Service(ServiceError::InternalError(
+                error.to_string(),
+            ))),
+        }
     }
 
     pub(crate) async fn authorize_workbench_sender(
@@ -474,17 +715,35 @@ impl GroupManagement {
             return Err(WorkbenchUseCaseError::ForbiddenSender);
         }
 
-        let Some(bot) = self.registry.get(from_actor_id).await else {
-            return Err(WorkbenchUseCaseError::ForbiddenSender);
-        };
-        if bot.actor_kind != ActorKind::Bot {
-            return Err(WorkbenchUseCaseError::ForbiddenSender);
-        }
-        if bot_belongs_to_staff(from_actor_id, bot.created_by.as_deref(), &auth.staff_no) {
+        if self
+            .human_may_act_as_sender(from_actor_id, &auth.staff_no)
+            .await?
+        {
             return Ok(());
         }
 
         Err(WorkbenchUseCaseError::ForbiddenSender)
+    }
+
+    /// Session-operate authority (spec §8.2/§12.4): with the live hook wired,
+    /// the bound Human may operate a session bot they CURRENTLY own/manage;
+    /// legacy lanes keep the created_by heuristic.
+    pub(crate) async fn human_may_operate_bot(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+        created_by: Option<&str>,
+    ) -> ServiceResult<bool> {
+        if self.authority.is_some() {
+            return match self.human_can_manage_bot(staff_no, bot_id).await {
+                Ok(allowed) => Ok(allowed),
+                Err(GroupUseCaseError::Service(ServiceError::Authority(
+                    bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. },
+                ))) => Ok(false),
+                Err(other) => Err(ServiceError::InternalError(other.to_string())),
+            };
+        }
+        Ok(bot_belongs_to_staff(bot_id, created_by, staff_no))
     }
 
     pub(crate) async fn session_participant(

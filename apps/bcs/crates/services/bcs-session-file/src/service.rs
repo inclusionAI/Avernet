@@ -22,6 +22,7 @@ use bcs_service_api::application::session_files::{
     PrepareUploadResult, SessionFileService, SessionFileUseCaseError, ShareConsumeResult,
     ShareMintCommand, ShareMintResult,
 };
+use bcs_service_api::types::{BotActionAuditPhase, BotOperationContext};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListParams, SessionFileRepoPort, SessionRepoPort,
 };
@@ -30,7 +31,21 @@ use bcs_storage_api::{
     StorageError, StorageHandle, UploadHandle, UploadMode, UploadPrepareRequest,
 };
 
+use crate::audit::{
+    delete_phase_record, per_resource_operation, share_phase_record, sweep_operation,
+};
 use crate::authz::{can_mutate, can_share, derive_key, validate_file_name};
+
+/// Map a phase-record persistence failure to the use-case error surface. A
+/// failed `admitted` persist must surface BEFORE any external side effect is
+/// started (the caller refuses to touch the backend); a failed
+/// `completed`/`failed` persist propagates the error — it never silently
+/// swallows the outcome (spec §12.5 "传播持久化失败").
+fn audit_persist_error() -> SessionFileUseCaseError {
+    SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
+        "session file operation audit persistence failed".into(),
+    ))
+}
 
 /// Fixed part size used by the local-proxy (`ProxyViaBcs`) multipart branch.
 ///
@@ -274,6 +289,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 storage_backend: self.cfg.storage.backend_name().to_string(),
                 object_handle: handle_json,
                 expires_at: prepared.expires_at,
+                operation: cmd.operation.clone(),
             })
             .await
             .map_err(SessionFileUseCaseError::Internal)?;
@@ -361,6 +377,7 @@ impl SessionFileService for SessionFileServiceImpl {
         &self,
         session_id: &str,
         file_id: &str,
+        operation: &BotOperationContext,
     ) -> Result<SessionFile, SessionFileUseCaseError> {
         let row = self
             .cfg
@@ -417,6 +434,8 @@ impl SessionFileService for SessionFileServiceImpl {
                 e.to_string(),
             ))
         })?;
+        // Same-transaction metadata change + `update/session_file/applied`
+        // audit row (spec §12.5): the store commits both atomically.
         let updated = self
             .cfg
             .repo
@@ -426,6 +445,7 @@ impl SessionFileService for SessionFileServiceImpl {
                 &handle_json,
                 FileStatus::Ready,
                 final_size,
+                operation,
             )
             .await
             .map_err(SessionFileUseCaseError::Internal)?
@@ -455,11 +475,32 @@ impl SessionFileService for SessionFileServiceImpl {
                 cmd.file_id,
             )));
         }
+        // External-effect class (spec §12.5, plan Task 11): persist
+        // `delete/session_file/admitted` BEFORE any backend I/O. When the
+        // admitted row cannot be persisted the side effect MUST NOT start —
+        // the backend is never called (storage call count stays 0) and the
+        // error propagates.
+        let admitted = delete_phase_record(
+            &cmd.operation,
+            &self.cfg.env,
+            &cmd.file_id,
+            BotActionAuditPhase::Admitted,
+            None,
+        );
+        if self
+            .cfg
+            .repo
+            .record_operation_phase(admitted)
+            .await
+            .is_err()
+        {
+            return Err(audit_persist_error());
+        }
         let result = match row.status {
             FileStatus::Ready => {
                 let handle: StorageHandle = serde_json::from_str(&row.object_handle).map_err(|e| {
                     SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
-                        format!("decode storage handle: {e}"),
+                        format!("decode storage handle: {e}")
                     ))
                 })?;
                 self.cfg.storage.delete(&handle).await
@@ -467,41 +508,51 @@ impl SessionFileService for SessionFileServiceImpl {
             FileStatus::Pending | FileStatus::Failed => {
                 let handle: UploadHandle = serde_json::from_str(&row.object_handle).map_err(|e| {
                     SessionFileUseCaseError::Internal(bcs_service_api::ServiceError::InternalError(
-                        format!("decode upload handle: {e}"),
+                        format!("decode upload handle: {e}")
                     ))
                 })?;
                 self.cfg.storage.abort_upload(&handle).await
             }
-            FileStatus::Deleting => {
-                // Should not normally occur in v1; treat as a no-op backend call.
-                return self
-                    .cfg
-                    .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
-                    .await
-                    .map(|_| ())
-                    .map_err(SessionFileUseCaseError::Internal);
-            }
+            // Should not normally occur in v1; no backend object remains in
+            // this state, so the final metadata delete happens directly.
+            FileStatus::Deleting => Ok(()),
         };
         match result {
-            Ok(()) => {
+            Ok(()) | Err(StorageError::NotFound) => {
+                // Backend success (NotFound is the idempotent form). The final
+                // metadata DELETE and the `delete/session_file/completed`
+                // audit row commit in ONE store transaction: a metadata/audit
+                // failure RETAINS the row (with the admitted row) and surfaces
+                // the error — never a false completion and never a silent
+                // rollback claim about the already-removed backend object.
                 self.cfg
                     .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
+                    .delete(&cmd.session_id, &cmd.file_id, &cmd.operation)
                     .await
                     .map_err(SessionFileUseCaseError::Internal)?;
                 Ok(())
             }
-            Err(StorageError::NotFound) => {
-                // Backend NotFound = idempotent. Drop the metadata row and return Ok.
-                self.cfg
-                    .repo
-                    .delete(&cmd.session_id, &cmd.file_id)
-                    .await
-                    .map_err(SessionFileUseCaseError::Internal)?;
-                Ok(())
+            Err(e) => {
+                // Explicit backend failure: persist the `failed` phase (fixed
+                // machine reason, never raw storage error text) best-effort,
+                // leave the row for the sweep/retry contract, and surface the
+                // storage error.
+                let failed = delete_phase_record(
+                    &cmd.operation,
+                    &self.cfg.env,
+                    &cmd.file_id,
+                    BotActionAuditPhase::Failed,
+                    Some("backend_removal_failed"),
+                );
+                if let Err(audit_error) = self.cfg.repo.record_operation_phase(failed).await {
+                    warn!(
+                        file_id = %cmd.file_id,
+                        error = %audit_error,
+                        "failed to persist the delete failed-phase audit row",
+                    );
+                }
+                Err(map_storage_err(e)) // Backend failure: leave row for sweep.
             }
-            Err(e) => Err(map_storage_err(e)), // Backend failure: leave row for sweep.
         }
     }
 
@@ -589,7 +640,8 @@ impl SessionFileService for SessionFileServiceImpl {
             )));
         }
         let ttl = cmd.ttl_seconds.unwrap_or(self.cfg.share_default_ttl);
-        self.mint_share_link(&cmd.session_id, &cmd.file_id, ttl).await
+        self.mint_share_link(&cmd.session_id, &cmd.file_id, ttl, &cmd.operation)
+            .await
     }
 
     async fn share_mint_for_history(
@@ -597,8 +649,10 @@ impl SessionFileService for SessionFileServiceImpl {
         session_id: &str,
         file_id: &str,
         ttl_seconds: u64,
+        operation: &BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
-        self.mint_share_link(session_id, file_id, ttl_seconds).await
+        self.mint_share_link(session_id, file_id, ttl_seconds, operation)
+            .await
     }
 
     async fn share_consume(
@@ -670,6 +724,13 @@ impl SessionFileService for SessionFileServiceImpl {
             .map_err(SessionFileUseCaseError::Internal)?;
         let mut swept = 0u64;
         for row in rows {
+            // Spec §12.5: the pending sweep is an INDEPENDENT system action.
+            // It records an honest System operator with a per-row operation —
+            // never a forged Human and never a replayed historical identity.
+            // The status flip commits its own `update/session_file/applied`
+            // audit row in the store's atomic transaction, and a re-sweep of
+            // an already-swept row is an idempotent no-op (no audit row).
+            let operation = sweep_operation(&row.file_id);
             let handle: UploadHandle = match serde_json::from_str(&row.object_handle) {
                 Ok(h) => h,
                 Err(e) => {
@@ -681,7 +742,12 @@ impl SessionFileService for SessionFileServiceImpl {
                     let _ = self
                         .cfg
                         .repo
-                        .update_status(&row.session_id, &row.file_id, FileStatus::Failed)
+                        .update_status(
+                            &row.session_id,
+                            &row.file_id,
+                            FileStatus::Failed,
+                            &operation,
+                        )
                         .await;
                     swept += 1;
                     continue;
@@ -697,14 +763,18 @@ impl SessionFileService for SessionFileServiceImpl {
             let _ = self
                 .cfg
                 .repo
-                .update_status(&row.session_id, &row.file_id, FileStatus::Failed)
+                .update_status(&row.session_id, &row.file_id, FileStatus::Failed, &operation)
                 .await;
             swept += 1;
         }
         Ok(swept)
     }
 
-    async fn delete_all_for_session(&self, session_id: &str) -> Result<u64, SessionFileUseCaseError> {
+    async fn delete_all_for_session(
+        &self,
+        session_id: &str,
+        operation: &BotOperationContext,
+    ) -> Result<u64, SessionFileUseCaseError> {
         // Collect every row for the session WITHOUT deleting yet, so backend
         // cleanup happens BEFORE the metadata row is dropped. The previous flow
         // deleted every row up front (atomic repo `delete_all_for_session`)
@@ -740,10 +810,27 @@ impl SessionFileService for SessionFileServiceImpl {
         let mut deleted = 0u64;
         let mut retained = 0u64;
         for row in rows {
+            // Per-row sub-operation (spec §12.5): the audit slot key must never
+            // carry two different resource ids, so each row derives its own
+            // deterministic sub-operation-id from the caller's context.
+            let row_operation = per_resource_operation(operation, &row.file_id);
+            // External-effect bracket: persist `admitted` before the backend
+            // call; skip the row when it cannot be persisted.
+            let admitted = delete_phase_record(
+                &row_operation, &self.cfg.env, &row.file_id,
+                BotActionAuditPhase::Admitted, None,
+            );
+            if self.cfg.repo.record_operation_phase(admitted).await.is_err() {
+                retained += 1;
+                continue;
+            }
             if self.cleanup_backend_for_row(&row).await {
+                // Final metadata DELETE + `delete/session_file/completed`
+                // audit in ONE store transaction; a failure keeps the row for
+                // retry and surfaces the error.
                 self.cfg
                     .repo
-                    .delete(&row.session_id, &row.file_id)
+                    .delete(&row.session_id, &row.file_id, &row_operation)
                     .await
                     .map_err(SessionFileUseCaseError::Internal)?;
                 deleted += 1;
@@ -775,6 +862,7 @@ impl SessionFileServiceImpl {
         session_id: &str,
         file_id: &str,
         ttl_seconds: u64,
+        operation: &BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
         let row = self
             .cfg
@@ -788,6 +876,28 @@ impl SessionFileServiceImpl {
                 "file status {:?} not Ready — cannot share",
                 row.status,
             )));
+        }
+        // External-effect class (spec §12.5): the `share/session_file/admitted`
+        // row persists BEFORE the share link is minted; a persistence failure
+        // refuses to mint. Share changes no metadata, so the mint result has
+        // no atomic transaction — instead the `completed` phase persists
+        // through the standalone recorder afterwards (admitted is NOT proof
+        // the share link was handed out).
+        let admitted = share_phase_record(
+            operation,
+            &self.cfg.env,
+            file_id,
+            BotActionAuditPhase::Admitted,
+            None,
+        );
+        if self
+            .cfg
+            .repo
+            .record_operation_phase(admitted)
+            .await
+            .is_err()
+        {
+            return Err(audit_persist_error());
         }
         let ttl = ttl_seconds.clamp(SHARE_TTL_MIN, SHARE_TTL_MAX);
         let exp = now_secs() + ttl;
@@ -809,6 +919,22 @@ impl SessionFileServiceImpl {
             base,
             token,
         );
+        // Successful mint: persist the `completed` phase (no metadata change,
+        // standalone record). The persistence failure PROPAGATES (spec §12.5
+        // "传播持久化失败") — the caller learns the outcome record could not
+        // be persisted.
+        let completed = share_phase_record(
+            operation,
+            &self.cfg.env,
+            file_id,
+            BotActionAuditPhase::Completed,
+            None,
+        );
+        self.cfg
+            .repo
+            .record_operation_phase(completed)
+            .await
+            .map_err(|_| audit_persist_error())?;
         Ok(ShareMintResult {
             share_url,
             share_token: token,
@@ -1101,6 +1227,7 @@ mod tests {
             size,
             mime_type: "text/plain".into(),
             caller: actor("human_1"),
+            operation: test_operation(),
         }
     }
 
@@ -1249,7 +1376,7 @@ mod tests {
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5)
             .await
             .unwrap();
-        let f = s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        let f = s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         assert_eq!(f.status, FileStatus::Ready);
         assert_eq!(f.size, 5);
         let row = repo.get("g1:abcd1234", &r.file.file_id).await.unwrap().unwrap();
@@ -1262,7 +1389,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         // Now Ready — a second stream_upload should Conflict.
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hi"));
         let err = s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 2).await.unwrap_err();
@@ -1281,11 +1408,21 @@ mod tests {
     #[tokio::test]
     async fn complete_returns_not_found_for_unknown_file() {
         let (s, _, _) = build_svc(local_caps());
-        let err = s.complete_upload("g1:abcd1234", "nope").await.unwrap_err();
+        let err = s.complete_upload("g1:abcd1234", "nope", &test_operation()).await.unwrap_err();
         assert!(matches!(err, SessionFileUseCaseError::NotFound(_)));
     }
 
     // ---- delete routing -----------------------------------------------------
+
+    fn test_operation() -> BotOperationContext {
+        BotOperationContext {
+            operation_id: format!("session-file-service-test-{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: "1".into(),
+                effective_actor_id: "human_1".into(),
+            },
+        }
+    }
 
     fn delete_cmd(file_id: &str, caller_ids: &[&str]) -> DeleteFileCommand {
         let caller_identities = caller_ids.iter().map(|s| (*s).to_string()).collect();
@@ -1296,6 +1433,7 @@ mod tests {
             caller_identities,
             session_creator: Some("creator_1".into()),
             driver_bot: None,
+            operation: test_operation(),
         }
     }
 
@@ -1305,7 +1443,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         s.delete_file(delete_cmd(&r.file.file_id, &["human_1"])).await.unwrap();
         assert!(repo.get("g1:abcd1234", &r.file.file_id).await.unwrap().is_none());
     }
@@ -1369,7 +1507,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
         assert!(route.presign.is_none());
     }
@@ -1380,7 +1518,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, Some(60), false).await.unwrap();
         let ticket = route.presign.unwrap();
         assert!(ticket.download_url.starts_with("fake://"));
@@ -1394,7 +1532,7 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
 
         // download_route(..., None) should pass share_link_ttl (7777) to presign_get.
         let (_row, route) = s.download_route("g1:abcd1234", &r1.file.file_id, None, false).await.unwrap();
@@ -1410,7 +1548,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, route) = s.download_route("g1:abcd1234", &r.file.file_id, None, true).await.unwrap();
         let _ticket = route.presign.expect("presign backend yields a ticket");
         let opts = storage.last_presign_opts().expect("presign_get was called");
@@ -1424,7 +1562,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (_file, _route) = s.download_route("g1:abcd1234", &r.file.file_id, None, false).await.unwrap();
         let opts = storage.last_presign_opts().expect("presign_get was called");
         assert_eq!(opts.show, false, "download_route(show=false) must forward show=false");
@@ -1447,7 +1585,7 @@ mod tests {
         let payload = bytes::Bytes::from_static(b"hello");
         let body = bcs_storage_api::byte_stream_from_bytes(payload.clone());
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         let (file, stream) = s.get_stream("g1:abcd1234", &r.file.file_id).await.unwrap();
         assert_eq!(file.size, 5);
         let got = collect_stream(stream).await;
@@ -1466,6 +1604,7 @@ mod tests {
             ttl_seconds: None,
             caller_identities,
             session_participants,
+            operation: test_operation(),
         }
     }
 
@@ -1473,7 +1612,7 @@ mod tests {
         let r = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r.file.file_id, &test_operation()).await.unwrap();
         r.file.file_id
     }
 
@@ -1571,7 +1710,7 @@ mod tests {
         // share_mint uses ttl_seconds=None → defaults to share_default_ttl (3600).
         // Pass the same 3600 to mint_share_link so the token shape matches.
         let via_internal = svc
-            .mint_share_link("g1:abcd1234", &file_id, 3600)
+            .mint_share_link("g1:abcd1234", &file_id, 3600, &test_operation())
             .await
             .expect("internal mint");
         let via_public = svc
@@ -1591,7 +1730,7 @@ mod tests {
         let (svc, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&svc).await; // seeded under g1:abcd1234
         let minted = svc
-            .share_mint_for_history("g1:abcd1234", &file_id, 3600)
+            .share_mint_for_history("g1:abcd1234", &file_id, 3600, &test_operation())
             .await
             .expect("history mint");
         assert!(minted.share_url.contains("/sessions/shared-file/content?token="));
@@ -1608,7 +1747,7 @@ mod tests {
         let (svc, _, _) = build_svc(local_caps());
         let file_id = prepare_complete(&svc).await; // under g1:abcd1234
         let err = svc
-            .share_mint_for_history("g1:other", &file_id, 3600)
+            .share_mint_for_history("g1:other", &file_id, 3600, &test_operation())
             .await
             .expect_err("must reject cross-session");
         assert!(matches!(err, SessionFileUseCaseError::NotFound(_)), "got: {:?}", err);
@@ -1695,6 +1834,7 @@ mod tests {
             &handle.to_string(),
             FileStatus::Pending,
             row.size,
+            &test_operation(),
         ).await.unwrap();
         let swept = s.sweep_expired_pending().await.unwrap();
         assert_eq!(swept, 1);
@@ -1711,7 +1851,7 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
 
         let r2 = s.prepare_upload(sample_prepare(10)).await.unwrap(); // Pending
 
@@ -1722,9 +1862,13 @@ mod tests {
             size: 3,
             mime_type: "text/plain".into(),
             caller: actor("human_1"),
+            operation: test_operation(),
         }).await.unwrap();
 
-        let deleted = s.delete_all_for_session("g1:abcd1234").await.unwrap();
+        let deleted = s
+            .delete_all_for_session("g1:abcd1234", &test_operation())
+            .await
+            .unwrap();
         assert_eq!(deleted, 2);
         assert!(repo.get("g1:abcd1234", &r1.file.file_id).await.unwrap().is_none());
         assert!(repo.get("g1:abcd1234", &r2.file.file_id).await.unwrap().is_none());
@@ -1748,11 +1892,14 @@ mod tests {
         let r1 = s.prepare_upload(sample_prepare(5)).await.unwrap();
         let body = bcs_storage_api::byte_stream_from_bytes(bytes::Bytes::from_static(b"hello"));
         s.stream_upload("g1:abcd1234", &r1.file.file_id, None, body, 5).await.unwrap();
-        s.complete_upload("g1:abcd1234", &r1.file.file_id).await.unwrap();
+        s.complete_upload("g1:abcd1234", &r1.file.file_id, &test_operation()).await.unwrap();
         // Pending file (abort succeeds → cleaned).
         let r2 = s.prepare_upload(sample_prepare(10)).await.unwrap();
 
-        let err = s.delete_all_for_session("g1:abcd1234").await.unwrap_err();
+        let err = s
+            .delete_all_for_session("g1:abcd1234", &test_operation())
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, SessionFileUseCaseError::Internal(_)),
             "expected partial-failure Internal error, got {err:?}"
@@ -1955,7 +2102,7 @@ mod tests {
             .await
             .unwrap();
         let ready = svc
-            .complete_upload("g1:abcd1234", &r.file.file_id)
+            .complete_upload("g1:abcd1234", &r.file.file_id, &test_operation())
             .await
             .unwrap();
         assert_eq!(ready.status, FileStatus::Ready); // not rejected as Conflict

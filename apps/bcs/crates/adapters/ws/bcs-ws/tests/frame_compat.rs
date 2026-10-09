@@ -172,7 +172,12 @@ impl GroupCoreService for RecordingGroupCoreService {
         Err(ServiceError::GroupNotFound(group_id.to_string()))
     }
 
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
+    async fn update_workspace(
+        &self,
+        id: &str,
+        _workspace: Workspace,
+        _operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 

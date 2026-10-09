@@ -17,10 +17,12 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
+bcs-edge-permission = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }
@@ -30,3 +32,4 @@ bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true }
 secrecy = { workspace = true }
+tempfile = { workspace = true }

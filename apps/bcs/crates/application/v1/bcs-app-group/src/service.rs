@@ -506,6 +506,7 @@ impl GroupService for GroupServiceImpl {
                 correlation_id: None,
                 trace_id: None,
                 mutation: GroupMutationKind::PatchMutableFields(persistence_patch),
+                operation: group_operation_context(&principal),
             })
             .await
             .map_err(map_service_error)?;
@@ -669,35 +670,32 @@ impl GroupService for GroupServiceImpl {
                 .map_err(map_service_error)?;
         }
         let bot_id = command.actor_id.clone();
-        let legacy_human_actor_id = match &principal {
+        // Human sponsorship (spec §8.3.4): the authenticated Human keeps a
+        // trusted human context for the legacy act-as check (now resolved
+        // against live authority) AND sponsors the target's qualification
+        // with their verified User ID; a Bot caller supplies neither.
+        let (human_actor_id, human_sponsorship) = match &principal {
             Principal::Human(human) => {
                 let human_actor_id = format!("human_{}", human.subject.id);
-                if manage_actor_id == human_actor_id {
-                    None
-                } else {
-                    let manage_actor = self
-                        .registry
-                        .try_get(&manage_actor_id)
-                        .await
-                        .map_err(map_service_error)?;
-                    manage_actor
-                        .filter(|actor| {
-                            actor.actor_kind == ActorKind::Bot
-                                && actor.created_by.as_deref() == Some(human.subject.id.as_str())
-                        })
-                        .map(|_| human_actor_id)
-                }
+                let legacy = (manage_actor_id != human_actor_id).then_some(human_actor_id);
+                (
+                    legacy,
+                    Some(HumanSponsorship {
+                        user_id: human.subject.id.clone(),
+                    }),
+                )
             }
-            Principal::Bot(_) => None,
+            Principal::Bot(_) => (None, None),
         };
         let result = self
             .management
             .add_member(GroupAddMemberCommand {
                 caller_actor_id: Some(manage_actor_id),
-                human_actor_id: legacy_human_actor_id,
+                human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
                 message_view_scope: command.message_view_scope,
+                human_sponsorship,
             })
             .await
             .map_err(map_group_error)?;
@@ -765,6 +763,7 @@ impl GroupService for GroupServiceImpl {
                             actor_id: command.actor_id.clone(),
                             mode,
                         },
+                        operation: group_operation_context(&principal),
                     })
                     .await
                     .map_err(map_service_error)?;
@@ -801,6 +800,7 @@ impl GroupService for GroupServiceImpl {
                         message_view_scope,
                         mode: command.mode,
                     },
+                    operation: group_operation_context(&principal),
                 })
                 .await
                 .map_err(map_service_error);

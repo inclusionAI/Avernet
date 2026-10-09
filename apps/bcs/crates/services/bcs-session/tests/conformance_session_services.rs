@@ -303,7 +303,7 @@ async fn impl_persists_and_publishes_chat_opening_message_once() {
     );
     assert_eq!(frontend_delivery.commands.lock().await.len(), 1);
 
-    svc.complete_if_running(&session_id, None, None)
+    svc.complete_if_running(&session_id, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
         .await
         .expect("complete session");
     svc.update_callback_status(&session_id, "success")
@@ -449,7 +449,7 @@ async fn impl_blocks_reactivate_when_callback_pending() {
     let sid = outcome.session.id.clone();
 
     // Complete it (callback_status remains "pending")
-    let completed = svc.complete_if_running(&sid, None, None).await.expect("complete");
+    let completed = svc.complete_if_running(&sid, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op")).await.expect("complete");
     assert!(completed.is_some());
 
     // Reactivate should fail with CallbackPending or Internal(SessionCallbackPending)
@@ -485,9 +485,9 @@ async fn impl_complete_if_running_is_idempotent_via_cas() {
         .expect("create");
     let sid = outcome.session.id.clone();
 
-    let first = svc.complete_if_running(&sid, None, None).await.expect("first");
+    let first = svc.complete_if_running(&sid, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op")).await.expect("first");
     assert!(first.is_some());
-    let again = svc.complete_if_running(&sid, None, None).await.expect("second");
+    let again = svc.complete_if_running(&sid, None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op")).await.expect("second");
     assert!(again.is_none(), "CAS short-circuit");
 }
 
@@ -578,6 +578,7 @@ async fn impl_allows_provider_downlink_participant_added_to_manager_worker_sessi
         .add_participant(
             &outcome.session.id,
             Participant::bot("provider-worker", ParticipantRole::Worker),
+            &bcs_service_api::types::system_lane_operation("bcs-test-op"),
         )
         .await
         .expect("provider downlink bot can be added to manager_worker session");

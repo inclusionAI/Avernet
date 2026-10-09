@@ -43,7 +43,6 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     async fn session_registration(&self, id: &str) -> Result<Option<bcs_service_api::port::repo::session_registry::SessionRegistration>, SessionUseCaseError> {
         self.inner.session_registration(id).await.map_err(Into::into)
     }
-
     async fn create_or_reactivate(
         &self,
         cmd: CreateOrReactivateCommand,
@@ -140,9 +139,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         output: Option<Value>,
         error: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         self.inner
-            .complete_if_running(session_id, output, error)
+            .complete_if_running(session_id, output, error, operation)
             .await
     }
 
@@ -156,16 +156,22 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.add_participant(session_id, participant).await
+        self.inner
+            .add_participant(session_id, participant, operation)
+            .await
     }
 
     async fn remove_participant(
         &self,
         session_id: &str,
         bot_uuid: &str,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.remove_participant(session_id, bot_uuid).await
+        self.inner
+            .remove_participant(session_id, bot_uuid, operation)
+            .await
     }
 
     async fn update_participant_mode(
@@ -173,9 +179,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
-            .update_participant_mode(session_id, bot_uuid, mode)
+            .update_participant_mode(session_id, bot_uuid, mode, operation)
             .await
     }
 
@@ -184,9 +191,15 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
-            .update_participant_message_view_scope(session_id, actor_id, message_view_scope)
+            .update_participant_message_view_scope(
+                session_id,
+                actor_id,
+                message_view_scope,
+                operation,
+            )
             .await
     }
 
@@ -196,6 +209,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         self.inner
             .update_participant_mode_and_message_view_scope(
@@ -203,6 +217,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                 actor_id,
                 mode,
                 message_view_scope,
+                operation,
             )
             .await
     }
@@ -211,8 +226,9 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        self.inner.update_title(session_id, title).await
+        self.inner.update_title(session_id, title, operation).await
     }
 
     async fn list_group_ids_by_session_participant(
@@ -236,12 +252,22 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.delete(session_id).await
     }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
-        self.inner.collect(session_id, bot_uuid).await
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.collect(session_id, bot_uuid, operation).await
     }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
-        self.inner.uncollect(session_id, bot_uuid).await
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.uncollect(session_id, bot_uuid, operation).await
     }
 
     async fn list_collected_by_group(
@@ -265,17 +291,21 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
         self.inner.collected_at_map(session_ids, bot_uuid).await
     }
-
 }
 
-impl SessionManagementServiceImpl {
+/// Honest System identity for the activation-completion lane: its callers
+/// (service-invocation callback confirmations) carry no verified Human
+/// operator, so the audit row records the independent system action itself
+/// and never forges a Human (spec §12.5).
 
-pub(super) async fn complete_session(
+impl SessionManagementServiceImpl {
+    pub(super) async fn complete_session(
         &self,
         current: Session,
         output: Option<Value>,
         error: Option<String>,
         guard_activation: bool,
+        operation: &BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         let session_id = current.id.as_str();
         let summary_value = output.clone().unwrap_or(Value::Null);
@@ -319,6 +349,7 @@ pub(super) async fn complete_session(
                     output,
                     error,
                     event,
+                    operation: operation.clone(),
                 })
                 .await?),
             None if guard_activation => Ok(self.repo.complete_running_service_activation(
@@ -328,7 +359,7 @@ pub(super) async fn complete_session(
         }
     }
 
-pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -> Self {
+    pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -> Self {
         Self {
             repo,
             group_repo,
@@ -339,12 +370,12 @@ pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -
         }
     }
 
-pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
+    pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
     }
 
-pub fn with_event_record_factory(
+    pub fn with_event_record_factory(
         mut self,
         event_record_factory: Arc<dyn EventRecordFactoryPort>,
     ) -> Self {
@@ -352,7 +383,7 @@ pub fn with_event_record_factory(
         self
     }
 
-pub fn with_opening_message_delivery(
+    pub fn with_opening_message_delivery(
         mut self,
         message_repo: Arc<dyn MessageRepoPort>,
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
@@ -362,7 +393,7 @@ pub fn with_opening_message_delivery(
         self
     }
 
-pub(super) async fn persist_session_opening_message(
+    pub(super) async fn persist_session_opening_message(
         &self,
         group: &bcs_service_api::Group,
         session: &Session,
@@ -518,7 +549,7 @@ pub(super) async fn persist_session_opening_message(
         Ok(())
     }
 
-pub(super) fn prepare_event(
+    pub(super) fn prepare_event(
         &self,
         event_type: &str,
         group_id: &str,
@@ -560,7 +591,7 @@ pub(super) fn prepare_event(
             })
     }
 
-pub(super) async fn ensure_manager_worker_accepts_participants(
+    pub(super) async fn ensure_manager_worker_accepts_participants(
         &self,
         group_id: &str,
         _participants: &[Participant],
@@ -574,3 +605,4 @@ pub(super) async fn ensure_manager_worker_accepts_participants(
         Ok(())
     }
 }
+

@@ -555,3 +555,36 @@ story_cli_operator_validates_channel_management() {
     api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
     require_status "CLI channel lookup group is cleaned up" "200" || return
 }
+
+# Bot owner/manager plan (Task 20): the historical-ownership cutover runs
+# through the dedicated maintenance binary `bcs-ownership-migrate`, NOT
+# through bcs-cli. This story keeps that claim executable: the CLI's
+# leaf set is discovered dynamically from `--help`, and NO leaf may expose
+# an ownership/migrate/cutover path. If someone later adds such a leaf,
+# this story fails and the runbook's "bcs-cli gains NO new leaf" record
+# must be updated first.
+story_cli_operator_no_ownership_maintenance_leaf() {
+    info "Story: bcs-cli stays out of the ownership cutover lane"
+    local bin leaves offending
+    get_bcs_cli_bin >/dev/null 2>&1
+    bin="${BCS_CLI_BIN_PATH:-}"
+    if [[ -z "$bin" || ! -x "$bin" ]]; then
+        skip_case "bcs-cli binary unavailable; leaf discovery skipped" || return 77
+    fi
+
+    leaves="$("$bin" --help 2>/dev/null | sed -n '/^Commands:/,/^$/p' | sed '1d;$d' | awk '{print $1}')"
+    if [[ -z "$leaves" ]]; then
+        skip_case "bcs-cli --help emitted no Commands section" || return 77
+    fi
+
+    offending="$(printf '%s\n' "$leaves" | grep -E 'ownership|migrate|cutover' || true)"
+    if [[ -z "$offending" ]]; then
+        pass "no bcs-cli leaf exposes the ownership cutover ($(printf '%s\n' "$leaves" | wc -l | tr -d ' ') discovered)"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    else
+        fail "bcs-cli grew cutover leaves: $offending — the runbook contract says binary-only"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    fi
+}

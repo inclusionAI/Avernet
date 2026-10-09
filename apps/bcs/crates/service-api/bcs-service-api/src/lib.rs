@@ -50,7 +50,7 @@ pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
     InviteCodeBindingView, InviteCodeService, InternalBotAttributesService,
-    PatchBotInternalAttributes, UserVisibility,
+    PatchBotInternalAttributes, UserVisibility, BotAuthorityHook,
 };
 pub use application::system_message::resolve_session_topic;
 pub use application::interaction::{
@@ -144,7 +144,7 @@ pub use friends::{
 pub use group_use_cases::{
     BotGroupListCommand, DmCreateCommand, DmCreateResult, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand,
-    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupHistoryCommand,
+    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupHistoryCommand, HumanSponsorship,
     GroupHistoryResult, GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
     GroupMessageHistoryService, GroupParticipantModeCommand, GroupParticipantModeResult,
     InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState, MessageHistoryOptions,
@@ -204,7 +204,7 @@ pub use port::{
     StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
     ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
-    BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
+    BotCatalogCleanupPort, BotMetricsSnapshotPort, BotRepoPort, BotRunContext, BotAuthorityRepoPort,
     BotControlPlaneRepoPort,
     BotRunContextPort, BotRunScope, BotRunTransportOwner, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState,
@@ -258,6 +258,7 @@ pub use workbench_use_cases::{
 
 pub use types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotControllableQuery, ControllableBotRecord,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
     BotTaskModesQuery, TaskModeMatch,
@@ -283,7 +284,9 @@ pub use core::{
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
+    ControllableBotView,
     BotRegistryCoreService,
+    BotAuthorityCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectStreamError, ConnectionKind,
     ContextBotSummary, HiddenMentionInfo, ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
