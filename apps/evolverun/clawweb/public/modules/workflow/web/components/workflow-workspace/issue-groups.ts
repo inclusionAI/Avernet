@@ -17,9 +17,18 @@ export type IssueGroupView = {
     certainty: 'supported' | 'hypothesis' | 'unknown'; sourceIds: string[] }> };
 };
 
-export function useIssueGroups(workflowId: string) {
-  return useQuery({ queryKey: ['evolve-issue-groups', workflowId],
-    queryFn: ({ signal }) => readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?workflowId=${encodeURIComponent(workflowId)}&view=summary`, signal),
+export type IssuePageQuery = { page: number; pageSize: number; nodeId?: string; failureMode?: string };
+export type IssuePage = { groups: IssueGroupView[]; facets?: { nodes: string[]; modes: string[] };
+  page?: { page: number; pageSize: number; total: number; totalPages: number } };
+export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
+  const params = new URLSearchParams({ workflowId, view: 'summary' });
+  if (query) {
+    params.set('page', String(query.page)); params.set('pageSize', String(query.pageSize));
+    if (query.nodeId) params.set('nodeId', query.nodeId);
+    if (query.failureMode) params.set('failureMode', query.failureMode);
+  }
+  return useQuery({ queryKey: ['evolve-issue-groups', workflowId, query],
+    queryFn: ({ signal }) => readOnlyJson<IssuePage>(`/api/evolve/issue-groups?${params}`, signal),
     retry: false,
     enabled: !!workflowId,
     refetchInterval: query => query.state.data?.groups.some(group => group.aggregationStatus === 'queued') ? 15_000 : 60_000,
@@ -47,6 +56,27 @@ export function useIssueGroupDetail(group: IssueGroupView | undefined) {
     return () => controller.abort();
   }, [compact, group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus, refresh]);
   return { group: compact ? data : group, loading: compact && (loading || !data && !error), error: compact ? error : '', retry: () => setRefresh(value => value + 1) };
+}
+
+/** A selected issue stays reachable even when it is not on the current list page. */
+export function useSelectedIssueGroup(workflowId: string, signature: string | null, current?: IssueGroupView) {
+  const [lookup, setLookup] = useState<{ group?: IssueGroupView; error?: string }>({})
+  const [refresh, setRefresh] = useState(0)
+  useEffect(() => {
+    setLookup({})
+    if (!signature || current) return
+    const controller = new AbortController()
+    const params = new URLSearchParams({ workflowId, signature, view: 'summary' })
+    readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, controller.signal)
+      .then(result => {
+        if (controller.signal.aborted) return
+        const group = result.groups.find(value => value.signature === signature)
+        setLookup(group ? { group } : { error: '该问题已更新，请刷新问题列表。' })
+      }).catch(reason => { if (!controller.signal.aborted) setLookup({ error: reason instanceof Error ? reason.message : String(reason) }) })
+    return () => controller.abort()
+  }, [workflowId, signature, current?.signature, refresh])
+  return { group: current ?? (lookup.group?.signature === signature ? lookup.group : undefined),
+    error: lookup.error, retry: () => setRefresh(value => value + 1) }
 }
 
 export function groupDiagnoses(group: IssueGroupView): EvolveRunDiagnosis[] {

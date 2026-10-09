@@ -45,9 +45,10 @@ export function SuggestionActions({ suggestion, canEdit, legacyApplyEnabled, onA
 }
 
 export default function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFlowId, selectedAnalysisId, canEdit,
-  legacyApplyEnabled, repairContent, initialTab, onAction, onApply, onClose }: {
+  legacyApplyEnabled, repairContent, repairFooter, initialTab, onAction, onApply, onClose }: {
   cluster: DiagnosisCluster
   repairContent: ReactNode
+  repairFooter?: ReactNode
   initialTab?: 'causes' | 'repairs' | 'evidence'
   suggestion?: DisplaySuggestion
   task?: SuggestionApplyTask
@@ -76,7 +77,7 @@ export default function IssueDetailDrawer({ cluster, suggestion, task, previousT
         {([['causes', '问题原因'], ['repairs', '修复建议'], ['evidence', '证据与历史']] as const).map(([key, label]) =>
           <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}
             className={`border-b-2 px-3 py-3 text-sm ${tab === key ? 'border-blue-600 font-medium text-blue-700' : 'border-transparent text-slate-500'}`}>{label}</button>)}
-      </nav>} footer={tab === 'evidence' && suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
+      </nav>} footer={tab === 'repairs' ? repairFooter : tab === 'evidence' && suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
         <SuggestionActions suggestion={suggestion} canEdit={canEdit} legacyApplyEnabled={legacyApplyEnabled} onAction={onAction} onApply={onApply} />
       </footer>}>
         {tab === 'causes' && (groupDetail.loading ? <p role="status" className="text-sm text-slate-600">正在加载问题原因…</p>

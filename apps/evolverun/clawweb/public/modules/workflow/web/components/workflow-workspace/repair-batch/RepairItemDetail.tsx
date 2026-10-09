@@ -29,20 +29,29 @@ export function sourceRunCount(item: RepairInboxItem): number | null {
 function ChangeValue({ value }: { value: unknown }) {
   const [copied, setCopied] = useState('')
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  useEffect(() => { setCopied('') }, [text])
   return <div>
-    <pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs leading-6 text-slate-700">{text}</pre>
-    <button type="button" className={`${button} mt-2`} onClick={async () => {
+    <div className="flex items-start rounded-lg bg-slate-50">
+    <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words p-3 text-xs leading-6 text-slate-700">{text}</pre>
+    <button type="button" aria-label="复制目标值" title={copied || '复制目标值'}
+      className="mr-2 mt-2 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600"
+      onClick={async () => {
       try { await navigator.clipboard.writeText(text ?? ''); setCopied('已复制') }
       catch { setCopied('复制失败，请手动选择内容') }
-    }}>复制目标值</button>
-    {copied && <span role="status" className="ml-2 text-xs text-slate-500">{copied}</span>}
+    }}><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+      {copied === '已复制' ? <path d="m5 12 4 4L19 6" /> : <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></>}
+    </svg></button>
+    </div>
+    {copied && <span role="status" className={copied === '已复制' ? 'sr-only' : 'text-xs text-red-700'}>{copied}</span>}
   </div>
 }
 
-export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, limitReached, onDisposition }: {
+export default function RepairItemDetail({ item, detail, loading, error, onLoad, selected, onToggle, canEdit, limitReached, onDisposition, showSelection = true, embedded = false }: {
   item: RepairInboxItem; detail?: RepairInboxItem; loading?: boolean; error?: string;
   onLoad: (id: string) => void; selected: boolean; onToggle: (id: string) => void; canEdit: boolean;
   limitReached: boolean; onDisposition: (item: RepairInboxItem, action: 'no_action' | 'restore') => void;
+  showSelection?: boolean;
+  embedded?: boolean;
 }) {
   const loader = useRef(onLoad)
   loader.current = onLoad
@@ -53,13 +62,13 @@ export default function RepairItemDetail({ item, detail, loading, error, onLoad,
   const diagnoses = records(detail?.context?.diagnoses)
   const runs = sourceRunCount(shown)
   return <div className="space-y-5">
-    <header className="space-y-2">
+    {!embedded && <header className="space-y-2">
       <p className="text-xs text-slate-500">{states[item.state]} · {runs === null ? '来源运行数未知' : `本建议来源覆盖 ${runs} 个运行`}</p>
       <h4 className="text-base font-semibold leading-7 text-slate-900">{itemTitle(shown)}</h4>
-      <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" className="h-4 w-4 accent-blue-600"
-        aria-label={`选择 ${itemTitle(item)}`} checked={selected} disabled={!canEdit || !!reason || (!selected && limitReached)} onChange={() => onToggle(item.itemId)} />纳入本次修复</label>
+      {showSelection && <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" className="h-4 w-4 accent-blue-600"
+        aria-label={`选择 ${itemTitle(item)}`} checked={selected} disabled={!canEdit || !!reason || (!selected && limitReached)} onChange={() => onToggle(item.itemId)} />纳入本次修复</label>}
       {reason && <p className="text-xs text-amber-700">{reason}</p>}
-    </header>
+    </header>}
     <section aria-label="修改内容" className="space-y-3 border-t border-slate-100 pt-4">
       <h4 className="text-sm font-semibold text-slate-900">修改内容</h4>
       <p className="text-xs leading-5 text-slate-500">以下为建议目标值，不是与当前部署版本的对比；生成 Pack 后仍需审阅实际 diff。</p>
