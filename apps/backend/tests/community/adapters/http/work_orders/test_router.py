@@ -156,7 +156,10 @@ def app(service: MagicMock):
     test_app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     test_app.add_exception_handler(RequestValidationError, _validation_error_handler)
     test_app.add_exception_handler(Exception, _unhandled_exception_handler)
-    from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
+    from agentclaw.community.adapters.http.openapi_v1.errors import (
+        MissingPrincipalError,
+    )
+
     test_app.add_exception_handler(MissingPrincipalError, _principal_error_handler)
 
     @test_app.middleware("http")
@@ -235,6 +238,25 @@ def test_create_notice_event_returns_created_status(
         "notification_ids": [21],
         "status": "CREATED",
     }
+
+
+def test_authenticated_user_cannot_submit_auto_approval(
+    client: TestClient, service: MagicMock
+) -> None:
+    payload = _approval_payload() | {
+        "approval_mode": "AUTO",
+        "biz_type": "SKILL_COLLABORATOR",
+        "biz_id": "91",
+        "event_type": "SKILL_COLLABORATOR_APPLIED",
+        "approver_user_ids": [],
+        "recipient_user_ids": [_USER_ID],
+    }
+
+    response = client.post(_PATH, json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["code"] == 403201
+    service.create_work_order_event.assert_not_called()
 
 
 @pytest.mark.parametrize(

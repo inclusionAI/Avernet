@@ -64,8 +64,9 @@ Unregistered event types keep the existing local-only approval behavior.
 
 ## Trusted AUTO events
 
-The public `POST /openapi/v1/bots/work-orders/events` route accepts MANUAL and
-NOTICE events but rejects caller-selected `approval_mode=AUTO`. A qualified
+Both user-facing `POST /openapi/v1/bots/work-orders/events` and
+`POST /api/v1/work-orders/events` accept MANUAL and NOTICE events but reject
+caller-selected `approval_mode=AUTO`. A qualified
 business module may call `WorkOrderService.create_work_order_event` in-process
 with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
 `recipient_user_ids`. AUTO creates no human approver row. WorkOrder claims the
@@ -118,7 +119,7 @@ and client compatibility plan.
 
 | Contract | Values |
 | --- | --- |
-| Work-order status | `PENDING`, `APPROVED`, `REJECTED` |
+| Work-order status | `PENDING`, `PROCESSING`, `APPROVED`, `REJECTED`, `FAILED` |
 | Approver status | `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED` |
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |

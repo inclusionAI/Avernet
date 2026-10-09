@@ -15,13 +15,13 @@ and rejects unknown fields. New and existing bindings default to false after
 the binding migration is applied.
 
 `POST /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests`
-remains the applicant's only public application entry. Its response fields are
+remains the Skill product's application entry. Its response fields are
 unchanged; status is PENDING for manual review or APPROVED after AUTO succeeds.
 The Skill module checks the applicant, Team binding, live Skill, Owner, active
 membership, existing Grant, and pending request before selecting the mode.
 The MANUAL path retains the Owner's approval task and notification. AUTO calls
 the WorkOrder Service in-process with no human approver and the applicant as
-the sole result recipient; the public generic events route rejects AUTO.
+the sole result recipient; both user-facing generic events routes reject AUTO.
 The applicant cannot choose the approval mode. An AUTO failure is an error, not
 a successful editor-request response.
 
