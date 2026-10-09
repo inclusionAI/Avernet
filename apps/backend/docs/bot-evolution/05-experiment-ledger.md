@@ -134,6 +134,11 @@ from typing import Literal
 EntryKind = Literal["experiment", "governance"]
 VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
 RiskTier = Literal["T0", "T1", "T2", "T3"]
+# Top-level gene categories of a genome (01-genome.md §2.1).
+GeneCategory = Literal["persona", "skills", "memory", "resources", "tools.mcp",
+                       "tools.cli_tools", "engine_config", "script"]
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
 
 
 @dataclass(frozen=True)
@@ -150,20 +155,20 @@ class MechanismRef:
 class PatchSummary:
     patch_digest: str                            # digest of the stored Genome Patch
     ops: list[str]                               # e.g. "persona/SOUL.md: replace_section"
-    genes: list[str]                             # top-level genes touched
+    genes: list[GeneCategory]                    # top-level genes touched
     risk_tier: RiskTier                          # max over ops, assigned by Promotion
-    size_bytes_changed: int
-    rewrite_flagged: bool
+    size_bytes_changed: int                      # bytes added plus removed across all ops
+    rewrite_flagged: bool                        # some file.edit changed more than the rewrite threshold (01-genome.md §6.2)
 
 
 @dataclass(frozen=True)
 class SplitResult:
     split: Literal["train", "validation", "holdout", "regression", "safety"]
-    cases: int
-    mean_delta: str                              # decimal as string: no floats in hashed records
-    ci_low: str | None                           # None for must-pass splits (no interval)
-    ci_high: str | None
-    newly_failing: int
+    cases: int                                   # number of cases of this split that were run
+    mean_delta: str                              # candidate minus parent, mean score; decimal as string (no floats in hashed records)
+    ci_low: str | None                           # lower end of the confidence interval of mean_delta; None for must-pass splits
+    ci_high: str | None                          # upper end; None for must-pass splits
+    newly_failing: int                           # cases the parent passed and the candidate fails
     evaluation_id: str                           # link into Verification
 
 
@@ -173,16 +178,16 @@ class VerdictRecord:
     verification_profile: str                    # "default@1"
     verifier_version: str                        # every verdict records it
     splits: list[SplitResult]
-    reasons: list[str]
+    reasons: list[str]                           # human-readable reasons, as written by Verification
     gate: dict | None                            # GateDecision summary, see 08-promotion.md
 
 
 @dataclass
 class Cost:
-    tokens: int
-    usd: str                                     # decimal as string
-    wall_clock_s: int
-    rollouts: int
+    tokens: int                                  # model tokens, input plus output, over all calls
+    usd: str                                     # money spent in US dollars; decimal as string
+    wall_clock_s: int                            # elapsed seconds attributed to this candidate
+    rollouts: int                                # evaluation rollouts: one rollout = one evaluation case run once against one bot version
 
 
 @dataclass
@@ -204,10 +209,10 @@ class OnlineOutcome:
 
 @dataclass
 class LedgerEntry:
-    entry_id: str
+    entry_id: str                                # "led_5c2"
     kind: EntryKind
-    bot_id: str
-    created_at: str
+    bot: BotRef                                  # the bot the entry is about (owner + bot id)
+    created_at: str                              # RFC 3339 UTC
     # experiment entries: all set; governance entries: run/candidate fields are None
     run_id: str | None
     binding_id: str | None
@@ -235,7 +240,7 @@ until the revision has been live long enough.
 {
   "entry_id": "led_5c2",
   "kind": "experiment",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-09T02:41:07Z",
   "run_id": "run_7f3",
   "binding_id": "bind_01",
@@ -298,7 +303,7 @@ set to `null` and a `subject` naming what the event is about:
 {
   "entry_id": "led_6a0",
   "kind": "governance",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-20T09:15:00Z",
   "subject": {"type": "promotion", "promotion_id": "prm_93", "revision": "sha256:a90b…"},  // going back to r41
   "run_id": null,
@@ -484,7 +489,8 @@ counting.
 cancellation, or budget stop are kept, still verified, and recorded. A run
 that is re-dispatched after a crash resubmits with the same content hash and
 gets the same candidate id, so the ledger appends nothing new for a repeated
-submission: `submitted` is idempotent on `(bot, run_id, candidate_id)`.
+submission: `submitted` is idempotent on `(owner_id, bot_id, run_id,
+candidate_id)`.
 
 **Why every candidate, even rejected ones.** Rejection is a normal outcome,
 and most candidates should fail. Recording only winners would hide exactly
@@ -609,11 +615,14 @@ Rules (proposed):
   the entry records it as `parent_revision`.
 
 ```python
-class ParentSelector(Protocol):
-    name: str                                  # "pareto_per_case"
-    version: str
+# One value per row of the table above; a new selector is a reviewed platform change.
+SelectorName = Literal["active", "latest_best", "pareto_per_case", "map_elites", "clade_metaproductivity"]
 
-    def select(self, bot_id: str, archive: "ArchiveView", seed: int) -> str:
+class ParentSelector(Protocol):
+    name: SelectorName
+    version: str                               # platform version of the selector code, e.g. "1.0.0"
+
+    def select(self, bot: BotRef, archive: "ArchiveView", seed: int) -> str:
         """Return the revision id a new run starts from.
 
         Deterministic for a given archive snapshot and seed, so a
@@ -663,9 +672,9 @@ this doc provides the history they read.
 ## 9. Exports
 
 Both exports are long-running operations: `POST
-/bots/{bot}/evolution/ledger:export` returns `202` with `{operation_id}` at
+/bots/{bot_id}/evolution/ledger:export` returns `202` with `{operation_id}` at
 once, the start is idempotent on its `Idempotency-Key`, and status is
-looked up by id with `GET /bots/{bot}/evolution/operations/{operation}`
+looked up by id with `GET /bots/{bot_id}/evolution/operations/{operation}`
 ([09-evolution-api.md](09-evolution-api.md)). No request is held open.
 
 ### 9.1 Filesystem export for strategies
@@ -749,14 +758,14 @@ class ExperimentLedger(Protocol):
     # --- writes (internal only) -------------------------------------------
 
     async def record_submission(
-        self, *, bot_id: str, run_id: str, binding_id: str, iteration: int,
+        self, *, bot: BotRef, run_id: str, binding_id: str, iteration: int,
         candidate_id: str, mechanism: MechanismRef, parent_revision: str,
         candidate_revision: str, evidence: list[str], patch: PatchSummary,
         cost: Cost, actor: Actor,
     ) -> str:
         """Create the experiment entry for a submitted candidate.
 
-        Idempotent on (bot_id, run_id, candidate_id): a repeated call returns
+        Idempotent on (owner_id, bot_id, run_id, candidate_id): a repeated call returns
         the existing entry id and appends nothing.
         """
         ...
@@ -772,7 +781,7 @@ class ExperimentLedger(Protocol):
         ...
 
     async def record_governance(
-        self, *, bot_id: str, subject: dict, event: LedgerEvent,
+        self, *, bot: BotRef, subject: dict, event: LedgerEvent,
     ) -> str:
         """Create a governance entry for an audited event that has no
         experiment entry (going back, a revision recorded outside a run)."""
@@ -780,24 +789,24 @@ class ExperimentLedger(Protocol):
 
     # --- reads -------------------------------------------------------------
 
-    async def get(self, bot_id: str, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
+    async def get(self, bot: BotRef, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
         """Return one entry as the given view sees it (full or strategy)."""
         ...
 
     async def query(
-        self, bot_id: str, flt: LedgerFilter, *, view: "LedgerView",
+        self, bot: BotRef, flt: LedgerFilter, *, view: "LedgerView",
     ) -> "Page[LedgerEntry]":
         """Return one page (`flt.page`, `flt.page_size`) of entries, newest first."""
         ...
 
-    async def archive(self, bot_id: str, *, verifier_version: str) -> "ArchiveView":
+    async def archive(self, bot: BotRef, *, verifier_version: str) -> "ArchiveView":
         """Snapshot of lineage plus per-split scores, for selectors."""
         ...
 
     # --- exports and derived data -----------------------------------------
 
     async def start_export(
-        self, bot_id: str, *, format: Literal["filesystem", "training"],
+        self, bot: BotRef, *, format: Literal["filesystem", "training"],
         flt: LedgerFilter, idempotency_key: str, requested_by: Actor,
     ) -> str:
         """Start an export operation and return its operation id at once.
@@ -828,7 +837,7 @@ standard envelope; see [09-evolution-api.md](09-evolution-api.md) for the
 envelope, errors, pagination, and idempotency. The ledger has no public write endpoints: entries
 are written only by platform services.
 
-### GET /bots/{bot}/evolution/ledger
+### GET /bots/{bot_id}/evolution/ledger
 
 List ledger entries of a bot, newest first, with filters. Called by the UI
 backend (lineage, history, audit views), the `avn` CLI, and pipelines.
@@ -878,7 +887,7 @@ List items are summaries; `GET …/ledger/{entry}` returns the full entry.
 Errors: `400 invalid_filter` (unknown field, malformed time, `page_size` out
 of range); `404 bot_not_found`.
 
-### GET /bots/{bot}/evolution/ledger/{entry}
+### GET /bots/{bot_id}/evolution/ledger/{entry}
 
 Return one entry with all fields and its full event history. Called by the
 UI backend (candidate history, audit detail) and the CLI
@@ -897,7 +906,7 @@ Example response (`200`):
 {
   "entry_id": "led_5c2",
   "kind": "experiment",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-09T02:41:07Z",
   "run_id": "run_7f3",
   "binding_id": "bind_01",
@@ -964,14 +973,14 @@ Example response (`200`):
 
 Errors: `404 entry_not_found` (also when the entry belongs to another bot).
 
-### POST /bots/{bot}/evolution/ledger:export
+### POST /bots/{bot_id}/evolution/ledger:export
 
 Start an export of the bot's ledger. Called by operators and pipelines
 (for example a research pipeline preparing a filesystem export for a
 coding-agent strategy, or a tenant's training-data pipeline). Returns
 `202` with `{operation_id}` at once; the work runs as an operation and its
 status and result (a download location for the export archive) are looked
-up by id with `GET /bots/{bot}/evolution/operations/{operation}`, defined in
+up by id with `GET /bots/{bot_id}/evolution/operations/{operation}`, defined in
 [09-evolution-api.md](09-evolution-api.md).
 
 Headers: `Idempotency-Key` (required). A retry with the same key returns
@@ -1027,10 +1036,10 @@ write to the ledger directly: their submissions reach it through
 from avernet_evolution import Client
 
 c = Client.from_env()
-page = c.ledger.list(bot="bot_123", strategy="clawevolve/bot-evolution",
+page = c.ledger.list(bot_id="bot_123", strategy="clawevolve/bot-evolution",
                      verdict="accept", since="2026-10-02T00:00:00Z")
 for item in page.items:
-    entry = c.ledger.get(bot="bot_123", entry=item.entry_id)
+    entry = c.ledger.get(bot_id="bot_123", entry=item.entry_id)
     print(item.candidate_revision.seq, entry.verdict.status,
           entry.cost.usd, entry.adoption.promoted)
 ```
@@ -1039,11 +1048,11 @@ for item in page.items:
 API; the ledger adds what happened to each candidate.
 
 ```python
-def lineage_tree(c, bot: str) -> dict[str, dict]:
+def lineage_tree(c, bot_id: str) -> dict[str, dict]:
     nodes: dict[str, dict] = {}
     page_no = 1
     while True:
-        page = c.ledger.list(bot=bot, kind="experiment", page=page_no, page_size=100)
+        page = c.ledger.list(bot_id=bot_id, kind="experiment", page=page_no, page_size=100)
         for e in page.items:
             nodes[e.candidate_revision.id] = {
                 "seq": e.candidate_revision.seq,
@@ -1063,9 +1072,9 @@ def lineage_tree(c, bot: str) -> dict[str, dict]:
 ```python
 async def submit(self, run: Run, cand: Candidate) -> str:
     candidate_id = content_hash(cand.patch)
-    revision = await self.genome.record_candidate(run.bot_id, base=cand.patch.base, patch=cand.patch)
+    revision = await self.genome.record_candidate(run.bot, base=cand.patch.base, patch=cand.patch)
     await self.ledger.record_submission(
-        bot_id=run.bot_id, run_id=run.run_id, binding_id=run.binding_id,
+        bot=run.bot, run_id=run.run_id, binding_id=run.binding_id,
         iteration=await self.next_iteration(run, candidate_id),
         candidate_id=candidate_id, mechanism=run.mechanism_ref(),
         parent_revision=cand.patch.base, candidate_revision=revision.id,
@@ -1123,7 +1132,7 @@ records the promotion of r41 with its reason. False-acceptance rate for
 | L-3 | Policy changes and kill switches in the audit trail | Proposed: record both as governance entries. The governance audit rule names revisions, gate decisions, approvals, promotions, and going back only |
 | L-4 | Tamper evidence | Proposed: per-entry hash chain over canonical JSON. Alternative: rely on insert-only grants |
 | L-5 | How strategies receive the filesystem export inside a run | The level-3 capability `ledger.read@1` ([10-meta-evolution.md](10-meta-evolution.md)) vs an operator-produced export passed as params; its contract is not fixed |
-| L-6 | Export operation status lookup path | Resolved: `GET /bots/{bot}/evolution/operations/{operation}` ([09-evolution-api.md](09-evolution-api.md)); the export's `202` returns `{operation_id}` |
+| L-6 | Export operation status lookup path | Resolved: `GET /bots/{bot_id}/evolution/operations/{operation}` ([09-evolution-api.md](09-evolution-api.md)); the export's `202` returns `{operation_id}` |
 | L-7 | Selector set and niche definitions for `map_elites` | Fixed in RSI-17 when a second selector is actually needed |
 | L-8 | Experience expiry vs evidence links | Proposed: keep ids, mark expired; never block expiry because the ledger references an episode |
 | D-1 | Module placement of the control plane | Recommended: `apps/evolution` (see [design.md](design.md)) |

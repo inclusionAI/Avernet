@@ -64,7 +64,7 @@ promotion; evolution: bindings"). Verification and Evolution Run live in the
 new `apps/evolution` module; they call Promotion through its service
 interface (§9). The public endpoints are under the shared `/openapi/v1`
 prefix (§10): Genome and Promotion endpoints, including the candidate
-report, review-queue, and approve/reject paths under `/bots/{bot}/evolution/`,
+report, review-queue, and approve/reject paths under `/bots/{bot_id}/evolution/`,
 are served by Backend; the other evolution endpoints are served by
 `apps/evolution`; [09-evolution-api.md](09-evolution-api.md) presents them
 as one public surface (this follows the recommended option of D-1 in
@@ -113,26 +113,36 @@ its ops, after raises (rewrite flag, guardrail tag) and the bot's
 
 ```python
 from enum import IntEnum
+from typing import Literal
 
-class RiskTier(IntEnum):
+class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
     T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
     T2 = 2   # persona edits, skill add/update, allowlisted engine_config, any rewrite-flagged edit
     T3 = 3   # tools, script, memory replace mode, permissions, anything in policy: locked by default
 
+# The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02).
+PatchOpName = Literal["file.edit", "skill.add", "skill.update", "memory.add",
+                      "memory.update", "memory.retire", "engine_config.set"]
+
+@dataclass(frozen=True)
+class TierRaise:                    # one raise applied after the per-op mapping (§5.1)
+    kind: Literal["rewrite", "guardrail_touch"]
+    target: str | None              # the file that triggered it, e.g. "persona/SOUL.md"; None for patch-wide
+
 @dataclass(frozen=True)
 class TierAssessment:
-    tier: RiskTier
+    tier: RiskTier                  # the patch's tier: the maximum over its ops, after raises and overrides
     per_op: list["OpTier"]          # one entry per patch op, in patch order
-    raised_by: list[str]            # e.g. ["rewrite:persona/SOUL.md", "guardrail_touch"]
+    raised_by: list[TierRaise]      # empty when no raise applied
 
 @dataclass(frozen=True)
 class OpTier:
-    op_index: int
-    op: str                         # "file.edit", "skill.add", "memory.add", ...
-    target: str                     # "persona/SOUL.md", "skills/refund-policy", ...
+    op_index: int                   # position of the op in the patch, from 0
+    op: PatchOpName
+    target: str                     # what the op changes, e.g. "persona/SOUL.md", "skills/refund-policy"
     tier: RiskTier
-    reason: str
+    reason: str                     # short human-readable reason for the tier, e.g. "persona edit"
 ```
 
 ```jsonc
@@ -173,13 +183,13 @@ class GateCheck:
 @dataclass(frozen=True)
 class GateDecision:
     id: str                         # "gd_204"
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.7)
     candidate_id: str               # content hash of the patch
     revision_id: str                # candidate revision
     parent_revision_id: str         # base the patch was made against
     run_id: str
     binding_id: str
-    verdict: str                    # final verdict: "accept" | "reject" | "inconclusive"
+    verdict: Literal["accept", "reject", "inconclusive"]   # the final verdict the gate decided on
     verification_profile: str       # "default@1"
     verifier_version: str           # recorded so decisions across verifier versions are not mixed
     risk: TierAssessment
@@ -194,7 +204,7 @@ class GateDecision:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "gd_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "candidate_id": "sha256:c41e…",
   "revision_id": "sha256:7c1e…",        // r42
   "parent_revision_id": "sha256:a90b…", // r41
@@ -227,7 +237,7 @@ ReviewStatus = Literal["open", "approved", "rejected", "superseded"]
 @dataclass(frozen=True)
 class ReviewItem:
     candidate_id: str               # the review item is keyed by candidate id
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     revision_id: str
     revision_seq: int               # 42, shown as "r42"
     parent_revision_id: str
@@ -241,7 +251,7 @@ class ReviewItem:
     self_reported_metrics: dict     # shown to reviewers, never used for acceptance
     status: ReviewStatus
     created_at: str
-    decided_by: str | None          # None while open
+    decided_by: str | None          # user or pipeline client id of the decider; None while open
     decided_at: str | None
     decision_reason: str | None
     promotion_id: str | None        # set when an approval promoted the revision
@@ -251,7 +261,7 @@ class ReviewItem:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "parent_revision_id": "sha256:a90b…",
@@ -285,14 +295,14 @@ class Actor:
 
 @dataclass(frozen=True)
 class ApplyResult:
-    kind: Literal["manifest_apply", "service_publish"]
+    kind: Literal["manifest_apply", "service_publish"]   # personal bot: Manifest apply; service bot: publish flow
     reference: str | None           # apply report id or published version, once known
-    detail: str
+    detail: str                     # short human-readable progress or failure text
 
 @dataclass(frozen=True)
 class Promotion:
     id: str                         # "prm_5d2"
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     ref: Literal["active", "canary"]
     revision_id: str                # what the ref now points at
     revision_seq: int
@@ -311,7 +321,7 @@ class Promotion:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "prm_5d2",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "ref": "active",
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
@@ -336,16 +346,16 @@ services; it is not stored.
 @dataclass(frozen=True)
 class SplitSummary:
     split: Literal["train", "validation", "holdout", "regression", "safety"]
-    mean_delta: str                 # decimal strings: no floats in canonical JSON
-    ci_low: str | None
+    mean_delta: str                 # candidate minus parent, mean score; decimal string (no floats in canonical JSON)
+    ci_low: str | None              # confidence interval of mean_delta; None for must-pass splits
     ci_high: str | None
-    newly_failing: int
+    newly_failing: int              # cases the parent passed and the candidate fails
     detail_visible: bool            # per-case detail is shown per caller role (07-verification.md)
 
 @dataclass(frozen=True)
 class CandidateReport:
     candidate_id: str
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     revision_id: str
     revision_seq: int
     parent_revision_id: str
@@ -357,15 +367,15 @@ class CandidateReport:
     diff_path: str                  # relative API path of the genome diff
     rationale: str
     evidence: list[str]
-    verdict: str
+    verdict: Literal["pending", "accept", "reject", "inconclusive"]
     splits: list[SplitSummary]
     cost: dict                      # parent vs candidate cost per case
-    flags: list[str]                # "rewrite", "guardrail_touch", "overfit_suspect", "wins_by_spending"
+    flags: list[Literal["rewrite", "guardrail_touch", "overfit_suspect", "wins_by_spending"]]   # meanings in §6.1
     gate: GateDecision
     review: ReviewItem | None
 ```
 
-The JSON form is the response of `GET /bots/{bot}/evolution/candidates/{candidate}` (§10.1).
+The JSON form is the response of `GET /bots/{bot_id}/evolution/candidates/{candidate}` (§10.1).
 
 ## 3. Separation of powers
 
@@ -872,13 +882,13 @@ class PromotionService(Protocol):
     `canary` refs in the Genome Registry.
     """
 
-    def check_floor(self, bot_id: str, candidate_id: str) -> GateCheck:
+    def check_floor(self, bot: BotRef, candidate_id: str) -> GateCheck:
         """Run every FloorCheck on a submitted candidate (§4.2). Called by Evolution
         Run at submission, before verification. On failure, records a GateDecision
         with outcome `not_promotable` and the verdict becomes `reject` without
         running any suite. Idempotent per candidate."""
 
-    def decide(self, bot_id: str, candidate_id: str) -> GateDecision:
+    def decide(self, bot: BotRef, candidate_id: str) -> GateDecision:
         """Evaluate the gate for a candidate whose verdict is final.
 
         Called by Evolution Run when Verification reports a final verdict.
@@ -888,22 +898,22 @@ class PromotionService(Protocol):
         Raises VerdictPending if the verdict is still `pending`.
         """
 
-    def reconsider(self, bot_id: str, reason: str) -> list[GateDecision]:
+    def reconsider(self, bot: BotRef, reason: str) -> list[GateDecision]:
         """Re-evaluate open items of a bot after a bot-level change
         (holdout incident opened or cleared, kill switch, daily limit reset).
         Never turns a decided item back into an open one."""
 
-    def candidate_report(self, bot_id: str, candidate_id: str,
+    def candidate_report(self, bot: BotRef, candidate_id: str,
                          viewer: Actor) -> CandidateReport:
         """Diff + verification summary + gate decision + review state.
         Per-case verification detail is filtered by the viewer's role."""
 
-    def review_queue(self, bot_id: str, status: ReviewStatus | None = "open",
+    def review_queue(self, bot: BotRef, status: ReviewStatus | None = "open",
                      min_tier: RiskTier | None = None,
                      page: int = 1, page_size: int = 20) -> "Page[ReviewItem]":
         """List review items for a bot, newest first."""
 
-    def approve(self, bot_id: str, candidate_id: str, actor: Actor, reason: str,
+    def approve(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
                 idempotency_key: str, override_stale_parent: bool = False) -> Promotion:
         """Approve an open item and promote its revision.
 
@@ -913,11 +923,11 @@ class PromotionService(Protocol):
         override_stale_parent is False), EvolutionFrozen.
         """
 
-    def reject(self, bot_id: str, candidate_id: str, actor: Actor, reason: str,
+    def reject(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
                idempotency_key: str) -> ReviewItem:
         """Reject an open item; the revision's status becomes rejected."""
 
-    def promote(self, bot_id: str, revision_id: str, ref: str, expected_revision: str,
+    def promote(self, bot: BotRef, revision_id: str, ref: Literal["active", "canary"], expected_revision: str,
                 actor: Actor, reason: str, idempotency_key: str) -> Promotion:
         """Move `ref` ("active" or "canary") to `revision_id` with CAS on
         `expected_revision`, then apply. Going back is this call with an
@@ -928,7 +938,8 @@ class FloorCheck(Protocol):
     """One platform-floor rule (§4.2). Floor checks are plugins owned by the
     platform, never by strategies; adding one is a reviewed platform change."""
 
-    name: str
+    name: Literal["schema", "base", "locked_genes_and_pins", "allowed_genes", "secret_pii_scan",
+                  "outbound_endpoints", "permission_escalation", "size_and_rewrite", "budget"]   # one per row of §4.2
 
     def check(self, patch: "GenomePatch", parent: "GenomeRevision",
               policy: "GenomePolicy", allowed_genes: list[str]) -> GateCheck: ...
@@ -962,7 +973,7 @@ Bot callers are postponed with DR-3.
 
 ### 10.1 Public endpoints
 
-#### GET /bots/{bot}/evolution/candidates/{candidate}
+#### GET /bots/{bot_id}/evolution/candidates/{candidate}
 
 The candidate report: diff, verification summary, gate decision, and review
 state. Called by the UI review screen, `avn evolve review show`, and
@@ -980,7 +991,7 @@ Example response (`200`):
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "parent_revision_id": "sha256:a90b…",
@@ -1019,7 +1030,7 @@ Notable errors: `404 not_found` (unknown bot or candidate, or the caller may
 not read the bot). A candidate whose verdict is still `pending` is not an
 error: the report is returned with `"verdict": "pending"` and `"gate": null`.
 
-#### GET /bots/{bot}/evolution/review-queue
+#### GET /bots/{bot_id}/evolution/review-queue
 
 List review items. Called by the UI, `avn evolve review list`, and
 pipelines. Query parameters: `status` (`open` default, `approved`,
@@ -1041,7 +1052,7 @@ Example response (`200`):
   "items": [
     {
       "candidate_id": "sha256:c41e…",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "revision_id": "sha256:7c1e…",
       "revision_seq": 42,
       "parent_revision_id": "sha256:a90b…",
@@ -1067,7 +1078,7 @@ Example response (`200`):
 Notable errors: `404 not_found`; `400 invalid_argument` for an unknown
 `status` value.
 
-#### POST /bots/{bot}/evolution/candidates/{candidate}:approve
+#### POST /bots/{bot_id}/evolution/candidates/{candidate}:approve
 
 Approve an open review item and promote its revision. Called by owners and
 reviewers (UI, `avn evolve review approve`), and by pipelines within owner
@@ -1103,7 +1114,7 @@ Example response (`200`):
   },
   "promotion": {
     "id": "prm_5d2",
-    "bot_id": "bot_123",
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
     "ref": "active",
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
@@ -1127,7 +1138,7 @@ in the queue, for example it was auto-promoted or is `not_promotable`);
 `403 policy_denied` (a pipeline approving above its allowed tier);
 `403 evolution_frozen` (per-bot kill switch).
 
-#### POST /bots/{bot}/evolution/candidates/{candidate}:reject
+#### POST /bots/{bot_id}/evolution/candidates/{candidate}:reject
 
 Reject an open review item. The revision's status becomes `rejected`; it is kept, never deleted.
 
@@ -1151,7 +1162,7 @@ Example response (`200`):
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "status": "rejected",
@@ -1165,7 +1176,7 @@ Example response (`200`):
 Notable errors: `404 not_found`; `409 not_reviewable`; `409 already_decided`;
 `400 invalid_argument` (empty reason).
 
-#### POST /bots/{bot}/genome/promotions
+#### POST /bots/{bot_id}/genome/promotions
 
 Move `active` (or `canary`) to a revision and apply it. Used for going back,
 for promoting an owner-authored revision, for canary → active, and
@@ -1196,7 +1207,7 @@ Example response (`201`):
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "prm_6a0",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "ref": "active",
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
@@ -1249,19 +1260,19 @@ look up by candidate id ([03-strategy.md](03-strategy.md)).
 from avernet_evolution import Client, RiskTier
 
 c = Client.from_env()
-run_id = c.runs.start(bot="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
+run_id = c.runs.start(bot_id="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
                       budget={"max_usd": 10},
                       idempotency_key="nightly-bot_123-2026-10-08")   # same key on every retry
 run = c.runs.wait(run_id)                     # repeated short status lookups by id
 
 for cand in run.candidates():
-    report = c.candidates.get(bot="bot_123", candidate=cand.id)
+    report = c.candidates.get(bot_id="bot_123", candidate=cand.id)
     if report.gate is None or report.gate.outcome != "needs_review":
         continue                              # auto-promoted, not promotable, or still pending
     if report.gate.risk.tier <= RiskTier.T1 and not report.flags:
         # Only reached when the owner turned gate auto-promotion off but allowed
         # this pipeline to approve T1; anything higher is left for a human.
-        c.review.approve(bot="bot_123", candidate=cand.id,
+        c.review.approve(bot_id="bot_123", candidate=cand.id,
                          reason="nightly auto-policy",
                          idempotency_key=f"approve-bot_123-{cand.id}")
 ```
@@ -1288,8 +1299,8 @@ conflict such as `stale_parent`, `5` for `policy_denied`.
 
 ```python
 # Illustrative only
-refs = c.genome.refs(bot="bot_123")           # active = r42, previous = r41
-promo = c.genome.promote(bot="bot_123",
+refs = c.genome.refs(bot_id="bot_123")        # active = r42, previous = r41
+promo = c.genome.promote(bot_id="bot_123",
                          revision=refs.previous,
                          expected_revision=refs.active,
                          reason="r42 mis-routes VIP refunds",
@@ -1362,8 +1373,8 @@ Resolved:
   cases; `regression` tolerance 1, and a spent tolerance
   (`tolerance_used: true`) routes the candidate to human review (§4.1, §4.3).
 - **Where the review-queue endpoints are served.** Genome and Promotion
-  endpoints (including the `/bots/{bot}/evolution/candidates/…` and
-  `/bots/{bot}/evolution/review-queue` paths) are served by Backend;
+  endpoints (including the `/bots/{bot_id}/evolution/candidates/…` and
+  `/bots/{bot_id}/evolution/review-queue` paths) are served by Backend;
   Experience, Strategy registry, Evolution Run, Verification, Ledger, and
   Meta-evolution endpoints by `apps/evolution`;
   [09-evolution-api.md](09-evolution-api.md) presents them under one public

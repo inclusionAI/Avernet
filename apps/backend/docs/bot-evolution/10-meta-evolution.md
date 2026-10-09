@@ -112,6 +112,12 @@ from typing import Literal
 MechanismStatus = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
 
 @dataclass(frozen=True)
+class MechanismProvenance:
+    kind: Literal["human", "meta_run"]   # registered by a person, or proposed by a meta-run
+    actor: str                       # user id, or the meta-strategy "id@version"
+    run_id: str | None = None        # set only when kind == "meta_run"
+
+@dataclass(frozen=True)
 class MechanismRevision:
     id: str                          # "sha256:…" over canonical mechanism content
     family: str                      # strategy id, e.g. "clawevolve/bot-evolution"
@@ -121,7 +127,7 @@ class MechanismRevision:
     agent_definitions: dict[str, str]   # definition name → content digest
     default_params: dict             # thresholds, round limits, per-step models and budgets
     parents: list[str]               # mechanism revision ids
-    created_by: dict                 # {"kind": "human" | "meta_run", ...}
+    created_by: MechanismProvenance
     patch_from_parent: str | None    # digest of the MechanismPatch; None for human-registered versions
     status: MechanismStatus
     verifier_version: str | None     # verifier version of the evidence that adopted it; None until verified
@@ -200,9 +206,11 @@ experiments, frozen with their inputs. Synthetic problems can be added, for
 example deliberately degraded genomes with a known fix.
 
 ```python
+ProblemSplit = Literal["mechanism_train", "mechanism_holdout"]   # §8.2
+
 @dataclass(frozen=True)
 class ImprovementProblem:
-    id: str
+    id: str                          # "prob_204"
     bot_genome_revision: str         # starting system S
     experience_snapshot: str         # episodes / feedback the mechanism may see
     visible_suites: list[str]        # visible to the mechanism under normal level-2 rules
@@ -211,8 +219,8 @@ class ImprovementProblem:
     segment: dict                    # engine and bot type, for stratification
     source: Literal["ledger", "synthetic"]
     source_entry: str | None         # ledger entry it was frozen from; None for synthetic problems
-    split: Literal["mechanism_train", "mechanism_holdout"]
-    verifier_version: str
+    split: ProblemSplit
+    verifier_version: str            # the verifier version the problem was frozen under (§9)
 ```
 
 ```jsonc
@@ -238,8 +246,8 @@ class ImprovementProblem:
 @dataclass(frozen=True)
 class MechanismVerificationProfile:
     id: str                          # e.g. "mechanism-default@1"
-    seeds_per_problem: int
-    min_holdout_problems: int
+    seeds_per_problem: int           # how many times each mechanism runs each problem
+    min_holdout_problems: int        # fewer mechanism-holdout problems than this: verification refused
     significance: str                # e.g. "0.05"; strings, no floats in hashed content
     min_yield_gain_pct: int          # lower confidence bound of the yield gain must clear this
     max_regression_rate_increase_pct: int
@@ -726,7 +734,7 @@ class MechanismRegistry(Protocol):
     Registry (03-strategy.md) on the shared revision/ref/patch machinery."""
 
     async def get_revision(self, family: str, revision: str) -> MechanismRevision: ...
-    async def list_revisions(self, family: str, *, status: str | None = None) -> list[MechanismRevision]: ...
+    async def list_revisions(self, family: str, *, status: MechanismStatus | None = None) -> list[MechanismRevision]: ...
     async def refs(self, family: str) -> dict[str, str]:
         """Ref name → mechanism revision id."""
     async def record_candidate(self, patch: MechanismPatch, *, run_id: str) -> str:
@@ -744,10 +752,10 @@ class MechanismRegistry(Protocol):
 class ImprovementProblems(Protocol):
     """Frozen improvement problems built from H."""
 
-    async def freeze(self, *, source_entry: str, split: str, budget: dict,
+    async def freeze(self, *, source_entry: str, split: ProblemSplit, budget: dict,
                      idempotency_key: str) -> ImprovementProblem: ...
     async def get(self, problem: str) -> ImprovementProblem: ...
-    async def list(self, *, split: str | None = None, segment: dict | None = None,
+    async def list(self, *, split: ProblemSplit | None = None, segment: dict | None = None,
                    verifier_version: str | None = None) -> list[ImprovementProblem]: ...
 
 

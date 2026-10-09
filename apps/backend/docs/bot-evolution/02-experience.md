@@ -28,10 +28,22 @@ It records three kinds of things:
 - **Eval trace** — every evaluation rollout, with grader scores and textual
   critiques.
 
-Every record carries the **genome revision id** that produced it. This is the
-one field missing everywhere in the codebase today, and it is what turns logs
-into attributable fitness signal ("revision `r42` fails refunds less often
-than `r41`") and later into training data (§8).
+Who generates these records: the **engine** during the bot's sessions
+(episodes, pulled through session export), **users and products** (feedback,
+sent to the feedback endpoint or picked up by ingest adapters), and
+**Verification** (one eval trace per evaluation rollout). Every record is
+stored with the **genome revision id** of the bot version that produced it,
+attached at ingest: an eval trace knows its revision directly, because
+Verification evaluates a specific revision; an episode gets it by
+attribution from the bot's apply history (the revision that was applied to
+the bot when the episode started; for a service bot, the published version
+that was serving, mapped to its revision); feedback inherits it from its
+episode. Records from before the bot had revisions are stored with
+`revision_id: null` (unattributed). The rules and an example timeline are in
+§3. The revision id is the one field missing everywhere in the codebase
+today, and it is what turns logs into attributable fitness signal ("revision
+`r42` fails refunds less often than `r41`") and later into training data
+(§8).
 
 **What it owns**
 
@@ -104,6 +116,12 @@ from typing import Literal
 
 Role = Literal["user", "assistant", "tool", "system"]
 OutcomeStatus = Literal["succeeded", "failed", "user_corrected", "abandoned", "unknown"]
+Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
+# Personal-data categories the redactor knows. New values are added by a reviewed
+# change to the redactor, together with their rules (defaults: open decision X-4).
+PiiCategory = Literal["email", "phone", "address"]
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -121,27 +139,27 @@ class Turn:
 
 @dataclass(frozen=True)
 class Cost:
-    usd: float
-    input_tokens: int
-    output_tokens: int
+    usd: float                     # model spend in US dollars for this episode or rollout
+    input_tokens: int              # tokens sent to the model, summed over all calls
+    output_tokens: int             # tokens the model produced, summed over all calls
 
 @dataclass(frozen=True)
 class Outcome:
     status: OutcomeStatus
     feedback: str | None = None    # short summary of the deciding feedback, if any
-    feedback_ids: list[str] = field(default_factory=list)
+    feedback_ids: list[str] = field(default_factory=list)   # the feedback records that decided `status`
 
 @dataclass(frozen=True)
 class SourceRef:
-    engine: str                    # "openclaw", "claude-code", "hermes", "teclaw"
+    engine: Engine                 # which engine ran the session
     export_api: str                # contract version that produced it, e.g. "session-export/v2"
     session_id: str                # the engine's own session id
     content_digest: str            # hash of the raw exported session, for re-normalization
 
 @dataclass(frozen=True)
 class Episode:
-    episode_id: str
-    bot_id: str
+    episode_id: str                # "ep_91"
+    bot: BotRef                    # the bot that ran the session (owner + bot id)
     revision_id: str | None        # None = unattributed (ran before revisions existed, §3)
     started_at: datetime
     ended_at: datetime
@@ -149,7 +167,7 @@ class Episode:
     model: str                     # model name reported by the engine
     cost: Cost
     outcome: Outcome
-    redactions: list[str]          # categories removed at ingest, e.g. ["email", "phone"]
+    redactions: list[PiiCategory]  # personal-data categories removed at ingest, e.g. ["email", "phone"]
     source: SourceRef
 ```
 
@@ -157,7 +175,7 @@ class Episode:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "episode_id": "ep_91",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",                 // the genome revision the bot was running (r41)
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
@@ -193,27 +211,34 @@ FeedbackKind = Literal[
     "run_evidence",           # TaskGuard: guard / repair / retry events of a run
     "finding",                # a producer's diagnosis, e.g. ClawInsight plan-source/v2 items
 ]
+FeedbackSource = Literal[
+    "user",                   # a person, through a product UI
+    "pipeline",               # a deterministic pipeline or product backend
+    "bcs",                    # BCS coordination outcomes
+    "taskguard",              # TaskGuard run evidence
+    "clawinsight",            # ClawInsight findings
+]
 
 @dataclass(frozen=True)
 class Feedback:
-    feedback_id: str
-    bot_id: str
+    feedback_id: str                  # "fb_204"
+    bot: BotRef                       # the bot the feedback is about (owner + bot id)
     kind: FeedbackKind
-    source: str                       # producer: "user", "pipeline", "bcs", "taskguard", "clawinsight"
+    source: FeedbackSource            # who produced it
     created_at: datetime
     revision_id: str | None           # copied from the episode, or given by the producer; None = unattributed
     episode_id: str | None            # None for feedback not tied to one episode
     score: float | None               # ratings / outcomes on [0, 1]; None for text-only kinds
     text: str | None                  # correction text, finding summary; redacted at ingest
     data: dict                        # kind-specific structured payload, schema per kind
-    idempotency_key: str              # the producer's key; (bot, key) is unique (§10)
+    idempotency_key: str              # the producer's key; (owner_id, bot_id, key) is unique (§10)
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "correction",
   "source": "user",
   "created_at": "2026-10-07T09:13:50Z",
@@ -235,7 +260,7 @@ strategies through `experience.feedback@1` (see
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_311",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "finding",
   "source": "clawinsight",
   "created_at": "2026-10-08T01:00:00Z",
@@ -260,20 +285,20 @@ Split = Literal["train", "validation", "holdout", "regression", "safety"]
 
 @dataclass(frozen=True)
 class GraderResult:
-    grader: str               # e.g. "platform/clawbench"
-    score: float              # [0, 1]
+    grader: str               # id of the grader that scored the rollout, e.g. "platform/clawbench"
+    score: float              # 0 = complete failure, 1 = perfect, by that grader's rubric
     critique: str             # textual critique; reflective strategies need it
 
 @dataclass(frozen=True)
 class EvalTrace:
-    trace_id: str
-    bot_id: str
+    trace_id: str             # "et_5521"
+    bot: BotRef               # the bot whose revision was evaluated (owner + bot id)
     evaluation_id: str        # the Verification evaluation this rollout belongs to
     revision_id: str          # always known: verification evaluates a specific revision
-    suite: str
-    case_id: str
+    suite: str                # suite id, e.g. "bot_123/support"
+    case_id: str              # the case that was run
     split: Split
-    seed: int
+    seed: int                 # which repetition of the case this is (each seed is one rollout)
     transcript: list[Turn]    # the rollout's conversation, same shape as Episode.turns
     grades: list[GraderResult]
     cost: Cost
@@ -285,7 +310,7 @@ class EvalTrace:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "trace_id": "et_5521",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "evaluation_id": "eval_train_77",
   "revision_id": "sha256:c41e…",
   "suite": "bot_123/support",
@@ -312,11 +337,11 @@ class EvalTrace:
 ```python
 @dataclass(frozen=True)
 class SessionExport:
-    export_id: str
-    bot_id: str
-    engine: str
-    since: datetime
-    until: datetime
+    export_id: str                # "sx_402"
+    bot: BotRef                   # whose sessions are exported (owner + bot id)
+    engine: Engine                # the engine whose provider runs the export
+    since: datetime               # window start (inclusive)
+    until: datetime               # window end (exclusive)
     status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
     package_digest: str | None    # set once succeeded: digest of the exported session package
     error: str | None             # set once failed
@@ -324,9 +349,9 @@ class SessionExport:
 @dataclass(frozen=True)
 class RetentionPolicy:
     tenant_id: str
-    episode_days: int             # episodes and eval traces older than this are deleted
-    feedback_days: int
-    pii_categories: list[str]     # categories redacted at ingest, e.g. ["email", "phone", "address"]
+    episode_days: int             # episodes and eval traces older than this many days are deleted
+    feedback_days: int            # feedback older than this many days is deleted
+    pii_categories: list[PiiCategory]   # categories redacted at ingest, e.g. ["email", "phone", "address"]
     training_export_opt_in: bool  # §7: export for training only with explicit tenant opt-in
 ```
 
@@ -335,7 +360,7 @@ class RetentionPolicy:
 {
   "session_export": {
     "export_id": "sx_402",
-    "bot_id": "bot_123",
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
     "engine": "openclaw",
     "since": "2026-10-07T00:00:00Z",
     "until": "2026-10-08T00:00:00Z",
@@ -370,11 +395,31 @@ when the episode started**.
   matched (for example, an apply was in flight), get `revision_id: null` and
   are reported as **unattributed**. They are still useful as diagnosis input,
   but they are excluded from any per-revision comparison.
+- **Service bots.** A service bot serves a published version, not the
+  draft. Each publish record stores the `revision_id` it published
+  ([01-genome.md](01-genome.md), RSI-04), so the store maps the published
+  version that was serving when the episode started to its revision.
 - Feedback inherits the revision of its episode. Feedback without an episode
   takes the revision the producer supplies, or the bot's `active` revision at
   `created_at`.
 - Eval traces always carry a revision, because Verification evaluates a
   specific revision.
+
+When this happens: the revision id is attached **at ingest**, once, and
+stored with the record; it is never rewritten later.
+
+Example timeline for `bot_123`:
+
+| Time | Event | Records produced and their `revision_id` |
+| --- | --- | --- |
+| Sep 20 | Bot runs on Manifest v1; no revisions exist yet | Episode `ep_12` → `null` (unattributed) |
+| Sep 30 02:40 | First revision `r41` recorded and applied | (apply report records `r41`) |
+| Oct 7 09:12 | Session starts | Episode `ep_91` → `r41` (the revision applied at 09:12) |
+| Oct 7 09:13 | User corrects the bot in that session | Feedback `fb_204` → `r41` (copied from `ep_91`) |
+| Oct 8 02:31 | Verification evaluates candidate `r42` in a sandbox | Eval trace `et_5521` → `r42` (known directly) |
+| Oct 8 11:29 | Session starts a minute before the next apply finishes | Episode `ep_120` → `r41` (what was applied at its start) |
+| Oct 8 11:30 | Promotion applies `r42` | (apply report records `r42`) |
+| Oct 8 14:00 | Session starts | Episode `ep_131` → `r42` |
 
 After a promotion (`active` moves from `r41` to `r42`), new episodes carry
 `r42`. That is what lets a later run, or online verification, compare live
@@ -387,7 +432,7 @@ outcomes of `r41` and `r42`.
 | Source | Record | How it arrives | First iteration? |
 | --- | --- | --- | --- |
 | Engine sessions (OpenClaw first) | `Episode` | Store pulls via the engine's session-export provider (§5) on a schedule, and on demand before a run that needs `experience.sessions@1` | Yes |
-| Product UI / pipelines (ratings, corrections, task outcomes) | `Feedback` (`rating`, `correction`, `outcome`) | `POST /bots/{bot}/experience/feedback` | Yes |
+| Product UI / pipelines (ratings, corrections, task outcomes) | `Feedback` (`rating`, `correction`, `outcome`) | `POST /bots/{bot_id}/experience/feedback` | Yes |
 | ClawInsight improvement items | `Feedback` (`finding`) | Ingest adapter reading `plan-source/v2` items | Yes (needed by default strategies) |
 | TaskGuard run evidence | `Feedback` (`run_evidence`) | Ingest adapter over TaskGuard's run evidence | Yes; TaskGuard itself stays runtime resilience, not evolution |
 | BCS coordination outcomes | `Feedback` (`coordination_outcome`) | Ingest adapter, later | Proposed, after the first iteration |
@@ -415,8 +460,8 @@ engine provider ──export──▶ normalize ──▶ redact ──▶ attri
 5. **Index** by bot, revision, time, and outcome status, so the read paths
    (§6, §10) can filter cheaply.
 
-Ingest is idempotent per `(bot, source.engine, source.session_id,
-source.content_digest)`: re-exporting a window does not duplicate episodes.
+Ingest is idempotent per `(owner_id, bot_id, source.engine,
+source.session_id, source.content_digest)`: re-exporting a window does not duplicate episodes.
 A session that changed since the last export (new turns) produces a new
 digest and replaces the earlier episode with the same id.
 
@@ -476,9 +521,9 @@ class SessionExportProvider(Protocol):
     docs/arch/protocol-contract-tests.md.
     """
 
-    engine: str
+    engine: Engine
 
-    async def start_export(self, *, bot_id: str, since: datetime, until: datetime,
+    async def start_export(self, *, bot: BotRef, since: datetime, until: datetime,
                            idempotency_key: str) -> str:
         """Start exporting the bot's sessions in [since, until). Returns an export id at once.
 
@@ -493,7 +538,7 @@ class SessionExportProvider(Protocol):
 ```
 
 The idempotency key the store uses for scheduled exports is
-`<bot>/<engine>/<since>/<until>`, so a retried export of the same window
+`<owner_id>/<bot_id>/<engine>/<since>/<until>`, so a retried export of the same window
 returns the same export instead of exporting twice.
 
 Capability catalog link: a bot can be bound to a strategy that needs
@@ -649,17 +694,17 @@ class ExperienceStore(Protocol):
     """Experience Store (apps/evolution). Transport-agnostic core interface."""
 
     # --- ingest -------------------------------------------------------------
-    async def ingest_window(self, *, bot_id: str, since: datetime, until: datetime) -> str:
+    async def ingest_window(self, *, bot: BotRef, since: datetime, until: datetime) -> str:
         """Export and ingest the bot's sessions in [since, until) from its engine provider.
 
         Returns the export id at once (an operation). Idempotent per window (§5).
         """
 
-    async def record_feedback(self, bot_id: str, feedback: "FeedbackInput",
+    async def record_feedback(self, bot: BotRef, feedback: "FeedbackInput",
                               *, idempotency_key: str) -> Feedback:
         """Store one feedback record after redaction and attribution.
 
-        The same (bot, idempotency_key) returns the stored record; a different body
+        The same (owner_id, bot_id, idempotency_key) returns the stored record; a different body
         under a reused key raises IdempotencyConflict.
         """
 
@@ -667,14 +712,14 @@ class ExperienceStore(Protocol):
         """Store one rollout. Called by Verification only. Idempotent per trace_id."""
 
     # --- read ---------------------------------------------------------------
-    async def list_episodes(self, bot_id: str, flt: EpisodeFilter, *,
+    async def list_episodes(self, bot: BotRef, flt: EpisodeFilter, *,
                             page: int, page_size: int) -> Page["EpisodeSummary"]:
         """Episode summaries (no turns), newest first."""
 
-    async def get_episode(self, bot_id: str, episode_id: str) -> Episode:
+    async def get_episode(self, bot: BotRef, episode_id: str) -> Episode:
         """One episode with turns. Raises NotFound if absent or deleted by retention."""
 
-    async def list_feedback(self, bot_id: str, *, kinds: list[FeedbackKind] | None,
+    async def list_feedback(self, bot: BotRef, *, kinds: list[FeedbackKind] | None,
                             episode_id: str | None, since: datetime | None,
                             page: int, page_size: int) -> Page[Feedback]:
         """Feedback records, newest first."""
@@ -687,7 +732,7 @@ class ExperienceStore(Protocol):
         """
 
     # --- capabilities -------------------------------------------------------
-    def query_for_run(self, *, run_id: str, bot_id: str,
+    def query_for_run(self, *, run_id: str, bot: BotRef,
                       granted: set[str]) -> ExperienceQuery:
         """The ctx.experience object for one run: bot-scoped, redacted, only granted parts."""
 
@@ -710,7 +755,7 @@ tenant admins (UI, `avn experience`), and pipelines and product backends
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
 errors, pagination, and idempotency.
 
-### `GET /bots/{bot}/experience/episodes`
+### `GET /bots/{bot_id}/experience/episodes`
 
 Lists episode summaries of a bot, newest first. Called by the UI, the CLI
 (`avn experience episodes`), and pipelines that look at how a revision is
@@ -765,7 +810,7 @@ Example response (`200`):
 Errors: `404` unknown bot; `400` invalid filter (for example `since` after
 `until`, unknown `outcome`).
 
-### `GET /bots/{bot}/experience/episodes/{episode}`
+### `GET /bots/{bot_id}/experience/episodes/{episode}`
 
 Returns one episode with its turns. Called by the UI's episode view, the CLI,
 and reviewers following a candidate's evidence ids.
@@ -782,7 +827,7 @@ Example response (`200`): the full `Episode` from §2.1.
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "episode_id": "ep_91",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",
   "revision_seq": "r41",
   "started_at": "2026-10-07T09:12:00Z",
@@ -806,7 +851,7 @@ Example response (`200`): the full `Episode` from §2.1.
 
 Errors: `404` unknown bot, or episode unknown or deleted by retention.
 
-### `POST /bots/{bot}/experience/feedback`
+### `POST /bots/{bot_id}/experience/feedback`
 
 Records one feedback item. Called by product backends and UIs (ratings,
 corrections), pipelines (task outcomes), and platform ingest adapters
@@ -814,7 +859,8 @@ corrections), pipelines (task outcomes), and platform ingest adapters
 
 The `Idempotency-Key` header is required. It is a client-chosen string,
 identical for every retry of one logical feedback item and different for
-different items; the platform stores `(bot, key) → feedback id`. Good keys
+different items; the platform stores `(owner_id, bot_id, key) → feedback
+id`. Good keys
 are derived from what the feedback is about, for example
 `support-ui/ep_91/turn-4/correction` or `clawinsight/imp_88`; a send-time
 timestamp is not a valid key, because it changes between retries.
@@ -844,7 +890,7 @@ used for the same request):
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "correction",
   "source": "user",
   "created_at": "2026-10-07T09:13:50Z",
@@ -861,7 +907,7 @@ Errors: `400` body does not match the schema for `kind`; `404` unknown bot
 or `episode_id`; `409` the idempotency key was already used with a different
 body; `428` missing `Idempotency-Key`.
 
-### `GET /bots/{bot}/experience/feedback`
+### `GET /bots/{bot_id}/experience/feedback`
 
 Lists feedback of a bot, newest first. Called by the UI, the CLI
 (`avn experience feedback`), and pipelines.
@@ -884,7 +930,7 @@ Example response (`200`):
   "items": [
     {
       "feedback_id": "fb_219",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "kind": "rating",
       "source": "user",
       "created_at": "2026-10-07T15:43:10Z",
@@ -897,7 +943,7 @@ Example response (`200`):
     },
     {
       "feedback_id": "fb_204",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "kind": "correction",
       "source": "user",
       "created_at": "2026-10-07T09:13:50Z",
@@ -963,7 +1009,7 @@ id for status and the package. Its exact v2 wire form is part of RSI-10.
 **Eval trace write (Verification → store).** `record_eval_trace` (§9) is an
 in-process call inside `apps/evolution`; it has no public endpoint.
 
-**Not in the first iteration.** `POST /bots/{bot}/experience/observations`
+**Not in the first iteration.** `POST /bots/{bot_id}/experience/observations`
 (fast-loop notes, §1) is postponed.
 
 ## 11. Examples
@@ -979,7 +1025,7 @@ c = Client.from_env()
 def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str) -> None:
     # The key names the thing being reported, so every retry sends the same key.
     c.experience.feedback.create(
-        bot=bot_id,
+        bot_id=bot_id,                     # caller owns the bot; otherwise also pass entity_id=<owner>
         kind="correction",
         source="user",
         episode_id=episode_id,
@@ -995,9 +1041,9 @@ def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str)
 # Illustrative only
 from collections import Counter
 
-def outcome_rates(c, bot: str, revision: str) -> dict[str, float]:
+def outcome_rates(c, bot_id: str, revision: str) -> dict[str, float]:
     counts: Counter[str] = Counter()
-    for ep in c.experience.episodes.list(bot=bot, revision=revision, since="2026-10-01T00:00:00Z"):
+    for ep in c.experience.episodes.list(bot_id=bot_id, revision=revision, since="2026-10-01T00:00:00Z"):
         counts[ep.outcome.status] += 1     # the SDK walks all pages
     total = sum(counts.values()) or 1
     return {status: n / total for status, n in counts.items()}
@@ -1040,9 +1086,9 @@ lessons = cluster_into_lessons(items)    # its own logic
 class OpenClawSessionExport(SessionExportProvider):
     engine = "openclaw"
 
-    async def start_export(self, *, bot_id, since, until, idempotency_key):
+    async def start_export(self, *, bot, since, until, idempotency_key):
         return await self.exports.create_or_get(           # same key → same export id
-            key=idempotency_key, bot_id=bot_id, since=since, until=until)
+            key=idempotency_key, owner_id=bot.owner_id, bot_id=bot.bot_id, since=since, until=until)
 
     async def get_export(self, export_id):
         return await self.exports.get(export_id)

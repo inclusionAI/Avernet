@@ -82,6 +82,9 @@ ADR number:
 | **Capability** | A platform-owned, versioned field of the strategy context (for example `experience.sessions@1`), with providers per engine. |
 | **Binding** | One entry in a bot's evolution policy: which strategy, trigger, parent, allowed genes, verification profile, budget, params. |
 | **Evolution Run** | One execution of a binding against one bot, with its inputs frozen at start and identified by a run id; it submits candidates and looks up their verdicts by id. |
+| **Job** | One dispatch attempt of a run on a worker, under a lease. A run has one job per attempt (a re-dispatch after a crash creates a new job for the same run). Callers only see runs; workers only see jobs. |
+| **Rollout** (evaluation) | One execution of one evaluation case against one bot version; repeated seeds count separately. Run budgets can limit them. |
+| **Bot identity** | A bot is identified by its owner and its bot id together (`owner_id`, `bot_id`), because a bot id alone is not unique across users. Paths carry `{bot_id}`; the owner is the `entity_id` query parameter, defaulting to the caller, as in OpenAPI v1. |
 | **Operation** | Long-running work started inside a run (an agent session, a train evaluation): its start returns an id, and its status is looked up by that id. |
 | **Candidate** | A Genome Revision proposed during a run, not yet promoted. |
 | **Verdict** | The result of verifying a candidate: `pending`, `accept`, `reject`, or `inconclusive`. |

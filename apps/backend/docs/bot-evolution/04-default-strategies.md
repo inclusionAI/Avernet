@@ -24,6 +24,18 @@ registration record, and the strategy SDK are defined in
 | `clawevolve/bot-evolution` | `2.0.0` | **Primary default.** Today's ClawEvolve bot evolution (diagnose → plan → tune/review rounds → bench) as a black-box strategy | P3, RSI-13 |
 | `platform/consolidate-memory` | `1.0.0` | Second, deliberately different default: consolidates feedback and episodes into curated memory items ("dream" job). Proves pluggability with a different capability set (R19 needs two examples) | P5, RSI-15 |
 
+These are **three separate strategies**, not three modes of one: each has
+its own id, its own code, its own params schema, and its own registered
+versions, and a bot uses each one through its own binding in its evolution
+policy ([06-evolution-run.md](06-evolution-run.md)). What each is for:
+
+- `platform/manual-patch`: apply one patch a person or pipeline already
+  wrote, through the full verify-gate-promote loop.
+- `clawevolve/bot-evolution`: improve persona and skills from what went
+  wrong in recent sessions.
+- `platform/consolidate-memory`: turn recent feedback into curated memory
+  items.
+
 This document owns:
 
 - the registration record, params schema, and `run(ctx)` behaviour of each
@@ -139,10 +151,10 @@ cause, and the episodes that show it. Findings are inputs to the plan step
 ```python
 @dataclass(frozen=True)
 class Finding:
-    finding_id: str
+    finding_id: str               # "f_12"
     kind: Literal["bad_case", "good_case"]
-    summary: str
-    root_cause: str
+    summary: str                  # one line: what the bot did
+    root_cause: str               # the likely reason, in the genome's terms (e.g. a skill that did not trigger)
     episodes: list[str]           # episode ids, evidence for the candidate
     severity: Literal["low", "medium", "high"]
 ```
@@ -169,9 +181,9 @@ over the JSON API a case travels as a string inside a JSON envelope.
 @dataclass(frozen=True)
 class TrainCaseProposal:
     case_key: str                 # strategy-chosen, stable per run: "<run>/<finding>/<n>"
-    format: str                   # proposed: "clawbench-md/1"
+    format: Literal["clawbench-md/1"]   # proposed: the ClawBench Markdown case format; new formats need a reviewed verifier change
     content: str                  # the Markdown case, unchanged
-    derived_from: list[str]       # finding / episode ids
+    derived_from: list[str]       # evidence ids it came from, e.g. "finding:f_12", "episode:ep_91"
 ```
 
 ```jsonc
@@ -193,10 +205,10 @@ what makes ClawEvolve survive a crash and re-dispatch (§4.4).
 ```python
 @dataclass
 class RoundRecord:
-    round: int
+    round: int                    # 0-based round number within the run
     candidate: str | None         # candidate id submitted in this round, if any
-    train_score_pct: int
-    verdict: str | None           # pending | accept | reject | inconclusive
+    train_score_pct: int          # the round's train score, 0..100
+    verdict: Literal["pending", "accept", "reject", "inconclusive"] | None   # None when nothing was submitted
 
 @dataclass
 class ClawEvolveState:
@@ -937,7 +949,7 @@ proposed.
 
 **Binding and starting the defaults (public).**
 
-### `PUT /bots/{bot}/evolution/policy`
+### `PUT /bots/{bot_id}/evolution/policy`
 
 Sets the bot's list of bindings. Called by the bot owner or tenant admin
 (UI, `avn evolve policy set`). Defined in
@@ -988,7 +1000,7 @@ Response:
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"bot": "bot_123", "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
+{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
 ```
 
 Notable errors (binding check, at configuration time rather than partway
@@ -998,7 +1010,7 @@ because its agent definitions are OpenClaw only); `422` when
 `allowed_genes` leaves the bot's genome `policy` (locked genes stay
 locked); `412` on a stale `If-Match`.
 
-### `POST /bots/{bot}/evolution/runs`
+### `POST /bots/{bot_id}/evolution/runs`
 
 Starts a run. Defined in [06-evolution-run.md](06-evolution-run.md). The
 manual-patch reference strategy is always started this way, with the patch
@@ -1065,7 +1077,7 @@ Response:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "job_id": "job_7f3",
+  "job_id": "job_7f3_1",
   "run_id": "run_7f3",
   "attempt": 1,
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60, "max_sessions": 500},
@@ -1080,10 +1092,10 @@ Notable errors: `204` (no content) when no job is available is proposed.
 
 ### `POST /evolution/v1/jobs/{id}/heartbeat`
 
-Renews the lease while `run(ctx)` works. An expired lease re-queues the job
+Renews the lease while `run(ctx)` works. An expired lease re-queues the run as a new job
 with the same run id and `attempt + 1`.
 
-Request: `POST /evolution/v1/jobs/job_7f3/heartbeat` with header
+Request: `POST /evolution/v1/jobs/job_7f3_1/heartbeat` with header
 `Evolution-Fencing-Token: ft_000231`, body `{}`.
 
 Response (`cancelled: true` is how a cancellation reaches the worker; the
@@ -1184,7 +1196,7 @@ Response:
      "revision_id": "sha256:a90b…", "text": "partial refunds are allowed",
      "created_at": "2026-10-07T09:15:00Z"},
     {"feedback_id": "fb_305", "kind": "rating", "episode_id": "ep_97",
-     "revision_id": "sha256:a90b…", "rating": -1, "created_at": "2026-10-07T14:02:00Z"}
+     "revision_id": "sha256:a90b…", "score": 0.0, "created_at": "2026-10-07T14:02:00Z"}
   ]
 }
 ```
@@ -1318,7 +1330,7 @@ feedback reflective strategies need):
 ```
 
 A succeeded agent operation returns an `AgentResult` instead, for example
-`{"exit_status": "ok", "transcript_artifact": "art_77"}`; files it changed
+`{"exit_status": "completed", "transcript_artifact": "art_77"}`; files it changed
 stay in the workspace until the strategy turns them into a patch.
 
 ### `POST /evolution/v1/runs/{run}/models:complete`
@@ -1475,7 +1487,7 @@ A pipeline using it end to end (client SDK, [09-evolution-api.md](09-evolution-a
 from avernet_evolution import Client
 
 c = Client.from_env()
-run_id = c.runs.start(bot="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
+run_id = c.runs.start(bot_id="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
                       params={"patch": patch}, idempotency_key="fix-refund-trigger-2026-10-09")
 run = c.runs.get(run_id)                       # repeat until terminal
 cand = run.candidates()[0]

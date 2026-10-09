@@ -112,6 +112,9 @@ its code runs (`runtime`) and which capabilities it needs (`needs`). It is
 strategy's code (for example, before a job-worker container exists).
 
 ```python
+Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
+ConformanceState = Literal["pending", "passed", "failed"]          # result of the conformance kit (§8.4)
+
 @dataclass(frozen=True)
 class Runtime:
     kind: Literal["in_process", "job_worker"]
@@ -120,7 +123,7 @@ class Runtime:
 
 @dataclass(frozen=True)
 class AgentDefinitionRef:
-    engine: str                                # e.g. "openclaw"
+    engine: Engine                             # the engine this agent runs on
     path: str                                  # directory in the strategy's source (as written by the author)
     digest: str | None = None                  # filled in by the registry after upload
 
@@ -136,14 +139,14 @@ class StrategyRegistration:
 
 @dataclass(frozen=True)
 class ConformanceStatus:                       # proposed shape
-    status: Literal["pending", "passed", "failed"]
-    kit_version: str
+    status: ConformanceState
+    kit_version: str                           # version of the conformance kit that ran, e.g. "1.0.0"
     report_artifact: str | None                # artifact id of the kit's report
 
 @dataclass(frozen=True)
 class RegisteredStrategy:                      # what the registry stores and returns (proposed shape)
     registration: StrategyRegistration         # with agent definition digests filled in
-    engines: list[str]                         # derived: the engine values of the agents@1 definitions
+    engines: list[Engine]                      # derived: the engine values of the agents@1 definitions
     conformance: ConformanceStatus
     enabled: bool                              # false after a per-strategy kill switch
     registered_at: datetime
@@ -191,20 +194,24 @@ signatures, data schema, semantics, which calls are operations, and a
 conformance test per engine provider.
 
 ```python
+# The StrategyContext fields a catalog entry can fill (§2.5).
+ContextPart = Literal["candidates", "models", "experience", "agents", "evaluate", "ledger"]
+ProviderEngine = Engine | Literal["*"]         # "*" = one provider serves every engine
+
 @dataclass(frozen=True)
 class CapabilityCall:
-    name: str                                  # e.g. "start_train"
+    name: str                                  # method name on the context part, e.g. "start_train"
     operation: bool                            # true: returns an operation id (§6)
 
 @dataclass(frozen=True)
 class Capability:
-    name: str                                  # "evaluate.train"
-    version: int                               # 1 -> "evaluate.train@1"
-    context_part: str                          # field of StrategyContext, e.g. "evaluate"
-    always_granted: bool
+    name: str                                  # catalog name, e.g. "evaluate.train"
+    version: int                               # contract version: 1 -> "evaluate.train@1" (§4.1)
+    context_part: ContextPart                  # which field of StrategyContext it fills
+    always_granted: bool                       # true: every strategy gets it without declaring it
     calls: list[CapabilityCall]
     arguments_schema: dict | None              # JSON Schema of the needs arguments (agents@1: definitions)
-    providers: dict[str, str]                  # engine -> provider id; "*" for engine-neutral providers
+    providers: dict[ProviderEngine, str]       # engine -> id of the provider that serves it there
     status: Literal["active", "deprecated"]
 ```
 
@@ -232,10 +239,10 @@ the format of its engine.
 ```python
 @dataclass(frozen=True)
 class AgentDefinition:
-    strategy: str                              # "clawevolve/bot-evolution"
-    strategy_version: str                      # "2.0.0"
-    name: str                                  # "clawevolve-tune"
-    engine: str                                # "openclaw"
+    strategy: str                              # strategy id, e.g. "clawevolve/bot-evolution"
+    strategy_version: str                      # e.g. "2.0.0"
+    name: str                                  # the definition's name in `needs`, e.g. "clawevolve-tune"
+    engine: Engine                             # the engine the agent runs on
     digest: str                                # content digest of the uploaded definition directory
     validated_by: str                          # agents@1 provider that validated it
 ```
@@ -333,7 +340,7 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
     status: Literal["pending", "accept", "reject", "inconclusive"]
     revision: str | None                       # the candidate revision recorded for this patch, once recorded
     aggregates: dict                           # {"validation": ...}: validation aggregates only; never per-case hidden data
-    reasons: list[str]                         # categories only, e.g. "must_pass_failure"; no case ids
+    reasons: list["VerdictReasonCategory"]     # closed set defined in 07-verification.md; no case ids
 ```
 
 ```jsonc
@@ -375,8 +382,8 @@ class AgentResult:
 
 @dataclass(frozen=True)
 class CaseScore:
-    case_id: str
-    score: float
+    case_id: str                               # a train case
+    score: float                               # 0 = failed, 1 = perfect, by the case's graders
     critique: str                              # graders always return score + critique
 
 @dataclass(frozen=True)
@@ -415,7 +422,8 @@ status" and that train evaluation returns "scores and critiques".
    live bot, or read platform storage. Isolation and budgets are therefore
    enforced in one place, whatever the strategy is. (A **budget** is the
    per-run spending limit set in the bot's binding: model spend in USD,
-   wall-clock time, and evaluation rollouts. Every model call, agent
+   wall-clock time, and evaluation rollouts, where one rollout is one run
+   of one evaluation case against one bot version. Every model call, agent
    session, and evaluation is charged to `ctx.budget`, and the run stops
    when it runs out.) This is a deliberate limitation: a strategy can use
    only what the capability catalog (§4) provides, and cannot bring its own
@@ -605,11 +613,11 @@ The `Episode` schema, its redaction, and retention are defined in
 **`experience.feedback@1`.**
 
 ```python
-async def feedback(self, *, days: int, kinds: list[str] | None = None,
+async def feedback(self, *, days: int, kinds: list[FeedbackKind] | None = None,
                    limit: int = 500) -> list[Feedback]: ...
 ```
 
-The `Feedback` schema is defined in [02-experience.md](02-experience.md);
+The `Feedback` schema and `FeedbackKind` are defined in [02-experience.md](02-experience.md);
 the exact filter arguments here are proposed.
 
 **`agents@1`** (registered with `{"agents@1": {"definitions": {...}}}`).
@@ -766,7 +774,7 @@ under the run's isolation and budget.
 | **What to submit**: its own filter on which candidates are worth proposing | **Train-only evaluation**: `ctx.evaluate` adds train cases and scores a workspace on the train split; validation, holdout, regression, and safety stay hidden |
 | **Its own progress persistence**: round number, search state, history, saved in its own storage keyed by run id | **Verification, gate, and promotion**: `ctx.candidates.submit` records the candidate; the platform verifies it, applies the gate and risk tier, and promotes; the strategy only reads the verdict by id |
 
-**Progress persistence.** Every run is a leased job. If the strategy's
+**Progress persistence.** Every attempt of a run is a leased job. If the strategy's
 process dies, the run is dispatched again with the same run id and
 `ctx.attempt + 1` ([06-evolution-run.md](06-evolution-run.md)). The
 platform keeps the run record, frozen inputs, budget spent, candidates, and
@@ -881,13 +889,13 @@ class StrategyRegistry(Protocol):
     async def get(self, strategy_id: str, version: str) -> RegisteredStrategy:
         """One registered version. Raises NotFound."""
 
-    async def list(self, *, engine: str | None = None,
-                   conformance: str | None = None) -> list[RegisteredStrategy]:
+    async def list(self, *, engine: Engine | None = None,
+                   conformance: ConformanceState | None = None) -> list[RegisteredStrategy]:
         """Registered versions, optionally only those usable on `engine`
         (every needed capability has a provider for it and, if agents@1 is needed,
         one of its definitions targets it)."""
 
-    async def check_engine(self, strategy_id: str, version: str, engine: str) -> list[str]:
+    async def check_engine(self, strategy_id: str, version: str, engine: Engine) -> list[str]:
         """The registration half of a binding check. Returns problems, empty when
         the version can run on a bot of `engine`. Called by Evolution Run when a
         binding is created or changed."""
@@ -907,7 +915,7 @@ class CapabilityCatalog(Protocol):
 
     def list(self) -> list[Capability]: ...
     def get(self, name: str, version: int) -> Capability: ...
-    def provider(self, name: str, version: int, engine: str) -> "CapabilityProvider | None":
+    def provider(self, name: str, version: int, engine: Engine) -> "CapabilityProvider | None":
         """The provider that serves this capability for bots of `engine`, if any."""
 
 
@@ -916,8 +924,8 @@ class CapabilityProvider(Protocol):
     Each provider passes the capability's contract test
     (docs/arch/protocol-contract-tests.md)."""
 
-    capability: str                    # "agents@1"
-    engine: str                        # "openclaw", or "*" for engine-neutral providers
+    capability: str                    # catalog name@version, e.g. "agents@1"
+    engine: ProviderEngine             # the engine it serves, or "*" for engine-neutral providers
 
     def validate_arguments(self, arguments: dict) -> list[str]:
         """Check the needs arguments at registration; for agents@1 this validates
@@ -1324,16 +1332,16 @@ A unit test with the fake platform from the SDK harness (proposed API):
 
 ```python
 async def test_submits_only_on_train_gain(fake_platform):
-    fake_platform.add_sessions(bot="bot_123", episodes=[corrected_episode("ep_91")])
+    fake_platform.add_sessions(bot_id="bot_123", episodes=[corrected_episode("ep_91")])
     fake_platform.train_scores({"r41": 0.61, "fix": 0.74})            # parent vs edited sandbox
-    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot="bot_123",
+    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot_id="bot_123",
                                   registration="strategy.json", params={"window_days": 7})
     assert len(run.candidates) == 1
     assert run.candidates[0].evidence == ["episode:ep_91"]
 
 
 async def test_redispatch_does_not_duplicate(fake_platform):
-    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot="bot_123",
+    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot_id="bot_123",
                                   registration="strategy.json", kill_after="agents.start")
     assert run.attempts == 2
     assert fake_platform.operations_started(kind="agent_session") == 1   # re-attached by key

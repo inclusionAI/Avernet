@@ -69,7 +69,8 @@ resources themselves (those are defined in their owning docs).
 | `Envelope[T]` | The uniform response wrapper: `code`, `message`, `data`, `request_id` | This doc (reuses OpenAPI v1) | Per response |
 | `ErrorEnvelope` | The same wrapper on failure, with `data` always `null` | This doc (reuses OpenAPI v1) | Per response |
 | `Page[T]` / `PageParams` | A page of a list result (`total`, `items`) and the controls (`page`, `page_size`) | This doc (reuses OpenAPI v1) | Per request |
-| `IdempotencyRecord` | The platform's memory of one idempotency key: `(bot, key) → resource id` plus a fingerprint of the request | This doc; stored by each service | Created on the first request with a key; kept for the retention window |
+| `BotRef` | The full identity of one bot: `owner_id` plus `bot_id`, because a `bot_id` alone is not unique across users ([§2.7](#27-botref-bot-identity)) | This doc; used by every evolution record | Fixed for the bot's life |
+| `IdempotencyRecord` | The platform's memory of one idempotency key: `(owner_id, bot_id, key) → resource id` plus a fingerprint of the request | This doc; stored by each service | Created on the first request with a key; kept for the retention window |
 | `Precondition` | An `ETag` returned on a read of a mutable resource, and the `If-Match` header that sends it back on a write | This doc | Per resource version |
 | `Operation` | A long-running unit of work started by a request and looked up by id (`queued`, `running`, `succeeded`, `failed`, `cancelled`) | Concept defined in [03-strategy.md](03-strategy.md); the public resource and its lookup endpoint are owned here ([§13.8](#138-operations--this-doc)) | Created by a `202` response; terminal once finished |
 | `ExitCode` | The `avn` CLI's stable process exit codes | This doc | Fixed per major CLI version |
@@ -83,7 +84,7 @@ that one client library handles both the Genome endpoints and the
 evolution endpoints. `code` is six digits: the HTTP status (three) followed
 by a business subcode (three), for example `200000` (OK), `202000`
 (Accepted), `404000` (not found). Binary content (for example
-`GET /bots/{bot}/genome/content/{digest}`) bypasses the envelope; that is
+`GET /bots/{bot_id}/genome/content/{digest}`) bypasses the envelope; that is
 the one exception, as in OpenAPI v1 today.
 
 ```python
@@ -170,14 +171,18 @@ rules are in [§5](#5-idempotency-keys).
 
 ```python
 from datetime import datetime
+from typing import Literal
+
+# What a key can create or start (one value per row of the §5.3 table).
+IdempotentResourceKind = Literal["run", "operation", "revision", "promotion", "review_decision", "feedback"]
 
 @dataclass(frozen=True)
 class IdempotencyRecord:
-    bot: str               # scope: the bot in the request path
+    bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.7)
     key: str               # the client's Idempotency-Key header value
     fingerprint: str       # sha256 of the RFC 8785 canonical form of {method, path, body}
-    resource_kind: str     # "run" | "operation" | "revision" | "promotion" | "review_decision" | "feedback"
-    resource_id: str       # what the first request created or started
+    resource_kind: IdempotentResourceKind
+    resource_id: str       # id of what the first request created or started, e.g. "run_7f3"
     first_status: int      # HTTP status of the first response (201 or 202)
     created_at: datetime
     expires_at: datetime   # end of the retention window (open decision, §16)
@@ -186,7 +191,7 @@ class IdempotencyRecord:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "key": "nightly-bot_123-2026-10-08",
   "fingerprint": "sha256:5d1e…",
   "resource_kind": "run",
@@ -223,7 +228,7 @@ class Precondition:
 An **operation** is work that can outlast a short HTTP request: an
 evaluation, a ledger export. Starting it returns `202 Accepted` with
 `{operation_id}` at once; the caller then looks up its status by id with
-`GET /bots/{bot}/evolution/operations/{operation}`, the single public
+`GET /bots/{bot_id}/evolution/operations/{operation}`, the single public
 operation resource ([§13.8](#138-operations--this-doc)). The same concept is
 used inside strategies (agent sessions, train evaluations); see
 [03-strategy.md](03-strategy.md). Runs follow the same pattern with their
@@ -233,6 +238,8 @@ own status values ([06-evolution-run.md](06-evolution-run.md)).
 from typing import Literal
 
 OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+# The public operation kinds: ad-hoc evaluations (07) and ledger exports (05).
+OperationKind = Literal["evaluation", "ledger_export"]
 
 @dataclass(frozen=True)
 class OperationError:
@@ -242,7 +249,7 @@ class OperationError:
 @dataclass(frozen=True)
 class Operation:
     id: str                         # "op_19a"
-    kind: str                       # e.g. "evaluation", "ledger_export"
+    kind: OperationKind             # which kind of work; decides the shape of `result`
     status: OperationStatus
     created_at: datetime
     updated_at: datetime
@@ -283,7 +290,7 @@ class ExitCode(IntEnum):
 class CommandSchema:
     command: list[str]              # e.g. ["evolve", "run", "start"]
     summary: str
-    api: list[str]                  # the API calls it makes, e.g. ["POST /bots/{bot}/evolution/runs"]
+    api: list[str]                  # the API calls it makes, e.g. ["POST /bots/{bot_id}/evolution/runs"]
     arguments: list[dict]           # name, type, required, repeated, description
     flags: list[dict]               # name, type, default, description
     destructive: bool               # True if --yes is required
@@ -296,7 +303,7 @@ class CommandSchema:
 {
   "command": ["evolve", "run", "start"],
   "summary": "Start an evolution run for a bot (idempotent)",
-  "api": ["POST /bots/{bot}/evolution/runs", "GET /bots/{bot}/evolution/runs/{run}"],
+  "api": ["POST /bots/{bot_id}/evolution/runs", "GET /bots/{bot_id}/evolution/runs/{run}"],
   "arguments": [],
   "flags": [
     {"name": "--bot", "type": "string", "required": true, "description": "Bot id"},
@@ -309,6 +316,35 @@ class CommandSchema:
   "output_schema": "avn/run@1"
 }
 ```
+
+### 2.7 BotRef (bot identity)
+
+A `bot_id` is unique only within one owner: two users can each have a bot
+called `bot_123`. OpenAPI v1 already handles this today: it addresses a bot
+as `/openapi/v1/bots/{bot_id}/…` and names the bot's owner with the
+`entity_id` query parameter, which defaults to the caller
+(`apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py`;
+`resolve_owner_id` in `…/openapi_v1/engine_runtime/params.py`). Every
+evolution record therefore stores the pair, as one `BotRef`, and every
+internal service method takes a `BotRef`, never a bare bot id. Run,
+candidate, operation, revision, and ledger-entry ids are different: they
+are globally unique on their own.
+
+```python
+@dataclass(frozen=True)
+class BotRef:
+    owner_id: str          # the user (entity) who owns the bot; the `entity_id` of OpenAPI v1
+    bot_id: str            # the bot's id within that owner, as in /bots/{bot_id}/…; not unique on its own
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// How a record names its bot (field "bot" of an IdempotencyRecord, Run, LedgerEntry, …)
+{"owner_id": "user_owner_5", "bot_id": "bot_123"}
+```
+
+On the wire the pair is split the way OpenAPI v1 splits it: `bot_id` in the
+path and the owner as `entity_id` ([§4.1](#41-paths-resources-and-custom-methods)).
 
 ## 3. Callers
 
@@ -338,9 +374,20 @@ DR-3 ([decisions/0003-bot-principal-for-evolution-surface.md](decisions/0003-bot
 - **Prefix.** Every public path is under `/openapi/v1`. Paths in this design
   set are written relative to it.
 - **Resource-oriented.** Collections are plural nouns
-  (`/bots/{bot}/evolution/runs`); a member is the collection plus its id.
+  (`/bots/{bot_id}/evolution/runs`); a member is the collection plus its id.
   `GET` reads, `POST` on a collection creates or starts, `PUT` replaces a
   whole mutable resource.
+- **Bot addressing.** Bot-scoped paths carry the bot id in the path
+  (`/bots/{bot_id}/…`) and the bot's owner in the **`entity_id` query
+  parameter**, which defaults to the caller, exactly as OpenAPI v1 does
+  today ([§2.7](#27-botref-bot-identity)). A `bot_id` is not unique across
+  users, so the server always resolves the pair `(entity_id or caller,
+  bot_id)` before doing anything else. Most examples in this design set omit
+  `entity_id` because the caller is the owner; a collaborator or a pipeline
+  acting on someone else's bot adds it, for example
+  `POST /bots/bot_123/evolution/runs?entity_id=user_owner_5`. Whether that
+  caller may act on the bot is decided by the existing OpenAPI v1 access
+  check, not by this layer.
 - **Custom methods** for actions that are not plain create or replace use a
   colon suffix on the resource: `:cancel`, `:approve`, `:reject`,
   `:export`. They are always `POST`.
@@ -433,9 +480,11 @@ twice still produces one run.
 
 ### 5.2 Rules for the platform
 
-- The platform stores **`(bot, key) → resource id`**, together with a
-  fingerprint of the request (`sha256` of the canonical `{method, path,
-  body}`). For bot-scoped paths the scope is the bot in the path.
+- The platform stores **`(owner_id, bot_id, key) → resource id`**, together
+  with a fingerprint of the request (`sha256` of the canonical `{method,
+  path, body}`). For bot-scoped paths the scope is the addressed bot: the
+  `bot_id` in the path and its owner (`entity_id`, or the caller when it is
+  omitted), so two owners' bots with the same `bot_id` never share keys.
 - The record is written **in the same transaction** as the resource it
   points to, so a crash can never leave a created run without its key, or a
   key without its run.
@@ -466,15 +515,15 @@ twice still produces one run.
 
 | Endpoint | Key creates or starts |
 | --- | --- |
-| `POST /bots/{bot}/evolution/runs` | A run (`202`, run id) |
-| `POST /bots/{bot}/evolution/evaluations` | An evaluation operation (`202`, operation id) |
-| `POST /bots/{bot}/evolution/ledger:export` | An export operation (`202`, operation id) |
-| `POST /bots/{bot}/genome/revisions` | A revision (also content-idempotent) |
-| `POST /bots/{bot}/genome/promotions` | A promotion (moving `active`) |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:approve` and `:reject` | A review decision |
-| `POST /bots/{bot}/evolution/runs/{run}:cancel` | A cancellation (also idempotent by state) |
-| `POST /bots/{bot}/evolution/operations/{operation}:cancel` | An operation cancellation (also idempotent by state) |
-| `POST /bots/{bot}/experience/feedback` | A feedback record |
+| `POST /bots/{bot_id}/evolution/runs` | A run (`202`, run id) |
+| `POST /bots/{bot_id}/evolution/evaluations` | An evaluation operation (`202`, operation id) |
+| `POST /bots/{bot_id}/evolution/ledger:export` | An export operation (`202`, operation id) |
+| `POST /bots/{bot_id}/genome/revisions` | A revision (also content-idempotent) |
+| `POST /bots/{bot_id}/genome/promotions` | A promotion (moving `active`) |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` and `:reject` | A review decision |
+| `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | A cancellation (also idempotent by state) |
+| `POST /bots/{bot_id}/evolution/operations/{operation}:cancel` | An operation cancellation (also idempotent by state) |
+| `POST /bots/{bot_id}/experience/feedback` | A feedback record |
 | `POST /evolution/strategies` | A strategy version (also content-idempotent) |
 
 `PUT` requests are idempotent by definition (the same body produces the
@@ -496,12 +545,12 @@ Registry closes ([01-genome.md](01-genome.md)).
   `428 Precondition Required` (`428000`), so a client cannot skip the check
   by accident.
 - The first mutable resource on the public surface is the bot's evolution
-  policy (`GET|PUT /bots/{bot}/evolution/policy`).
+  policy (`GET|PUT /bots/{bot_id}/evolution/policy`).
 
 **Compare-and-swap in the body** for ref moves. Ref updates carry
 `expected_revision`: the revision the client believes the ref points to
 now. A mismatch is `409` (`409010`). This is the mechanism defined by the
-Genome Registry for `PUT /bots/{bot}/genome/refs/draft`
+Genome Registry for `PUT /bots/{bot_id}/genome/refs/draft`
 ([01-genome.md](01-genome.md)); promotions move `active` under the same
 rule ([08-promotion.md](08-promotion.md)).
 
@@ -594,7 +643,7 @@ request follows one pattern:
 1. **Start returns an id at once.** The start request records the work and
    answers `202 Accepted` (`202000`). For an operation, `data` is
    `{operation_id}` and the `Location` header names
-   `/bots/{bot}/evolution/operations/{operation}`; for a run, `data` is the
+   `/bots/{bot_id}/evolution/operations/{operation}`; for a run, `data` is the
    run as it is now (status `queued`) and `Location` names the run.
 2. **Status is looked up by id.** The caller repeats a short `GET` on that
    URL until the status is terminal. Every lookup returns promptly. The
@@ -609,13 +658,13 @@ request follows one pattern:
 
 | Started by | Returns | Look up with | Statuses |
 | --- | --- | --- | --- |
-| `POST /bots/{bot}/evolution/runs` | run id | `GET /bots/{bot}/evolution/runs/{run}` | `queued \| running \| completed \| failed \| cancelled \| budget_exhausted` |
-| `POST /bots/{bot}/evolution/evaluations` | operation id | `GET /bots/{bot}/evolution/operations/{operation}`; its `result` carries the `evaluation_id`, read with `GET /bots/{bot}/evolution/evaluations/{evaluation}` | `queued \| running \| succeeded \| failed \| cancelled` |
-| `POST /bots/{bot}/evolution/ledger:export` | operation id | `GET /bots/{bot}/evolution/operations/{operation}` | `queued \| running \| succeeded \| failed \| cancelled` |
+| `POST /bots/{bot_id}/evolution/runs` | run id | `GET /bots/{bot_id}/evolution/runs/{run}` | `queued \| running \| completed \| failed \| cancelled \| budget_exhausted` |
+| `POST /bots/{bot_id}/evolution/evaluations` | operation id | `GET /bots/{bot_id}/evolution/operations/{operation}`; its `result` carries the `evaluation_id`, read with `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | `queued \| running \| succeeded \| failed \| cancelled` |
+| `POST /bots/{bot_id}/evolution/ledger:export` | operation id | `GET /bots/{bot_id}/evolution/operations/{operation}` | `queued \| running \| succeeded \| failed \| cancelled` |
 
 Candidates and verdicts follow the same "by id" rule one level down: a
 candidate's report is looked up by candidate id
-(`GET /bots/{bot}/evolution/candidates/{candidate}`), and there is no
+(`GET /bots/{bot_id}/evolution/candidates/{candidate}`), and there is no
 blocking call that waits for a verdict.
 
 ## 10. Generated SDKs
@@ -702,36 +751,40 @@ Paths are relative to `/openapi/v1`.
 
 | Command | API call(s) | Notes |
 | --- | --- | --- |
-| `avn genome log --bot B [--status S] [--parent R]` | `GET /bots/{bot}/genome/revisions` | |
-| `avn genome show --bot B [--revision R \| --ref active]` | `GET /bots/{bot}/genome/refs` (to resolve a ref or `r41`), `GET /bots/{bot}/genome/revisions/{rev}` | |
-| `avn genome diff --bot B R1 --against R2` | `GET /bots/{bot}/genome/revisions/{rev}/diff?against=` | |
-| `avn genome refs --bot B` | `GET /bots/{bot}/genome/refs` | |
-| `avn genome draft set --bot B R --expected R0` | `PUT /bots/{bot}/genome/refs/draft` | Compare-and-swap on `expected_revision` |
-| `avn genome patch apply --bot B patch.json [--dry-run]` | `POST /bots/{bot}/genome/revisions` | Records a revision from `{base, patch}` |
-| `avn genome content get --bot B DIGEST` / `content put --bot B FILE` | `GET /bots/{bot}/genome/content/{digest}` / `PUT /bots/{bot}/genome/content` | Binary, no envelope on get |
-| `avn genome promote --bot B --revision R --reason TEXT --yes` | `POST /bots/{bot}/genome/promotions` | Also how to go back: promote an earlier revision |
-| `avn genome export --bot B --format git DIR` | `GET /bots/{bot}/genome/revisions`, `GET /bots/{bot}/genome/content/{digest}` | Writes a local git history; read-only on the platform ([01-genome.md](01-genome.md)) |
-| `avn experience episodes --bot B [--revision R] [--since T] [--outcome O]` | `GET /bots/{bot}/experience/episodes` | |
-| `avn experience episode show --bot B EPISODE` | `GET /bots/{bot}/experience/episodes/{episode}` | |
-| `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot}/experience/feedback` | |
+| `avn genome log --bot B [--status S] [--parent R]` | `GET /bots/{bot_id}/genome/revisions` | |
+| `avn genome show --bot B [--revision R \| --ref active]` | `GET /bots/{bot_id}/genome/refs` (to resolve a ref or `r41`), `GET /bots/{bot_id}/genome/revisions/{rev}` | |
+| `avn genome diff --bot B R1 --against R2` | `GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=` | |
+| `avn genome refs --bot B` | `GET /bots/{bot_id}/genome/refs` | |
+| `avn genome draft set --bot B R --expected R0` | `PUT /bots/{bot_id}/genome/refs/draft` | Compare-and-swap on `expected_revision` |
+| `avn genome patch apply --bot B patch.json [--dry-run]` | `POST /bots/{bot_id}/genome/revisions` | Records a revision from `{base, patch}` |
+| `avn genome content get --bot B DIGEST` / `content put --bot B FILE` | `GET /bots/{bot_id}/genome/content/{digest}` / `PUT /bots/{bot_id}/genome/content` | Binary, no envelope on get |
+| `avn genome promote --bot B --revision R --reason TEXT --yes` | `POST /bots/{bot_id}/genome/promotions` | Also how to go back: promote an earlier revision |
+| `avn genome export --bot B --format git DIR` | `GET /bots/{bot_id}/genome/revisions`, `GET /bots/{bot_id}/genome/content/{digest}` | Writes a local git history; read-only on the platform ([01-genome.md](01-genome.md)) |
+| `avn experience episodes --bot B [--revision R] [--since T] [--outcome O]` | `GET /bots/{bot_id}/experience/episodes` | |
+| `avn experience episode show --bot B EPISODE` | `GET /bots/{bot_id}/experience/episodes/{episode}` | |
+| `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot_id}/experience/feedback` | |
 | `avn evolve strategies list` / `strategies show ID --version V` | `GET /evolution/strategies` / `GET /evolution/strategies/{id}/versions/{version}` | |
 | `avn evolve capabilities` | `GET /evolution/capabilities` | |
-| `avn evolve policy get --bot B` | `GET /bots/{bot}/evolution/policy` | Prints the `ETag` as `etag` |
-| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot}/evolution/policy` | `--if-match` is required |
-| `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot}/evolution/runs` (+ `GET .../runs/{run}` with `--wait`) | |
-| `avn evolve run list --bot B [--status S]` | `GET /bots/{bot}/evolution/runs` | |
-| `avn evolve run status --bot B RUN` | `GET /bots/{bot}/evolution/runs/{run}` | |
-| `avn evolve run candidates --bot B RUN` | `GET /bots/{bot}/evolution/runs/{run}/candidates` | |
-| `avn evolve run cancel --bot B RUN --yes` | `POST /bots/{bot}/evolution/runs/{run}:cancel` | |
-| `avn evolve review list --bot B` | `GET /bots/{bot}/evolution/review-queue` | |
-| `avn evolve review show --bot B CANDIDATE` | `GET /bots/{bot}/evolution/candidates/{candidate}` | Diff, verification, gate decision |
-| `avn evolve review approve\|reject --bot B CANDIDATE --reason TEXT --yes` | `POST /bots/{bot}/evolution/candidates/{candidate}:approve` / `:reject` | |
+| `avn evolve policy get --bot B` | `GET /bots/{bot_id}/evolution/policy` | Prints the `ETag` as `etag` |
+| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/policy` | `--if-match` is required |
+| `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot_id}/evolution/runs` (+ `GET .../runs/{run}` with `--wait`) | |
+| `avn evolve run list --bot B [--status S]` | `GET /bots/{bot_id}/evolution/runs` | |
+| `avn evolve run status --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}` | |
+| `avn evolve run candidates --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}/candidates` | |
+| `avn evolve run cancel --bot B RUN --yes` | `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | |
+| `avn evolve review list --bot B` | `GET /bots/{bot_id}/evolution/review-queue` | |
+| `avn evolve review show --bot B CANDIDATE` | `GET /bots/{bot_id}/evolution/candidates/{candidate}` | Diff, verification, gate decision |
+| `avn evolve review approve\|reject --bot B CANDIDATE --reason TEXT --yes` | `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` / `:reject` | |
 | `avn evolve suites list` / `suites show SUITE` | `GET /evolution/suites` / `GET /evolution/suites/{suite}` | |
-| `avn evolve evaluate start --bot B --revision R --suite S [--wait]` / `evaluate status --bot B ID` | `POST /bots/{bot}/evolution/evaluations` / `GET /bots/{bot}/evolution/evaluations/{evaluation}` | Operator-only ad-hoc evaluation |
-| `avn evolve ledger list --bot B [filters]` / `ledger show --bot B ENTRY` | `GET /bots/{bot}/evolution/ledger` / `GET /bots/{bot}/evolution/ledger/{entry}` | |
-| `avn evolve ledger export --bot B [--wait]` | `POST /bots/{bot}/evolution/ledger:export` (+ status lookup) | |
+| `avn evolve evaluate start --bot B --revision R --suite S [--wait]` / `evaluate status --bot B ID` | `POST /bots/{bot_id}/evolution/evaluations` / `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | Operator-only ad-hoc evaluation |
+| `avn evolve ledger list --bot B [filters]` / `ledger show --bot B ENTRY` | `GET /bots/{bot_id}/evolution/ledger` / `GET /bots/{bot_id}/evolution/ledger/{entry}` | |
+| `avn evolve ledger export --bot B [--wait]` | `POST /bots/{bot_id}/evolution/ledger:export` (+ status lookup) | |
 | `avn strategy dev\|test\|publish` | Strategy SDK harness; `publish` calls `POST /evolution/strategies` | Owned by [03-strategy.md](03-strategy.md) |
 | `avn job claim\|heartbeat\|input\|upload\|complete\|fail` | Internal Job Protocol `/evolution/v1/...` | For debugging platform job workers; owned by [06-evolution-run.md](06-evolution-run.md) |
+
+`--bot B` takes the bot id. Every bot-scoped command also accepts
+`--entity-id OWNER`, sent as the `entity_id` query parameter; omitted, the
+owner is the caller ([§4.1](#41-paths-resources-and-custom-methods)).
 
 The previous design's `avn evolve inbox` and `avn evolve observe` commands
 belonged to bot callers and are postponed with them ([§3](#3-callers)).
@@ -763,80 +816,92 @@ HTTP adapter so that every endpoint behaves the same way.
 
 ### 12.1 Client interface (what the SDKs provide)
 
+Every bot-scoped method takes the bot id as `bot_id` and also accepts a
+keyword-only `entity_id: str | None = None`: the bot's owner, sent as the
+`entity_id` query parameter; `None` means the caller is the owner, the
+OpenAPI v1 default ([§4.1](#41-paths-resources-and-custom-methods)). It is
+left out of the signatures below to keep them short. Filter parameters use
+the closed value sets of the owning docs (`RevisionStatus` in
+[01-genome.md](01-genome.md), `OutcomeStatus` in
+[02-experience.md](02-experience.md), `Engine` and `ConformanceState` in
+[03-strategy.md](03-strategy.md), `RunStatus` in
+[06-evolution-run.md](06-evolution-run.md)); `None` means "no filter".
+
 ```python
 from typing import AsyncIterator, Protocol
 
 class GenomeClient(Protocol):
-    async def list_revisions(self, bot: str, *, status: str | None = None,
+    async def list_revisions(self, bot_id: str, *, status: "RevisionStatus | None" = None,
                              parent: str | None = None, page: PageParams = PageParams()) -> Page["GenomeRevision"]: ...
-    async def get_revision(self, bot: str, revision: str) -> "GenomeRevision": ...
-    async def diff(self, bot: str, revision: str, *, against: str) -> dict: ...
-    async def refs(self, bot: str) -> list["GenomeRef"]: ...
-    async def set_draft(self, bot: str, revision: str, *, expected_revision: str) -> "GenomeRef":
+    async def get_revision(self, bot_id: str, revision: str) -> "GenomeRevision": ...
+    async def diff(self, bot_id: str, revision: str, *, against: str) -> dict: ...
+    async def refs(self, bot_id: str) -> list["GenomeRef"]: ...
+    async def set_draft(self, bot_id: str, revision: str, *, expected_revision: str) -> "GenomeRef":
         """Compare-and-swap; raises RefConflict (409010) if the draft moved."""
-    async def record_revision(self, bot: str, *, base: str, patch: "GenomePatch",
+    async def record_revision(self, bot_id: str, *, base: str, patch: "GenomePatch",
                               idempotency_key: str | None = None) -> "GenomeRevision": ...
-    async def promote(self, bot: str, revision: str, *, reason: str,
+    async def promote(self, bot_id: str, revision: str, *, reason: str,
                       idempotency_key: str | None = None) -> "Promotion":
         """Moves `active` (also used to go back to an earlier revision). Owned by 08-promotion."""
-    async def get_content(self, bot: str, digest: str) -> bytes: ...
-    async def put_content(self, bot: str, data: bytes) -> str: ...  # digest
+    async def get_content(self, bot_id: str, digest: str) -> bytes: ...
+    async def put_content(self, bot_id: str, data: bytes) -> str: ...  # digest
 
 class ExperienceClient(Protocol):
-    def iter_episodes(self, bot: str, *, revision: str | None = None, since: str | None = None,
-                      outcome: str | None = None) -> AsyncIterator["Episode"]: ...
-    async def get_episode(self, bot: str, episode: str) -> "Episode": ...
-    async def add_feedback(self, bot: str, feedback: "Feedback", *,
+    def iter_episodes(self, bot_id: str, *, revision: str | None = None, since: str | None = None,
+                      outcome: "OutcomeStatus | None" = None) -> AsyncIterator["Episode"]: ...
+    async def get_episode(self, bot_id: str, episode: str) -> "Episode": ...
+    async def add_feedback(self, bot_id: str, feedback: "Feedback", *,
                            idempotency_key: str | None = None) -> "Feedback": ...
 
 class StrategiesClient(Protocol):
-    async def list(self, *, engine: str | None = None, conformance: str | None = None) -> Page["StrategyRegistration"]: ...
+    async def list(self, *, engine: "Engine | None" = None,
+                   conformance: "ConformanceState | None" = None) -> Page["StrategyRegistration"]: ...
     async def get_version(self, strategy: str, version: str) -> "StrategyRegistration": ...
     async def capabilities(self) -> list["Capability"]: ...
 
 class PolicyClient(Protocol):
-    async def get(self, bot: str) -> tuple["EvolutionPolicy", str]:
+    async def get(self, bot_id: str) -> tuple["EvolutionPolicy", str]:
         """Returns the policy and its ETag."""
-    async def put(self, bot: str, policy: "EvolutionPolicy", *, if_match: str) -> tuple["EvolutionPolicy", str]:
+    async def put(self, bot_id: str, policy: "EvolutionPolicy", *, if_match: str) -> tuple["EvolutionPolicy", str]:
         """Raises PreconditionFailed (412000) if the policy changed since it was read."""
 
 class RunsClient(Protocol):
-    async def start(self, bot: str, *, binding: str, params: dict | None = None,
+    async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
                     budget: dict | None = None, idempotency_key: str | None = None) -> "Run":
         """202: returns the run as it is now (status queued, or its current status on a replay)."""
-    async def get(self, bot: str, run: str) -> "Run": ...
-    def iter(self, bot: str, *, status: str | None = None) -> AsyncIterator["Run"]: ...
-    async def candidates(self, bot: str, run: str) -> list["Candidate"]: ...
-    async def cancel(self, bot: str, run: str, *, idempotency_key: str | None = None) -> "Run": ...
-    async def wait(self, bot: str, run: str, *, timeout_s: int, poll_s: int = 15) -> "Run":
+    async def get(self, bot_id: str, run: str) -> "Run": ...
+    def iter(self, bot_id: str, *, status: "RunStatus | None" = None) -> AsyncIterator["Run"]: ...
+    async def candidates(self, bot_id: str, run: str) -> list["Candidate"]: ...
+    async def cancel(self, bot_id: str, run: str, *, idempotency_key: str | None = None) -> "Run": ...
+    async def wait(self, bot_id: str, run: str, *, timeout_s: int, poll_s: int = 15) -> "Run":
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class VerificationClient(Protocol):
     async def list_suites(self) -> Page["Suite"]: ...
     async def get_suite(self, suite: str) -> "Suite": ...
-    async def start_evaluation(self, bot: str, *, revision: str, suite: str,
+    async def start_evaluation(self, bot_id: str, *, revision: str, suite: str,
                                idempotency_key: str | None = None) -> Operation: ...
-    async def get_evaluation(self, bot: str, evaluation: str) -> "Evaluation": ...
+    async def get_evaluation(self, bot_id: str, evaluation: str) -> "Evaluation": ...
 
 class ReviewClient(Protocol):
-    async def queue(self, bot: str) -> Page["ReviewItem"]: ...
-    async def report(self, bot: str, candidate: str) -> dict:
+    async def queue(self, bot_id: str) -> Page["ReviewItem"]: ...
+    async def report(self, bot_id: str, candidate: str) -> dict:
         """Diff + verification + gate decision for one candidate (08-promotion)."""
-    async def approve(self, bot: str, candidate: str, *, reason: str,
+    async def approve(self, bot_id: str, candidate: str, *, reason: str,
                       idempotency_key: str | None = None) -> "ReviewItem": ...
-    async def reject(self, bot: str, candidate: str, *, reason: str,
+    async def reject(self, bot_id: str, candidate: str, *, reason: str,
                      idempotency_key: str | None = None) -> "ReviewItem": ...
 
 class OperationsClient(Protocol):
-    async def get(self, bot: str, operation: str) -> Operation: ...
-    async def cancel(self, bot: str, operation: str, *, idempotency_key: str | None = None) -> Operation: ...
-    async def wait(self, bot: str, operation: str, *, timeout_s: int = 3600, poll_s: int = 15) -> Operation:
+    async def get(self, bot_id: str, operation: str) -> Operation: ...
+    async def cancel(self, bot_id: str, operation: str, *, idempotency_key: str | None = None) -> Operation: ...
+    async def wait(self, bot_id: str, operation: str, *, timeout_s: int = 3600, poll_s: int = 15) -> Operation:
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class LedgerClient(Protocol):
-    def iter_entries(self, bot: str, **filters: str) -> AsyncIterator["LedgerEntry"]: ...
-    async def get_entry(self, bot: str, entry: str) -> "LedgerEntry": ...
-    async def start_export(self, bot: str, *, idempotency_key: str | None = None) -> Operation: ...
+    def iter_entries(self, bot_id: str, **filters: str) -> AsyncIterator["LedgerEntry"]: ...
+    async def get_entry(self, bot_id: str, entry: str) -> "LedgerEntry": ...
+    async def start_export(self, bot_id: str, *, idempotency_key: str | None = None) -> Operation: ...
 
 class EvolutionClient(Protocol):
     """Entry point of the generated SDK (`avernet_evolution.Client`)."""
@@ -857,15 +922,15 @@ class EvolutionClient(Protocol):
 class IdempotencyStore(Protocol):
     """Implements §5. Writes happen in the caller's transaction."""
 
-    async def lookup(self, bot: str, key: str) -> IdempotencyRecord | None:
-        """The record for (bot, key), or None if the key is new or expired."""
+    async def lookup(self, bot: BotRef, key: str) -> IdempotencyRecord | None:
+        """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
 
     async def record(self, record: IdempotencyRecord) -> None:
-        """Stores (bot, key) -> resource id in the same transaction that creates the resource.
+        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
         Raises KeyInProgress if another request holds the key and has not committed."""
 
 class IdempotentHandler(Protocol):
-    async def handle(self, *, bot: str, key: str | None, fingerprint: str,
+    async def handle(self, *, bot: BotRef, key: str | None, fingerprint: str,
                      create: "Callable[[], Awaitable[tuple[str, int]]]",
                      current: "Callable[[str], Awaitable[dict]]") -> tuple[int, dict, bool]:
         """Replays (same fingerprint), refuses (409001, different fingerprint),
@@ -896,14 +961,14 @@ long-running work looked up by id; **ETag** = `If-Match` required on write;
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/genome/revisions` | List revisions (`status=`, `parent=`) | Page |
-| `POST /bots/{bot}/genome/revisions` | Record a revision from `{base, patch}` or `{manifest}` | key; content-idempotent |
-| `GET /bots/{bot}/genome/revisions/{rev}` | One revision | Immutable ETag |
-| `GET /bots/{bot}/genome/revisions/{rev}/diff?against=` | Diff two revisions | |
-| `GET /bots/{bot}/genome/refs` | Named refs (`active`, `previous`, `canary`, `draft`, …) | |
-| `PUT /bots/{bot}/genome/refs/draft` | Move the owner's `draft` ref | CAS (`expected_revision`) |
-| `GET /bots/{bot}/genome/content/{digest}` | Content bytes by digest | Binary, no envelope |
-| `PUT /bots/{bot}/genome/content` | Upload content, returns its digest | Content-idempotent |
+| `GET /bots/{bot_id}/genome/revisions` | List revisions (`status=`, `parent=`) | Page |
+| `POST /bots/{bot_id}/genome/revisions` | Record a revision from `{base, patch}` or `{manifest}` | key; content-idempotent |
+| `GET /bots/{bot_id}/genome/revisions/{rev}` | One revision | Immutable ETag |
+| `GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=` | Diff two revisions | |
+| `GET /bots/{bot_id}/genome/refs` | Named refs (`active`, `previous`, `canary`, `draft`, …) | |
+| `PUT /bots/{bot_id}/genome/refs/draft` | Move the owner's `draft` ref | CAS (`expected_revision`) |
+| `GET /bots/{bot_id}/genome/content/{digest}` | Content bytes by digest | Binary, no envelope |
+| `PUT /bots/{bot_id}/genome/content` | Upload content, returns its digest | Content-idempotent |
 
 Shared-convention example: compare-and-swap on a ref.
 
@@ -932,10 +997,10 @@ Content-Type: application/json
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/experience/episodes` | List episodes (`revision=`, `since=`, `outcome=`) | Page |
-| `GET /bots/{bot}/experience/episodes/{episode}` | One episode | |
-| `POST /bots/{bot}/experience/feedback` | Record a rating, correction, or outcome | key |
-| `GET /bots/{bot}/experience/feedback` | List feedback | Page |
+| `GET /bots/{bot_id}/experience/episodes` | List episodes (`revision=`, `since=`, `outcome=`) | Page |
+| `GET /bots/{bot_id}/experience/episodes/{episode}` | One episode | |
+| `POST /bots/{bot_id}/experience/feedback` | Record a rating, correction, or outcome | key |
+| `GET /bots/{bot_id}/experience/feedback` | List feedback | Page |
 
 Shared-convention example: pagination and filters.
 
@@ -1004,9 +1069,9 @@ Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/ledger` | List entries (filters such as `run=`, `strategy=`, `since=`) | Page |
-| `GET /bots/{bot}/evolution/ledger/{entry}` | One entry | Immutable ETag |
-| `POST /bots/{bot}/evolution/ledger:export` | Export entries | key; 202 + operation id |
+| `GET /bots/{bot_id}/evolution/ledger` | List entries (filters such as `run=`, `strategy=`, `since=`) | Page |
+| `GET /bots/{bot_id}/evolution/ledger/{entry}` | One entry | Immutable ETag |
+| `POST /bots/{bot_id}/evolution/ledger:export` | Export entries | key; 202 + operation id |
 
 Shared-convention example: a long-running export.
 
@@ -1036,19 +1101,21 @@ Idempotency-Key: ledger-export-bot_123-2026-10-08
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/policy` | The bot's evolution policy (list of bindings) | Returns ETag |
-| `PUT /bots/{bot}/evolution/policy` | Replace the policy (binding checks run here) | ETag (`If-Match` required) |
-| `POST /bots/{bot}/evolution/runs` | Start a run of one binding | key; 202 + run id |
-| `GET /bots/{bot}/evolution/runs` | List runs (`status=`) | Page |
-| `GET /bots/{bot}/evolution/runs/{run}` | Run status, rounds, budget used | |
-| `POST /bots/{bot}/evolution/runs/{run}:cancel` | Cancel a run | key; idempotent by state |
-| `GET /bots/{bot}/evolution/runs/{run}/candidates` | Candidates the run submitted | |
+| `GET /bots/{bot_id}/evolution/policy` | The bot's evolution policy (list of bindings) | Returns ETag |
+| `PUT /bots/{bot_id}/evolution/policy` | Replace the policy (binding checks run here) | ETag (`If-Match` required) |
+| `POST /bots/{bot_id}/evolution/runs` | Start a run of one binding | key; 202 + run id |
+| `GET /bots/{bot_id}/evolution/runs` | List runs (`status=`) | Page |
+| `GET /bots/{bot_id}/evolution/runs/{run}` | Run status, rounds, budget used | |
+| `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | Cancel a run | key; idempotent by state |
+| `GET /bots/{bot_id}/evolution/runs/{run}/candidates` | Candidates the run submitted | |
 
 Shared-convention example 1: idempotent run submission. The first request
-and a retry with the same key get the same run id.
+and a retry with the same key get the same run id. The caller here is a
+pipeline acting on a bot it does not own, so it names the owner with
+`entity_id` ([§4.1](#41-paths-resources-and-custom-methods)).
 
 ```http
-POST /openapi/v1/bots/bot_123/evolution/runs
+POST /openapi/v1/bots/bot_123/evolution/runs?entity_id=user_owner_5
 Content-Type: application/json
 Idempotency-Key: nightly-bot_123-2026-10-08
 ```
@@ -1060,7 +1127,7 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 202 on the first attempt; Location: /openapi/v1/bots/bot_123/evolution/runs/run_7f3
+// 202 on the first attempt; Location: /openapi/v1/bots/bot_123/evolution/runs/run_7f3?entity_id=user_owner_5
 {
   "code": 202000,
   "message": "Accepted",
@@ -1130,8 +1197,8 @@ long-running calls answered with `202` and an operation id.
 | --- | --- | --- |
 | `GET /evolution/suites` | List suites | Page |
 | `GET /evolution/suites/{suite}` | One suite; case contents subject to split visibility | |
-| `POST /bots/{bot}/evolution/evaluations` | Operator-only ad-hoc evaluation of a revision on a suite | key; 202 + operation id |
-| `GET /bots/{bot}/evolution/evaluations/{evaluation}` | Evaluation result (the id comes from the operation's `result`) | |
+| `POST /bots/{bot_id}/evolution/evaluations` | Operator-only ad-hoc evaluation of a revision on a suite | key; 202 + operation id |
+| `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | Evaluation result (the id comes from the operation's `result`) | |
 
 Shared-convention example: start, then look up the operation by id.
 
@@ -1175,17 +1242,17 @@ GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
 ```
 
 Once `status` is `succeeded`, `result` is `{"evaluation_id": "ev_310"}`, and
-the evaluation is read with `GET /bots/{bot}/evolution/evaluations/ev_310`.
+the evaluation is read with `GET /bots/{bot_id}/evolution/evaluations/ev_310`.
 
 ### 13.7 Promotion — [08-promotion.md](08-promotion.md)
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/candidates/{candidate}` | Candidate report: diff, verification, gate decision | |
-| `GET /bots/{bot}/evolution/review-queue` | Candidates waiting for human review | Page |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:approve` | Approve a candidate | key; state-checked |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:reject` | Reject a candidate | key; state-checked |
-| `POST /bots/{bot}/genome/promotions` | Move `active` (including going back to an earlier revision) | key; CAS on `active` |
+| `GET /bots/{bot_id}/evolution/candidates/{candidate}` | Candidate report: diff, verification, gate decision | |
+| `GET /bots/{bot_id}/evolution/review-queue` | Candidates waiting for human review | Page |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` | Approve a candidate | key; state-checked |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:reject` | Reject a candidate | key; state-checked |
+| `POST /bots/{bot_id}/genome/promotions` | Move `active` (including going back to an earlier revision) | key; CAS on `active` |
 
 Shared-convention example: a custom method on a colon-containing id.
 
@@ -1226,10 +1293,10 @@ The single public operation resource, shared by every endpoint that answers
 
 | Method and path | Purpose | Conventions |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/operations/{operation}` | Operation status and, once finished, result or error | |
-| `POST /bots/{bot}/evolution/operations/{operation}:cancel` | Cancel an operation | key; idempotent by state |
+| `GET /bots/{bot_id}/evolution/operations/{operation}` | Operation status and, once finished, result or error | |
+| `POST /bots/{bot_id}/evolution/operations/{operation}:cancel` | Cancel an operation | key; idempotent by state |
 
-#### GET /bots/{bot}/evolution/operations/{operation}
+#### GET /bots/{bot_id}/evolution/operations/{operation}
 
 Look up an operation by id: `Operation{id, kind, status, result?, error?,
 created_at, updated_at}` (§2.5). Called by pipelines, the UI backend, the
@@ -1256,7 +1323,7 @@ GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
 
 Errors: `404000` unknown operation, or an operation of another bot.
 
-#### POST /bots/{bot}/evolution/operations/{operation}:cancel
+#### POST /bots/{bot_id}/evolution/operations/{operation}:cancel
 
 Cancel an operation. Idempotent by state: cancelling a cancelled operation
 returns it unchanged; cancelling one that already succeeded or failed is
@@ -1286,8 +1353,10 @@ Errors: `404000` unknown operation; `409020` the operation already finished.
 
 ### 14.1 Nightly pipeline (Python SDK)
 
-A scheduled job starts tonight's run, waits for it, and approves
-candidates that the owner's policy lets the pipeline approve. The key is
+A scheduled job starts tonight's run on a bot owned by `user_owner_5`,
+waits for it, and approves candidates that the owner's policy lets the
+pipeline approve. Because the pipeline is not the owner, every call passes
+`entity_id`. The key is
 deterministic, so if the job itself crashes and is rerun, it re-attaches to
 the same run instead of starting a second one.
 
@@ -1295,29 +1364,30 @@ the same run instead of starting a second one.
 import asyncio
 from avernet_evolution import Client, PolicyDenied, Transient
 
-async def nightly(bot: str, binding: str, day: str) -> None:
+async def nightly(owner_id: str, bot_id: str, binding: str, day: str) -> None:
     c = Client.from_env()                                   # base URL and client settings from configuration
-    run = await c.runs.start(bot, binding=binding,
-                             idempotency_key=f"nightly-{bot}-{day}")  # same key on every rerun of this job
+    # The pipeline acts on another user's bot, so every call names the owner (entity_id).
+    run = await c.runs.start(bot_id, entity_id=owner_id, binding=binding,
+                             idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}")  # same key on every rerun of this job
     try:
-        run = await c.runs.wait(bot, run.run_id, timeout_s=3 * 3600)  # short lookups by id
+        run = await c.runs.wait(bot_id, run.run_id, entity_id=owner_id, timeout_s=3 * 3600)  # short lookups by id
     except Transient:
         return                                              # still running; the next invocation re-attaches
     print(run.run_id, run.status, f"request_id={run.request_id}")
     if run.status != "completed":
         return                                              # failed / cancelled / budget_exhausted: nothing to approve
 
-    for cand in await c.runs.candidates(bot, run.run_id):
-        report = await c.review.report(bot, cand.candidate_id)
+    for cand in await c.runs.candidates(bot_id, run.run_id, entity_id=owner_id):
+        report = await c.review.report(bot_id, cand.candidate_id, entity_id=owner_id)
         if report["gate"]["decision"] != "needs_review":
             continue
         try:
-            await c.review.approve(bot, cand.candidate_id, reason="nightly auto-policy",
-                                   idempotency_key=f"nightly-{bot}-{day}/approve/{cand.candidate_id}")
+            await c.review.approve(bot_id, cand.candidate_id, entity_id=owner_id, reason="nightly auto-policy",
+                                   idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}/approve/{cand.candidate_id}")
         except PolicyDenied as e:                           # the owner's policy does not let pipelines approve this tier
             print("left for human review:", cand.candidate_id, e.code, e.request_id)
 
-asyncio.run(nightly("bot_123", "bind_01", "2026-10-08"))
+asyncio.run(nightly("user_owner_5", "bot_123", "bind_01", "2026-10-08"))
 ```
 
 ### 14.2 CI script with `avn`
@@ -1361,14 +1431,14 @@ Read-modify-write with `If-Match`; on `412` re-read and reapply.
 ```python
 from avernet_evolution import Client, PreconditionFailed
 
-async def raise_budget(c: Client, bot: str, binding_id: str, max_usd: int) -> None:
+async def raise_budget(c: Client, bot_id: str, binding_id: str, max_usd: int) -> None:
     for _ in range(3):
-        policy, etag = await c.policy.get(bot)
+        policy, etag = await c.policy.get(bot_id)        # caller is the owner: no entity_id
         for b in policy.bindings:
             if b.id == binding_id:
                 b.budget.max_usd = max_usd
         try:
-            await c.policy.put(bot, policy, if_match=etag)
+            await c.policy.put(bot_id, policy, if_match=etag)
             return
         except PreconditionFailed:
             continue                                         # someone else changed it; read again
@@ -1382,18 +1452,19 @@ import { Client, PolicyDenied } from "@avernet/evolution";
 
 const client = Client.fromEnv();
 
-export async function reviewQueue(bot: string) {
+// entityId: the bot's owner, passed when it is not the signed-in user (omitted = caller)
+export async function reviewQueue(botId: string, entityId?: string) {
   const items = [];
-  for await (const item of client.review.iterQueue(bot)) {        // walks all pages
-    const report = await client.review.report(bot, item.candidateId);
+  for await (const item of client.review.iterQueue(botId, { entityId })) {        // walks all pages
+    const report = await client.review.report(botId, item.candidateId, { entityId });
     items.push({ candidate: item.candidateId, tier: report.riskTier, gate: report.gate, diff: report.diff });
   }
   return items;
 }
 
-export async function approve(bot: string, candidateId: string, reason: string, key: string) {
+export async function approve(botId: string, candidateId: string, reason: string, key: string, entityId?: string) {
   try {
-    return await client.review.approve(bot, candidateId, { reason, idempotencyKey: key });
+    return await client.review.approve(botId, candidateId, { reason, idempotencyKey: key, entityId });
   } catch (e) {
     if (e instanceof PolicyDenied) return { refused: true, code: e.code, requestId: e.requestId };
     throw e;
@@ -1414,9 +1485,9 @@ avn genome promote --bot bot_123 --revision r41 \
   --reason "r42 raised refund escalations" --yes --output json
 ```
 
-`avn` resolves `r41` to its revision id through `GET /bots/{bot}/genome/refs`
-and `GET /bots/{bot}/genome/revisions`, then calls
-`POST /bots/{bot}/genome/promotions`. For a service bot the revision is
+`avn` resolves `r41` to its revision id through `GET /bots/{bot_id}/genome/refs`
+and `GET /bots/{bot_id}/genome/revisions`, then calls
+`POST /bots/{bot_id}/genome/promotions`. For a service bot the revision is
 published as the next version through the existing publish flow
 ([08-promotion.md](08-promotion.md)).
 

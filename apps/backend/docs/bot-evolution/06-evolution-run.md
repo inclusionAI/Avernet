@@ -28,7 +28,7 @@ It owns:
 | Triggers | Schedule, manual, and event triggers that create runs | [§4](#4-triggers) |
 | Run lifecycle | `queued → running → completed \| failed \| cancelled \| budget_exhausted`; start, during, end, cancellation | [§5](#5-run-lifecycle) |
 | Idempotent run submission | A submission returns a run id; a repeat with the same idempotency key returns the same id | [§6](#6-idempotent-submission-and-status-by-id) |
-| Leases and re-dispatch | Every run is a leased job; a dead worker's run is dispatched again with the same run id | [§7](#7-leases-re-dispatch-and-crash-recovery) |
+| Leases and re-dispatch | Every attempt of a run is a leased job; a dead worker's run is dispatched again, as a new job, with the same run id | [§7](#7-leases-re-dispatch-and-crash-recovery) |
 | Long-running operations (platform side) | Agent sessions and train evaluations are persisted operations with ids, run by the platform | [§8](#8-long-running-operations-platform-side) |
 | Runtimes and the Job Protocol | In-process strategies, and job-worker containers that reach `ctx` over HTTP | [§9](#9-runtimes-and-the-job-protocol) |
 | Sandboxing | Strategies work only on sandbox materialisations, with no credentials, egress, or model keys of their own | [§10](#10-sandboxing) |
@@ -79,7 +79,7 @@ in [work-items.md](work-items.md)).
 | `Trigger` | What makes a binding create a run: a schedule, manual only, or a platform event | Part of a binding | As the binding |
 | `Budget` | Per-run spending limits: USD, wall clock, rollouts, tokens | Part of a binding; frozen on the run | Frozen at run start; spent amounts never reset |
 | `Run` | One execution of a binding, with strategy version, params, parent, and budget frozen at start; the run id is its only handle | Platform (this service) | `queued → running → completed \| failed \| cancelled \| budget_exhausted`; never deleted |
-| `Job` | The leased, dispatchable form of a run: holder, lease expiry, attempt, fencing token | Platform (this service) | One per run; re-leased on each re-dispatch; closed when the run ends |
+| `Job` | One dispatch attempt of a run, executed by a worker under a lease: holder, lease expiry, attempt, fencing token | Platform (this service) | One per attempt; a re-dispatch creates a new job for the same run; closed when its attempt ends |
 | `Operation` | A long-running capability call (agent session, train evaluation) started by a run, persisted and executed by the platform | Platform (this service) | `queued → running → succeeded \| failed \| cancelled`; unfinished ones are cancelled when the run ends |
 | `Workspace` | A sandbox materialisation of a revision, created for a run under a key | Platform (this service) | Created idempotently per `(run, key)`; discarded after the run ends |
 | `RunSummary` | What `run(ctx)` returns when it finishes normally | Strategy | Stored on the run |
@@ -92,26 +92,42 @@ A **budget** is the per-run spending limit. Every model call, agent session,
 and evaluation is charged to it, and the run stops when any dimension runs
 out.
 
+A **rollout** is one execution of one evaluation case against one bot
+version. For example, running the test case "partial refund" once against
+the sandbox candidate is one rollout; running it with 3 seeds (3 repeats,
+to average out model randomness) is 3 rollouts, and running it against both
+the parent and the candidate for a comparison counts both. Train
+evaluations a strategy starts are counted in rollouts; verification of
+submitted candidates is not charged to the run (§11.1).
+
 ```python
 @dataclass(frozen=True)
 class Budget:
-    max_usd: float                      # model spend, agent sessions, evaluations
-    max_wall_clock_s: int               # from first start to end, across attempts (§7.3)
-    max_rollouts: int | None = None     # evaluation rollouts; None means no limit on this dimension
-    max_tokens: int | None = None       # model tokens; None means no limit on this dimension
+    max_usd: float                      # US dollars the run may spend in total: model calls, agent
+                                        # sessions, and train evaluations. At the limit the next charged
+                                        # call fails and the run ends as budget_exhausted
+    max_wall_clock_s: int               # seconds from the run's first start to its end, including time
+                                        # spent waiting and between attempts (§7.3); at the limit the run ends
+    max_rollouts: int | None = None     # how many evaluation rollouts (see above) the run may use;
+                                        # None = no limit on this dimension
+    max_tokens: int | None = None       # model tokens (input + output, all calls) the run may use;
+                                        # None = no limit on this dimension
 
 @dataclass(frozen=True)
-class BudgetUsage:
-    usd: float
-    wall_clock_s: int
-    rollouts: int
-    tokens: int
+class BudgetUsage:                      # what has been spent so far, in the same units as Budget
+    usd: float                          # US dollars charged so far
+    wall_clock_s: int                   # seconds since the run first started
+    rollouts: int                       # evaluation rollouts charged so far
+    tokens: int                         # model tokens charged so far
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
+  // Limits: at most $20, 2 hours, and 400 rollouts (for example 20 train cases x 2 versions x 10 rounds);
+  // no token limit because max_tokens is omitted.
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "max_rollouts": 400},
+  // Spent so far: $6.42, about 30 minutes, 96 rollouts, 412,300 tokens.
   "budget_used": {"usd": 6.42, "wall_clock_s": 1830, "rollouts": 96, "tokens": 412300}
 }
 ```
@@ -127,14 +143,24 @@ class ScheduleTrigger:
 class ManualTrigger:
     manual: Literal[True]               # no automatic firing; runs only when submitted
 
+# Platform events a binding can be triggered by (proposed list, from §4). A new
+# event is added by a reviewed platform change, together with its producer.
+EventName = Literal[
+    "failure_rate_alert",               # the bot's failure rate crossed its alert threshold
+    "clawinsight_improvement_item",     # ClawInsight recorded an improvement item for the bot
+    "feedback_threshold_reached",       # N new feedback items arrived since the last run (memory consolidation)
+]
+
 @dataclass(frozen=True)
 class EventTrigger:
-    event: str                          # platform event name, e.g. "failure_rate_alert"
+    event: EventName                    # fire a run when this platform event arrives for the bot
 
 Trigger = ScheduleTrigger | ManualTrigger | EventTrigger
 
 @dataclass(frozen=True)
-class Rollout:                          # proposed; read by Promotion (08-promotion.md)
+class Rollout:                          # proposed; read by Promotion (08-promotion.md). How a promoted
+                                        # revision reaches a multi-instance bot; not the evaluation
+                                        # "rollouts" counted in Budget
     canary_share: str                   # share of instances on `canary`, decimal string, e.g. "0.1"
     auto_rollback: bool                 # owner-enabled auto-rollback rule
 
@@ -143,7 +169,8 @@ class Binding:
     id: str                             # chosen by the owner, unique within the bot, e.g. "bind_01"
     strategy: str                       # "<strategy id>@<version>", a registered, conformant version
     trigger: Trigger
-    parent: str                         # which revision runs start from; "active" in the first iteration
+    parent: "SelectorName"              # which revision runs start from (05-experiment-ledger.md §7);
+                                        # only "active" is accepted in the first iteration
     allowed_genes: list[str]            # what this strategy may change on THIS bot; within the bot's policy
     verification_profile: str           # e.g. "default@1"; owners may pick a stricter one, never a looser one
     budget: Budget
@@ -170,21 +197,36 @@ class Binding:
 
 ### 2.3 EvolutionPolicy
 
+Each bot has exactly **one** evolution policy, and the policy is a list of
+bindings. Each binding attaches one strategy to the bot with its own
+trigger, allowed genes, verification profile, budget, and params. Several
+bindings mean several strategies (or the same strategy with different
+settings) improving different aspects of the bot on different schedules:
+for example, `bind_01` runs ClawEvolve nightly on `persona` and `skills`,
+and `bind_02` runs `platform/consolidate-memory` weekly on `memory`, as in
+the example below. Bindings run independently: each binding has at most one
+active run at a time (§4), but runs of different bindings can overlap.
+When two bindings' candidates are built on the same parent and one of them
+is promoted first, `active` has moved by the time the other is approved;
+Promotion then refuses the second with `409 stale_parent` unless the
+reviewer explicitly overrides
+(§6.2 of [08-promotion.md](08-promotion.md)).
+
 ```python
 @dataclass(frozen=True)
 class EvolutionPolicy:
-    bot: str
-    bindings: list[Binding]
+    bot: BotRef                         # the bot this policy belongs to (owner + bot id, 09-evolution-api.md §2.7)
+    bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
-    updated_by: str
+    updated_by: str                     # user id of whoever wrote this version
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Evolution policy of bot_123 (OpenClaw support bot)
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {
       "id": "bind_01",
@@ -218,27 +260,43 @@ further fields of this document; see [§17](#17-open-decisions).
 
 ### 2.4 Run
 
+A **run** is one execution of one binding for one bot: the platform starts
+the binding's strategy once, against a parent revision frozen at start,
+under the binding's budget. It is the durable business record of that
+execution (what was frozen, what it spent, what it submitted, how it
+ended) and the **only handle callers use**: they start it, look it up,
+list its candidates, and cancel it by its run id. A run never disappears
+and never restarts under a new id, even when its worker crashes.
+
 ```python
 RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "budget_exhausted"]
+# Why a run ended, when the status alone does not say (proposed; extended only by a reviewed change).
+EndReason = Literal[
+    "worker_failed",                    # the strategy reported a non-retryable failure
+    "max_attempts",                     # re-dispatched max_attempts times without finishing (§7.2)
+    "cancelled_by_owner",               # a caller cancelled it (POST …/runs/{run}:cancel)
+    "kill_switch",                      # a strategy, bot, or global kill switch stopped it (§11.3)
+    "consecutive_rejections",           # the escalation rule stopped it (§11.2)
+]
 
 @dataclass(frozen=True)
 class TriggerRecord:
     kind: Literal["schedule", "manual", "event"]
     fire_time: datetime | None          # set for schedule triggers
     event_id: str | None                # set for event triggers
-    requested_by: str | None            # set for manual submissions
+    requested_by: str | None            # set for manual submissions: the caller's user or pipeline client id
 
 @dataclass
 class Run:
-    id: str                             # "run_7f3"; the only handle
-    bot: str
+    id: str                             # "run_7f3"; globally unique; the only handle
+    bot: BotRef                         # the bot it runs against (owner + bot id)
     binding_id: str
-    idempotency_key: str                # (bot, key) -> run id
+    idempotency_key: str                # (owner_id, bot_id, key) -> run id
     trigger: TriggerRecord
     # frozen at submission
     strategy: str                       # "clawevolve/bot-evolution"
     strategy_version: str               # "2.0.0"
-    parent_ref: str                     # "active"
+    parent_ref: "SelectorName"          # the binding's `parent` at submission, e.g. "active"
     parent_revision: str                # resolved revision id, e.g. "sha256:a90b…"
     allowed_genes: list[str]
     verification_profile: str
@@ -255,7 +313,7 @@ class Run:
     created_at: datetime
     started_at: datetime | None         # first transition to running
     ended_at: datetime | None
-    end_reason: str | None              # e.g. "worker_failed", "max_attempts", "cancelled_by_owner"
+    end_reason: EndReason | None        # None while running, and for completed or budget_exhausted runs
     summary: dict | None                # RunSummary from a completed run
 ```
 
@@ -263,7 +321,7 @@ class Run:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "run_7f3",
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "binding_id": "bind_01",
   "idempotency_key": "bind_01/2026-10-08T02:00:00Z",
   "trigger": {"kind": "schedule", "fire_time": "2026-10-08T02:00:00Z", "event_id": null, "requested_by": null},
@@ -293,18 +351,28 @@ class Run:
 
 ### 2.5 Job
 
-A **job** is the dispatchable form of a run. A worker *claims* a job and
-holds it under a **lease**: a time-limited claim the worker must keep
-renewing. A **fencing token** is a value issued with each lease; calls that
-carry an older token are refused, so a worker that lost its lease cannot
-interfere with the new holder.
+A **job** is one dispatch attempt of a run: the unit a worker claims and
+executes under a **lease**, a time-limited claim the worker must keep
+renewing. A run has one job per attempt: when a worker crashes and its
+lease expires, the platform re-dispatches the run as a new job (attempt
+`n + 1`) for the **same** run. A **fencing token** is a value issued with
+each lease; calls that carry an older token are refused, so a worker that
+lost its lease cannot interfere with the new holder. Callers never see
+jobs; workers only see jobs.
+
+| | Run | Job |
+| --- | --- | --- |
+| What it represents | One execution of a binding for one bot: the business record (frozen inputs, spend, candidates, outcome) | One attempt to execute that run on a worker, under a lease |
+| Lifetime | From submission to a terminal status; kept forever | From dispatch until the attempt completes, fails, or its lease expires |
+| How many | One per submission (per idempotency key) | One per attempt of the run: 1, or more after crashes |
+| Who sees it | Callers (API, SDK, CLI, UI) by run id; the strategy as `ctx.run_id` | Workers and the Job Protocol only, by job id |
 
 ```python
 @dataclass
 class Job:
-    id: str                             # "job_7f3"; one job per run
-    run_id: str
-    attempt: int                        # equals the run's attempt
+    id: str                             # "job_7f3_2" (run_7f3, attempt 2); one job per attempt of the run
+    run_id: str                         # the run this attempt executes
+    attempt: int                        # which attempt of the run this job is (1, 2, …)
     worker_id: str | None               # current holder; None while queued
     lease_expires_at: datetime | None
     fencing_token: str | None           # new value on every claim
@@ -313,7 +381,7 @@ class Job:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "id": "job_7f3",
+  "id": "job_7f3_2",
   "run_id": "run_7f3",
   "attempt": 2,
   "worker_id": "worker-clawevolve-02",
@@ -336,7 +404,7 @@ OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled
 class Operation:
     id: str                             # "op_19a"
     run_id: str
-    kind: Literal["agent", "train_evaluation"]
+    kind: Literal["agent_session", "train_evaluation"]   # same values as Operation.kind in 03-strategy.md
     idempotency_key: str                # "<run>/<own step>", e.g. "run_7f3/round-1/tune"
     status: OperationStatus
     cost: BudgetUsage                   # charged to the run's budget as it accrues
@@ -351,7 +419,7 @@ class Operation:
 {
   "id": "op_19a",
   "run_id": "run_7f3",
-  "kind": "agent",
+  "kind": "agent_session",
   "idempotency_key": "run_7f3/round-1/tune",
   "status": "succeeded",
   "cost": {"usd": 1.12, "wall_clock_s": 640, "rollouts": 0, "tokens": 88100},
@@ -359,7 +427,7 @@ class Operation:
   "finished_at": "2026-10-08T02:23:20Z",
   "result": {
     "definition": "clawevolve-tune",
-    "exit_status": "ok",
+    "exit_status": "completed",
     "transcript_artifact": "art_tune_r1",
     "changed_files": ["persona/SOUL.md", "skills/refund-policy/SKILL.md"]
   },
@@ -409,7 +477,8 @@ class RunSummary:
 
 A bot's **evolution policy** is a list of **bindings**. Different bots use
 different strategies, and one bot may use several (for example ClawEvolve
-nightly on persona and skills, and memory consolidation weekly on memory).
+nightly on persona and skills, and memory consolidation weekly on memory);
+what several bindings mean is explained in §2.3.
 
 Information about a strategy is split by who it is true of:
 
@@ -458,7 +527,8 @@ paid run:
 5. `verification_profile` exists and is not looser than the platform
    default.
 6. `budget` fits within the per-bot and per-tenant ceilings.
-7. `trigger` is well formed: a valid cron expression, or a known event name.
+7. `trigger` is well formed: a valid cron expression, or an `EventName`
+   (§2.2).
 8. If the strategy's registration record has a `params_schema` (proposed,
    [03-strategy.md](03-strategy.md)), `params` validates against it.
 
@@ -481,9 +551,12 @@ made by the platform instead of a caller.
 | Event | `{"event": "failure_rate_alert"}` | A platform event with that name arrives for the bot | `<binding_id>/<event_id>` (proposed) |
 
 Examples of event triggers from the default strategies: a failure-rate
-alert, a ClawInsight improvement item (an event trigger for ClawEvolve
-bindings), and "N new feedback items" for memory consolidation
-([04-default-strategies.md](04-default-strategies.md)).
+alert (`failure_rate_alert`), a ClawInsight improvement item
+(`clawinsight_improvement_item`, an event trigger for ClawEvolve bindings),
+and "N new feedback items" for memory consolidation
+(`feedback_threshold_reached`)
+([04-default-strategies.md](04-default-strategies.md)). These three are the
+proposed `EventName` values (§2.2).
 
 Rules:
 
@@ -536,7 +609,7 @@ At submission the service:
 3. Records the agent definition digests of the strategy version, so results
    are attributable to the exact prompts used.
 4. **Reserves** the budget against per-bot and per-tenant ceilings.
-5. Records the run as `queued`, with its job, and returns the run id.
+5. Records the run as `queued`, with its first job, and returns the run id.
 
 On each dispatch (claim) the service builds the `StrategyContext` with
 exactly the granted capabilities: the always-granted parts (`parent`,
@@ -619,7 +692,7 @@ Starting a run (a trigger firing, or a caller through the API) returns a
 - The submitter sends an **idempotency key**: a string chosen by the
   submitter, identical for every retry of one logical request and different
   for different requests.
-- The platform stores `(bot, key) → run id`. A repeated submission with the
+- The platform stores `(owner_id, bot_id, key) → run id`. A repeated submission with the
   same key returns the same run id and starts nothing new, whatever the
   first run's status is now.
 - From then on the run id is the only handle. Callers look up status,
@@ -652,7 +725,7 @@ reboot. The work is split between the platform and the strategy:
 | Concern | Owner | How |
 | --- | --- | --- |
 | The run record, its frozen inputs, budget spent, and candidates submitted | Platform | Persisted before run submission or `candidates.submit` returns |
-| Noticing that a run's process died | Platform | Every run is a **leased job**. The worker (or the in-process host) renews the lease; when it expires, the job goes back to `queued` and is dispatched again with the same run id and `ctx.attempt + 1`. A fencing token rejects calls from the old holder. After `max_attempts` the run ends as `failed` |
+| Noticing that a run's process died | Platform | Every attempt of a run is a **leased job**. The worker (or the in-process host) renews the lease; when it expires, the run goes back to `queued` and is dispatched again as a new job with the same run id and `ctx.attempt + 1`. A fencing token rejects calls from the old holder. After `max_attempts` the run ends as `failed` |
 | Agent sessions and train evaluations already started | Platform | They are operations (§8): persisted and run by the platform, independent of the strategy's process. They keep running across a re-dispatch; the strategy re-attaches by repeating the start with the same idempotency key |
 | The strategy's own progress (round number, search state, history) | Strategy | The strategy persists whatever it needs in **its own storage**, keyed by run id, and on re-dispatch reloads it and continues. The platform has **no checkpoint API** and never reads this state; its shape differs from strategy to strategy |
 
@@ -766,7 +839,7 @@ example in [§14.2](#142-internal-api-job-protocol).
 | Endpoint | `ctx` call |
 | --- | --- |
 | `POST /evolution/v1/jobs:claim` | (worker loop) claim a job: `{worker_id, strategy_ids[]}` → `{job_id, run_id, attempt, params, parent, budget, granted, fencing_token}` |
-| `POST /evolution/v1/jobs/{id}/heartbeat` | lease renewal; an expired lease re-queues the job |
+| `POST /evolution/v1/jobs/{id}/heartbeat` | lease renewal; an expired lease re-queues the run as a new job |
 | `GET /evolution/v1/runs/{run}/parent` | `ctx.parent` |
 | `GET /evolution/v1/runs/{run}/content/{digest}` | file bytes of the parent / workspace |
 | `GET /evolution/v1/runs/{run}/experience/sessions` | `ctx.experience.sessions` (if granted) |
@@ -909,9 +982,9 @@ server database elsewhere):
 
 | Table | Key | Holds |
 | --- | --- | --- |
-| `evolution_policy` | `bot` | The bindings document and its ETag |
+| `evolution_policy` | `(owner_id, bot_id)` | The bindings document and its ETag |
 | `evolution_run` | `run_id` | The `Run` record: frozen inputs, status, attempt, usage |
-| `evolution_run_key` | `(bot, idempotency_key)` | `run_id`; makes submission idempotent |
+| `evolution_run_key` | `(owner_id, bot_id, idempotency_key)` | `run_id`; makes submission idempotent |
 | `evolution_job` | `job_id` | Lease holder, expiry, fencing token, attempt |
 | `evolution_operation` | `operation_id`, unique `(run_id, idempotency_key)` | The `Operation` record |
 | `evolution_workspace` | `workspace_id`, unique `(run_id, key)` | The `Workspace` record; sandbox files live in the executor |
@@ -934,10 +1007,10 @@ them.
 
 ```python
 class EvolutionPolicyService(Protocol):
-    async def get_policy(self, bot: str) -> EvolutionPolicy:
+    async def get_policy(self, bot: BotRef) -> EvolutionPolicy:
         """Return the bot's policy; an empty bindings list if none was written."""
 
-    async def put_policy(self, bot: str, bindings: list[Binding], *,
+    async def put_policy(self, bot: BotRef, bindings: list[Binding], *,
                          expected_etag: str | None, actor: str) -> EvolutionPolicy:
         """Replace the bindings after running the binding checks (§3.2) on every
         new or changed binding. expected_etag None means "create; fail if one exists".
@@ -945,28 +1018,28 @@ class EvolutionPolicyService(Protocol):
 
 
 class RunService(Protocol):
-    async def submit(self, bot: str, binding_id: str, *, idempotency_key: str,
+    async def submit(self, bot: BotRef, binding_id: str, *, idempotency_key: str,
                      trigger: TriggerRecord, params: dict | None = None,
                      budget: Budget | None = None) -> str:
         """Create a run of the binding and return its run id, or return the existing
-        run id for (bot, idempotency_key). params are merged over the binding's params;
+        run id for (owner_id, bot_id, idempotency_key). params are merged over the binding's params;
         budget, when given, must not exceed the binding's budget (None: use the binding's).
         Freezes inputs, reserves the budget, records the run as queued.
         Raises BindingCheckFailed, EvolutionFrozen, CeilingExceeded, BindingBusy,
         IdempotencyKeyReused."""
 
-    async def get(self, bot: str, run_id: str) -> Run: ...
+    async def get(self, bot: BotRef, run_id: str) -> Run: ...
 
-    async def list(self, bot: str, *, status: list[RunStatus] | None = None,
+    async def list(self, bot: BotRef, *, status: list[RunStatus] | None = None,
                    binding_id: str | None = None, page: int = 1,
                    page_size: int = 20) -> Page[Run]: ...
 
-    async def cancel(self, bot: str, run_id: str, *, reason: str, actor: str) -> Run:
+    async def cancel(self, bot: BotRef, run_id: str, *, reason: str, actor: str) -> Run:
         """Set the run's cancellation token; cancel its unfinished operations;
         end it as cancelled. Idempotent on an already cancelled run; raises
         RunAlreadyEnded for completed/failed/budget_exhausted runs."""
 
-    async def candidates(self, bot: str, run_id: str) -> list[RunCandidate]:
+    async def candidates(self, bot: BotRef, run_id: str) -> list[RunCandidate]:
         """Candidates the run submitted, in order, with verdict status."""
 
 
@@ -975,7 +1048,7 @@ class JobService(Protocol):
 
     async def claim(self, worker_id: str, strategy_ids: list[str]) -> ClaimedJob | None:
         """Lease one queued job of the given strategies; None if there is none.
-        Increments nothing: attempt was set when the job was (re-)queued."""
+        Increments nothing: attempt was set when the run was (re-)queued."""
 
     async def heartbeat(self, job_id: str, fencing_token: str) -> LeaseState:
         """Renew the lease; returns new expiry and whether the run was cancelled.
@@ -988,12 +1061,12 @@ class JobService(Protocol):
         """Retryable with attempts left: re-queue (attempt + 1). Otherwise end as failed."""
 
     async def expire_leases(self, now: datetime) -> list[str]:
-        """Called by the service's own timer: re-queue or fail every job whose
-        lease has expired. Returns the affected run ids."""
+        """Called by the service's own timer: for every job whose lease has expired,
+        re-queue its run (a new job, attempt + 1) or fail the run. Returns the affected run ids."""
 
 
 class OperationService(Protocol):
-    async def start(self, run_id: str, kind: Literal["agent", "train_evaluation"], *,
+    async def start(self, run_id: str, kind: Literal["agent_session", "train_evaluation"], *,
                     idempotency_key: str, request: dict) -> str:
         """Record the operation and hand it to its executor; return the operation id.
         Returns the existing id for (run_id, idempotency_key)."""
@@ -1007,10 +1080,11 @@ class OperationService(Protocol):
 
 
 class BudgetService(Protocol):
-    async def reserve(self, bot: str, tenant: str, budget: Budget) -> None:
+    async def reserve(self, bot: BotRef, tenant: str, budget: Budget) -> None:
         """Raises CeilingExceeded."""
 
-    async def charge(self, run_id: str, usage: BudgetUsage, *, source: str) -> BudgetUsage:
+    async def charge(self, run_id: str, usage: BudgetUsage, *,
+                     source: Literal["model_call", "operation", "explicit"]) -> BudgetUsage:
         """Add to the run's spend and return what remains. Raises BudgetExhausted
         once any dimension is used up (the run is then ended by the caller)."""
 
@@ -1019,7 +1093,7 @@ class BudgetService(Protocol):
 
 class KillSwitches(Protocol):
     async def is_strategy_disabled(self, strategy: str, version: str) -> bool: ...
-    async def is_bot_frozen(self, bot: str) -> bool: ...
+    async def is_bot_frozen(self, bot: BotRef) -> bool: ...
     async def is_paused(self) -> bool: ...
 ```
 
@@ -1049,7 +1123,7 @@ postponed (DR-3). Responses below show the `data` payload of the standard
 envelope; see [09-evolution-api.md](09-evolution-api.md) for the envelope,
 errors, pagination, and idempotency.
 
-### GET /bots/{bot}/evolution/policy
+### GET /bots/{bot_id}/evolution/policy
 
 Read the bot's evolution policy (its bindings). Called by the UI backend,
 `avn evolve policy get`, and pipelines.
@@ -1065,7 +1139,7 @@ Response `200` (header `ETag: "pol-v12"`):
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {
       "id": "bind_01",
@@ -1086,7 +1160,7 @@ Response `200` (header `ETag: "pol-v12"`):
 
 Errors: `404` unknown bot.
 
-### PUT /bots/{bot}/evolution/policy
+### PUT /bots/{bot_id}/evolution/policy
 
 Replace the bot's bindings. Runs the binding checks (§3.2) on every new or
 changed binding and rejects the whole document if any fails. Called by the
@@ -1127,7 +1201,7 @@ Response `200` (header `ETag: "pol-v13"`):
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {"id": "bind_01", "strategy": "clawevolve/bot-evolution@2.0.0", "trigger": {"schedule": "0 2 * * *"},
      "parent": "active", "allowed_genes": ["persona", "skills"], "verification_profile": "default@1",
@@ -1161,7 +1235,7 @@ Error example `422` (binding check failed):
 Other errors: `412` ETag mismatch (someone else changed the policy); `404`
 unknown bot or unknown strategy version.
 
-### POST /bots/{bot}/evolution/runs
+### POST /bots/{bot_id}/evolution/runs
 
 Submit a run of one of the bot's bindings. The body is
 `{binding, params?, budget?}`. Idempotent: the
@@ -1195,7 +1269,7 @@ key, different body); `422` `binding_check_failed` (the bot or strategy
 changed since the policy was written), or `budget` above the binding's
 budget.
 
-### GET /bots/{bot}/evolution/runs
+### GET /bots/{bot_id}/evolution/runs
 
 List the bot's runs, newest first. Filters: `status`, `binding`, `since`;
 `page` and `page_size`. Called by the UI backend and `avn evolve run status`.
@@ -1225,7 +1299,7 @@ Response `200`:
 
 Errors: `404` unknown bot; `422` unknown filter value.
 
-### GET /bots/{bot}/evolution/runs/{run}
+### GET /bots/{bot_id}/evolution/runs/{run}
 
 Read one run by id: status, frozen inputs, attempt, budget used, summary.
 This is the status lookup every caller repeats until the status is
@@ -1244,7 +1318,7 @@ Response `200`:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "run_7f3",
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "binding_id": "bind_01",
   "idempotency_key": "bind_01/2026-10-08T02:00:00Z",
   "trigger": {"kind": "schedule", "fire_time": "2026-10-08T02:00:00Z", "event_id": null, "requested_by": null},
@@ -1274,7 +1348,7 @@ Response `200`:
 
 Errors: `404` unknown run, or a run of another bot.
 
-### POST /bots/{bot}/evolution/runs/{run}:cancel
+### POST /bots/{bot_id}/evolution/runs/{run}:cancel
 
 Cancel a run. Sets the run's cancellation token, cancels its unfinished
 operations, and ends it as `cancelled`. Candidates already submitted are
@@ -1299,11 +1373,11 @@ Response `200`:
 Errors: `404` unknown run; `409` `run_already_ended` for a run that is
 `completed`, `failed`, or `budget_exhausted`.
 
-### GET /bots/{bot}/evolution/runs/{run}/candidates
+### GET /bots/{bot_id}/evolution/runs/{run}/candidates
 
 List the candidates a run submitted, in submission order, with their verdict
 status. The full report of one candidate (diff, verification, gate
-decision) is `GET /bots/{bot}/evolution/candidates/{candidate}` in
+decision) is `GET /bots/{bot_id}/evolution/candidates/{candidate}` in
 [08-promotion.md](08-promotion.md). Called by the UI backend, pipelines, and
 `avn evolve run report`.
 
@@ -1364,7 +1438,7 @@ Response `200`:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "job_id": "job_7f3",
+  "job_id": "job_7f3_2",
   "run_id": "run_7f3",
   "attempt": 2,
   "strategy": "clawevolve/bot-evolution@2.0.0",
@@ -1388,7 +1462,7 @@ Errors: `409` `orchestrator_paused` while the global kill switch is on
 
 ### POST /evolution/v1/jobs/{id}/heartbeat
 
-Renew the lease. An expired lease re-queues the job (§7). The response
+Renew the lease. An expired lease re-queues the run as a new job (§7). The response
 also tells the worker whether the run was cancelled (proposed).
 
 Request (header `Evolution-Fencing-Token: ft_7f3_2_b81c`):
@@ -1526,7 +1600,7 @@ Response `200`:
      "kind": "correction", "text": "partial refunds are allowed within 30 days",
      "created_at": "2026-10-07T09:20:00Z"},
     {"feedback_id": "fb_302", "episode_id": "ep_95", "revision_id": "sha256:a90b…",
-     "kind": "rating", "value": 2, "created_at": "2026-10-07T14:02:00Z"}
+     "kind": "rating", "score": 0.25, "created_at": "2026-10-07T14:02:00Z"}
   ]
 }
 ```
@@ -2003,15 +2077,15 @@ from avernet_evolution import Client
 
 c = Client.from_env()
 key = "nightly-bot_123-2026-10-08"                     # deterministic: same key on every retry
-run_id = c.runs.start(bot="bot_123", binding="bind_01",
+run_id = c.runs.start(bot_id="bot_123", binding="bind_01",   # caller owns the bot: no entity_id
                       budget={"max_usd": 10, "max_wall_clock_s": 3600},
                       idempotency_key=key)              # safe to repeat: returns the same run_id
 
-while (run := c.runs.get(bot="bot_123", run_id=run_id)).status in ("queued", "running"):
+while (run := c.runs.get(bot_id="bot_123", run_id=run_id)).status in ("queued", "running"):
     time.sleep(30)                                      # short lookups by id; no request held open
 
 print(run.status, run.budget_used.usd)
-for cand in c.runs.candidates(bot="bot_123", run_id=run_id):
+for cand in c.runs.candidates(bot_id="bot_123", run_id=run_id):
     print(cand.candidate_id, cand.verdict.status)       # approval is Promotion's job (08-promotion.md)
 ```
 
@@ -2026,14 +2100,14 @@ avn evolve run status --bot bot_123 run_7f3 --wait --output json
 ### 15.2 An owner adds a binding
 
 ```python
-policy = c.policy.get(bot="bot_123")
+policy = c.policy.get(bot_id="bot_123")
 bindings = policy.bindings + [Binding(
     id="bind_02", strategy="platform/consolidate-memory@1.0.0",
     trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
     verification_profile="default@1",
     budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
 try:
-    c.policy.put(bot="bot_123", bindings=bindings, if_match=policy.etag)
+    c.policy.put(bot_id="bot_123", bindings=bindings, if_match=policy.etag)
 except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
     for d in e.details:
         print(d.binding, d.check, d.detail)
@@ -2044,7 +2118,7 @@ except BindingCheckFailed as e:                          # 422: fix the binding,
 Inside the service, a schedule firing is an idempotent submission:
 
 ```python
-async def fire_schedule(binding: Binding, bot: str, slot: datetime) -> None:
+async def fire_schedule(binding: Binding, bot: BotRef, slot: datetime) -> None:
     if await kill.is_paused() or await kill.is_bot_frozen(bot):
         await firings.record_skipped(binding.id, slot, reason="paused_or_frozen")
         return
@@ -2125,15 +2199,15 @@ schedule. ClawEvolve's own code is shown in
 | Time | Event | Run state |
 | --- | --- | --- |
 | 02:00:00 | Schedule fires; key `bind_01/2026-10-08T02:00:00Z`; inputs frozen: parent `active` = `r41` (`sha256:a90b…`), `max_rounds: 3`, `max_usd: 20` | `run_7f3` `queued`, attempt 1 |
-| 02:00:09 | Worker A claims `job_7f3`, token `ft_7f3_1_…`; context grants `experience.sessions@1`, `agents@1`, `evaluate.train@1` plus the always-granted parts | `running` |
+| 02:00:09 | Worker A claims `job_7f3_1`, token `ft_7f3_1_…`; context grants `experience.sessions@1`, `agents@1`, `evaluate.train@1` plus the always-granted parts | `running` |
 | 02:01 | Strategy reads 7 days of episodes, adds train cases, saves its state in its own store | `running` |
 | 02:12 | `workspaces` with key `run_7f3/round-1`; `agents:start` with key `run_7f3/round-1/tune` → `op_19a` | `running` |
 | 02:15 | Worker A's host reboots; heartbeats stop | `running` |
 | 02:16:10 | Lease expires; attempt becomes 2; token `ft_7f3_1_…` is now stale | `queued`, attempt 2 |
-| 02:16:30 | Worker B claims; strategy reloads its state by run id; repeats `workspaces` and `agents:start` with the same keys → same `ws_7f3_r1`, same `op_19a`, still running | `running`, attempt 2 |
+| 02:16:30 | Worker B claims the new job `job_7f3_2`; strategy reloads its state by run id; repeats `workspaces` and `agents:start` with the same keys → same `ws_7f3_r1`, same `op_19a`, still running | `running`, attempt 2 |
 | 02:23 | `op_19a` succeeds; train evaluation `op_1b2`; strategy submits candidate `sha256:c41e…` → `candidate/run_7f3/1` (`r42`) | `running` |
 | 02:24–02:58 | Verification under `default@1`; strategy looks the verdict up by id: `pending`, then `accept`; next round builds on `r42` | `running` |
-| 03:26:59 | Round 3 ends; `jobs/job_7f3/complete` with the summary | `completed` |
+| 03:26:59 | Round 3 ends; `jobs/job_7f3_2/complete` with the summary | `completed` |
 
 The gate then routes `r42` (risk tier T2: persona + skill) to the review
 queue ([08-promotion.md](08-promotion.md)); the run itself never moves
