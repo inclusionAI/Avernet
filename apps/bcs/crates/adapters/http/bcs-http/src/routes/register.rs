@@ -144,9 +144,17 @@ pub async fn register_bot(
     {
         Ok(r) => r,
         Err(e) => {
+            // Sanitize at the legacy boundary (final review, Finding 2): the
+            // full cause stays SERVER-SIDE; the client body is a fixed
+            // generic text — never interpolated service diagnostics.
+            tracing::error!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %e,
+                "register: connect_bot failed"
+            );
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": "internal", "message": format!("bot connect failed: {}", e)})),
+                Json(serde_json::json!({"error": "internal", "message": "bot connect failed"})),
             ).into_response();
         }
     };
@@ -187,7 +195,10 @@ pub async fn register_bot(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
                 "error": "internal",
-                "message": format!("bot onboarding failed: {}", e)
+                // Sanitized (final review, Finding 2): the full cause is
+                // logged above server-side; the client body is a fixed
+                // generic text.
+                "message": "bot onboarding failed"
             })),
         ).into_response();
     }

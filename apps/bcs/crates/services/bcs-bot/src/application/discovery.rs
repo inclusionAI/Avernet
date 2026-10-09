@@ -28,7 +28,6 @@ use crate::application::bot::{
 
 
 #[async_trait]
-#[async_trait]
 impl BotDiscoveryService for Bot {
     async fn discover_bots(
         &self,

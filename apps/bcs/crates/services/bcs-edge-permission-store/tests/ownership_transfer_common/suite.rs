@@ -723,5 +723,6 @@ pub(crate) async fn transferred_ownership_contract_tests(h: &Harness) {
     super::suite_second_half::deleted_bot_history_case(h).await;
     super::suite_second_half::visibility_and_paging_case(h).await;
     super::suite_second_half::ot02_team_chain_case(h).await;
+    super::suite_second_half::recipient_liveness_case(h).await;
 }
 

@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bcs_bot::BotCore;
 use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};
@@ -18,21 +19,126 @@ use bcs_service_api::application::invite::{
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    invite_token_decode_no_expiry, invite_token_encode, BotCapabilities, BotRegistryCoreService,
-    Group, GroupCoreService, GroupStrategy, InviteTargetType, InviteTokenPayload, Participant,
-    ParticipantRole, SessionKind,
+    invite_token_decode_no_expiry, invite_token_encode, ActorKind, ActorStatus, BotCapabilities,
+    BotDetailCommand, BotDetailResult, BotListCommand, BotListResult, BotPagedListResult,
+    BotQueryEntry, BotQueryService, BotRegistryCoreService, BotVisibilityQueryCommand,
+    BotVisibilityQueryResult, DynamicStatusResponse, Group, GroupCoreService, GroupStrategy,
+    InviteTargetType, InviteTokenPayload, MyBotsCommand, Participant, ParticipantRole,
+    SessionKind,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
-use bcs_test_support::NoopSystemMessageService;
+use bcs_test_support::{NoopSystemMessageService, NoopBotQueryService};
 
 const SECRET: &[u8] = b"test-invite-secret-32-bytes-long!!";
+
+/// Map-backed LIVE mine-union double (final-review cutover tests):
+/// `list_my_bots` answers ONLY from the seeded control facts, never from
+/// the registry's `created_by` values, so the invite lanes are provably
+/// driven by the live projection.
+struct SeededBotQuery {
+    controlled: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
+}
+
+impl SeededBotQuery {
+    fn new() -> Self {
+        Self {
+            controlled: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Seed the Bots a staff_no CURRENTLY controls (owner or manager —
+    /// both live facts count for the mine union).
+    fn control(&self, staff_no: &str, bot_id: &str) {
+        self.controlled
+            .lock()
+            .unwrap()
+            .entry(staff_no.to_string())
+            .or_default()
+            .push(bot_id.to_string());
+    }
+}
+
+fn mine_entry(bot_id: &str) -> BotQueryEntry {
+    BotQueryEntry {
+        bot_uuid: bot_id.to_string(),
+        capabilities: BotCapabilities {
+            name: Some(bot_id.to_string()),
+            ..BotCapabilities::default()
+        },
+        visibility: "public".into(),
+        status: ActorStatus::Online,
+        actor_kind: ActorKind::Bot,
+        env: Some("local".into()),
+        dynamic_status: DynamicStatusResponse {
+            status: "active".to_string(),
+        },
+        created_by: None,
+        user_visibility: "protected".into(),
+        friend_ext: Default::default(),
+        friend_check_in_strategy: String::new(),
+        is_friend: None,
+        access_relation: Some("owner".to_string()),
+    }
+}
+
+#[async_trait]
+impl BotQueryService for SeededBotQuery {
+    async fn list_bots(
+        &self,
+        _command: BotListCommand,
+    ) -> Result<BotListResult, bcs_service_api::BotUseCaseError> {
+        Err(unconfigured_bot_query())
+    }
+
+    async fn get_bot(
+        &self,
+        _command: BotDetailCommand,
+    ) -> Result<BotDetailResult, bcs_service_api::BotUseCaseError> {
+        Err(unconfigured_bot_query())
+    }
+
+    async fn get_visibility(
+        &self,
+        _command: BotVisibilityQueryCommand,
+    ) -> Result<BotVisibilityQueryResult, bcs_service_api::BotUseCaseError> {
+        Err(unconfigured_bot_query())
+    }
+
+    async fn list_my_bots(
+        &self,
+        command: MyBotsCommand,
+    ) -> Result<BotPagedListResult, bcs_service_api::BotUseCaseError> {
+        let controlled = self
+            .controlled
+            .lock()
+            .unwrap()
+            .get(command.staff_no.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let total = controlled.len() as u64;
+        Ok(BotPagedListResult {
+            items: controlled.iter().map(|id| mine_entry(id)).collect(),
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+}
+
+fn unconfigured_bot_query() -> bcs_service_api::BotUseCaseError {
+    bcs_service_api::BotUseCaseError::Service(bcs_service_api::ServiceError::InvalidOperation {
+        message: "bot query service is not configured".to_string(),
+        request_id: None,
+    })
+}
 
 struct Fixture {
     service: InviteServiceImpl,
     groups: Arc<GroupCore>,
     sessions: Arc<SessionManagementServiceImpl>,
     bots: Arc<BotCore>,
+    mine: Arc<SeededBotQuery>,
 }
 
 impl Fixture {
@@ -47,11 +153,13 @@ impl Fixture {
             session_repo.clone(),
             group_repo.clone(),
         ));
+        let mine = Arc::new(SeededBotQuery::new());
         let service = InviteServiceImpl {
             registry: bots.clone(),
             group: groups.clone(),
             session: sessions.clone(),
             system_message: Arc::new(NoopSystemMessageService),
+            bot_query: mine.clone(),
             token_secret: SECRET.to_vec(),
             default_ttl_seconds: 3600,
             base_url: None,
@@ -63,6 +171,7 @@ impl Fixture {
             groups,
             sessions,
             bots,
+            mine,
         }
     }
 
@@ -256,11 +365,13 @@ async fn session_invite_token_rejects_non_participant() {
 #[tokio::test]
 async fn session_invite_token_allows_human_owner_of_participant_bot() {
     // A Human caller who is not itself a session participant may still mint a
-    // session invite token when one of the Human's owned Bots participates in
-    // the session.
+    // session invite token when one of the Human's CURRENTLY controlled Bots
+    // participates in the session (live mine union — the historical
+    // created_by value alone is not the grant).
     let fx = Fixture::new().await;
     fx.add_owned_bot("bot-a", "staff-owner").await;
     fx.add_owned_bot("bot-b", "staff-9").await;
+    fx.mine.control("staff-9", "bot-b");
     fx.store_group("grp-1", "bot-a").await;
     let session_id = fx
         .create_session_with_participants(
@@ -290,12 +401,13 @@ async fn session_invite_token_allows_human_owner_of_participant_bot() {
 
 #[tokio::test]
 async fn session_invite_token_rejects_human_without_participant_bot() {
-    // A Human caller whose owned Bots are NOT session participants is still
-    // forbidden: ownership alone (without session membership of the owned
-    // Bot) does not grant minting.
+    // A Human caller whose CONTROLLED Bots are NOT session participants is
+    // still forbidden: control alone (without session membership of the
+    // controlled Bot) does not grant minting.
     let fx = Fixture::new().await;
     fx.add_owned_bot("bot-a", "staff-owner").await;
     fx.add_owned_bot("bot-c", "staff-9").await;
+    fx.mine.control("staff-9", "bot-c");
     fx.store_group("grp-1", "bot-a").await;
     let session_id = fx
         .create_session_with_participants(
@@ -533,4 +645,128 @@ async fn pre_field_legacy_token_still_joins_both_paths() {
         .await
         .expect("pre-field token still joins the session path");
     assert!(joined.joined);
+}
+
+// ---------------------------------------------------------------------------
+// Final-review cutover (spec §12.2/§12.4): invite minting authorizes the
+// Human through the LIVE mine union, never the historical `created_by`.
+// ---------------------------------------------------------------------------
+
+/// The FORMER owner — still the historical `created_by` of the driver bot —
+/// can no longer mint a group invite link after the live control moved on.
+#[tokio::test]
+async fn group_invite_token_denies_former_owner_of_driver() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-driver", "staff-9").await;
+    fx.store_group("grp-1", "bot-driver").await;
+    // `staff-9` is still the driver's creator, but has NO live control.
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: "grp-1".to_string(),
+        ttl_seconds: None,
+    };
+    let error = fx
+        .service
+        .create_group_invite_token(cmd)
+        .await
+        .expect_err("a former owner must not mint group invite links");
+    assert!(
+        matches!(error, InviteUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {error:?}"
+    );
+}
+
+/// A legitimate MANAGER of the driver bot — with no historical creation
+/// fact at all — may mint a group invite link (under-grant fix, AC08).
+#[tokio::test]
+async fn group_invite_token_allows_live_manager_of_driver() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-driver", "staff-creator").await;
+    fx.mine.control("staff-9", "bot-driver");
+    fx.store_group("grp-1", "bot-driver").await;
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: "grp-1".to_string(),
+        ttl_seconds: None,
+    };
+    let result = fx
+        .service
+        .create_group_invite_token(cmd)
+        .await
+        .expect("a live manager of the driver may mint group invite links");
+    assert!(result.invite_token.len() > 0);
+}
+
+/// Same cutover on the session lane: the former owner of a participant Bot
+/// (created_by without live control) is denied a session invite link.
+#[tokio::test]
+async fn session_invite_token_denies_former_owner_of_participant_bot() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-a", "staff-owner").await;
+    fx.add_owned_bot("bot-b", "staff-9").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::bot("bot-b", ParticipantRole::Consultant),
+            ],
+        )
+        .await;
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: session_id,
+        ttl_seconds: None,
+    };
+    let error = fx
+        .service
+        .create_session_invite_token(cmd)
+        .await
+        .expect_err("a former owner must not mint session invite links");
+    assert!(
+        matches!(error, InviteUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {error:?}"
+    );
+}
+
+/// A live MANAGER of a participant Bot — with no historical creation fact —
+/// may mint a session invite link.
+#[tokio::test]
+async fn session_invite_token_allows_live_manager_of_participant_bot() {
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-a", "staff-owner").await;
+    fx.add_owned_bot("bot-b", "someone-else").await;
+    fx.mine.control("staff-9", "bot-b");
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::bot("bot-b", ParticipantRole::Consultant),
+            ],
+        )
+        .await;
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: session_id,
+        ttl_seconds: None,
+    };
+    let result = fx
+        .service
+        .create_session_invite_token(cmd)
+        .await
+        .expect("a live manager of a participant Bot may mint session invite links");
+    assert!(result.invite_token.len() > 0);
 }

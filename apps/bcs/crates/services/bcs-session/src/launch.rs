@@ -83,13 +83,26 @@ impl SessionLaunchApplication {
         {
             return Ok(true);
         }
-        let owned = self.registry.try_list_bots_by_creator(owner_id).await?;
-        Ok(owned.iter().any(|bot| {
-            group
-                .participants
-                .iter()
-                .any(|participant| participant.bot_uuid == bot.bot_uuid)
-        }))
+        // Spec §12.2/§12.4 (final-review cutover): the Human qualifies
+        // through a Bot they CURRENTLY own or manage — resolved through the
+        // live authority hook, never the historical `created_by` listing.
+        // A hook failure is a DENY for that pair (fail-closed): it never
+        // grants, and never falls back to a creation-source allowance.
+        for participant in group.participants.iter().filter(|p| p.is_bot()) {
+            match self.authority.can_manage(owner_id, &participant.bot_uuid).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        owner_id,
+                        bot_id = %participant.bot_uuid,
+                        error = %error,
+                        "session launch: live Human→Bot control lookup failed; denying that pair"
+                    );
+                }
+            }
+        }
+        Ok(false)
     }
 
     async fn caller_has_group_access(

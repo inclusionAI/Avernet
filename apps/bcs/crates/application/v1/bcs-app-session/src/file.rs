@@ -23,7 +23,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::types::BotOperationContext;
 use bcs_service_api::{
-    BotRegistryCoreService, GroupCoreService, ServiceError, SystemMessageService,
+    BotQueryService, BotRegistryCoreService, BotUseCaseError, GroupCoreService, MyBotsCommand,
+    ServiceError, SystemMessageService,
 };
 
 pub struct SessionFileApplicationServiceImpl {
@@ -32,17 +33,23 @@ pub struct SessionFileApplicationServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     authority: Arc<dyn BotAuthorityHook>,
+    /// Live mine-union projection (spec §12.4, final-review cutover): the
+    /// identities a Human may act for resolve through `list_my_bots` (live
+    /// owner/manager union) — never the historical `created_by` listing.
+    bot_query: Arc<dyn BotQueryService>,
     system_message: Arc<dyn SystemMessageService>,
     internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
 }
 
 impl SessionFileApplicationServiceImpl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         files: Arc<dyn LegacySessionFileService>,
         sessions: Arc<dyn SessionManagementService>,
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         authority: Arc<dyn BotAuthorityHook>,
+        bot_query: Arc<dyn BotQueryService>,
         system_message: Arc<dyn SystemMessageService>,
         internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
     ) -> Self {
@@ -52,6 +59,7 @@ impl SessionFileApplicationServiceImpl {
             groups,
             registry,
             authority,
+            bot_query,
             system_message,
             internal_content_projector,
         }
@@ -125,18 +133,31 @@ impl SessionFileApplicationServiceImpl {
         let Principal::Human(human) = principal else {
             return Ok(false);
         };
-        let owned = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .map(|bot| bot.bot_uuid)
-            .collect::<HashSet<_>>();
-        Ok(session
-            .participants
-            .iter()
-            .any(|participant| participant.is_bot() && owned.contains(&participant.bot_uuid)))
+        // Final-review cutover (spec §12.2/§12.4): the Human qualifies
+        // through a participating Bot they CURRENTLY own or manage — the
+        // live authority hook per participant, never the historical
+        // `created_by` creation listing. A hook failure DENIES that pair
+        // (fail-closed): it never grants and never falls back.
+        for participant in session.participants.iter().filter(|participant| participant.is_bot()) {
+            match self
+                .authority
+                .can_manage(&human.subject.id, &participant.bot_uuid)
+                .await
+            {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session.id,
+                        user_id = %human.subject.id,
+                        bot_id = %participant.bot_uuid,
+                        error = %error,
+                        "session file membership: live control lookup failed; denying that pair"
+                    );
+                }
+            }
+        }
+        Ok(false)
     }
 
     async fn caller_identities(
@@ -146,13 +167,30 @@ impl SessionFileApplicationServiceImpl {
         match principal {
             Principal::Bot(bot) => Ok(vec![bot.bot_uuid.clone()]),
             Principal::Human(human) => {
+                // Final-review cutover (spec §12.4): the identities a
+                // Human may act for are the live mine union (owner/manager
+                // role facts through `list_my_bots`) — never the historical
+                // `created_by` creation listing. A lookup failure is an
+                // error (fail-closed), never a partial legacy allowance.
                 let mut identities = vec![principal.actor_id()];
                 identities.extend(
-                    self.registry
-                        .try_list_bots_by_creator(&human.subject.id)
+                    self.bot_query
+                        .list_my_bots(MyBotsCommand {
+                            staff_no: human.subject.id.clone(),
+                            offset: 0,
+                            limit: 500,
+                            active_only: false,
+                        })
                         .await
-                        .map_err(map_service_error)?
+                        .map_err(|error| match error {
+                            BotUseCaseError::Service(service_error) => {
+                                map_service_error(service_error)
+                            }
+                            other => ApplicationError::internal(other.to_string()),
+                        })?
+                        .items
                         .into_iter()
+                        .filter(|bot| bot.actor_kind == ActorKind::Bot)
                         .map(|bot| bot.bot_uuid),
                 );
                 Ok(identities)

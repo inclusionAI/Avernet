@@ -21,6 +21,43 @@ impl GroupManagement {
             .map_err(GroupUseCaseError::Service)
     }
 
+    /// Enumeration-style control question for the legacy caller lanes
+    /// (final-review cutover, spec §12.2/§12.4): does the Human CURRENTLY
+    /// own or manage the exact Bot? Any hook failure — no hook wired,
+    /// missing bot, uninitialized or corrupt authority — is a plain DENY
+    /// (fail-closed, never an error page on these read-style lanes), and
+    /// the historical `created_by` value is never consulted as a
+    /// substitute grant. Unlike [`Self::human_maybe_manages_bot`] (which
+    /// propagates typed authority failures for mutation-target questions)
+    /// these caller-eligibility lanes read a failed lookup as "not a
+    /// grant": a retired driver Bot can never wedge them into an error.
+    pub(crate) async fn human_presently_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, GroupUseCaseError> {
+        let Some(hook) = self.authority.as_ref() else {
+            tracing::warn!(
+                user_id,
+                bot_id,
+                "group lane: Human→Bot authority is not configured; denying"
+            );
+            return Ok(false);
+        };
+        match hook.can_manage(user_id, bot_id).await {
+            Ok(allowed) => Ok(allowed),
+            Err(error) => {
+                tracing::warn!(
+                    user_id,
+                    bot_id,
+                    error = %error,
+                    "group lane: Human→Bot authority lookup failed; denying"
+                );
+                Ok(false)
+            }
+        }
+    }
+
     /// Eligibility form: an UNINITIALIZED Bot is a plain non-match for
     /// enumeration-style questions (spec §12.4: callers who do not already
     /// manage the Bot must learn nothing); corrupt and other typed

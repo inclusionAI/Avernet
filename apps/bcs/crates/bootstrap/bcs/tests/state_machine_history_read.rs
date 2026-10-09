@@ -97,7 +97,11 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         bcs_app_group::GroupServiceConfig { relation_env: env.into() }));
     let invite = Arc::new(bcs_group::application::invite::InviteServiceImpl {
         registry: services.registry.clone(), group: services.group.clone(), session: services.session_management.clone(),
-        system_message: services.system_message.clone(), token_secret: Vec::new(), default_ttl_seconds: 60,
+        system_message: services.system_message.clone(),
+        // Noop mine projection: this fixture never resolves Human control,
+        // so the invite lanes deny that side fail-closed.
+        bot_query: services.bot_query.clone(),
+        token_secret: Vec::new(), default_ttl_seconds: 60,
         base_url: None, group_link_url: None, session_link_url: None,
     });
     let invitations = Arc::new(bcs_app_invitation::InvitationFriendshipServiceImpl::new(services.friend.clone(),

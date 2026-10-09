@@ -80,6 +80,10 @@ pub trait TransferDriver: Send + Sync {
     /// authority edge, and INVALIDATE its pendings with terminal_reason
     /// `bot_deleted` (the acceptance must never resurrect a retired Bot).
     async fn retire_bot(&self, bot_id: &str);
+    /// Retire the HUMAN actor row (`human_<user_id>`) through the production
+    /// deletion lane: a recipient deleted between create and decide must fail
+    /// the acceptance closed (the decide-lane liveness re-proof cases).
+    async fn retire_human(&self, user_id: &str);
     /// The STORED (pre-projection) row facts of one transfer.
     async fn raw_row(&self, bot_id: &str, transfer_id: &str) -> Option<RawTransferRow>;
     /// The count of this bot's stored transfer rows (不落单/留存 proofs).
@@ -401,6 +405,24 @@ impl TransferDriver for SqliteDriver {
             .expect("retire_bot");
     }
 
+    async fn retire_human(&self, user_id: &str) {
+        // The SQL soft-delete mark on the Human actor row, the exact shape
+        // the decide-lane recipient guard reads
+        // (`COALESCE(is_deleted, 0) = 0 AND actor_kind = 'human'`).
+        self.db
+            .inner
+            .execute(DbStatement::with_params(
+                "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP \
+                 WHERE bot_uuid = ? AND env = ? AND actor_kind = 'human'",
+                vec![
+                    DbValue::from(format!("human_{user_id}")),
+                    DbValue::from(self.env.clone()),
+                ],
+            ))
+            .await
+            .expect("retire_human");
+    }
+
     async fn raw_row(&self, _bot_id: &str, transfer_id: &str) -> Option<RawTransferRow> {
         let rows = self
             .db
@@ -580,6 +602,26 @@ impl TransferDriver for MemoryDriver {
             .await
             .expect("retire_bot");
         assert!(retired, "the seeded bot must retire through the lane");
+    }
+
+    async fn retire_human(&self, user_id: &str) {
+        // The production Human-deletion lane, reached through the
+        // `BotRepoPort` contract with a system operator context.
+        let deleted = self
+            .repo
+            .delete_human_actor(
+                user_id,
+                BotOperationContext {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    actor: BotOperationActor::System {
+                        system_id: "ownership-transfer-tests".to_string(),
+                        effective_actor_id: "ownership-transfer-tests".to_string(),
+                    },
+                },
+            )
+            .await
+            .expect("retire_human");
+        assert!(deleted, "the seeded Human must retire through the lane");
     }
 
     async fn raw_row(&self, bot_id: &str, transfer_id: &str) -> Option<RawTransferRow> {

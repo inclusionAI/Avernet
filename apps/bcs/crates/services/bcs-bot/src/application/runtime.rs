@@ -22,7 +22,6 @@ use crate::application::bot::{
 };
 
 #[async_trait]
-#[async_trait]
 impl BotRuntimeConnectionService for Bot {
     async fn connect_streaming(
         &self,

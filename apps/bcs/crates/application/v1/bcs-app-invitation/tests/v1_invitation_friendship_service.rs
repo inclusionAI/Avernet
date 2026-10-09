@@ -136,6 +136,9 @@ impl Fixture {
             group: groups.clone(),
             session: sessions.clone(),
             system_message: Arc::new(NoopSystemMessageService),
+            // The join paths this fixture drives never resolve Human
+            // control: the Noop mine projection denies (fail-closed).
+            bot_query: Arc::new(bcs_test_support::NoopBotQueryService),
             token_secret: SECRET.to_vec(),
             default_ttl_seconds: 3600,
             base_url: None,

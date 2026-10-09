@@ -287,7 +287,7 @@ trailing blank line 已修复后复验）。
 | AC05 | 无 view 仍 Human 视角；session-only 不升格 | group/session parity 用例 |
 | AC06 | X 不在 Session 时 B 不得越权读消息/文件 | session_file_facade.rs `non_member_cannot_list_session_files` 等 |
 | AC07 | worker 时 B 无群管理权；driver/manager 时同 owner | owner_manager_parity.rs |
-| AC08 | 全资源 owner/manager 对照 + 业务审计 operator/effective actor | Tasks 9–12 各自 RED/GREEN 套件（focused gate 绿）+ §1.1 session/file 流 |
+| AC08 | 全资源 owner/manager 对照 + 业务审计 operator/effective actor | Tasks 9–12 各自 RED/GREEN 套件（focused gate 绿）+ §1.1 session/file 流。最终修复波补齐 9 条遗留 lane 的 owner/manager 对照：group invite 铸造（invite.rs RED/GREEN）、member removal 与 visibility（operations.rs RED/GREEN）、event-subscription 授权范围（resource_authorizer.rs RED/GREEN）、launch human_has_group_access（session_launch.rs RED/GREEN）、v1 session-file is_member/caller_identities（owner_manager_parity RED/GREEN）、legacy resolve_group_member_caller（共用 sessions.rs current_controllable_bot_ids） |
 | AC09 | manager 可增删 manager、自撤 direct/ownership_transfer、team-only DELETE=200/revoked=false、终撤后 403 | e2e_ownership_transfer story 7（revoke 响应 remaining_team_sources=[] + 接续 403）+ manager_mutation 套件 |
 | AC10 | 越权/Bot-only/跨 env 拒绝 | mutation/manager 路由 conformance + bcs-api-http manager/ownership route 测试 |
 | AC11 | profile/friend/后缀不构成 manager | edge permission conformance（Task 3 suites） |
@@ -330,7 +330,7 @@ trailing blank line 已修复后复验）。
 | OT24 | 无主/多 creator/损坏不自动迁 | 同上（governance reason 固定词表） |
 | OT25 | 注册初始化原子（v1/v2/legacy） | registration init 套件（Tasks 5/18） |
 | OT26 | 重复注册不覆盖 ownership、锁 owner_scope | 同上 + e2e re-onboard |
-| OT27 | cutover 后 created_by 不单独放行 | e2e 全 403 断言 + 生产 cutover 全套管检查（merge probe） |
+| OT27 | cutover 后 created_by 不单独放行 | e2e 全 403 断言 + 生产 cutover 全套管检查（merge probe）。最终修复波收尾 9 条 created_by/list_bots_by_creator 残留 lane：invite.rs:59,93、operations.rs:213,225,414、resource_authorizer.rs:105、launch.rs:86、file.rs:130,152、translation.rs:234 全部切换 live authority/mine union（fail-closed；前 owner 拒绝 + 合法 manager/新 owner 放行均有 RED/GREEN 断言，§1.1 各 crate 测试行） |
 
 ---
 

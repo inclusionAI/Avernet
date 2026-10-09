@@ -55,6 +55,99 @@ impl bcs_service_api::application::v1::SessionFileInternalContentUrlProjector
     }
 }
 
+/// Mine-union double for the file-facade tests: `list_my_bots` answers
+/// from the SAME live control facts as [`SeededAuthority`], so the facade's
+/// identity projection and its per-Bot authority questions agree by
+/// construction.
+struct SeededMine {
+    controlled: std::sync::Mutex<BTreeMap<String, Vec<String>>>,
+}
+
+impl SeededMine {
+    fn empty() -> Self {
+        Self {
+            controlled: std::sync::Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    fn control(&self, user_id: &str, bot_id: &str) {
+        self.controlled
+            .lock()
+            .unwrap()
+            .entry(user_id.to_string())
+            .or_default()
+            .push(bot_id.to_string());
+    }
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::BotQueryService for SeededMine {
+    async fn list_bots(
+        &self,
+        _command: bcs_service_api::BotListCommand,
+    ) -> Result<bcs_service_api::BotListResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn get_bot(
+        &self,
+        _command: bcs_service_api::BotDetailCommand,
+    ) -> Result<bcs_service_api::BotDetailResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn get_visibility(
+        &self,
+        _command: bcs_service_api::BotVisibilityQueryCommand,
+    ) -> Result<bcs_service_api::BotVisibilityQueryResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn list_my_bots(
+        &self,
+        command: bcs_service_api::MyBotsCommand,
+    ) -> Result<bcs_service_api::BotPagedListResult, bcs_service_api::BotUseCaseError> {
+        let controlled = self
+            .controlled
+            .lock()
+            .unwrap()
+            .get(command.staff_no.as_str())
+            .cloned()
+            .unwrap_or_default();
+        Ok(bcs_service_api::BotPagedListResult {
+            total: controlled.len() as u64,
+            items: controlled
+                .iter()
+                .map(|bot_id| bcs_service_api::BotQueryEntry {
+                    bot_uuid: bot_id.clone(),
+                    capabilities: Default::default(),
+                    visibility: "public".to_string(),
+                    status: bcs_service_api::ActorStatus::Online,
+                    actor_kind: bcs_service_api::ActorKind::Bot,
+                    env: Some("local".to_string()),
+                    dynamic_status: bcs_service_api::DynamicStatusResponse {
+                        status: "active".to_string(),
+                    },
+                    created_by: None,
+                    user_visibility: "protected".to_string(),
+                    friend_ext: Default::default(),
+                    friend_check_in_strategy: String::new(),
+                    is_friend: None,
+                    access_relation: Some("owner".to_string()),
+                })
+                .collect(),
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+}
+
 struct Fixture {
     service: SessionFileApplicationServiceImpl,
     bots: Arc<BotCore>,
@@ -62,6 +155,7 @@ struct Fixture {
     session_repo: Arc<dyn SessionRepoPort>,
     notifications: Arc<RecordingSystemMessage>,
     authority: Arc<SeededAuthority>,
+    mine: Arc<SeededMine>,
 }
 
 impl Fixture {
@@ -103,12 +197,14 @@ impl Fixture {
         // live-fact semantics (fail-closed, never `created_by`) and lets the
         // parity tests seed owner/manager edges (spec §8/§12.2).
         let authority_hook = Arc::new(SeededAuthority::empty());
+        let mine = Arc::new(SeededMine::empty());
         let service = SessionFileApplicationServiceImpl::new(
             legacy,
             sessions,
             groups.clone(),
             bots.clone(),
             authority_hook.clone(),
+            mine.clone(),
             notifications.clone(),
             Arc::new(CompletionShareProjector),
         );
@@ -119,6 +215,7 @@ impl Fixture {
             session_repo,
             notifications,
             authority: authority_hook,
+            mine,
         }
     }
 
@@ -170,11 +267,13 @@ impl Fixture {
     /// resolve through the authority hook, never `created_by`.
     async fn seed_authority_owner(&self, bot_id: &str, owner_staff_no: &str) {
         self.authority.seed_owner(bot_id, owner_staff_no).await;
+        self.mine.control(owner_staff_no, bot_id);
     }
 
     /// Seed a live manager fact (spec §8 owner/manager parity).
     async fn seed_authority_manager(&self, bot_id: &str, manager_staff_no: &str) {
         self.authority.seed_manager(bot_id, manager_staff_no).await;
+        self.mine.control(manager_staff_no, bot_id);
     }
 }
 

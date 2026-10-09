@@ -14,7 +14,7 @@ use bcs_service_api::types::{AuditActor, ManagerMutation};
 use bcs_service_api::ServiceError;
 
 use super::suite::{
-    assert_receipt, expect_concealed, fresh_key,
+    assert_receipt, expect_concealed, expect_invalid_subject, fresh_key,
 };
 use super::Harness;
 use super::{create_with_key, FUTURE_DEADLINE, LAPSED_DEADLINE};
@@ -549,3 +549,76 @@ pub(super) async fn ot02_team_chain_case(h: &Harness) {
     );
 }
 
+
+// ---------------------------------------------------------------------------
+// Case — the recipient must still be a LIVE Human at decision time
+// ---------------------------------------------------------------------------
+
+/// Recipient-liveness re-proof at accept (spec §10.2 parity with the memory
+/// twin's decision-point check): a recipient retired after the create
+/// validation answers the typed `InvalidSubject` branch — never an
+/// acceptance that writes an owner edge onto a retired actor. The failure
+/// leaves no partial side effects (pending preserved, owner unchanged,
+/// version intact), and the retry observes the SAME classification.
+pub(super) async fn recipient_liveness_case(h: &Harness) {
+    let repo = h.repo.clone();
+    h.seed_owned("bot-live", "a").await;
+    h.seed_human("r").await;
+    let created = repo
+        .create_transfer(create_with_key("a", "bot-live", "r", 1, &fresh_key()))
+        .await
+        .unwrap();
+    let transfer_id = created.receipt.transfer_id.clone();
+
+    // The recipient retires BETWEEN create and decide.
+    h.driver.retire_human("r").await;
+
+    expect_invalid_subject(
+        repo.decide_transfer("r", &transfer_id, TransferAction::Accept)
+            .await,
+        "an accept whose recipient is no longer a live Human",
+    );
+
+    // No partial side effects: the pending slot survives untouched, the
+    // owner edge and version are unchanged.
+    assert_eq!(
+        h.driver.raw_row("bot-live", &transfer_id).await,
+        Some(super::RawTransferRow {
+            stored_status: "pending".to_string(),
+            terminal_reason: None,
+        }),
+        "the failed acceptance must leave the pending row untouched"
+    );
+    assert_eq!(
+        repo.ownership("bot-live").await.unwrap(),
+        bcs_service_api::types::OwnershipState {
+            owner_user_id: "a".to_string(),
+            ownership_version: 1,
+        },
+        "the failed acceptance must not move ownership or bump the version"
+    );
+
+    // Retry re-classifies identically (fail-closed stays stable, and the
+    // recipient party keeps seeing the typed subject branch — not a 404
+    // concealing a mutated transfer).
+    expect_invalid_subject(
+        repo.decide_transfer("r", &transfer_id, TransferAction::Accept)
+            .await,
+        "the retried accept re-classifies the retired recipient",
+    );
+
+    // The still-live initiator cleans the slot afterwards (the failure
+    // answered a subject question, not a mutated transfer state).
+    let cancelled = repo
+        .decide_transfer("a", &transfer_id, TransferAction::Cancel)
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            cancelled,
+            CommittedTransferOutcome::Receipt(ref receipt)
+                if matches!(receipt.status, TransferStatus::Cancelled)
+        ),
+        "the still-initiating owner may cancel the un-acceptable pending"
+    );
+}

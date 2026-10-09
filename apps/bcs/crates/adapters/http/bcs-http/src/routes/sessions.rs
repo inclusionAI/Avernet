@@ -137,7 +137,19 @@ pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> 
         }
         bcs_service_api::SessionUseCaseError::Conflict(s) => (StatusCode::CONFLICT, s.clone()),
         bcs_service_api::SessionUseCaseError::Internal(e) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            // Sanitize at the legacy boundary (final review, Finding 2): the
+            // full cause stays SERVER-SIDE (tracing), the client body is a
+            // fixed generic text — never the raw authority/store diagnostics
+            // (e.g. "corrupt authority data: …" or SQL fragments).
+            tracing::error!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %e,
+                "legacy session route: internal error (details withheld from the client body)"
+            );
+                        (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal session error".to_string(),
+            )
         }
     };
     (code, Json(serde_json::json!({"error": msg}))).into_response()
@@ -242,11 +254,22 @@ fn session_launch_error_to_legacy(error: SessionLaunchError) -> Response {
         )
             .into_response(),
         SessionLaunchError::Runtime(error) => collaboration_error_to_response(error),
-        SessionLaunchError::Internal(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": error.to_string()})),
-        )
-            .into_response(),
+        SessionLaunchError::Internal(error) => {
+            // Sanitize at the legacy boundary (final review, Finding 2): the
+            // raw authority/store diagnostics (corrupt authority rows, SQL
+            // fragments) stay SERVER-SIDE; the client body is the fixed
+            // generic text.
+            tracing::error!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %error,
+                "legacy session launch: internal error (details withheld from the client body)"
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal session launch error"})),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -2286,4 +2309,108 @@ mod tests {
     // Session message history tests are in bcs-message-flow/src/group_history.rs
     // alongside the session_history_request_params and resolve_session_history_source_bots
     // functions that power the service layer.
+
+    use super::*;
+    use axum::body::to_bytes;
+    use futures::FutureExt;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing::instrument::WithSubscriber;
+
+    fn body_string(response: Response) -> String {
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .now_or_never()
+            .expect("body read")
+            .expect("body ok");
+        String::from_utf8(bytes.to_vec()).expect("UTF-8 body")
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A corrupt-authority error carrying the exact diagnostic fragments
+    /// (SQL, internal row detail) that must NEVER reach a client body.
+    fn corrupt_authority_error() -> bcs_service_api::ServiceError {
+        bcs_service_api::ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::CorruptAuthority {
+                bot_id: "bot-secret".to_string(),
+                env: "prod".to_string(),
+                detail: "SELECT owner FROM edge_grants -- row detail: 3 owner edges"
+                    .to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn session_launch_internal_error_body_hides_authority_detail() {
+        let error = SessionLaunchError::Internal(corrupt_authority_error());
+        let response = session_launch_error_to_legacy(error);
+        assert_eq!(response.status().as_u16(), 500);
+        let body = body_string(response);
+        assert_eq!(body, r#"{"error":"internal session launch error"}"#);
+    }
+
+    #[test]
+    fn session_use_case_internal_error_body_hides_service_detail() {
+        let error = bcs_service_api::SessionUseCaseError::Internal(
+            bcs_service_api::ServiceError::InternalError(
+                "SQLSTATE[23000] Integrity constraint violation: bot-secret,state=corrupt"
+                    .to_string(),
+            ),
+        );
+        let response = session_error_to_response(&error);
+        assert_eq!(response.status().as_u16(), 500);
+        let body = body_string(response);
+        assert_eq!(body, r#"{"error":"internal session error"}"#);
+    }
+
+    #[test]
+    fn sanitized_internal_renderers_keep_the_cause_in_the_server_side_log() {
+        // The full cause stays observable SERVER-SIDE: the same render call
+        // that ships the generic body emits the raw diagnostics to tracing.
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || writer.clone())
+            .finish();
+        async {
+            let error = SessionLaunchError::Internal(corrupt_authority_error());
+            let response = session_launch_error_to_legacy(error);
+            // client body: sanitized
+            assert_eq!(
+                body_string(response),
+                r#"{"error":"internal session launch error"}"#
+            );
+            let second = bcs_service_api::SessionUseCaseError::Internal(
+                corrupt_authority_error(),
+            );
+            let response = session_error_to_response(&second);
+            assert_eq!(body_string(response), r#"{"error":"internal session error"}"#);
+        }
+        .with_subscriber(subscriber)
+        .now_or_never()
+        .expect("render runs synchronously");
+
+        let text = String::from_utf8(buffer.0.lock().unwrap().clone())
+            .expect("UTF-8 log output");
+        assert!(
+            text.contains("corrupt authority data"),
+            "the server-side log must retain the full cause"
+        );
+        assert!(
+            text.contains("SELECT owner FROM edge_grants"),
+            "the server-side log must retain the SQL/row detail"
+        );
+    }
 }

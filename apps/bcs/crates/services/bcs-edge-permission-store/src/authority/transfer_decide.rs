@@ -265,6 +265,17 @@ impl super::reads::DbBotAuthorityStore {
         // The action's all-or-nothing transaction.
         match action {
             TransferAction::Accept => {
+                // The recipient must still be a LIVE same-env Human at
+                // decision time — the memory twin's decision-point re-proof
+                // and the create lane's `rh` guard. A recipient deleted
+                // between create and decide answers the typed
+                // `InvalidSubject` branch here; the guarded receipt
+                // statement re-proves the same predicate inside the write
+                // transaction, so a deletion racing THIS read rolls the
+                // whole acceptance back and the retry re-classifies here.
+                if let Err(error) = self.accept_recipient_live(&to_user_id).await {
+                    return DecideAttempt::Service(error);
+                }
                 self.accept_transaction(actor_user_id, transfer_id, &bot_id, &row)
                     .await
             }
@@ -684,8 +695,8 @@ impl super::reads::DbBotAuthorityStore {
         // §10.2 step 5: save the accepted receipt. `result_owner_version`
         // is the row's own `expected_owner_version + 1` — the CAS above
         // proves that is the committed new version — and the statement's
-        // guards re-prove parties, deadline, the new owner edge and the
-        // bumped version against CURRENT rows.
+        // guards re-prove parties, deadline, the LIVE recipient Human, the
+        // new owner edge and the bumped version against CURRENT rows.
         steps.push(DbTransactionStep::ExecuteChecked {
             expected_affected_rows: 1,
             statement: DbStatement::with_params(
@@ -699,6 +710,9 @@ impl super::reads::DbBotAuthorityStore {
                        AND expires_at > {now} \
                        AND (SELECT b.ownership_version FROM bcs_bots b \
                              WHERE b.bot_uuid = ? AND b.env = ?) = expected_owner_version + 1 \
+                       AND EXISTS (SELECT 1 FROM bcs_bots rh \
+                             WHERE rh.bot_uuid = ? AND rh.env = ? AND rh.actor_kind = 'human' \
+                               AND COALESCE(rh.is_deleted, 0) = 0) \
                        AND EXISTS (SELECT 1 FROM edge_grants ae \
                              WHERE ae.env = ? AND ae.to_id = ? \
                                AND ae.grant_kind = 'owner' AND ae.status = 'approved' \
@@ -712,6 +726,8 @@ impl super::reads::DbBotAuthorityStore {
                     DbValue::from(from_user_id.as_str()),
                     DbValue::from(to_user_id.as_str()),
                     DbValue::from(bot_id),
+                    DbValue::from(env),
+                    DbValue::from(human_actor_id(&to_user_id).as_str()),
                     DbValue::from(env),
                     DbValue::from(env),
                     DbValue::from(bot_id),
@@ -748,6 +764,38 @@ impl super::reads::DbBotAuthorityStore {
     // ------------------------------------------------------------------
     // Shared reads
     // ------------------------------------------------------------------
+
+    /// The Accept arm's validated recipient re-read: the recipient must be
+    /// a live same-env Human at the decision point (spec §10.2 parity with
+    /// the memory twin's decision-time re-proof; the SQL create lane's `rh`
+    /// guard shape). A deleted/revoked recipient fails closed with the
+    /// typed `InvalidSubject` branch — never an acceptance that writes an
+    /// owner edge onto a retired actor.
+    async fn accept_recipient_live(&self, to_user_id: &str) -> ServiceResult<()> {
+        let recipient_edge = human_actor_id(to_user_id);
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT 1 FROM bcs_bots rh \
+                 WHERE rh.bot_uuid = ? AND rh.env = ? AND rh.actor_kind = 'human' \
+                   AND COALESCE(rh.is_deleted, 0) = 0 LIMIT 1",
+                vec![
+                    DbValue::from(recipient_edge.as_str()),
+                    DbValue::from(self.env.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|err| service_db_error("authority_transfer_accept_recipient", err))?;
+        if rows.is_empty() {
+            return Err(ServiceError::Authority(AuthorityError::InvalidSubject(
+                format!(
+                    "recipient '{}' is not a live human actor in env '{}'",
+                    to_user_id, self.env
+                ),
+            )));
+        }
+        Ok(())
+    }
 
     /// The minimal-record read (raw columns of the transfer row for the
     /// party/terminal classification; full strict decode happens on the

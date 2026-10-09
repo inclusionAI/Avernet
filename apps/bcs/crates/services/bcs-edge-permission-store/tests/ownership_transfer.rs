@@ -18,7 +18,7 @@ use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, ListOwnershipTransfers, TransferListDirection,
 };
 
-use common::suite::{expect_forbidden, fresh_key};
+use common::suite::{expect_forbidden, expect_invalid_subject, fresh_key};
 use common::{create_with_key, sqlite_harness};
 
 #[tokio::test]
@@ -189,10 +189,72 @@ async fn sqlite_transfer_guards_hold_inside_the_write_transaction() {
         "no pending row may survive the drifted create"
     );
 
+    // Recipient-liveness drift (the Accept-lane production gap this wave
+    // closed): the recipient Human retires BETWEEN the accept's validated
+    // read and the write transaction. The guarded receipt statement
+    // re-proves recipient liveness inside the transaction, so the whole
+    // acceptance rolls back (no partial side effects) and the bounded
+    // retry re-classifies into the typed `InvalidSubject` branch — the
+    // same classification the memory twin gives at its decision point.
+    h.seed_owned("bot-drift-recipient", "a").await;
+    let created = h
+        .repo
+        .create_transfer(create_with_key("a", "bot-drift-recipient", "b", 1, &fresh_key()))
+        .await
+        .unwrap();
+    db.arm_drift(
+        "UPDATE bcs_bots SET is_deleted = 1 \
+         WHERE bot_uuid = 'human_b' AND env = 'local' AND actor_kind = 'human'",
+    );
+    expect_invalid_subject(
+        h.repo
+            .decide_transfer("b", &created.receipt.transfer_id, TransferAction::Accept)
+            .await,
+        "an accept whose recipient drifted away inside the write window",
+    );
+    assert_eq!(
+        h.driver.raw_row("bot-drift-recipient", &created.receipt.transfer_id).await,
+        Some(common::RawTransferRow {
+            stored_status: "pending".to_string(),
+            terminal_reason: None,
+        }),
+        "the rolled-back acceptance leaves the pending row intact (no partial side effects)"
+    );
+    assert_eq!(
+        h.driver.manager_edge_status("bot-drift-recipient", "a", "ownership_transfer", &created.receipt.transfer_id).await,
+        None,
+        "the previous owner's transfer-source edge was not written by the drift"
+    );
+    // Slot hygiene intact: the still-valid pending accepts normally once a
+    // live recipient exists again (the failure answers a subject question,
+    // not a mutated transfer state).
+    db.inner
+        .execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET is_deleted = 0 \
+             WHERE bot_uuid = 'human_b' AND env = 'local' AND actor_kind = 'human'",
+            vec![],
+        ))
+        .await
+        .expect("restore the retired recipient");
+    let accepted = h
+        .repo
+        .decide_transfer("b", &created.receipt.transfer_id, TransferAction::Accept)
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            accepted,
+            CommittedTransferOutcome::Receipt(ref receipt)
+                if matches!(receipt.status, TransferStatus::Accepted)
+        ),
+        "the restored pending accepts once the recipient is live again"
+    );
+
     // Accept path: the version bumps between the validated read and the
     // write window; the probes re-classify into the owner_changed
     // invalidation instead of committing a stale acceptance.
     h.seed_owned("bot-drift-accept", "a").await;
+    h.seed_human("b").await;
     let created = h
         .repo
         .create_transfer(create_with_key("a", "bot-drift-accept", "b", 1, &fresh_key()))

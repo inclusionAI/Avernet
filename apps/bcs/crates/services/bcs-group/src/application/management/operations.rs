@@ -209,11 +209,19 @@ impl GroupManagementService for GroupManagement {
 
         let is_coordinator = group.originator() == caller || group.driver_bot == caller || {
             if caller.starts_with("human_") {
+                // Final-review cutover (spec §12.2/§12.4): the Human
+                // qualifies through a Bot they CURRENTLY own or manage —
+                // the live authority hook, never the historical
+                // `created_by` creation listing.
                 let staff_no = caller.trim_start_matches("human_");
-                let owned = self.registry.list_bots_by_creator(staff_no).await;
-                owned
-                    .iter()
-                    .any(|b| b.bot_uuid == group.driver_bot || b.bot_uuid == group.originator())
+                let originator = group.originator();
+                let controls_driver = self
+                    .human_presently_controls_bot(staff_no, &group.driver_bot)
+                    .await?;
+                let controls_originator = originator != group.driver_bot
+                    && !originator.starts_with("human_")
+                    && self.human_presently_controls_bot(staff_no, originator).await?;
+                controls_driver || controls_originator
             } else {
                 false
             }
@@ -221,11 +229,8 @@ impl GroupManagementService for GroupManagement {
         let is_self = caller == cmd.bot_id;
         let is_owner = if caller.starts_with("human_") {
             let staff_no = caller.trim_start_matches("human_");
-            self.registry
-                .list_bots_by_creator(staff_no)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == cmd.bot_id)
+            self.human_presently_controls_bot(staff_no, &cmd.bot_id)
+                .await?
         } else {
             false
         };
@@ -406,15 +411,24 @@ impl GroupManagementService for GroupManagement {
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
-        // Only coordinator (driver, originator, or driver's owner) can change visibility
+        // Only coordinator (driver, originator, or a Human who currently
+        // controls the driver Bot) can change visibility. Final-review
+        // cutover (spec §12.2/§12.4): the Human side resolves through the
+        // live authority hook — the owner/manager union — never the
+        // historical `created_by` creation listing.
+        let human_controls_driver = if let Some(staff_no) = cmd
+            .caller_actor_id
+            .strip_prefix("human_")
+            .filter(|staff_no| !staff_no.is_empty())
+        {
+            self.human_presently_controls_bot(staff_no, &group.driver_bot)
+                .await?
+        } else {
+            false
+        };
         let is_coordinator = cmd.caller_actor_id == group.driver_bot
             || group.originator.as_deref() == Some(&cmd.caller_actor_id)
-            || self
-                .registry
-                .list_bots_by_creator(&cmd.caller_actor_id)
-                .await
-                .iter()
-                .any(|b| b.bot_uuid == group.driver_bot);
+            || human_controls_driver;
         if !is_coordinator {
             return Err(GroupUseCaseError::Forbidden(
                 "Only the group coordinator can change visibility".to_string(),

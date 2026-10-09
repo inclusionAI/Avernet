@@ -318,6 +318,7 @@ fn build_eventing_runtime_blocking(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
     allow_local_test_endpoints: bool,
 ) -> crate::Result<crate::eventing_wiring::EventingRuntime> {
     std::thread::scope(|scope| {
@@ -332,6 +333,7 @@ fn build_eventing_runtime_blocking(
                         sessions,
                         collaboration_runtime,
                         registry,
+                        authority,
                         allow_local_test_endpoints,
                     ))
             })
@@ -1662,6 +1664,7 @@ fn build_openapi_v1_state(
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
     >,
+    bot_query: Arc<dyn bcs_service_api::BotQueryService>,
 ) -> (
     ApiState,
     Arc<dyn bcs_service_api::InternalBotAttributesService>,
@@ -1746,6 +1749,10 @@ fn build_openapi_v1_state(
         groups.clone(),
         registry.clone(),
         authority_hook.clone(),
+        // Live mine union (spec §12.4, final-review cutover): the V1 file
+        // facade's caller identities resolve through the owner/manager
+        // union — never the historical `created_by` listing.
+        bot_query.clone(),
         system_message.clone(),
         Arc::new(session_file_url_projector.clone()),
     ));
@@ -1757,6 +1764,10 @@ fn build_openapi_v1_state(
             group: groups,
             session: sessions,
             system_message,
+            // Live mine union (spec §12.4, final-review cutover): the
+            // Human-side invite authorization resolves through the owner/
+            // manager union, never the historical `created_by` listing.
+            bot_query: bot_query.clone(),
             token_secret: invite_token_secret.clone(),
             default_ttl_seconds: config.invite.default_ttl_seconds,
             base_url: config.invite.base_url.clone(),
@@ -2609,6 +2620,7 @@ impl Default for BcsServerState {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             false,
         )
         .expect("default Eventing configuration must initialize");
@@ -2655,6 +2667,7 @@ impl Default for BcsServerState {
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
+            bot_use_cases.clone(),
         );
         let channel_runtime = build_channel_runtime(
             &config,
@@ -4261,6 +4274,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
@@ -4300,6 +4314,7 @@ impl BcsServer {
             frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
+            use_cases.bot_query.clone(),
         );
 
         // Build services bundle
@@ -5212,6 +5227,7 @@ impl BcsServer {
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
+            authority_hook.clone(),
             local_eventing_endpoints_allowed(),
         )
         .await?;
@@ -5254,6 +5270,7 @@ impl BcsServer {
             frontend_connections.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
+            use_cases.bot_query.clone(),
         );
 
         // Build services bundle

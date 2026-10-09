@@ -79,12 +79,18 @@ All notable BCS changes are documented here. Items follow
   the legacy `is_creator` edge, Bot-id suffixes and signed Gateway owner
   claims are no longer permission answers: every "may this Human manage this
   Bot" decision resolves through the live Bot authority store (owner edge /
-  manager sources) via the centralized authority hook, on every HTTP entry
-  (v1 and legacy), the Session connection/launch lanes and the Workbench
-  protected delivery. Deployments with historical bots must run the
+  manager sources) via the centralized authority hook or the owner∪manager
+  mine projection, on every HTTP entry (v1 and legacy) — including the group
+  invite minting, member removal, group-visibility and event-subscription
+  scope lanes — the Session connection/launch lanes, the session-file
+  membership/identity lanes and the Workbench protected delivery. Deployments
+  with historical bots must run the
   `bcs-ownership-migrate` cutover (see the runbook) before relying on manager
   abilities; version-0 (uninitialized) Bots answer
   `ownership_not_initialized` on the ownership-dependent Human surfaces.
+  Legacy 500 bodies no longer carry internal authority/store diagnostics:
+  the full cause is logged server-side and the client sees a fixed generic
+  error text.
 
 - Rename `collaboration.experimental_fixed_loop_execution` to
   `collaboration.loop_execution_enabled`. Update existing configuration files;

@@ -45,8 +45,8 @@ use bcs_service_api::application::v1::session_file::SessionFileApplicationServic
 use bcs_service_api::application::v1::{
     resolve_authorized_principal, ApplicationError, AuthenticatedBotIdentity,
     AuthenticatedCaller, AuthenticatedUserIdentity, BotAuthorityHook, CollectSession,
-    CreateSession, DeleteResult, DeleteSessionFile, GetSession, ListSessionMessages, Page,
-    SessionMessageService, SessionService, UncollectSession,
+    CreateSession, DeleteResult, DeleteSessionFile, GetSession, ListSessionFiles,
+    ListSessionMessages, Page, SessionMessageService, SessionService, UncollectSession,
 };
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::application::v1::SessionFileInternalContentUrlProjector;
@@ -129,6 +129,92 @@ impl BotAuthorityHook for SeededAuthority {
     }
 }
 
+/// Map-backed mine-union double: `list_my_bots` answers from the SAME
+/// live control facts as [`SeededAuthority`], so the facade's identity
+/// projection and its per-Bot authority questions agree by construction.
+struct SeededMine {
+    controlled: Mutex<std::collections::BTreeMap<String, Vec<String>>>,
+}
+
+impl SeededMine {
+    fn control(&self, user_id: &str, bot_id: &str) {
+        self.controlled
+            .lock()
+            .unwrap()
+            .entry(user_id.to_string())
+            .or_default()
+            .push(bot_id.to_string());
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::BotQueryService for SeededMine {
+    async fn list_bots(
+        &self,
+        _command: bcs_service_api::BotListCommand,
+    ) -> Result<bcs_service_api::BotListResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn get_bot(
+        &self,
+        _command: bcs_service_api::BotDetailCommand,
+    ) -> Result<bcs_service_api::BotDetailResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn get_visibility(
+        &self,
+        _command: bcs_service_api::BotVisibilityQueryCommand,
+    ) -> Result<bcs_service_api::BotVisibilityQueryResult, bcs_service_api::BotUseCaseError> {
+        Err(bcs_service_api::BotUseCaseError::Service(
+            bcs_service_api::ServiceError::InternalError("not configured".to_string()),
+        ))
+    }
+
+    async fn list_my_bots(
+        &self,
+        command: bcs_service_api::MyBotsCommand,
+    ) -> Result<bcs_service_api::BotPagedListResult, bcs_service_api::BotUseCaseError> {
+        let controlled = self
+            .controlled
+            .lock()
+            .unwrap()
+            .get(command.staff_no.as_str())
+            .cloned()
+            .unwrap_or_default();
+        Ok(bcs_service_api::BotPagedListResult {
+            total: controlled.len() as u64,
+            items: controlled
+                .iter()
+                .map(|bot_id| bcs_service_api::BotQueryEntry {
+                    bot_uuid: bot_id.clone(),
+                    capabilities: Default::default(),
+                    visibility: "public".to_string(),
+                    status: bcs_service_api::ActorStatus::Online,
+                    actor_kind: bcs_service_api::ActorKind::Bot,
+                    env: Some("parity".to_string()),
+                    dynamic_status: bcs_service_api::DynamicStatusResponse {
+                        status: "active".to_string(),
+                    },
+                    created_by: None,
+                    user_visibility: "protected".to_string(),
+                    friend_ext: Default::default(),
+                    friend_check_in_strategy: String::new(),
+                    is_friend: None,
+                    access_relation: Some("owner".to_string()),
+                })
+                .collect(),
+            offset: command.offset,
+            limit: command.limit,
+        })
+    }
+}
+
 struct Fixture {
     service: SessionServiceImpl,
     file_facade: SessionFileApplicationServiceImpl,
@@ -138,6 +224,7 @@ struct Fixture {
     session_repo: Arc<MemorySessionRepo>,
     file_repo: Arc<MemorySessionFileRepo>,
     authority: Arc<SeededAuthority>,
+    mine: Arc<SeededMine>,
 }
 
 fn human_caller(staff_no: &str) -> AuthenticatedCaller {
@@ -189,6 +276,9 @@ impl Fixture {
             group_repo,
         ));
         let authority = Arc::new(SeededAuthority::empty());
+        let mine = Arc::new(SeededMine {
+            controlled: Mutex::new(std::collections::BTreeMap::new()),
+        });
         let authority_hook: Arc<dyn BotAuthorityHook> = authority.clone();
         let runtime: Arc<ParityRuntime> = Arc::new(Default::default());
         let history: Arc<ParityHistory> = Arc::new(Default::default());
@@ -246,6 +336,10 @@ impl Fixture {
             groups.clone(),
             bots.clone(),
             authority_hook,
+            // Mine union seeded from the SAME live facts as the authority
+            // double: the identity projection and the per-Bot questions
+            // agree by construction.
+            mine.clone(),
             Arc::new(bcs_test_support::NoopSystemMessageService),
             Arc::new(ParityShareProjector),
         );
@@ -258,7 +352,21 @@ impl Fixture {
             session_repo,
             file_repo,
             authority,
+            mine,
         }
+    }
+
+    /// Seed a live OWNER fact on BOTH doubles (the per-Bot questions and
+    /// the mine identity projection answer from the same fact).
+    async fn seed_owner(&self, bot_id: &str, staff_no: &str) {
+        self.authority.seed_owner(bot_id, staff_no).await;
+        self.mine.control(staff_no, bot_id);
+    }
+
+    /// Seed a live MANAGER fact on BOTH doubles.
+    async fn seed_manager(&self, bot_id: &str, staff_no: &str) {
+        self.authority.seed_manager(bot_id, staff_no).await;
+        self.mine.control(staff_no, bot_id);
     }
 
     async fn register_public_bot(&self, bot_uuid: &str) {
@@ -571,8 +679,8 @@ async fn parities() {
     fixture.register_public_bot("bot-x").await;
     fixture.register_public_bot("driver-bot").await;
     // Alice owns bot-x; Bob is its MANAGER (owner parity, spec §8).
-    fixture.authority.seed_owner("bot-x", "alice").await;
-    fixture.authority.seed_manager("bot-x", "bob").await;
+    fixture.seed_owner("bot-x", "alice").await;
+    fixture.seed_manager("bot-x", "bob").await;
 
     fixture
         .seed_chat_group_with_participants("parity-group", &["bot-x"])
@@ -625,7 +733,7 @@ async fn parities() {
     // NOT a session participant is an error (managed rights stop at the bot's
     // own participation, spec §8.1 "View Bot 必须真实参与待查询资源").
     fixture.register_public_bot("bot-outsider").await;
-    fixture.authority.seed_manager("bot-outsider", "bob").await;
+    fixture.seed_manager("bot-outsider", "bob").await;
     let other_session = fixture
         .seed_session(
             "parity-group",
@@ -801,7 +909,7 @@ async fn mixed_identity_launch_keeps_the_human_operator_in_the_create_audit() {
     ;
     // Bob MANAGES bot-x: the live authority facts authorize the mixed caller
     // regardless of the (stale) signed owner_id claim.
-    fixture.authority.seed_manager("bot-x", "bob").await;
+    fixture.seed_manager("bot-x", "bob").await;
     fixture
         .seed_chat_group_with_participants("parity-launch", &[])
         .await;
@@ -853,4 +961,85 @@ async fn mixed_identity_launch_keeps_the_human_operator_in_the_create_audit() {
         create_rows[0].phase,
         bcs_service_api::types::BotActionAuditPhase::Applied
     );
+}
+
+// ---------------------------------------------------------------------------
+// Final-review cutover (spec §12.2/§12.4): the file facade's session-membership
+// gate for a Human resolves through the LIVE authority facts, never the
+// historical `created_by` creation listing.
+// ---------------------------------------------------------------------------
+
+async fn seed_session_with_bot_participant(fixture: &Fixture) -> String {
+    fixture.register_public_bot("driver-bot").await;
+    fixture.register_public_bot("bot-file").await;
+    fixture
+        .seed_chat_group_with_participants("group-files", &["bot-file"])
+        .await;
+    fixture
+        .seed_session(
+            "group-files",
+            "group-files:abcd1234",
+            vec![
+                Participant::bot("driver-bot", ParticipantRole::Driver),
+                Participant::bot("bot-file", ParticipantRole::Consultant),
+            ],
+        )
+        .await;
+    "group-files:abcd1234".to_string()
+}
+
+/// The FORMER owner of a participating Bot — still its historical
+/// `created_by` — is denied the session-files lane after the live control
+/// moved on (over-grant retired).
+#[tokio::test]
+async fn former_owner_is_denied_the_session_file_lane() {
+    let fixture = Fixture::new().await;
+    let session_id = seed_session_with_bot_participant(&fixture).await;
+    // Historical creation fact only: created_by alice, no live role.
+    fixture
+        .bots
+        .save_created_by("bot-file", "alice", true)
+        .await
+        .expect("record the historical creator");
+
+    let error = fixture
+        .file_facade
+        .list(ListSessionFiles {
+            caller: human_caller("alice"),
+            session_id: session_id.clone(),
+            prefix: None,
+            status: None,
+            limit: 10,
+            offset: 0,
+        })
+        .await
+        .expect_err("a former owner without live control is not a session member");
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected the participant gate, got {error:?}"
+    );
+}
+
+/// A legitimate MANAGER of a participating Bot — with no historical creation
+/// fact at all — passes the session-membership gate (AC08 under-grant fix).
+#[tokio::test]
+async fn live_manager_passes_the_session_file_lane() {
+    let fixture = Fixture::new().await;
+    let session_id = seed_session_with_bot_participant(&fixture).await;
+    fixture.seed_manager("bot-file", "bob").await;
+    // No created_by involvement: alice's registry record stays untouched.
+
+    let page = fixture
+        .file_facade
+        .list(ListSessionFiles {
+            caller: human_caller("bob"),
+            session_id,
+            prefix: None,
+            status: None,
+            limit: 10,
+            offset: 0,
+        })
+        .await
+        .expect("a live manager of a participant Bot is a session member");
+    assert_eq!(page.items.len(), 0);
 }

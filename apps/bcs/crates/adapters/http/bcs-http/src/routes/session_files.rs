@@ -1052,6 +1052,9 @@ mod tests {
                 group_core.clone(),
                 registry.clone(),
                 authority,
+                // Noop mine projection: the fixture has no live role facts,
+                // so the Human identity union stays fail-closed.
+                Arc::new(bcs_test_support::NoopBotQueryService),
                 system_messages.clone(),
                 Arc::new(CompletionShareProjector),
             ),
