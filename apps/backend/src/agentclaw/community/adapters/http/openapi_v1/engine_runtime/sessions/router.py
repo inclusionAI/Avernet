@@ -654,7 +654,6 @@ async def create_session_file_upload_intents(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileUploadIntentResult]:
@@ -668,7 +667,6 @@ async def create_session_file_upload_intents(
     )
     try:
         intents = adapter.create_upload_intents(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             actor_user_id=user_id,
             owner_id=owner_id,
             bot_id=bot_id,
@@ -712,7 +710,6 @@ async def complete_session_file_upload(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
@@ -722,7 +719,6 @@ async def complete_session_file_upload(
     )
     try:
         record = adapter.complete_upload(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -747,7 +743,6 @@ async def session_file_materialize_status(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
@@ -757,7 +752,6 @@ async def session_file_materialize_status(
     )
     try:
         record = adapter.get_status(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -777,7 +771,6 @@ async def list_ready_session_files(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileList]:
@@ -787,7 +780,6 @@ async def list_ready_session_files(
     )
     try:
         records = adapter.list_ready(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -818,7 +810,6 @@ async def stream_session_file_content(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     disposition: DispositionQuery = "inline",
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
@@ -829,7 +820,6 @@ async def stream_session_file_content(
     )
     try:
         record, upstream = await adapter.open_content(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -869,7 +859,6 @@ async def delete_session_file(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[Deleted]:
@@ -879,7 +868,6 @@ async def delete_session_file(
     )
     try:
         adapter.delete(
-            **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,

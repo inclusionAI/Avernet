@@ -1,6 +1,6 @@
 # OpenAPI instance selection
 
-The bot-first connection, sessions (including favorites and Session Files),
+The bot-first connection, sessions (including favorites, excluding Session Files),
 engine-runtime, models, nodes and resources endpoints accept an optional
 `device_uuid` query parameter. Use `instances[].id` from the existing
 `GET /openapi/v1/bots/{bot_id}/containers` response.
@@ -29,20 +29,11 @@ GET /openapi/v1/bots/{bot_id}/resources?stage=online&device_uuid={instance-id}
 
 ## Session Files
 
-An upload intent stores the selected UUID alongside its resolved binding.
-Completion, background materialization and downloads reuse that target even
-if the user subsequently selects another instance in the UI. Switching the
-UI affects new requests; it does not move an already-started upload.
-
-An explicit selector on a file operation must match its stored UUID. File
-lists with a selector return only records pinned to that instance. Legacy
-records with a NULL UUID remain available when the selector is omitted;
-their original instance cannot be inferred retroactively.
+Multi-instance selection for `/sessions/{session_id}/files` and its child
+operations is deferred. These endpoints retain their existing contract and
+upload/materialization behavior; they do not expose `device_uuid`.
+This exclusion does not apply to the separate `/resources` workspace APIs.
 
 ## Deployment
 
-Before deploying Backend, apply
-`apps/backend/src/agentclaw/community/core/session_resources/sql/2026_10_09_session_file_device_uuid.sql`.
-It adds the nullable `ac_session_resource.device_uuid` column. No data backfill
-is required. Old binaries tolerate the extra column. Database changes are
-not executed by this PR.
+No database migration or backfill is required.

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 import pytest_asyncio
 
@@ -49,12 +47,6 @@ async def repo():
     await db.bootstrap()
     yield SessionResourceRepository(db)
     reset_for_tests()
-
-
-@pytest.mark.asyncio
-async def test_instance_survives_database_roundtrip(repo):
-    repo.create(replace(_record(), device_uuid="device-a"))
-    assert repo.get_by_resource_id("sr_001").device_uuid == "device-a"
 
 
 @pytest.mark.asyncio

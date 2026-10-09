@@ -77996,27 +77996,6 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
-            }
           }
         ],
         "responses": {
@@ -78268,27 +78247,6 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
-            }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
             }
           }
         ],
@@ -78551,27 +78509,6 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
-            }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
             }
           }
         ],
@@ -78847,27 +78784,6 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
-            }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
             }
           }
         ],
@@ -79147,27 +79063,6 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
-            }
           }
         ],
         "responses": {
@@ -79436,27 +79331,6 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
-            }
-          },
-          {
-            "description": "Instance id from containers. Omit for automatic instance selection.",
-            "in": "query",
-            "name": "device_uuid",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "pattern": "^[A-Za-z0-9_-]+$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Instance id from containers. Omit for automatic instance selection.",
-              "title": "Device Uuid"
             }
           }
         ],

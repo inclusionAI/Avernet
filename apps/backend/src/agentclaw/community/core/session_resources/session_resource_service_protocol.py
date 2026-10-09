@@ -16,7 +16,6 @@ class SessionResourceServiceProtocol(Protocol):
         bot_id: str,
         session_key: str,
         resource_id: str,
-        device_uuid: str | None = None,
     ) -> Any: ...
 
     def list_resources(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -45,7 +44,6 @@ class SessionResourceServiceProtocol(Protocol):
         bot_id: str,
         session_key: str,
         resource_id: str,
-        device_uuid: str | None = None,
     ) -> Any: ...
 
     def materialized_callback(self, *args: Any, **kwargs: Any) -> Any: ...

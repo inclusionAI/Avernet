@@ -74,7 +74,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         filename: str,
         target_entity_id: str | None = None,
         binding_id: int | None = None,
-        device_uuid: str | None = None,
         size_bytes: int | None = None,
         content_hash: str | None = None,
     ) -> SessionUploadIntent:
@@ -85,7 +84,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
             target_entity_id=target_entity_id,
             scope_type=scope_type,
             binding_id=binding_id,
-            device_uuid=device_uuid,
         )
         raw_tenant = context.conn_info.get("tenant")
         raw_bot_uuid = context.conn_info.get("bot_uuid")
@@ -94,11 +92,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
             if isinstance(context.provider, str)
             else type(context.provider).__name__
         )
-        if device_uuid is not None and (
-            binding_id is None or provider not in {"baas", "teclaw"}
-            or context.bot_type == "desktop"
-        ):
-            raise ValueError("bot_device_unavailable")
         bot_uuid_present = isinstance(raw_bot_uuid, str) and bool(raw_bot_uuid)
         if raw_tenant is None or raw_tenant == "":
             if not self._default_tenant:
@@ -168,7 +161,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 status=SessionResourceStatus.UPLOAD_URL_ISSUED,
                 transfer_api_version=TransferApiVersion.SESSION_V2,
                 binding_id=binding_id,
-                device_uuid=device_uuid,
                 session_key_ciphertext=self._vault.encrypt(session_key),
                 size_bytes=size_bytes,
                 client_content_hash=content_hash,
@@ -184,10 +176,9 @@ class SessionResourceService(SessionResourceServiceProtocol):
         session_key: str,
         resource_id: str,
         transfer_id: str,
-        device_uuid: str | None = None,
     ) -> SessionResourceRecord:
         session_hash = hash_identifier(session_key)
-        current = self._owned(resource_id, owner_id, bot_id, session_hash, device_uuid)
+        current = self._owned(resource_id, owner_id, bot_id, session_hash)
         if current.transfer_id != transfer_id:
             raise ValueError("transfer_id_mismatch")
         if current.status in {
@@ -212,10 +203,9 @@ class SessionResourceService(SessionResourceServiceProtocol):
         bot_id: str,
         session_key: str,
         resource_id: str,
-        device_uuid: str | None = None,
     ) -> SessionResourceRecord:
         session_hash = hash_identifier(session_key)
-        record = self._owned(resource_id, owner_id, bot_id, session_hash, device_uuid)
+        record = self._owned(resource_id, owner_id, bot_id, session_hash)
         log.info(
             "session_resource.materialize.poll resource_id=%s session_key_hash=%s status=%s task_version=%s",
             record.resource_id,
@@ -232,7 +222,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         bot_id: str,
         session_key: str,
         ready_only: bool = False,
-        device_uuid: str | None = None,
     ) -> list[SessionResourceRecord]:
         records = self._repository.list_owned(
             owner_id,
@@ -243,7 +232,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
             record
             for record in records
             if record.status is not SessionResourceStatus.DELETED
-            and (device_uuid is None or record.device_uuid == device_uuid)
             and (not ready_only or record.status is SessionResourceStatus.READY)
         ]
 
@@ -326,7 +314,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         session_key: str,
         resource_id: str,
         disposition: str,
-        device_uuid: str | None = None,
     ) -> tuple[SessionResourceRecord, DeviceAdapterStreamResponse]:
         if disposition not in {"inline", "attachment"}:
             raise ValueError("invalid_disposition")
@@ -335,7 +322,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
             owner_id,
             bot_id,
             hash_identifier(session_key),
-            device_uuid,
         )
         if record.status is not SessionResourceStatus.READY:
             raise ValueError("resource_not_ready")
@@ -389,11 +375,8 @@ class SessionResourceService(SessionResourceServiceProtocol):
         bot_id: str,
         session_key: str,
         resource_id: str,
-        device_uuid: str | None = None,
     ) -> SessionResourceRecord:
         session_hash = hash_identifier(session_key)
-        if device_uuid is not None:
-            self._owned(resource_id, owner_id, bot_id, session_hash, device_uuid)
         result = self._repository.soft_delete(
             resource_id,
             owner_id,
@@ -533,7 +516,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         target_entity_id: str | None,
         scope_type: str,
         binding_id: int | None,
-        device_uuid: str | None = None,
     ) -> tuple[DeviceContext, int]:
         if binding_id is not None:
             try:
@@ -541,7 +523,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                     binding_id,
                     requester_id,
                     bot_id=bot_id,
-                    **({"device_uuid": device_uuid} if device_uuid is not None else {}),
                 )
             except DeviceNotBoundError as exc:
                 log.warning(
@@ -598,7 +579,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 binding_id,
                 requester_id,
                 bot_id=bot_id,
-                **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             )
         except DeviceNotBoundError as exc:
             log.warning(
@@ -612,15 +592,13 @@ class SessionResourceService(SessionResourceServiceProtocol):
         return context, binding_id
 
     def _resolve_record_context(self, record: SessionResourceRecord) -> DeviceContext:
-        selection = {"device_uuid": record.device_uuid} if record.device_uuid is not None else {}
         if record.binding_id is None:
-            return self._resolver.resolve_for_bot(record.bot_id, record.owner_id, **selection)
+            return self._resolver.resolve_for_bot(record.bot_id, record.owner_id)
         try:
             return self._resolver.resolve_for_binding(
                 record.binding_id,
                 record.owner_id,
                 bot_id=record.bot_id,
-                **selection,
             )
         except DeviceNotBoundError as exc:
             log.warning(
@@ -636,7 +614,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         owner_id: str,
         bot_id: str,
         session_key_hash: str,
-        device_uuid: str | None = None,
     ) -> SessionResourceRecord:
         record = self._repository.get_owned(
             resource_id,
@@ -644,8 +621,7 @@ class SessionResourceService(SessionResourceServiceProtocol):
             bot_id,
             session_key_hash,
         )
-        # COSEC: an instance selector must not retarget another instance's file.
-        if record is None or (device_uuid is not None and record.device_uuid != device_uuid):
+        if record is None:
             raise ValueError("resource_not_found")
         return record
 
