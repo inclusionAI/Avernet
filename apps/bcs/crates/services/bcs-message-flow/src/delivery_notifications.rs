@@ -1,4 +1,5 @@
-//! Ephemeral, best-effort IM hints. Durable status queries remain authoritative.
+//! Best-effort legacy workbench failure notices and IM hints.
+//! Durable status queries remain authoritative.
 //! No notification replay, outbox, or per-message background task is created.
 use crate::BcsMessageFlow;
 use bcs_channel_api::{DeliveryReactionEvent, DeliveryReactionState};
@@ -211,6 +212,12 @@ async fn publish(
     rows: &[&PersistedMessageDelivery],
     text: String,
 ) -> bcs_service_api::ServiceResult<()> {
+    // Admission succeeds before downstream I/O. Report later failures using
+    // the same visible system chat as the synchronous path, not only a status
+    // event that existing workbench clients do not render.
+    if let Err(error) = crate::delivery_failure_notice::publish(flow, rows).await {
+        tracing::warn!(%error, "queued delivery failure notice failed; continuing IM notification");
+    }
     let (Some(channel), Some(repository), Some(row)) =
         (flow.channel.get(), flow.message_repo.as_ref(), rows.first())
     else {

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 pub mod a2a;
 pub mod attachment;
 pub mod delivery;
+pub mod frontend;
 pub mod http;
 pub mod principal;
 pub mod ws;

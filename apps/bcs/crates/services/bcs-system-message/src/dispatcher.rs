@@ -585,26 +585,10 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
 /// Build the frontend JSON event frame for a system message.
 /// Follows the exact format used by `group_flow.rs::publish_group_callback_event`.
 fn build_frontend_system_event_frame(group_id: &str, content: &str, session_id: &str) -> String {
-    let run_id = uuid::Uuid::new_v4().to_string();
-    let mut event = serde_json::json!({
-        "bcs_group_id": group_id,
-        "run_id": run_id,
-        "state": "final",
-        "message": {
-            "role": "system",
-            "content": [{"type": "text", "text": content}],
-            "timestamp": now_ms(),
-        },
-    });
-    event["bcs_session_id"] = serde_json::Value::String(session_id.to_string());
-    let frame = serde_json::json!({
-        "type": "event",
-        "event": "chat",
-        "payload": event,
-        "group_id": group_id,
-        "bot_uuid": BCS_SYSTEM_MESSAGE,
-    });
-    serde_json::to_string(&frame).unwrap_or_default()
+    bcs_protocol::frontend::build_frontend_system_event_frame(
+        group_id, content, session_id, BCS_SYSTEM_MESSAGE,
+        &uuid::Uuid::new_v4().to_string(), now_ms(),
+    )
 }
 
 fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
