@@ -132,7 +132,7 @@ Sources: `node.input.goal` (→ `TaskEnvelope.objective`), `DAGPlan.prompt`, LLM
 One row per orchestration round.
 
 ### Guard events (new — POC never persisted)
-Kinds: `serial_collapse`, `spurious_parallelism`, `dedupe_reject`, `depth_exceeded`, `width_exceeded`, `timeout`, `kill`, `stuck`.
+Kinds: `serial_collapse`, `spurious_parallelism`, `dedupe_reject`, `depth_exceeded`, `width_exceeded`, `timeout`, `kill`, `stuck`, `prompt_injection`.
 
 ### Dropped (with reasons)
 | POC item | Dropped reason |

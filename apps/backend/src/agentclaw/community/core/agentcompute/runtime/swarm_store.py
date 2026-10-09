@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from typing import Any, Callable
 
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
 from agentclaw.community.core.agentcompute.domain.models import (
-    Agent, AgentId, AgentStatus, EpochMillis, Message,
-    MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId,
-    TenantId,
+    Agent, AgentId, AgentStatus, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
 )
 from agentclaw.community.core.agentcompute.observability import (
     NULL_OBSERVABILITY, AgentComputeObservability,
 )
 from agentclaw.community.core.agentcompute.orchestration.termination import RunState
 from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, MessageRepository, ResultShardRepository, RoundRepository,
+    AgentRepository, GuardEventRepository, MessageRepository,
+    ResultShardRepository, RoundRepository,
 )
 from agentclaw.community.log import get_logger
 
@@ -55,6 +55,7 @@ class SliceStore:
         round_repo: RoundRepository,
         lost_probe: Callable[[], bool],
         observability: AgentComputeObservability = NULL_OBSERVABILITY,
+        guard_repo: "GuardEventRepository | None" = None,
     ) -> None:
         self._config = config
         self._agent_repo = agent_repo
@@ -63,6 +64,7 @@ class SliceStore:
         self._round_repo = round_repo
         self._lost_probe = lost_probe
         self._obs = observability
+        self._guard_repo = guard_repo
         self._last_seq = 0
 
     def next_seq(self) -> int:
@@ -108,6 +110,7 @@ class SliceStore:
         )
         self._obs.agent_terminal(status)
         if status is AgentStatus.COMPLETED:
+            self._record_injection(run_id, tenant, agent_id, payload)
             self._create_shard(run_id, tenant, agent_id, payload,
                                artifact_key, state)
 
@@ -122,6 +125,28 @@ class SliceStore:
             run_id, tenant, agent_id, MessageRole.ASSISTANT,
             content, token_usage=completion["token_usage"],
         )
+
+    def _record_injection(self, run_id: RunId, tenant: TenantId,
+                          agent_id: AgentId, payload: Any) -> None:
+        from agentclaw.community.core.agentcompute.security import (
+            detect_prompt_injection,
+        )
+        if self._guard_repo is None or payload is None:
+            return
+        text = payload if isinstance(payload, str) else json.dumps(
+            payload, ensure_ascii=False, default=str,
+        )
+        markers = detect_prompt_injection(text)
+        for marker in markers:
+            self._guard_repo.create(GuardEvent(
+                id=EventId(uuid.uuid4().hex),
+                run_id=run_id,
+                tenant=tenant,
+                agent_id=agent_id,
+                kind=GuardKind.PROMPT_INJECTION,
+                details={"marker": marker},
+                created_at=EpochMillis(_now_ms()),
+            ))
 
     def _create_shard(self, run_id: RunId, tenant: TenantId, agent_id: AgentId,
                       payload: Any, artifact_key: Any,

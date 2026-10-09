@@ -85,6 +85,7 @@ class GuardKind(StrEnum):
     TIMEOUT = "timeout"
     KILL = "kill"
     STUCK = "stuck"
+    PROMPT_INJECTION = "prompt_injection"
 
 
 class TerminationReason(StrEnum):

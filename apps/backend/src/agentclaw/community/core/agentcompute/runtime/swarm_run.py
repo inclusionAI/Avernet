@@ -72,6 +72,7 @@ class SwarmRunHandler:
             config, agent_repo, message_repo, shard_repo, round_repo,
             lost_probe=lambda: self._slice_lost.is_set(),
             observability=observability,
+            guard_repo=guard_repo,
         )
 
     def set_slice_lost(self, lost: bool, run_id: Any = None) -> None:

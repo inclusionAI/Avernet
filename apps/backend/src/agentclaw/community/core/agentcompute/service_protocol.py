@@ -144,3 +144,9 @@ class AgentComputeServiceProtocol(Protocol):
 
     @abstractmethod
     async def cancel(self, run_id: str, tenant: str) -> str: ...
+
+    @abstractmethod
+    def purge_run(self, run_id: str, tenant: str) -> dict[str, int] | None: ...
+
+    @abstractmethod
+    def content_classification(self, run_id: str, tenant: str) -> dict[str, int] | None: ...

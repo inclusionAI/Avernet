@@ -225,6 +225,16 @@ class RunRepository(RunRepositoryProtocol):
                 )
             ).scalar_one()
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeRunModel).where(
+                    om.AcAgentComputeRunModel.run_id == run_id,
+                    om.AcAgentComputeRunModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRunModel) -> dm.Run:
         catalog_raw = _loads(row.agent_catalog) or []
@@ -344,6 +354,16 @@ class AgentRepository(AgentRepositoryProtocol):
             )
         return result.rowcount > 0
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeAgentModel).where(
+                    om.AcAgentComputeAgentModel.run_id == run_id,
+                    om.AcAgentComputeAgentModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeAgentModel, tenant: dm.TenantId) -> dm.Agent:
         ts_raw = _loads(row.task_spec) or {}
@@ -429,6 +449,16 @@ class MessageRepository(MessageRepositoryProtocol):
             )
         return result.rowcount
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeMessageModel).where(
+                    om.AcAgentComputeMessageModel.run_id == run_id,
+                    om.AcAgentComputeMessageModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeMessageModel) -> dm.Message:
         return dm.Message(
@@ -490,6 +520,16 @@ class ResultShardRepository(ResultShardRepositoryProtocol):
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeResultShardModel).where(
+                    om.AcAgentComputeResultShardModel.run_id == run_id,
+                    om.AcAgentComputeResultShardModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeResultShardModel) -> dm.ResultShard:
         return dm.ResultShard(
@@ -548,6 +588,16 @@ class RoundRepository(RoundRepositoryProtocol):
             ).all()
             return [(r[0], self._to_domain(r[1])) for r in rows]
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeRoundModel).where(
+                    om.AcAgentComputeRoundModel.run_id == run_id,
+                    om.AcAgentComputeRoundModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRoundModel) -> dm.Round:
         return dm.Round(
@@ -605,6 +655,16 @@ class GuardEventRepository(GuardEventRepositoryProtocol):
             ).all()
             return [(r[0], self._to_domain(r[1])) for r in rows]
 
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeGuardEventModel).where(
+                    om.AcAgentComputeGuardEventModel.run_id == run_id,
+                    om.AcAgentComputeGuardEventModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeGuardEventModel) -> dm.GuardEvent:
         return dm.GuardEvent(
@@ -636,6 +696,16 @@ class JobRepository(JobRepositoryProtocol):
             )
             session.add(row)
         return row
+
+    def purge_run(self, run_id: dm.RunId, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            result = session.execute(
+                delete(om.AcAgentComputeJobModel).where(
+                    om.AcAgentComputeJobModel.run_id == run_id,
+                    om.AcAgentComputeJobModel.tenant == tenant,
+                )
+            )
+        return result.rowcount
 
     def claim_batch(self, worker_id: str, tenant_filter: list[dm.TenantId] | None,
                     limit: int, lease_seconds: int) -> list[dict]:

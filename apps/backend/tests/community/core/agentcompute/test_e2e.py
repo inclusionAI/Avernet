@@ -197,8 +197,9 @@ def _build_env(db, script: list[str]) -> tuple:
     )
     service = AgentComputeService(
         run_repo=repos["run"], job_repo=repos["job"],
-        agent_repo=repos["agent"], round_repo=repos["round"],
-        guard_repo=repos["guard"], config=cfg,
+        agent_repo=repos["agent"], message_repo=repos["message"],
+        round_repo=repos["round"], guard_repo=repos["guard"],
+        shard_repo=repos["shard"], config=cfg,
     )
     return service, worker, repos, handler
 

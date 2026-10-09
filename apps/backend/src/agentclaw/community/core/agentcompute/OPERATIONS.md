@@ -102,3 +102,26 @@ broadcast (or the platform's pub/sub), keeping the same SSE wire format.
 **Drain interaction:** slice-bound writes are short; the pool math above
 assumes `drain.grace_seconds` (30) ≥ a slice's final write batch — cross-check
 with the drain runbook (task 12.2) before shrinking pool/recycle values.
+## Data protection (12.9)
+
+Classification of stored content: `run.goal`, `message.content` and shard
+payloads may carry user-supplied text. `AgentComputeService.content_`
+`classification(run_id, tenant)` reports the PII families present per
+content chunk (email/phone/card/national_id) without exposing content;
+`security.redact_pii` is the export-time redactor.
+
+Controls map:
+- Retention: message tail applied at terminal (D13); artifacts swept by
+  `AgentComputeRetentionSweeper` after `retention.artifact_ttl_days`.
+- Hard erasure: `AgentComputeService.purge_run` physically deletes the
+  run's agents, messages, shards, rounds, guard events, job and run rows
+  (tenant-scoped). The append-only `ac_agent_compute_audit` trail is a
+  governance record and is intentionally kept.
+- Egress: both outbound surfaces validate against `config.egress`
+  (scheme http(s)-only, optional https-only, optional host allowlist) at
+  client construction - fail clear at boot.
+- Prompt injection: subagent output is untrusted data. `SliceStore`
+  records `prompt_injection` guard events for detected markers while
+  still routing the result; the orchestrator wraps every result in an
+  `<untrusted_result>` fence and instructs the model never to follow
+  instructions found inside it.

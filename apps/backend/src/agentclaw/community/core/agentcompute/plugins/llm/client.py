@@ -32,7 +32,16 @@ class OpenAICompatibleClient:
         max_tokens: int = 4096,
         max_retries: int = 3,
         observability: AgentComputeObservability | None = None,
+        egress: Any = None,
     ) -> None:
+        from agentclaw.community.core.agentcompute.security import validate_egress_url
+        if egress is not None:
+            validate_egress_url(
+                base_url,
+                allowed_hosts=egress.allowed_hosts,
+                require_https=egress.require_https,
+                surface="llm",
+            )
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._default_model = default_model

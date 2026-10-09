@@ -69,6 +69,12 @@ class AgentComputeUpstreamBreakerConfig:
 
 
 @dataclass(frozen=True)
+class AgentComputeEgressConfig:
+    allowed_hosts: tuple[str, ...] = ()
+    require_https: bool = False
+
+
+@dataclass(frozen=True)
 class AgentComputeRetentionConfig:
     artifact_ttl_days: int = 7
     sweep_interval_seconds: float = 3600.0
@@ -97,6 +103,9 @@ class AgentComputeConfig:
     )
     retention: AgentComputeRetentionConfig = field(
         default_factory=AgentComputeRetentionConfig
+    )
+    egress: AgentComputeEgressConfig = field(
+        default_factory=AgentComputeEgressConfig
     )
     artifact_store_root: str = "/tmp/agentcompute/artifacts"
     artifact_inline_threshold: int = 16384

@@ -29,11 +29,20 @@ class AvernetSubagent:
 
     def __init__(self, spec: AgentSpecRaw, run: Run, llm: Any,
                  config: AgentComputeAvernetConfig | None = None,
-                 observability: AgentComputeObservability | None = None) -> None:
+                 observability: AgentComputeObservability | None = None,
+                 egress: Any = None) -> None:
+        from agentclaw.community.core.agentcompute.security import validate_egress_url
         self._spec = spec
         self._run = run
         self._config = config or AgentComputeAvernetConfig()
         self._obs = observability
+        if egress is not None:
+            validate_egress_url(
+                self._config.backend_base_url,
+                allowed_hosts=egress.allowed_hosts,
+                require_https=egress.require_https,
+                surface="avernet",
+            )
         self._client = httpx.AsyncClient(
             base_url=self._config.backend_base_url,
             timeout=self._config.http_timeout,

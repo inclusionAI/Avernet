@@ -20,8 +20,8 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.repository import models as om
 from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, RoundRepository,
-    RunRepository,
+    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
+    ResultShardRepository, RoundRepository, RunRepository,
 )
 from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeAdmissionConfig, AgentComputeConfig,
@@ -123,8 +123,10 @@ def _service(db, *, tenant_limit: int = 8, global_limit: int = 64,
         run_repo=RunRepository(db),
         job_repo=JobRepository(db),
         agent_repo=AgentRepository(db),
+        message_repo=MessageRepository(db),
         round_repo=RoundRepository(db),
         guard_repo=GuardEventRepository(db),
+        shard_repo=ResultShardRepository(db),
         config=cfg,
         metrics=metrics,
     )
@@ -247,8 +249,10 @@ class TestAdmissionControl:
         svc = AgentComputeService(
             run_repo=run_repo, job_repo=JobRepository(db),
             agent_repo=AgentRepository(db),
+            message_repo=MessageRepository(db),
             round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db), config=cfg,
+            guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db), config=cfg,
         )
 
         # Fail-clear config rejection keeps precedence over 429-class caps.

@@ -66,16 +66,20 @@ class AgentComputeModule(Module):
         run_repo: RunRepository,
         job_repo: JobRepository,
         agent_repo: AgentRepository,
+        message_repo: MessageRepository,
         round_repo: RoundRepository,
         guard_repo: GuardEventRepository,
+        shard_repo: ResultShardRepository,
         config: AgentComputeConfig,
     ) -> AgentComputeService:
         return AgentComputeService(
             run_repo=run_repo,
             job_repo=job_repo,
             agent_repo=agent_repo,
+            message_repo=message_repo,
             round_repo=round_repo,
             guard_repo=guard_repo,
+            shard_repo=shard_repo,
             config=config,
         )
 
@@ -120,6 +124,7 @@ class AgentComputeModule(Module):
                 max_tokens=config.llm.max_tokens,
                 max_retries=config.llm.max_retries,
                 observability=observability,
+                egress=config.egress,
             )
         return StubLLMProvider()
 
@@ -185,7 +190,7 @@ class AgentComputeModule(Module):
         llm: LLMProvider,
         config: AgentComputeConfig,
     ) -> SubagentRuntime:
-        factory = DefaultSubagentFactory(llm)
+        factory = DefaultSubagentFactory(llm, config.egress)
         store = FilesystemArtifactStore(config.artifact_store_root)
         return SubagentRuntime(
             factory=factory,

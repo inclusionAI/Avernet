@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from contextlib import contextmanager
@@ -12,8 +13,8 @@ from agentclaw.community.core.agentcompute.domain.models import (
     EpochMillis, ProviderId, Run, RunId, RunPage, RunStatus, TenantId,
 )
 from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, RoundRepository,
-    RunRepository,
+    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
+    ResultShardRepository, RoundRepository, RunRepository,
 )
 from agentclaw.community.core.agentcompute.service_protocol import (
     AgentComputeConfigError, AgentComputeRunNotFoundError,
@@ -45,15 +46,18 @@ class _NullMetrics:
 class AgentComputeService(AgentComputeServiceProtocol):
 
     def __init__(self, run_repo: RunRepository, job_repo: JobRepository,
-                 agent_repo: AgentRepository, round_repo: RoundRepository,
-                 guard_repo: GuardEventRepository,
+                 agent_repo: AgentRepository, message_repo: MessageRepository,
+                 round_repo: RoundRepository, guard_repo: GuardEventRepository,
+                 shard_repo: ResultShardRepository,
                  config: AgentComputeConfig,
                  metrics: MetricsPlugin | None = None) -> None:
         self._run_repo = run_repo
         self._job_repo = job_repo
         self._agent_repo = agent_repo
+        self._message_repo = message_repo
         self._round_repo = round_repo
         self._guard_repo = guard_repo
+        self._shard_repo = shard_repo
         self._config = config
         self._metrics: MetricsPlugin = metrics or _NullMetrics()
         slice_max = config.orchestration.slice_max_seconds
@@ -180,3 +184,37 @@ class AgentComputeService(AgentComputeServiceProtocol):
             raise AgentComputeConfigError(
                 "agentcompute llm config missing: base_url/api_key required"
             )
+
+    def purge_run(self, run_id: str, tenant: str) -> dict[str, int] | None:
+        rid, tid = RunId(run_id), TenantId(tenant)
+        if self._run_repo.get(rid, tid) is None:
+            return None
+        # Hard erasure (12.9): physical deletes across the run's rows.
+        # Audit rows are append-only governance records and are kept.
+        counts = {
+            "agents": self._agent_repo.purge_run(rid, tid),
+            "messages": self._message_repo.purge_run(rid, tid),
+            "shards": self._shard_repo.purge_run(rid, tid),
+            "rounds": self._round_repo.purge_run(rid, tid),
+            "guards": self._guard_repo.purge_run(rid, tid),
+            "jobs": self._job_repo.purge_run(rid, tid),
+            "run": self._run_repo.purge_run(rid, tid),
+        }
+        return counts
+
+    def content_classification(self, run_id: str, tenant: str) -> dict[str, int] | None:
+        from agentclaw.community.core.agentcompute.security import classify_pii
+        rid, tid = RunId(run_id), TenantId(tenant)
+        run = self._run_repo.get(rid, tid)
+        if run is None:
+            return None
+        totals: dict[str, int] = {}
+        for chunk in [run.goal] + [
+            message.content if isinstance(message.content, str)
+            else json.dumps(message.content, ensure_ascii=False, default=str)
+            for agent in self._agent_repo.list_by_run(rid, tid)
+            for message in self._message_repo.list_by_agent(rid, agent.agent_id, tid)
+        ]:
+            for kind in classify_pii(chunk):
+                totals[kind.value] = totals.get(kind.value, 0) + 1
+        return totals

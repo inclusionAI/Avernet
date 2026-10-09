@@ -424,8 +424,9 @@ class TestSubmitSync:
         repos = self._repos(db)
         service = AgentComputeService(
             run_repo=repos["run"], job_repo=repos["job"],
-            agent_repo=repos["agent"], round_repo=repos["round"],
-            guard_repo=repos["guard"], config=config,
+            agent_repo=repos["agent"], message_repo=repos["message"],
+            round_repo=repos["round"], guard_repo=repos["guard"],
+            shard_repo=repos["shard"], config=config,
         )
         return service, repos
 
@@ -485,6 +486,8 @@ class TestSubmitSync:
             "run": RunRepository(db), "job": JobRepository(db),
             "agent": AgentRepository(db), "round": RoundRepository(db),
             "guard": GuardEventRepository(db),
+            "message": MessageRepository(db),
+            "shard": ResultShardRepository(db),
         }
 
 

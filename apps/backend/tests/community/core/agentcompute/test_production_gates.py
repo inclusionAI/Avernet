@@ -208,8 +208,9 @@ class TestLoadQueueSaturation:
         )
         svc = AgentComputeService(
             run_repo=env.run_repo, job_repo=env.job_repo,
-            agent_repo=env.agent_repo, round_repo=env.round_repo,
-            guard_repo=env.guard_repo,
+            agent_repo=env.agent_repo, message_repo=env.message_repo,
+            round_repo=env.round_repo, guard_repo=env.guard_repo,
+            shard_repo=env.shard_repo,
             config=AgentComputeConfig(
                 llm=LlmConfig(base_url="stub", api_key="stub",
                               default_model="stub"),
@@ -327,8 +328,9 @@ class TestMultiTenantIsolation:
         assert env.shard_repo.get_by_run_agent(run_a.run_id, "x", TENANT_B) is None
         svc = AgentComputeService(
             run_repo=env.run_repo, job_repo=env.job_repo,
-            agent_repo=env.agent_repo, round_repo=env.round_repo,
-            guard_repo=env.guard_repo, config=env.cfg,
+            agent_repo=env.agent_repo, message_repo=env.message_repo,
+            round_repo=env.round_repo, guard_repo=env.guard_repo,
+            shard_repo=env.shard_repo, config=env.cfg,
         )
         assert svc.get_run(run_a.run_id, str(TENANT_B)) is None
         assert asyncio.run(
@@ -343,8 +345,9 @@ class TestMultiTenantIsolation:
         )
         svc = AgentComputeService(
             run_repo=env.run_repo, job_repo=env.job_repo,
-            agent_repo=env.agent_repo, round_repo=env.round_repo,
-            guard_repo=env.guard_repo,
+            agent_repo=env.agent_repo, message_repo=env.message_repo,
+            round_repo=env.round_repo, guard_repo=env.guard_repo,
+            shard_repo=env.shard_repo,
             config=AgentComputeConfig(
                 llm=LlmConfig(base_url="stub", api_key="stub",
                               default_model="stub"),

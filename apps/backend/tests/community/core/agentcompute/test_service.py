@@ -22,6 +22,8 @@ from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.repository import models as om
 from agentclaw.community.core.agentcompute.repository.impl import (
     AgentRepository, GuardEventRepository, JobRepository, RoundRepository,
+    MessageRepository,
+    ResultShardRepository,
     RunRepository,
 )
 from agentclaw.community.core.agentcompute.service import AgentComputeService
@@ -84,8 +86,10 @@ def service(db) -> AgentComputeService:
         run_repo=RunRepository(db),
         job_repo=JobRepository(db),
         agent_repo=AgentRepository(db),
+        message_repo=MessageRepository(db),
         round_repo=RoundRepository(db),
         guard_repo=GuardEventRepository(db),
+        shard_repo=ResultShardRepository(db),
         config=_config(),
     )
 
@@ -155,8 +159,9 @@ class TestTenantLimits:
     async def test_limit_refuses_second_concurrent_run(self, db):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         first = await service.submit_async(_req("tenant-a"))
@@ -170,8 +175,9 @@ class TestTenantLimits:
     async def test_other_tenant_unaffected_by_tenant_a_limit(self, db):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         await service.submit_async(_req("tenant-a"))
@@ -182,8 +188,9 @@ class TestTenantLimits:
     async def test_limit_recovers_after_terminal_status(self, db, run_repo, job_repo):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=_config(max_concurrent_runs=1),
         )
         run_id = await service.submit_async(_req("tenant-a"))
@@ -251,8 +258,9 @@ class TestConfigFailClear:
     async def test_missing_llm_config_refuses_submit(self, db, job_repo):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=AgentComputeConfig(),
         )
         with pytest.raises(AgentComputeConfigError, match="llm config missing"):
@@ -263,8 +271,9 @@ class TestConfigFailClear:
     async def test_empty_base_url_refuses_submit(self, db):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=_config(llm=LlmConfig(base_url="", api_key="k")),
         )
         with pytest.raises(AgentComputeConfigError, match="base_url/api_key"):
@@ -288,8 +297,9 @@ class TestCancelFlow:
     ):
         service = AgentComputeService(
             run_repo=RunRepository(db), job_repo=JobRepository(db),
-            agent_repo=AgentRepository(db), round_repo=RoundRepository(db),
-            guard_repo=GuardEventRepository(db),
+            agent_repo=AgentRepository(db), message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db), guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
             config=_config(),
         )
         run_id = await service.submit_async(_req("tenant-a"))
