@@ -33,7 +33,7 @@ consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
   - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned manual review policy"
-  - "SkillEditorRequestRepositoryProtocol — Skill-owned AUTO qualification and Grant write in the WorkOrder transaction"
+  - "SkillEditorRequestRepositoryProtocol — Skill-owned admission in the AUTO creation transaction and Grant write in the completion transaction"
   - "Qualified BCN HttpClient Plugin API — required friend-request approval callbacks"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
@@ -53,10 +53,37 @@ internal_dependencies:
 Event values, statuses, titles, and content templates are persisted public
 semantics. Rename or wording changes require coordinated client and data
 compatibility review. Approval state and result-notification creation are one transaction and
-must not be split across best-effort writes. Registered external decision callbacks run before
-that transaction; a transport error, non-success HTTP response, malformed response, or response
-without an exact `success: true` aborts local processing and leaves the work order pending.
+must not be split across best-effort writes. For AUTO, local Space/Bot/Skill
+business writes join the same approval-and-notice transaction. Registered
+external decision callbacks run before local AUTO completion; callback failure
+records FAILED and a failure notice together. If a callback has already
+succeeded but local persistence fails, the work order remains PROCESSING for
+reconciliation rather than falsely reporting FAILED. An external side effect
+cannot be rolled back by the local database transaction.
 Unregistered event types keep the existing local-only approval behavior.
+
+## Trusted AUTO events
+
+Both user-facing `POST /openapi/v1/bots/work-orders/events` and
+`POST /api/v1/work-orders/events` accept MANUAL and NOTICE events but reject
+caller-selected `approval_mode=AUTO`. They also reject Skill collaborator
+APPROVAL events before reaching the WorkOrder Service; applicants must use the
+Skill editor-request endpoint, which owns membership, Grant, and duplicate
+request checks. Skill result NOTICE events remain available through generic
+delivery. This is a user-facing ingress rule, not a Skill qualification rule
+inside the generic WorkOrder Service. A qualified
+business module may call `WorkOrderService.create_work_order_event` in-process
+with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
+`recipient_user_ids`. AUTO creates no human approver row. For Skill requests,
+the creation transaction calls Skill-owned admission while holding the binding
+lock; it rejects an existing active Grant or PENDING/PROCESSING request before
+inserting the order. WorkOrder then creates the order as PROCESSING and completes
+the local business effect, APPROVED /
+SYSTEM state, and result notices in one transaction. The response includes the
+created result-notification IDs. The Skill business module validates the
+applicant before requesting AUTO, while the Skill Grant step rechecks the
+binding and membership inside WorkOrder's transaction. Failure cannot be
+reported to the Skill applicant as a successful approval.
 
 ## Bot editor request auto-approval
 
@@ -100,7 +127,7 @@ and client compatibility plan.
 
 | Contract | Values |
 | --- | --- |
-| Work-order status | `PENDING`, `APPROVED`, `REJECTED` |
+| Work-order status | `PENDING`, `PROCESSING`, `APPROVED`, `REJECTED`, `FAILED` |
 | Approver status | `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED` |
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |

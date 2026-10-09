@@ -64,6 +64,7 @@ from agentclaw.community.api.work_order_service import (
 from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderCallbackCredential,
 )
+from agentclaw.community.core.work_orders.errors import WorkOrderAccessDeniedError
 from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision as DomainWorkOrderDecision,
     WorkOrderItemType as DomainWorkOrderItemType,
@@ -136,7 +137,12 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             reviewed_at=None,
             recipient_user_id=notification.recipient_user_id,
             event_type=notification.event_type,
-            title=display_title(notification.title, event_type=notification.event_type, approval_mode=None) or "新的系统通知",
+            title=display_title(
+                notification.title,
+                event_type=notification.event_type,
+                approval_mode=None,
+            )
+            or "新的系统通知",
             summary=display_summary(
                 notification.event_type,
                 notification.content,
@@ -153,9 +159,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             gmt_modified=notification.gmt_modified,
         )
     created = (
-        notification.gmt_created
-        if notification is not None
-        else work_order.gmt_created
+        notification.gmt_created if notification is not None else work_order.gmt_created
     )
     modified = (
         notification.gmt_modified
@@ -169,20 +173,25 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         else WorkOrderItemType.APPROVAL
     )
     event_type = notification.event_type if notification is not None else None
-    title = display_title(
-        notification.title if notification is not None else None,
-        event_type=event_type,
-        biz_type=work_order.biz_type,
-        status=work_order.status,
-        approval_mode=work_order.approval_mode,
-    ) or "新的系统通知"
+    title = (
+        display_title(
+            notification.title if notification is not None else None,
+            event_type=event_type,
+            biz_type=work_order.biz_type,
+            status=work_order.status,
+            approval_mode=work_order.approval_mode,
+        )
+        or "新的系统通知"
+    )
     summary = display_summary(
         event_type,
         notification.content if notification is not None else None,
         biz_type=work_order.biz_type,
         status=work_order.status,
     )
-    content = preserve_content(notification.content) if notification is not None else None
+    content = (
+        preserve_content(notification.content) if notification is not None else None
+    )
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -374,6 +383,10 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
+    if body.approval_mode.value == "AUTO":
+        raise WorkOrderAccessDeniedError(
+            "AUTO events require a trusted internal business caller"
+        )
     event_log = body.model_dump(mode="json")
     if body.approval_mode.value == "MANUAL":
         event_log.pop("approval_mode", None)
@@ -462,7 +475,8 @@ async def get_work_order(
                 biz_type=work_order.biz_type,
                 status=work_order.status,
                 approval_mode=work_order.approval_mode,
-            ) or "新的系统通知",
+            )
+            or "新的系统通知",
             summary=display_summary(
                 detail.event_type,
                 detail.content,
@@ -626,7 +640,8 @@ async def get_notification(
                 biz_type=record.biz_type,
                 status=detail.work_order_status,
                 approval_mode=detail.approval_mode,
-            ) or "新的系统通知",
+            )
+            or "新的系统通知",
             summary=display_summary(
                 record.event_type,
                 record.content,

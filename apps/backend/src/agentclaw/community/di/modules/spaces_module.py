@@ -63,6 +63,12 @@ from agentclaw.community.core.repository.protocols.space_skill_publication impor
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
+from agentclaw.community.core.work_orders.work_order_service_protocol import (
+    WorkOrderServiceProtocol,
+)
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.space_skill_offline import (
     SpaceSkillOfflineRepositoryProtocol,
 )
@@ -221,10 +227,14 @@ class SpacesModule(Module):
     def space_skill_editor_request_service(
         self,
         repository: WorkOrderRepositoryProtocol,
+        skill_repository: SkillEditorRequestRepositoryProtocol,
+        work_orders: WorkOrderServiceProtocol,
         staff_dept: StaffDeptPlugin,
     ) -> SpaceSkillEditorRequestServiceProtocol:
         """Assemble editor-request policy with environment at the boundary."""
-        return SpaceSkillEditorRequestService(repository, staff_dept, get_current_env)
+        return SpaceSkillEditorRequestService(
+            repository, skill_repository, work_orders, staff_dept, get_current_env
+        )
 
     @singleton
     @provider

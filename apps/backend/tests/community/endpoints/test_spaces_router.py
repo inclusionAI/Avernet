@@ -39,6 +39,9 @@ from agentclaw.community.api.space_skill_grant_service import (
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
+from agentclaw.community.core.skill_center.editor_request_contract import (
+    SkillEditorRequestResult,
+)
 from agentclaw.community.api.space_skill_offline_service import (
     OfflineDraft,
     OfflineImpact,
@@ -58,7 +61,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRole
-from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
+from agentclaw.community.core.work_orders.models import WorkOrderStatus
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -380,8 +383,8 @@ def _seed_space_skill_copy(world) -> None:
         world,
         SpaceSkillApplicationServiceProtocol,
         {
-            "copy_published_version": lambda _self, **_kwargs: SpaceSkillCreationOutcome(
-                skill_id=51, created=True
+            "copy_published_version": lambda _self, **_kwargs: (
+                SpaceSkillCreationOutcome(skill_id=51, created=True)
             ),
         },
     )
@@ -715,27 +718,30 @@ def _seed_space_skill_editor_request(world) -> None:
     _enable_public_auth(world)
 
     def _create_request(_self, **kwargs):
-        now = datetime(2026, 8, 26, 8, 0)
-        return WorkOrderRecord(
-            id=91,
+        return SkillEditorRequestResult(
+            work_order_id=91,
             work_order_no="WO-91",
-            biz_type="SKILL_COLLABORATOR",
-            biz_id=str(kwargs["skill_id"]),
-            applicant_user_id=kwargs["applicant_user_id"],
-            apply_reason=kwargs["reason"],
             status=WorkOrderStatus.PENDING,
-            reviewer_user_id=None,
-            review_remark=None,
-            reviewed_at=None,
-            env="test",
-            gmt_created=now,
-            gmt_modified=now,
         )
 
     bind_overrides(
         world,
         SpaceSkillEditorRequestServiceProtocol,
         {"create_request": _create_request},
+    )
+
+
+def _seed_skill_editor_approval_policy(world) -> None:
+    _enable_public_auth(world)
+    bind_overrides(
+        world,
+        SpaceSkillEditorRequestServiceProtocol,
+        {
+            "get_approval_policy": lambda _self, **_kwargs: False,
+            "update_approval_policy": lambda _self, **kwargs: kwargs[
+                "auto_approve_editor_requests"
+            ],
+        },
     )
 
 
@@ -941,6 +947,72 @@ def create_space_skill_editor_request_happy():
 )
 def create_space_skill_editor_request_wrong_user():
     """A mismatched actor is refused before Skill policy executes."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    scenario="happy",
+    seed=_seed_skill_editor_approval_policy,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"auto_approve_editor_requests": False}},
+    ),
+)
+def get_skill_editor_approval_policy_happy():
+    """The Skill Owner reads the current per-Skill policy."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def get_skill_editor_approval_policy_wrong_user():
+    """A mismatched acting user cannot read another user's policy."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    scenario="happy",
+    seed=_seed_skill_editor_approval_policy,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+        json_body={"auto_approve_editor_requests": True},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"auto_approve_editor_requests": True}},
+    ),
+)
+def put_skill_editor_approval_policy_happy():
+    """The Skill Owner replaces the policy with a strict boolean."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9},
+        {"auto_approve_editor_requests": True},
+    ),
+    expect=ExpectError(status=403),
+)
+def put_skill_editor_approval_policy_wrong_user():
+    """A mismatched acting user cannot change a Skill's policy."""
 
 
 @endpoint_test(

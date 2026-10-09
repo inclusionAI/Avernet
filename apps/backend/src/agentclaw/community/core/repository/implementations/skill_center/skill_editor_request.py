@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
+from agentclaw.community.core.skill_center.errors import (
+    SpaceSkillGrantForbiddenError,
+    SpaceSkillGrantNotFoundError,
+)
 from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
@@ -46,6 +50,9 @@ from agentclaw.community.core.work_orders.repository.models import (
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.editor_request_contract import (
+    SkillEditorRequestAdmission,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
@@ -65,6 +72,265 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         return f"WO{stamp}{uuid4().hex[:10].upper()}"
 
+    @staticmethod
+    def _lock_editor_approval_policy(
+        session: Session, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SkillSpaceBinding:
+        binding = (
+            session.query(SkillSpaceBinding)
+            .filter(
+                SkillSpaceBinding.space_id == space_id,
+                SkillSpaceBinding.skill_id == skill_id,
+                SkillSpaceBinding.env == env,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        space = (
+            session.query(SpaceModel)
+            .filter(
+                SpaceModel.id == space_id,
+                SpaceModel.env == env,
+                SpaceModel.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        skill = (
+            session.query(Skill)
+            .filter(Skill.id == skill_id, Skill.env == env)
+            .with_for_update()
+            .one_or_none()
+        )
+        if binding is None or space is None or skill is None:
+            raise SpaceSkillGrantNotFoundError("Space Skill not found")
+        if space.space_type != SpaceType.TEAM.value or skill.offline_at is not None:
+            raise SpaceSkillGrantForbiddenError(
+                "approval policy requires a live Team Space Skill"
+            )
+        member = (
+            session.query(SpaceMemberModel.id)
+            .filter(
+                SpaceMemberModel.space_id == space_id,
+                SpaceMemberModel.user_id == actor_id,
+                SpaceMemberModel.status == "ACTIVE",
+                SpaceMemberModel.env == env,
+            )
+            .with_for_update()
+            .first()
+        )
+        owner = (
+            session.query(SkillGrant.id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == actor_id,
+                SkillGrant.role == "OWNER",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.owner_slot == 1,
+                SkillGrant.env == env,
+            )
+            .with_for_update()
+            .first()
+        )
+        if member is None or owner is None:
+            raise SpaceSkillGrantForbiddenError("current Skill Owner role required")
+        return binding
+
+    def get_editor_approval_policy(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> bool:
+        with self._db.transactional_orm_session() as session:
+            binding = self._lock_editor_approval_policy(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            return bool(binding.auto_approve_editor_requests)
+
+    def update_editor_approval_policy(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        auto_approve_editor_requests: bool,
+        env: str,
+    ) -> bool:
+        with self._db.transactional_orm_session() as session:
+            binding = self._lock_editor_approval_policy(
+                session,
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                env=env,
+            )
+            binding.auto_approve_editor_requests = auto_approve_editor_requests
+            session.flush()
+            return bool(binding.auto_approve_editor_requests)
+
+    @staticmethod
+    def _qualified_editor_request(
+        db: Session,
+        *,
+        space_id: int,
+        skill_id: int,
+        applicant_user_id: str,
+        env: str,
+    ) -> tuple[Skill, str, bool]:
+        binding = (
+            db.query(SkillSpaceBinding)
+            .filter(
+                SkillSpaceBinding.space_id == space_id,
+                SkillSpaceBinding.skill_id == skill_id,
+                SkillSpaceBinding.env == env,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if binding is None:
+            raise WorkOrderNotFoundError("Space Skill not found")
+        space = (
+            db.query(SpaceModel)
+            .filter(
+                SpaceModel.id == space_id,
+                SpaceModel.env == env,
+                SpaceModel.deleted_at.is_(None),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        skill = (
+            db.query(Skill)
+            .filter(Skill.id == skill_id, Skill.env == env)
+            .with_for_update()
+            .one_or_none()
+        )
+        if space is None or skill is None:
+            raise WorkOrderNotFoundError("Space Skill not found")
+        if space.space_type != SpaceType.TEAM.value or skill.offline_at is not None:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "only live Team Space Skills accept editor requests"
+            )
+        member = (
+            db.query(SpaceMemberModel.id)
+            .filter(
+                SpaceMemberModel.space_id == space_id,
+                SpaceMemberModel.user_id == applicant_user_id,
+                SpaceMemberModel.status == "ACTIVE",
+                SpaceMemberModel.env == env,
+            )
+            .with_for_update()
+            .first()
+        )
+        if member is None:
+            raise WorkOrderAccessDeniedError(
+                "applicant must be an active Team Space member"
+            )
+        existing_grant = (
+            db.query(SkillGrant.id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == applicant_user_id,
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.env == env,
+            )
+            .first()
+        )
+        if existing_grant is not None:
+            raise WorkOrderSkillApplicantAlreadyEditorError(
+                "applicant already has Skill editor access"
+            )
+        owner = (
+            db.query(SkillGrant.user_id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.role == "OWNER",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.owner_slot == 1,
+                SkillGrant.env == env,
+            )
+            .first()
+        )
+        if owner is None:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "Skill has no active Owner"
+            )
+        pending = (
+            db.query(WorkOrderModel.id)
+            .filter(
+                WorkOrderModel.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
+                WorkOrderModel.biz_id == str(skill_id),
+                WorkOrderModel.applicant_user_id == applicant_user_id,
+                WorkOrderModel.status.in_(
+                    (WorkOrderStatus.PENDING.value, WorkOrderStatus.PROCESSING.value)
+                ),
+                WorkOrderModel.env == env,
+            )
+            .first()
+        )
+        if pending is not None:
+            raise WorkOrderAlreadyPendingError("pending request already exists")
+        return skill, owner[0], bool(binding.auto_approve_editor_requests)
+
+    def inspect_editor_request(
+        self, *, space_id: int, skill_id: int, applicant_user_id: str, env: str
+    ) -> SkillEditorRequestAdmission:
+        with self._db.transactional_orm_session() as db:
+            skill, _owner_id, auto_approve = self._qualified_editor_request(
+                db,
+                space_id=space_id,
+                skill_id=skill_id,
+                applicant_user_id=applicant_user_id,
+                env=env,
+            )
+            return SkillEditorRequestAdmission(
+                auto_approve=auto_approve, skill_name=skill.name
+            )
+
+    @staticmethod
+    def _auto_order_identity(*, biz_id: str, biz_data: str | None) -> tuple[int, int]:
+        try:
+            data = json.loads(biz_data or "{}")
+            space_id = int(data["space_id"])
+            skill_id = int(data["skill_id"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "work-order Skill identity is invalid"
+            ) from exc
+        if str(skill_id) != biz_id:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "work-order Skill identity is inconsistent"
+            )
+        return space_id, skill_id
+
+    def admit_auto_skill_editor_request(
+        self,
+        *,
+        session: Session,
+        biz_id: str,
+        biz_data: str | None,
+        applicant_user_id: str,
+        env: str,
+    ) -> None:
+        if not applicant_user_id:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "Skill editor applicant is required"
+            )
+        space_id, skill_id = self._auto_order_identity(biz_id=biz_id, biz_data=biz_data)
+        _, _, auto_approve = self._qualified_editor_request(
+            session,
+            space_id=space_id,
+            skill_id=skill_id,
+            applicant_user_id=applicant_user_id,
+            env=env,
+        )
+        if not auto_approve:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "automatic Skill editor approval is disabled"
+            )
+
     def create_skill_editor_request(
         self,
         *,
@@ -76,107 +342,17 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
         env: str,
     ):
         with self._db.transactional_orm_session() as db:
-            binding = (
-                db.query(SkillSpaceBinding)
-                .filter(
-                    SkillSpaceBinding.space_id == space_id,
-                    SkillSpaceBinding.skill_id == skill_id,
-                    SkillSpaceBinding.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
+            skill, owner_id, auto_approve = self._qualified_editor_request(
+                db,
+                space_id=space_id,
+                skill_id=skill_id,
+                applicant_user_id=applicant_user_id,
+                env=env,
             )
-            if binding is None:
-                raise WorkOrderNotFoundError("Space Skill not found")
-            if binding.auto_approve_editor_requests:
+            if auto_approve:
                 raise WorkOrderSkillEditorRequestNotAllowedError(
-                    "automatic approval is unavailable until the trusted "
-                    "WorkOrder integration is installed"
+                    "automatic Skill editor requests must use WorkOrder AUTO"
                 )
-            space = (
-                db.query(SpaceModel)
-                .filter(
-                    SpaceModel.id == space_id,
-                    SpaceModel.env == env,
-                    SpaceModel.deleted_at.is_(None),
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            skill = (
-                db.query(Skill)
-                .filter(
-                    Skill.id == skill_id,
-                    Skill.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if space is None or skill is None:
-                raise WorkOrderNotFoundError("Space Skill not found")
-            if space.space_type != SpaceType.TEAM.value:
-                raise WorkOrderSkillEditorRequestNotAllowedError(
-                    "Personal Space Skills do not accept editor requests"
-                )
-            member = (
-                db.query(SpaceMemberModel.id)
-                .filter(
-                    SpaceMemberModel.space_id == space_id,
-                    SpaceMemberModel.user_id == applicant_user_id,
-                    SpaceMemberModel.status == "ACTIVE",
-                    SpaceMemberModel.env == env,
-                )
-                .first()
-            )
-            if member is None:
-                raise WorkOrderAccessDeniedError(
-                    "applicant must be an active Team Space member"
-                )
-            existing_grant = (
-                db.query(SkillGrant.id)
-                .filter(
-                    SkillGrant.skill_id == skill_id,
-                    SkillGrant.user_id == applicant_user_id,
-                    SkillGrant.status == "ACTIVE",
-                    SkillGrant.env == env,
-                )
-                .first()
-            )
-            if existing_grant is not None:
-                raise WorkOrderSkillApplicantAlreadyEditorError(
-                    "applicant already has Skill editor access"
-                )
-            owner = (
-                db.query(SkillGrant.user_id)
-                .filter(
-                    SkillGrant.skill_id == skill_id,
-                    SkillGrant.role == "OWNER",
-                    SkillGrant.status == "ACTIVE",
-                    SkillGrant.owner_slot == 1,
-                    SkillGrant.env == env,
-                )
-                .one_or_none()
-            )
-            if owner is None:
-                raise WorkOrderSkillEditorRequestNotAllowedError(
-                    "Skill has no active Owner"
-                )
-            pending = (
-                db.query(WorkOrderModel.id)
-                .filter(
-                    WorkOrderModel.biz_type
-                    == WorkOrderBizType.SKILL_COLLABORATOR.value,
-                    WorkOrderModel.biz_id == str(skill_id),
-                    WorkOrderModel.applicant_user_id == applicant_user_id,
-                    WorkOrderModel.status == WorkOrderStatus.PENDING.value,
-                    WorkOrderModel.env == env,
-                )
-                .first()
-            )
-            if pending is not None:
-                raise WorkOrderAlreadyPendingError("pending request already exists")
-
-            owner_id = owner[0]
             title = WorkOrderMessageTitle.SKILL_COLLABORATOR_PENDING.value
             content = WorkOrderMessageContent.SKILL_COLLABORATOR_PENDING.value.format(
                 applicant_display=skill_collaborator_applicant_display(
@@ -448,18 +624,9 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             raise WorkOrderSkillEditorRequestNotAllowedError(
                 "Skill editor applicant is required"
             )
-        try:
-            data = json.loads(order.biz_data or "{}")
-            space_id = int(data["space_id"])
-            skill_id = int(data["skill_id"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise WorkOrderSkillEditorRequestNotAllowedError(
-                "work-order Skill identity is invalid"
-            ) from exc
-        if str(skill_id) != order.biz_id:
-            raise WorkOrderSkillEditorRequestNotAllowedError(
-                "work-order Skill identity is inconsistent"
-            )
+        space_id, skill_id = self._auto_order_identity(
+            biz_id=order.biz_id, biz_data=order.biz_data
+        )
         if (
             session.query(WorkOrderApproverModel.id)
             .filter(

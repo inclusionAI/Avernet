@@ -86,7 +86,7 @@ def _work_orders(db) -> WorkOrderRepository:
     return WorkOrderRepository(db, _skill_editor_requests(db))
 
 
-def test_auto_event_is_created_pending_without_result_notice(db) -> None:
+def test_auto_event_is_created_processing_without_result_notice(db) -> None:
     repository = _work_orders(db)
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
@@ -95,7 +95,7 @@ def test_auto_event_is_created_pending_without_result_notice(db) -> None:
         biz_id="friend-auto-1",
         event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
         applicant_user_id="applicant-auto",
-        approver_user_ids=["approver-auto"],
+        approver_user_ids=[],
         recipient_user_ids=["applicant-auto"],
         title="friend request",
         content=None,
@@ -106,7 +106,7 @@ def test_auto_event_is_created_pending_without_result_notice(db) -> None:
     assert created.status.value == "PENDING"
     with db.orm_session() as session:
         order = session.query(WorkOrderModel).one()
-        assert order.status == WorkOrderStatus.PENDING.value
+        assert order.status == WorkOrderStatus.PROCESSING.value
         assert session.query(WorkOrderApproverModel).count() == 0
         assert session.query(WorkOrderNotificationModel).count() == 0
 
@@ -120,7 +120,7 @@ def test_auto_finalize_records_system_reviewer_without_approver_rows(db) -> None
         biz_id="friend-auto-finalize",
         event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
         applicant_user_id="applicant-auto",
-        approver_user_ids=["first-approver", "final-approver"],
+        approver_user_ids=[],
         recipient_user_ids=["applicant-auto"],
         title="friend request",
         content=None,
@@ -128,29 +128,30 @@ def test_auto_finalize_records_system_reviewer_without_approver_rows(db) -> None
         biz_data=json.dumps({"request_ids": ["request-auto-finalize"]}),
         env="dev",
     )
-    repository.claim_auto_approval(
+    repository.complete_auto_approval(
         work_order_id=created.work_order_id,
-        reviewer_user_id="SYSTEM",
-        env="dev",
-    )
-    repository.finalize_auto_approval(
-        work_order_id=created.work_order_id,
-        reviewer_user_id="SYSTEM",
+        recipient_user_ids=["applicant-auto"],
+        source_event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
         env="dev",
     )
 
     with db.orm_session() as session:
-        order = session.query(WorkOrderModel).filter(
-            WorkOrderModel.id == created.work_order_id
-        ).one()
+        order = (
+            session.query(WorkOrderModel)
+            .filter(WorkOrderModel.id == created.work_order_id)
+            .one()
+        )
         status = order.status
         reviewer_user_id = order.reviewer_user_id
-        approver_count = session.query(WorkOrderApproverModel).filter(
-            WorkOrderApproverModel.work_order_id == created.work_order_id
-        ).count()
+        approver_count = (
+            session.query(WorkOrderApproverModel)
+            .filter(WorkOrderApproverModel.work_order_id == created.work_order_id)
+            .count()
+        )
     assert status == WorkOrderStatus.APPROVED.value
     assert reviewer_user_id == "SYSTEM"
     assert approver_count == 0
+
 
 def _space_skills(db) -> SpaceSkillRepository:
     return SpaceSkillRepository(db, _skill_editor_requests(db))
@@ -1080,9 +1081,9 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     # The endpoint's historical helper creates NULL/legacy MANUAL rows; explicit
     # MANUAL rows from the unified event endpoint must also remain reviewable.
     with db.transactional_orm_session() as session:
-        session.query(WorkOrderModel).filter(
-            WorkOrderModel.id == record.id
-        ).update({WorkOrderModel.approval_mode: "MANUAL"})
+        session.query(WorkOrderModel).filter(WorkOrderModel.id == record.id).update(
+            {WorkOrderModel.approval_mode: "MANUAL"}
+        )
     assert record.status is WorkOrderStatus.PENDING
     assert record.work_order_no.startswith("WO")
     assert record.biz_data is None
@@ -1401,11 +1402,10 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
         offset=0,
         limit=20,
     )
-    assert (
-        applicant_items[0].notification.title
-        == "空间加入申请已处理"
-    )
-    assert json.loads(applicant_items[0].notification.content) == {"text": "custom rejected content"}
+    assert applicant_items[0].notification.title == "空间加入申请已处理"
+    assert json.loads(applicant_items[0].notification.content) == {
+        "text": "custom rejected content"
+    }
 
 
 def test_badge_counts_distinct_pending_work_orders(db) -> None:

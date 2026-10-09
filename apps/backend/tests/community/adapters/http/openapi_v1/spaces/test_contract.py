@@ -59,7 +59,10 @@ from agentclaw.community.api.space_skill_offline_service import (
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
-from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
+from agentclaw.community.core.skill_center.editor_request_contract import (
+    SkillEditorRequestResult,
+)
+from agentclaw.community.core.work_orders.models import WorkOrderStatus
 from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
@@ -101,6 +104,9 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseTokenRejectedError,
     DraftSourceNotRefreshableError,
     SkillOfflineBlockedError,
+)
+from agentclaw.community.core.work_orders.errors import (
+    WorkOrderSkillEditorRequestNotAllowedError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -216,21 +222,10 @@ def client(
 def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
     client, skill_editor_request_service
 ):
-    now = datetime(2026, 8, 26, 8, 0, 0)
-    skill_editor_request_service.create_request.return_value = WorkOrderRecord(
-        id=91,
+    skill_editor_request_service.create_request.return_value = SkillEditorRequestResult(
+        work_order_id=91,
         work_order_no="WO-91",
-        biz_type="SKILL_COLLABORATOR",
-        biz_id="9",
-        applicant_user_id="owner-1",
-        apply_reason="共同维护",
         status=WorkOrderStatus.PENDING,
-        reviewer_user_id=None,
-        review_remark=None,
-        reviewed_at=None,
-        env="test",
-        gmt_created=now,
-        gmt_modified=now,
     )
 
     response = client.post(
@@ -249,6 +244,78 @@ def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
         skill_id=9,
         applicant_user_id="owner-1",
         reason="共同维护",
+    )
+
+
+def test_skill_editor_request_auto_result_is_approved_on_wire(
+    client, skill_editor_request_service
+) -> None:
+    skill_editor_request_service.create_request.return_value = SkillEditorRequestResult(
+        work_order_id=92, work_order_no="WO-92", status=WorkOrderStatus.APPROVED
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-requests",
+        json={"reason": "共同维护"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {
+        "work_order_id": 92,
+        "work_order_no": "WO-92",
+        "status": "APPROVED",
+    }
+
+
+def test_skill_editor_request_auto_failure_is_not_success_on_wire(
+    client, skill_editor_request_service
+) -> None:
+    skill_editor_request_service.create_request.side_effect = (
+        WorkOrderSkillEditorRequestNotAllowedError("automatic approval failed")
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-requests",
+        json={"reason": "共同维护"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["data"] is None
+
+
+def test_skill_editor_approval_policy_is_owner_scoped_on_wire(
+    client, skill_editor_request_service
+) -> None:
+    skill_editor_request_service.get_approval_policy.return_value = False
+    skill_editor_request_service.update_approval_policy.return_value = True
+    path = "/openapi/v1/bots/spaces/7/skills/9/editor-approval-policy"
+
+    read = client.get(path)
+    updated = client.put(path, json={"auto_approve_editor_requests": True})
+
+    assert read.status_code == 200
+    assert read.json()["data"] == {"auto_approve_editor_requests": False}
+    assert updated.status_code == 200
+    assert updated.json()["data"] == {"auto_approve_editor_requests": True}
+    skill_editor_request_service.get_approval_policy.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1"
+    )
+    skill_editor_request_service.update_approval_policy.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+    )
+    assert (
+        client.put(path, json={"auto_approve_editor_requests": "true"}).status_code
+        == 422
+    )
+    assert (
+        client.put(
+            path,
+            json={"auto_approve_editor_requests": False, "unexpected": 1},
+        ).status_code
+        == 422
     )
 
 
@@ -365,10 +432,10 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "edit_draft": False,
                 "publish_draft": False,
                 "delete_draft": False,
-                            "create_upgrade_draft": False,
-                            "offline_skill": False,
-                            "copy_offline_skill": False,
-                            "manage_grants": False,
+                "create_upgrade_draft": False,
+                "offline_skill": False,
+                "copy_offline_skill": False,
+                "manage_grants": False,
                 "transfer_owner": False,
                 "request_edit_access": True,
                 "takeover_lease": False,

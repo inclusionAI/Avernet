@@ -489,16 +489,7 @@ def test_create_work_order_event_accepts_json_objects(
     )
 
 
-def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
-    client, work_order_service
-):
-    work_order_service.create_work_order_event.return_value = WorkOrderEventCreatedResult(
-        event_category=NotificationCategory.APPROVAL,
-        work_order_id=11,
-        work_order_no="WO-11",
-        notification_ids=[21],
-        status=WorkOrderEventStatus.APPROVED,
-    )
+def test_public_work_order_event_rejects_untrusted_auto(client, work_order_service):
     payload = {
         "event_category": "APPROVAL",
         "approval_mode": "AUTO",
@@ -507,7 +498,7 @@ def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
         "event_type": "HUMAN2BOT_FRIEND_APPLIED",
         "applicant_user_id": "owner-1",
         "approver_user_ids": [],
-        "recipient_user_ids": [],
+        "recipient_user_ids": ["owner-1"],
         "title": "Friend request",
         "biz_data": {"request_ids": ["request-1"]},
     }
@@ -518,10 +509,63 @@ def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
         headers={"X-Request-Id": "request-1"},
     )
 
-    assert response.status_code == 201
-    kwargs = work_order_service.create_work_order_event.call_args.kwargs
-    assert kwargs["approval_mode"] is WorkOrderApprovalMode.AUTO
-    assert kwargs["callback_auth"].headers == {"x-request-id": "request-1"}
+    assert response.status_code == 403
+    work_order_service.create_work_order_event.assert_not_called()
+
+
+def test_public_auto_space_join_cannot_bypass_owner_approval(
+    client, work_order_service
+):
+    response = client.post(
+        "/openapi/v1/bots/work-orders/events",
+        json={
+            "event_category": "APPROVAL",
+            "approval_mode": "AUTO",
+            "biz_type": "SPACE_JOIN",
+            "biz_id": "7",
+            "event_type": "SPACE_JOIN_APPLIED",
+            "applicant_user_id": "owner-1",
+            "approver_user_ids": ["owner-1"],
+            "recipient_user_ids": ["owner-1"],
+            "title": "join",
+        },
+    )
+
+    assert response.status_code == 403
+    work_order_service.create_work_order_event.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("biz_type", "event_type"),
+    [
+        ("SKILL_COLLABORATOR", "SKILL_COLLABORATOR_APPLIED"),
+        ("SKILL_COLLABORATOR", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "SKILL_COLLABORATOR_APPLIED"),
+        (" SKILL_COLLABORATOR ", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "\tSKILL_COLLABORATOR_APPLIED\n"),
+    ],
+)
+def test_public_generic_events_reject_skill_approval_before_service_call(
+    client, work_order_service, biz_type, event_type
+):
+    payload = {
+        "event_category": "APPROVAL",
+        "biz_type": biz_type,
+        "biz_id": "91",
+        "event_type": event_type,
+        "applicant_user_id": "owner-1",
+        "approver_user_ids": ["real-skill-owner"],
+        "recipient_user_ids": [],
+        "title": "Skill editor request",
+        "biz_data": {"space_id": 7, "skill_id": 91},
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400201
+    work_order_service.create_work_order_event.assert_not_called()
+
 
 @pytest.mark.parametrize(
     "content",
@@ -536,13 +580,17 @@ def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
         {"workitem_name": "历史任务"},
     ],
 )
-def test_create_work_order_event_accepts_supported_content(content, client, work_order_service):
-    work_order_service.create_work_order_event.return_value = WorkOrderEventCreatedResult(
-        event_category=NotificationCategory.NOTICE,
-        work_order_id=None,
-        work_order_no=None,
-        notification_ids=[21],
-        status=WorkOrderEventStatus.CREATED,
+def test_create_work_order_event_accepts_supported_content(
+    content, client, work_order_service
+):
+    work_order_service.create_work_order_event.return_value = (
+        WorkOrderEventCreatedResult(
+            event_category=NotificationCategory.NOTICE,
+            work_order_id=None,
+            work_order_no=None,
+            notification_ids=[21],
+            status=WorkOrderEventStatus.CREATED,
+        )
     )
     payload = {
         "event_category": "NOTICE",
@@ -557,7 +605,10 @@ def test_create_work_order_event_accepts_supported_content(content, client, work
     response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
 
     assert response.status_code == 201
-    assert work_order_service.create_work_order_event.call_args.kwargs["content"] == content
+    assert (
+        work_order_service.create_work_order_event.call_args.kwargs["content"]
+        == content
+    )
 
 
 @pytest.mark.parametrize(
@@ -569,7 +620,9 @@ def test_create_work_order_event_accepts_supported_content(content, client, work
         True,
     ],
 )
-def test_create_work_order_event_rejects_invalid_content(content, client, work_order_service):
+def test_create_work_order_event_rejects_invalid_content(
+    content, client, work_order_service
+):
     payload = {
         "event_category": "NOTICE",
         "biz_type": "SPACE",
@@ -700,8 +753,16 @@ def test_list_work_orders_derives_space_title_without_notification(
     ("event_type", "stored_title", "expected"),
     [
         (WorkOrderEventType.SPACE_JOIN_REVIEWED, None, "空间加入申请已处理"),
-        (WorkOrderEventType.SKILL_COLLABORATOR_APPLIED, None, "Skill 共同编辑申请待审批"),
-        (WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED, "BOT_FRIEND APPROVED", "Bot 好友申请已通过"),
+        (
+            WorkOrderEventType.SKILL_COLLABORATOR_APPLIED,
+            None,
+            "Skill 共同编辑申请待审批",
+        ),
+        (
+            WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED,
+            "BOT_FRIEND APPROVED",
+            "Bot 好友申请已通过",
+        ),
         ("EXTERNAL_EVENT", "custom title", "custom title"),
     ],
 )
@@ -1043,7 +1104,9 @@ def test_display_title_marks_auto_approved_work_orders() -> None:
     )
 
 
-def test_notification_content_text_has_priority_and_is_preserved(client, notification_service):
+def test_notification_content_text_has_priority_and_is_preserved(
+    client, notification_service
+):
     notification_service.get_detail.return_value = WorkOrderNotificationDetail(
         notification=_notification().model_copy(
             update={
@@ -1098,7 +1161,8 @@ def test_list_work_orders_derives_collaborator_title_without_notification(
 ):
     work_order = _work_order().model_copy(update={"biz_type": biz_type})
     work_order_service.list_items.return_value = (
-        1, [WorkOrderListItem(work_order=work_order, notification=None, can_approve=True)]
+        1,
+        [WorkOrderListItem(work_order=work_order, notification=None, can_approve=True)],
     )
 
     response = client.get("/openapi/v1/bots/work-orders")
@@ -1113,13 +1177,34 @@ def test_list_work_orders_derives_collaborator_title_without_notification(
 def test_content_presentation_supports_all_legacy_shapes():
     assert preserve_content(None) is None
     assert preserve_content("plain text") == "plain text"
-    assert preserve_content(json.dumps({"text": "structured"})) == {"text": "structured"}
-    assert preserve_content(json.dumps(["legacy", 1])) == "[\"legacy\", 1]"
+    assert preserve_content(json.dumps({"text": "structured"})) == {
+        "text": "structured"
+    }
+    assert preserve_content(json.dumps(["legacy", 1])) == '["legacy", 1]'
 
     assert extract_content_text("plain text") == "plain text"
-    assert extract_content_text(json.dumps({"text": "  ", "legacy_value": "legacy"})) == "legacy"
-    assert extract_content_text(json.dumps({"text": "display", "legacy_value": "legacy", "workitem_name": "workitem"})) == "display"
-    assert extract_content_text(json.dumps({"legacy_value": "legacy", "workitem_name": "workitem"})) == "legacy"
+    assert (
+        extract_content_text(json.dumps({"text": "  ", "legacy_value": "legacy"}))
+        == "legacy"
+    )
+    assert (
+        extract_content_text(
+            json.dumps(
+                {
+                    "text": "display",
+                    "legacy_value": "legacy",
+                    "workitem_name": "workitem",
+                }
+            )
+        )
+        == "display"
+    )
+    assert (
+        extract_content_text(
+            json.dumps({"legacy_value": "legacy", "workitem_name": "workitem"})
+        )
+        == "legacy"
+    )
     assert extract_content_text(json.dumps({"workitem_name": "workitem"})) == "workitem"
     assert extract_content_text(json.dumps({"other": "value"})) is None
     assert extract_content_text(json.dumps(["not", "an", "object"])) is None

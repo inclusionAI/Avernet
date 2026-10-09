@@ -318,7 +318,9 @@ def test_editor_request_policy_delegates_authenticated_actor_and_environment() -
     )
 
 
-def test_create_bot_editor_request_allows_team_space_bot_without_engine_capability() -> None:
+def test_create_bot_editor_request_allows_team_space_bot_without_engine_capability() -> (
+    None
+):
     """A Team Space Bot accepts editor requests regardless of engine/template form.
 
     真实缺陷（预发 2026-09-09）：bot 20260902_07czoyk5 为 bot_type=personal、
@@ -577,7 +579,7 @@ def test_generic_approval_without_handler_preserves_existing_path() -> None:
     context = _friend_context().model_copy(
         update={
             "work_order": _work_order().model_copy(
-                    update={"biz_type": "GENERIC_APPROVAL", "biz_id": "generic-1"}
+                update={"biz_type": "GENERIC_APPROVAL", "biz_id": "generic-1"}
             ),
             "source_event_type": WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         }
@@ -639,8 +641,8 @@ def test_auto_work_order_rejects_applicant_other_than_actor() -> None:
             biz_id="friend-auto",
             event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
             applicant_user_id="someone-else",
-            approver_user_ids=["result-recipient"],
-            recipient_user_ids=[],
+            approver_user_ids=[],
+            recipient_user_ids=["result-recipient"],
             title="friend request",
             content=None,
             apply_reason=None,
@@ -671,8 +673,8 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
         biz_id="friend-auto",
         event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
         applicant_user_id="actor-auto",
-        approver_user_ids=["ignored-approver"],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["result-recipient"],
         title="friend request",
         content=None,
         apply_reason=None,
@@ -683,7 +685,8 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
 
     assert result.status is WorkOrderEventStatus.APPROVED
     kwargs = repository.create_work_order_event.call_args.kwargs
-    assert kwargs["approver_user_ids"] == ["ignored-approver"]
+    assert kwargs["approver_user_ids"] == []
+    assert kwargs["recipient_user_ids"] == ["result-recipient"]
     assert kwargs["callback_source_event_type"] == (
         WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
     )
@@ -1001,9 +1004,7 @@ def test_get_detail_resolves_reviewer_name_from_staff_directory() -> None:
     service, repository, *_ = _service(staff_dept=staff_dept)
     repository.get_detail.return_value = _detail().model_copy(
         update={
-            "work_order": _work_order().model_copy(
-                update={"reviewer_user_id": "1234"}
-            )
+            "work_order": _work_order().model_copy(update={"reviewer_user_id": "1234"})
         }
     )
 
@@ -1019,9 +1020,7 @@ def test_get_detail_keeps_success_when_reviewer_lookup_fails() -> None:
     service, repository, *_ = _service(staff_dept=staff_dept)
     repository.get_detail.return_value = _detail().model_copy(
         update={
-            "work_order": _work_order().model_copy(
-                update={"reviewer_user_id": "1234"}
-            )
+            "work_order": _work_order().model_copy(update={"reviewer_user_id": "1234"})
         }
     )
 
@@ -1084,7 +1083,9 @@ def test_review_requires_owner_and_delegates(
         review_remark="ok",
         target_status=status,
         notification=notification,
-        applicant_user_name=("applicant-1" if status is WorkOrderStatus.APPROVED else None),
+        applicant_user_name=(
+            "applicant-1" if status is WorkOrderStatus.APPROVED else None
+        ),
         env="dev",
     )
 
@@ -1342,6 +1343,35 @@ def test_create_work_order_event_normalizes_and_delegates(
     )
 
 
+def test_manual_skill_event_is_not_blocked_by_generic_work_order_service() -> None:
+    service, repository, _, _, _ = _service()
+    repository.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=42,
+        work_order_no="WO-42",
+        notification_ids=[24],
+        status=WorkOrderEventStatus.PENDING,
+    )
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="91",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor-1",
+        approver_user_ids=["owner-1"],
+        recipient_user_ids=[],
+        title="Skill editor request",
+        content=None,
+        apply_reason=None,
+        biz_data={"space_id": 7, "skill_id": 91},
+        actor_id="actor-1",
+    )
+
+    assert result.status is WorkOrderEventStatus.PENDING
+    repository.create_work_order_event.assert_called_once()
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -1363,13 +1393,6 @@ def test_create_work_order_event_normalizes_and_delegates(
         ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
-        (
-            {
-                "biz_type": "SKILL_COLLABORATOR",
-                "event_type": "SKILL_COLLABORATOR_APPLIED",
-            },
-            "must use the Skill endpoint",
-        ),
     ],
 )
 def test_create_work_order_event_rejects_invalid_input(
@@ -1446,8 +1469,8 @@ def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize
         biz_id="skill-1",
         event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         applicant_user_id="actor",
-        approver_user_ids=["notify-user"],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["actor"],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -1467,6 +1490,7 @@ def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize
 
 def test_auto_skill_non_approved_handler_result_marks_order_failed():
     service, repo, *_ = _service()
+    repo.fail_auto_approval.return_value = [34]
     repo.create_work_order_event.return_value = WorkOrderEventCreatedResult(
         event_category=NotificationCategory.APPROVAL,
         work_order_id=20,
@@ -1485,8 +1509,8 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
         biz_id="skill-2",
         event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         applicant_user_id="actor",
-        approver_user_ids=["notify-user"],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["actor"],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -1495,10 +1519,11 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
     )
 
     assert result.status is WorkOrderEventStatus.FAILED
-    repo.mark_auto_approval_failed.assert_called_once()
-    assert "skill transaction failed" in repo.mark_auto_approval_failed.call_args.kwargs[
-        "review_remark"
-    ]
-    repo.create_auto_result_notifications.assert_called_once()
-    assert repo.create_auto_result_notifications.call_args.kwargs["status"] is WorkOrderStatus.FAILED
-    repo.finalize_auto_approval.assert_not_called()
+    repo.fail_auto_approval.assert_called_once()
+    assert (
+        "skill transaction failed"
+        in repo.fail_auto_approval.call_args.kwargs["review_remark"]
+    )
+    assert repo.fail_auto_approval.call_args.kwargs["recipient_user_ids"] == ["actor"]
+    repo.complete_auto_approval.assert_not_called()
+    assert result.notification_ids == [34]
