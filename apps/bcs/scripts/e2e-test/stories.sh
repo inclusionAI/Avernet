@@ -1431,8 +1431,10 @@ print(json.dumps({
 story_provider_operator_publishes_agent() {
     info "Story: provider operator registers a provider, publishes an agent, and retires it"
 
+    local provider_slug="e2e-provider-$$-$(date +%s)"
+    local renamed_slug="${provider_slug}-renamed"
     api_post "/providers" \
-        '{"name":"E2E Provider","webhook_url":"https://provider.example.com/bcs/webhook","auth":{"mode":"static_bearer"},"protocol_version":"2.0","coordination":{"mode":"native_tool"}}'
+        "{\"name\":\"E2E Provider\",\"slug\":\"${provider_slug}\",\"webhook_url\":\"https://provider.example.com/bcs/webhook\",\"auth\":{\"mode\":\"static_bearer\"},\"protocol_version\":\"2.0\",\"coordination\":{\"mode\":\"native_tool\"}}"
     require_status "operator registers a Provider 2.0 integration" "200" || return
     local provider_id admin_token bcs_token
     provider_id=$(json_path "$RESPONSE" "provider_id")
@@ -1443,6 +1445,26 @@ story_provider_operator_publishes_agent() {
     assert_not_empty "provider registration returns BCS callback token" "$bcs_token"
     [[ -n "$provider_id" && -n "$admin_token" ]] || return
 
+    api_get "/providers/by-slug/${provider_slug}"
+    require_status "caller discovers provider by slug without provider credentials" "200" || return
+    assert_json_eq "slug discovery keeps provider id" "$RESPONSE" "provider_id" "$provider_id"
+    assert_json_eq "slug discovery returns the registered slug" "$RESPONSE" "slug" "$provider_slug"
+    assert_json_eq "slug discovery returns provider name" "$RESPONSE" "name" "E2E Provider"
+    assert_json_eq "slug discovery returns auth mode" "$RESPONSE" "auth_mode" "static_bearer"
+    assert_json_eq "slug discovery returns protocol version" "$RESPONSE" "protocol_version" "2.0"
+    assert_json_eq "slug discovery starts enabled" "$RESPONSE" "enabled" "true"
+    local public_keys
+    public_keys=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(",".join(sorted(json.load(sys.stdin))))')
+    assert_eq "slug discovery exposes only basic public fields" "$public_keys" \
+        "auth_mode,created_at,enabled,name,protocol_version,provider_id,slug,updated_at"
+
+    api_get "/providers/by-slug/${renamed_slug}"
+    require_status "unknown provider slug returns not found" "404" || return
+    api_get "/providers/by-slug/Invalid_slug"
+    require_status "invalid provider slug is rejected" "400" || return
+    api_post "/providers" "{\"name\":\"Duplicate E2E Provider\",\"slug\":\"${provider_slug}\",\"auth\":{\"mode\":\"static_bearer\"}}"
+    require_status "another provider cannot claim an existing slug" "409" || return
+
     api_request_headers GET "/providers/${provider_id}" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "operator reads provider metadata" "200" || return
@@ -1451,11 +1473,18 @@ story_provider_operator_publishes_agent() {
     assert_json_eq "provider starts enabled" "$RESPONSE" "disabled" "false"
 
     api_request_headers PATCH "/providers/${provider_id}" \
-        '{"name":"E2E Provider Updated","protocol_version":"2.0"}' \
+        "{\"name\":\"E2E Provider Updated\",\"slug\":\"${renamed_slug}\",\"protocol_version\":\"2.0\"}" \
         "Authorization: Bearer ${admin_token}"
     require_status "operator updates provider metadata" "200" || return
     assert_json_eq "provider name update is persisted" "$RESPONSE" "name" "E2E Provider Updated"
     assert_json_eq "provider id is stable across update" "$RESPONSE" "provider_id" "$provider_id"
+
+    api_get "/providers/by-slug/${provider_slug}"
+    require_status "renamed provider releases the old slug" "404" || return
+    api_get "/providers/by-slug/${renamed_slug}"
+    require_status "provider is discoverable under the new slug" "200" || return
+    assert_json_eq "renamed slug keeps provider id" "$RESPONSE" "provider_id" "$provider_id"
+    assert_json_eq "slug discovery reflects metadata update" "$RESPONSE" "name" "E2E Provider Updated"
 
     local provider_bot_ref="reviewer-$$-$(date +%s)"
     api_request_headers POST "/providers/${provider_id}/bots" \
@@ -1549,11 +1578,17 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
         "Authorization: Bearer ${admin_token}"
     require_status "operator disables the provider" "200" || return
     assert_json_eq "provider disable is persisted" "$RESPONSE" "disabled" "true"
+    api_get "/providers/by-slug/${renamed_slug}"
+    require_status "disabled provider remains discoverable" "200" || return
+    assert_json_eq "slug discovery reports disabled provider" "$RESPONSE" "enabled" "false"
 
     api_request_headers POST "/providers/${provider_id}/enable" "" \
         "Authorization: Bearer ${admin_token}"
     require_status "operator re-enables the provider" "200" || return
     assert_json_eq "provider enable is persisted" "$RESPONSE" "disabled" "false"
+    api_get "/providers/by-slug/${renamed_slug}"
+    require_status "re-enabled provider remains discoverable" "200" || return
+    assert_json_eq "slug discovery reports re-enabled provider" "$RESPONSE" "enabled" "true"
 
     api_request_headers DELETE "/providers/${provider_id}/bots/${provider_bot_ref}" "" \
         "Authorization: Bearer ${admin_token}"
