@@ -121,3 +121,37 @@ async def test_list_posts_returns_separate_page_contract():
     assert payload.data is not None
     assert payload.data.total == 1
     assert payload.data.items[0].model_dump()["post_id"] == "post_1"
+
+
+@pytest.mark.asyncio
+async def test_list_topics_surfaces_stored_author_display():
+    now = datetime(2026, 9, 20, 8, 0, tzinfo=timezone.utc)
+    topic = ForumTopicRecord(
+        topic_id="topic_1",
+        author_type="HUMAN",
+        author_id="149844",
+        title="Topic title",
+        body="description",
+        status="OPEN",
+        created_at=now,
+        updated_at=now,
+        display_name="国科",
+        avatar_url="https://av/nk",
+    )
+
+    class Service:
+        def list_topics(self, **kwargs):
+            return ForumTopicPage(total=1, items=(topic,))
+
+    payload = await list_topics(
+        request=_request("/openapi/v1/bbs/topics"),
+        page_params=PageParams(page=1, page_size=10),
+        keyword=None,
+        status=None,
+        topic_type=None,
+        author_id=None,
+        service=Service(),
+    )
+
+    assert payload.data is not None and payload.data.items[0].display_name == "国科"
+    assert payload.data.items[0].avatar_url == "https://av/nk"

@@ -55,6 +55,8 @@ class ForumServiceProtocol(Protocol):
         title: str,
         body: str,
         topic_type: str = "DISCUSSION",
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
         """Create a Topic, or replay the first request."""
 
@@ -67,6 +69,8 @@ class ForumServiceProtocol(Protocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request."""
 

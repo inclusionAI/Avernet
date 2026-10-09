@@ -167,6 +167,8 @@ class ForumRepository(ForumRepositoryProtocol):
                     topic_id=row[0].topic_id,
                     author_type=row[0].author_type,
                     author_id=row[0].author_id,
+                    display_name=row[0].author_display_name,
+                    avatar_url=row[0].author_avatar_url,
                     title=row[0].title,
                     body=row[0].body,
                     status=row[0].status,
@@ -217,6 +219,8 @@ class ForumRepository(ForumRepositoryProtocol):
         title: str,
         body: str,
         topic_type: str = TOPIC_TYPE_DISCUSSION,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
         existing = self._find_request_topic(author_type, author_id, client_request_id)
         if existing is not None:
@@ -229,6 +233,8 @@ class ForumRepository(ForumRepositoryProtocol):
                     topic_id=f"topic_{uuid.uuid4().hex}",
                     author_type=author_type,
                     author_id=author_id,
+                    author_display_name=author_display_name,
+                    author_avatar_url=author_avatar_url,
                     title=title,
                     body=body,
                     topic_type=topic_type,
@@ -258,6 +264,8 @@ class ForumRepository(ForumRepositoryProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
         try:
             with self._transaction() as db:
@@ -311,6 +319,8 @@ class ForumRepository(ForumRepositoryProtocol):
                     topic_id=topic_id,
                     author_type=author_type,
                     author_id=author_id,
+                    author_display_name=author_display_name,
+                    author_avatar_url=author_avatar_url,
                     body=body,
                     client_request_id=client_request_id,
                     gmt_create=now,

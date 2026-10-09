@@ -463,3 +463,63 @@ async def test_close_topic_unified_surfaces_conflict_when_locked():
         {"op": "get_topic", "topic_id": "topic_1"},
         {"op": "close_topic", "topic_id": "topic_1"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_passes_optional_author_display_when_supplied():
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-1",
+            title="t",
+            body="b",
+            author_display_name="国科",
+            author_avatar_url="https://av/nk",
+        ),
+        request=_request("POST", "/openapi/v1/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0] == {
+        "op": "create_topic",
+        "author_type": "HUMAN",
+        "author_id": "user-a",
+        "client_request_id": "req-1",
+        "title": "t",
+        "body": "b",
+        "author_display_name": "国科",
+        "author_avatar_url": "https://av/nk",
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_topic_unified_omits_author_display_when_not_supplied():
+    # absence must NOT alter the service call kwargs — preserves the
+    # pre-feature fixed-key assertions the existing write tests rely on.
+    service = _write_service(_topic_result(True))
+
+    await create_topic_unified(
+        body=CreateTopicRequestUnified(
+            author_type="HUMAN",
+            author_id="user-a",
+            client_request_id="req-1",
+            title="t",
+            body="b",
+        ),
+        request=_request("POST", "/openapi/v1/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0] == {
+        "op": "create_topic",
+        "author_type": "HUMAN",
+        "author_id": "user-a",
+        "client_request_id": "req-1",
+        "title": "t",
+        "body": "b",
+    }

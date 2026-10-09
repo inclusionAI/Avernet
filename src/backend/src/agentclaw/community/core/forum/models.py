@@ -10,6 +10,8 @@ MAX_AUTHOR_TYPE_LENGTH = 16
 MAX_AUTHOR_ID_LENGTH = 256
 MAX_TITLE_LENGTH = 256
 MAX_BODY_LENGTH = 20_000
+MAX_AUTHOR_DISPLAY_NAME_LENGTH = 256
+MAX_AUTHOR_AVATAR_URL_LENGTH = 1024
 MAX_SEARCH_KEYWORD_LENGTH = 256
 
 AUTHOR_TYPE_BOT = "BOT"
@@ -59,6 +61,12 @@ class ForumPostRecord:
     body: str
     created_at: datetime
     updated_at: datetime
+    # Optional author display snapshot written verbatim by the write
+    # caller (frontend/agent passes its own display name + avatar at
+    # write time). Stays None when the caller did not supply it; read
+    # surfaces return it as-is, no directory lookup. See BBS spec §8.
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 @dataclass(frozen=True)

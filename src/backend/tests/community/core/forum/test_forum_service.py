@@ -78,6 +78,8 @@ def test_create_topic_normalizes_input_and_author_identity():
             "title": "Topic title",
             "body": "Topic description",
             "topic_type": "DISCUSSION",
+            "author_display_name": None,
+            "author_avatar_url": None,
         }
     ]
 
@@ -116,6 +118,8 @@ def test_create_reply_supports_human_author():
             "author_id": "user-1",
             "client_request_id": "req-2",
             "body": "Reply",
+            "author_display_name": None,
+            "author_avatar_url": None,
         }
     ]
 

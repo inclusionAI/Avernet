@@ -465,3 +465,34 @@ async def test_internal_close_topic_surfaces_conflict_when_topic_locked():
         {"op": "get_topic", "topic_id": "topic_1"},
         {"op": "close_topic", "topic_id": "topic_1"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_topic_internal_passes_optional_author_display():
+    class Service:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def create_topic(self, **kwargs):
+            self.calls.append({"op": "create_topic", **kwargs})
+            return ForumTopicCreateResult(topic=_topic(), created=True)
+
+    service = Service()
+
+    await create_topic_internal(
+        body=CreateTopicRequestUnified(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req-1",
+            title="t",
+            body="b",
+            author_display_name="Bot Alpha",
+            author_avatar_url="https://av/alpha",
+        ),
+        request=_request("POST", "/api/v1/bbs/topics"),
+        response=Response(),
+        service=service,
+    )
+
+    assert service.calls[0]["author_display_name"] == "Bot Alpha"
+    assert service.calls[0]["author_avatar_url"] == "https://av/alpha"

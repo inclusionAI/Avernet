@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 from agentclaw.community.core.forum.models import (
     BROWSE_MODE_FRAMEWORK,
+    MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+    MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
@@ -114,6 +116,26 @@ class AuthorRefRequest(BaseModel):
             "Stable identifier of the human work-no or Bot that authors the "
             "write. The engine records it as declared; it is not re-verified "
             "against a principal on this surface."
+        ),
+    )
+
+    author_display_name: str | None = Field(
+        default=None,
+        max_length=MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+        description=(
+            "Optional author display-name snapshot the write caller already "
+            "holds (HUMAN flower name or Bot name). Persisted verbatim and "
+            "surfaced on Topic/Post reads so listing no longer depends on a "
+            "staff directory. Omit to leave it null."
+        ),
+    )
+    author_avatar_url: str | None = Field(
+        default=None,
+        max_length=MAX_AUTHOR_AVATAR_URL_LENGTH,
+        description=(
+            "Optional author avatar URL snapshot, paired with "
+            "author_display_name. Persisted verbatim and surfaced on read; "
+            "omit to leave it null."
         ),
     )
 
@@ -316,6 +338,14 @@ class TopicDetail(BaseModel):
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
     author_type: str = Field(description="Author kind: HUMAN or BOT.")
     author_id: str = Field(description="Stable identifier of the human or Bot author.")
+    display_name: str | None = Field(
+        default=None,
+        description="Author display-name snapshot written at topic creation, if supplied.",
+    )
+    avatar_url: str | None = Field(
+        default=None,
+        description="Author avatar URL snapshot written at topic creation, if supplied.",
+    )
     title: str = Field(description="Topic title.")
     body: str = Field(description="Full Topic description or reply body.")
     status: str = Field(description="Topic state: OPEN, CLOSED, or LOCKED.")
@@ -335,6 +365,14 @@ class PostItem(BaseModel):
     topic_id: str = Field(description="Stable server-generated Topic identifier.")
     author_type: str = Field(description="Author kind: HUMAN or BOT.")
     author_id: str = Field(description="Stable identifier of the human or Bot author.")
+    display_name: str | None = Field(
+        default=None,
+        description="Author display-name snapshot written at reply time, if supplied.",
+    )
+    avatar_url: str | None = Field(
+        default=None,
+        description="Author avatar URL snapshot written at reply time, if supplied.",
+    )
     body: str = Field(description="Full Topic description or reply body.")
     created_at: datetime = Field(description="UTC creation timestamp.")
     updated_at: datetime = Field(description="UTC last-modified timestamp.")
@@ -444,3 +482,20 @@ class BrowseFeedTopicItem(BaseModel):
             updated_at=item.updated_at,
             my_reply_count=item.my_reply_count,
         )
+
+
+def author_display_fields(body: "AuthorRefRequest") -> dict[str, str]:
+    """Map the optional author display snapshot fields on ``body`` to the
+    kwargs passed to ``ForumService.create_topic`` / ``create_reply``.
+
+    Empty by design when the caller omitted the fields, so the service call
+    kwargs stay identical to the pre-feature surface — existing write-path
+    call assertions comparing a fixed key set are unaffected. Mirrors the
+    "supply it to store it, otherwise stay null" contract.
+    """
+    fields: dict[str, str] = {}
+    if body.author_display_name is not None:
+        fields["author_display_name"] = body.author_display_name
+    if body.author_avatar_url is not None:
+        fields["author_avatar_url"] = body.author_avatar_url
+    return fields

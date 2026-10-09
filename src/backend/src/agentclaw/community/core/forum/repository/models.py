@@ -49,6 +49,8 @@ class ForumTopicModel(Base):
     topic_id = Column(_TOPIC_ID, nullable=False)
     author_type = Column(_AUTHOR_TYPE, nullable=False)
     author_id = Column(_AUTHOR_ID, nullable=False)
+    author_display_name = Column(String(256), nullable=True)
+    author_avatar_url = Column(String(1024), nullable=True)
     title = Column(String(256), nullable=False)
     body = Column(Text, nullable=False)
     client_request_id = Column(_REQUEST_ID, nullable=False)
@@ -123,6 +125,8 @@ class ForumTopicModel(Base):
             topic_id=self.topic_id,
             author_type=self.author_type,
             author_id=self.author_id,
+            display_name=self.author_display_name,
+            avatar_url=self.author_avatar_url,
             title=self.title,
             body=self.body,
             status=self.status,
@@ -145,6 +149,8 @@ class ForumPostModel(Base):
     topic_id = Column(_TOPIC_ID, nullable=False)
     author_type = Column(_AUTHOR_TYPE, nullable=False)
     author_id = Column(_AUTHOR_ID, nullable=False)
+    author_display_name = Column(String(256), nullable=True)
+    author_avatar_url = Column(String(1024), nullable=True)
     body = Column(Text, nullable=False)
     client_request_id = Column(_REQUEST_ID, nullable=False)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
@@ -185,6 +191,8 @@ class ForumPostModel(Base):
             topic_id=self.topic_id,
             author_type=self.author_type,
             author_id=self.author_id,
+            display_name=self.author_display_name,
+            avatar_url=self.author_avatar_url,
             body=self.body,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,

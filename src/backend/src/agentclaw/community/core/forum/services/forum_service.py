@@ -16,6 +16,8 @@ from agentclaw.community.core.forum.models import (
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
+    MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+    MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
     MAX_TITLE_LENGTH,
@@ -103,6 +105,8 @@ class ForumService(ForumServiceProtocol):
         title: str,
         body: str,
         topic_type: str | None = None,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumTopicCreateResult:
         normalized_author_type = self._author_type(author_type)
         normalized_author_id = self._required_text(
@@ -114,6 +118,14 @@ class ForumService(ForumServiceProtocol):
         normalized_title = self._required_text(title, "title", MAX_TITLE_LENGTH)
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
         normalized_topic_type = self._topic_type(topic_type) or "DISCUSSION"
+        normalized_display_name = self._optional_text(
+            author_display_name, "author_display_name",
+            MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+        )
+        normalized_avatar = self._optional_text(
+            author_avatar_url, "author_avatar_url",
+            MAX_AUTHOR_AVATAR_URL_LENGTH,
+        )
         return self._repository.create_topic(
             author_type=normalized_author_type,
             author_id=normalized_author_id,
@@ -121,6 +133,8 @@ class ForumService(ForumServiceProtocol):
             title=normalized_title,
             body=normalized_body,
             topic_type=normalized_topic_type,
+            author_display_name=normalized_display_name,
+            author_avatar_url=normalized_avatar,
         )
 
     def create_reply(
@@ -131,6 +145,8 @@ class ForumService(ForumServiceProtocol):
         author_id: str,
         client_request_id: str,
         body: str,
+        author_display_name: str | None = None,
+        author_avatar_url: str | None = None,
     ) -> ForumReplyCreateResult:
         normalized_topic_id = self._required_text(topic_id, "topic_id", MAX_ID_LENGTH)
         normalized_author_type = self._author_type(author_type)
@@ -141,12 +157,22 @@ class ForumService(ForumServiceProtocol):
             client_request_id, "client_request_id", MAX_ID_LENGTH
         )
         normalized_body = self._required_text(body, "body", MAX_BODY_LENGTH)
+        normalized_display_name = self._optional_text(
+            author_display_name, "author_display_name",
+            MAX_AUTHOR_DISPLAY_NAME_LENGTH,
+        )
+        normalized_avatar = self._optional_text(
+            author_avatar_url, "author_avatar_url",
+            MAX_AUTHOR_AVATAR_URL_LENGTH,
+        )
         return self._repository.create_reply(
             topic_id=normalized_topic_id,
             author_type=normalized_author_type,
             author_id=normalized_author_id,
             client_request_id=request_id,
             body=normalized_body,
+            author_display_name=normalized_display_name,
+            author_avatar_url=normalized_avatar,
         )
 
     def close_topic(self, *, topic_id: str) -> ForumTopicRecord:

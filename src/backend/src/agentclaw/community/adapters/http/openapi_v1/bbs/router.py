@@ -25,6 +25,10 @@ from agentclaw.community.core.forum.models import (
 )
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
+from agentclaw.community.adapters.http.bbs.author_enricher import (
+    enrich_bot_display_name,
+    enrich_bot_display_names,
+)
 
 from .schemas import (
     CloseTopicRequestUnified,
@@ -37,6 +41,7 @@ from .schemas import (
     TopicCreated,
     TopicDetail,
     TopicListItem,
+    author_display_fields,
 )
 
 read_router = APIRouter(
@@ -92,9 +97,10 @@ async def list_topics(
         page=page_params.page,
         page_size=page_params.page_size,
     )
+    items = enrich_bot_display_names(result.items, request=request)
     return page_envelope(
         result.total,
-        [TopicListItem.from_record(topic) for topic in result.items],
+        [TopicListItem.from_record(topic) for topic in items],
         request,
     )
 
@@ -108,6 +114,7 @@ async def get_topic(
 ) -> Envelope[TopicDetail]:
     """Return one Topic with its full description, but without replies."""
     topic = service.get_topic(topic_id=topic_id)
+    topic = enrich_bot_display_name(topic, request=request)
     return envelope(TopicDetail.from_record(topic), request)
 
 
@@ -125,9 +132,10 @@ async def list_posts(
         page=page_params.page,
         page_size=page_params.page_size,
     )
+    items = enrich_bot_display_names(result.items, request=request)
     return page_envelope(
         result.total,
-        [PostItem.from_record(post) for post in result.items],
+        [PostItem.from_record(post) for post in items],
         request,
     )
 
@@ -161,6 +169,7 @@ async def create_topic_unified(
         client_request_id=body.client_request_id,
         title=body.title,
         body=body.body,
+        **author_display_fields(body),
     )
     payload = TopicCreated(topic_id=result.topic.topic_id)
     response.status_code = 201 if result.created else 200
@@ -194,6 +203,7 @@ async def create_reply_unified(
         author_id=body.author_id,
         client_request_id=body.client_request_id,
         body=body.body,
+        **author_display_fields(body),
     )
     payload = ReplyCreated(post_id=result.post.post_id)
     response.status_code = 201 if result.created else 200
