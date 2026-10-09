@@ -22,6 +22,7 @@ from ._types import (
 
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
+    from secbaas.community.api.device_manage import OutBoundOperationRuleUpdatedMode
 
 
 class TeClawBotPlugin(Protocol):
@@ -165,16 +166,41 @@ class TeClawBotPlugin(Protocol):
         """
         ...
 
-    async def update_outbound_rule(self, bot_id: str, rules: dict[str, Any]) -> bool:
+    async def update_outbound_rule(
+        self,
+        bot_id: str,
+        rules: dict[str, Any],
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
+    ) -> bool:
         """Update the outbound operation rule for a bot via PUT /api/v1/bot/{bot_id}/operationRules.
 
         Args:
             bot_id: The teclaw_bot_id for the target device.
             rules: Dict in TeClaw API JSON format, e.g.
                 ``{"header_operation_rules": [...]}``.
+            mode: Bot rule update mode. ``APPEND`` combined with
+                ``session_key`` updates rules in the session dimension.
+            session_key: Raw session key. Required when ``mode`` is
+                ``APPEND``; implementations encode it before URL construction.
 
         Returns:
             True if the update was accepted by the TeClaw API.
+        """
+        ...
+
+    async def append_session_outbound_rule(
+        self, session_key: str, rule: dict[str, Any]
+    ) -> bool:
+        """Append a session-scoped outbound operation rule for a bot.
+
+        Args:
+            session_key: Raw session key. Implementations encode it before
+                constructing the TeClaw URL.
+            rule: Single header operation rule in TeClaw session API format.
+
+        Returns:
+            True if the session-scoped rule was accepted.
         """
         ...
 

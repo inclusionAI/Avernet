@@ -179,6 +179,7 @@ class PaasService(PaasServiceProtocol, ABC):
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
         mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Update outbound operation rule for a device.
 
@@ -438,3 +439,10 @@ class PaasService(PaasServiceProtocol, ABC):
             PaasError: With FILE_TRANSFER_FAILED if upload fails.
         """
         ...
+
+    async def close(self) -> None:
+        """Release resources owned by this request-scoped service.
+
+        The default is intentionally a no-op. Platform services that own
+        resources such as plugin HTTP sessions must override this method.
+        """
