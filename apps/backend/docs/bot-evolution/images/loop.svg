@@ -12,11 +12,11 @@
 <text x="500" y="132" font-size="15" font-weight="700" fill="#334155" text-anchor="middle" dominant-baseline="middle">Evolution Run (orchestrator)</text>
 <rect x="270" y="148" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="166" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">1  Trigger</text>
-<text x="420" y="166" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">the binding fires: schedule · event · manual</text>
+<text x="420" y="166" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">fires on schedule · event · manual</text>
 <text x="718" y="166" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
 <rect x="270" y="190" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="208" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">2  Freeze run</text>
-<text x="420" y="208" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">strategy version · params · parent · budget</text>
+<text x="420" y="208" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">version · params · parent · budget</text>
 <text x="718" y="208" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">PLATFORM</text>
 <rect x="270" y="232" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
 <text x="285" y="250" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">3  run(ctx)</text>
@@ -24,7 +24,7 @@
 <text x="718" y="250" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">STRATEGY</text>
 <rect x="270" y="274" width="460" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
 <text x="285" y="292" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">4  Submit</text>
-<text x="420" y="292" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">candidate Genome Patch via ctx.submit</text>
+<text x="420" y="292" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">patch via ctx.candidates.submit</text>
 <text x="718" y="292" font-size="10.5" font-weight="700" fill="#0d9488" text-anchor="end" dominant-baseline="middle">STRATEGY</text>
 <rect x="270" y="316" width="460" height="36" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="285" y="334" font-size="13.5" font-weight="600" fill="#0f172a" text-anchor="start" dominant-baseline="middle">5  Static checks</text>
