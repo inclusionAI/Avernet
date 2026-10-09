@@ -258,7 +258,8 @@ ClawBench（`clawbench-base`）成为默认的评分器；backend 评测环境
 3. 在策略内部，ClawEvolve 的诊断逻辑读取 `r41` 最近 7 天的片段，聚类根因，并
    添加可重放的训练用例（平台分配划分；封存集和回归集保持隐藏）。
 4. 它的 tune 智能体编辑一个从 `r41` 物化出来的**沙箱工作区**；
-   `ctx.evaluate.train` 为结果打分；策略提交一个基因组补丁（逐项列出：
+   一次训练评估（`ctx.evaluate.start_train`，一个按 id 查询的长时操作）为结果
+   打分；策略提交一个基因组补丁（逐项列出：
    `persona/SOUL.md: replace section "Escalation"`、
    `skills/refund-policy: update SKILL.md`）以及理由。
 5. 平台静态检查通过；C1 记录候选修订版 `r42`（父版本 `r41`）。

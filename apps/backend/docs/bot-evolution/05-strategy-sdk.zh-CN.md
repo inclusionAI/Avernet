@@ -85,11 +85,11 @@ class EvolutionStrategy(Protocol):
 
 | 能力 | 上下文部分 | 提供什么 | 备注 |
 | --- | --- | --- | --- |
-| *（始终授予）* | `parent`、`workspace`、`submit`、`budget`、`log`、`artifacts`、`cancelled` | 读取父修订版；将修订版物化到沙箱，并将差异转回补丁；提交候选；预算、日志、产物、取消 | 无需声明 |
+| *（始终授予）* | `parent`、`workspace`、`submit`、`operations`、`budget`、`log`、`artifacts`、`cancelled` | 读取父修订版；将修订版物化到沙箱，并将差异转回补丁；提交候选；查询长时操作（§6.1）；预算、日志、产物、取消 | 无需声明 |
 | `experience.sessions@1` | `ctx.experience.sessions()` | Bot 过去的对话，归一化为片段（episode），并经过过滤 | 读取对话历史；向所有者展示 |
 | `experience.feedback@1` | `ctx.experience.feedback()` | 收件箱中的评分、纠正、结果以及被测 Bot 的观察 | |
-| `agents@1` `{definitions}` | `ctx.agents.run(definition, …)` | 在沙箱工作区中运行策略自己的某个智能体定义 | 每个定义都指明其引擎；该 Bot 的引擎必须在其中（§4.2） |
-| `evaluate.train@1` | `ctx.evaluate.train(…)`、`ctx.evaluate.add_train_cases(…)` | 仅在**训练集**上进行平台评估，返回分数与评语；添加训练用例 | 验证集、封存集、回归集和安全集保持隐藏 |
+| `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → 操作 id | 在沙箱工作区中运行策略自己的某个智能体定义，作为一个长时操作（§6.1） | 每个定义都指明其引擎；该 Bot 的引擎必须在其中（§4.2） |
+| `evaluate.train@1` | `ctx.evaluate.start_train(…)` → 操作 id、`ctx.evaluate.add_train_cases(…)` | 仅在**训练集**上进行平台评估，返回分数与评语，作为一个长时操作（§6.1）；添加训练用例 | 验证集、封存集、回归集和安全集保持隐藏 |
 
 **`@1` 的含义。** `@` 后面的数字是*能力契约*（其方法和数据结构）的版本，而不是
 策略的版本。策略会声明它是针对哪个契约版本编写的。如果平台之后以不兼容的方式修改
@@ -126,20 +126,22 @@ async def sessions(self, *, days: int, limit: int = 500,
 
 ```python
 # agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
-async def run(self, definition: str, *, workspace: Workspace,
-              prompt: str, timeout_s: int = 1800) -> AgentResult: ...
+async def start(self, definition: str, *, workspace: Workspace, prompt: str,
+                idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
+# when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
 ```
 
 这里的**智能体**指多步骤、会使用工具的智能体会话（一个在多个步骤中读取和编辑
 文件的 LLM），而不是单次模型调用。例如，ClawEvolve 的调优步骤会调用
-`ctx.agents.run("clawevolve-tune", workspace=ws, prompt=…)`。平台在沙箱 `ws`
-内启动该智能体，而不是在线上 Bot 上，并返回它的对话记录和退出状态。它修改的
-文件留在 `ws` 中，直到策略把它们转成补丁。指定了策略未注册的定义的调用会被
+`ctx.agents.start("clawevolve-tune", workspace=ws, prompt=…, idempotency_key=…)`。
+平台在沙箱 `ws` 内启动该智能体，而不是在线上 Bot 上，并立即返回一个操作 id。
+一次智能体会话可能运行许多分钟，因此策略通过该 id 查询其状态（§6.1）；成功时，
+结果包含它的对话记录和退出状态。它修改的文件留在 `ws` 中，直到策略把它们转成补丁。指定了策略未注册的定义的调用会被
 拒绝。
 
 ### 4.2 智能体定义从何而来
 
-`ctx.agents.run` 指定了一个智能体，但平台还需要该智能体的**定义**：它的指令、
+`ctx.agents.start` 指定了一个智能体，但平台还需要该智能体的**定义**：它的指令、
 技能和工具配置。目前，ClawEvolve 的调优智能体是 `clawevolve-skills` 中的
 `clawevolve-tune` 技能（`SKILL.md` 加参考资料），安装在 ClawEvolve 自己驱动的
 OpenClaw 运行时中，因此指定名称就足够了。来自其他团队的黑盒策略没有这样的共享
@@ -155,7 +157,7 @@ OpenClaw 运行时中，因此指定名称就足够了。来自其他团队的�
    找到这些定义，因此两种运行时（§9）的工作方式相同。
 3. **在注册时校验。** 每个被指定引擎的 `agents@1` 提供方会对照该引擎的定义契约
    校验定义。若定义所属的引擎没有提供方，或定义未通过校验，则注册失败。
-4. **按调用加载。** `ctx.agents.run("clawevolve-tune", …)` 使提供方按 digest
+4. **按调用加载。** `ctx.agents.start("clawevolve-tune", …)` 使提供方按 digest
    将该定义加载到沙箱中，与工作区 `ws` 并列。定义对智能体只读；只有 `ws` 可写。
 5. **随策略一起版本化。** 定义属于某个策略版本：修改调优提示词意味着注册一个新的
    策略版本。实验记录 H 在每次运行中记录定义的 digest，因此结果可以归因到所使用
@@ -209,12 +211,13 @@ Bot 的进化策略配置（evolution policy）是一个绑定列表。不同 Bo
 class StrategyContext(Protocol):
     run_id: str; params: dict                       # frozen at run start
     parent: GenomeRevisionView                      # read-only: spec, files by digest, lineage
-    workspace: WorkspaceFactory                     # materialise(revision) → sandbox dir; ws.to_patch()
+    workspace: WorkspaceFactory                     # materialise(revision, key) → sandbox; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
     attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
     async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
     async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
+    operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6.1)
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -236,6 +239,32 @@ class StrategyContext(Protocol):
 - 提交什么由策略自己选择（由它的启发式决定什么值得提交）。候选是否被接受由平台
   选择：先按绑定的验证配置进行验证，再经过门禁和风险等级
   （[08-governance.zh-CN.md §2](08-governance.zh-CN.md#2-门禁)）。
+
+### 6.1 长时调用即操作
+
+有些能力调用所做的工作需要几分钟甚至更久：一次智能体会话（`agents.start`），或
+一次覆盖大量 rollout 的训练评估（`evaluate.start_train`）。这些调用在工作运行期间
+绝不会让请求一直挂起：
+
+- **启动立即返回 id。** 启动调用记录一个**操作**，把工作交给平台，并返回它的
+  **操作 id**。在作业协议中，这对应返回 `202` 和该 id（§9）。
+- **状态按 id 查询。** `ctx.operations.get(op_id)` 返回状态（`queued`、
+  `running`、`succeeded`、`failed` 或 `cancelled`），并在操作成功后返回结果。
+  每次查询都是一个短请求。`ctx.operations.wait(op_id)` 是一个 SDK 辅助函数，它
+  反复发起短查询，直到操作结束；它从不让某个请求一直挂起。
+- **启动是幂等的。** 它接受一个 `idempotency_key`。使用相同的键重复启动，会返回
+  同一个操作（无论是否已结束），而不会再次启动这项工作并再次为其付费。用运行 id
+  和自身步骤构建键的策略（例如 `"<run>/round-2/tune"`）在重新派发（§7.2）后能
+  重新接上它的操作，而无需存储操作 id。
+- **操作属于平台和运行。** 它们由平台持久化和执行，独立于策略的进程，因此策略
+  崩溃不会让它们停止。它们的成本计入运行的预算。运行结束时，其未完成的操作会被
+  取消。
+- **工作区遵循同样的规则。** `ctx.workspace.materialise(revision, key)` 按键
+  幂等，因此重新派发的运行会拿回同一个沙箱，包括某个智能体操作已经做出的编辑。
+
+始终很快的调用（读取经验、添加训练用例、`submit`、`verdict`、预算）仍是普通的
+请求与响应。每个能力的目录契约（§4）会说明它的哪些调用是操作；任何工作可能超出
+一个短请求的调用都必须是操作。
 
 ## 7. 运行生命周期
 
@@ -266,6 +295,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 | --- | --- | --- |
 | 运行记录、其冻结的输入、已花费的预算和已提交的候选 | 平台 | 在 `submit` 或运行提交返回之前持久化 |
 | 发现运行的进程已死亡 | 平台 | 每次运行都是一个**带租约的作业**。worker（或进程内宿主）续租；租约到期时（进程崩溃、硬件故障、重启），作业回到 `queued`，并以相同的运行 id 和 `ctx.attempt + 1` 重新派发。fencing token 会拒绝旧持有者的调用。超过 `max_attempts` 后，运行以 `failed` 结束 |
+| 已经启动的智能体会话和训练评估 | 平台 | 它们是操作（§6.1）：由平台持久化和运行，独立于策略的进程。它们在重新派发期间继续运行；策略通过以相同的幂等键重复启动来重新接上它们 |
 | 策略自身的进度（轮次编号、搜索状态、历史） | 策略 | 策略把所需的任何内容持久化到**自己的存储**中，以运行 id 为键，并在重新派发时重新加载并继续。平台不提供检查点 API，也从不读取这部分状态；它的形态因策略而异 |
 
 重新派发的运行使用相同的冻结输入和相同的预算：之前各次尝试花掉的预算不会退回。
@@ -306,13 +336,21 @@ GET  /evolution/v1/runs/{run}/parent                ctx.parent
 GET  /evolution/v1/runs/{run}/content/{digest}      file bytes of the parent / workspace
 GET  /evolution/v1/runs/{run}/experience/sessions   ctx.experience.sessions   (if granted)
 GET  /evolution/v1/runs/{run}/experience/feedback   ctx.experience.feedback   (if granted)
-POST /evolution/v1/runs/{run}/agents:run            ctx.agents.run            (if granted)
-POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.train        (if granted)
+POST /evolution/v1/runs/{run}/workspaces            ctx.workspace.materialise {revision, key} → {workspace_id}   (idempotent)
+POST /evolution/v1/runs/{run}/agents:start          ctx.agents.start → 202 {operation_id}            (if granted; idempotent)
+POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.start_train → 202 {operation_id}    (if granted; idempotent)
+POST /evolution/v1/runs/{run}/evaluations/cases     ctx.evaluate.add_train_cases                     (if granted)
+GET  /evolution/v1/runs/{run}/operations/{id}       ctx.operations.get → {status, result?}
+POST /evolution/v1/runs/{run}/operations/{id}:cancel ctx.operations.cancel
 POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
 GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
+
+每个请求都会及时返回。工作可能超出一个短请求的，就是一个操作（§6.1）：它的启动
+返回 `202` 和一个操作 id，worker 按 id 查询其状态。智能体会话或评估运行期间，
+没有任何请求会一直挂起。
 
 所有载荷都是带 JSON Schema 的 JSON。worker 不会获得任何访问 Bot 的凭证；未被
 授予的能力所对应的端点返回 `403`；携带过期 fencing token 的调用返回 `409`。
@@ -335,11 +373,15 @@ class ClawEvolveStrategy(EvolutionStrategy):
             state = State(findings=findings, base=ctx.parent.id, next_round=0)
             await self.store.save(ctx.run_id, state)
         while state.next_round < ctx.params["max_rounds"]:
+            key = f"{ctx.run_id}/round-{state.next_round}"               # same keys after a re-dispatch
             if state.pending is None:
-                ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
-                await ctx.agents.run("clawevolve-tune", workspace=ws,
-                                     prompt=build_tune_prompt(state.findings, state.history))
-                train = await ctx.evaluate.train(ws)                     # replaces its own bench step
+                ws = await ctx.workspace.materialise(state.base, key=key) # sandbox, not the live bot
+                tune = await ctx.agents.start("clawevolve-tune", workspace=ws,
+                                              prompt=build_tune_prompt(state.findings, state.history),
+                                              idempotency_key=f"{key}/tune")   # operation id, returned at once
+                await ctx.operations.wait(tune)                           # short status lookups by id
+                train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+                train = (await ctx.operations.wait(train_op)).result      # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
                     state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
                                                                evidence=state.findings.ids))
@@ -379,14 +421,14 @@ class ClawEvolveStrategy(EvolutionStrategy):
 | 包 | 面向 | 内容 |
 | --- | --- | --- |
 | `avernet-evolution`（Python）、`@avernet/evolution`（TS） | 调用方：流水线、CI、UI 后端 | 为 Evolution API（绑定、运行、判定）生成的客户端 |
-| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、类型化模型、进程内与作业协议两种 `StrategyContext`、`WorkspaceFactory`（物化 / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、带模拟平台的本地测试工具（`avn strategy dev`）、`avn strategy publish`（注册一个版本并上传其智能体定义，§4.2），以及一致性测试套件 |
+| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、类型化模型、进程内与作业协议两种 `StrategyContext`、`WorkspaceFactory`（物化 / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、按 id 轮询的 `operations.wait` 辅助函数、带模拟平台的本地测试工具（`avn strategy dev`）、`avn strategy publish`（注册一个版本并上传其智能体定义，§4.2），以及一致性测试套件 |
 
 一致性测试在端口两侧都要运行：
 
 - **策略测试套件**（由作者运行；在某个版本可以在开发环境之外被绑定之前，也由
   C3 运行）：候选必须通过补丁模式和本次运行 `allowed_genes` 的校验；策略只使用
   被授予的能力；它会在取消和 `BudgetExhausted` 时停止；重复提交同一候选是幂等的；在运行中途杀掉策略并再次派发
-  同一运行 id，既不会产生重复候选，也不会超出预算。
+  同一运行 id，既不会产生重复的候选或操作，也不会超出预算。
 - **能力提供方**（由平台和引擎适配器运行）：每个目录条目针对每个引擎提供方都有
   一个契约测试，遵循 `docs/arch/protocol-contract-tests.md`。
 

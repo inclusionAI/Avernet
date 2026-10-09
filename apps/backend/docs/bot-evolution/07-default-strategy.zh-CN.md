@@ -41,8 +41,8 @@ ClawEvolve 通过唯一的策略端口（[05-strategy-sdk.zh-CN.md](05-strategy-
 | `acquisition/discovery.py`、`sessions.py`、`service_export.py` | OpenClaw 的 `experience.sessions` 提供方（平台侧） | 移到引擎 session-export 契约之后；归一化为 `Episode`；打上基因组修订版标签 |
 | `clawevolve-diagnose` | 位于策略内部 | 通过 `ctx.experience.sessions()` 而非磁盘读取片段 |
 | `clawevolve-plan`（bench 用例） | 位于策略内部 | 通过 `ctx.evaluate.add_train_cases()` 添加用例；由平台分配划分（移除其自有的 80/20 划分权） |
-| `clawevolve-tune` + `clawevolve-review` | 位于策略内部 | **编辑由 `ctx.workspace.materialise()` 得到的沙箱，而不是线上工作区**；通过 `ctx.agents.run()` 运行智能体；提交 `ws.to_patch()` |
-| 训练集 bench 运行（`bench-full-opt`） | `ctx.evaluate.train()` | ClawBench 评分作为 `platform/clawbench` 迁入验证服务 |
+| `clawevolve-tune` + `clawevolve-review` | 位于策略内部 | **编辑由 `ctx.workspace.materialise()` 得到的沙箱，而不是线上工作区**；通过 `ctx.agents.start()` 以按 id 查询的长时操作运行智能体；提交 `ws.to_patch()` |
+| 训练集 bench 运行（`bench-full-opt`） | `ctx.evaluate.start_train()`（一个按 id 查询的操作） | ClawBench 评分作为 `platform/clawbench` 迁入验证服务 |
 | `action_accept`（`test > baseline`）+ 建议性门禁 | 决定提交什么的内部过滤 | 接受与否变为平台在绑定的验证配置下给出的判定；ClawEvolve 的门禁阈值可以作为更严格验证配置的初始值 |
 | baseline-pack / restore / pack / deploy | —（移除） | 不再需要：策略从不修改线上 Bot |
 | `ce_tasks` / `ce_steps` / claim-report | —（替换） | 平台 Run Orchestrator + 作业协议 |
@@ -57,7 +57,7 @@ ClawEvolve 通过唯一的策略端口（[05-strategy-sdk.zh-CN.md](05-strategy-
 | 耦合点 | 替换为 |
 | --- | --- |
 | 硬编码的 `/home/admin/.openclaw/workspace` 和 `~/.openclaw/agents/*/sessions` | 编辑使用 `ctx.workspace`（物化的基因组）；会话使用 `ctx.experience.sessions()` |
-| 用 `openclaw agent --local --agent …` 运行 tune/review/judge/bench | `ctx.agents.run()`（`agents` 能力），先提供 OpenClaw 提供方；bench 执行迁移到验证服务中的评测 Bot |
+| 用 `openclaw agent --local --agent …` 运行 tune/review/judge/bench | `ctx.agents.start()`（`agents` 能力；一个按 id 查询的操作），先提供 OpenClaw 提供方；bench 执行迁移到验证服务中的评测 Bot |
 | OpenClaw 的 md 约定（SOUL/AGENTS/TOOLS、`skills/skills-local`、`config/mcporter.json`） | 基因组的基因（`persona`、`skills`、`tools.mcp`）；路径由引擎投影负责 |
 | `singlebox/bot-runtime.ts` 中的 `active_engine='openclaw'`、`bot_type='personal'` 过滤 | 绑定检查：Bot 的引擎必须为 `needs` 中的每一项提供提供方 |
 | 直接 SQLite 读取 Backend 表（`ac_bots`，…） | Genome Registry / Backend API |

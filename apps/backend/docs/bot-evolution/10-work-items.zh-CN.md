@@ -60,8 +60,9 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
   智能体定义契约以及定义的上传与加载，05 §4.2）、进化策略配置（evolution policy，
   即绑定）schema 与绑定检查、运行生命周期与失败语义（R11）：幂等的运行提交并
   返回运行 id、崩溃后以相同运行 id 重新派发的带租约作业、由策略自行负责的进度
-  持久化（平台不提供检查点 API）；隔离（R13）；以及每个 `ctx` 调用在作业协议
-  （Job Protocol）中的映射。
+  持久化（平台不提供检查点 API）；智能体会话和训练评估的长时操作（启动返回操作
+  id，按键幂等；状态按 id 查询；工作运行期间不挂起任何请求）；隔离（R13）；以及
+  每个 `ctx` 调用在作业协议（Job Protocol）中的映射。
 - **先读**：[05-strategy-sdk.zh-CN.md](05-strategy-sdk.zh-CN.md)；ClawEvolve
   `official-stage-catalog.json`、`routes/internal/evolve.ts`；
   `docs/arch/protocol-contract-tests.md`。
@@ -116,7 +117,8 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 - **依赖**：RSI-06、RSI-07、RSI-03。
 - **完成标准**：singlebox 故事：用参考进化策略启动运行 → 记录候选 → 门禁 →
   晋升 → Bot 更新 → 回滚；用相同幂等键重复启动会返回相同的运行 id；在运行中途
-  杀掉 worker 会导致以相同运行 id 重新派发。
+  杀掉 worker 会导致以相同运行 id 重新派发，重新派发的运行会重新接上正在运行的
+  操作，而不是再次启动它们。
 
 ### RSI-09 进化策略 SDK 与一致性测试套件
 - **模块**：evolution
