@@ -37,6 +37,10 @@ IMAGE_PIN_PARAM_CODE = "sbot_pin_image"
 IMAGE_DEFAULT_KEY = "sbot_use_default_image"
 IMAGE_PIN_ENABLED_KEY = "sbot_pin_image"
 IMAGE_PIN_VALUE_KEY = "sbot_docker_image"
+ARCA_IMAGE_PIN_TEMPLATE_UIDS = frozenset({
+    "default_bot_template",
+    "claude_code_bot_template",
+})
 IMAGE_POLICY_KEYS = (
     IMAGE_DEFAULT_KEY,
     IMAGE_PIN_ENABLED_KEY,

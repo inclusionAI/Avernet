@@ -32,9 +32,14 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     has_explicit_image_policy,
     resolve_current_arca_image,
     PublishImagePolicyResolver,
+    ImagePolicyState,
     ServiceBotImagePin,
+    ARCA_IMAGE_PIN_TEMPLATE_UIDS,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -459,14 +464,26 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     ) -> ServiceBotImagePin:
         """Resolve image policy through :class:`PublishImagePolicyResolver`.
 
-        This is *the* image-policy operation: it re-reads the record, may
-        lazily snapshot the configured ARCA image under CAS, and returns the
-        resulting policy. (``arca_image_pin.image_policy_from_ext`` is only the
-        pure decoder the resolver uses internally.)
+        Only the default and Claude Code templates use the persisted ARCA image
+        policy resolver. Other templates use DEFAULT without reading or
+        snapshotting ARCA Pin config. Template lookup errors propagate rather
+        than silently acquiring a Pin for an unknown template.
 
         ``device_provider`` is the caller's resolved container token; the policy
         never re-derives the provider from the record's ``ext``.
         """
+        # Teclaw owns its image. Preserve that path without requiring ARCA
+        # template routing. All other callers share this identity lookup, so
+        # scale/restart/rollback cannot accidentally snapshot a Pin for AICoding.
+        if device_provider != TECLAW_DEVICE_PROVIDER:
+            template_uid = self._bot_service.resolve_bot_template_uid(
+                bot_id=publish_record.source_bot_id,
+                user_id=publish_record.owner_id,
+                env=publish_record.env,
+            )
+            if template_uid not in ARCA_IMAGE_PIN_TEMPLATE_UIDS:
+                return ServiceBotImagePin(ImagePolicyState.DEFAULT, None)
+
         return self._image_policy_resolver.resolve(
             publish_record, device_provider=device_provider
         )

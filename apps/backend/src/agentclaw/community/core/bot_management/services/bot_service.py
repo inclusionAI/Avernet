@@ -683,6 +683,28 @@ class BotService(BotServiceProtocol):
             )
             return template_type == "applicationCoding" and on_create
 
+    def resolve_bot_template_uid(self, *, bot_id: str, user_id: str, env: str) -> str:
+        """Resolve a stored bot's template identity without selecting a template UUID.
+
+        Lookup/resolution failures propagate: callers must not mistake an unknown
+        template for one eligible for the legacy ARCA image Pin.
+        """
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        # Unlike get_bot's best-effort enrichment, propagate template read errors.
+        # Identity lookup does not need device bindings.
+        template_config = self._template_service.get_template_config_strict(bot_id)
+        return self._baas_template_resolver.resolve_template_uid(
+            bot_id=bot_id,
+            user_id=user_id,
+            env=env,
+            bot_type=str(bot.get("bot_type") or "service"),
+            engine_type=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=template_config if isinstance(template_config, dict) else None,
+        )
+
     def _attach_template_uid_context(
         self,
         *,
