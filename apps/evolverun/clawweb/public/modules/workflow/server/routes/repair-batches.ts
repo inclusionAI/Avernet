@@ -84,6 +84,8 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
       nodeId: req.query.nodeId === undefined ? undefined : text(req.query.nodeId, 'nodeId'),
       failureMode: req.query.failureMode === undefined ? undefined : text(req.query.failureMode, 'failureMode'),
       signature: req.query.signature === undefined ? undefined : text(req.query.signature, 'signature'),
+      previewSignatures: req.query.previewSignature === undefined ? undefined
+        : (Array.isArray(req.query.previewSignature) ? req.query.previewSignature : [req.query.previewSignature]).map(value => text(value, 'previewSignature')),
       includeHistorical: boolean(req.query.includeHistorical, 'includeHistorical') }), canEdit: actor.canEdit });
   }));
   router.get('/items/:itemId', handle(async (req, res) => {

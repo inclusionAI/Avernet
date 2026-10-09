@@ -36,26 +36,18 @@ export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
 }
 
 export function useIssueGroupDetail(group: IssueGroupView | undefined) {
-  const [data, setData] = useState<IssueGroupView>();
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [refresh, setRefresh] = useState(0);
   const compact = group?.presentation === 'summary';
-  useEffect(() => {
-    if (!compact || !group) return;
-    const controller = new AbortController();
-    setLoading(true); setData(undefined); setError('');
-    const params = new URLSearchParams({ workflowId: group.workflowId, signature: group.signature });
-    readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, controller.signal)
-      .then(result => { if (!controller.signal.aborted) {
-        const detail = result.groups.find(value => value.signature === group.signature);
-        if (!detail) throw new Error('该问题已更新，请刷新问题列表');
-        setData(detail);
-      } }).catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [compact, group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus, refresh]);
-  return { group: compact ? data : group, loading: compact && (loading || !data && !error), error: compact ? error : '', retry: () => setRefresh(value => value + 1) };
+  const query = useQuery({ queryKey: ['issue-detail', group?.workflowId, group?.signature, group?.inputDigest, group?.aggregationId, group?.aggregationStatus],
+    enabled: compact && !!group, staleTime: 30_000, gcTime: 300_000, retry: false,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ workflowId: group!.workflowId, signature: group!.signature });
+      const result = await readOnlyJson<{ groups: IssueGroupView[] }>(`/api/evolve/issue-groups?${params}`, signal);
+      const detail = result.groups.find(value => value.signature === group!.signature);
+      if (!detail) throw new Error('该问题已更新，请刷新问题列表');
+      return detail;
+    } });
+  return { group: compact ? (query.error ? undefined : query.data) : group, loading: compact && query.isPending,
+    error: compact && query.error ? query.error.message : '', retry: () => { void query.refetch(); } };
 }
 
 /** A selected issue stays reachable even when it is not on the current list page. */

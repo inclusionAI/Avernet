@@ -15,11 +15,13 @@ export function repairSignatureKey(signature: string): string {
 }
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
 export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean;
-  nodeId?: string; failureMode?: string; signature?: string };
+  nodeId?: string; failureMode?: string; signature?: string; previewSignatures?: string[] };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
+  /** Up to 3 suggestion summaries per visible issue, independent of the global item page. */
+  issuePreviews?: Array<{ signature: string; total: number; items: RepairInboxItem[] }>;
   includeHistorical: boolean; activeLookbackDays: number;
   repairSignatureKeys: string[];
   counts: Record<RepairInboxFilter, number>;

@@ -60,6 +60,20 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=1')).status).toBe(400);
     expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=true')).body.includeHistorical).toBe(true);
   });
+  it('returns bounded previews for all visible issues in one authorized read, including empty issues', async () => {
+    const f = await setup();
+    f.items[0].context = { signature: 'issue-a' };
+    f.items[1].context = { signature: 'issue-b' };
+    const response = await f.request('/candidates?workflowId=wf-1&pageSize=1&previewSignature=issue-b&previewSignature=empty');
+    expect(response.status).toBe(200);
+    expect(response.body.issuePreviews).toMatchObject([
+      { signature: 'issue-b', total: 1, items: [{ itemId: 'item-1' }] },
+      { signature: 'empty', total: 0, items: [] },
+    ]);
+    expect(response.body.page.total).toBe(2);
+    expect((await f.request('/candidates?workflowId=wf-1&previewSignature=issue-b', undefined, 'denied')).status).toBe(403);
+    expect((await f.request('/candidates?workflowId=wf-1' + '&previewSignature=a'.repeat(51))).status).toBe(400);
+  });
   it('keeps dispositions usable with generation unavailable and cancels with a JSON acknowledgement', async () => {
     const f = await setup(false);
     const inbox = (await f.request('/candidates?workflowId=wf-1')).body;

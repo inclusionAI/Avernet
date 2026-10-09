@@ -16,6 +16,7 @@ export const repairBatches = {
     if (query.nodeId) params.set('nodeId', query.nodeId)
     if (query.failureMode) params.set('failureMode', query.failureMode)
     if (query.signature) params.set('signature', query.signature)
+    for (const signature of query.previewSignatures ?? []) params.append('previewSignature', signature)
     return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),

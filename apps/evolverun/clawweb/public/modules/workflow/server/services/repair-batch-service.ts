@@ -177,6 +177,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         if (value !== undefined && !requiredText(value, 4096)) fail('INVALID_INPUT', 'Invalid repair scope');
       }
       const includeHistorical = query.includeHistorical === true;
+      if (query.previewSignatures !== undefined && (!Array.isArray(query.previewSignatures)
+        || query.previewSignatures.length > 50 || query.previewSignatures.some(value => !requiredText(value, 4096)))) {
+        fail('INVALID_INPUT', 'Invalid issue preview scope');
+      }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
       const scopedItems = snapshot.items.filter(item => matchesScope(item, query) && (includeHistorical ||
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
@@ -197,6 +201,12 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
+      if (query.previewSignatures) response.issuePreviews = [...new Set(query.previewSignatures)].map(signature => {
+        const matches = filtered.filter(item => item.context?.signature === signature)
+          .sort((a, b) => Number(b.state === 'pending' && b.sourceAvailable) - Number(a.state === 'pending' && a.sourceAvailable)
+            || a.itemId.localeCompare(b.itemId));
+        return { signature, total: matches.length, items: matches.slice(0, 3) };
+      });
       boundedRepairJson(response, MAX_INBOX_READ_BYTES);
       return response;
     });

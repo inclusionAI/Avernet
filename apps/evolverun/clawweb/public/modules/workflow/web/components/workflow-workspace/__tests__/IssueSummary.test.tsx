@@ -3,6 +3,22 @@ import { describe, it, expect } from 'vitest';
 import IssueSummary from '../IssueSummary';
 
 describe('IssueSummary', () => {
+  it('shows each original diagnosis when aggregation failed, without presenting a shared conclusion', () => {
+    render(<IssueSummary group={{ aggregationStatus: 'failed', summary: null, stale: false, summarySources: [],
+      sources: [
+        { sourceId: 'a', flowId: 'run-a', analysisId: 'analysis-a', completedAtMs: 1000, reasoning: 'Upstream output was missing' },
+        { sourceId: 'b', flowId: 'run-b', analysisId: 'analysis-b', completedAtMs: 2000, reasoning: 'Scheduler never started the ready node' },
+      ] } as never} />);
+    expect(screen.getByText('Upstream output was missing')).toBeVisible();
+    expect(screen.getByText('Scheduler never started the ready node')).toBeVisible();
+    expect(screen.getByText(/原始诊断 · 尚未汇总/)).toBeVisible();
+    expect(screen.getByText(/run-a/)).toBeVisible();
+  });
+  it('explains when neither an aggregate nor an original reason was recorded', () => {
+    render(<IssueSummary group={{ aggregationStatus: 'not_generated', summary: null, stale: false,
+      sources: [{ sourceId: 'a', flowId: 'run-a', reasoning: '  ' }] } as never} />);
+    expect(screen.getByText(/原始诊断未记录原因/)).toBeVisible();
+  });
   it('shows distinct causes with their own source runs and does not invent a shared suggestion', () => {
     render(<IssueSummary group={{ aggregationStatus: 'completed', stale: false,
       summary: { summary: 'Different timeout causes', unknowns: ['Need traces'], causes: [

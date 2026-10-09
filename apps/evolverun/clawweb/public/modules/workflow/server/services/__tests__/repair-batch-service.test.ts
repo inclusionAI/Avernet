@@ -43,6 +43,19 @@ describe('repair workbench control service', () => {
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
   });
+  it('limits each issue preview but keeps its real total and reads sources only once', async () => {
+    const f = await repairFixture(8); fixtures.push(f);
+    f.items.forEach((item, i) => { item.context = { signature: i < 6 ? 'many' : 'few' }; });
+    const load = vi.spyOn(f.sourcePort, 'load');
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const result = await service.candidates('wf-1', { page: 2, pageSize: 1, previewSignatures: ['many', 'few', 'empty'] });
+    expect(result.page).toMatchObject({ page: 2, total: 8 });
+    expect(result.issuePreviews?.map(p => ({ total: p.total, ids: p.items.map(i => i.itemId) }))).toEqual([
+      { total: 6, ids: ['item-0', 'item-1', 'item-2'] }, { total: 2, ids: ['item-6', 'item-7'] }, { total: 0, ids: [] },
+    ]);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+  });
   it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
     const f = await setup(4, false);
     f.items.forEach((item, i) => { item.context = { signature: `issue-${i}`, diagnoses: [{ nodeId: i < 3 ? 'fetch' : 'write', failureMode: i === 2 ? 'other' : 'timeout' }] }; });

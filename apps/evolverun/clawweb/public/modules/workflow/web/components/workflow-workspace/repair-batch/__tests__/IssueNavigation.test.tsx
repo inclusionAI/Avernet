@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -7,9 +7,10 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import EvolutionTab from '../../EvolutionTab'
 import IssueRepairSuggestions from '../IssueRepairSuggestions'
 import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../../server/contracts/repair-workbench'
+const accessState = vi.hoisted(() => ({ ready: true }))
 
 vi.mock('../../../../api/hooks', () => ({
-  useWorkflowAccess: () => ({ data: { canEdit: true } }),
+  useWorkflowAccess: () => ({ data: accessState.ready ? { canEdit: true } : undefined, isPending: !accessState.ready }),
   useEvolveSuggestions: () => ({ data: { suggestions: [] }, isLoading: false }),
   useSuggestionApplyTasks: () => ({ data: { tasks: [] } }),
   useRecordSuggestionAction: () => ({ mutate: vi.fn() }),
@@ -31,6 +32,7 @@ const result: RepairCandidatesResponse = {
   page: { page: 1, pageSize: 20, total: 2, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 }
 const requests: URL[] = []
+const choices = () => within(screen.queryByRole('dialog', { name: '问题详情' }) ?? document.body)
 const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, inputDigest: String(i),
   flowIds: [`run-${i}`], aggregationStatus: 'not_generated', aggregationId: null, summary: null, stale: false,
   sources: [{ sourceId: String(i), flowId: `run-${i}`, flowIds: [`run-${i}`], analysisId: 'an', diagnosisId: String(i),
@@ -38,6 +40,9 @@ const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, input
 })
 beforeEach(() => {
   sessionStorage.clear(); requests.length = 0
+  accessState.ready = true
+  result.capabilities.generation = true
+  result.capabilities.reason = null
   result.items = [item('retry'), item('timeout')]
   vi.stubGlobal('fetch', vi.fn(async (raw: string) => {
     const url = new URL(raw, 'http://localhost'); requests.push(url)
@@ -56,6 +61,10 @@ beforeEach(() => {
       const page = Number(url.searchParams.get('page') ?? 1)
       const pageSize = Number(url.searchParams.get('pageSize') ?? 20)
       body = { ...result, items: result.items.slice((page - 1) * pageSize, page * pageSize),
+        issuePreviews: url.searchParams.getAll('previewSignature').map(signature => {
+          const items = result.items.filter(item => item.context?.signature === signature)
+          return { signature, total: items.length, items: items.slice(0, 3) }
+        }),
         page: { page, pageSize, total: result.items.length, totalPages: Math.ceil(result.items.length / pageSize) } }
     }
     else if (url.pathname.includes('/items/')) body = item(url.pathname.split('/').at(-1)!)
@@ -65,7 +74,37 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-it('turns the issue page, changes the actual problem rows, and resets it on filtering without reading candidates', async () => {
+it('does not scan suggestions twice when initial workflow permission finishes loading', async () => {
+  accessState.ready = false
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const ui = () => <QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>
+  const view = render(ui())
+  await screen.findByText('node-0', { selector: 'span' })
+  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(0)
+  accessState.ready = true
+  view.rerender(ui())
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(1)
+})
+
+it('keeps repair context usable when the issue endpoint fails before returning any data', async () => {
+  const fetchOther = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn((input: string, init?: RequestInit) => input.includes('/issue-groups')
+    ? Promise.resolve(new Response(JSON.stringify({ error: 'issue summary unavailable' }), { status: 503 })) : fetchOther(input, init)))
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  await screen.findByRole('alert')
+  await user.click(screen.getByRole('button', { name: '全部建议与历史' }))
+  const dialog = screen.getByRole('dialog', { name: '全部建议与历史' })
+  const checkbox = await within(dialog).findByRole('checkbox', { name: '选择 retry' })
+  expect(checkbox).toBeEnabled()
+  await user.click(checkbox)
+  expect(within(dialog).getByRole('button', { name: '生成修复草稿（1）' })).toBeEnabled()
+})
+
+it('turns and filters issue pages while batching suggestion previews for the visible signatures', async () => {
   const user = userEvent.setup()
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
@@ -78,11 +117,52 @@ it('turns the issue page, changes the actual problem rows, and resets it on filt
   await user.selectOptions(screen.getByRole('combobox', { name: '问题节点' }), 'node-3')
   expect(await screen.findByText('node-3', { selector: 'span' })).toBeVisible()
   expect(requests.some(url => url.searchParams.get('page') === '1' && url.searchParams.get('nodeId') === 'node-3')).toBe(true)
-  expect(requests.some(url => url.pathname.endsWith('/candidates'))).toBe(false)
+  expect(requests.some(url => url.searchParams.getAll('previewSignature').includes('issue-3'))).toBe(true)
   await user.selectOptions(screen.getByRole('combobox', { name: '问题模式' }), 'error')
   expect(await screen.findByText('没有符合当前筛选条件的问题')).toBeVisible()
   await user.selectOptions(screen.getByRole('combobox', { name: '问题模式' }), 'all')
   expect(await screen.findByText('node-3', { selector: 'span' })).toBeVisible()
+})
+
+it('selects directly in the issue list and shows unavailable generation beside the fixed next action', async () => {
+  result.capabilities.generation = false
+  result.capabilities.reason = 'Repair generation provider is unavailable'
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  await user.click(await choices().findByRole('checkbox', { name: '选择 retry' }))
+  const bar = screen.getByRole('region', { name: '本次修复操作' })
+  expect(within(bar).getByText(/已选 1 条建议/)).toBeVisible()
+  expect(within(bar).getByText(/生成服务尚未接入/)).toBeVisible()
+  expect(within(bar).getByRole('button', { name: '生成修复草稿（1）' })).toBeDisabled()
+  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(1)
+  expect(requests.filter(url => url.pathname.includes('/items/'))).toHaveLength(0)
+  await user.click(within(screen.getByText('node-0', { selector: 'span' }).closest('article')!).getByRole('button', { name: '问题详情' }))
+  await user.click(screen.getByRole('button', { name: '修复建议' }))
+  const drawer = screen.getByRole('dialog', { name: '问题详情' })
+  expect(within(drawer).getByRole('button', { name: '生成修复草稿（1）' })).toBeDisabled()
+  expect(within(drawer).getByText(/生成服务尚未接入/)).toBeVisible()
+  expect(screen.queryByRole('button', { name: '确认修复范围' })).not.toBeInTheDocument()
+})
+
+it('reuses loaded suggestions on a tab revisit and after closing and reopening the drawer', async () => {
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  await user.click(within((await screen.findByText('node-0', { selector: 'span' })).closest('article')!).getByRole('button', { name: '问题详情' }))
+  await user.click(screen.getByRole('button', { name: '修复建议' }))
+  await within(screen.getByRole('dialog', { name: '问题详情' })).findByRole('checkbox', { name: '选择 retry' })
+  const count = requests.filter(url => url.pathname.endsWith('/candidates')).length
+  await user.click(screen.getByRole('button', { name: '问题原因' }))
+  await user.click(screen.getByRole('button', { name: '修复建议' }))
+  expect(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
+  await user.click(within(screen.getByText('node-0', { selector: 'span' }).closest('article')!).getByRole('button', { name: '问题详情' }))
+  await user.click(screen.getByRole('button', { name: '修复建议' }))
+  expect(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(count)
 })
 
 it('presents suggestions together for multi-selection and does not hydrate evidence until requested', async () => {
@@ -94,11 +174,11 @@ it('presents suggestions together for multi-selection and does not hydrate evide
       onToggle={id => setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id])}
       onResult={() => {}} renderItem={value => <p>Evidence for {value.itemId}</p>} />
   }
-  render(<Harness />)
-  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
-  await user.click(screen.getByRole('checkbox', { name: '选择 timeout' }))
-  expect(screen.getByRole('checkbox', { name: '选择 retry' })).toBeChecked()
-  expect(screen.getByRole('checkbox', { name: '选择 timeout' })).toBeChecked()
+  render(<QueryClientProvider client={new QueryClient()}><Harness /></QueryClientProvider>)
+  await user.click(await choices().findByRole('checkbox', { name: '选择 retry' }))
+  await user.click(choices().getByRole('checkbox', { name: '选择 timeout' }))
+  expect(choices().getByRole('checkbox', { name: '选择 retry' })).toBeChecked()
+  expect(choices().getByRole('checkbox', { name: '选择 timeout' })).toBeChecked()
   expect(screen.queryByRole('combobox', { name: '切换建议' })).not.toBeInTheDocument()
   expect(screen.queryByText('Evidence for retry')).not.toBeInTheDocument()
   await user.click(screen.getAllByRole('button', { name: '查看修改与依据' })[0])
@@ -110,17 +190,18 @@ it('retains selections across issue pages and reviews their actual titles before
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
   </QueryClientProvider>)
-  await user.click((await screen.findAllByRole('button', { name: '问题详情' }))[0])
+  await user.click(within((await screen.findByText('node-0', { selector: 'span' })).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
-  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
-  await user.click(screen.getByRole('checkbox', { name: '选择 timeout' }))
+  await user.click(await choices().findByRole('checkbox', { name: '选择 retry' }))
+  await user.click(choices().getByRole('checkbox', { name: '选择 timeout' }))
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
-  await user.click(screen.getByRole('button', { name: '生成 Pack 草稿（2）' }))
-  const confirmation = screen.getByRole('dialog', { name: '生成 Pack 草稿' })
+  await waitFor(() => expect(screen.getByRole('button', { name: '生成修复草稿（2）' })).toBeEnabled())
+  await user.click(screen.getByRole('button', { name: '生成修复草稿（2）' }))
+  const confirmation = screen.getByRole('dialog', { name: '生成修复草稿' })
   expect(within(confirmation).getByText('retry')).toBeVisible()
   expect(within(confirmation).getByText('timeout')).toBeVisible()
-  expect(within(confirmation).getByRole('button', { name: '确认生成' })).toBeEnabled()
+  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeEnabled()
 })
 
 it('requires a choice between conflicting modifications before draft generation', async () => {
@@ -130,17 +211,17 @@ it('requires a choice between conflicting modifications before draft generation'
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
   </QueryClientProvider>)
-  await user.click((await screen.findAllByRole('button', { name: '问题详情' }))[0])
+  await user.click(within((await screen.findByText('node-0', { selector: 'span' })).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
-  await user.click(await screen.findByRole('checkbox', { name: '选择 600' }))
-  await user.click(screen.getByRole('checkbox', { name: '选择 90' }))
+  await user.click(await choices().findByRole('checkbox', { name: '选择 600' }))
+  await user.click(choices().getByRole('checkbox', { name: '选择 90' }))
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
-  await user.click(screen.getByRole('button', { name: '生成 Pack 草稿（2）' }))
-  const confirmation = screen.getByRole('dialog', { name: '生成 Pack 草稿' })
+  await user.click(screen.getByRole('button', { name: '生成修复草稿（2）' }))
+  const confirmation = screen.getByRole('dialog', { name: '生成修复草稿' })
   expect(within(confirmation).getByRole('alert')).toHaveTextContent('同一配置')
-  expect(within(confirmation).getByRole('button', { name: '确认生成' })).toBeDisabled()
+  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeDisabled()
   await user.click(within(confirmation).getByRole('button', { name: '移除 90' }))
-  expect(within(confirmation).getByRole('button', { name: '确认生成' })).toBeEnabled()
+  expect(within(confirmation).getByRole('button', { name: '确认生成草稿' })).toBeEnabled()
 })
 
 it('opens a selected item directly even when neither its issue nor its suggestion is on the current page', async () => {
@@ -148,9 +229,9 @@ it('opens a selected item directly even when neither its issue nor its suggestio
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
   </QueryClientProvider>)
-  await user.click((await screen.findAllByRole('button', { name: '问题详情' }))[0])
+  await user.click(within((await screen.findByText('node-0', { selector: 'span' })).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
-  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
+  await user.click(await choices().findByRole('checkbox', { name: '选择 retry' }))
   await user.click(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('button', { name: '关闭' }))
   await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
   await screen.findByText('node-20', { selector: 'span' })
@@ -158,7 +239,7 @@ it('opens a selected item directly even when neither its issue nor its suggestio
   await user.click(screen.getByRole('button', { name: '查看已选' }))
   await user.click(within(screen.getByRole('dialog', { name: '已选修复建议' })).getByRole('button', { name: 'retry' }))
   expect(await screen.findByRole('button', { name: '返回此问题的建议列表' })).toBeVisible()
-  expect(screen.getByRole('checkbox', { name: '选择 retry' })).toBeChecked()
+  expect(choices().getByRole('checkbox', { name: '选择 retry' })).toBeChecked()
 })
 
 it('pages suggestions independently and preserves explicit selections without selecting the next page', async () => {
@@ -170,12 +251,12 @@ it('pages suggestions independently and preserves explicit selections without se
       selected={selected} canEdit onToggle={id => setSelected(old => old.includes(id) ? old.filter(x => x !== id) : [...old, id])}
       onResult={() => {}} renderItem={value => <p>{value.itemId}</p>} />
   }
-  render(<Harness />)
-  await user.click(await screen.findByRole('checkbox', { name: '选择 suggestion-0' }))
+  render(<QueryClientProvider client={new QueryClient()}><Harness /></QueryClientProvider>)
+  await user.click(await choices().findByRole('checkbox', { name: '选择 suggestion-0' }))
   await user.click(screen.getByRole('button', { name: '下一页建议' }))
-  expect(await screen.findByRole('checkbox', { name: '选择 suggestion-20' })).not.toBeChecked()
-  expect(screen.queryByRole('checkbox', { name: '选择 suggestion-0' })).not.toBeInTheDocument()
-  await user.click(screen.getByRole('checkbox', { name: '选择 suggestion-20' }))
+  expect(await choices().findByRole('checkbox', { name: '选择 suggestion-20' })).not.toBeChecked()
+  expect(choices().queryByRole('checkbox', { name: '选择 suggestion-0' })).not.toBeInTheDocument()
+  await user.click(choices().getByRole('checkbox', { name: '选择 suggestion-20' }))
   await user.click(screen.getByRole('button', { name: '上一页建议' }))
-  expect(await screen.findByRole('checkbox', { name: '选择 suggestion-0' })).toBeChecked()
+  expect(await choices().findByRole('checkbox', { name: '选择 suggestion-0' })).toBeChecked()
 })
