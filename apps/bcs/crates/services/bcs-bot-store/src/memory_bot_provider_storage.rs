@@ -156,7 +156,23 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         let binding = if record.connection_mode == BotConnectionMode::Gateway {
             Some(bindings.get_mut(bot_uuid).filter(|b| !b.disabled && b.provider_id == provider_id && b.provider_bot_ref == record.provider_bot_ref).ok_or_else(conflict)?)
         } else { None };
-        if !self.bots.soft_delete(bot_uuid).await { return Err(conflict()); }
+        // The tombstone consumes the SAME retirement lane the bot deletion
+        // boundary owns: inside the bots repo's one critical section the
+        // role edges are withdrawn, the pending transfers invalidated and
+        // the lifecycle audit appended — no orphan owner edge survives a
+        // Provider delete (plan Task 17 orphan-edge carry). The Provider
+        // admin token is a service identity: the audit records the honest
+        // System context, never a User ID.
+        let operation = bcs_service_api::types::BotOperationContext {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "bcs-provider-tombstone".to_string(),
+                effective_actor_id: format!("provider:{}", record.provider_id),
+            },
+        };
+        if !self.bots.retire_bot_lifecycle(bot_uuid, operation).await? {
+            return Err(conflict());
+        }
         record.is_deleted = true;
         if let Some(binding) = binding { binding.disabled = true; binding.updated_at = updated_at; }
         Ok(true)

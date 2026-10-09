@@ -103,6 +103,57 @@ fn now_sql(flavor: &DbSqlFlavor) -> &'static str {
     flavor.now()
 }
 
+/// The authority-withdrawal steps that must follow a Bot's tombstone in the
+/// SAME commit (plan Task 5 deletion boundary; consumed by the bot
+/// retirement lane AND the Provider tombstone lane after the Task 17
+/// orphan-edge carry): revoke every approved role edge of the Bot,
+/// terminate its PENDING transfers with the frozen decision columns, and
+/// append the `delete/bot/applied` lifecycle audit row — any step failure
+/// rolls the tombstone itself back.
+pub(crate) fn retirement_withdrawal_steps(
+    env: &str,
+    flavor: &DbSqlFlavor,
+    bot_id: &str,
+    operation: &BotOperationContext,
+) -> Vec<DbTransactionStep> {
+    vec![
+        // Withdraw EVERY authority role edge of the retired Bot.
+        DbTransactionStep::Execute(DbStatement::with_params(
+            format!(
+                "UPDATE edge_grants SET status = 'revoked', gmt_modified = {now} \
+                 WHERE env = ? AND to_id = ? AND status = 'approved' \
+                   AND grant_kind IN ('owner', 'manager')",
+                now = now_sql(flavor)
+            ),
+            vec![Value::from(env), Value::from(bot_id)],
+        )),
+        // Terminate the Bot's PENDING transfers: an acceptance racing
+        // this commit loses its pending slot and can never resurrect
+        // the Bot. Already-decided rows are history and stay untouched.
+        DbTransactionStep::Execute(DbStatement::with_params(
+            format!(
+                "UPDATE bot_ownership_transfers \
+                 SET status = 'invalidated', terminal_reason = 'bot_deleted', \
+                     decision_actor_kind = 'system', decided_by = ?, decided_at = {now}, \
+                     gmt_modified = {now} \
+                 WHERE env = ? AND bot_id = ? AND status = 'pending'",
+                now = now_sql(flavor)
+            ),
+            vec![
+                Value::from(operation.actor.operator_id()),
+                Value::from(env),
+                Value::from(bot_id),
+            ],
+        )),
+        // The lifecycle audit row commits with the retirement or not at
+        // all: a failed audit rolls the tombstone back with it.
+        DbTransactionStep::ExecuteChecked {
+            statement: deletion_audit_statement(env, operation, bot_id),
+            expected_affected_rows: 1,
+        },
+    ]
+}
+
 impl PersistentBotRepo {
     /// One-transaction Bot retirement (see the module header). Returns
     /// `Ok(true)` when this call retired the Bot, `Ok(false)` for a missing,
@@ -113,55 +164,25 @@ impl PersistentBotRepo {
         operation: &BotOperationContext,
     ) -> ServiceResult<bool> {
         let env = resolve_env();
-        let steps = vec![
-            // The soft-delete leads the transaction: its row write lock is
-            // the same first lock every authority flow takes, and
-            // stop-on-no-rows turns a lost race or a missing row into the
-            // empty-prefix commit (Ok(false)), never an error.
-            DbTransactionStep::Execute(
-                DbStatement::with_params(
-                    "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP \
-                     WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
-                       AND COALESCE(actor_kind, 'bot') <> 'human'",
-                    vec![Value::from(bot_id), Value::from(env.as_str())],
-                )
-                .with_transaction_stop_on_no_rows(),
-            ),
-            // Withdraw EVERY authority role edge of the retired Bot.
-            DbTransactionStep::Execute(DbStatement::with_params(
-                format!(
-                    "UPDATE edge_grants SET status = 'revoked', gmt_modified = {now} \
-                     WHERE env = ? AND to_id = ? AND status = 'approved' \
-                       AND grant_kind IN ('owner', 'manager')",
-                    now = now_sql(&self.flavor)
-                ),
-                vec![Value::from(env.as_str()), Value::from(bot_id)],
-            )),
-            // Terminate the Bot's PENDING transfers: an acceptance racing
-            // this commit loses its pending slot and can never resurrect
-            // the Bot. Already-decided rows are history and stay untouched.
-            DbTransactionStep::Execute(DbStatement::with_params(
-                format!(
-                    "UPDATE bot_ownership_transfers \
-                     SET status = 'invalidated', terminal_reason = 'bot_deleted', \
-                         decision_actor_kind = 'system', decided_by = ?, decided_at = {now}, \
-                         gmt_modified = {now} \
-                     WHERE env = ? AND bot_id = ? AND status = 'pending'",
-                    now = now_sql(&self.flavor)
-                ),
-                vec![
-                    Value::from(operation.actor.operator_id()),
-                    Value::from(env.as_str()),
-                    Value::from(bot_id),
-                ],
-            )),
-            // The lifecycle audit row commits with the retirement or not at
-            // all: a failed audit rolls the soft delete back with it.
-            DbTransactionStep::ExecuteChecked {
-                statement: deletion_audit_statement(&env, operation, bot_id),
-                expected_affected_rows: 1,
-            },
-        ];
+        // The soft-delete leads the transaction: its row write lock is
+        // the same first lock every authority flow takes, and
+        // stop-on-no-rows turns a lost race or a missing row into the
+        // empty-prefix commit (Ok(false)), never an error.
+        let mut steps = vec![DbTransactionStep::Execute(
+            DbStatement::with_params(
+                "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP \
+                 WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 \
+                   AND COALESCE(actor_kind, 'bot') <> 'human'",
+                vec![Value::from(bot_id), Value::from(env.as_str())],
+            )
+            .with_transaction_stop_on_no_rows(),
+        )];
+        steps.extend(retirement_withdrawal_steps(
+            env.as_str(),
+            &self.flavor,
+            bot_id,
+            operation,
+        ));
         let results = self
             .db
             .transaction(steps)

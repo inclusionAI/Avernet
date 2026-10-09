@@ -111,13 +111,16 @@ pub(super) fn validate_initialization(initialization: &OwnershipInitialization) 
 /// The authority steps appended to a creation (or governed-init)
 /// transaction. Order is binding: the CAS takes the Bot's row write lock
 /// first — the same first lock every authority flow takes — and every
-/// later statement runs under it.
+/// later statement runs under it. `batch_id` is the governed migration's
+/// batch tag on the initialization ledger row (`None` for registration and
+/// plain governed-repair lanes, plan Task 17).
 pub(super) fn ownership_initialization_steps(
     flavor: &DbSqlFlavor,
     env: &str,
     bot_id: &str,
     initialization: &OwnershipInitialization,
     source: &'static str,
+    batch_id: Option<&str>,
 ) -> ServiceResult<Vec<DbTransactionStep>> {
     validate_initialization(initialization)?;
     let human_id = human_actor_id(&initialization.owner_user_id);
@@ -213,12 +216,14 @@ pub(super) fn ownership_initialization_steps(
         // 5. Initialization audit (bot_ownership_initializations): one row
         //    per committed operation, unique audit id derived from the
         //    operation id so a retried identical operation stays one row.
+        //    `batch_id` is NULL for registration/plain governed-repair
+        //    lanes and carries the governed migration batch otherwise.
         DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
                 "INSERT INTO bot_ownership_initializations \
                    (audit_id, env, bot_id, owner_user_id, initial_version, source, \
                     actor_kind, actor_id, operation_id, batch_id) \
-                 VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, NULL)",
+                 VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
                 vec![
                     Value::from(audit_id),
                     Value::from(env),
@@ -228,6 +233,7 @@ pub(super) fn ownership_initialization_steps(
                     Value::from(initialization.actor.kind_str()),
                     Value::from(initialization.actor.actor_id()),
                     Value::from(initialization.operation_id.as_str()),
+                    batch_id.map(Value::from).unwrap_or(Value::Null),
                 ],
             ),
             expected_affected_rows: 1,
@@ -278,13 +284,39 @@ async fn refresh_initialization_branch(
 
 impl PersistentBotRepo {
     /// Governed, atomic initialization of an EXISTING live Bot whose
-    /// ownership is still uninitialized (version 0). One transaction:
-    /// bot row lock/read → CAS → human ensure → owner edge → profile
-    /// ensure → audit; any failure rolls the Bot's fields back untouched.
+    /// ownership is still uninitialized (version 0), `batch_id = NULL`
+    /// on the initialization ledger (the plain governed-repair lane).
     pub(super) async fn initialize_existing_ownership_impl(
         &self,
         bot_id: &str,
         initialization: &OwnershipInitialization,
+    ) -> ServiceResult<OwnershipState> {
+        self.initialize_existing_ownership_with_batch_impl(bot_id, initialization, None)
+            .await
+    }
+
+    /// Governed, atomic initialization tagging the migration `batch_id` on
+    /// the initialization ledger (plan Task 17) — the recovery/replay key
+    /// an interrupted `initialize_batch` replays against.
+    pub(super) async fn initialize_existing_ownership_in_batch_impl(
+        &self,
+        bot_id: &str,
+        initialization: &OwnershipInitialization,
+        batch_id: &str,
+    ) -> ServiceResult<OwnershipState> {
+        if batch_id.trim().is_empty() {
+            return Err(sanitized("batched initialization requires a non-blank batch id"));
+        }
+        self.initialize_existing_ownership_with_batch_impl(bot_id, initialization, Some(batch_id.trim()))
+            .await
+    }
+
+    /// The one-transaction Task 5 lane both governed entries share.
+    async fn initialize_existing_ownership_with_batch_impl(
+        &self,
+        bot_id: &str,
+        initialization: &OwnershipInitialization,
+        batch_id: Option<&str>,
     ) -> ServiceResult<OwnershipState> {
         validate_initialization(initialization)?;
         let env = resolve_env();
@@ -336,6 +368,7 @@ impl PersistentBotRepo {
             bot_id,
             initialization,
             SOURCE_GOVERNED_REPAIR,
+            batch_id,
         )?);
         match self.db.transaction(steps).await {
             Ok(_) => Ok(OwnershipState {
@@ -364,6 +397,7 @@ pub(crate) fn memory_apply_initialization(
     bot_id: &str,
     initialization: &OwnershipInitialization,
     source: &str,
+    batch_id: Option<&str>,
 ) -> ServiceResult<()> {
     validate_initialization(initialization)?;
     let human_id = human_actor_id(&initialization.owner_user_id);
@@ -432,7 +466,9 @@ pub(crate) fn memory_apply_initialization(
         authority.next_default_profile_id = id.saturating_add(1);
         authority.default_profiles.insert(profile_key, id);
     }
-    // The initialization audit row: one per committed operation.
+    // The initialization audit row: one per committed operation. The
+    // batch tag mirrors the SQL ledger's `batch_id` column (NULL for the
+    // registration/plain governed-repair lanes).
     authority
         .initialization_records
         .push(MemoryOwnershipInitRecord {
@@ -444,6 +480,7 @@ pub(crate) fn memory_apply_initialization(
             actor_kind: initialization.actor.kind_str().to_string(),
             actor_id: initialization.actor.actor_id().to_string(),
             operation_id: initialization.operation_id.to_string(),
+            batch_id: batch_id.map(str::to_string),
         });
     Ok(())
 }
@@ -451,11 +488,43 @@ pub(crate) fn memory_apply_initialization(
 impl super::MemoryBotRepo {
     /// Governed memory initialization of an existing live version-0 Bot,
     /// sharing the exact critical section of the Task 3/4 authority state
-    /// (bots + authority under the deletion lane's deleted→bots order).
+    /// (bots + authority under the deletion lane's deleted→bots order);
+    /// `batch_id = NULL` on the ledger record (plain governed repair).
     pub(crate) async fn initialize_existing_ownership_impl(
         &self,
         bot_id: &str,
         initialization: &OwnershipInitialization,
+    ) -> ServiceResult<OwnershipState> {
+        self.initialize_existing_ownership_with_batch_impl(bot_id, initialization, None)
+            .await
+    }
+
+    /// Governed memory initialization tagging the migration `batch_id`
+    /// (plan Task 17) on the ledger record.
+    pub(crate) async fn initialize_existing_ownership_in_batch_impl(
+        &self,
+        bot_id: &str,
+        initialization: &OwnershipInitialization,
+        batch_id: &str,
+    ) -> ServiceResult<OwnershipState> {
+        if batch_id.trim().is_empty() {
+            return Err(sanitized("batched initialization requires a non-blank batch id"));
+        }
+        self.initialize_existing_ownership_with_batch_impl(
+            bot_id,
+            initialization,
+            Some(batch_id.trim()),
+        )
+        .await
+    }
+
+    /// The memory twin of the one-transaction Task 5 lane both governed
+    /// entries share.
+    async fn initialize_existing_ownership_with_batch_impl(
+        &self,
+        bot_id: &str,
+        initialization: &OwnershipInitialization,
+        batch_id: Option<&str>,
     ) -> ServiceResult<OwnershipState> {
         validate_initialization(initialization)?;
         if self.take_authority_write_failure().await {
@@ -488,6 +557,7 @@ impl super::MemoryBotRepo {
             bot_id,
             initialization,
             SOURCE_GOVERNED_REPAIR,
+            batch_id,
         )?;
         Ok(OwnershipState {
             owner_user_id: initialization.owner_user_id.clone(),

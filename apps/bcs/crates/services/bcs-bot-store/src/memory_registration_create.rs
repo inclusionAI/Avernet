@@ -206,6 +206,7 @@ impl MemoryBotRepo {
                 &bot_id,
                 initialization,
                 SOURCE_REGISTRATION,
+                None,
             )?;
         }
         Ok(true)

@@ -163,6 +163,9 @@ pub(crate) struct MemoryOwnershipInitRecord {
     pub(crate) actor_kind: String,
     pub(crate) actor_id: String,
     pub(crate) operation_id: String,
+    /// Governed migration batch (plan Task 17); `None` mirrors the SQL
+    /// ledger's NULL for registration/plain governed-repair lanes.
+    pub(crate) batch_id: Option<String>,
 }
 
 /// One `bot_ownership_transfers` row projection (plan Task 5, extended by

@@ -92,6 +92,7 @@ impl PersistentBotRepo {
             &bot_id,
             initialization,
             SOURCE_REGISTRATION,
+            None,
         )?);
         let result = self.db.transaction(steps).await;
         match result {

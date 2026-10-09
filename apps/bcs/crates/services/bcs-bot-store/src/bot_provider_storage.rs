@@ -9,6 +9,13 @@ use crate::ownership_initialization::{
     SOURCE_REGISTRATION, ownership_initialization_steps, validate_initialization,
 };
 
+use bcs_service_api::types::{BotOperationActor, BotOperationContext};
+
+/// Fixed system identifier recorded on the Provider tombstone lane's
+/// lifecycle audit rows (a service identity acting for a Provider; never a
+/// User ID).
+const PROVIDER_TOMBSTONE_SYSTEM_ID: &str = "bcs-provider-tombstone";
+
 pub(super) fn validate_record(record: &BotProviderRecord) -> ServiceResult<()> {
     if record.bot_uuid.trim().is_empty() || record.provider_id.trim().is_empty()
         || record.provider_bot_ref.trim().is_empty() || record.is_deleted
@@ -221,6 +228,7 @@ impl BotProviderRepoPort for DbProviderStore {
             &record.bot_uuid,
             &initialization,
             SOURCE_REGISTRATION,
+            None,
         )?);
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
@@ -264,6 +272,18 @@ impl BotProviderRepoPort for DbProviderStore {
         let record = self.require_provider_bot(provider_id, bot_uuid).await?;
         if record.is_deleted { return Ok(false); }
         let env = resolve_env();
+        // Provider-admin deletion is a service identity acting for the
+        // Provider: the same-commit retirement withdraws the Bot's authority
+        // under an honest System context (plan Task 17 orphan-edge carry, no
+        // verified Human exists on this lane). The forbid-listed shapes:
+        // never a User ID, never the Provider token.
+        let operation = BotOperationContext {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            actor: BotOperationActor::System {
+                system_id: PROVIDER_TOMBSTONE_SYSTEM_ID.to_string(),
+                effective_actor_id: format!("provider:{}", record.provider_id),
+            },
+        };
         let mut steps = Vec::new();
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(self.lock_gateway_binding(&record, &env));
@@ -271,6 +291,16 @@ impl BotProviderRepoPort for DbProviderStore {
         steps.push(DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
             "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = ? AND is_deleted = 0",
             vec![bot_uuid.into(), env.as_str().into(), provider_id.into(), record.provider_bot_ref.as_str().into(), record.connection_mode.as_str().into()]), expected_affected_rows: 1 });
+        // The tombstone is a retirement: the Bot's approved role edges,
+        // PENDING transfers and the lifecycle audit row are withdrawn in the
+        // SAME commit (plan Task 5 deletion boundary, Task 17 carry — the
+        // initialization history rows are append-only audit and stay).
+        steps.extend(crate::ownership_deletion::retirement_withdrawal_steps(
+            env.as_str(),
+            &self.flavor,
+            bot_uuid,
+            &operation,
+        ));
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_transaction_params(
                 format!("UPDATE bcs_provider_bot_bindings SET disabled = 1, {} WHERE bot_uuid = ? AND env = ?", self.now_modified_clause()),

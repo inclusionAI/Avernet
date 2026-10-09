@@ -11,6 +11,13 @@ version     = { workspace = true }
 name = "bcs"
 path = "src/main.rs"
 
+# Governed ownership cutover maintenance binary (plan Task 17). Registered
+# on the SAME crate (composition entry `bcs::ownership_migration_wiring`), so
+# the integration tests exercise the real binary through CARGO_BIN_EXE_*.
+[[bin]]
+name = "bcs-ownership-migrate"
+path = "src/bin/bcs-ownership-migrate.rs"
+
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]

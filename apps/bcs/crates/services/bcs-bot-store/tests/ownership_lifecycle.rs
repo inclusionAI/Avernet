@@ -672,7 +672,18 @@ async fn sqlite_provider_ref_tombstone_never_replays_credentials_or_reinitialize
     assert!(repo.try_load_token("bot-tomb").await.unwrap().is_none());
     assert!(repo.find_bot_by_token("token-tomb").await.is_none());
     assert!(repo.find_bot_by_token("token-resurrect").await.is_none());
-    assert_eq!(approved_owner_edge_count(db.as_ref(), "bot-tomb").await, 1);
+    // Contract change (Task 17 orphan-edge carry): the Provider tombstone is
+    // a RETIREMENT in the same commit — the approved owner edge (and every
+    // role edge) is withdrawn, so no orphan owner edge survives a Provider
+    // delete. The initialization LEDGER row stays: `bot_ownership_initializations`
+    // is append-only audit (and the migration batch-recovery substrate), never
+    // authority state — retirement never deletes history.
+    assert_eq!(approved_owner_edge_count(db.as_ref(), "bot-tomb").await, 0);
+    assert_eq!(
+        approved_role_edge_count_to(db.as_ref(), "bot-tomb").await,
+        0,
+        "the tombstone withdraws every approved role edge"
+    );
     assert_eq!(initialization_count(db.as_ref(), "bot-tomb").await, 1);
     // A duplicate living ref is rejected identically on the living bot.
     let store2 = DbProviderStore::sqlite(db.clone());
@@ -742,7 +753,22 @@ async fn memory_provider_ref_tombstone_never_replays_credentials_or_reinitialize
     assert_conflict(&error);
     assert!(bots.get("bot-tomb").await.is_none());
     assert!(bots.load_token("bot-tomb").await.is_none());
+    // Contract change (Task 17 orphan-edge carry): the memory tombstone also
+    // consumes the retirement lane — the owner edge is withdrawn inside the
+    // same critical section and a `delete/bot/applied` audit record is
+    // appended. The initialization LEDGER projection stays (append-only
+    // history, never authority state).
     assert_eq!(bots.authority_ownership_initialization_count("bot-tomb").await.unwrap(), 1);
+    assert!(
+        bots.authority_action_audit_records()
+            .await
+            .unwrap()
+            .iter()
+            .any(|record| record.resource_id == "bot-tomb"
+                && record.action == bcs_service_api::types::BotActionKind::Delete
+                && record.phase == bcs_service_api::types::BotActionAuditPhase::Applied),
+        "the tombstone appends the same-commit retirement audit row"
+    );
     // The tombstoned authority surface is unreachable for reads.
     assert_bot_not_found(&bots.ownership("bot-tomb").await.unwrap_err());
 }

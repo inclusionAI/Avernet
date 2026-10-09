@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_db_api::{DbError, DbExecuteResult, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 pub use bcs_service_api::port::repo::RelationRepoPort;
+use bcs_service_api::types::bot_authority::LegacyCreatorClaim;
 use bcs_service_api::{EnsureOwnerEdgesResult, RelationEdge, ServiceError, ServiceResult};
 use tracing::warn;
 
@@ -374,6 +375,54 @@ impl RelationRepoPort for DbRelationStore {
             }
         }
         Ok(out)
+    }
+
+    async fn list_creator_claims(
+        &self,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<LegacyCreatorClaim>> {
+        if bot_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Chunks stay below every dialect's positional-parameter ceiling
+        // (SQLite ~999) even if a future caller passes a larger page; the
+        // migration's own bound (100/batch) keeps the common case to one
+        // query per page.
+        const CHUNK: usize = 100;
+        let mut claims = Vec::new();
+        for chunk in bot_ids.chunks(CHUNK) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let placeholders = std::iter::repeat("?")
+                .take(chunk.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT env, to_id, from_id FROM bcs_actor_relations \
+                 WHERE env = ? AND is_creator = 1 AND to_id IN ({placeholders}) \
+                 ORDER BY to_id, from_id"
+            );
+            let mut params = Vec::with_capacity(chunk.len() + 1);
+            params.push(DbValue::from(env));
+            for bot_id in chunk {
+                params.push(DbValue::from(bot_id.as_str()));
+            }
+            let rows = self
+                .db
+                .query(DbStatement::with_params(sql, params))
+                .await
+                .map_err(|err| service_db_error("list_creator_claims", err))?;
+            for row in rows {
+                claims.push(LegacyCreatorClaim {
+                    env: required_string(&row, "env")?,
+                    bot_id: required_string(&row, "to_id")?,
+                    claimant_actor_id: required_string(&row, "from_id")?,
+                });
+            }
+        }
+        Ok(claims)
     }
 }
 

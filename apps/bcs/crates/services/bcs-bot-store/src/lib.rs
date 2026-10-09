@@ -52,6 +52,7 @@ mod controllable_bots;
 mod action_audit;
 mod ownership_initialization;
 mod ownership_deletion;
+mod ownership_backfill;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -1196,6 +1197,38 @@ impl BotRepoPort for PersistentBotRepo {
     ) -> ServiceResult<bcs_service_api::types::OwnershipState> {
         self.initialize_existing_ownership_impl(bot_id, &initialization)
             .await
+    }
+
+    async fn initialize_existing_ownership_in_batch(
+        &self,
+        bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+        batch_id: String,
+    ) -> ServiceResult<bcs_service_api::types::OwnershipState> {
+        self.initialize_existing_ownership_in_batch_impl(bot_id, &initialization, &batch_id)
+            .await
+    }
+
+    async fn list_migration_candidates(
+        &self,
+        after_bot_id: Option<&str>,
+        limit: u32,
+    ) -> ServiceResult<Vec<bcs_service_api::types::bot_authority::OwnershipMigrationBotState>> {
+        self.list_migration_candidates_impl(after_bot_id, limit).await
+    }
+
+    async fn migration_bot_state(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::bot_authority::OwnershipMigrationBotState>> {
+        self.migration_bot_state_impl(bot_id).await
+    }
+
+    async fn list_batch_initializations(
+        &self,
+        batch_id: &str,
+    ) -> ServiceResult<Vec<bcs_service_api::types::bot_authority::OwnershipBatchInitialization>> {
+        self.list_batch_initializations_impl(batch_id).await
     }
 
     async fn retire_bot_lifecycle(

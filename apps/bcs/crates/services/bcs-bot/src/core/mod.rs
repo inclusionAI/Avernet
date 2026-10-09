@@ -2,6 +2,7 @@ pub mod bot_core;
 pub mod bot_control_plane_core;
 pub mod candidate_search_core;
 mod ids;
+pub mod ownership_migration;
 pub mod provider_core;
 pub mod provider_registration;
 
@@ -9,6 +10,7 @@ pub use bcs_bot_store::{BotInfo, PersistentBotRepo, MemoryBotRepo};
 pub use bot_core::BotCore;
 pub use bot_control_plane_core::BotControlPlaneCore;
 pub use candidate_search_core::{BotCandidateSearchCore, EmptyWorkerProfileCoreService};
+pub use ownership_migration::OwnershipMigrationCore;
 pub use provider_core::ProviderCore;
 
 #[deprecated(note = "Use BotCore; BotRegistry is a temporary compatibility alias.")]

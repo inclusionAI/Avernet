@@ -96,6 +96,77 @@ pub trait BotRepoPort: Send + Sync {
         ))
     }
 
+    /// Governed batched variant of
+    /// [`initialize_existing_ownership`](Self::initialize_existing_ownership)
+    /// (plan Task 17): the SAME one-transaction Task 5 lane — bot row lock,
+    /// CAS 0 -> 1, unique owner edge, Human ensure, default profile ensure —
+    /// with the governed migration's `batch_id` recorded on the appended
+    /// `bot_ownership_initializations` row instead of NULL. The same
+    /// fail-closed branches apply (missing/deleted -> `BotNotFound`,
+    /// initialized -> `AuthorityError::Conflict`, `Service` actor or blank
+    /// owner rejected before any write); individual registrational lanes
+    /// keep `batch_id = NULL` and are unaffected.
+    async fn initialize_existing_ownership_in_batch(
+        &self,
+        bot_id: &str,
+        initialization: OwnershipInitialization,
+        batch_id: String,
+    ) -> ServiceResult<OwnershipState> {
+        let _ = (bot_id, initialization, batch_id);
+        Err(crate::types::ServiceError::InternalError(
+            "batched ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// One keyset page of the historical-ownership migration candidate scan
+    /// (plan Task 17, spec §16.1.2): live, physical, still version-0 Bots of
+    /// the store's env, ordered by `bot_uuid` ASC, strictly after
+    /// `after_bot_id`, at most `limit` rows. Every row is a CURRENT read
+    /// (version, approved owner edges, created_by, live-Human evidence for
+    /// the creator); the scan never writes. Conflicted shapes appear in the
+    /// page too — the dry-run is the complete governance list.
+    async fn list_migration_candidates(
+        &self,
+        after_bot_id: Option<&str>,
+        limit: u32,
+    ) -> ServiceResult<Vec<crate::types::bot_authority::OwnershipMigrationBotState>> {
+        let _ = (after_bot_id, limit);
+        Err(crate::types::ServiceError::InternalError(
+            "ownership migration candidate scan is not configured".into(),
+        ))
+    }
+
+    /// Current migration facts of ONE Bot (plan Task 17): the same
+    /// projection as [`list_migration_candidates`](Self::list_migration_candidates)
+    /// but for an arbitrary row — including deleted rows, Human rows and
+    /// initialized Bots — so the execution re-verification can attribute skips
+    /// and conflicts instead of treating them as candidates. `Ok(None)` for a
+    /// missing row id.
+    async fn migration_bot_state(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<Option<crate::types::bot_authority::OwnershipMigrationBotState>> {
+        let _ = bot_id;
+        Err(crate::types::ServiceError::InternalError(
+            "ownership migration state read is not configured".into(),
+        ))
+    }
+
+    /// The committed initialization rows of one governed migration batch
+    /// (plan Task 17 recovery read): `bot_ownership_initializations` rows
+    /// with the given `batch_id`, the ledger a replayed `initialize_batch`
+    /// uses to rebuild an interrupted run's committed prefix without
+    /// re-executing it.
+    async fn list_batch_initializations(
+        &self,
+        batch_id: &str,
+    ) -> ServiceResult<Vec<crate::types::bot_authority::OwnershipBatchInitialization>> {
+        let _ = batch_id;
+        Err(crate::types::ServiceError::InternalError(
+            "ownership migration batch ledger read is not configured".into(),
+        ))
+    }
+
     /// Atomically retire one Bot (plan Task 5 deletion boundary): inside
     /// ONE transaction under the same first lock every authority flow
     /// takes (the Bot's `bcs_bots` row), withdraw every authority role
