@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
@@ -36,6 +36,11 @@ from agentclaw.community.core.repository.implementations.chat.expert_chat import
 from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository as UnifiedExpertChatInstanceRepository
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 
+
+from agentclaw.community.core.bot_management.engines.aicoding.caller_restart import (
+    AicodingCallerRestartHandler, AicodingCallerRestartLifecycle,
+)
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 
 logger = get_logger()
 
@@ -94,3 +99,13 @@ class ExpertChatModule(Module):
         http_client: Annotated[HttpClient, QUALIFIER_BCN],
     ) -> HumanBotFriendshipServiceProtocol:
         return BcnHumanBotFriendshipService(http_client)
+
+    @singleton
+    @provider
+    @inject
+    def aicoding_caller_restart_lifecycle(
+        self, registry: HandlerRegistry, injector: Injector,
+    ) -> AicodingCallerRestartLifecycle:
+        return AicodingCallerRestartLifecycle(registry, AicodingCallerRestartHandler(
+            service_provider=lambda: injector.get(ExpertChatInstanceService),
+        ))

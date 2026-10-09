@@ -27,6 +27,7 @@ internal_dependencies:
   - agentclaw.community.core.common_config
   - agentclaw.community.core.devices
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.task_queue
   - agentclaw.community.core.skill_center
   - agentclaw.community.log
   - agentclaw.community.plugin_api.device_adapter_transport

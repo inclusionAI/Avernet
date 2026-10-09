@@ -39,8 +39,9 @@ restart wrapper. Its private helper dependencies are centralized in this adapter
 and covered by payload-parity tests to detect future shared-helper drift.
 
 BaaS server, frontend, `/status`, schema and Repository APIs are unchanged.
-Published/Caller backup entrypoints and direct-provider restart remain on their
-existing paths; they do not enter the new ordinary coding/BaaS executor.
+Published/Caller backup entrypoints and direct-provider restart do not enter
+the ordinary coding/BaaS executor. The Caller-specific asynchronous extension
+is documented below.
 
 ## Execution
 
@@ -103,3 +104,58 @@ No live deployment, online Bot recovery, or full Singlebox E2E is performed.
 The existing main BotService exceeds the source-size guideline; this patch only
 passes a collaborator and does not refactor that unrelated large file. New
 strategy modules remain under 1000 lines and no CI gate is weakened.
+
+## Caller asynchronous restart (dev follow-up)
+
+Caller is **not** an ordinary Bot and does not write the source Bot's PENDING.
+Its independent `ac_expert_chat_instance` row uses the existing `init / success /
+failed` states and `ext.error.message` error contract. No schema, Repository,
+BaaS, frontend or `/status` changes are required.
+
+- Only aicoding/claude_code existing Caller upgrades opt in. First creation,
+  successful reuse and other engines retain the old path.
+- Admission writes `init` once, before enqueueing `aicoding.caller.restart`.
+  The payload contains IDs/engine/time only, never IAM tokens or template secrets.
+- `engines/aicoding/caller_restart.py` owns admission, locks, operation phases,
+  task execution and errors. It reuses the existing restart-lock table with a
+  tenant/owner/Bot/**Caller**-scoped namespaced key. HTTP never waits on this lock:
+  a busy lock returns the existing pending result without another upgrade.
+- The worker invokes the original `_upgrade_container`: original configuration,
+  backup precondition, then upgrade. Its optional engine-supplied `before_submit`
+  callback validates operation ownership/target/deadline and records submission.
+  This callback is generic; no engine names or backup policy enter the shared
+  Caller service. BaaS still only manages devices.
+- After the new publish ID is persisted, the original polling/identity/connection
+  logic resumes. It is serialized with admission, so a stale polling write cannot
+  overwrite another operation. Identity exchange uses the deployed publish ID,
+  not a newer owner publication. Tokens remain confined to the incoming request.
+- A worker also observes deployment failures without a frontend. Backup,
+  preparation, submission and deployment failures persist `failed` and the old
+  error field. Ordinary polling stops; only an explicit restart can retry.
+- A delivered task never repeats an upgrade after entering EXECUTING/SUBMITTING.
+  A lost worker is conservatively observed until the business deadline rather
+  than automatically replayed. A stale lock is token-fenced and expires after
+  the business budget; a late worker must revalidate ownership before submission.
+- Backup retains the 1500-second budget. Queue waiting is deducted for Caller;
+  business timeout remains 2100 seconds. The timeout is enforced on worker
+  delivery/pre-submit checks, not by cancelling an already accepted BaaS job.
+- The accepted historical write-before-enqueue crash window is unchanged; no
+  completion marker or crash-window recovery was added. Normal write/enqueue
+  exceptions are surfaced and persisted as failure.
+
+Shared changes are limited to a default engine-policy dispatch, typed internal
+lifecycle ports/dependency passthrough, the optional pre-submit callback, and DI
+registration. The original Caller body is extracted without changing its logic.
+`ExpertChatInstanceServiceProtocol` documents the existing response shape's
+asynchronous semantics. Published-service and ordinary tasks remain distinct.
+
+Tests cover inline default-engine compatibility, no-backup upgrade, admission
+ordering, immediate queue wake, real SQLite concurrent requests, worker replay,
+backup/submission/deployment/identity failures, timeout, token exclusion, tenant
+context, original identity exchange and DI/lifecycle discovery. Runtime validation
+against a deployed environment remains to be performed.
+
+Local validation (2026-10-09): **3007 passed** across bot-management,
+service-bot services, expert-chat, Caller/lock repositories, Service API
+conformance, protocol ordering, lifecycle discovery and module-boundary tests.
+Ruff, the new strategy's local SAST block scan and `git diff --check` passed.

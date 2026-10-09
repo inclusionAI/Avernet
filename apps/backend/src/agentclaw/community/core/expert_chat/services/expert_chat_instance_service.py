@@ -27,13 +27,16 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart, resolve_restart_strategy
 
 import asyncio
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable
 
 from injector import inject
+
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
@@ -105,7 +108,11 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         common_config_service: CommonConfigService,
+        task_queue: TaskQueueService,
+        restart_locks: BotRestartLockRepositoryProtocol,
     ) -> None:
+        self._task_queue = task_queue
+        self._restart_locks = restart_locks
         self._instance_repo = instance_repo
         self._baas = baas_service
         self._publish_repo = bot_publish_repo
@@ -280,7 +287,6 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         publish_record, migration_path = self._resolve_build_artifact(
             bot_id, owner_id
         )
-        version = publish_record.version or 1
         image_pin = self._resolve_publish_image_pin(
             publish_record, bot_id=bot_id, owner_id=owner_id
         )
@@ -296,6 +302,23 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                 ext=None,
             )
 
+        # Engine policy may defer an existing-instance restart. The default
+        # strategy invokes exactly the historical create/upgrade/poll path.
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
+        ctx, strategy = resolve_restart_strategy(bot)
+        return await strategy.execute_caller_connection(
+            ctx, service=self, instance=instance, publish_record=publish_record,
+            migration_path=migration_path, image_pin=image_pin,
+            user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+            force_upgrade=force_upgrade, iam_token=iam_token,
+        )
+
+    async def _continue_caller_connection(
+        self, *, instance, publish_record, migration_path, image_pin,
+        user_id, bot_id, owner_id, force_upgrade, iam_token,
+    ) -> Dict[str, Any]:
+        """Original lifecycle, also used for progress/identity after deferred upgrade."""
+        version = publish_record.version or 1
         try:
             # If instance is already success, check if version upgrade is needed
             # Skip this fast path when force_upgrade=True
@@ -644,6 +667,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         version: int = 1,
         docker_image: str | None = None,
         publish_ext: Optional[Dict[str, Any]] = None,
+        before_submit: Callable[[], None] | None = None,
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
@@ -671,6 +695,8 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         )
         try:
             await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
+            if before_submit is not None:
+                before_submit()
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,

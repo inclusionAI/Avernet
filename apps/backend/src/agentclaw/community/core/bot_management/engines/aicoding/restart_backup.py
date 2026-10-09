@@ -6,6 +6,7 @@ may omit it. The runtime installs it before enabling canonical data bind mounts.
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 import json
 import re
 import shlex
@@ -22,6 +23,9 @@ ENTRY = '/opt/agentclaw/bin/restart_backup'
 POLL_SECONDS = 2
 # Covers runtime termination (330s) plus archive budget (900s) and exec overhead.
 DEADLINE_SECONDS = 1500
+# A deferred Caller shares the original backup budget across queue waiting and
+# execution. None preserves ordinary/published and direct-call defaults.
+caller_backup_deadline: ContextVar[float | None] = ContextVar('caller_backup_deadline', default=None)
 
 
 class RestartBackupError(RuntimeError):
@@ -89,6 +93,9 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     execution = current_restart.get()
     remaining = (BACKUP_TIMEOUT - (time.time() - execution.payload["started_at"])
                  if execution is not None else DEADLINE_SECONDS)
+    caller_deadline = caller_backup_deadline.get()
+    if caller_deadline is not None:
+        remaining = min(remaining, caller_deadline - time.time())
     deadline = started + remaining
     action, boot, last_status = 'start', None, None
     last_log = started

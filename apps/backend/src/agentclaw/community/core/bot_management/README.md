@@ -18,6 +18,7 @@ provides:
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
   - "AicodingRestartLifecycle"
+  - "AicodingCallerRestartLifecycle"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
   - "BotQuotaService and BotQuotaScope"
@@ -39,6 +40,8 @@ consumes:
   - "CachePlugin quota lock"
   - "CapabilityDesiredStateRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.api.baas_service    # publish-progress Service API
+  - agentclaw.community.core.repository.protocols.chat    # Caller instance ledger
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.identity    # MCP execution identity carried into the restart Passport refresh

@@ -58,6 +58,14 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     ) -> Dict[str, Any]:
         """Return the caller's container connection info.
 
+        Coding-engine existing-instance restarts may return ``init`` and
+        ``need_poll=True`` after durable admission, before backup/upgrade.
+        Polling never automatically retries a failed coding restart: its
+        instance has ``status=failed``, the existing ``ext.error.message``,
+        ``connection=None`` and ``need_poll=False``. ``force_upgrade=True``
+        explicitly starts another attempt after the previous task ends.
+        Other engines and first-time allocation retain inline submission.
+
         Args:
             user_id: The caller's user ID.
             bot_id: The bot ID.
