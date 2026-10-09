@@ -153,6 +153,11 @@ Token is validated at two levels:
 | Valid | Allow | Return associated bot_id |
 | Invalid | Reject 401 | Close WebSocket connection |
 
+When `[bot_ws_admission].enabled = true`, `/ws/bot` upgrades pass a
+per-process token bucket (`rate_per_sec`, `burst`) before any token handling.
+Rejected upgrades get HTTP 429 with `Retry-After` and are retried by the bot's
+reconnect loop, so a post-restart reconnect storm is admitted gradually.
+
 ### HTTP API
 All protected endpoints use `Authorization: Bearer <token>` header.
 
