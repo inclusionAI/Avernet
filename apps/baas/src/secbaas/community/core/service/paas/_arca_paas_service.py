@@ -648,6 +648,8 @@ class ArcaPaasService(PaasService):
 
         Raises:
             PaasError: With DEVICE_NOT_FOUND if sandbox doesn't exist.
+                        With DEVICE_UNAVAILABLE on unexpected errors
+                        (e.g. local OS or transport failures).
         """
         return await asyncio.to_thread(self._get_device_info_sync, paas_device_id)
 
@@ -685,7 +687,10 @@ class ArcaPaasService(PaasService):
                 f"Device {paas_device_id} not found",
             )
         except Exception as e:
-            raise self._translate_error(e, ErrorCode.DEVICE_NOT_FOUND)
+            # Unrecognized failures (e.g. local OSError from fd exhaustion)
+            # say nothing about device existence — not-found must come from
+            # ArcaSandboxNotFoundError only.
+            raise self._translate_error(e, ErrorCode.DEVICE_UNAVAILABLE)
 
     async def update_outbound_operation_rule(
         self,
