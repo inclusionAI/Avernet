@@ -70,6 +70,37 @@ def test_task_executor_dispatch_bbs_delegates_to_modal_executor():
     assert kwargs["on_bbs_report"] is on_bbs_report
 
 
+def test_task_executor_dispatch_bbs_passes_task_context_service():
+    """Relay BBS 生命周期轨迹(bbs_entered/bid/bbs_released 等)依赖 notify 收到
+    task_context_service;不接线则该链路在时间线上全盲(2026-09-30 relay 排障:
+    只有 4 条 relay 回调行,认领是否发生无从判断)。"""
+    from types import SimpleNamespace
+
+    graph = MagicMock()
+    graph.query_task_dashboard.return_value = TaskExecutionGraph(
+        run_id=1, loop_round=1, status=Status.HUNG,
+        tasks=[_node("persisted objective")], task_id="t1",
+    )
+    emissions: list[tuple] = []
+    tcs = SimpleNamespace(
+        emit_trajectory_event=lambda *a, **k: emissions.append((a, k))
+    )
+    exe = TaskExecutor(
+        bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
+        formatter=None, context=None, sink=None, poller=None,
+        graph=graph, api_base_url="http://test:8888",
+        task_context_service=tcs,
+    )
+
+    with patch(
+        "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
+        new_callable=AsyncMock,
+    ) as mock_notify:
+        assert _run(exe.dispatch([_node("updated objective")])) == [True]
+
+    assert mock_notify.call_args.kwargs["task_context_service"] is tcs
+
+
 def test_task_executor_dispatch_bbs_propagates_graph_lookup_failure():
     graph = MagicMock()
     graph.query_task_dashboard.side_effect = RuntimeError("graph unavailable")

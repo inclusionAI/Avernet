@@ -127,5 +127,8 @@ class TaskExecutorRelayMixin:
                 on_bbs_report=self._on_bbs_report,
                 group_executor=self._bbs_execute_as_manager_worker_group,
                 target_node_id=node.node_id if config.get("orchestration_mode") == "relay" else None,
+                # 不接线则 BBS 认领/释放生命周期在时间线上全盲(bbs_entered/bid/
+                # bbs_execution_started/bbs_released 全部静默 no-op),对齐 run_bbs。
+                task_context_service=self._task_context_service,
             )
         return True
