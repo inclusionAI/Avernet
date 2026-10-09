@@ -17,6 +17,11 @@
    per-run spending limit set in the bot's binding: model spend in USD,
    wall-clock time, and evaluation rollouts. Every model call and evaluation
    is charged through `ctx.budget`, and the run stops when it runs out.)
+   This is a deliberate limitation: a strategy can use only what the
+   capability catalog (§4) provides, and cannot bring its own model keys
+   or agent runtimes. Its own computation (parsing, search, ranking) is
+   unrestricted. A new need is met by adding a catalog entry once a second
+   strategy needs it, not by an exception for one strategy.
 3. **Strategies propose; the platform decides.** A strategy submits
    candidates. Recording, verification, the gate, and promotion stay
    platform-owned (DR-2).
@@ -70,7 +75,10 @@ container exists):
   "runtime": {"kind": "job_worker", "image": "registry.example/clawevolve@sha256:…"},
   "needs": {                                       // capabilities from the catalog (§4), with arguments
     "experience.sessions@1": {},
-    "agents@1": {"engines": ["openclaw"]},         // also implies which bots it can run on
+    "agents@1": {"definitions": {                  // agent definitions shipped with the strategy (§4.2)
+      "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
+      "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
+    }},
     "evaluate.train@1": {}
   }
 }
@@ -93,7 +101,7 @@ OpenClaw), which is how a binding check knows what a bot can supply.
 | *(always granted)* | `parent`, `workspace`, `submit`, `budget`, `log`, `artifacts`, `cancelled` | Read the parent revision; materialise revisions to a sandbox and diff back to a patch; submit candidates; budget, logs, artifacts, cancellation | Nothing to declare |
 | `experience.sessions@1` | `ctx.experience.sessions()` | The bot's past conversations as normalized episodes, filtered | Reads conversation history; shown to owners |
 | `experience.feedback@1` | `ctx.experience.feedback()` | Ratings, corrections, outcomes, and subject-bot observations from the inbox | |
-| `agents@1` `{engines}` | `ctx.agents.run(engine, …)` | Run an engine agent inside a sandbox workspace | The engine list must include the bot's engine |
+| `agents@1` `{definitions}` | `ctx.agents.run(definition, …)` | Run one of the strategy's own agent definitions inside a sandbox workspace | Each definition names its engine; the bot's engine must be among them (§4.2) |
 | `evaluate.train@1` | `ctx.evaluate.train(…)`, `ctx.evaluate.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques; adding train cases | Validation, holdout, regression, and safety stay hidden |
 
 **What `@1` means.** The number after `@` is the version of the
@@ -132,18 +140,56 @@ async def sessions(self, *, days: int, limit: int = 500,
 ```
 
 ```python
-# agents@1 — registered as {"agents@1": {"engines": ["openclaw"]}}
-async def run(self, engine: str, *, agent: str, workspace: Workspace,
+# agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
+async def run(self, definition: str, *, workspace: Workspace,
               prompt: str, timeout_s: int = 1800) -> AgentResult: ...
 ```
 
-`engines` lists the engines this strategy can drive. A call with any other
-engine is refused, and a binding to a bot whose engine is not in the list
-is rejected (§5). For example, ClawEvolve's tune step calls
-`ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws, prompt=…)`.
-The platform starts that agent inside the sandbox `ws`, not on the live bot,
-and returns its transcript and exit status. Files it changed stay in `ws`
-until the strategy turns them into a patch.
+An **agent** here is a multi-step, tool-using agent session (an LLM that
+reads and edits files over many steps), as opposed to a single model call.
+For example, ClawEvolve's tune step calls
+`ctx.agents.run("clawevolve-tune", workspace=ws, prompt=…)`. The platform
+starts that agent inside the sandbox `ws`, not on the live bot, and returns
+its transcript and exit status. Files it changed stay in `ws` until the
+strategy turns them into a patch. A call naming a definition the strategy
+did not register is refused.
+
+### 4.2 Where agent definitions come from
+
+`ctx.agents.run` names an agent, but the platform also needs the agent's
+**definition**: its instructions, skills, and tool configuration. Today,
+ClawEvolve's tune agent is the `clawevolve-tune` skill (`SKILL.md` plus
+references) in `clawevolve-skills`, installed into the OpenClaw runtime
+that ClawEvolve itself drives, so naming it is enough. A black-box strategy
+from another team has no such shared install: the platform's sandboxed
+runner has never seen its agents. The mechanism:
+
+1. **Shipped with the strategy.** Each agent definition is a directory in
+   the strategy's source, in the format of its engine (for OpenClaw: the
+   agent's skill and configuration layout). The registration record lists
+   each one under `agents@1.definitions` with its `engine` and `path` (§3).
+2. **Uploaded at registration.** `avn strategy publish` uploads each
+   definition directory to the Strategy Registry (C3), which stores it
+   content-addressed (digest as in
+   [02-genome.md §7.1](02-genome.md#71-content-reuse-the-manifest-content-store))
+   and records the digest in the registration record. The platform never
+   needs to read the strategy's container image or Python package to find
+   them, so both runtimes (§9) work the same way.
+3. **Validated at registration.** The `agents@1` provider for each named
+   engine validates the definition against that engine's definition
+   contract. A definition for an engine with no provider, or one that does
+   not validate, fails registration.
+4. **Loaded per call.** `ctx.agents.run("clawevolve-tune", …)` makes the
+   provider load that definition by digest into the sandbox, next to the
+   workspace `ws`. The definition is read-only to the agent; only `ws` is
+   writable.
+5. **Versioned with the strategy.** Definitions belong to a strategy
+   version: changing a tune prompt means registering a new strategy
+   version. The Experiment Ledger H records the definition digests with
+   each run, so results are attributable to the exact prompts used.
+
+The engines a strategy drives are the `engine` values of its definitions,
+so there is no separate engine list.
 
 ## 5. Binding: which strategies a bot uses
 
@@ -179,7 +225,8 @@ strategies, and a bot may use several:
 
 When a binding is created or changed, the platform checks it against the
 bot. Every capability in `needs` must have a provider for the bot's engine;
-`agents@1` must list the bot's engine; `allowed_genes` must stay within the
+the bot's engine must be among the `engine` values of the strategy's
+`agents@1` definitions; `allowed_genes` must stay within the
 bot's `policy` (locked genes stay locked). A mismatch is rejected at
 configuration time, not partway through a paid run.
 
@@ -337,7 +384,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
         while state.next_round < ctx.params["max_rounds"]:
             if state.pending is None:
                 ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
-                await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
+                await ctx.agents.run("clawevolve-tune", workspace=ws,
                                      prompt=build_tune_prompt(state.findings, state.history))
                 train = await ctx.evaluate.train(ws)                     # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
@@ -380,7 +427,7 @@ submits:
 | Package | For | Contents |
 | --- | --- | --- |
 | `avernet-evolution` (Python), `@avernet/evolution` (TS) | Callers: pipelines, CI, UI backends | Generated client for the Evolution API (bindings, runs, verdicts) |
-| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), a local harness with a fake platform (`avn strategy dev`), and the conformance kit |
+| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), a local harness with a fake platform (`avn strategy dev`), `avn strategy publish` (registers a version and uploads its agent definitions, §4.2), and the conformance kit |
 
 Conformance runs on both sides of the port:
 

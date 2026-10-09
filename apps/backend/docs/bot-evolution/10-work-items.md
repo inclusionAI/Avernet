@@ -61,7 +61,8 @@ the rest.
   looked up by id), the registration record schema, the
   first capability catalog (`experience.sessions@1`,
   `experience.feedback@1`, `agents@1`, `evaluate.train@1`) with per-engine
-  provider contracts, the evolution policy (binding) schema and binding
+  provider contracts (for `agents@1`, the per-engine agent definition
+  contract and the upload and loading of definitions, 05 §4.2), the evolution policy (binding) schema and binding
   checks, run lifecycle and failure semantics (R11): idempotent run
   submission returning a run id, leased jobs re-dispatched after a crash
   with the same run id, strategy-owned progress persistence (no platform

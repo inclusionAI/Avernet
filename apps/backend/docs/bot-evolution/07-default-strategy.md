@@ -34,7 +34,10 @@ operator library, round loop) and only its edges move to the
 [05-strategy-sdk.md §10](05-strategy-sdk.md#10-examples).
 
 Registration record: `needs` = `experience.sessions@1`,
-`agents@1 {engines: [openclaw]}`, `evaluate.train@1`.
+`agents@1` with the definitions `clawevolve-tune` and `clawevolve-review`
+(engine `openclaw`, shipped and uploaded with the strategy, see
+[05-strategy-sdk.md §4.2](05-strategy-sdk.md#42-where-agent-definitions-come-from)),
+`evaluate.train@1`.
 
 | ClawEvolve piece | In the new model | Change needed |
 | --- | --- | --- |
