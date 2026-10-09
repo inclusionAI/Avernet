@@ -167,9 +167,21 @@ exit=0：tsc --noEmit 通过、max lint 0 error、jest 全绿、build 成功
   （2 既有 parse_hits 用例 + 3 新增 team slice 用例：3 个真实 endpoint 的发现、
   PUT/POST/DELETE 三方法计数、未挂前缀模板不得误匹配）。
 - `scripts/adapters_endpoint_coverage.py` 新增 `--extra-router PREFIX:FILE`
-  （默认分母不变；解析同一 `.route` 扫描 + nest 前缀对齐访问日志 MatchedPath，
-  无手工 covered 标注）。默认 `--min 100` 门禁分母保持 bcs-http router.rs，
-  未删任何分母。
+  （解析同一 `.route` 扫描 + nest 前缀对齐访问日志 MatchedPath，
+  无手工 covered 标注；不删任何分母）。**终审 fix wave：该旗标已接入真实
+  门禁链**——`e2e_coverage.sh` 的 endpoint 门禁调用现携带
+  `--extra-router /api/v1/bots:…/team_manager_sources.rs`，team slice 的
+  PUT/POST/DELETE 3 个 endpoint 进入 CI 实际执行的 100% 分母（真实运行校验：
+  分母 156 -> 159 endpoints，新 3 项的 handler 为 sync_team_manager_sources /
+  repair_add_team_member / repair_remove_team_member）。配套地把执行链上
+  该 slice 变为可命中：singlebox 的 BCS 启动在生成的 runtime config 里面
+  追加 `[team_manager_sync]`（跟踪模板不动，`cargo run` 仍默认不挂），
+  并为 BCS 进程与 e2e 子进程导出本地-only signing key
+  （`BCS_TEAM_MANAGER_SYNC_SIGNING_KEY`，与既有 Principal dev key 同一
+  模式）；`bot_authority.sh` 的 team 凭证 mint 增加 `BCS_SERVER_ENV` 回退，
+  与服务端 env 判定对齐。本环境未能完整跑 singlebox 栈（§2.2），该链路的
+  端到端验证按未验证如实记录；脚本级验证为 pytest 5 passed + 上述真实
+  旗标运行输出。
 - `scripts/e2e-test/bot_authority.sh`：5 个新 story 注册进 `e2e.sh`
   （`bot_authority` suite：mine 标签、manager grant/revoke、转交全链、team
   slice（凭证命中或 404/401 skip 如实记账）、maintenance binary 用法探测）。
@@ -203,9 +215,15 @@ bcs-ownership-migrate --maintenance inspect（无 config-dir/BCS_CONFIG_DIR）�
   thread 'main' panicked at config.rs:1588 "No config file found. Use -c <config-dir>..."
 ```
 
-最后一条是**如实记录的实现瑕疵**（前况）：缺 config 走的是 config-loader panic
-（101），而非 Task 17 的 usage=2 类。它不产生半迁移状态（启动前失败、零写），
-但按 runbook“code 2 覆盖 usage 错误”的字面表还差一小步——记录待裁，不虚报。
+**终审修复后（2026-10-09 fix wave）此缺口已闭合**：binary 改调 fallible 的
+`BcsConfig::try_load_with_env` 并把 `Err` 映射到 `RunFailure::Execution`，真实
+子进程复测退出码 **1**（typed 报错 `config load failed: Base config file not
+found in …`，无 `panicked at`）；新增真实子进程测试
+`binary_missing_config_is_a_typed_execution_failure_not_a_panic`（exit 1 + 无
+panic + `--maintenance` 缺失仍 2）在 ownership_migration 套件内固定该行为；
+runbook 的 exit-code 表 1 行更新为“storage failure, a missing/unloadable
+config chain, or ≥1 failed entry”。原验收时观察的 101 记录保留于 runbook
+附录作为历史（前状况已被 fix commit 取代）。
 
 ### 1.10 `git diff --check`
 
@@ -241,8 +259,11 @@ trailing blank line 已修复后复验）。
    （pypi.org 直连）受限的环境下下载近乎停滞（faiss-cpu/mysql-connector/
    grpcio 等大包 15+ 分钟未完成），本次尝试中止（23 分钟，进程已清），未进入
    bcs 覆盖率编译/验收段。**结果：本环境未跑完 → 报告与 verifier 产物未生成，
-   coverage/endpoint/CLI 覆盖率数字未验证，不伪造**。CI 中该栈有镜像源与 MySQL
-   service，按既有门禁执行；本任务未降低任何其阈值（§7.6）。
+   coverage/endpoint/CLI 覆盖率数字未验证，不伪造**。终审 fix wave 后，该栈的
+   单次完整运行仍未在本环境执行（外网依赖不变），但执行链 wiring 已按终审
+   findings 接线就位（§1.7：--extra-router 接入门禁链 + singlebox 运行时
+   config 装配 team lane 与本地-only key），CI 中该栈按既有门禁执行；本任务
+   未降低任何其阈值（§7.6）。
    （证据：`/tmp/singlebox_cov.log` 首启过程中断前 17.5KB 输出；目录
    `singlebox/.dependencies/coverage/singlebox/{raw,reports,mock-services}` 仅为
    空壳初始化。）
@@ -375,11 +396,12 @@ MySQL 行锁等待时长；共享连接池等待计数；>100 成员的大快照
 ## 7. 发布核对清单
 
 1. **文件规模**：每文件 ≤1000 行——新增/修改 Rust/TS source：e2e_bot_authority.rs
-   924、e2e_ownership_transfer.rs 753、botAuthorityService.ts 527、
-   botAuthority.test.ts 358；python/脚本：adapters_endpoint_coverage.py 593、
-   test_adapters_endpoint_coverage.py 125、bot_authority.sh 502、e2e.sh 225、
+   914、e2e_ownership_transfer.rs 753、ownership_migration.rs（测试，本任务新增
+   一个用例后）995、botAuthorityService.ts 526、botAuthority.test.ts 358；
+   python/脚本：adapters_endpoint_coverage.py 593、
+   test_adapters_endpoint_coverage.py 125、bot_authority.sh 511、e2e.sh 225、
    cli-stories.sh 590。（stories.sh 1804 行为既有大文件，本任务 +43 行；bash
-   非生产 Rust source，前况。）
+   非生产 Rust source，前况。终审复核后的行数以 2026-10-09 fix wave 为准。）
 2. **schema/迁移**：001..031 冻结链已有（Task 2/17），无新迁移。
 3. **OpenAPI**：两个入口校验 82/26 operations 全过（§1.4）。
 4. **conformance**：R25 登记差量由 Task 18 裁决为计划内；arch-check 其余项为
@@ -393,7 +415,7 @@ MySQL 行锁等待时长；共享连接池等待计数；>100 成员的大快照
 ## 8. 本任务实际变更文件
 
 ```text
-A  crates/bootstrap/bcs/tests/e2e_bot_authority.rs       (924)
+A  crates/bootstrap/bcs/tests/e2e_bot_authority.rs       (914)
 A  crates/bootstrap/bcs/tests/e2e_ownership_transfer.rs  (753)
 A  scripts/e2e-test/bot_authority.sh                     (502)
 M  scripts/e2e-test/e2e.sh           （suite 注册：bot_authority 5 story + 列表）

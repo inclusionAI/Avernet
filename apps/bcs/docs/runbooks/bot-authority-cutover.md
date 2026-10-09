@@ -208,8 +208,9 @@ state is the NEW fact: authority comes from owner/manager edges.
 | code | meaning |
 | --- | --- |
 | 0 | inspect printed; apply committed with an empty `failed` lane (conflicted/skipped lanes are governance entries, not failures) |
-| 1 | storage failure or ≥1 `failed` entry — re-run the same `--batch-id` to recover the batch from its committed prefix |
+| 1 | storage failure, a missing/unloadable `--config-dir`/`BCS_CONFIG_DIR` chain, or ≥1 `failed` entry — fix the config/operator inputs, then re-run the same `--batch-id` to recover the batch from its committed prefix |
 | 2 | usage error: missing `--maintenance`, over-limit page, blank batch id, unreadable/invalid confirmation file |
+
 ## 附: 2026-10-09 验收演练记录（Task 20 全链路验收）
 
 本节是 release 前对上述 runbook 的实测记录（环境：无 MySQL，SQLite/memory 路径；
@@ -218,11 +219,15 @@ state is the NEW fact: authority comes from owner/manager edges.
 - `bcs-ownership-migrate inspect`（无 `--maintenance`）：真实子进程退出码 **2**
   （usage 语义，与上表一致）。
 - `bcs-ownership-migrate --maintenance --help`：退出码 **0**。
-- `--maintenance inspect` 缺 `--config-dir`/`BCS_CONFIG_DIR`：**当前实现为
-  config-loader panic（退出码 101）**，而非上表的 usage=2。启动前失败、零写、
-  不会产生半迁移状态，但与 exit-code 表的“2 覆盖全部 usage 错误”存在一道缺口；
-  以此为治理项记录，验收文档（`docs/superpowers/plans/2026-10-08-bot-owner-manager-validation.md`
-  §1.9/§5）同文如实记录，修复需在下一次治理提交中完成，不在验收报告里虚化。
+- `--maintenance inspect` 缺 `--config-dir`/`BCS_CONFIG_DIR`：验收时实测曾为
+  config-loader panic（退出码 101，见下条历史记录）。**终审修复（fix commit）
+  已闭合**：binary 改走 fallible 的 `BcsConfig::try_load_with_env` 并映射为
+  `RunFailure::Execution` → **退出码 1**，与上方 exit-code 表的 config 行一致，
+  由真实子进程测试
+  `binary_missing_config_is_a_typed_execution_failure_not_a_panic`
+  （`crates/bootstrap/bcs/tests/ownership_migration.rs`）固定：exit 1、报错
+  命名 config 问题、断言无 `panicked at`；`--maintenance` 缺失仍独立为退出码
+  2。启动前失败、零写、不产生半迁移状态的语义不变。
 - dry-run 与回退断言由 `crates/bootstrap/bcs/tests/ownership_migration.rs`
   以真实二进制子进程覆盖：inspect 前后库指纹断言**零写**；同 `--batch-id` 重放
   返回原报告（add-safe、不重置已转交 owner/version）；conflict/skip 车道是治理

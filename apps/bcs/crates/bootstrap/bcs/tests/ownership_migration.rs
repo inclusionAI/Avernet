@@ -667,6 +667,45 @@ async fn binary_requires_maintenance_and_dry_run_writes_nothing() {
     );
 }
 
+/// A missing/unloadable config chain is an EXECUTION failure (exit `1`)
+/// through the binary's typed `RunFailure` taxonomy — never a config-loader
+/// panic escaping `main` (the pre-fix behavior surfaced as exit `101` on
+/// ops hosts). Zero writes happen before the config leg resolves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn binary_missing_config_is_a_typed_execution_failure_not_a_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing_config_dir = dir.path().join("no-such-config-dir");
+
+    let failed = run_binary(
+        &["--maintenance", "inspect", "--limit", "100"],
+        &missing_config_dir,
+    );
+    assert_eq!(
+        failed.status.code(),
+        Some(1),
+        "a missing config chain must exit 1 per the runbook's execution-failure row: {failed:?}\n{}",
+        String::from_utf8_lossy(&failed.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&failed.stderr),
+        String::from_utf8_lossy(&failed.stdout)
+    );
+    assert!(
+        combined.to_lowercase().contains("config"),
+        "the typed failure names the config problem: {combined}"
+    );
+    assert!(
+        !combined.contains("panicked at"),
+        "no Rust panic may reach the operator on the config leg: {combined}"
+    );
+
+    // The usage leg is still `2`: dropping `--maintenance` stays a
+    // distinct, operator-fixable mistake even with a missing config.
+    let refused = run_binary(&["inspect", "--limit", "100"], &missing_config_dir);
+    assert_eq!(refused.status.code(), Some(2));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn binary_apply_writes_once_and_replays_the_same_batch() {
     let dir = tempfile::tempdir().unwrap();

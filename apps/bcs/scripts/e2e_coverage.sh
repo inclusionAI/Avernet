@@ -43,6 +43,14 @@ method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
 # The coverage runner is a local test launcher, so explicitly provide the same
 # non-production Principal key to both the BCS child and the E2E client.
 export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+# Task 20: same contract for the team-manager sync credential lane — the
+# singlebox child (which arms [team_manager_sync] in the generated runtime
+# config and passes this key into the BCS process) is a child process whose
+# exports die at exit, so re-export the local-only default here for the
+# e2e.sh child that mints the trusted platform credential
+# (bot_authority.sh story_team_manager_sources_platform_sync). Without it the
+# endpoint-coverage gate's --extra-router slice would stay unhittable.
+export BCS_TEAM_MANAGER_SYNC_SIGNING_KEY="${BCS_TEAM_MANAGER_SYNC_SIGNING_KEY:-local-only-bcs-team-manager-sync-signing-key}"
 source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 
 skip_start=0
@@ -331,12 +339,21 @@ if [[ "$no_stop" -eq 0 ]]; then
   # registered in bcs-http's router.rs, which does this e2e run exercise? Diff
   # the BCS_DEBUG hit log (collected above) against the parsed endpoint set.
   # See scripts/adapters_endpoint_coverage.py for the over/under-count self-checks.
+  # Task 20: the credential-gated team-manager sources slice is mounted OUTSIDE
+  # bcs-http's router.rs (axum .nest at /api/v1/bots in bcs-api-http), so it
+  # joins the SAME denominator via --extra-router — parsed from the slice's own
+  # .route calls, prefixed to match the access log's MatchedPath. The
+  # bot_authority e2e suite drives the slice's PUT sync and POST/DELETE member
+  # repairs (plus the uncredentialed 401/404 probes), so the 100% gate holds
+  # with the slice counted. Bots-manager-slice GET/mine coverage stays where it
+  # always was: the v1 openapi routes are a separate contract contract suite.
   endpoint_txt="$cov_dir/endpoint_coverage.txt"
   endpoint_xml="$cov_dir/endpoint_coverage.xml"
   # The script prints only a short summary to stdout (no per-endpoint detail);
   # the full covered/uncovered lists go to the .txt and structured .xml files.
   ( cd "$bcs_dir" && python3 scripts/adapters_endpoint_coverage.py \
       --router crates/adapters/http/bcs-http/src/router.rs \
+      --extra-router /api/v1/bots:crates/adapters/http/bcs-api-http/src/v1/internal/routes/team_manager_sources.rs \
       --log "$bcs_log" \
       --out-txt "$endpoint_txt" \
       --out-xml "$endpoint_xml" \

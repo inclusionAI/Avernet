@@ -81,7 +81,16 @@ import base64, hmac, hashlib, json, os, sys, time
 key = os.environ.get("BCS_TEAM_MANAGER_SYNC_SIGNING_KEY", "").encode()
 if not key.strip():
     sys.exit(1)
-env_raw = os.environ.get("SERVER_ENV") or os.environ.get("REAL_SERVER_ENV") or os.environ.get("ALIPAY_APP_ENV") or ""
+# Same priority as `bcs_config::resolve_env`, plus the singlebox wrapper's
+# own BCS_SERVER_ENV (it passes the value to the server process inline; the
+# credential's env claim must match the assembled verifier's env).
+env_raw = (
+    os.environ.get("SERVER_ENV")
+    or os.environ.get("REAL_SERVER_ENV")
+    or os.environ.get("ALIPAY_APP_ENV")
+    or os.environ.get("BCS_SERVER_ENV")
+    or ""
+)
 env_raw = env_raw.lower()
 env = {"prod": "prod", "gray": "gray", "pre": "pre", "prepub": "pre", "local": "local"}.get(env_raw, "dev")
 now = int(time.time())

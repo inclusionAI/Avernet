@@ -14,7 +14,8 @@
 //!   from current facts at execution time — the confirm file can never
 //!   smuggle in an owner;
 //! - exit codes: `0` success (a `failed`-free apply), `1` for any storage
-//!   failure or per-Bot failed entry (the committed prefix of a failed
+//!   failure, a missing/unloadable `--config-dir`/`BCS_CONFIG_DIR` chain,
+//!   or per-Bot failed entry (the committed prefix of a failed
 //!   batch stays recoverable by re-running the same `--batch-id`),
 //!   `2` for usage errors (clap, unreadable/invalid confirmation file,
 //!   refused request shapes).
@@ -145,8 +146,15 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<u8, RunFailure> {
-    // Only the existing configuration chain selects the datasource.
-    let config = bcs::BcsConfig::load_with_env(args.config_dir.as_ref());
+    // Only the existing configuration chain selects the datasource — the
+    // fallible leg of `BcsConfig::try_load_with_env`, never the panicking
+    // server loader. A missing/invalid config is an EXECUTION failure of
+    // the storage/config boundary per the taxonomy above (exit `1`), so
+    // the operator gets a typed error, not a Rust panic through `main`
+    // (the pre-fix behavior determinedly exited 101 here). Zero writes
+    // happen before this point.
+    let config = bcs::BcsConfig::try_load_with_env(args.config_dir.as_ref())
+        .map_err(|error| RunFailure::Execution(format!("config load failed: {error}")))?;
     let service = bcs::ownership_migration_wiring::ownership_migration_service_from_config(&config)
         .await
         .map_err(|error| RunFailure::Execution(format!("datasource selection failed: {error}")))?;
