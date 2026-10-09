@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 import uuid
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentId, AgentStatus, IdempotencyKey, Run,
@@ -15,8 +15,31 @@ from dataclasses import dataclass
 
 from agentclaw.community.core.agentcompute.spi.subagent_factory import SubagentFactory
 from agentclaw.community.core.agentcompute.spi.artifact_store import ArtifactStore
+from agentclaw.community.core.agentcompute.runtime.upstream_breaker import (
+    UpstreamBreaker,
+)
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.metrics import MetricsPlugin
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+
+class _NullMetrics:
+    """Private no-op MetricsPlugin — executions run unmeasured when no
+    metrics backend is configured (local/test profiles)."""
+
+    def increment(self, name: str, labels: Any = None) -> None:
+        return None
+
+    def observe(self, name: str, value: float, labels: Any = None) -> None:
+        return None
+
+    def set_gauge(self, name: str, value: float, labels: Any = None) -> None:
+        return None
+
+    @contextmanager
+    def time_block(self, name: str, labels: Any = None) -> Iterator[None]:
+        yield
 
 
 class EnvelopeSchemaInvalid(Exception):
@@ -37,6 +60,18 @@ def _now_ms() -> int:
 
 
 class SubagentRuntime:
+    """Bounded subagent worker pool (D23) with optional upstream guard.
+
+        Constructor contract for the optional knobs:
+
+        - ``upstream_breaker=None`` means the breaker is disabled (every
+          attempt allowed) — a valid domain state for profiles that run
+          without a real LLM upstream; the DI composition root wires a
+          breaker built from ``config.upstream_breaker`` when one exists.
+        - ``metrics=None`` means no metrics backend is configured
+          (local/test profiles); a private no-op fills the seam so call
+          sites never branch on instrumentation.
+        """
 
     def __init__(
         self,
@@ -46,6 +81,8 @@ class SubagentRuntime:
         max_attempts: int = 3,
         per_task_timeout: float = 120.0,
         artifact_inline_threshold: int = 16384,
+        upstream_breaker: UpstreamBreaker | None = None,
+        metrics: MetricsPlugin | None = None,
     ) -> None:
         self._factory = factory
         self._artifact_store = artifact_store
@@ -53,6 +90,8 @@ class SubagentRuntime:
         self._max_attempts = max_attempts
         self._per_task_timeout = per_task_timeout
         self._artifact_inline_threshold = artifact_inline_threshold
+        self._upstream_breaker = upstream_breaker
+        self._metrics: MetricsPlugin = metrics or _NullMetrics()
         self._work: asyncio.Queue = asyncio.Queue(maxsize=max_width)
         self._completions: asyncio.Queue = asyncio.Queue()
         self._workers: list[asyncio.Task] = []
@@ -137,10 +176,19 @@ class SubagentRuntime:
         if timeout is None or timeout < 0:
             await self._work.join()
         else:
+            started = time.monotonic()
             try:
                 await asyncio.wait_for(self._work.join(), timeout)
             except asyncio.TimeoutError:
                 pass
+            # An idle work queue settles join() instantly; a caller asked to
+            # wait `timeout` for completions would hot-spin on that instant
+            # return (starving the event loop and every timer on it, e.g.
+            # the drain grace window). Sleep out the remainder — but never
+            # delay draining when this call was woken by a completion.
+            remaining = timeout - (time.monotonic() - started)
+            if remaining > 0 and self._work.empty() and self._completions.empty():
+                await asyncio.sleep(remaining)
         results = []
         while not self._completions.empty():
             results.append(await self._completions.get())
@@ -193,7 +241,23 @@ class SubagentRuntime:
         last_error: str | None = None
         for attempt in range(1, self._max_attempts + 1):
             if self._slice_lost.is_set():
+                self._metrics.observe(
+                    "agentcompute_subagent_attempts", attempt,
+                )
                 return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", attempt)
+
+            if (self._upstream_breaker is not None
+                    and not self._upstream_breaker.allow(time.monotonic())):
+                # 12.5: fail fast without calling the subagent — a run degrades
+                # through its normal failure path instead of burning the
+                # attempt budget waiting out timeouts against a dead upstream.
+                self._metrics.increment("agentcompute_upstream_breaker_open")
+                self._metrics.observe(
+                    "agentcompute_subagent_attempts", attempt,
+                )
+                return self._mk_result(
+                    item, AgentStatus.FAILED, None, "upstream_breaker_open", attempt,
+                )
 
             subagent = self._factory.create(spec, item.run)
             try:
@@ -212,14 +276,21 @@ class SubagentRuntime:
                             item.agent_id, attempt, schema_error,
                         )
                         continue
+                if self._upstream_breaker is not None:
+                    self._upstream_breaker.record_success()
+                self._metrics.observe(
+                    "agentcompute_subagent_attempts", attempt,
+                )
                 return self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
             except asyncio.TimeoutError:
                 last_error = "timeout"
+                self._record_upstream_failure()
                 logger.warning("[agentcompute][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 last_error = str(exc)
+                self._record_upstream_failure()
                 logger.warning("[agentcompute][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
             finally:
                 try:
@@ -227,7 +298,15 @@ class SubagentRuntime:
                 except Exception:
                     pass
 
+        self._metrics.observe(
+            "agentcompute_subagent_attempts", self._max_attempts,
+        )
         return self._mk_result(item, AgentStatus.FAILED, None, last_error, self._max_attempts)
+
+    def _record_upstream_failure(self) -> None:
+        if self._upstream_breaker is not None:
+            self._upstream_breaker.record_failure(time.monotonic())
+        self._metrics.increment("agentcompute_upstream_failures")
 
     @staticmethod
     def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpecRaw | None:

@@ -89,6 +89,38 @@ class TenantRunLimitExceeded(Exception):
         )
 
 
+class GlobalRunLimitExceeded(Exception):
+    """Fleet-wide concurrency cap reached (429-class, task 12.1).
+
+    Raised from submit before any row is created: admission is strictly
+    accept-or-reject, so a rejected submit leaves no run and no durable
+    job behind. Protects the worker fleet (all tenants combined) from
+    oversubscription; per-tenant fairness stays in TenantRunLimitExceeded.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(
+            f"global max_concurrent_runs={limit} reached"
+        )
+
+
+class QueueDepthExceeded(Exception):
+    """Pending-job queue-depth cap reached (429-class, task 12.1).
+
+    Rejects submits while the durable queue is saturated at
+    ``admission.max_pending_jobs`` — before any row is created — so a
+    backlog manifests as synchronous backpressure to callers rather
+    than unbounded enqueue latency.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(
+            f"queue depth reached max_pending_jobs={limit}"
+        )
+
+
 @runtime_checkable
 class AgentComputeServiceProtocol(Protocol):
     """Submit/run lifecycle over the agentcompute repositories."""

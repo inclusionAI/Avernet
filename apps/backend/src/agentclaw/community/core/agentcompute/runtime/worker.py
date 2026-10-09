@@ -1,17 +1,40 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import uuid
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
 from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.metrics import MetricsPlugin
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+# 12.2: join-window cap after drain grace expires; see shutdown().
+_ABORT_JOIN_MAX_SECONDS = 5.0
+
+
+class _NullMetrics:
+    """Private no-op MetricsPlugin — slices run unmeasured when no metrics
+    backend is configured (local/test profiles)."""
+
+    def increment(self, name: str, labels: Any = None) -> None:
+        return None
+
+    def observe(self, name: str, value: float, labels: Any = None) -> None:
+        return None
+
+    def set_gauge(self, name: str, value: float, labels: Any = None) -> None:
+        return None
+
+    @contextmanager
+    def time_block(self, name: str, labels: Any = None) -> Iterator[None]:
+        yield
 
 
 class AgentComputeWorker(LifecycleBase):
@@ -21,10 +44,12 @@ class AgentComputeWorker(LifecycleBase):
         config: AgentComputeConfig,
         handler: SwarmRunHandler,
         job_repo: Any,
+        metrics: MetricsPlugin | None = None,
     ) -> None:
         self._config = config
         self._handler = handler
         self._job_repo = job_repo
+        self._metrics: MetricsPlugin = metrics or _NullMetrics()
         self._worker_id = uuid.uuid4().hex[:16]
         self._running = False
         self._task: asyncio.Task | None = None
@@ -41,17 +66,59 @@ class AgentComputeWorker(LifecycleBase):
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def shutdown(self) -> None:
-        # Graceful drain: stop claiming, let the in-flight slice persist its
-        # latest completions, then unwind (§9.3 / D34 crash-clean drain).
+        """Graceful drain (12.2, §9.3 / D34).
+
+        State machine:
+
+        1. stop claiming — ``_running=False``: the poll loop exits after
+           its current iteration; jobs already claimed by that iteration
+           still complete normally.
+        2. grace wait — up to ``config.drain.grace_seconds`` for in-flight
+           ``handle_slice`` calls to finish. The heartbeat loop keeps
+           renewing in-flight leases while ``_inflight`` is non-empty, so a
+           healthy drain does not lose claims to lease expiry. Tracked
+           via ``self._inflight``.
+        3. cooperative abort — grace expired with slices still in flight:
+           signal ``set_slice_lost(True)`` per in-flight run so the slice
+           unwinds through its checkpoint+release path (the job is
+           rescheduled for reclaim, no partial writes persisted), then
+           join a bounded short window.
+        4. hard cancel — anything still unwinding after the abort window
+           is cancelled, as before (D23).
+
+        Deploy lead time must be >= slice budget + lease
+        (``orchestration.slice_max_seconds`` + ``orchestration.lease_seconds``).
+        No signal handler is installed here: the app shutdown hook calls
+        this method; the intended stop-claiming signal is recorded in
+        ``config.drain.stop_claiming_signal`` for the operations runbook.
+        """
         logger.info("[agentcompute][worker] draining worker_id=%s", self._worker_id)
         self._running = False
-        self._inflight.clear()
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        loop_task = self._task
+        if loop_task is not None:
+            grace = self._config.drain.grace_seconds
+            done, pending = await asyncio.wait(
+                {loop_task}, timeout=max(0.0, grace),
+            )
+            if pending:
+                for run_id in list(self._inflight):
+                    self._handler.set_slice_lost(True, run_id)
+                abort_join = min(grace, _ABORT_JOIN_MAX_SECONDS)
+                _, still_pending = await asyncio.wait(
+                    {loop_task}, timeout=max(0.0, abort_join),
+                )
+                if still_pending:
+                    logger.warning(
+                        "[agentcompute][worker] drain abort timed out, cancelling %d in-flight run(s)",
+                        len(self._inflight),
+                    )
+                    loop_task.cancel()
+                    try:
+                        await loop_task
+                    except asyncio.CancelledError:
+                        pass
+            if loop_task.done():
+                self._consume(loop_task)
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             try:
@@ -60,7 +127,15 @@ class AgentComputeWorker(LifecycleBase):
                 pass
         logger.info("[agentcompute][worker] stopped worker_id=%s", self._worker_id)
 
+    @staticmethod
+    def _consume(task: asyncio.Task) -> None:
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
+
     async def run_once(self) -> int:
+        await self._sample_pending_jobs()
         lease = self._config.orchestration.lease_seconds
         batch = self._config.orchestration.batch_size
         reclaimed = await asyncio.to_thread(
@@ -78,6 +153,15 @@ class AgentComputeWorker(LifecycleBase):
             processed += 1
         return processed
 
+    async def _sample_pending_jobs(self) -> None:
+        # D39 metrics are diagnostic-first: a failed sample is logged and
+        # skipped, never propagated into the poll tick.
+        try:
+            pending = await asyncio.to_thread(self._job_repo.count_pending_jobs)
+            self._metrics.set_gauge("agentcompute_pending_jobs", float(pending))
+        except Exception as exc:
+            logger.warning("[agentcompute][worker] pending-jobs sampling failed: %s", exc)
+
     async def _run_job(self, job: dict, *, reclaimed: bool) -> None:
         run_id = job["run_id"]
         tenant = job["tenant"]
@@ -85,6 +169,7 @@ class AgentComputeWorker(LifecycleBase):
         cancel = job.get("cancel_requested", False)
         if reclaimed and job.get("reclaims", 0) > self._config.orchestration.reclaim_max:
             # D40 circuit breaker: reclaim_max no-progress reclaims -> STUCK.
+            self._metrics.increment("agentcompute_stuck")
             await asyncio.to_thread(
                 self._handler.force_stuck,
                 run_id, tenant, epoch,
@@ -94,9 +179,16 @@ class AgentComputeWorker(LifecycleBase):
             return
         self._inflight[run_id] = job
         try:
-            outcome = await self._handler.handle_slice(
-                run_id, tenant, epoch, cancel, worker_id=self._worker_id,
+            self._metrics.increment(
+                "agentcompute_claim",
+                {"kind": "reclaim" if reclaimed else "claim"},
             )
+            with self._metrics.time_block(
+                "agentcompute_slice", {"run": str(run_id)},
+            ):
+                outcome = await self._handler.handle_slice(
+                    run_id, tenant, epoch, cancel, worker_id=self._worker_id,
+                )
             logger.info(
                 "[agentcompute][worker] run=%s outcome=%s", run_id, outcome
             )
@@ -122,9 +214,12 @@ class AgentComputeWorker(LifecycleBase):
             await asyncio.sleep(max(0.0, delay))
 
     async def _heartbeat_loop(self) -> None:
+        # Drains keep their leases: renew while running OR while in-flight
+        # slices are still unwinding (12.2), so grace-period work does not
+        # get reclaimed from under a healthy drain.
         lease = self._config.orchestration.lease_seconds
         interval = lease / 3.0
-        while self._running:
+        while self._running or self._inflight:
             await asyncio.sleep(interval)
             lost = []
             for run_id, job in list(self._inflight.items()):
