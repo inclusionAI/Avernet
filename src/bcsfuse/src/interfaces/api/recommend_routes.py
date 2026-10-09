@@ -11,6 +11,13 @@ Bot 推荐接口,根据问题自动推荐最合适的 Bot 列表。
 - 返回推荐的 Bot 列表
 - 用户可基于推荐结果调用 G1/G2/G5 进行融合决策
 
+当前搜索边界（2026-10-09）：
+- 本接口固定使用 EXPERT_DIAGNOSIS 场景标记，不提供四选一的搜索模式。
+- 正常主链路由 WorkerVectorMatchService 执行片段向量/关键词召回、
+  RRF 合并及可选精排；标记不意味着使用旧 ModeAwareScorer 决定主链路排序。
+- 已移除的旧 AGENT 混合检索实验不是本接口的搜索实现；融合业务模式
+  与搜索算法分开维护，本接口历史兼容/降级行为不因该清理而改变。
+
 群组上下文增强:
 - 当提供 group_id 时,系统会获取群组最近消息并用 LLM 改写问题
 - 改写后的问题更具上下文完整性,能提升推荐准确性
@@ -287,7 +294,7 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
 
     candidate_response = candidate_service.recommend(
         question=rewrite_question,
-        mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 使用专家诊断模式进行检索
+        mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 兼容场景标记，非切换到旧评分算法
         participants=None,  # 关键:不传 participants,触发全库推荐
         max_candidates=request.topK,
         runtime_config=runtime_config if runtime_config else None,

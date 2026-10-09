@@ -5,8 +5,14 @@ Worker Profile Retrieval & Fusion Simulation Baseline
 
 Mode-aware 检索服务，根据不同模式应用不同的评分策略。
 
-Phase C: G1 Semantic Rerank V2
-- 当 ENABLE_G1_PROFILE_RERANK=true 且 mode=AGENT 时，使用 ProfileSemanticRanker
+维护边界（2026-10-09）：本服务保留画像读取和历史模式评分职责；
+它不等同于 /api/v1/recommend 的片段向量 + 关键词 + RRF + 精排主链路。
+AGENT 的损坏 Phase E 实验已移除；旧开关开启时直接使用原有兜底评分，
+不再初始化另一套索引。V2 显式选择、过滤、画像读取和融合模式保持兼容。
+
+DEPRECATED: Phase C G1 Semantic Rerank V2（仅保留历史显式选择）
+- ENABLE_HYBRID_RETRIEVAL=false、ENABLE_G1_PROFILE_RERANK=true 且 mode=AGENT
+  时，使用 ProfileSemanticRanker；不是当前统一搜索的精排实现。
 - 支持 score_breakdown 输出（仅用于日志/调试，不改变 RetrievalResult 结构）
 """
 
@@ -77,6 +83,10 @@ class ModeAwareScorer:
     Mode-aware 评分器
 
     根据检索模式应用不同的评分权重策略。
+
+    .. deprecated:: 2026-10-09
+       仅保留历史兼容/降级评分，不再新增模式、权重策略或调用方。
+       新搜索使用 WorkerVectorMatchService 的统一召回和可选精排链路。
     """
 
     # 各模式的权重配置
@@ -125,6 +135,10 @@ class ModeAwareScorer:
 class WorkerProfileRetrievalService:
     """
     Worker Profile 检索服务
+
+    DEPRECATED（仅指按模式检索/评分）：不再作为新搜索功能的入口。
+    新搜索使用 /api/v1/recommend，其主链路由 WorkerVectorMatchService 实现。
+    画像读取、现存兼容/降级调用仍需保留，不代表整个服务可直接删除。
 
     提供基于模式的检索功能，支持：
     - G1 (AGENT): 关注直接相关性
@@ -188,6 +202,10 @@ class WorkerProfileRetrievalService:
     ) -> RetrievalResponse:
         """
         检索 profiles
+
+        .. deprecated:: 2026-10-09
+           历史按模式检索入口，仅供现存兼容/降级调用；不新增调用方。
+           新搜索接入 /api/v1/recommend 的统一链路。
 
         Args:
             question: 问题/任务描述
@@ -388,35 +406,21 @@ class WorkerProfileRetrievalService:
         # 计算 mode-aware 评分
         logger.info("[RETRIEVAL] Step 5: 计算 mode-aware 评分...")
 
-        # Phase E: Hybrid Retrieval（优先级最高）
-        use_hybrid_retrieval = (
+        # Retired Phase E always failed into legacy scoring. Keep its precedence
+        # over V2 for existing configs, without constructing another index/provider.
+        use_legacy_agent_compat = (
             FeatureFlags.is_enabled("ENABLE_HYBRID_RETRIEVAL")
             and mode == RetrievalMode.AGENT
         )
 
-        # Phase C: V2 评分路径（仅 G1/AGENT 模式）
+        # DEPRECATED: Phase C V2 仅保留历史显式选择，不是现役搜索精排。
         use_v2_scorer = (
             FeatureFlags.is_g1_profile_rerank_enabled()
             and mode == RetrievalMode.AGENT
+            and not use_legacy_agent_compat
         )
 
-        if use_hybrid_retrieval:
-            logger.info("[RETRIEVAL]   使用 Hybrid Retrieval（Phase E）")
-            results = self._retrieve_with_hybrid(
-                profiles=profiles,
-                question=question,
-                min_score=min_score,
-                top_k=top_k,
-                use_strict=use_strict,
-                profile_keys=profile_keys,
-            )
-            logger.info(
-                "✅ [ProfileRetrieval] Hybrid retrieval completed, "
-                "results_count=%d, profiles_input=%d",
-                len(results),
-                len(profiles)
-            )
-        elif use_v2_scorer:
+        if use_v2_scorer:
             logger.info("[RETRIEVAL]   使用 V2 ProfileSemanticRanker（G1 V2 评分）")
             results = self._calculate_v2_scores(
                 profiles=profiles,
@@ -509,154 +513,6 @@ class WorkerProfileRetrievalService:
             mode=mode,
         )
 
-    def _retrieve_with_hybrid(
-        self,
-        profiles: list[WorkerProfile],
-        question: str,
-        min_score: float,
-        top_k: Optional[int],
-        use_strict: bool,
-        profile_keys: Optional[list[str]],
-    ) -> list[RetrievalResult]:
-        """
-        Phase E: Hybrid Retrieval 方法
-
-        使用 Dense + Sparse + Structured 混合检索。
-
-        Args:
-            profiles: 待检索的 profiles（已过滤）
-            question: 问题文本
-            min_score: 最低分数阈值
-            top_k: 目标数量
-            use_strict: 是否使用严格模式
-            profile_keys: 显式指定的 profile_keys
-
-        Returns:
-            list[RetrievalResult]: 检索结果
-        """
-        try:
-            # 1. 初始化 Hybrid Retrieval 组件
-            from src.domain.services.hybrid_retrieval_service import HybridRetrievalService
-            from src.domain.services.dense_retriever import DenseRetriever
-            from src.domain.services.sparse_retriever import SparseRetriever
-            from src.domain.services.retrieval_scorer import RetrievalScorer
-            from src.domain.models.hybrid_retrieval_result import HybridRetrievalContext
-            from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
-            from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
-            from src.infra.config.feature_flags import FeatureFlags as FF
-
-            # 获取 embedding provider
-            embedding_provider = RealEmbeddingProvider()
-
-            # 获取 profile embedding store（根据环境自动选择 local/zdas）
-            from src.infra.config.data_paths import resolve_data_path
-            profile_store = ProfileEmbeddingStore(
-                dimension=4096,
-                index_type="local",  # 会在依赖注入时根据环境切换
-                db_path=resolve_data_path("data/vector_store.db"),
-            )
-
-            # 初始化 retrievers
-            dense_retriever = DenseRetriever(
-                embedding_provider=embedding_provider,
-                profile_store=profile_store,
-            )
-
-            sparse_retriever = SparseRetriever()
-            retrieval_scorer = RetrievalScorer()
-
-            # 初始化 Hybrid Retrieval Service
-            hybrid_service = HybridRetrievalService(
-                dense_retriever=dense_retriever,
-                sparse_retriever=sparse_retriever,
-                retrieval_scorer=retrieval_scorer,
-            )
-
-            # 2. 构造检索上下文
-            context = HybridRetrievalContext(
-                question=question,
-                profile_keys=profile_keys,
-                strict=use_strict,
-                top_k=top_k or 10,
-                min_score=min_score,
-                enable_dense=FF.is_enabled("ENABLE_DENSE_RETRIEVAL"),
-                enable_sparse=FF.is_enabled("ENABLE_SPARSE_RETRIEVAL"),
-            )
-
-            # 3. 执行 Hybrid Retrieval
-            hybrid_result = hybrid_service.retrieve(context)
-
-            # 4. 转换为 RetrievalResult 格式
-            results: list[RetrievalResult] = []
-            for candidate in hybrid_result.candidates:
-                # 从 profiles 中找到对应的 WorkerProfile
-                profile = next(
-                    (p for p in profiles if p.profile_key == candidate.profile_key),
-                    None
-                )
-
-                if profile and candidate.score >= min_score:
-                    # 将 Hybrid 分数包装为 signal
-                    signal = ScoringSignal(
-                        signal_type=SignalType.SEARCHABLE_MATCH,
-                        raw_score=candidate.score,
-                        weight=1.0,
-                        details={
-                            "scorer_version": "hybrid",
-                            "source": candidate.source.value if hasattr(candidate.source, 'value') else str(candidate.source),
-                            "hybrid_score": candidate.score,
-                        },
-                    )
-                    results.append(RetrievalResult(
-                        profile=profile,
-                        total_score=candidate.score,
-                        signals=[signal],
-                    ))
-
-            if len(results) > 0:
-                logger.info(
-                    "✅ [ProfileRetrieval] Hybrid retrieval completed successfully, "
-                    "results_count=%d, source=%s, fallback=%s, profiles_input=%d",
-                    len(results),
-                    hybrid_result.source.value if hasattr(hybrid_result.source, 'value') else str(hybrid_result.source),
-                    hybrid_result.fallback_occurred,
-                    len(profiles)
-                )
-            else:
-                logger.warning(
-                    "⚠️ [ProfileRetrieval] Hybrid retrieval returned no results, "
-                    "source=%s, fallback=%s, profiles_input=%d, min_score=%.3f",
-                    hybrid_result.source.value if hasattr(hybrid_result.source, 'value') else str(hybrid_result.source),
-                    hybrid_result.fallback_occurred,
-                    len(profiles),
-                    min_score
-                )
-
-            return results
-
-        except Exception as e:
-            logger.error(
-                "❌ [ProfileRetrieval] Hybrid retrieval failed, falling back to legacy scorer, "
-                "error_type=%s, error_message=%s, profiles_input=%d",
-                type(e).__name__,
-                str(e),
-                len(profiles),
-                exc_info=True
-            )
-            # Fallback 到 Legacy 评分
-            scorer = ModeAwareScorer(RetrievalMode.AGENT)
-            results = []
-            for profile in profiles:
-                signals = self._calculate_signals(profile, question, scorer, RetrievalMode.AGENT)
-                total_score = sum(s.weighted_score or 0 for s in signals)
-                if total_score >= min_score:
-                    results.append(RetrievalResult(
-                        profile=profile,
-                        total_score=total_score,
-                        signals=signals,
-                    ))
-            return results
-
     def _calculate_v2_scores(
         self,
         profiles: list[WorkerProfile],
@@ -668,6 +524,9 @@ class WorkerProfileRetrievalService:
     ) -> list[RetrievalResult]:
         """
         Phase C: V2 评分方法
+
+        .. deprecated:: 2026-10-09
+           仅保留历史 AGENT 配置的兼容行为，不新增调用或扩展此评分链路。
 
         使用 ProfileSemanticRanker 进行评分和排序。
 

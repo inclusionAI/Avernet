@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.bootstrap import oss_worker_lifecycle_routes as lifecycle_routes
@@ -54,6 +55,9 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
         def delete_profile_vectors(self, worker_id, profile_id):
             events.append(f"profile:{worker_id}:{profile_id}")
 
+        def delete_worker_vectors(self, worker_id):
+            events.append(f"vectors:{worker_id}")
+
     def delete_worker(worker_id):
         events.append(f"worker:{worker_id}")
         return original_delete(worker_id)
@@ -76,7 +80,11 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
         "worker_id": "bot:owner",
         "deleted": True,
     }
-    assert events == ["profile:bot:owner:default", "worker:bot:owner"]
+    assert events == [
+        "profile:bot:owner:default",
+        "vectors:bot:owner",
+        "worker:bot:owner",
+    ]
     assert workers.get_by_id("bot:owner") is None
 
     with TestClient(app) as client:
@@ -157,7 +165,11 @@ def test_availability_route_propagates_vector_payload_update_failure(monkeypatch
     assert response.json()["detail"]["code"] == "SET_AVAILABILITY_ERROR"
 
 
-def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
+@pytest.mark.parametrize(
+    "failed_operation",
+    ["list_profiles", "delete_profile_vectors", "delete_worker_vectors"],
+)
+def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch, failed_operation):
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
     monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
@@ -182,7 +194,17 @@ def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
             return True
 
         def list_profiles(self, worker_id):
-            raise RuntimeError(f"profile cleanup failed for {worker_id}")
+            if failed_operation == "list_profiles":
+                raise RuntimeError("list_profiles unavailable")
+            return SimpleNamespace(items=[SimpleNamespace(profile_id="default")])
+
+        def delete_profile_vectors(self, worker_id, profile_id):
+            if failed_operation == "delete_profile_vectors":
+                raise RuntimeError("delete_profile_vectors unavailable")
+
+        def delete_worker_vectors(self, worker_id):
+            if failed_operation == "delete_worker_vectors":
+                raise RuntimeError("delete_worker_vectors unavailable")
 
     monkeypatch.setattr(lifecycle_routes, "_get_profile_service", FailingProfileService)
 
@@ -193,6 +215,10 @@ def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
         )
 
     assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "code": "DELETE_WORKER_ERROR",
+        "message": f"{failed_operation} unavailable",
+    }
     assert workers.get_by_id("bot:owner") is not None
 
 

@@ -348,7 +348,7 @@ required `candidate_bundle` and lists of warnings, errors, and explanations.
 This batch contract is distinct from the unchanged
 `src.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
 (`profile_key`, `score`, provenance). The baseline retriever and its application
-service use the batch type; dense/sparse retrieval keeps the single-hit type.
+service use the batch type; the single-hit type remains available for compatibility.
 This repairs an incompatible model import without changing HTTP payloads.
 The baseline retriever/service/result suites exercise this batch contract.
 
@@ -366,9 +366,30 @@ place. This migration does not introduce a stricter metadata failure policy.
 `test_vector_metadata_filter_contract.py` covers delegation using real local
 Qdrant vectors, including metadata-provider unavailability.
 
-The separate legacy `HybridRetrievalService` invocation/scoring changes remain
-excluded. The approved keyword extension operates in fragment matching as
-described above; it does not certify or repair that legacy service's defects.
+The broken Phase E AGENT experiment (`HybridRetrievalService`, `DenseRetriever`,
+`SparseRetriever`, and `RetrievalScorer`) has been removed, not repaired or
+reactivated. Repository call-site inspection found these implementations used
+only by the legacy AGENT dispatch and their own tests, not the current HTTP
+recommendation chain or internal composition. Existing
+`ENABLE_HYBRID_RETRIEVAL=true` configurations still select the same legacy AGENT
+fallback scoring, including its precedence over the explicit V2 scorer. They
+no longer construct an unused embedding provider or fail through the experiment.
+Filters, thresholds, ranking, and the V2 selection when the old flag is false
+are covered by `test_agent_retrieval_compatibility.py`.
+
+Historical mode enums and score/result models remain import-compatible, with
+model coverage in `test_hybrid_score_compatibility.py`. Fuse business modes are
+unchanged. The current fragment/keyword/RRF/optional-rerank search chain is
+independent of the removed experiment and is unchanged by this cleanup.
+
+Deprecation policy (2026-10-09): mode-based search selection, `ModeAwareScorer`,
+the legacy `WorkerProfileRetrievalService.retrieve()` entrypoint, and its
+explicit AGENT V2 branch are deprecated for new use. Keep existing compatibility
+and fallback consumers working; do not add modes, scoring strategies, or callers.
+New search consumers use `/api/v1/recommend`, whose main implementation is
+`WorkerVectorMatchService`. `EXPERT_DIAGNOSIS` remains a live compatibility marker;
+profile reading and `FusionMode` business behavior are not deprecated. These are
+documentation-only deprecation markers, not runtime warnings or removal dates.
 
 Fusion HTTP responses project perspectives onto the declared
 `PerspectiveResponse` fields. Domain-only diagnostic `metadata` is not part
