@@ -10,6 +10,8 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.mcp.scoped_config_flow import (
     HeaderGroup,
+    URLRule,
+    _compile_url_rules,
     read_scoped_config,
     write_scoped_config,
 )
@@ -35,10 +37,14 @@ def test_read_returns_explicit_groups_without_copying_inherited_values() -> None
         "headers": {"X-Region": "east", "X-Trace": "on"},
         "endpoint_env": "PROD",
         "transport_protocol": "SSE",
+        "url": "https://global.example.test/mcp",
     }
     bot_configs = MagicMock()
     bot_configs.list_by_owner_and_server_code.return_value = {
-        "bot-x": {"headers": {"x-region": "east"}},
+        "bot-x": {
+            "headers": {"x-region": "east"},
+            "url": "https://bot.example.test/mcp",
+        },
         "deleted-bot": {"headers": {"X-Ignored": "old"}},
     }
     bots = MagicMock()
@@ -60,6 +66,10 @@ def test_read_returns_explicit_groups_without_copying_inherited_values() -> None
         ("X-Trace", "on", ()),
         ("x-region", "east", ("bot-x",)),
     ]
+    assert result.url_rules == (
+        URLRule(url="https://global.example.test/mcp", bots=()),
+        URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
+    )
 
 
 def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
@@ -92,11 +102,12 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
                 UserMCPConfig(
                     user_id="owner", server_code="mcp.weather", env=get_current_env(),
                     api_key="existing-secret",
-                    extra_config='{"api_key":"existing-secret","headers":{"B":"2"},"endpoint_env":"PROD","transport_protocol":"SSE"}',
+                    extra_config='{"api_key":"existing-secret","headers":{"B":"2"},"endpoint_env":"PROD","transport_protocol":"SSE","url":"https://old.example.test/mcp"}',
                 ),
                 BotMCPConfig(
                     owner_id="owner", bot_id="bot-x", server_code="mcp.weather",
-                    env=get_current_env(), config='{"headers":{"A":"old"}}',
+                    env=get_current_env(),
+                    config='{"headers":{"A":"old"},"url":"https://old-bot.example.test/mcp"}',
                 ),
             ]
         )
@@ -144,6 +155,10 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
             HeaderGroup(key="B", value="4", bots=()),
             HeaderGroup(key="A", value="3", bots=("bot-x",)),
         ),
+        url_rules=(
+            URLRule(url="https://global.example.test/mcp", bots=()),
+            URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
+        ),
         config_service=config, bot_config_repo=bot_config_repo, bot_repo=bots,
         command_repo=ScopedMCPConfigRepository(db), market_service=market,
         sync_service=sync, capability_reader=capability,
@@ -152,14 +167,42 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
     override = bot_config_repo.get_by_bot_and_server_code(
         owner_id="owner", bot_id="bot-x", server_code="mcp.weather"
     )
-    _, effective_headers, _, _ = config.build_mcp_sync_payload(
+    api_key, effective_headers, _, _ = config.build_mcp_sync_payload(
         user_id="owner", mcp_data=detail, bot_override=override
     )
+    assert api_key is None
     assert effective_headers == {"B": "4", "A": "3"}
+    assert override["url"] == "https://bot.example.test/mcp"
+    assert result.url_rules == (
+        URLRule(url="https://global.example.test/mcp", bots=()),
+        URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
+    )
     assert result.sync_summary["offline"] == 1
     assert UserMCPConfigRepository(db).get_by_user_and_server_code(
         "owner", "mcp.weather"
     )["api_key"] == "existing-secret"
+
+
+@pytest.mark.parametrize(
+    ("rules", "error"),
+    [
+        ((URLRule(url="file:///tmp/server", bots=()),), "Invalid MCP URL"),
+        ((URLRule(url="https://example.test/mcp", bots=("other",)),), "not owned"),
+        ((
+            URLRule(url="https://a.example.test/mcp", bots=()),
+            URLRule(url="https://b.example.test/mcp", bots=()),
+        ), "Duplicate user-default"),
+        ((
+            URLRule(url="https://a.example.test/mcp", bots=("bot-x",)),
+            URLRule(url="https://b.example.test/mcp", bots=("bot-x",)),
+        ), "Overlapping Bot"),
+    ],
+)
+def test_url_rule_validation_rejects_invalid_or_overlapping_scope(
+    rules: tuple[URLRule, ...], error: str
+) -> None:
+    with pytest.raises(McpConfigValueError, match=error):
+        _compile_url_rules(rules, {"bot-x"})
 
 
 def test_write_rejects_center_combination_without_any_installed_bot() -> None:

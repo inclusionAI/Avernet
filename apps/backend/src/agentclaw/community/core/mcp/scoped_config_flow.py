@@ -1,9 +1,10 @@
-"""Request-agnostic read/write flow for scoped MCP Header groups."""
+"""Request-agnostic read/write flow for scoped MCP Header and URL rules."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
 from injector import inject
 
@@ -34,6 +35,7 @@ from agentclaw.community.core.mcp.scoped_config_contract import (
     HeaderGroup,
     MCPScopedConfigServiceProtocol,
     ScopedMCPConfig,
+    URLRule,
 )
 
 
@@ -67,11 +69,25 @@ def read_scoped_config(
             grouped.items(), key=lambda item: (item[0][0].lower(), item[0][1])
         )
     )
+    url_rules: list[URLRule] = []
+    user_url = stored_default.get("url")
+    if isinstance(user_url, str) and user_url:
+        url_rules.append(URLRule(url=user_url, bots=()))
+    grouped_urls: dict[str, list[str]] = {}
+    for bot_id in sorted(owned_ids & bot_configs.keys()):
+        bot_url = bot_configs[bot_id].get("url")
+        if isinstance(bot_url, str) and bot_url:
+            grouped_urls.setdefault(bot_url, []).append(bot_id)
+    url_rules.extend(
+        URLRule(url=url, bots=tuple(bot_ids))
+        for url, bot_ids in sorted(grouped_urls.items())
+    )
     return ScopedMCPConfig(
         server_code=server_code,
         endpoint_env=stored_default.get("endpoint_env") or "PROD",
         transport_protocol=stored_default.get("transport_protocol"),
         params=tuple(params),
+        url_rules=tuple(url_rules),
     )
 
 
@@ -104,6 +120,42 @@ def _compile_groups(
             names.add(lowered)
             bot_headers.setdefault(bot_id, {})[name] = group.value
     return user_headers, bot_headers
+
+
+def _compile_url_rules(
+    rules: tuple[URLRule, ...], owned_ids: set[str]
+) -> tuple[str | None, dict[str, str]]:
+    user_url: str | None = None
+    bot_urls: dict[str, str] = {}
+    for rule in rules:
+        url = rule.url
+        try:
+            parsed = urlsplit(url)
+            valid = (
+                url == url.strip()
+                and not any(char.isspace() for char in url)
+                and parsed.scheme.lower() in {"http", "https"}
+                and bool(parsed.hostname)
+                and parsed.port != 0
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise McpConfigValueError("Invalid MCP URL: expected an HTTP(S) address")
+        if not rule.bots:
+            if user_url is not None:
+                raise McpConfigValueError("Duplicate user-default MCP URL")
+            user_url = url
+            continue
+        if len(set(rule.bots)) != len(rule.bots):
+            raise McpConfigValueError("Duplicate Bot in MCP URL rule")
+        for bot_id in rule.bots:
+            if bot_id not in owned_ids:
+                raise McpConfigValueError(f"Bot is not owned by caller: {bot_id}")
+            if bot_id in bot_urls:
+                raise McpConfigValueError(f"Overlapping Bot MCP URL: {bot_id}")
+            bot_urls[bot_id] = url
+    return user_url, bot_urls
 
 
 def _validate_center_selection(
@@ -151,6 +203,7 @@ async def write_scoped_config(
     endpoint_env: str,
     transport_protocol: str | None,
     params: tuple[HeaderGroup, ...],
+    url_rules: tuple[URLRule, ...] | None = None,
     config_service: MCPConfigServiceProtocol,
     bot_config_repo: BotMCPConfigRepositoryProtocol,
     bot_repo: BotRepository,
@@ -174,6 +227,11 @@ async def write_scoped_config(
 
     owned_ids = {str(bot_id) for bot_id in bot_repo.list_live_bot_ids_by_owner(user_id)}
     user_headers, bot_headers = _compile_groups(params, owned_ids)
+    user_url, bot_urls = (
+        _compile_url_rules(url_rules, owned_ids)
+        if url_rules is not None
+        else (None, None)
+    )
     header_validation = config_service.validate_scoped_headers(
         server_code=server_code,
         entries=tuple((group.key.strip(), group.value) for group in params),
@@ -187,6 +245,11 @@ async def write_scoped_config(
         "endpoint_env": endpoint_env,
         "transport_protocol": normalized_protocol,
     }
+    if bot_urls is not None:
+        if user_url is None:
+            candidate_user.pop("url", None)
+        else:
+            candidate_user["url"] = user_url
     existing_bots = bot_config_repo.list_by_owner_and_server_code(
         owner_id=user_id, server_code=server_code
     )
@@ -200,10 +263,17 @@ async def write_scoped_config(
             candidate_bot["headers"] = bot_headers[bot_id]
         else:
             candidate_bot.pop("headers", None)
+        if bot_urls is not None:
+            if bot_id in bot_urls:
+                candidate_bot["url"] = bot_urls[bot_id]
+            else:
+                candidate_bot.pop("url", None)
         is_consumer = server_code in capability_reader.effective_mcp_server_codes(
             bot_id=bot_id, owner_id=user_id, bot=bot
         )
-        if is_consumer or bot_id in bot_headers:
+        if is_consumer or bot_id in bot_headers or (
+            bot_urls is not None and bot_id in bot_urls
+        ):
             validation = config_service.validate_effective_scoped_config(
                 server_code=server_code,
                 detail=detail,
@@ -224,6 +294,8 @@ async def write_scoped_config(
         owned_bot_ids=owned_ids,
         endpoint_env=endpoint_env,
         transport_protocol=normalized_protocol,
+        user_url=user_url,
+        bot_urls=bot_urls,
     )
 
     sync_results: tuple[dict[str, Any], ...] = ()
@@ -265,6 +337,7 @@ async def write_scoped_config(
         endpoint_env=saved.endpoint_env,
         transport_protocol=saved.transport_protocol,
         params=saved.params,
+        url_rules=saved.url_rules,
         sync_results=sync_results,
         sync_summary=sync_summary,
     )
@@ -309,6 +382,7 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
         endpoint_env: str,
         transport_protocol: str | None,
         params: tuple[HeaderGroup, ...],
+        url_rules: tuple[URLRule, ...] | None = None,
     ) -> ScopedMCPConfig:
         return await write_scoped_config(
             user_id=user_id,
@@ -316,6 +390,7 @@ class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
             endpoint_env=endpoint_env,
             transport_protocol=transport_protocol,
             params=params,
+            url_rules=url_rules,
             config_service=self._config_service,
             bot_config_repo=self._bot_config_repo,
             bot_repo=self._bot_repo,

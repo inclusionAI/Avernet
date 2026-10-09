@@ -20,6 +20,7 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.di.config import McpRuntimeCredentialsConfig
+from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 
 logger = get_logger()
 
@@ -72,7 +73,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
     def get_user_unified_config(
         self, user_id: str, server_code: str
     ) -> Optional[dict[str, Any]]:
-        """获取用户统一配置：api_key、headers、endpoint_env、transport_protocol。"""
+        """获取用户统一配置：凭据、Header、端点选择和全局 URL。"""
         config = self.user_mcp_config_repo.get_by_user_and_server_code(
             user_id, server_code
         )
@@ -102,6 +103,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
             "headers": headers,
             "endpoint_env": extra_config.get("endpoint_env", "PROD"),
             "transport_protocol": extra_config.get("transport_protocol"),
+            "url": extra_config.get("url"),
         }
 
     def get_bot_override(
@@ -242,6 +244,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
             "transport_protocol": transport_protocol
             if transport_protocol is not None
             else current.get("transport_protocol"),
+            "url": current.get("url"),
         }
 
         owner_bots = self._candidate_bots(
@@ -433,9 +436,17 @@ class MCPConfigService(MCPConfigServiceProtocol):
         )
         if existing:
             # 合并策略：入参为 None 表示不修改，沿用旧值
-            old_extra = old_config or {}
+            old_extra = existing.get("extra_config") or {}
+            if isinstance(old_extra, str):
+                try:
+                    old_extra = json.loads(old_extra)
+                except json.JSONDecodeError:
+                    old_extra = {}
+            if not isinstance(old_extra, dict):
+                old_extra = {}
             extra_config = {
-                "api_key": api_key if api_key is not None else old_extra.get("api_key"),
+                **old_extra,
+                "api_key": api_key if api_key is not None else (old_config or {}).get("api_key"),
                 "headers": headers if headers is not None else old_extra.get("headers", {}),
                 "endpoint_env": endpoint_env
                 if endpoint_env is not None
@@ -557,16 +568,13 @@ class MCPConfigService(MCPConfigServiceProtocol):
             if "transport_protocol" in bot_override:
                 _transport_protocol = bot_override["transport_protocol"]
 
-        # An arbitrary Manifest URL is outside the Center endpoint's trust
-        # boundary. Never redirect inherited user credentials, default auth
-        # headers, or platform-managed secrets to it. The only headers allowed
-        # on that URL are the non-sensitive literals explicitly declared next
-        # to it in the same Bot override.
-        custom_url = bool(bot_override and "url" in bot_override)
+        # User-explicit Headers are independent of URL selection. A custom URL
+        # must not, however, inherit legacy api_key, platform defaults or
+        # platform-managed credentials intended for Center endpoints.
+        custom_url = effective_mcp_url_override(extra_config, bot_override) is not None
         if custom_url:
             _api_key = None
             config_headers = {}
-            user_headers = bot_override.get("headers", {})
 
         # 当 api_key 是 x-ling-auth 格式时，需要把默认 headers 里的同名 key 删掉，
         # 否则设备端会收到两个冲突的 authorization header。

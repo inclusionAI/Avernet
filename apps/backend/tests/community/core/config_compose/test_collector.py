@@ -276,6 +276,9 @@ def test_mcps_run_collect_then_per_server_merge():
     svc.mcp_center.get_mcp_detail.return_value = {"runMode": "REMOTE", "endpoints": []}
     mcp_cfg = MagicMock()
     mcp_cfg.build_mcp_sync_payload.return_value = ("kee", {"h": "v"}, "PROD", "http")
+    mcp_cfg.get_user_unified_config.return_value = {
+        "url": "https://global.example.test/mcp"
+    }
     mcp_cfg.get_bot_override.side_effect = lambda **kwargs: (
         {"url": "https://bot-a.example.test/mcp"}
         if kwargs["server_code"] == "a"
@@ -290,7 +293,7 @@ def test_mcps_run_collect_then_per_server_merge():
     assert inputs[0].transport_protocol == "http"
     assert inputs[0].url_override == "https://bot-a.example.test/mcp"
     assert inputs[0].strict_transport_protocol is False
-    assert inputs[1].url_override is None
+    assert inputs[1].url_override == "https://global.example.test/mcp"
     assert mcp_cfg.build_mcp_sync_payload.call_count == 2
     assert mcp_cfg.build_mcp_sync_payload.call_args_list[0].kwargs[
         "bot_override"

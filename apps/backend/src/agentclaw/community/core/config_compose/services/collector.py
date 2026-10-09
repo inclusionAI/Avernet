@@ -51,6 +51,7 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
@@ -427,7 +428,12 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     headers=headers,
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
-                    url_override=(bot_override or {}).get("url"),
+                    url_override=effective_mcp_url_override(
+                        self._mcp_config_service.get_user_unified_config(
+                            req.user_id, server_code
+                        ),
+                        bot_override,
+                    ),
                     strict_transport_protocol=bool(
                         bot_override
                         and transport

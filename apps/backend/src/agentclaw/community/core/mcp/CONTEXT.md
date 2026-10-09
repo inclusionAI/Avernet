@@ -23,3 +23,7 @@ _Avoid_: Stored configuration
 **MCP Parameter Group**:
 A named Header parameter, its value, and the set of Bots to which that value is explicitly assigned; an empty Bot set denotes a user default.
 _Avoid_: MCP installation
+
+**MCP URL Rule**:
+An explicit HTTP(S) connection address and the Bot set to which it applies; an empty Bot set denotes a user default. URL selection is independent of user-explicit Header merging.
+_Avoid_: Header parameter, MCP installation

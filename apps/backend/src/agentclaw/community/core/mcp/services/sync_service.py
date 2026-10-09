@@ -22,6 +22,7 @@ from agentclaw.community.core.devices.services.device_context import (
     UnknownProviderError,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.core.mcp.services.detail_fanout import (
     fan_out_mcp_details,
     server_code_of,
@@ -899,9 +900,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 # the endpoint shape the validation just rejected/replaced.
                 mcp_data = current_detail
 
-        # 用 MCPConfigService 合并用户自定义配置与默认模板，生成设备端需要的完整 payload。
-        # 同步方法且要读一次 DB,跟 sync_single_mcp 一样放线程池——留在协程里会占住
-        # event loop,让并发投递退化成串行。
+        # 配置合并需读 DB；放入线程池，避免阻塞并发投递的 event loop。
         _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
             self.mcp_config_service.build_mcp_sync_payload,
             user_id=user_id,
@@ -913,7 +912,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
             engine_type=engine_type,
             bot_override=bot_override,
         )
-        url_override = bot_override.get("url") if bot_override else None
+        user_config = await asyncio.to_thread(self.mcp_config_service.get_user_unified_config, user_id, server_code)
+        url_override = effective_mcp_url_override(user_config, bot_override)
         strict_transport_protocol = bool(
             bot_override
             and _transport_protocol
