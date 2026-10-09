@@ -123,7 +123,7 @@ class AicodingDurableRestartMixin:
         existing = services.task_queue.find_by_idempotency_key(TASK_TYPE, key)
         if existing is not None and existing.status not in TERMINAL_STATUSES:
             payload = existing.payload
-            result = _state(services.repository, payload).ensure(payload, existing.id)
+            result = _state(services.repository, payload).read_for_task()
             return self._accepted(result)
 
         # No old binding means no backup to wait for. Keep historical unbound
@@ -162,16 +162,41 @@ class AicodingDurableRestartMixin:
             "nick_name": kwargs.get("nick_name"),
             "started_at": time.time(),
         }
-        task, _created = services.task_queue.enqueue(
-            TASK_TYPE,
-            payload,
-            deadline_seconds=TASK_DEADLINE,
-            idempotency_key=key,
-        )
-        # A concurrent submit may have won queue dedup. Its payload, never ours,
-        # owns the operation/target, even if its HTTP process died before CAS.
-        result = _state(services.repository, task.payload).ensure(task.payload, task.id)
-        return self._accepted(result)
+        state = _state(services.repository, payload)
+        try:
+            result = state.initialize(
+                payload, journal(bot).get("operation_id"),
+                replace_terminal_task=(
+                    existing is not None
+                    and existing.status in TERMINAL_STATUSES
+                    and existing.payload.get("operation_id") == journal(bot).get("operation_id")
+                ),
+            )
+            if journal(result).get("operation_id") != state.operation_id:
+                winner = services.task_queue.find_by_idempotency_key(TASK_TYPE, key)
+                if (
+                    winner is not None
+                    and winner.status not in TERMINAL_STATUSES
+                    and winner.payload.get("operation_id") == journal(result).get("operation_id")
+                ):
+                    return self._accepted(result)
+                raise BotServiceError("重启请求正在提交，请稍后重试")
+            # PENDING is persisted before the task becomes visible to workers.
+            task, _created = services.task_queue.enqueue(
+                TASK_TYPE, payload, deadline_seconds=TASK_DEADLINE, idempotency_key=key,
+            )
+            if task.payload.get("operation_id") != state.operation_id:
+                raise RestartSuperseded("Another restart task is still active")
+        except Exception:
+            current = state.read()
+            if (
+                journal(current).get("operation_id") == state.operation_id
+                and journal(current).get("phase") == "QUEUED"
+            ):
+                state.fail("重启初始化或任务提交失败，本次重启未执行")
+            raise
+        # A fast worker may have progressed; admission must not write PENDING again.
+        return self._accepted(state.read())
 
     @staticmethod
     def _accepted(bot):
@@ -223,7 +248,7 @@ class AicodingRestartHandler:
             )
             if task is None or task.payload.get("operation_id") != state.operation_id:
                 return Complete()
-            bot = state.ensure(payload, task.id)
+            bot = state.read_for_task()
             record = journal(bot)
             if record.get("phase") in TERMINAL:
                 return (

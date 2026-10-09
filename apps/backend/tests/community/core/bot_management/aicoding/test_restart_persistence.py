@@ -116,17 +116,28 @@ def test_admission_persists_status_and_journal_using_existing_repository(persist
 
 
 def test_real_database_deduplicates_concurrent_submissions(persisted):
+    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+
     p = persisted
 
     def submit(_):
-        return p.strategy._submit_restart(
-            p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
-        )
+        try:
+            return p.strategy._submit_restart(
+                p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
+            )
+        except BotServiceError as error:
+            # A competing request before enqueue must not falsely claim acceptance.
+            assert str(error) == "重启请求正在提交，请稍后重试"
+            return None
 
     with ThreadPoolExecutor(max_workers=6) as pool:
         results = list(pool.map(submit, range(12)))
-    assert len({result["restart_operation_id"] for result in results}) == 1
+    accepted = [result for result in results if result is not None]
+    assert accepted
+    assert len({result["restart_operation_id"] for result in accepted}) == 1
     assert p.repo.get_by_id_and_owner("bot", "owner")["status"] == "PENDING"
+    task = p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner"))
+    assert task.payload["operation_id"] == accepted[0]["restart_operation_id"]
 
 
 def test_stale_cas_cannot_clobber_ext_or_status(persisted):
@@ -176,7 +187,7 @@ def test_failure_persists_bot_status_and_existing_error_fields(persisted):
     assert bot["ext"]["unrelated"] == 1
 
 
-def test_admission_status_write_failure_propagates_and_retry_repairs(persisted):
+def test_admission_status_write_failure_prevents_enqueue_and_allows_new_retry(persisted):
     from unittest.mock import patch
 
     p = persisted
@@ -188,12 +199,13 @@ def test_admission_status_write_failure_propagates_and_retry_repairs(persisted):
     bot = p.repo.get_by_id_and_owner("bot", "owner")
     operation = bot["ext"][KEY]["operation_id"]
     assert bot["status"] == "ACTIVE"
-    assert bot["ext"][KEY]["phase"] == "QUEUED"
+    assert bot["ext"][KEY]["phase"] == "FAILED"
+    assert p.queue.find_by_idempotency_key(TASK_TYPE, task_key("bot", "owner")) is None
     result = p.strategy._submit_restart(
         p.ctx, p.services, {"bot_id": "bot", "user_id": "owner"}
     )
     assert result["status"] == "PENDING"
-    assert result["restart_operation_id"] == operation
+    assert result["restart_operation_id"] != operation
 
 
 def test_failure_status_write_failure_propagates_and_worker_can_repair(persisted):
@@ -212,7 +224,7 @@ def test_failure_status_write_failure_propagates_and_worker_can_repair(persisted
     partial = p.repo.get_by_id_and_owner("bot", "owner")
     assert partial["status"] == "PENDING"
     assert partial["ext"]["start_status"] == "FAILED"
-    repaired = state.ensure(task.payload, task.id)
+    repaired = state.read_for_task()
     assert repaired["status"] == "FAILED"
     assert repaired["ext"]["start_message"] == "backup failed"
 

@@ -221,34 +221,40 @@ async def test_concurrent_submissions_dedup_before_backup(setup):
     import asyncio
 
     s = setup
-    results = await asyncio.gather(*[submit(s) for _ in range(12)])
-    assert len({r["restart_operation_id"] for r in results}) == 1
+    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+
+    results = await asyncio.gather(*[submit(s) for _ in range(12)], return_exceptions=True)
+    accepted = [r for r in results if isinstance(r, dict)]
+    assert accepted
+    for result in results:
+        if not isinstance(result, dict):
+            assert isinstance(result, BotServiceError)
+            assert str(result) == "重启请求正在提交，请稍后重试"
+    assert len({r["restart_operation_id"] for r in accepted}) == 1
     assert len(s.queue.tasks) == 1
     s.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_enqueue_failure_does_not_write_pending(setup):
+async def test_enqueue_failure_marks_failed_without_executing_backup(setup):
     setup.queue.fail = True
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await submit(setup)
-    assert setup.repo.bot["status"] == "ACTIVE"
-    assert KEY not in setup.repo.bot["ext"]
+    assert setup.repo.bot["status"] == "FAILED"
+    assert journal(setup.repo.bot)["phase"] == "FAILED"
+    assert "任务提交失败" in setup.repo.bot["ext"]["start_message"]
+    assert task(setup) is None
     setup.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_worker_repairs_enqueue_before_journal_crash(setup):
+async def test_initialization_failure_never_enqueues_task(setup):
     s = setup
     s.repo.failed_write = True
     with pytest.raises(RuntimeError, match="database unavailable"):
         await submit(s)
-    assert task(s) is not None and KEY not in s.repo.bot["ext"]
-    s.repo.failed_write = False
-    mock_lifecycle(s)
-    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
-    assert journal(s.repo.bot)["phase"] == "WAITING_READY"
-    assert s.repo.bot["status"] == "PENDING"
+    assert task(s) is None and KEY not in s.repo.bot["ext"]
+    s.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -691,3 +697,115 @@ def test_submission_error_cleanup_never_clears_a_newer_operation(fenced):
         clear.assert_not_called()
     finally:
         current_restart.reset(context_reset_handle)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bot_type", ["personal", "service"])
+async def test_worker_wakes_inside_enqueue_after_single_pending_write(setup, monkeypatch, bot_type):
+    """Reproduce the HTTP/worker overlap, with affected-row no-op semantics."""
+    s = setup
+    s.repo.bot["bot_type"] = bot_type
+    writes = []
+    original_update = s.repo.update_by_owner
+    original_enqueue = s.queue.enqueue
+
+    def update(bot_id, owner_id, changes):
+        writes.append(deepcopy(changes))
+        if all(s.repo.bot.get(k) == v for k, v in changes.items()):
+            return None
+        return original_update(bot_id, owner_id, changes)
+
+    def enqueue(*args, **kwargs):
+        assert s.repo.bot["status"] == "PENDING"
+        assert journal(s.repo.bot)["phase"] == "QUEUED"
+        accepted = original_enqueue(*args, **kwargs)
+        assert isinstance(s.handler.handle(accepted.record.payload), Reschedule)
+        assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+        # A callback can advance the visible status before HTTP returns.
+        s.repo.bot["status"] = "ACTIVE"
+        return accepted
+
+    mock_lifecycle(s)
+    monkeypatch.setattr(s.repo, "update_by_owner", update)
+    monkeypatch.setattr(s.queue, "enqueue", enqueue)
+    result = await submit(s)
+    assert result["status"] == "ACTIVE"
+    assert writes == [{"status": "PENDING"}]
+    s.service.restart_bot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_recreate_missing_admission_journal(setup):
+    s = setup
+    await submit(s)
+    s.repo.bot["ext"].pop(KEY)
+    s.repo.bot["status"] = "ACTIVE"
+    assert isinstance(s.handler.handle(task(s).payload), Complete)
+    assert KEY not in s.repo.bot["ext"]
+    assert s.repo.bot["status"] == "ACTIVE"
+    s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_none_status_result_is_accepted_only_after_readback_confirms_write(setup, monkeypatch):
+    s = setup
+    original = s.repo.update_by_owner
+
+    def update(*args):
+        original(*args)
+        return None
+
+    monkeypatch.setattr(s.repo, "update_by_owner", update)
+    result = await submit(s)
+    assert result["status"] == "PENDING"
+    assert task(s) is not None
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_pending_write_never_enqueues(setup, monkeypatch):
+    s = setup
+    original = s.repo.update_by_owner
+
+    def update(bot_id, owner_id, changes):
+        if changes == {"status": "PENDING"}:
+            return None
+        return original(bot_id, owner_id, changes)
+
+    monkeypatch.setattr(s.repo, "update_by_owner", update)
+    with pytest.raises(RestartSuperseded, match="not confirmed"):
+        await submit(s)
+    assert task(s) is None
+    assert s.repo.bot["status"] == "FAILED"
+    s.service.restart_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_http_cannot_accept_unsubmitted_operation(setup, monkeypatch):
+    import asyncio
+    from threading import Event
+    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+
+    s = setup
+    entered, release = Event(), Event()
+    original = s.repo.update_by_owner
+    writes = []
+
+    def update(bot_id, owner_id, changes):
+        writes.append(deepcopy(changes))
+        if changes == {"status": "PENDING"}:
+            entered.set()
+            assert release.wait(5)
+        return original(bot_id, owner_id, changes)
+
+    monkeypatch.setattr(s.repo, "update_by_owner", update)
+    first = asyncio.create_task(submit(s))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        with pytest.raises(BotServiceError, match="正在提交"):
+            await submit(s)
+        assert task(s) is None
+    finally:
+        release.set()
+        await first
+    assert writes == [{"status": "PENDING"}]
+    assert len(s.queue.tasks) == 1

@@ -49,7 +49,19 @@ existing paths; they do not enter the new ordinary coding/BaaS executor.
    not submit it, start backup, enqueue provider polling or change lifecycle
    status. An existing provider intent joins existing work rather than creating
    another coding task.
-2. Admission persists the coding task/journal and writes Bot PENDING once.
+2. Synchronous admission claims the operation journal with the existing ext CAS,
+   writes Bot PENDING, and only then enqueues the coding task. The worker never
+   initializes the journal or PENDING. An immediate wake during enqueue cannot
+   race the HTTP status write, nor can HTTP reset a fast worker's later status.
+   Concurrent requests join an already-enqueued operation; while its submitter
+   is still initializing, they report submission in progress without claiming
+   that a task has been accepted. A terminal queue row can be explicitly retried.
+   Initialization/enqueue exceptions propagate and finalize the owned operation
+   as FAILED using existing startup error fields. There is deliberately no new
+   process-crash recovery for the PENDING-before-enqueue window and no new ready
+   marker or queue protocol. New journals correlate by operation_id rather than
+   task_id, which is not available before enqueue. Existing journal formats remain
+   readable; workers only repair an incomplete FAILED status write, never PENDING.
 3. The worker verifies operation/target ownership and runs backup, outside the
    short restart lock. One 1500-second budget includes queue time and redelivery.
 4. With the original restart lock, it verifies the receipt and rebuilds the
