@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from typing import Any
@@ -10,6 +9,9 @@ from agentclaw.community.core.agentcompute.config.settings import AgentComputeCo
 from agentclaw.community.core.agentcompute.domain.models import (
     Agent, AgentId, AgentKind, AgentStatus, IdempotencyKey, Run, RunId,
     RunStatus, TenantId, TerminationReason, WaitMode,
+)
+from agentclaw.community.core.agentcompute.observability import (
+    NULL_OBSERVABILITY, AgentComputeObservability,
 )
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import Orchestrator
 from agentclaw.community.core.agentcompute.orchestration.termination import (
@@ -21,8 +23,9 @@ from agentclaw.community.core.agentcompute.repository.impl import (
 )
 from agentclaw.community.core.agentcompute.runtime.subagent_runtime import SubagentRuntime
 from agentclaw.community.core.agentcompute.runtime.swarm_store import SliceStore
+from agentclaw.community.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class _SliceLost(Exception):
@@ -45,6 +48,7 @@ class SwarmRunHandler:
         job_repo: JobRepository,
         termination: TerminationEvaluator,
         guards: GuardService,
+        observability: AgentComputeObservability = NULL_OBSERVABILITY,
     ) -> None:
         self._config = config
         self._orchestrator = orchestrator
@@ -58,6 +62,7 @@ class SwarmRunHandler:
         self._job_repo = job_repo
         self._termination = termination
         self._guards = guards
+        self._obs = observability
         self._slice_lost = asyncio.Event()
         self._claim_epoch = 0
         self._worker_id = uuid.uuid4().hex[:8]
@@ -66,6 +71,7 @@ class SwarmRunHandler:
         self.store = SliceStore(
             config, agent_repo, message_repo, shard_repo, round_repo,
             lost_probe=lambda: self._slice_lost.is_set(),
+            observability=observability,
         )
 
     def set_slice_lost(self, lost: bool, run_id: Any = None) -> None:
@@ -99,6 +105,7 @@ class SwarmRunHandler:
         )
         if ok:
             self.store.apply_run_retention(run_id, tenant)
+            self._obs.stuck_transition()
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return ok
 
@@ -146,57 +153,58 @@ class SwarmRunHandler:
         deadline = self._deadline()
 
         try:
-            await self._runtime.start()
-            for agent in interrupted:
-                # D16/D24: re-instantiate interrupted agents under their existing
-                # identity and idempotency key — never under a fresh AgentId.
-                await self._runtime.spawn(
-                    run, agent.task_spec,
-                    agent_id=AgentId(agent.agent_id),
-                    idempotency_key=agent.idempotency_key,
-                )
-            while True:
-                self._check_lost()
-                self._drain_completions(
-                    await self._runtime.wait_for_completions(timeout=0), state,
-                )
-                self._check_lost()
-
-                outcome = await self._orchestrator.run_slice(
-                    run, state,
-                    shard_getter=lambda rid: self.store.get_shards(rid, tenant),
-                    on_llm_exchange=self._on_llm_exchange,
-                )
-                self._check_lost()
-                for ge in outcome.get("guard_events", []):
-                    self._guard_repo.create(ge)
-
-                term = outcome.get("terminate") or self._termination.evaluate(state)
-                if outcome.get("fatal") is not None:
-                    return self._finalize_failure(run_id, tenant, term, outcome, claim_epoch)
-                if term is not None:
-                    return self._finalize(run_id, tenant, term, outcome, claim_epoch)
-
-                if outcome.get("wait_refs") is not None:
-                    await self._await_refs(
-                        run_id, tenant, outcome["wait_refs"],
-                        outcome.get("wait_mode") or WaitMode.ALL, deadline, state,
+            with self._obs.slice_duration(run):
+                await self._runtime.start()
+                for agent in interrupted:
+                    # D16/D24: re-instantiate interrupted agents under their existing
+                    # identity and idempotency key — never under a fresh AgentId.
+                    await self._runtime.spawn(
+                        run, agent.task_spec,
+                        agent_id=AgentId(agent.agent_id),
+                        idempotency_key=agent.idempotency_key,
                     )
-                elif outcome.get("spawn"):
-                    await self._dispatch_spawn(run, state, outcome["spawn"], done_pairs)
-                elif outcome.get("persona") is not None:
-                    pass  # handoff: persona applied to state + next prompt already
-
-                if time.monotonic() >= deadline:
-                    break
-                if outcome.get("wait_refs") is None:
-                    # D28/H1: bound the decision cadence so a non-wait turn
-                    # cannot hot-spin against the LLM.
-                    await asyncio.sleep(
-                        min(self._config.orchestration.orchestrator_turn_interval,
-                            max(0.0, deadline - time.monotonic()))
+                while True:
+                    self._check_lost()
+                    self._drain_completions(
+                        await self._runtime.wait_for_completions(timeout=0), state,
                     )
-                self._check_lost()
+                    self._check_lost()
+
+                    outcome = await self._orchestrator.run_slice(
+                        run, state,
+                        shard_getter=lambda rid: self.store.get_shards(rid, tenant),
+                        on_llm_exchange=self._on_llm_exchange,
+                    )
+                    self._check_lost()
+                    for ge in outcome.get("guard_events", []):
+                        self._guard_repo.create(ge)
+
+                    term = outcome.get("terminate") or self._termination.evaluate(state)
+                    if outcome.get("fatal") is not None:
+                        return self._finalize_failure(run_id, tenant, term, outcome, claim_epoch)
+                    if term is not None:
+                        return self._finalize(run_id, tenant, term, outcome, claim_epoch)
+
+                    if outcome.get("wait_refs") is not None:
+                        await self._await_refs(
+                            run_id, tenant, outcome["wait_refs"],
+                            outcome.get("wait_mode") or WaitMode.ALL, deadline, state,
+                        )
+                    elif outcome.get("spawn"):
+                        await self._dispatch_spawn(run, state, outcome["spawn"], done_pairs)
+                    elif outcome.get("persona") is not None:
+                        pass  # handoff: persona applied to state + next prompt already
+
+                    if time.monotonic() >= deadline:
+                        break
+                    if outcome.get("wait_refs") is None:
+                        # D28/H1: bound the decision cadence so a non-wait turn
+                        # cannot hot-spin against the LLM.
+                        await asyncio.sleep(
+                            min(self._config.orchestration.orchestrator_turn_interval,
+                                max(0.0, deadline - time.monotonic()))
+                        )
+                    self._check_lost()
         except _SliceLost:
             self._release_claim(run_id, tenant, claim_epoch, "slice lost")
             return "retry"
@@ -287,6 +295,7 @@ class SwarmRunHandler:
                     "[agentcompute][swarm] skipping completed spawn name=%s", envelope.name,
                 )
                 continue
+            kind = self._resolve_kind(run, envelope.name)
             agent_id = await self._runtime.spawn(run, envelope)
             self.store.create_agent(Agent(
                 agent_id=agent_id,
@@ -296,7 +305,7 @@ class SwarmRunHandler:
                 depth=0,
                 name=envelope.name,
                 role=envelope.objective,
-                kind=self._resolve_kind(run, envelope.name),
+                kind=kind,
                 task_spec=envelope,
                 spawn_round=state.round_index,
                 status=AgentStatus.QUEUED,
@@ -304,6 +313,7 @@ class SwarmRunHandler:
                 idempotency_key=IdempotencyKey(f"{run.run_id}:{agent_id}"),
                 output={},
             ))
+            self._obs.agent_spawn(kind)
             done_pairs.add((envelope.name, envelope.objective))
             cohort.append(agent_id)
         if cohort:

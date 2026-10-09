@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import uuid
 from typing import Any
 
@@ -11,8 +10,12 @@ from agentclaw.community.core.agentcompute.config.settings import AgentComputeAv
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpecRaw, BotState, ModelId, Run, SubagentResult, TaskEnvelope,
 )
+from agentclaw.community.core.agentcompute.observability import (
+    AgentComputeObservability,
+)
+from agentclaw.community.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _TERMINAL_FAILURE = frozenset({
     BotState.AUTHORIZATION_REJECTED.value,
@@ -25,10 +28,12 @@ _TERMINAL_FAILURE = frozenset({
 class AvernetSubagent:
 
     def __init__(self, spec: AgentSpecRaw, run: Run, llm: Any,
-                 config: AgentComputeAvernetConfig | None = None) -> None:
+                 config: AgentComputeAvernetConfig | None = None,
+                 observability: AgentComputeObservability | None = None) -> None:
         self._spec = spec
         self._run = run
         self._config = config or AgentComputeAvernetConfig()
+        self._obs = observability
         self._client = httpx.AsyncClient(
             base_url=self._config.backend_base_url,
             timeout=self._config.http_timeout,
@@ -59,11 +64,22 @@ class AvernetSubagent:
         if self._bot_id is None:
             raise RuntimeError("setup not completed")
         prompt = f"objective={envelope.objective!r} boundaries={envelope.boundaries!r}"
-        resp = await self._client.post(
-            "/openapi/v1/chat/stream",
-            json={"bot_id": self._bot_id, "message": prompt},
-        )
-        resp.raise_for_status()
+        try:
+            resp = await self._client.post(
+                "/openapi/v1/chat/stream",
+                json={"bot_id": self._bot_id, "message": prompt},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            if self._obs is not None:
+                self._obs.llm_call("non_retryable")
+            raise
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError):
+            if self._obs is not None:
+                self._obs.llm_call("exhausted")
+            raise
+        if self._obs is not None:
+            self._obs.llm_call("ok")
         text = resp.text
         try:
             output = json.loads(text)

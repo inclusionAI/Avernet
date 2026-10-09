@@ -34,8 +34,12 @@ from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
 )
 from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
+from agentclaw.community.core.agentcompute.observability import (
+    AgentComputeObservability,
+)
 from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.metrics import MetricsPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +49,14 @@ class AgentComputeModule(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(DecisionParser, scope=singleton)
         binder.bind(GuardService, scope=singleton)
+        # Metrics fallback for profiles whose infrastructure column does not
+        # bind MetricsPlugin (today: the corp column, wired corp-side).
+        # This module rides the base module list, which build_injector
+        # installs BEFORE the profile column, so an explicit column
+        # binding always replaces this default (last binding wins).
+        from agentclaw.community.plugins.local.metrics import NoopMetrics
+
+        binder.bind(MetricsPlugin, to=NoopMetrics, scope=singleton)
 
     @singleton
     @provider
@@ -84,7 +96,20 @@ class AgentComputeModule(Module):
     @provider
     @singleton
     @inject
-    def provide_llm(self, config: AgentComputeConfig) -> LLMProvider:
+    def provide_observability(
+        self,
+        metrics: MetricsPlugin,
+    ) -> AgentComputeObservability:
+        return AgentComputeObservability(metrics)
+
+    @provider
+    @singleton
+    @inject
+    def provide_llm(
+        self,
+        config: AgentComputeConfig,
+        observability: AgentComputeObservability,
+    ) -> LLMProvider:
         if config.llm is not None and config.llm.base_url:
             return OpenAICompatibleClient(
                 base_url=config.llm.base_url,
@@ -94,6 +119,7 @@ class AgentComputeModule(Module):
                 timeout_seconds=config.llm.timeout_seconds,
                 max_tokens=config.llm.max_tokens,
                 max_retries=config.llm.max_retries,
+                observability=observability,
             )
         return StubLLMProvider()
 
@@ -185,6 +211,7 @@ class AgentComputeModule(Module):
         round_repo: RoundRepository,
         guard_repo: GuardEventRepository,
         job_repo: JobRepository,
+        observability: AgentComputeObservability,
     ) -> SwarmRunHandler:
         from agentclaw.community.core.agentcompute.orchestration.termination import (
             TerminationEvaluator,
@@ -209,6 +236,7 @@ class AgentComputeModule(Module):
                 max_width=config.orchestration.max_width,
                 max_depth=config.orchestration.max_depth,
             ),
+            observability=observability,
         )
 
     @provider

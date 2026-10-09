@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from typing import Any, Callable
@@ -11,12 +10,16 @@ from agentclaw.community.core.agentcompute.domain.models import (
     MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId,
     TenantId,
 )
+from agentclaw.community.core.agentcompute.observability import (
+    NULL_OBSERVABILITY, AgentComputeObservability,
+)
 from agentclaw.community.core.agentcompute.orchestration.termination import RunState
 from agentclaw.community.core.agentcompute.repository.impl import (
     AgentRepository, MessageRepository, ResultShardRepository, RoundRepository,
 )
+from agentclaw.community.log import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _now_ms() -> int:
@@ -51,6 +54,7 @@ class SliceStore:
         shard_repo: ResultShardRepository,
         round_repo: RoundRepository,
         lost_probe: Callable[[], bool],
+        observability: AgentComputeObservability = NULL_OBSERVABILITY,
     ) -> None:
         self._config = config
         self._agent_repo = agent_repo
@@ -58,6 +62,7 @@ class SliceStore:
         self._shard_repo = shard_repo
         self._round_repo = round_repo
         self._lost_probe = lost_probe
+        self._obs = observability
         self._last_seq = 0
 
     def next_seq(self) -> int:
@@ -101,6 +106,7 @@ class SliceStore:
             error=completion["error"],
             claim_epoch=claim_epoch,
         )
+        self._obs.agent_terminal(status)
         if status is AgentStatus.COMPLETED:
             self._create_shard(run_id, tenant, agent_id, payload,
                                artifact_key, state)
@@ -139,6 +145,7 @@ class SliceStore:
             artifact_key=artifact_key,
             routed_at=EpochMillis(_now_ms()),
         ))
+        self._obs.shard_persisted(artifact_key is not None)
         if state is not None:
             state.routed_shard_count += 1
 

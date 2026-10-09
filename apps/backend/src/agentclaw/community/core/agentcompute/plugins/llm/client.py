@@ -16,6 +16,9 @@ from agentclaw.community.core.agentcompute.domain.models import (
     ModelId,
     TokenUsage,
 )
+from agentclaw.community.core.agentcompute.observability import (
+    UNATTRIBUTED_TENANT, AgentComputeObservability,
+)
 
 
 class OpenAICompatibleClient:
@@ -28,6 +31,7 @@ class OpenAICompatibleClient:
         timeout_seconds: float = 60.0,
         max_tokens: int = 4096,
         max_retries: int = 3,
+        observability: AgentComputeObservability | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -36,6 +40,7 @@ class OpenAICompatibleClient:
         self._timeout = timeout_seconds
         self._max_tokens = max_tokens
         self._max_retries = max_retries
+        self._obs = observability
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -55,18 +60,42 @@ class OpenAICompatibleClient:
         }
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
+            last_attempt = attempt == self._max_retries
+
+            def note_failure(outcome: str) -> None:
+                if self._obs is None:
+                    return
+                if last_attempt:
+                    # The budget-exhausting attempt is its own outcome class.
+                    self._obs.llm_call("exhausted")
+                else:
+                    self._obs.llm_call(outcome)
+
             try:
                 response = await self._client.post("/chat/completions", json=body)
                 response.raise_for_status()
-                return self._parse_response(response.json(), model)
+                parsed = self._parse_response(response.json(), model)
+                if self._obs is not None:
+                    self._obs.llm_call("ok")
+                    self._obs.token_usage(
+                        UNATTRIBUTED_TENANT, request.kind, parsed.token_usage,
+                    )
+                return parsed
             except httpx.HTTPStatusError as exc:
                 if 400 <= exc.response.status_code < 500:
+                    if self._obs is not None:
+                        self._obs.llm_call("non_retryable")
                     raise RuntimeError(
                         f"chat completion failed (client error): {exc.response.status_code}"
                     ) from exc
                 last_exc = exc
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as exc:
+                note_failure("transient")
+            except httpx.TimeoutException as exc:
                 last_exc = exc
+                note_failure("timeout")
+            except (httpx.ConnectError, httpx.ReadError) as exc:
+                last_exc = exc
+                note_failure("transient")
 
             if attempt < self._max_retries:
                 jitter = random.uniform(0.0, 0.4 * (2 ** attempt))
