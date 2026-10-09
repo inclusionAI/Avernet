@@ -59,6 +59,22 @@ async function start() {
 }
 
 describe("workflow collaborator HTTP access", () => {
+  it.each([
+    ["/", false],
+    ["/", true],
+    ["/list", false],
+    ["/list", true],
+  ])("keeps %s unrestricted when the permission table is empty (Bot scope: %s)", async (path, botScoped) => {
+    const { request, permissions, owner } = await start();
+    await permissions.delete("shared-bot", owner, "shared");
+    const query = botScoped ? `?botOwnerId=${owner}&botId=shared-bot` : "";
+    const response = await request(`${path}${query}`, "stranger");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const rows = path === "/list" ? body.data : body;
+    expect(rows.map((row: { workflowId: string }) => row.workflowId)).toEqual(["shared"]);
+  });
+
   it("returns the listed Bot workflow's details using the caller's existing identity", async () => {
     const { request, owner } = await start();
     const list = await request(`?botOwnerId=${owner}&botId=shared-bot`);

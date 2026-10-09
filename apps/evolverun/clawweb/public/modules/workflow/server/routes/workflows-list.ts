@@ -19,7 +19,8 @@ async function intersectActorAccess(req: Request, repo: BotWorkflowPermissionRep
   const actor = resolveWorkflowActorId(req);
   if (req.isAdmin || !repo || !actor) return scope;
   const effective = await repo.getViewByIdsForOwner(actor);
-  if (!effective) return { restrictedIds: new Set(), viewableIds: new Set() };
+  // An empty permission table means unrestricted access, not an empty grant set.
+  if (effective === null) return scope;
   const botId = typeof req.query.botId === "string" ? req.query.botId.trim() : "";
   const botOwnerId = typeof req.query.botOwnerId === "string" ? req.query.botOwnerId.trim() : "";
   const scopeIds = botId
