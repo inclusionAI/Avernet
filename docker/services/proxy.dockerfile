@@ -15,12 +15,12 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
 
 # Install dependencies first (without the project) for better layer caching.
-COPY src/proxy/pyproject.toml src/proxy/uv.lock src/proxy/README.md ./
+COPY apps/proxy/pyproject.toml apps/proxy/uv.lock apps/proxy/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # Then install the project itself.
-COPY src/proxy/src ./src
+COPY apps/proxy/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -51,8 +51,8 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /app/.venv /app/.venv
-COPY src/proxy/src /app/src
-COPY src/proxy/configs /app/configs
+COPY apps/proxy/src /app/src
+COPY apps/proxy/configs /app/configs
 
 RUN mkdir -p /app/tmp /home/admin/logs \
     && chown -R admin:admin /app /home/admin

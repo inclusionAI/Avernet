@@ -1,0 +1,3539 @@
+use std::time::{Duration, Instant};
+use std::{net::IpAddr, sync::Arc};
+
+use async_trait::async_trait;
+use bcs_domain::BotDeliveryTarget;
+use bcs_protocol::stream::{
+    ChatState, InteractionKind as WireInteractionKind, InteractionPhase, StreamEvent,
+    TASK_INTENT_ELIGIBLE_KEY, parse_stream_event,
+};
+use bcs_protocol::{
+    AgentEventPayload, AgentStream, Attachment, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
+    BCN_TIMESTAMP_HEADER, BCN_TRANSPORT_HEADER, BcsFrame, ChatEventPayload,
+    ChatEventState as WireChatState, ContentBlock, MessageContent, ProviderAbortResponse,
+    ProviderAckResponse, ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
+    ProviderWebhookSender, RequestFrame,
+};
+use bcs_route_security::{OutboundUrlError, OutboundUrlGuard};
+use bcs_service_api::{
+    BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, BotEventCommand, BotRunContext, BotRunContextPort,
+    ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, GroupHistoryBotRequestPort,
+    InteractionKind, InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort,
+    InteractionService, ProviderEventIngestCommand, ProviderEventIngestService,
+    ProviderEventSource, ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
+    ProviderRunTransport, ProviderTransportPreference, ServiceError, ServiceResult,
+};
+use opentelemetry::global;
+use opentelemetry_http::HeaderInjector;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+use tracing::{info, warn};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+mod sse;
+
+use crate::sse::{IngestKind, SeqDecision, SeqDedup, classify, parse_sse_block};
+
+/// Idle timeout for an SSE read loop: if no bytes arrive within this window the
+/// run is considered stuck and closed with a synthesized error terminal (#3).
+const SSE_IDLE_TIMEOUT_MS: u64 = 15 * 60 * 1_000;
+/// Hard limit for a single SSE frame or an unterminated frame buffer.
+const SSE_MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
+/// Maximum time for an SSE request to receive response headers. Body liveness
+/// is governed separately by `SSE_IDLE_TIMEOUT_MS` after the stream is accepted.
+const SSE_RESPONSE_HEADER_TIMEOUT_MS: u64 = 125_000;
+/// Maximum time to read the finite JSON acknowledgement when an SSE-preferred
+/// request falls back to `application/json`.
+const JSON_FALLBACK_BODY_TIMEOUT_MS: u64 = SSE_RESPONSE_HEADER_TIMEOUT_MS;
+/// Existing provider execution budget for methods other than `chat.send`.
+/// This is intentionally independent from configurable chat runs.
+const NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60 * 60 * 1_000;
+/// Bounded retry for resolving run context after `deliver()` returns but before
+/// `put_context` lands (#2 put_context race): ~50ms * 20 ≈ 1s.
+const SSE_CTX_RETRY_INTERVAL_MS: u64 = 50;
+const SSE_CTX_RETRY_MAX: u32 = 20;
+/// When a run's consumption lag crosses this, emit a single WARN (rising edge)
+/// that the run is falling behind the producer; a matching WARN is emitted once
+/// it recovers below the threshold. Edge-triggered so a sustained backlog logs
+/// twice (enter + recover), not once per frame.
+const SSE_LAG_ALERT_MS: u64 = 5_000;
+
+fn sse_next_read_timeout(now_ms: u64, deadline_ms: u64) -> (Duration, bool) {
+    let idle = Duration::from_millis(SSE_IDLE_TIMEOUT_MS);
+    if deadline_ms == u64::MAX {
+        return (idle, false);
+    }
+    let remaining_ms = deadline_ms.saturating_sub(now_ms);
+    if remaining_ms <= SSE_IDLE_TIMEOUT_MS {
+        (Duration::from_millis(remaining_ms), true)
+    } else {
+        (idle, false)
+    }
+}
+
+#[derive(Debug)]
+enum ProviderAckBodyError {
+    Decode(reqwest::Error),
+    Timeout,
+}
+
+async fn read_provider_ack_body(
+    response: reqwest::Response,
+    timeout: Duration,
+) -> Result<ProviderAckResponse, ProviderAckBodyError> {
+    bcs_observability::observe_result("provider.read_provider_ack_body", async {
+    match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
+        Ok(Ok(ack)) => Ok(ack),
+        Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
+        Err(_) => Err(ProviderAckBodyError::Timeout),
+    }
+    }).await
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProviderClientPolicy {
+    total_timeout: Option<Duration>,
+    read_timeout: Option<Duration>,
+    response_header_timeout: Option<Duration>,
+    http2_only: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderStatusPolicy {
+    RequireSuccess,
+    ReturnExplicitRejection,
+}
+
+impl ProviderClientPolicy {
+    fn for_request(accept_sse: bool) -> Self {
+        if accept_sse {
+            Self {
+                total_timeout: None,
+                read_timeout: None,
+                response_header_timeout: Some(Duration::from_millis(
+                    SSE_RESPONSE_HEADER_TIMEOUT_MS,
+                )),
+                // Content negotiation must also reach HTTP/1.1 providers so
+                // they can select JSON callback fallback on this same POST.
+                http2_only: false,
+            }
+        } else {
+            Self {
+                total_timeout: Some(Duration::from_secs(65)),
+                read_timeout: None,
+                response_header_timeout: None,
+                http2_only: false,
+            }
+        }
+    }
+}
+
+/// Edge-triggered tracker for a run's consumption lag, so a sustained backlog
+/// produces exactly one "falling behind" WARN and one "recovered" WARN rather
+/// than a per-frame flood.
+#[derive(Default)]
+struct LagTracker {
+    alerting: bool,
+    peak_lag_ms: u64,
+}
+
+#[derive(Clone)]
+struct SseInteractionContext {
+    service: Arc<dyn InteractionService>,
+    provider_target: BotDeliveryTarget,
+    provider_bypass_headers: Vec<(String, String)>,
+}
+
+pub struct HttpProviderTransport {
+    /// Callback / history client with a 65s total timeout.
+    client: reqwest::Client,
+    /// SSE-capable client with NO total timeout: a total `.timeout()` would cut
+    /// a long-lived stream. HTTP/1.1 remains enabled for JSON callback fallback.
+    sse_client: reqwest::Client,
+    url_guard: OutboundUrlGuard,
+    chat_run_timeout_ms: u64,
+    event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
+    bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
+    interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
+}
+
+impl HttpProviderTransport {
+    pub fn new() -> Self {
+        Self::with_url_guard(OutboundUrlGuard::strict())
+    }
+
+    pub fn allowing_private_networks_for_tests() -> Self {
+        Self::with_url_guard_and_sse_policy(
+            OutboundUrlGuard::allowing_private_networks_for_tests(),
+            ProviderClientPolicy::for_request(true),
+        )
+    }
+
+    pub fn with_url_guard(url_guard: OutboundUrlGuard) -> Self {
+        Self::with_url_guard_and_sse_policy(url_guard, ProviderClientPolicy::for_request(true))
+    }
+
+    fn with_url_guard_and_sse_policy(
+        url_guard: OutboundUrlGuard,
+        sse_policy: ProviderClientPolicy,
+    ) -> Self {
+        Self {
+            client: provider_client_builder(ProviderClientPolicy::for_request(false))
+                .build()
+                .expect("build provider http client"),
+            sse_client: provider_client_builder(sse_policy)
+                .build()
+                .expect("build provider sse client"),
+            url_guard,
+            chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+            event_ingest: std::sync::RwLock::new(None),
+            bot_run_context: std::sync::RwLock::new(None),
+            interactions: std::sync::RwLock::new(None),
+        }
+    }
+
+    /// Override the fallback deadline for `chat.send` frames that do not
+    /// provide an explicit `params.timeout_ms`.
+    pub fn with_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.chat_run_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Inject the ingest dependencies needed by the 2.0 SSE branch after
+    /// construction. Using a shared `&self` setter allows the transport to be
+    /// Arc-shared into bot_delivery before message_flow exists, resolving the
+    /// circular-dependency bootstrap cycle.
+    pub fn set_ingest(
+        &self,
+        event_ingest: Arc<dyn ProviderEventIngestService>,
+        bot_run_context: Arc<dyn BotRunContextPort>,
+    ) {
+        *self
+            .event_ingest
+            .write()
+            .expect("event_ingest lock poisoned") = Some(event_ingest);
+        *self
+            .bot_run_context
+            .write()
+            .expect("bot_run_context lock poisoned") = Some(bot_run_context);
+    }
+
+    /// Inject the Application service that owns Provider 2.0 HITL state.
+    pub fn set_interactions(&self, interactions: Arc<dyn InteractionService>) {
+        *self
+            .interactions
+            .write()
+            .expect("interactions lock poisoned") = Some(Arc::downgrade(&interactions));
+    }
+}
+
+impl Default for HttpProviderTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl InteractionProviderPort for HttpProviderTransport {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            protocol_version,
+            ..
+        } = &command.target
+        else {
+            return Err(ServiceError::InvalidOperation {
+                message: "interaction.resolve requires an HTTP Provider target".to_string(),
+                request_id: Some(command.bcs_run_id),
+            });
+        };
+        if protocol_version != "2.0" {
+            return Err(ServiceError::InvalidOperation {
+                message: "interaction.resolve requires Provider protocol 2.0".to_string(),
+                request_id: Some(command.bcs_run_id),
+            });
+        }
+
+        let mut params = match command.resolution {
+            Value::Object(map) => map,
+            _ => {
+                return Err(ServiceError::InvalidOperation {
+                    message: "interaction resolution must be a JSON object".to_string(),
+                    request_id: Some(command.bcs_run_id),
+                });
+            }
+        };
+        params.insert(
+            "bcsRunId".to_string(),
+            Value::String(command.bcs_run_id.clone()),
+        );
+        params.insert("runId".to_string(), Value::String(command.provider_run_id));
+        params.insert(
+            "interactionId".to_string(),
+            Value::String(command.interaction_id),
+        );
+        params.insert(
+            "kind".to_string(),
+            Value::String(command.kind.as_slug().to_string()),
+        );
+        params.insert(
+            "idempotencyKey".to_string(),
+            Value::String(command.idempotency_key),
+        );
+
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: uuid::Uuid::new_v4().to_string(),
+            method: "interaction.resolve".to_string(),
+            params: Some(Value::Object(params)),
+            session_id: command.bcs_session_id,
+            bcn_group_id: command.group_id,
+            to_bot: ProviderWebhookBotRef {
+                provider_id: provider_id.clone(),
+                provider_bot_ref: provider_bot_ref.clone(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS,
+            extensions: None,
+        };
+        let ack = post_provider::<ProviderAckResponse>(
+            &self.client,
+            &self.url_guard,
+            &command.target,
+            &body,
+            &command.provider_bypass_headers,
+        )
+        .await?;
+        Ok(InteractionProviderAck {
+            ok: ack.ok,
+            retryable: ack.retryable,
+            error: ack.error,
+        })
+    }
+}
+
+#[async_trait]
+impl BotDeliveryPort for HttpProviderTransport {
+    async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
+        target.is_http_provider()
+    }
+
+    async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        let target_bot_id = cmd.target_bot_id().to_string();
+        if matches!(
+            cmd.delivery_kind,
+            BotDeliveryKind::Send
+                | BotDeliveryKind::TaskDispatch
+                | BotDeliveryKind::TaskMessage
+                | BotDeliveryKind::TaskResult
+        ) {
+            let BcsFrame::Request(_) = &cmd.frame else {
+                return Err(ServiceError::DeliveryNotSent {
+                    code: "provider_request_frame_required", retryable: false,
+                });
+            };
+        }
+        let mut body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)
+            .map_err(|_| ServiceError::DeliveryNotSent { code: "provider_request_invalid", retryable: false })?;
+        if body.method == "chat.send" {
+            if cmd.run_id.is_empty() {
+                return Err(ServiceError::DeliveryNotSent {
+                    code: "provider_canonical_run_id_required", retryable: false,
+                });
+            }
+            // Queue frames carry a per-attempt request id. Provider requests,
+            // callbacks and SSE contexts use the canonical run id instead.
+            // Do not rewrite non-running requests (inject/history/abort).
+            body.id = cmd.run_id.clone();
+        }
+        let provider_id = body.to_bot.provider_id.clone();
+        let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
+        let method = body.method.clone();
+        let run_id = cmd.run_id.clone();
+        let delivery_kind = format!("{:?}", cmd.delivery_kind);
+        info!(
+            target_bot_id = %target_bot_id,
+            provider_id = %provider_id,
+            provider_bot_ref = %provider_bot_ref,
+            method = %method,
+            run_id = %run_id,
+            delivery_kind = %delivery_kind,
+            "provider downlink: deliver start"
+        );
+
+        // Protocol 2.0: prefer SSE. Send with an SSE-capable Accept header on the
+        // no-total-timeout client, then branch on the response Content-Type.
+        let is_proto2 = matches!(
+            &cmd.target,
+            BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
+        );
+        if is_proto2 {
+            let is_chat_send = method == "chat.send";
+            let wants_sse =
+                is_chat_send && cmd.provider_transport == ProviderTransportPreference::SseFirst;
+            let client = if wants_sse {
+                &self.sse_client
+            } else {
+                &self.client
+            };
+            let run_context = self
+                .bot_run_context
+                .read()
+                .expect("bot_run_context lock poisoned")
+                .clone();
+            if is_chat_send {
+                if let Some(context) = run_context.as_ref() {
+                    let began = context
+                        .begin_provider_transport(
+                            &run_id,
+                            bcs_protocol::now_ms().saturating_add(body.timeout_ms),
+                        )
+                        .await;
+                    if !began {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run transport is already registered".to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
+            }
+            let resp = match send_provider_delivery_request(
+                client,
+                &self.url_guard,
+                &cmd.target,
+                &body,
+                wants_sse,
+                &cmd.provider_bypass_headers,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    return Err(error);
+                }
+            };
+            if !resp.status().is_success() {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
+                return Ok(provider_delivery_rejection(
+                    target_bot_id,
+                    resp.status(),
+                ));
+            }
+            let ctype = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            if wants_sse && ctype.starts_with("text/event-stream") {
+                if let Some(context) = run_context.as_ref() {
+                    let bound = context
+                        .bind_provider_transport(&run_id, ProviderRunTransport::Sse)
+                        .await;
+                    if !bound {
+                        return Err(ServiceError::InvalidOperation {
+                            message: "provider run is already bound to another transport"
+                                .to_string(),
+                            request_id: Some(run_id),
+                        });
+                    }
+                }
+                let (Some(flow), Some(ctx)) = (
+                    self.event_ingest
+                        .read()
+                        .expect("event_ingest lock poisoned")
+                        .clone(),
+                    self.bot_run_context
+                        .read()
+                        .expect("bot_run_context lock poisoned")
+                        .clone(),
+                ) else {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    warn!(
+                        target_bot_id = %target_bot_id,
+                        provider_id = %provider_id,
+                        run_id = %run_id,
+                        "2.0 SSE response but ingest deps not wired"
+                    );
+                    return Err(ServiceError::InternalError(
+                        "sse ingest deps not wired".to_string(),
+                    ));
+                };
+                let spawn_run_id = run_id.clone();
+                let spawn_bot_id = target_bot_id.clone();
+                let interaction_context = self
+                    .interactions
+                    .read()
+                    .expect("interactions lock poisoned")
+                    .clone()
+                    .and_then(|service| service.upgrade())
+                    .map(|service| SseInteractionContext {
+                        service,
+                        provider_target: cmd.target.clone(),
+                        provider_bypass_headers: cmd.provider_bypass_headers.clone(),
+                    });
+                info!(
+                    target_bot_id = %target_bot_id,
+                    provider_id = %provider_id,
+                    run_id = %run_id,
+                    "provider downlink: 2.0 SSE stream accepted; spawning reader"
+                );
+                tokio::spawn(async move {
+                    stream_and_drive(
+                        resp,
+                        spawn_run_id,
+                        spawn_bot_id,
+                        flow,
+                        ctx,
+                        interaction_context,
+                    )
+                    .await;
+                });
+                return Ok(BotDeliveryResult {
+                    target_bot_id,
+                    delivered: true,
+                    error: None,
+                });
+            }
+            // 2.0 + application/json: branch on the request method (D5 relaxed).
+            //   - inject / abort / history (and any non-send): the provider
+            //     ack's the POST with JSON; treat it as a simple ack, exactly
+            //     like the 1.0 path. The events (if any) arrive separately via
+            //     the upstream /bot/events callback (handled by submit_event).
+            //   - send: a JSON response means "callback streaming" (transport
+            //     =callback) — the actual chat/agent events come later over
+            //     /bot/events. We still accept the ack here; whether downstream
+            //     events are honored is gated by submit_event's protocol_version
+            //     check (Capability B). We do NOT require SSE for send anymore.
+            let status = resp.status();
+            let json_body_timeout = Duration::from_millis(JSON_FALLBACK_BODY_TIMEOUT_MS);
+            let ack = match read_provider_ack_body(resp, json_body_timeout).await {
+                Ok(ack) => ack,
+                Err(ProviderAckBodyError::Decode(error)) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    warn!(
+                        target_bot_id = %target_bot_id,
+                        provider_id = %provider_id,
+                        method = %method,
+                        run_id = %run_id,
+                        status = %status.as_u16(),
+                        error = %error,
+                        "provider downlink: 2.0 JSON ack decode failed"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "decode 2.0 json ack: {error}"
+                    )));
+                }
+                Err(ProviderAckBodyError::Timeout) => {
+                    if let Some(context) = run_context.as_ref() {
+                        context.clear_provider_transport(&run_id).await;
+                    }
+                    warn!(
+                        target_bot_id = %target_bot_id,
+                        provider_id = %provider_id,
+                        method = %method,
+                        run_id = %run_id,
+                        status = %status.as_u16(),
+                        json_body_timeout_ms = %json_body_timeout.as_millis(),
+                        "provider downlink: 2.0 JSON ack body timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider 2.0 JSON ack body timeout after {}ms",
+                        json_body_timeout.as_millis()
+                    )));
+                }
+            };
+            if ack.ok {
+                if is_chat_send {
+                    if let Some(context) = run_context.as_ref() {
+                        let bound = context
+                            .bind_provider_transport(&run_id, ProviderRunTransport::Callback)
+                            .await;
+                        if !bound {
+                            return Err(ServiceError::InvalidOperation {
+                                message: "provider run is already bound to another transport"
+                                    .to_string(),
+                                request_id: Some(run_id),
+                            });
+                        }
+                    }
+                }
+                info!(
+                    target_bot_id = %target_bot_id,
+                    provider_id = %provider_id,
+                    method = %method,
+                    run_id = %run_id,
+                    "provider downlink: 2.0 JSON ack accepted (callback transport)"
+                );
+            } else {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
+                warn!(
+                    target_bot_id = %target_bot_id,
+                    provider_id = %provider_id,
+                    method = %method,
+                    run_id = %run_id,
+                    error = %ack.error.as_deref().unwrap_or("provider rejected"),
+                    "provider downlink: 2.0 JSON ack rejected by provider"
+                );
+            }
+            return Ok(BotDeliveryResult {
+                target_bot_id,
+                delivered: ack.ok,
+                error: (!ack.ok).then(|| {
+                    ServiceError::InternalError(
+                        ack.error.unwrap_or_else(|| "provider rejected".to_string()),
+                    )
+                }),
+            });
+        }
+
+        let started = Instant::now();
+        let response = send_provider_delivery_request(
+            &self.client,
+            &self.url_guard,
+            &cmd.target,
+            &body,
+            false,
+            &cmd.provider_bypass_headers,
+        )
+        .await;
+        let elapsed_ms = started.elapsed().as_millis();
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                warn!(
+                    target_bot_id = %target_bot_id,
+                    provider_id = %provider_id,
+                    method = %method,
+                    run_id = %run_id,
+                    elapsed_ms = %elapsed_ms,
+                    error = %error,
+                    "provider downlink: deliver failed"
+                );
+                return Err(error);
+            }
+        };
+        if !response.status().is_success() {
+            return Ok(provider_delivery_rejection(
+                target_bot_id,
+                response.status(),
+            ));
+        }
+        let status = response.status();
+        let ack = response.json::<ProviderAckResponse>().await.map_err(|error| {
+            warn!(
+                target_bot_id = %target_bot_id,
+                provider_id = %provider_id,
+                method = %method,
+                run_id = %run_id,
+                status = %status.as_u16(),
+                elapsed_ms = %elapsed_ms,
+                error = %error,
+                "provider downlink: decode response failed"
+            );
+            ServiceError::InternalError(format!("decode provider response: {error}"))
+        })?;
+        if ack.ok {
+            info!(
+                target_bot_id = %target_bot_id,
+                provider_id = %provider_id,
+                method = %method,
+                run_id = %run_id,
+                elapsed_ms = %elapsed_ms,
+                "provider downlink: deliver acked"
+            );
+        } else {
+            warn!(
+                target_bot_id = %target_bot_id,
+                provider_id = %provider_id,
+                method = %method,
+                run_id = %run_id,
+                elapsed_ms = %elapsed_ms,
+                error = %ack.error.as_deref().unwrap_or("provider rejected"),
+                "provider downlink: deliver rejected by provider"
+            );
+        }
+        Ok(BotDeliveryResult {
+            target_bot_id,
+            delivered: ack.ok,
+            error: (!ack.ok).then(|| {
+                ServiceError::InternalError(
+                    ack.error.unwrap_or_else(|| "provider rejected".to_string()),
+                )
+            }),
+        })
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        let target_bot_id = cmd.target_bot_id().to_string();
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            ..
+        } = &cmd.target
+        else {
+            return Err(ServiceError::InvalidOperation {
+                message: "Provider chat.abort requires an HTTP Provider target".to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        };
+        if cmd.run_id.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "Provider chat.abort must use Bot/Session scope".to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        }
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: cmd.command_id.clone(),
+            method: "chat.abort".to_string(),
+            params: None,
+            session_id: cmd.session_id,
+            bcn_group_id: cmd.group_id,
+            to_bot: ProviderWebhookBotRef {
+                provider_id: provider_id.clone(),
+                provider_bot_ref: provider_bot_ref.clone(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: cmd.timeout_ms,
+            extensions: None,
+        };
+        // COSEC: this reuses the guarded Provider request path (redirects
+        // disabled, URL policy enforced, DNS pinned, configured bearer only).
+        let response = send_provider_request(
+            &self.client,
+            &self.url_guard,
+            &cmd.target,
+            &body,
+            false,
+            &cmd.provider_bypass_headers,
+        )
+        .await?;
+        if response.status() == reqwest::StatusCode::GONE {
+            let body = response.json::<Value>().await.map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "decode Provider chat.abort 410 response: {error}"
+                ))
+            })?;
+            let error_code = body.get("error").and_then(|error| {
+                error
+                    .as_str()
+                    .or_else(|| error.get("code").and_then(Value::as_str))
+            });
+            if error_code != Some("run_terminated") {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Provider returned an unexpected chat.abort 410 response".to_string(),
+                    request_id: Some(cmd.command_id),
+                });
+            }
+            return Ok(BotAbortDeliveryResult {
+                target_bot_id,
+                aborted_run_ids: Vec::new(),
+            });
+        }
+        let status = response.status();
+        let result = response
+            .json::<ProviderAbortResponse>()
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "decode Provider chat.abort response ({status}): {error}"
+                ))
+            })?;
+        if !result.ok {
+            return Err(ServiceError::InvalidOperation {
+                message: result
+                    .error
+                    .unwrap_or_else(|| "Provider rejected chat.abort".to_string()),
+                request_id: Some(cmd.command_id),
+            });
+        }
+        Ok(BotAbortDeliveryResult {
+            target_bot_id,
+            aborted_run_ids: result.aborted_run_ids,
+        })
+    }
+}
+
+fn provider_delivery_rejection(
+    target_bot_id: String,
+    status: reqwest::StatusCode,
+) -> BotDeliveryResult {
+    BotDeliveryResult {
+        target_bot_id,
+        delivered: false,
+        error: Some(ServiceError::InternalError(format!(
+            "provider explicitly rejected delivery with HTTP {}",
+            status.as_u16()
+        ))),
+    }
+}
+
+#[async_trait]
+impl GroupHistoryBotRequestPort for HttpProviderTransport {
+    async fn send_history_request(
+        &self,
+        target: BotDeliveryTarget,
+        method: &str,
+        params: Value,
+        timeout_ms: u64,
+    ) -> Result<Value, String> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let frame = BcsFrame::Request(RequestFrame::new(
+            request_id,
+            method.to_string(),
+            Some(params),
+        ));
+        let body = provider_request_from_frame(&target, &frame, timeout_ms)
+            .map_err(|error| error.to_string())?;
+        let target_bot_id = target.bot_id().to_string();
+        let response: ProviderHistoryResponse =
+            post_provider(&self.client, &self.url_guard, &target, &body, &[])
+                .await
+                .map_err(|error| error.to_string())?;
+        let history_body = provider_history_log(&response);
+        info!(
+            target_bot_id = %target_bot_id,
+            provider_id = %body.to_bot.provider_id,
+            provider_bot_ref = %body.to_bot.provider_bot_ref,
+            method = %body.method,
+            frame_id = %body.id,
+            session_id = %body.session_id,
+            provider_session_id = ?response.session_id,
+            bcn_group_id = %body.bcn_group_id,
+            before = ?body.before,
+            after = ?body.after,
+            limit = ?body.limit,
+            response_ok = %response.ok,
+            message_count = %response.messages.len(),
+            has_more = %response.has_more,
+            next_before = ?response.next_before,
+            next_after = ?response.next_after,
+            history_body = %history_body,
+            "provider downlink: history response"
+        );
+        if !response.ok {
+            return Err("provider history response not ok".to_string());
+        }
+        Ok(serde_json::json!({
+            "messages": response.messages,
+            "has_more": response.has_more,
+            "next_before": response.next_before,
+            "next_after": response.next_after,
+        }))
+    }
+}
+
+pub struct BotTransportMux {
+    websocket: Arc<dyn BotDeliveryPort>,
+    provider: Arc<HttpProviderTransport>,
+}
+
+impl BotTransportMux {
+    pub fn new(websocket: Arc<dyn BotDeliveryPort>, provider: Arc<HttpProviderTransport>) -> Self {
+        Self {
+            websocket,
+            provider,
+        }
+    }
+}
+
+#[async_trait]
+impl BotDeliveryPort for BotTransportMux {
+    async fn connection_identity(&self, target: &BotDeliveryTarget) -> Option<String> {
+        match target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.connection_identity(target).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.connection_identity(target).await,
+        }
+    }
+
+    async fn deliver_on_connection(
+        &self,
+        cmd: BotDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.deliver_on_connection(cmd, connection_id).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.deliver_on_connection(cmd, connection_id).await,
+        }
+    }
+
+    async fn abort_on_connection(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.abort_on_connection(cmd, connection_id).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.abort_on_connection(cmd, connection_id).await,
+        }
+    }
+
+    async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
+        match target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.is_available(target).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.is_available(target).await,
+        }
+    }
+
+    async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.deliver(cmd).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.deliver(cmd).await,
+        }
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.abort(cmd).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.abort(cmd).await,
+        }
+    }
+}
+
+pub struct HistoryRequestMux {
+    websocket: Arc<dyn GroupHistoryBotRequestPort>,
+    provider: Arc<HttpProviderTransport>,
+}
+
+impl HistoryRequestMux {
+    pub fn new(
+        websocket: Arc<dyn GroupHistoryBotRequestPort>,
+        provider: Arc<HttpProviderTransport>,
+    ) -> Self {
+        Self {
+            websocket,
+            provider,
+        }
+    }
+}
+
+#[async_trait]
+impl GroupHistoryBotRequestPort for HistoryRequestMux {
+    async fn send_history_request(
+        &self,
+        target: BotDeliveryTarget,
+        method: &str,
+        params: Value,
+        timeout_ms: u64,
+    ) -> Result<Value, String> {
+        if target.is_http_provider() {
+            self.provider
+                .send_history_request(target, method, params, timeout_ms)
+                .await
+        } else {
+            self.websocket
+                .send_history_request(target, method, params, timeout_ms)
+                .await
+        }
+    }
+}
+
+pub struct InteractionProviderMux {
+    websocket: Arc<dyn InteractionProviderPort>,
+    provider: Arc<HttpProviderTransport>,
+}
+
+impl InteractionProviderMux {
+    pub fn new(
+        websocket: Arc<dyn InteractionProviderPort>,
+        provider: Arc<HttpProviderTransport>,
+    ) -> Self {
+        Self {
+            websocket,
+            provider,
+        }
+    }
+}
+
+#[async_trait]
+impl InteractionProviderPort for InteractionProviderMux {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        match &command.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.resolve_interaction(command).await,
+            BotDeliveryTarget::HttpProvider { .. } => {
+                self.provider.resolve_interaction(command).await
+            }
+        }
+    }
+}
+
+fn provider_request_from_frame(
+    target: &BotDeliveryTarget,
+    frame: &BcsFrame,
+    timeout_ms: u64,
+) -> ServiceResult<ProviderWebhookRequest> {
+    let BotDeliveryTarget::HttpProvider {
+        provider_id,
+        provider_bot_ref,
+        ..
+    } = target
+    else {
+        return Err(ServiceError::InvalidOperation {
+            message: "provider_request_from_frame requires http provider target".to_string(),
+            request_id: None,
+        });
+    };
+    let BcsFrame::Request(request) = frame else {
+        return Err(ServiceError::InvalidOperation {
+            message: "provider delivery requires request frame".to_string(),
+            request_id: None,
+        });
+    };
+    let params = request.params.clone().unwrap_or(Value::Null);
+    let bcs_group_id = params
+        .get("bcs_group_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let session_id = provider_session_id(&params, &bcs_group_id);
+
+    let callback_timeout_ms = if request.method == "chat.send" {
+        params
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(timeout_ms)
+    } else {
+        NON_CHAT_PROVIDER_REQUEST_TIMEOUT_MS
+    };
+    let attachments = params
+        .get("attachments")
+        .cloned()
+        .map(serde_json::from_value::<Vec<Attachment>>)
+        .transpose()
+        .map_err(|error| ServiceError::InvalidOperation {
+            message: format!("provider attachment payload is invalid: {error}"),
+            request_id: Some(request.id.clone()),
+        })?
+        .unwrap_or_default();
+
+    Ok(ProviderWebhookRequest {
+        frame_type: "req".to_string(),
+        id: request.id.clone(),
+        method: request.method.clone(),
+        params: None,
+        session_id,
+        bcn_group_id: bcs_group_id,
+        to_bot: ProviderWebhookBotRef {
+            provider_id: provider_id.clone(),
+            provider_bot_ref: provider_bot_ref.clone(),
+            tags: provider_tags_from_params(&params),
+        },
+        from: provider_sender_from_params(&params),
+        message: provider_message_for_method(&request.method, &params),
+        attachments,
+        before: params.get("before").and_then(Value::as_u64),
+        after: params.get("after").and_then(Value::as_u64),
+        limit: params.get("limit").and_then(Value::as_u64),
+        timeout_ms: callback_timeout_ms,
+        extensions: provider_extensions_from_params(&params),
+    })
+}
+
+fn provider_extensions_from_params(params: &Value) -> Option<Value> {
+    let extensions = params.get("extensions")?;
+    match extensions {
+        Value::Object(map) if !map.is_empty() => Some(extensions.clone()),
+        _ => None,
+    }
+}
+
+fn provider_tags_from_params(params: &Value) -> Vec<String> {
+    params
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn provider_sender_from_params(params: &Value) -> Option<ProviderWebhookSender> {
+    let channel = params.get("channel")?;
+    let actor_id = channel
+        .get("actor_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|actor_id| !actor_id.is_empty());
+    let name = channel
+        .get("actor_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or(actor_id)?;
+    Some(ProviderWebhookSender {
+        kind: "bot".to_string(),
+        name: name.to_string(),
+        actor_id: actor_id.map(str::to_string),
+    })
+}
+
+fn provider_message_from_params(params: &Value) -> Option<Value> {
+    let mut message = params.get("message")?.clone();
+    let Some(sender_json) = provider_sender_json(params) else {
+        return Some(message);
+    };
+    prepend_provider_sender(&mut message, &sender_json);
+    Some(message)
+}
+
+fn provider_message_for_method(method: &str, params: &Value) -> Option<Value> {
+    if !matches!(method, "chat.send" | "chat.inject") {
+        return params.get("message").cloned();
+    }
+    provider_message_from_params(params)
+}
+
+fn provider_sender_json(params: &Value) -> Option<String> {
+    let channel = params.get("channel")?;
+    if channel.get("identity_forwarding").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let id = channel
+        .get("user_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let name = channel
+        .get("actor_name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    // COSEC: serialize untrusted identity fields as JSON rather than interpolating
+    // them into a JSON-shaped string.
+    Some(serde_json::json!({ "sender": { "id": id, "name": name } }).to_string())
+}
+
+fn prepend_provider_sender(message: &mut Value, sender_json: &str) {
+    if let Some(text) = message.as_str() {
+        *message = Value::String(format!("{sender_json}\n\n{text}"));
+        return;
+    }
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
+    if let Some(text) = object.get("text").and_then(Value::as_str) {
+        let combined = format!("{sender_json}\n\n{text}");
+        object.insert("text".to_string(), Value::String(combined));
+        return;
+    }
+    if let Some(content) = object.get_mut("content") {
+        if let Some(text) = content.as_str() {
+            *content = Value::String(format!("{sender_json}\n\n{text}"));
+            return;
+        }
+        if let Some(blocks) = content.as_array_mut() {
+            if let Some(text_block) = blocks.iter_mut().find(|block| {
+                block.get("type").and_then(Value::as_str) == Some("text")
+                    && block.get("text").and_then(Value::as_str).is_some()
+            }) {
+                if let Some(text) = text_block.get("text").and_then(Value::as_str) {
+                    let combined = format!("{sender_json}\n\n{text}");
+                    text_block["text"] = Value::String(combined);
+                }
+                return;
+            }
+            blocks.insert(
+                0,
+                serde_json::json!({ "type": "text", "text": sender_json }),
+            );
+        }
+    }
+}
+
+fn provider_session_id(params: &Value, bcs_group_id: &str) -> String {
+    if let Some(session_id) = params.get("bcs_session_id").and_then(Value::as_str) {
+        return session_id.to_string();
+    }
+    if let Some(session_id) = params.get("session_id").and_then(Value::as_str) {
+        return session_id.to_string();
+    }
+    if let Some(session_key) = params.get("session_key").and_then(Value::as_str) {
+        if !session_key.starts_with("group:") {
+            return session_key.to_string();
+        }
+    }
+    bcs_group_id.to_string()
+}
+
+async fn post_provider<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    provider_bypass_headers: &[(String, String)],
+) -> ServiceResult<T> {
+    bcs_observability::observe_result("provider.post_provider", async {
+    let response = send_provider_request(
+        client,
+        url_guard,
+        target,
+        body,
+        false,
+        provider_bypass_headers,
+    )
+    .await?;
+    let status = response.status();
+    let method = body.method.clone();
+    let frame_id = body.id.clone();
+    let provider_id = body.to_bot.provider_id.clone();
+    response.json::<T>().await.map_err(|error| {
+        warn!(
+            provider_id = %provider_id,
+            method = %method,
+            frame_id = %frame_id,
+            status = %status.as_u16(),
+            error = %error,
+            "provider downlink: decode response failed"
+        );
+        ServiceError::InternalError(format!("decode provider response: {error}"))
+    })
+    }).await
+}
+
+/// Send the webhook request and return the raw response after requiring a
+/// successful status (except the documented chat.abort 410). The delivery-only
+/// sibling returns explicit non-success responses so they can become terminal
+/// delivery rejections instead of ambiguous transport failures.
+async fn send_provider_request(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+) -> ServiceResult<reqwest::Response> {
+    send_provider_request_with_policy(
+        client,
+        url_guard,
+        target,
+        body,
+        accept_sse,
+        provider_bypass_headers,
+        ProviderClientPolicy::for_request(accept_sse),
+        ProviderStatusPolicy::RequireSuccess,
+    )
+    .await
+}
+
+async fn send_provider_delivery_request(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+) -> ServiceResult<reqwest::Response> {
+    send_provider_request_with_policy(
+        client,
+        url_guard,
+        target,
+        body,
+        accept_sse,
+        provider_bypass_headers,
+        ProviderClientPolicy::for_request(accept_sse),
+        ProviderStatusPolicy::ReturnExplicitRejection,
+    )
+    .await
+}
+
+fn is_safe_provider_bypass_header(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() || reqwest::header::HeaderName::try_from(trimmed).is_err() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    !matches!(
+        lower.as_str(),
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
+    ) && lower != "bcn"
+        && !lower.starts_with("bcn-")
+        && !lower.starts_with("x-bcn-")
+}
+
+async fn send_provider_request_with_policy(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+    client_policy: ProviderClientPolicy,
+    status_policy: ProviderStatusPolicy,
+) -> ServiceResult<reqwest::Response> {
+    bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
+    let BotDeliveryTarget::HttpProvider {
+        webhook_url,
+        bcs_to_provider_token,
+        protocol_version,
+        ..
+    } = target
+    else {
+        return Err(ServiceError::InternalError(
+            "not http provider target".to_string(),
+        ));
+    };
+    let guarded_url = match url_guard.resolve_request_http_url(webhook_url).await {
+        Ok(url) => url,
+        Err(error) => {
+            warn!(
+                provider_id = %body.to_bot.provider_id,
+                provider_bot_ref = %body.to_bot.provider_bot_ref,
+                webhook_url = %webhook_url_for_log(webhook_url),
+                resolved_ip = ?blocked_outbound_ip(&error),
+                reason = %error,
+                "provider downlink: webhook blocked by outbound URL policy"
+            );
+            return Err(ServiceError::DeliveryNotSent {
+                code: "provider_url_preflight_failed",
+                retryable: matches!(error, OutboundUrlError::ResolveFailed(_)),
+            });
+        }
+    };
+    let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|_| {
+        ServiceError::DeliveryNotSent { code: "provider_client_build_failed", retryable: false }
+    })?;
+    let dns_pinned = pinned_client.is_some();
+    let request_client = pinned_client.as_ref().unwrap_or(client);
+
+    let message_id = uuid::Uuid::new_v4().to_string();
+    let accept = if accept_sse {
+        "text/event-stream, application/json"
+    } else {
+        "application/json"
+    };
+    let transport = if accept_sse { "sse" } else { "callback" };
+    let request_body = provider_body_log(body);
+    info!(
+        provider_id = %body.to_bot.provider_id,
+        provider_bot_ref = %body.to_bot.provider_bot_ref,
+        method = %body.method,
+        frame_id = %body.id,
+        session_id = %body.session_id,
+        bcn_group_id = %body.bcn_group_id,
+        from = ?body.from,
+        message = ?body.message,
+        before = ?body.before,
+        after = ?body.after,
+        limit = ?body.limit,
+        timeout_ms = %body.timeout_ms,
+        request_body = %request_body,
+        "provider downlink: request body"
+    );
+    let request_started_ms = bcs_protocol::now_ms();
+    let request_started = Instant::now();
+    info!(
+        provider_id = %body.to_bot.provider_id,
+        method = %body.method,
+        frame_id = %body.id,
+        message_id = %message_id,
+        webhook_url = %webhook_url,
+        protocol_version = %protocol_version,
+        accept = %accept,
+        transport = %transport,
+        dns_pinned,
+        http2_only = client_policy.http2_only,
+        total_timeout_ms = ?client_policy.total_timeout.map(|timeout| timeout.as_millis()),
+        read_timeout_ms = ?client_policy.read_timeout.map(|timeout| timeout.as_millis()),
+        response_header_timeout_ms = ?client_policy.response_header_timeout.map(|timeout| timeout.as_millis()),
+        request_started_ms,
+        "provider downlink: posting webhook"
+    );
+    let mut request = request_client
+        .post(guarded_url.as_str())
+        .bearer_auth(bcs_to_provider_token.expose_secret())
+        .header("Accept", accept)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
+        .header(BCN_MESSAGE_ID_HEADER, &message_id)
+        .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string());
+    for (name, value) in provider_bypass_headers {
+        if is_safe_provider_bypass_header(name) {
+            request = request.header(name.as_str(), value.as_str());
+        }
+    }
+    if protocol_version == "2.0" {
+        request = request.header(BCN_TRANSPORT_HEADER, transport);
+    }
+    let context = tracing::Span::current().context();
+    let mut trace_headers = reqwest::header::HeaderMap::new();
+    global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&context, &mut HeaderInjector(&mut trace_headers));
+    });
+    request = request.headers(trace_headers);
+    // Build errors (including invalid headers) are known to precede any HTTP
+    // submission. Errors after execute starts remain ambiguous.
+    let request = request.json(body).build().map_err(|_| ServiceError::DeliveryNotSent {
+        code: "provider_request_build_failed", retryable: false,
+    })?;
+    let send = request_client.execute(request);
+    let response_result =
+        if let Some(response_header_timeout) = client_policy.response_header_timeout {
+            match tokio::time::timeout(response_header_timeout, send).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let elapsed_ms = request_started.elapsed().as_millis();
+                    warn!(
+                        provider_id = %body.to_bot.provider_id,
+                        method = %body.method,
+                        frame_id = %body.id,
+                        message_id = %message_id,
+                        webhook_url = %webhook_url,
+                        dns_pinned,
+                        http2_only = client_policy.http2_only,
+                        elapsed_ms,
+                        response_header_timeout_ms = response_header_timeout.as_millis(),
+                        "provider downlink: response header timeout"
+                    );
+                    return Err(ServiceError::InternalError(format!(
+                        "provider response header timeout after {}ms",
+                        response_header_timeout.as_millis()
+                    )));
+                }
+            }
+        } else {
+            send.await
+        };
+    let response = response_result.map_err(|error| {
+        let elapsed_ms = request_started.elapsed().as_millis();
+        warn!(
+            provider_id = %body.to_bot.provider_id,
+            method = %body.method,
+            frame_id = %body.id,
+            message_id = %message_id,
+            webhook_url = %webhook_url,
+            dns_pinned,
+            http2_only = client_policy.http2_only,
+            elapsed_ms,
+            error = %error,
+            "provider downlink: webhook transport error"
+        );
+        ServiceError::InternalError(format!("provider request failed: {error}"))
+    })?;
+
+    let status = response.status();
+    let response_version = response.version();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let transfer_encoding = response
+        .headers()
+        .get(reqwest::header::TRANSFER_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    info!(
+        target_bot_id = %target.bot_id(),
+        provider_id = %body.to_bot.provider_id,
+        method = %body.method,
+        frame_id = %body.id,
+        message_id = %message_id,
+        webhook_url = %webhook_url,
+        dns_pinned,
+        http2_only = client_policy.http2_only,
+        accept_sse,
+        status = %status.as_u16(),
+        http_version = ?response_version,
+        content_type,
+        content_length = ?response.content_length(),
+        transfer_encoding,
+        headers_elapsed_ms = request_started.elapsed().as_millis(),
+        "provider downlink: response headers received"
+    );
+    if status_policy == ProviderStatusPolicy::RequireSuccess
+        && !status.is_success()
+        && !(body.method == "chat.abort" && status == reqwest::StatusCode::GONE)
+    {
+        warn!(
+            provider_id = %body.to_bot.provider_id,
+            method = %body.method,
+            frame_id = %body.id,
+            message_id = %message_id,
+            webhook_url = %webhook_url,
+            status = %status.as_u16(),
+            "provider downlink: webhook non-2xx"
+        );
+        return Err(ServiceError::InternalError(format!(
+            "provider returned status {status}"
+        )));
+    }
+
+    Ok(response)
+    }).await
+}
+
+fn blocked_outbound_ip(error: &OutboundUrlError) -> Option<IpAddr> {
+    match error {
+        OutboundUrlError::UnsafeAddress(address) => Some(*address),
+        _ => None,
+    }
+}
+
+fn webhook_url_for_log(webhook_url: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(webhook_url) else {
+        return "<invalid webhook URL>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
+fn provider_client_builder(policy: ProviderClientPolicy) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
+    if let Some(timeout) = policy.total_timeout {
+        builder = builder.timeout(timeout);
+    }
+    if let Some(read_timeout) = policy.read_timeout {
+        builder = builder.read_timeout(read_timeout);
+    }
+    if policy.http2_only {
+        builder = builder.http2_prior_knowledge();
+    }
+    builder
+}
+
+fn provider_client_for_url(
+    guarded_url: &bcs_route_security::ValidatedRequestUrl,
+    policy: ProviderClientPolicy,
+) -> Result<Option<reqwest::Client>, reqwest::Error> {
+    let Some((host, addrs)) = guarded_url.dns_override() else {
+        return Ok(None);
+    };
+    provider_client_builder(policy)
+        .resolve_to_addrs(host, addrs)
+        .build()
+        .map(Some)
+}
+
+fn provider_body_log(body: &ProviderWebhookRequest) -> String {
+    let mut redacted = match serde_json::to_value(body) {
+        Ok(value) => value,
+        Err(error) => return format!("{{\"serialize_error\":\"{}\"}}", error),
+    };
+    if let Some(attachments) = redacted
+        .get_mut("attachments")
+        .and_then(Value::as_array_mut)
+    {
+        for attachment in attachments {
+            if let Some(url) = attachment.get_mut("url") {
+                *url = Value::String("<redacted>".to_string());
+            }
+        }
+    }
+    serde_json::to_string(&redacted)
+        .unwrap_or_else(|error| format!("{{\"serialize_error\":\"{}\"}}", error))
+}
+
+fn sse_data_log(_event: &str, data: &str) -> String {
+    data.to_string()
+}
+
+fn provider_history_log(response: &ProviderHistoryResponse) -> String {
+    serde_json::to_string(response)
+        .unwrap_or_else(|error| format!("{{\"serialize_error\":\"{}\"}}", error))
+}
+
+// ---------------------------------------------------------------------------
+// SSE read loop (2.0 downlink streaming)
+// ---------------------------------------------------------------------------
+
+/// Two ASCII bytes `\n\n` (LF LF) — a frame separator.
+const FRAME_SEP_LF: &[u8] = b"\n\n";
+/// Four ASCII bytes `\r\n\r\n` (CRLF CRLF) — the other frame separator.
+const FRAME_SEP_CRLF: &[u8] = b"\r\n\r\n";
+
+/// Find the earliest frame separator (`\n\n` or `\r\n\r\n`) in `buf`.
+/// Returns `(start_index, separator_len)` of the match closest to the front.
+fn find_frame_sep(buf: &[u8]) -> Option<(usize, usize)> {
+    let lf = find_subslice(buf, FRAME_SEP_LF);
+    let crlf = find_subslice(buf, FRAME_SEP_CRLF);
+    match (lf, crlf) {
+        (Some(a), Some(b)) => {
+            if a <= b {
+                Some((a, FRAME_SEP_LF.len()))
+            } else {
+                Some((b, FRAME_SEP_CRLF.len()))
+            }
+        }
+        (Some(a), None) => Some((a, FRAME_SEP_LF.len())),
+        (None, Some(b)) => Some((b, FRAME_SEP_CRLF.len())),
+        (None, None) => None,
+    }
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Read the SSE byte stream from `resp`, split into frames, parse, dedupe by
+/// `StreamEvent.seq`, and ingest into the message-flow pipeline. Closes the run
+/// with a synthesized error terminal on idle timeout, read error, or a stream
+/// that ends without a chat terminal (#3). Resolves run context (with bounded
+/// retry for the put_context race, #2) before ingesting any frame.
+async fn stream_and_drive(
+    resp: reqwest::Response,
+    bcn_run_id: String,
+    bot_id: String,
+    flow: Arc<dyn ProviderEventIngestService>,
+    ctx: Arc<dyn BotRunContextPort>,
+    interaction_context: Option<SseInteractionContext>,
+) {
+    use futures::StreamExt;
+
+    // Resolve run context first (group_id needed for every payload). Retry to
+    // cover the put_context race: deliver() returns -> put_context runs, but the
+    // spawned reader may reach here first.
+    let Some(run_ctx) = resolve_run_context(&ctx, &bcn_run_id).await else {
+        warn!(run_id = %bcn_run_id, "sse: run context never became available; closing");
+        return;
+    };
+    let group_id = run_ctx.group_id.clone();
+    let bcs_session_id = run_ctx.bcs_session_id.clone();
+    // #2: stash the run deadline so every frame can be guarded against an
+    // already-expired run before it is ingested (re-checked per frame below).
+    let deadline_ms = run_ctx.deadline_ms;
+
+    let mut stream = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut dedup = SeqDedup::default();
+    let mut lag = LagTracker::default();
+    let mut saw_terminal = false;
+    let mut close_reason = "run_terminal";
+
+    // SSE-detail diagnostics: how many frames we consumed, when we started, and
+    // how long we blocked waiting on the socket vs processing frames. The gap
+    // between `stream.next()` returns (idle waits) and total elapsed tells us
+    // whether a stall (idle timeout) or a truncated/reset stream closed the run.
+    let started_ms = bcs_protocol::now_ms();
+    let mut frames: u64 = 0;
+    tracing::info!(
+        target: "bcs_sse_detail",
+        run_id = %bcn_run_id,
+        group_id = %group_id,
+        started_ms,
+        idle_timeout_ms = SSE_IDLE_TIMEOUT_MS,
+        deadline_ms,
+        "sse begin reading downlink stream"
+    );
+
+    'read: loop {
+        let now_ms = bcs_protocol::now_ms();
+        let (read_timeout, deadline_limited) = sse_next_read_timeout(now_ms, deadline_ms);
+        if deadline_limited && read_timeout.is_zero() {
+            close_reason = "run_deadline";
+            warn!(run_id = %bcn_run_id, "sse run deadline reached; closing stream");
+            break 'read;
+        }
+        let next = tokio::time::timeout(read_timeout, stream.next()).await;
+        match next {
+            Err(_) => {
+                if deadline_limited {
+                    close_reason = "run_deadline";
+                }
+                warn!(
+                    target: "bcs_sse_detail",
+                    run_id = %bcn_run_id,
+                    frames,
+                    saw_terminal,
+                    elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
+                    deadline_limited,
+                    "sse read timeout; closing run as error"
+                );
+                break 'read;
+            }
+            Ok(None) => {
+                // Stream ended. Flush any trailing buffered (non-empty) frame.
+                if !buf.is_empty() {
+                    if buf.len() > SSE_MAX_FRAME_BYTES {
+                        warn!(
+                            run_id = %bcn_run_id,
+                            frame_bytes = buf.len(),
+                            max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                            "oversized trailing SSE frame; closing run"
+                        );
+                        break 'read;
+                    }
+                    frames += 1;
+                    if let Some(done) = drive_frame_bytes(
+                        &buf,
+                        &bcn_run_id,
+                        &group_id,
+                        &bot_id,
+                        &bcs_session_id,
+                        deadline_ms,
+                        &mut dedup,
+                        &mut lag,
+                        &flow,
+                        interaction_context.as_ref(),
+                    )
+                    .await
+                    {
+                        saw_terminal = done;
+                    }
+                }
+                tracing::info!(
+                    target: "bcs_sse_detail",
+                    run_id = %bcn_run_id,
+                    frames,
+                    saw_terminal,
+                    elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
+                    "sse stream ended (EOF)"
+                );
+                break 'read;
+            }
+            Ok(Some(Err(error))) => {
+                warn!(
+                    target: "bcs_sse_detail",
+                    run_id = %bcn_run_id,
+                    %error,
+                    frames,
+                    saw_terminal,
+                    elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
+                    "sse read error; closing run as error"
+                );
+                break 'read;
+            }
+            Ok(Some(Ok(chunk))) => {
+                buf.extend_from_slice(&chunk);
+                while let Some((idx, sep_len)) = find_frame_sep(&buf) {
+                    let frame: Vec<u8> = buf.drain(..idx + sep_len).collect();
+                    if frame.len() > SSE_MAX_FRAME_BYTES {
+                        warn!(
+                            run_id = %bcn_run_id,
+                            frame_bytes = frame.len(),
+                            max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                            "oversized SSE frame; closing run"
+                        );
+                        break 'read;
+                    }
+                    frames += 1;
+                    if let Some(done) = drive_frame_bytes(
+                        &frame,
+                        &bcn_run_id,
+                        &group_id,
+                        &bot_id,
+                        &bcs_session_id,
+                        deadline_ms,
+                        &mut dedup,
+                        &mut lag,
+                        &flow,
+                        interaction_context.as_ref(),
+                    )
+                    .await
+                    {
+                        if done {
+                            saw_terminal = true;
+                            break 'read;
+                        }
+                    }
+                }
+                if buf.len() > SSE_MAX_FRAME_BYTES {
+                    warn!(
+                        run_id = %bcn_run_id,
+                        buffered_bytes = buf.len(),
+                        max_frame_bytes = SSE_MAX_FRAME_BYTES,
+                        "unterminated SSE frame exceeded buffer limit; closing run"
+                    );
+                    break 'read;
+                }
+            }
+        }
+    }
+
+    // #3: any close path that did NOT see a chat terminal synthesizes one so the
+    // run is cleanly closed and the frontend is never left hanging.
+    if !saw_terminal {
+        warn!(
+            target: "bcs_sse_detail",
+            run_id = %bcn_run_id,
+            frames,
+            elapsed_ms = bcs_protocol::now_ms().saturating_sub(started_ms),
+            "sse closed without chat terminal; synthesizing error terminal"
+        );
+        ingest_synthesized_error(&bcn_run_id, &group_id, &bot_id, &bcs_session_id, &flow).await;
+    }
+    // #2: mark the run terminal in the run-context store after closing.
+    ctx.mark_terminal(&bcn_run_id).await;
+    ctx.mark_provider_transport_terminal(&bcn_run_id).await;
+    if let Some(interactions) = interaction_context {
+        if let Err(error) = interactions
+            .service
+            .invalidate_run(&bcn_run_id, close_reason, bcs_protocol::now_ms())
+            .await
+        {
+            warn!(run_id = %bcn_run_id, %error, "failed to invalidate run interactions");
+        }
+    }
+}
+
+/// Resolve the run context for `run_id`, retrying a bounded number of times to
+/// cover the put_context race (#2). Returns `None` once retries are exhausted.
+async fn resolve_run_context(
+    ctx: &Arc<dyn BotRunContextPort>,
+    run_id: &str,
+) -> Option<BotRunContext> {
+    for _ in 0..SSE_CTX_RETRY_MAX {
+        if let Some(found) = ctx.get_context(run_id).await {
+            return Some(found);
+        }
+        tokio::time::sleep(Duration::from_millis(SSE_CTX_RETRY_INTERVAL_MS)).await;
+    }
+    ctx.get_context(run_id).await
+}
+
+/// Decode one complete frame's bytes, parse + classify + dedupe + ingest.
+/// Returns `Some(true)` if this frame closed the run (terminal), `Some(false)`
+/// if a non-terminal event was ingested, and `None` if the frame was dropped
+/// (ping / unknown / duplicate / not-json / no run context).
+async fn drive_frame_bytes(
+    frame_bytes: &[u8],
+    bcn_run_id: &str,
+    group_id: &str,
+    bot_id: &str,
+    bcs_session_id: &Option<String>,
+    deadline_ms: u64,
+    dedup: &mut SeqDedup,
+    lag: &mut LagTracker,
+    flow: &Arc<dyn ProviderEventIngestService>,
+    interaction_context: Option<&SseInteractionContext>,
+) -> Option<bool> {
+    // Decode only the complete frame bytes (#5). Lossy + WARN on invalid UTF-8.
+    let text = match std::str::from_utf8(frame_bytes) {
+        Ok(text) => text.to_string(),
+        Err(error) => {
+            warn!(run_id = %bcn_run_id, %error, "sse frame not valid utf-8; lossy-decoding");
+            String::from_utf8_lossy(frame_bytes).into_owned()
+        }
+    };
+    if text.trim().is_empty() {
+        return None;
+    }
+    drive_sse_frame(
+        &text,
+        bcn_run_id,
+        group_id,
+        bot_id,
+        bcs_session_id,
+        deadline_ms,
+        dedup,
+        lag,
+        flow,
+        interaction_context,
+    )
+    .await
+}
+
+/// Core per-frame ingest logic, decoupled from the byte source so tests can
+/// drive it from in-memory text. Returns the same tri-state as
+/// `drive_frame_bytes`.
+async fn drive_sse_frame(
+    block: &str,
+    bcn_run_id: &str,
+    group_id: &str,
+    bot_id: &str,
+    bcs_session_id: &Option<String>,
+    deadline_ms: u64,
+    dedup: &mut SeqDedup,
+    lag: &mut LagTracker,
+    flow: &Arc<dyn ProviderEventIngestService>,
+    interaction_context: Option<&SseInteractionContext>,
+) -> Option<bool> {
+    let frame = parse_sse_block(block)?;
+    let data: Value = match serde_json::from_str(&frame.data) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(
+                target: "bcs_sse_detail",
+                run_id = %bcn_run_id,
+                event = %frame.event,
+                %error,
+                sse_data = %sse_data_log(&frame.event, &frame.data),
+                "sse data not json; dropping frame"
+            );
+            warn!(run_id = %bcn_run_id, %error, "sse data not json; dropping frame");
+            return None;
+        }
+    };
+    let event = parse_stream_event(&frame.event, data);
+    let kind = classify(&event);
+    let recv_ms = bcs_protocol::now_ms();
+
+    // SSE-detail per-frame trace: `lag_ms` (receipt time minus the engine
+    // frame's own ts) measures how far BCS consumption trails the producer.
+    // Goes only to the bcs-sse-detail.log target. Interaction business payloads
+    // are reduced to safe correlation metadata before they reach that log.
+    {
+        let frame_ts = stream_event_ts(&event);
+        let seq = stream_event_seq(&event).unwrap_or(0);
+        let lag_ms = frame_ts.map(|t| recv_ms.saturating_sub(t)).unwrap_or(0);
+        let state = ingest_kind_state_slug(&kind);
+
+        // Edge-triggered lag alert: WARN once when the run crosses the alert
+        // threshold (falling behind the producer) and once when it recovers, so
+        // a sustained backlog is visible without a per-frame WARN flood.
+        if lag_ms > SSE_LAG_ALERT_MS {
+            lag.peak_lag_ms = lag.peak_lag_ms.max(lag_ms);
+            if !lag.alerting {
+                lag.alerting = true;
+                warn!(
+                    target: "bcs_sse_detail",
+                    run_id = %bcn_run_id,
+                    seq,
+                    lag_ms,
+                    alert_threshold_ms = SSE_LAG_ALERT_MS,
+                    "sse consumption falling behind producer"
+                );
+            }
+        } else if lag.alerting {
+            lag.alerting = false;
+            warn!(
+                target: "bcs_sse_detail",
+                run_id = %bcn_run_id,
+                seq,
+                lag_ms,
+                peak_lag_ms = lag.peak_lag_ms,
+                "sse consumption recovered"
+            );
+            lag.peak_lag_ms = 0;
+        }
+
+        tracing::info!(
+            target: "bcs_sse_detail",
+            run_id = %bcn_run_id,
+            event = %frame.event,
+            state = state,
+            seq,
+            frame_ts = frame_ts.unwrap_or(0),
+            recv_ms,
+            lag_ms,
+            sse_data = %sse_data_log(&frame.event, &frame.data),
+            "sse frame recv"
+        );
+    }
+
+    if matches!(kind, IngestKind::Interaction) {
+        match dedup.accept(stream_event_seq(&event)) {
+            SeqDecision::Duplicate => {
+                warn!(run_id = %bcn_run_id, "duplicate/regressed interaction seq; dropping");
+                return None;
+            }
+            SeqDecision::Gap(gap) => {
+                warn!(run_id = %bcn_run_id, gap, "seq gap before interaction")
+            }
+            SeqDecision::Accept => {}
+        }
+        if bcs_protocol::now_ms() > deadline_ms {
+            warn!(run_id = %bcn_run_id, "run deadline exceeded; dropping interaction frame");
+            if let Some(context) = interaction_context {
+                if let Err(error) = context
+                    .service
+                    .invalidate_run(bcn_run_id, "run_deadline", bcs_protocol::now_ms())
+                    .await
+                {
+                    warn!(run_id = %bcn_run_id, %error, "failed to invalidate expired interactions");
+                }
+            }
+            return None;
+        }
+        let StreamEvent::Interaction(interaction) = event else {
+            return None;
+        };
+        let Some(context) = interaction_context else {
+            warn!(run_id = %bcn_run_id, "interaction service not wired; dropping frame");
+            return None;
+        };
+        let Some(bcs_session_id) = bcs_session_id.clone() else {
+            warn!(run_id = %bcn_run_id, "interaction has no trusted BCS session; dropping frame");
+            return None;
+        };
+        let app_kind = match interaction.kind {
+            WireInteractionKind::Exec => InteractionKind::Exec,
+            WireInteractionKind::AskUser => InteractionKind::AskUser,
+            WireInteractionKind::ModeSwitch => InteractionKind::ModeSwitch,
+        };
+        let result = match interaction.phase {
+            InteractionPhase::Requested => context
+                .service
+                .on_provider_requested(ProviderInteractionRequestedCommand {
+                    bcs_run_id: bcn_run_id.to_string(),
+                    provider_run_id: interaction.run_id,
+                    interaction_id: interaction.interaction_id,
+                    kind: app_kind,
+                    bcs_session_id,
+                    group_id: group_id.to_string(),
+                    bot_id: bot_id.to_string(),
+                    run_deadline_ms: deadline_ms,
+                    provider_target: context.provider_target.clone(),
+                    provider_bypass_headers: context.provider_bypass_headers.clone(),
+                    payload: interaction.raw,
+                    received_at_ms: bcs_protocol::now_ms(),
+                })
+                .await
+                .map(|_| ()),
+            InteractionPhase::Resolved => {
+                context
+                    .service
+                    .on_provider_resolved(ProviderInteractionResolvedCommand {
+                        bcs_run_id: bcn_run_id.to_string(),
+                        provider_run_id: interaction.run_id,
+                        interaction_id: interaction.interaction_id,
+                        kind: app_kind,
+                        payload: interaction.raw,
+                        received_at_ms: bcs_protocol::now_ms(),
+                    })
+                    .await
+            }
+        };
+        if let Err(error) = result {
+            warn!(run_id = %bcn_run_id, %error, "interaction frame handling failed");
+        }
+        return Some(false);
+    }
+
+    let (event_type, state, payload, terminal) = match kind {
+        IngestKind::Drop => return None,
+        IngestKind::Interaction => unreachable!("interaction handled above"),
+        IngestKind::CloseUnsupported => {
+            // Approval/HITL is gated this round (#4/D11): close the run with a
+            // chat error terminal so the frontend isn't stuck. Not deduped.
+            warn!(
+                run_id = %bcn_run_id,
+                "approval/HITL received but resolve is out of scope; closing run as unsupported"
+            );
+            let payload = build_chat_error_payload(bcn_run_id, group_id);
+            (
+                "chat.event".to_string(),
+                ChatEventState::Error,
+                payload,
+                true,
+            )
+        }
+        IngestKind::Pipeline { event_type, state } => {
+            // #4: dedupe off the parsed StreamEvent's seq, never the SSE id.
+            match dedup.accept(stream_event_seq(&event)) {
+                SeqDecision::Duplicate => {
+                    warn!(run_id = %bcn_run_id, "duplicate/regressed seq; dropping");
+                    return None;
+                }
+                SeqDecision::Gap(gap) => warn!(run_id = %bcn_run_id, gap, "seq gap"),
+                SeqDecision::Accept => {}
+            }
+            let payload = build_event_payload(&event, bcn_run_id, group_id, recv_ms);
+            (event_type, state, payload, false)
+        }
+        IngestKind::Terminal { event_type, state } => {
+            match dedup.accept(stream_event_seq(&event)) {
+                SeqDecision::Duplicate => {
+                    warn!(run_id = %bcn_run_id, "duplicate/regressed terminal seq; dropping");
+                    return None;
+                }
+                SeqDecision::Gap(gap) => {
+                    warn!(run_id = %bcn_run_id, gap, "seq gap before terminal")
+                }
+                SeqDecision::Accept => {}
+            }
+            let payload = build_event_payload(&event, bcn_run_id, group_id, recv_ms);
+            (event_type, state, payload, true)
+        }
+    };
+
+    // #2: re-check the run deadline per frame. The SSE connection is itself the
+    // terminal writer, so a cheap monotonic deadline check is enough to avoid
+    // feeding an already-expired run; drop + WARN (no raw payload) and move on.
+    if bcs_protocol::now_ms() > deadline_ms {
+        warn!(run_id = %bcn_run_id, "run deadline exceeded; dropping frame");
+        return None;
+    }
+
+    ingest(
+        bcn_run_id,
+        group_id,
+        bot_id,
+        bcs_session_id,
+        event_type,
+        state,
+        payload,
+        flow,
+    )
+    .await;
+    Some(terminal)
+}
+
+/// Read the per-variant seq from a parsed `StreamEvent` (#4). ping / unknown
+/// carry no seq and must never reach the dedupe counter anyway.
+fn stream_event_seq(event: &StreamEvent) -> Option<u64> {
+    match event {
+        StreamEvent::Agent(agent) => agent.seq,
+        StreamEvent::Chat(chat) => chat.seq,
+        StreamEvent::Interaction(interaction) => interaction.seq,
+        _ => None,
+    }
+}
+
+/// The engine-stamped `ts` (ms) of a parsed frame, for SSE-detail lag tracing.
+fn stream_event_ts(event: &StreamEvent) -> Option<u64> {
+    match event {
+        StreamEvent::Agent(agent) => agent.ts,
+        StreamEvent::Chat(chat) => chat.ts,
+        StreamEvent::Interaction(interaction) => interaction.ts,
+        StreamEvent::Ping { ts } => *ts,
+        _ => None,
+    }
+}
+
+fn ingest_kind_state_slug(kind: &IngestKind) -> &'static str {
+    match kind {
+        IngestKind::Pipeline { state, .. } | IngestKind::Terminal { state, .. } => {
+            chat_event_state_slug(state)
+        }
+        IngestKind::CloseUnsupported => "close_unsupported",
+        IngestKind::Interaction => "interaction",
+        IngestKind::Drop => "drop",
+    }
+}
+
+fn chat_event_state_slug(state: &ChatEventState) -> &'static str {
+    match state {
+        ChatEventState::Delta => "delta",
+        ChatEventState::Final => "final",
+        ChatEventState::Error => "error",
+        ChatEventState::Aborted => "aborted",
+        ChatEventState::ToolCallStart => "tool_call_start",
+        ChatEventState::ToolCallEnd => "tool_call_end",
+    }
+}
+
+/// Build the downstream `event_payload` by FILLING the existing protocol structs
+/// (#1) so the wire names match the WS plugin path byte-for-byte. `run_id` and
+/// `bcs_group_id` come from the run context (BCN ids), NOT the engine frame.
+fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_ms: u64) -> Value {
+    match event {
+        StreamEvent::Agent(agent) => {
+            if let bcs_protocol::stream::AgentData::Error { raw } = &agent.data {
+                let error_message = raw
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let mut message = raw.get("message").cloned().and_then(|mut raw_message| {
+                    if let Some(object) = raw_message.as_object_mut() {
+                        object.entry("timestamp").or_insert_with(|| {
+                            Value::from(agent.ts.unwrap_or(recv_ms))
+                        });
+                    }
+                    match serde_json::from_value(raw_message) {
+                        Ok(parsed) => Some(parsed),
+                        Err(error) => {
+                            warn!(
+                                run_id,
+                                %error,
+                                "agent error message did not match MessageContent; body omitted"
+                            );
+                            None
+                        }
+                    }
+                });
+                if !message_has_text(&message) {
+                    if let Some(text) = error_message
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                    {
+                        message = Some(assistant_text_message(text));
+                    }
+                }
+                return serde_json::to_value(ChatEventPayload {
+                    run_id: run_id.to_string(),
+                    bcs_group_id: group_id.to_string(),
+                    state: WireChatState::Error,
+                    message,
+                    delta_text: None,
+                    usage: None,
+                    stop_reason: None,
+                    error_message,
+                    error_kind: raw
+                        .get("errorKind")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    error_code: raw
+                        .get("errorCode")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    tool_call_id: None,
+                    tool_name: None,
+                    args: None,
+                    result: None,
+                    is_error: None,
+                    success: None,
+                    routing: None,
+                })
+                .unwrap_or(Value::Null);
+            }
+            let stream = match &agent.data {
+                bcs_protocol::stream::AgentData::Tool(_) => AgentStream::Tool,
+                bcs_protocol::stream::AgentData::Thinking(_) => AgentStream::Thinking,
+                bcs_protocol::stream::AgentData::Lifecycle(_) => AgentStream::Lifecycle,
+                // Phase has no AgentStream counterpart; fall back to Assistant
+                // (the closest "model output" stream) and WARN so the choice is
+                // visible. Approval is handled upstream as CloseUnsupported.
+                bcs_protocol::stream::AgentData::Phase(_) => {
+                    warn!(
+                        run_id,
+                        "agent phase stream has no AgentStream variant; using assistant"
+                    );
+                    AgentStream::Assistant
+                }
+                other => {
+                    warn!(
+                        run_id,
+                        ?other,
+                        "unexpected agent data in payload build; using assistant"
+                    );
+                    AgentStream::Assistant
+                }
+            };
+            // Preserve the raw frame (including provider extensions), then
+            // overlay typed tool fields so canonical aliases such as
+            // toolName/arguments reach message flow as name/args.
+            let mut data = agent
+                .raw
+                .get("data")
+                .cloned()
+                .unwrap_or_else(|| agent.raw.clone());
+            if let bcs_protocol::stream::AgentData::Tool(tool) = &agent.data {
+                if let (Some(raw), Ok(Value::Object(normalized))) =
+                    (data.as_object_mut(), serde_json::to_value(tool))
+                {
+                    raw.extend(normalized);
+                }
+            }
+            let payload = AgentEventPayload {
+                run_id: run_id.to_string(),
+                bcs_group_id: group_id.to_string(),
+                stream,
+                ts: agent.ts.unwrap_or(0),
+                data,
+            };
+            let mut payload = serde_json::to_value(payload).unwrap_or(Value::Null);
+            if matches!(
+                &agent.data,
+                bcs_protocol::stream::AgentData::Tool(tool)
+                    if matches!(tool.phase, bcs_protocol::stream::ToolPhase::Result)
+            ) {
+                payload[TASK_INTENT_ELIGIBLE_KEY] = Value::Bool(true);
+            }
+            payload
+        }
+        StreamEvent::Chat(chat) => {
+            let state = match chat.state {
+                ChatState::Delta => WireChatState::Delta,
+                ChatState::Final => WireChatState::Final,
+                ChatState::Aborted => WireChatState::Aborted,
+                ChatState::Error => WireChatState::Error,
+            };
+            // message is strongly typed (Option<MessageContent>). If the engine
+            // frame's message shape doesn't deserialize, WARN rather than
+            // silently dropping the body (#1 risk note).
+            let mut message = match chat.message.clone() {
+                Some(mut raw_message) => {
+                    // SSE permits an omitted message timestamp. Normalize a
+                    // copy at this boundary, preserving supplied values and
+                    // validation of malformed messages in the shared WS type.
+                    if let Some(object) = raw_message.as_object_mut() {
+                        object.entry("timestamp").or_insert_with(|| {
+                            Value::from(stream_event_ts(event).unwrap_or(recv_ms))
+                        });
+                    }
+                    match serde_json::from_value(raw_message) {
+                        Ok(parsed) => Some(parsed),
+                        Err(error) => {
+                            warn!(
+                                run_id,
+                                %error,
+                                "chat message did not match MessageContent; body omitted"
+                            );
+                            None
+                        }
+                    }
+                }
+                None => chat.content.as_deref().map(|content| MessageContent {
+                    role: "assistant".to_string(),
+                    content: vec![ContentBlock::text(content)],
+                    timestamp: chat.ts.unwrap_or(recv_ms),
+                }),
+            };
+            if matches!(chat.state, ChatState::Error) && !message_has_text(&message) {
+                if let Some(error_message) = chat
+                    .error_message
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                {
+                    message = Some(assistant_text_message(error_message));
+                }
+            }
+            let payload = ChatEventPayload {
+                run_id: run_id.to_string(),
+                bcs_group_id: group_id.to_string(),
+                state,
+                message,
+                // Forward the frame's incremental delta so BCS can accumulate
+                // segments itself instead of re-deriving from cumulative message.
+                delta_text: chat.delta_text.clone().or_else(|| {
+                    matches!(chat.state, ChatState::Delta)
+                        .then(|| chat.content.clone())
+                        .flatten()
+                }),
+                usage: None,
+                stop_reason: chat.stop_reason.clone(),
+                error_message: chat.error_message.clone(),
+                error_kind: chat.error_kind.clone(),
+                error_code: chat.error_code.clone(),
+                tool_call_id: None,
+                tool_name: None,
+                args: None,
+                result: None,
+                is_error: None,
+                success: None,
+                routing: None,
+            };
+            serde_json::to_value(payload).unwrap_or(Value::Null)
+        }
+        _ => Value::Null,
+    }
+}
+
+fn message_has_text(message: &Option<MessageContent>) -> bool {
+    message.as_ref().is_some_and(|message| {
+        message.content.iter().any(|block| {
+            block
+                .text
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty())
+        })
+    })
+}
+
+fn assistant_text_message(text: &str) -> MessageContent {
+    MessageContent {
+        role: "assistant".to_string(),
+        content: vec![ContentBlock::text(text)],
+        timestamp: bcs_protocol::now_ms(),
+    }
+}
+
+/// Build a chat error terminal payload (#3 synthesized terminal / approval gate).
+fn build_chat_error_payload(run_id: &str, group_id: &str) -> Value {
+    let payload = ChatEventPayload {
+        run_id: run_id.to_string(),
+        bcs_group_id: group_id.to_string(),
+        state: WireChatState::Error,
+        message: None,
+        delta_text: None,
+        usage: None,
+        stop_reason: None,
+        error_message: None,
+        error_kind: None,
+        error_code: None,
+        tool_call_id: None,
+        tool_name: None,
+        args: None,
+        result: None,
+        is_error: None,
+        success: None,
+        routing: None,
+    };
+    serde_json::to_value(payload).unwrap_or(Value::Null)
+}
+
+/// Synthesize and ingest a chat error terminal to close a run cleanly (#3).
+async fn ingest_synthesized_error(
+    bcn_run_id: &str,
+    group_id: &str,
+    bot_id: &str,
+    bcs_session_id: &Option<String>,
+    flow: &Arc<dyn ProviderEventIngestService>,
+) {
+    warn!(run_id = %bcn_run_id, "sse closed without chat terminal; synthesizing error terminal");
+    let payload = build_chat_error_payload(bcn_run_id, group_id);
+    ingest(
+        bcn_run_id,
+        group_id,
+        bot_id,
+        bcs_session_id,
+        "chat.event".to_string(),
+        ChatEventState::Error,
+        payload,
+        flow,
+    )
+    .await;
+}
+
+/// Build the `BotEventCommand` and hand it to the message-flow pipeline.
+#[allow(clippy::too_many_arguments)]
+async fn ingest(
+    bcn_run_id: &str,
+    group_id: &str,
+    bot_id: &str,
+    bcs_session_id: &Option<String>,
+    event_type: String,
+    state: ChatEventState,
+    payload: Value,
+    flow: &Arc<dyn ProviderEventIngestService>,
+) {
+    let cmd = BotEventCommand {
+        bot_id: bot_id.to_string(),
+        run_id: bcn_run_id.to_string(), // BCN run id from run_ctx, NOT engine runId (D9)
+        group_id: group_id.to_string(),
+        event_type,
+        event_payload: payload,
+        state,
+        bcs_session_id: bcs_session_id.clone(),
+    };
+    if let Err(error) = flow
+        .ingest_provider_event(ProviderEventIngestCommand {
+            source: ProviderEventSource::Sse,
+            event: cmd,
+        })
+        .await
+    {
+        warn!(run_id = %bcn_run_id, %error, "ingest handle_bot_event failed");
+    }
+}
+
+#[cfg(test)]
+mod client_policy_tests {
+    use super::*;
+    use bcs_domain::RedactedToken;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn provider_message_prepends_opted_in_sender_json_without_mutating_frame_params() {
+        let params = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_id": "human_410025",
+                "actor_name": "张\"三"
+            },
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }],
+                "timestamp": 1710960000000_u64
+            }
+        });
+
+        let first = provider_message_for_method("chat.send", &params).unwrap();
+        let retry = provider_message_for_method("chat.send", &params).unwrap();
+        assert_eq!(first, retry, "retry must rebuild from the unchanged frame");
+        assert_eq!(
+            first["content"][0]["text"],
+            "{\"sender\":{\"id\":\"410025\",\"name\":\"张\\\"三\"}}\n\nhello"
+        );
+        assert_eq!(params["message"]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn provider_message_limits_sender_prefix_to_chat_methods() {
+        let params = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_name": "张三"
+            },
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "hello" }],
+                "timestamp": 1710960000000_u64
+            }
+        });
+
+        let send = provider_message_for_method("chat.send", &params).unwrap();
+        let inject = provider_message_for_method("chat.inject", &params).unwrap();
+        assert_eq!(send, inject);
+        assert_ne!(send, params["message"]);
+        assert_eq!(
+            provider_message_for_method("chat.history", &params),
+            params.get("message").cloned()
+        );
+        assert_eq!(
+            provider_message_for_method("task.dispatch", &params),
+            params.get("message").cloned()
+        );
+    }
+
+    #[test]
+    fn provider_message_ignores_legacy_channel_identity_and_supports_content_blocks() {
+        let legacy = serde_json::json!({
+            "channel": { "user_id": "410025", "actor_name": "张三" },
+            "message": { "text": "hello" }
+        });
+        assert_eq!(
+            provider_message_from_params(&legacy),
+            legacy.get("message").cloned()
+        );
+
+        let opted_in = serde_json::json!({
+            "channel": {
+                "identity_forwarding": true,
+                "user_id": "410025",
+                "actor_name": "张三"
+            },
+            "message": {
+                "content": [
+                    { "type": "image", "url": "https://example.invalid/image" },
+                    { "type": "text", "text": "hello" }
+                ]
+            }
+        });
+        let message = provider_message_from_params(&opted_in).unwrap();
+        assert_eq!(
+            message["content"][1]["text"],
+            "{\"sender\":{\"id\":\"410025\",\"name\":\"张三\"}}\n\nhello"
+        );
+    }
+
+    async fn spawn_http1_server() -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+        });
+        addr
+    }
+
+    async fn spawn_delayed_http1_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            tokio::time::sleep(delay).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await;
+        });
+        addr
+    }
+
+    async fn spawn_stalled_json_body_server(delay: Duration) -> std::net::SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\n\
+Content-Type: application/json\r\n\
+Content-Length: 64\r\n\
+Connection: keep-alive\r\n\
+\r\n\
+{\"ok\":",
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(delay).await;
+        });
+        addr
+    }
+
+    #[test]
+    fn sse_policy_allows_http1_fallback_without_total_timeout() {
+        let policy = ProviderClientPolicy::for_request(true);
+
+        assert_eq!(policy.total_timeout, None);
+        assert_eq!(policy.read_timeout, None);
+        assert_eq!(
+            policy.response_header_timeout,
+            Some(Duration::from_secs(125))
+        );
+        assert!(!policy.http2_only);
+    }
+
+    #[test]
+    fn sse_idle_timeout_is_fifteen_minutes() {
+        assert_eq!(SSE_IDLE_TIMEOUT_MS, 15 * 60 * 1_000);
+    }
+
+    #[test]
+    fn sse_read_wait_is_capped_by_run_deadline_and_frame_memory_is_bounded() {
+        let (deadline_wait, deadline_limited) = sse_next_read_timeout(1_000, 1_250);
+        assert_eq!(deadline_wait, Duration::from_millis(250));
+        assert!(deadline_limited);
+
+        let (idle_wait, deadline_limited) = sse_next_read_timeout(1_000, u64::MAX);
+        assert_eq!(idle_wait, Duration::from_millis(SSE_IDLE_TIMEOUT_MS));
+        assert!(!deadline_limited);
+        assert_eq!(SSE_MAX_FRAME_BYTES, 8 * 1024 * 1024);
+    }
+
+    #[test]
+    fn callback_policy_keeps_total_timeout_and_protocol_negotiation() {
+        let policy = ProviderClientPolicy::for_request(false);
+
+        assert_eq!(policy.total_timeout, Some(Duration::from_secs(65)));
+        assert_eq!(policy.read_timeout, None);
+        assert_eq!(policy.response_header_timeout, None);
+        assert!(!policy.http2_only);
+    }
+
+    #[tokio::test]
+    async fn provider_request_times_out_waiting_for_response_headers() {
+        let addr = spawn_delayed_http1_server(Duration::from_millis(100)).await;
+        let policy = ProviderClientPolicy {
+            response_header_timeout: Some(Duration::from_millis(10)),
+            http2_only: false,
+            ..ProviderClientPolicy::for_request(true)
+        };
+        let client = provider_client_builder(policy).build().unwrap();
+        let url_guard = OutboundUrlGuard::allowing_private_networks_for_tests();
+        let target = BotDeliveryTarget::HttpProvider {
+            bot_id: "bot-1".to_string(),
+            provider_id: "provider-1".to_string(),
+            provider_bot_ref: "bot-1".to_string(),
+            webhook_url: format!("http://{addr}"),
+            bcs_to_provider_token: RedactedToken::new("secret"),
+            protocol_version: "2.0".to_string(),
+        };
+        let body = ProviderWebhookRequest {
+            frame_type: "request".to_string(),
+            id: "frame-timeout".to_string(),
+            method: "chat.send".to_string(),
+            params: None,
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let error = send_provider_request_with_policy(
+            &client,
+            &url_guard,
+            &target,
+            &body,
+            true,
+            &[],
+            policy,
+            ProviderStatusPolicy::RequireSuccess,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("provider response header timeout after 10ms")
+        );
+    }
+
+    #[tokio::test]
+    async fn json_fallback_body_timeout_bounds_incomplete_response() {
+        let addr = spawn_stalled_json_body_server(Duration::from_secs(1)).await;
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}"))
+            .send()
+            .await
+            .unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            read_provider_ack_body(response, Duration::from_millis(10)),
+        )
+        .await
+        .expect("ack body reader must not remain pending");
+
+        assert!(matches!(result, Err(ProviderAckBodyError::Timeout)));
+    }
+
+    #[test]
+    fn provider_body_log_redacts_temporary_attachment_urls() {
+        let body = ProviderWebhookRequest {
+            frame_type: "event".to_string(),
+            id: "frame-1".to_string(),
+            method: "chat.send".to_string(),
+            params: None,
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: vec![Attachment {
+                attachment_id: "att-1".to_string(),
+                attachment_type: bcs_protocol::AttachmentType::Image,
+                file_name: "image".to_string(),
+                mime_type: None,
+                size: None,
+                sha256: None,
+                url: "https://download.example.com/image?token=secret".to_string(),
+                expires_at: None,
+            }],
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let logged = provider_body_log(&body);
+
+        assert!(logged.contains("\"url\":\"<redacted>\""));
+        assert!(!logged.contains("token=secret"));
+        assert_eq!(
+            body.attachments[0].url,
+            "https://download.example.com/image?token=secret"
+        );
+    }
+
+    #[test]
+    fn provider_body_log_preserves_interaction_business_payload() {
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: "resolve-frame-1".to_string(),
+            method: "interaction.resolve".to_string(),
+            params: Some(serde_json::json!({
+                "bcsRunId": "bcs-run-1",
+                "runId": "provider-run-1",
+                "interactionId": "interaction-1",
+                "kind": "ask_user",
+                "idempotencyKey": "idem-1",
+                "action": "submit",
+                "answers": {"customer_name": {"values": ["sensitive answer"]}},
+                "providerExtension": {"feedback": "sensitive extension"}
+            })),
+            session_id: "session-1".to_string(),
+            bcn_group_id: "group-1".to_string(),
+            to_bot: ProviderWebhookBotRef {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-1".to_string(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: 1_000,
+            extensions: None,
+        };
+
+        let logged = provider_body_log(&body);
+
+        assert!(logged.contains("\"action\":\"submit\""));
+        assert!(logged.contains("sensitive answer"));
+        assert!(logged.contains("sensitive extension"));
+        assert!(!logged.contains("<redacted>"));
+    }
+
+    #[test]
+    fn sse_detail_log_preserves_interaction_business_payload() {
+        let logged = sse_data_log(
+            "interaction",
+            r#"{"runId":"run-1","seq":7,"phase":"resolved","interactionId":"i-1","kind":"ask_user","command":"sensitive command","answers":{"name":{"values":["sensitive answer"]}}}"#,
+        );
+
+        assert!(logged.contains("\"command\":\"sensitive command\""));
+        assert!(logged.contains("sensitive answer"));
+
+        let malformed = sse_data_log("interaction", "not-json interaction payload");
+        assert_eq!(malformed, "not-json interaction payload");
+    }
+
+    #[tokio::test]
+    async fn sse_and_callback_builders_accept_http1() {
+        let callback_addr = spawn_http1_server().await;
+        let callback_client = provider_client_builder(ProviderClientPolicy::for_request(false))
+            .build()
+            .unwrap();
+        let callback_response = callback_client
+            .get(format!("http://{callback_addr}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(callback_response.version(), reqwest::Version::HTTP_11);
+
+        let sse_addr = spawn_http1_server().await;
+        let sse_client = provider_client_builder(ProviderClientPolicy::for_request(true))
+            .build()
+            .unwrap();
+        let sse_response = sse_client
+            .get(format!("http://{sse_addr}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(sse_response.version(), reqwest::Version::HTTP_11);
+    }
+}
+
+#[cfg(test)]
+mod sse_loop_tests {
+    use super::*;
+    use bcs_service_api::{
+        BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
+        GroupCallbackOutcome, InteractionFrontendEvent, InteractionRequestedOutcome,
+        InteractionService, InteractionServiceError, MessageFlowService,
+        ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
+        ResolveInteractionCommand, ResolveInteractionResult, TaskCompleteCommand,
+        TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
+        WebSendCommand, WebSendOutcome,
+    };
+    use std::sync::Mutex;
+
+    /// Records each ingested (event_type, state, event_payload) tuple.
+    #[derive(Default)]
+    struct RecordingFlow {
+        events: Mutex<Vec<(String, ChatEventState, Value)>>,
+    }
+
+    #[derive(Default)]
+    struct RecordingInteractions {
+        requested: Mutex<Vec<ProviderInteractionRequestedCommand>>,
+        resolved: Mutex<Vec<ProviderInteractionResolvedCommand>>,
+    }
+
+    #[async_trait]
+    impl InteractionService for RecordingInteractions {
+        async fn on_provider_requested(
+            &self,
+            command: ProviderInteractionRequestedCommand,
+        ) -> ServiceResult<InteractionRequestedOutcome> {
+            self.requested.lock().unwrap().push(command);
+            Ok(InteractionRequestedOutcome::Stored)
+        }
+
+        async fn on_provider_resolved(
+            &self,
+            command: ProviderInteractionResolvedCommand,
+        ) -> ServiceResult<()> {
+            self.resolved.lock().unwrap().push(command);
+            Ok(())
+        }
+
+        async fn resolve(
+            &self,
+            _command: ResolveInteractionCommand,
+        ) -> Result<ResolveInteractionResult, InteractionServiceError> {
+            unimplemented!("not used in Provider SSE tests")
+        }
+
+        async fn list_pending(
+            &self,
+            _bcs_session_id: &str,
+        ) -> ServiceResult<Vec<InteractionFrontendEvent>> {
+            Ok(Vec::new())
+        }
+
+        async fn invalidate_run(
+            &self,
+            _bcs_run_id: &str,
+            _reason: &str,
+            _invalidated_at_ms: u64,
+        ) -> ServiceResult<usize> {
+            Ok(0)
+        }
+
+        async fn cleanup_terminal(&self, _terminal_before_ms: u64) -> ServiceResult<usize> {
+            Ok(0)
+        }
+    }
+
+    impl RecordingFlow {
+        fn snapshot(&self) -> Vec<(String, ChatEventState, Value)> {
+            self.events.lock().unwrap().clone()
+        }
+        fn pairs(&self) -> Vec<(String, ChatEventState)> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(event_type, state, _)| (event_type.clone(), state.clone()))
+                .collect()
+        }
+    }
+
+    #[async_trait]
+    impl MessageFlowService for RecordingFlow {
+        async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
+            unimplemented!("not used in sse loop tests")
+        }
+        async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
+            self.events.lock().unwrap().push((
+                cmd.event_type.clone(),
+                cmd.state.clone(),
+                cmd.event_payload.clone(),
+            ));
+            Ok(BotEventOutcome {
+                bot_deliveries: vec![],
+                frontend_deliveries: vec![],
+                unregistered_run_ids: vec![],
+                mentions: vec![],
+                delivered_count: 1,
+                failed_count: 0,
+                delivery_results: vec![],
+            })
+        }
+        async fn handle_group_callback(
+            &self,
+            _cmd: GroupCallbackCommand,
+        ) -> ServiceResult<GroupCallbackOutcome> {
+            unimplemented!("not used in sse loop tests")
+        }
+        async fn handle_chat_abort(
+            &self,
+            _cmd: ChatAbortCommand,
+        ) -> ServiceResult<ChatAbortOutcome> {
+            unimplemented!("not used in sse loop tests")
+        }
+        async fn register_task_run_alias(
+            &self,
+            _task_id: &str,
+            _run_id: &str,
+            _bot_id: &str,
+        ) -> ServiceResult<TaskRunAliasRegistration> {
+            unimplemented!("not used in sse loop tests")
+        }
+        async fn handle_task_dispatch(
+            &self,
+            _cmd: TaskDispatchCommand,
+        ) -> ServiceResult<TaskDispatchOutcome> {
+            unimplemented!("not used in sse loop tests")
+        }
+        async fn handle_task_complete(
+            &self,
+            _cmd: TaskCompleteCommand,
+        ) -> ServiceResult<TaskCompleteOutcome> {
+            unimplemented!("not used in sse loop tests")
+        }
+    }
+
+    #[async_trait]
+    impl ProviderEventIngestService for RecordingFlow {
+        async fn ingest_provider_event(
+            &self,
+            cmd: ProviderEventIngestCommand,
+        ) -> ServiceResult<BotEventOutcome> {
+            self.handle_bot_event(cmd.event).await
+        }
+    }
+
+    /// Fixed run-context fake: always resolves with the given group/bot and a
+    /// configurable deadline (so the per-frame deadline guard can be exercised).
+    struct FixedCtx {
+        deadline_ms: u64,
+    }
+
+    #[async_trait]
+    impl BotRunContextPort for FixedCtx {
+        async fn put_context(&self, _context: BotRunContext) {}
+        async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
+            Some(BotRunContext {
+                run_id: run_id.to_string(),
+                bot_id: "bot-1".into(),
+                group_id: "grp-1".into(),
+                bcs_session_id: None,
+                deadline_ms: self.deadline_ms,
+                terminal: false,
+            })
+        }
+        async fn try_begin_terminal(&self, _run_id: &str) -> bool {
+            true
+        }
+        async fn mark_terminal(&self, _run_id: &str) -> bool {
+            true
+        }
+        async fn release_terminal(&self, _run_id: &str) {}
+        async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+            false
+        }
+        async fn bind_provider_transport(
+            &self,
+            _run_id: &str,
+            _transport: ProviderRunTransport,
+        ) -> bool {
+            false
+        }
+        async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+            None
+        }
+        async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+        async fn clear_provider_transport(&self, _run_id: &str) {}
+    }
+
+    /// Test wrapper: drive the per-frame ingest core over an in-memory SSE text
+    /// split on `\n\n`, with one dedupe state spanning the whole stream. Returns
+    /// whether a terminal was seen.
+    async fn run_sse_text_for_test(
+        sse_text: &str,
+        bcn_run_id: &str,
+        group_id: &str,
+        bot_id: &str,
+        flow: &Arc<dyn ProviderEventIngestService>,
+    ) -> bool {
+        run_sse_text_with_deadline(sse_text, bcn_run_id, group_id, bot_id, u64::MAX, flow).await
+    }
+
+    /// Like `run_sse_text_for_test` but with an explicit run deadline so the
+    /// per-frame deadline guard can be exercised.
+    async fn run_sse_text_with_deadline(
+        sse_text: &str,
+        bcn_run_id: &str,
+        group_id: &str,
+        bot_id: &str,
+        deadline_ms: u64,
+        flow: &Arc<dyn ProviderEventIngestService>,
+    ) -> bool {
+        let mut dedup = SeqDedup::default();
+        let mut lag = LagTracker::default();
+        let session: Option<String> = None;
+        for block in sse_text.split("\n\n") {
+            if block.trim().is_empty() {
+                continue;
+            }
+            if let Some(true) = drive_sse_frame(
+                block,
+                bcn_run_id,
+                group_id,
+                bot_id,
+                &session,
+                deadline_ms,
+                &mut dedup,
+                &mut lag,
+                flow,
+                None,
+            )
+            .await
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn top_level_interactions_use_application_service_not_message_flow() {
+        let recording_flow = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording_flow.clone();
+        let interactions = Arc::new(RecordingInteractions::default());
+        let context = SseInteractionContext {
+            service: interactions.clone(),
+            provider_target: BotDeliveryTarget::HttpProvider {
+                bot_id: "bot-1".to_string(),
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "ref-1".to_string(),
+                webhook_url: "https://provider.example/webhook".to_string(),
+                bcs_to_provider_token: bcs_domain::RedactedToken::new("secret"),
+                protocol_version: "2.0".to_string(),
+            },
+            provider_bypass_headers: Vec::new(),
+        };
+        let session = Some("session-1".to_string());
+        let mut dedup = SeqDedup::default();
+        let mut lag = LagTracker::default();
+
+        let handled = drive_sse_frame(
+            "event: interaction\ndata: {\"runId\":\"provider-run-1\",\"seq\":1,\"phase\":\"requested\",\"interactionId\":\"interaction-1\",\"kind\":\"exec\",\"command\":\"deploy\"}",
+            "bcs-run-1",
+            "group-1",
+            "bot-1",
+            &session,
+            u64::MAX,
+            &mut dedup,
+            &mut lag,
+            &flow,
+            Some(&context),
+        )
+        .await;
+
+        assert_eq!(handled, Some(false));
+        assert!(recording_flow.snapshot().is_empty());
+        let requested = interactions.requested.lock().unwrap();
+        assert_eq!(requested.len(), 1);
+        assert_eq!(requested[0].bcs_run_id, "bcs-run-1");
+        assert_eq!(requested[0].provider_run_id, "provider-run-1");
+        assert_eq!(requested[0].bcs_session_id, "session-1");
+    }
+
+    #[tokio::test]
+    async fn chat_timestamp_missing_uses_event_ts_for_every_state() {
+        for (state, expected_state) in [
+            ("delta", ChatEventState::Delta),
+            ("final", ChatEventState::Final),
+            ("error", ChatEventState::Error),
+            ("aborted", ChatEventState::Aborted),
+        ] {
+            let recording = Arc::new(RecordingFlow::default());
+            let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+            let data = serde_json::json!({
+                "runId": "provider-run", "seq": 1, "ts": 1786260001000_u64,
+                "state": state,
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "complete answer"}
+                ]}
+            });
+            let terminal = run_sse_text_for_test(
+                &format!("event: chat\ndata: {data}\n\n"),
+                "bcn-run-1", "grp-1", "bot-1", &flow,
+            ).await;
+            assert_eq!(terminal, state != "delta", "{state}");
+            let events = recording.snapshot();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].1, expected_state);
+            assert_eq!(events[0].2["message"]["content"][0]["text"], "complete answer", "{state}");
+            assert_eq!(events[0].2["message"]["timestamp"], 1786260001000_u64, "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_timestamp_missing_without_usable_ts_uses_receipt_time() {
+        for ts in [None, Some(Value::Null), Some(serde_json::json!("bad")),
+            Some(serde_json::json!(-1)), Some(serde_json::json!(1.5))] {
+            let mut data = serde_json::json!({
+                "runId": "provider-run", "seq": 1, "state": "final",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "final without deltas"}
+                ]}
+            });
+            if let Some(ts) = ts { data["ts"] = ts; }
+            let recording = Arc::new(RecordingFlow::default());
+            let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+            let before = bcs_protocol::now_ms();
+            assert!(run_sse_text_for_test(
+                &format!("event: chat\ndata: {data}\n\n"),
+                "bcn-run-1", "grp-1", "bot-1", &flow,
+            ).await);
+            let after = bcs_protocol::now_ms();
+            let events = recording.snapshot();
+            let timestamp = events[0].2["message"]["timestamp"].as_u64()
+                .expect("missing timestamp must not discard the final body");
+            assert!((before..=after).contains(&timestamp));
+            assert_eq!(events[0].2["message"]["content"][0]["text"], "final without deltas");
+        }
+    }
+
+    #[tokio::test]
+    async fn canonical_chat_content_projects_to_message_and_delta_text() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: chat\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"ts\":1786260001000,\"state\":\"delta\",\"content\":\"working \"}\n\n\
+event: chat\ndata: {\"runId\":\"engine-run\",\"seq\":2,\"ts\":1786260002000,\"state\":\"final\",\"content\":\"working done\"}\n\n";
+
+        assert!(run_sse_text_for_test(
+            sse,
+            "bcn-run-content",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "chat.event");
+        assert_eq!(events[0].1, ChatEventState::Delta);
+        assert_eq!(events[0].2["delta_text"], "working ");
+        assert_eq!(events[0].2["message"]["content"][0]["text"], "working ");
+        assert_eq!(events[0].2["message"]["timestamp"], 1786260001000_u64);
+        assert_eq!(events[1].0, "chat.event");
+        assert_eq!(events[1].1, ChatEventState::Final);
+        assert_eq!(events[1].2["message"]["content"][0]["text"], "working done");
+        assert_eq!(events[1].2["message"]["timestamp"], 1786260002000_u64);
+    }
+
+    #[tokio::test]
+    async fn canonical_tool_aliases_are_normalized_without_dropping_raw_fields() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"stream\":\"tool\",\"phase\":\"start\",\"toolCallId\":\"tc-1\",\"toolName\":\"mcp__bcs__call\",\"arguments\":{\"intent\":\"task.create\"},\"providerExtension\":\"kept\"}\n\n\
+event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":2,\"stream\":\"tool\",\"phase\":\"result\",\"toolCallId\":\"tc-1\",\"toolName\":\"mcp__bcs__call\",\"isError\":false,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n\n";
+
+        assert!(!run_sse_text_for_test(
+            sse,
+            "bcn-run-tool",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].1, ChatEventState::ToolCallStart);
+        assert_eq!(events[0].2["data"]["name"], "mcp__bcs__call");
+        assert_eq!(events[0].2["data"]["args"]["intent"], "task.create");
+        assert_eq!(events[0].2["data"]["providerExtension"], "kept");
+        assert_eq!(events[1].1, ChatEventState::ToolCallEnd);
+        assert_eq!(events[1].2["data"]["name"], "mcp__bcs__call");
+        assert_eq!(events[1].2["data"]["isError"], false);
+        assert_eq!(events[1].2[TASK_INTENT_ELIGIBLE_KEY], true);
+    }
+
+    #[tokio::test]
+    async fn agent_error_projects_to_chat_error_terminal() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"ts\":1786260001000,\"stream\":\"error\",\"errorCode\":\"MODEL_ERROR\",\"errorKind\":\"provider_error\",\"errorMessage\":\"model failed\"}\n\n";
+
+        assert!(run_sse_text_for_test(
+            sse,
+            "bcn-run-error",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "chat.event");
+        assert_eq!(events[0].1, ChatEventState::Error);
+        assert_eq!(events[0].2["state"], "error");
+        assert_eq!(events[0].2["errorCode"], "MODEL_ERROR");
+        assert_eq!(events[0].2["errorKind"], "provider_error");
+        assert_eq!(events[0].2["errorMessage"], "model failed");
+        assert_eq!(events[0].2["message"]["content"][0]["text"], "model failed");
+    }
+
+    #[test]
+    fn chat_timestamp_preserves_supplied_values_and_raw_event() {
+        for timestamp in [None, Some(0_u64), Some(1786260000000), Some(u64::MAX)] {
+            let mut raw = serde_json::json!({
+                "runId": "provider-run", "state": "final", "ts": 1786260001000_u64,
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "answer"}
+                ]}
+            });
+            if let Some(timestamp) = timestamp { raw["message"]["timestamp"] = timestamp.into(); }
+            let event = parse_stream_event("chat", raw.clone());
+            let payload = build_event_payload(&event, "bcn-run-1", "grp-1", 1786260002000);
+            assert_eq!(payload["message"]["timestamp"], timestamp.unwrap_or(1786260001000));
+            let StreamEvent::Chat(chat) = event else { panic!("expected chat"); };
+            assert_eq!(chat.raw, raw);
+            assert_eq!(chat.message.as_ref(), raw.get("message"));
+        }
+    }
+
+    #[test]
+    fn chat_timestamp_fallback_does_not_mask_invalid_messages() {
+        for message in [
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": null}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": "123"}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": -1}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": 1.5}),
+            serde_json::json!({"content": []}),
+            serde_json::json!({"role": "assistant"}),
+            serde_json::json!({"role": 1, "content": []}),
+            serde_json::json!({"role": "assistant", "content": "bad"}),
+            Value::Null,
+        ] {
+            let event = parse_stream_event("chat", serde_json::json!({
+                "runId": "provider-run", "state": "final", "ts": 1786260001000_u64,
+                "message": message,
+            }));
+            let payload = build_event_payload(&event, "bcn-run-1", "grp-1", 1786260002000);
+            assert!(payload["message"].is_null(), "invalid message accepted: {message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn read_loop_ingests_delta_then_final_and_dedupes() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
+event: ping\ndata: {\"ts\":1}\n\n\
+event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
+event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
+        let terminal = run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
+        assert!(terminal, "final should close the run");
+
+        // duplicate seq1 dropped, ping dropped: thinking(agent/Delta) + chat final.
+        assert_eq!(
+            recording.pairs(),
+            vec![
+                ("agent".to_string(), ChatEventState::Delta),
+                ("chat.event".to_string(), ChatEventState::Final),
+            ]
+        );
+        // chat payload must use snake_case BCS wire names, NOT deltaText.
+        let snapshot = recording.snapshot();
+        let chat_payload = &snapshot[1].2;
+        assert_eq!(chat_payload["run_id"], Value::String("bcn-run-1".into()));
+        assert_eq!(chat_payload["bcs_group_id"], Value::String("grp-1".into()));
+        assert!(chat_payload.get("deltaText").is_none());
+    }
+
+    #[tokio::test]
+    async fn read_loop_synthesizes_error_message_body() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"errorKind\":\"provider_error\"}\n\n";
+        let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
+        assert!(terminal, "error should close the run");
+
+        let snapshot = recording.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        let (event_type, state, payload) = &snapshot[0];
+        assert_eq!(event_type, "chat.event");
+        assert_eq!(*state, ChatEventState::Error);
+        assert_eq!(payload["run_id"], Value::String("bcn-run-err".into()));
+        assert_eq!(payload["bcs_group_id"], Value::String("grp-1".into()));
+        assert_eq!(payload["errorMessage"], "engine crashed");
+        assert_eq!(payload["errorKind"], "provider_error");
+        assert_eq!(payload["message"]["content"][0]["text"], "engine crashed");
+    }
+
+    #[tokio::test]
+    async fn read_loop_falls_back_from_blank_error_message_body() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: chat\nid: 1\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"state\":\"error\",\"errorMessage\":\"engine crashed\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"   \"}],\"timestamp\":0}}\n\n";
+        let terminal = run_sse_text_for_test(sse, "bcn-run-err", "grp-1", "bot-1", &flow).await;
+        assert!(terminal, "error should close the run");
+
+        let snapshot = recording.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        let payload = &snapshot[0].2;
+        assert_eq!(payload["errorMessage"], "engine crashed");
+        assert_eq!(payload["message"]["content"][0]["text"], "engine crashed");
+    }
+
+    #[tokio::test]
+    async fn crlf_frame_separators_are_split() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        // CRLF line endings AND CRLF-CRLF frame separators across the byte path.
+        let sse = "event: agent\r\nid: 1\r\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\r\n\r\n\
+event: chat\r\nid: 2\r\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\r\n\r\n";
+
+        // Drive through the real byte splitter (find_frame_sep) to exercise CRLF.
+        let mut dedup = SeqDedup::default();
+        let mut lag = LagTracker::default();
+        let session: Option<String> = None;
+        let mut buf = sse.as_bytes().to_vec();
+        let mut terminal = false;
+        while let Some((idx, sep_len)) = find_frame_sep(&buf) {
+            let frame: Vec<u8> = buf.drain(..idx + sep_len).collect();
+            if let Some(true) = drive_frame_bytes(
+                &frame,
+                "bcn-run-1",
+                "grp-1",
+                "bot-1",
+                &session,
+                u64::MAX,
+                &mut dedup,
+                &mut lag,
+                &flow,
+                None,
+            )
+            .await
+            {
+                terminal = true;
+                break;
+            }
+        }
+        assert!(terminal);
+        assert_eq!(
+            recording.pairs(),
+            vec![
+                ("agent".to_string(), ChatEventState::Delta),
+                ("chat.event".to_string(), ChatEventState::Final),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn dedupe_works_without_sse_id_using_payload_seq() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        // No `id:` lines at all — dedupe must come from StreamEvent.seq (#4).
+        let sse = "event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
+event: agent\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
+event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\":\"b\"}\n\n";
+        run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
+        // Second seq=1 is a duplicate and dropped: only two accepts.
+        assert_eq!(
+            recording.pairs(),
+            vec![
+                ("agent".to_string(), ChatEventState::Delta),
+                ("agent".to_string(), ChatEventState::Delta),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_end_without_terminal_synthesizes_error() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let resp = sse_response(
+            "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n",
+        )
+        .await;
+        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx {
+            deadline_ms: u64::MAX,
+        });
+        stream_and_drive(
+            resp,
+            "bcn-run-1".into(),
+            "bot-1".into(),
+            flow.clone(),
+            ctx,
+            None,
+        )
+        .await;
+        let pairs = recording.pairs();
+        // thinking delta, then a synthesized chat error terminal.
+        assert_eq!(
+            pairs,
+            vec![
+                ("agent".to_string(), ChatEventState::Delta),
+                ("chat.event".to_string(), ChatEventState::Error),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn approval_frame_closes_run_unsupported() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"approval\",\"phase\":\"requested\",\"kind\":\"exec\"}\n\n";
+        let terminal = run_sse_text_for_test(sse, "bcn-run-1", "grp-1", "bot-1", &flow).await;
+        assert!(terminal, "approval gate must close the run");
+        assert_eq!(
+            recording.pairs(),
+            vec![("chat.event".to_string(), ChatEventState::Error)]
+        );
+    }
+
+    #[tokio::test]
+    async fn past_deadline_frames_are_dropped_before_ingest() {
+        // A run whose deadline is already in the past must not ingest any frame:
+        // the per-frame guard (#2) drops every frame + WARNs before ingest.
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n\
+event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[],\"timestamp\":0}}\n\n";
+        // deadline_ms = 0 is always in the past relative to now_ms().
+        let terminal =
+            run_sse_text_with_deadline(sse, "bcn-run-1", "grp-1", "bot-1", 0, &flow).await;
+        assert!(!terminal, "expired run must not report a terminal");
+        assert!(
+            recording.pairs().is_empty(),
+            "no frame may be ingested past the run deadline"
+        );
+
+        // Sanity: the very same stream with a fresh deadline ingests normally.
+        let recording_ok = Arc::new(RecordingFlow::default());
+        let flow_ok: Arc<dyn ProviderEventIngestService> = recording_ok.clone();
+        let terminal_ok =
+            run_sse_text_with_deadline(sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok)
+                .await;
+        assert!(terminal_ok, "fresh-deadline run should close on the final");
+        assert_eq!(
+            recording_ok.pairs(),
+            vec![
+                ("agent".to_string(), ChatEventState::Delta),
+                ("chat.event".to_string(), ChatEventState::Final),
+            ]
+        );
+    }
+
+    // Helpers --------------------------------------------------------------
+    /// Build a streaming reqwest::Response from a fixed SSE body for the
+    /// `stream_and_drive` integration tests.
+    async fn sse_response(body: &'static str) -> reqwest::Response {
+        use axum::Router;
+        use axum::routing::post;
+
+        let app = Router::new().route(
+            "/sse",
+            post(move || async move {
+                axum::response::Response::builder()
+                    .header("Content-Type", "text/event-stream")
+                    .body(axum::body::Body::from(body))
+                    .unwrap()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        reqwest::Client::new()
+            .post(format!("http://{addr}/sse"))
+            .send()
+            .await
+            .unwrap()
+    }
+}

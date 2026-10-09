@@ -10,19 +10,20 @@
 # fallback above.
 /.github/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
 /docs/arch/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
+/singlebox/ @carolynli @vzvince @FreddieSun @totalfrank @pfmiles @cassiuscai @xxxxpenny @phoenixliu
 /scripts/ @carolynli @vzvince @FreddieSun @totalfrank @pfmiles @cassiuscai @xxxxpenny @phoenixliu
 /docker/ @carolynli @vzvince @FreddieSun @totalfrank @pfmiles @cassiuscai @xxxxpenny @phoenixliu
-/src/bcs/ @carolynli @vzvince @questchaos @RaymondHX
-/src/frontend/ @zoii @ClaaaaaaaaaireR @greenishzyy
-/src/bcsfuse/ @archer910517-ctrl @wienyang @xianmuyq
-/src/backend/ @totalfrank @xianmuyq @FreddieSun
-/src/engine/ @totalfrank @xianmuyq @FreddieSun
-/src/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
-/src/proxy/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
-/src/gateway/ @cassiuscai @xxxxpenny @totalfrank @liveandevil @vzvince
-/src/evolverun/ @archer910517-ctrl @wienyang @fudp @3h-william @ZhaosenLin @XIEAN99
+/apps/bcs/ @carolynli @vzvince @questchaos @RaymondHX
+/apps/frontend/ @zoii @ClaaaaaaaaaireR @greenishzyy
+/apps/bcsfuse/ @archer910517-ctrl @wienyang @xianmuyq
+/apps/backend/ @totalfrank @xianmuyq @FreddieSun
+/engine/adapter/ @totalfrank @xianmuyq @FreddieSun
+/apps/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
+/apps/proxy/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
+/apps/gateway/ @cassiuscai @xxxxpenny @totalfrank @liveandevil @vzvince
+/apps/evolverun/ @archer910517-ctrl @wienyang @fudp @3h-william @ZhaosenLin @XIEAN99
 
 # Task goal-driven execution framework — dedicated owners.
-/src/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627
+/apps/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627
+/apps/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627
+/apps/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627

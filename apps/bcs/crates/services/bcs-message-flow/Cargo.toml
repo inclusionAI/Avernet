@@ -1,0 +1,49 @@
+[package]
+name = "bcs-message-flow"
+description = "Message and chat flow orchestration service for BCS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-observability = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true }
+
+bcs-domain = { workspace = true }
+bcs-channel-api = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-chat-run-store = { workspace = true }
+bcs-cache-api = { workspace = true }
+bcs-protocol = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+# The integration suite uses the composition root's SQLite migration runner.
+sha2 = { workspace = true }
+hex = { workspace = true }
+bcs-system-message = { workspace = true }
+bcs-bot = { workspace = true }
+bcs-event-store = { workspace = true }
+tracing-subscriber = { workspace = true }
+bcs-message-store = { workspace = true }
+bcs-test-support = { workspace = true }
+bcs-cache-local = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
+bcs-group-store = { workspace = true }

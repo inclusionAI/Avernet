@@ -4,7 +4,7 @@
 
 这份文档说明如何在本机控制 Avernet local stack（BCS、本地 5 个 OpenClaw demo bot 和前端），辅助开发和联调。以下命令默认都在仓库根目录执行。
 
-当前主入口是 `./scripts/singlebox.sh`；`./scripts/standalone.sh` 只作为兼容 wrapper 保留，不作为主入口讲解。
+当前主入口是 `./singlebox/singlebox.sh`；`./scripts/standalone.sh` 只作为兼容 wrapper 保留，不作为主入口讲解。
 
 如果这是你第一次看 Avernet，建议先读 [README.zh-CN.md](../README.zh-CN.md)。
 如果只想看工具依赖，请看 [dependencies.zh-CN.md](dependencies.zh-CN.md)。
@@ -14,10 +14,10 @@
 
 | 入口 | 适合谁 | 做什么 |
 | --- | --- | --- |
-| `./scripts/singlebox.sh` | 日常本机开发、首次试跑用户 | 使用仓库内隔离 runtime 启动 BAAS、backend、BCS、5 个 OpenClaw demo bot、demo bot 和前端。 |
-| `./scripts/singlebox.sh --standalone` | 兼容旧文档或旧脚本 | 默认隔离 singlebox 模式的显式别名。 |
-| `./scripts/singlebox.sh check` | 只想先做预检的用户 | 检查所需工具、源码目录和端口；不安装、不构建、不启动、不停止进程。 |
-| `./scripts/singlebox.sh install-tools` | 希望脚本辅助安装依赖的用户 | 检查并安装缺失工具。可能写入用户目录或调用本机包管理器，执行前请确认可以接受。 |
+| `./singlebox/singlebox.sh` | 日常本机开发、首次试跑用户 | 使用仓库内隔离 runtime 启动 BAAS、backend、BCS、5 个 OpenClaw demo bot、demo bot 和前端。 |
+| `./singlebox/singlebox.sh --standalone` | 兼容旧文档或旧脚本 | 默认隔离 singlebox 模式的显式别名。 |
+| `./singlebox/singlebox.sh check` | 只想先做预检的用户 | 检查所需工具、源码目录和端口；不安装、不构建、不启动、不停止进程。 |
+| `./singlebox/singlebox.sh install-tools` | 希望脚本辅助安装依赖的用户 | 检查并安装缺失工具。可能写入用户目录或调用本机包管理器，执行前请确认可以接受。 |
 
 当前 `all` 组会启动 BAAS、backend、BCS、5 个本地 OpenClaw demo bot、demo bot 和 frontend。默认配置下，BCS 启动时会拉起 5 个本地 OpenClaw demo bot，并通过 BCN 插件接入 BCS。
 
@@ -63,7 +63,7 @@ USE_CN_MIRROR=1
 先做预检：
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 `check` 当前检查 BCS / frontend 预检项：Cargo / `protoc`、Node.js 主版本、npm、源码目录和端口。它不会安装依赖、构建代码、启动服务、停止进程，也不会提前检查 5bot 启动脚本里的 OpenClaw / `jq`。
@@ -73,7 +73,7 @@ USE_CN_MIRROR=1
 也可以让脚本辅助安装工具：
 
 ```bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ```
 
 `install-tools` 可能安装 Node.js、uv、OpenClaw、Rust/Cargo、protobuf/protoc，并写入用户目录或调用本机包管理器。当前脚本会在安装 OpenClaw、Rust/Cargo、protobuf/protoc 前询问确认；Node.js 缺失或版本过低时会通过 nvm 安装 Node.js 22，uv 缺失时会尝试通过 `pip` 或官方安装脚本安装。
@@ -83,7 +83,7 @@ USE_CN_MIRROR=1
 预检通过后，启动默认隔离路径：
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 首次启动会安装前端依赖、构建 BCS / bcs-cli / bcs-admin、构建并链接 BCN 插件，然后启动 BAAS、backend、BCS、5 个 OpenClaw demo bot、demo bot 和前端。完成后访问：
@@ -99,8 +99,8 @@ http://127.0.0.1:8000/
 BCS runtime、OpenClaw profile、workspace 和插件 link 默认都放在仓库内隔离目录：
 
 ```bash
-./scripts/singlebox.sh check
-./scripts/singlebox.sh
+./singlebox/singlebox.sh check
+./singlebox/singlebox.sh
 ```
 
 `--standalone` 仍可作为默认模式的显式兼容写法。默认路径不写入真实 `~/.openclaw`。
@@ -169,13 +169,13 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 查看整体状态：
 
 ```bash
-./scripts/singlebox.sh status
+./singlebox/singlebox.sh status
 ```
 
 查看隔离路径的状态：
 
 ```bash
-./scripts/singlebox.sh status
+./singlebox/singlebox.sh status
 ```
 
 ## 8. 常用操作
@@ -183,19 +183,19 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 停止默认隔离路径：
 
 ```bash
-./scripts/singlebox.sh stop
+./singlebox/singlebox.sh stop
 ```
 
 重启默认隔离路径：
 
 ```bash
-./scripts/singlebox.sh restart
+./singlebox/singlebox.sh restart
 ```
 
 清理 BCS 中间状态：
 
 ```bash
-./scripts/singlebox.sh clean bcs
+./singlebox/singlebox.sh clean bcs
 ```
 
 `clean bcs` 会先停止 BCS 和本地 5bot stack，然后清理 BCS SQLite 数据、生成配置、PID 文件和本仓库 BCN plugin symlink。普通 `start` / `restart` 不会默认清理 `bcs.db*` 或 bot workspace。
@@ -236,7 +236,7 @@ test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 如果插件产物不存在，重新执行：
 
 ```bash
-./scripts/singlebox.sh setup bcs
+./singlebox/singlebox.sh setup bcs
 ```
 
 ### Bot 没有全部接入
@@ -279,7 +279,7 @@ FRONTEND_PORT=<可用的前端端口>
 也可以在启动时显式传入：
 
 ```bash
-./scripts/singlebox.sh --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
+./singlebox/singlebox.sh --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
 ```
 
 如果是 5bot 端口被占用，可以在当前 shell 或 `.env.local` 中启用自动选择：

@@ -1,0 +1,2038 @@
+import { strict as assert } from 'node:assert';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import plugin, { bcsPlugin, registerBcsCore, setBcsRuntime } from '../src/index.js';
+import { getDefaultBcsUrl, listAccountIds, resolveAccount } from '../src/accounts.js';
+import {
+  abortAllStreams,
+  cleanupAgentEventsSubscription,
+  combineDeliveredReplyParts,
+  handleChatAbort,
+  handleChatInject,
+  handleChatSend,
+  handleBcsRouteTool,
+  initAgentEventsSubscription,
+  rememberTaskToolSession,
+  resolveChatRunId,
+  resolveEngineSessionPeerId,
+  resolveInboundSender,
+  resolveGroupIdFromSessionKey,
+  setInboundMediaFactBuilderForTest,
+} from '../src/inbound-handler.js';
+import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const noop = () => undefined;
+type RegisteredToolFactory = (ctx: Record<string, unknown>) => unknown;
+
+function listSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const fullPath = join(dir, entry);
+    if (statSync(fullPath).isDirectory()) {
+      files.push(...listSourceFiles(fullPath));
+    } else if (fullPath.endsWith('.ts')) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+describe('openclaw-channel-bcn', () => {
+  it('stages a pure file message from HTTP and uses facts-first media when available', async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), 'bcn-inbound-file-'));
+    const savedPath = join(mediaDir, 'design.pdf');
+    let inboundContext: Record<string, unknown> | undefined;
+    let dispatched = false;
+    const responses: Array<{ ok: boolean }> = [];
+    const client = {
+      sendResponse(_id: string, ok: boolean) {
+        responses.push({ ok });
+      },
+      sendEvent() {},
+    };
+    setInboundMediaFactBuilderForTest(items => ({ facts: items }));
+    setBcsRuntime({
+      config: { async loadConfig() { return {}; } },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            return {
+              buffer: Buffer.from('pdf-content'),
+              contentType: 'application/pdf',
+              fileName: 'design.pdf',
+            };
+          },
+          async saveMediaBuffer(buffer: Buffer) {
+            writeFileSync(savedPath, buffer);
+            return { path: savedPath, size: buffer.length, contentType: 'application/pdf' };
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            inboundContext = ctx;
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            dispatched = true;
+            await dispatcherOptions.deliver({ text: 'done' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() { return join(mediaDir, 'sessions.json'); },
+          async recordInboundSession() { return undefined; },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-file-facts',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
+          channel: { source: 'dingtalk', user_id: 'user-1' },
+          session_context: {},
+          message: { role: 'user', content: [], timestamp: Date.now() },
+          attachments: [{
+            attachment_id: 'att-file',
+            type: 'file',
+            file_name: 'design.pdf',
+            mime_type: 'application/pdf',
+            size: 11,
+            url: 'http://download.example/temporary-token',
+          }],
+        },
+      }, client as any, {
+        accountId: 'default',
+        enabled: true,
+        bcsUrl: 'ws://bcs.test/ws/bot',
+        botId: 'bot-1',
+        botName: 'Bot 1',
+        capabilities: { summary: '', domains: [], skills: [], scopes: [] },
+        heartbeatIntervalMs: 60000,
+        reconnectIntervalMs: 5000,
+        connectionTimeoutMs: 10000,
+      });
+
+      assert.equal(responses[0]?.ok, true);
+      assert.equal(dispatched, true);
+      assert.equal(inboundContext?.Body, '');
+      assert.deepEqual(inboundContext?.media, {
+        facts: [{
+          path: savedPath,
+          contentType: 'application/pdf',
+          messageId: 'att-file',
+        }],
+      });
+      assert.equal('MediaPath' in (inboundContext ?? {}), false);
+      assert.equal(JSON.stringify(inboundContext).includes('temporary-token'), false);
+    } finally {
+      setInboundMediaFactBuilderForTest(undefined);
+      await rm(mediaDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves the upstream BCS run id with backward-compatible fallbacks', () => {
+    assert.equal(resolveChatRunId('request-run', ' upstream-run '), 'upstream-run');
+    assert.equal(resolveChatRunId(' request-run ', undefined), 'request-run');
+    assert.match(
+      resolveChatRunId(undefined, '  '),
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('uses the canonical BCS session id as the OpenClaw route peer for protocol v3', () => {
+    const channelSessionId = 'bcs_grp_dingtalk_dm_x:channel_dingtalk_abcdef12';
+    assert.equal(
+      resolveEngineSessionPeerId({
+        session_key: channelSessionId,
+        bcs_group_id: 'bcs_grp_dingtalk_dm_x',
+        bcs_session_id: channelSessionId,
+      }, 'onboarding-bot'),
+      channelSessionId,
+    );
+    assert.equal(
+      resolveEngineSessionPeerId({
+        session_key: 'group:bcs_grp',
+        bcs_group_id: 'bcs_grp_dingtalk_dm_x',
+      }, 'onboarding-bot'),
+      'bcs_grp_dingtalk_dm_x',
+    );
+  });
+
+  it('keeps the legacy From value while using actor identity for sender metadata', async () => {
+    const inboundContexts: Array<Record<string, unknown>> = [];
+    const client = {
+      sendResponse() {},
+      sendEvent() {},
+    };
+    const account = {
+      accountId: 'default',
+      botId: 'bot-1',
+    } as ResolvedBcsAccount;
+    setBcsRuntime({
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            inboundContexts.push(ctx);
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            await dispatcherOptions.deliver({ text: 'done' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-sender-test';
+          },
+          async recordInboundSession() {
+            throw new Error('stop after capturing inbound context');
+          },
+        },
+      },
+    } as any);
+
+    const params = {
+      bcs_group_id: 'group-1',
+      bcs_session_id: 'group-1:session-1',
+      channel: {
+        source: 'api',
+        user_id: 'legacy-channel-name',
+        actor_id: 'bot-11',
+        actor_name: 'Current Actor',
+      },
+      session_context: {
+        from: 'legacy-session-name',
+      },
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '[from:Legacy Prefix]hello' }],
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-sender-send',
+        method: 'chat.send',
+        params,
+      }, client as any, account);
+      await handleChatInject({
+        type: 'req',
+        id: 'chat-sender-inject',
+        method: 'chat.inject',
+        params,
+      }, client as any, account);
+
+      assert.equal(inboundContexts.length, 2);
+      for (const inboundContext of inboundContexts) {
+        assert.equal(inboundContext.From, 'bcs:Legacy Prefix');
+        assert.equal(inboundContext.SenderName, 'Current Actor');
+        assert.equal(inboundContext.SenderId, 'bot-11');
+      }
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('uses BCS actor identity for OpenClaw sender metadata', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:Apple]ALL Hi',
+        {
+          source: 'api',
+          user_id: 'Apple',
+          actor_id: 'human_001',
+          actor_name: 'Apple',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: 'Apple(human_001)',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'ALL Hi',
+        },
+      ),
+      {
+        fromDisplayName: 'Apple',
+        senderName: 'Apple',
+        senderId: 'human_001',
+        strippedText: 'ALL Hi',
+      },
+    );
+
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: '研发',
+          actor_id: 'bot_11b77a19',
+          actor_name: '研发',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          from_bot_owner: '001',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('does not treat a legacy Human display name as SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        'hello',
+        { source: 'api', user_id: 'Apple' },
+      ),
+      {
+        fromDisplayName: 'Apple',
+        senderName: 'Apple',
+        senderId: undefined,
+        strippedText: 'hello',
+      },
+    );
+  });
+
+  it('uses opted-in Channel user identity for OpenClaw sender metadata', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        'hello',
+        {
+          source: 'dingtalk',
+          user_id: '410025',
+          actor_id: 'human_410025',
+          actor_name: '张三',
+          identity_forwarding: true,
+        },
+      ),
+      {
+        fromDisplayName: '张三',
+        senderName: '张三',
+        senderId: '410025',
+        strippedText: 'hello',
+      },
+    );
+
+    assert.equal(
+      resolveInboundSender('hello', {
+        source: 'dingtalk',
+        user_id: '410025',
+        actor_id: 'human_410025',
+        actor_name: '张三',
+        identity_forwarding: false,
+      }).senderId,
+      'human_410025',
+    );
+  });
+
+  it('uses legacy from_bot_id as the Bot SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        { source: 'api', user_id: '研发' },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('ignores malformed non-string sender fields without throwing', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: 101,
+          actor_id: { value: 'human_001' },
+          actor_name: false,
+        } as never,
+        { from_bot_id: 101 } as never,
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: undefined,
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('resolves default and named BCS accounts', () => {
+    const cfg = {
+      channels: {
+        bcs: {
+          bcsUrl: 'ws://localhost:21000/ws/bot',
+          botId: 'primary-bot',
+          botName: 'Primary Bot',
+          accounts: {
+            secondary: {
+              botId: 'secondary-bot',
+            },
+          },
+        },
+      },
+    };
+
+    assert.deepEqual(listAccountIds(cfg), [ 'default', 'secondary' ]);
+
+    const primary = resolveAccount(cfg);
+    assert.equal(primary.accountId, 'default');
+    assert.equal(primary.bcsUrl, 'ws://localhost:21000/ws/bot');
+    assert.equal(primary.botId, 'primary-bot');
+    assert.equal(primary.botName, 'Primary Bot');
+
+    const secondary = resolveAccount(cfg, 'secondary');
+    assert.equal(secondary.accountId, 'secondary');
+    assert.equal(secondary.botId, 'secondary-bot');
+    assert.equal(secondary.botName, 'Primary Bot');
+  });
+
+  it('does not fall back to internal BCS endpoints in the public package', () => {
+    const originalBcsUrl = process.env.BCS_URL;
+    const originalAgentClawEnv = process.env.AGENTCLAW_ENV;
+    const originalEnv = process.env.env;
+
+    delete process.env.BCS_URL;
+    process.env.AGENTCLAW_ENV = 'pre';
+    process.env.env = 'pre';
+
+    try {
+      assert.equal(getDefaultBcsUrl(), '');
+      assert.equal(resolveAccount({}).bcsUrl, '');
+    } finally {
+      if (originalBcsUrl === undefined) {
+        delete process.env.BCS_URL;
+      } else {
+        process.env.BCS_URL = originalBcsUrl;
+      }
+      if (originalAgentClawEnv === undefined) {
+        delete process.env.AGENTCLAW_ENV;
+      } else {
+        process.env.AGENTCLAW_ENV = originalAgentClawEnv;
+      }
+      if (originalEnv === undefined) {
+        delete process.env.env;
+      } else {
+        process.env.env = originalEnv;
+      }
+    }
+  });
+
+  it('does not resolve Cookie authentication from public config or environment', () => {
+    const originalBcsCookie = process.env.BCS_COOKIE;
+    process.env.BCS_COOKIE = 'session=env-secret';
+
+    try {
+      const cfg = {
+        channels: {
+          bcs: {
+            bcsUrl: 'ws://localhost:21000/ws/bot',
+            cookie: 'session=cfg-secret',
+            accounts: {
+              secondary: {
+                cookie: 'session=account-secret',
+              },
+            },
+          },
+        },
+      };
+
+      assert.equal('cookie' in resolveAccount(cfg), false);
+      assert.equal('cookie' in resolveAccount(cfg, 'secondary'), false);
+    } finally {
+      if (originalBcsCookie === undefined) {
+        delete process.env.BCS_COOKIE;
+      } else {
+        process.env.BCS_COOKIE = originalBcsCookie;
+      }
+    }
+  });
+
+  it('resolves BCS DM policy and allowlist from channel config', () => {
+    const cfg = {
+      channels: {
+        bcs: {
+          bcsUrl: 'ws://localhost:21000/ws/bot',
+          dmPolicy: 'allowlist',
+          allowFrom: [ 'alice', 'Bob' ],
+        },
+      },
+    };
+    const account = resolveAccount(cfg) as any;
+
+    assert.equal(account.dmPolicy, 'allowlist');
+    assert.deepEqual(account.allowFrom, [ 'alice', 'Bob' ]);
+    assert.deepEqual((bcsPlugin.config as any).resolveAllowFrom({ cfg }), [ 'alice', 'Bob' ]);
+    assert.deepEqual((bcsPlugin.security as any).resolveDmPolicy(account), {
+      policy: 'allowlist',
+      allowFrom: [ 'alice', 'Bob' ],
+    });
+  });
+
+  it('registers the BCS channel plugin and stores runtime', () => {
+    const runtime = {
+      marker: 'runtime',
+    };
+    let registeredChannel: unknown;
+    let registeredTool: unknown;
+
+    plugin.register({
+      runtime,
+      registerChannel(payload: unknown) {
+        registeredChannel = payload;
+      },
+      registerTool(tool: unknown) {
+        registeredTool = tool;
+      },
+      on: noop,
+    } as any);
+
+    // registerChannel receives bcsPlugin directly (ChannelPlugin type)
+    assert.equal((registeredChannel as any)?.id, 'bcs');
+    assert.ok(typeof registeredTool === 'function', 'bcs_route tool factory should be registered');
+    assert.equal(resolveGroupIdFromSessionKey('missing-session'), undefined);
+    setBcsRuntime(runtime as any);
+  });
+
+  it('declares every registered agent tool in the OpenClaw manifest contract', () => {
+    const registeredToolNames: string[] = [];
+    const manifest = JSON.parse(
+      readFileSync(join(__dirname, '..', 'openclaw.plugin.json'), 'utf8'),
+    ) as {
+      contracts?: {
+        tools?: string[];
+      };
+    };
+
+    plugin.register({
+      runtime: {},
+      registerChannel: noop,
+      registerTool(tool: unknown, opts?: { name?: string; names?: string[] }) {
+        registeredToolNames.push(
+          ...(opts?.names ?? []),
+          ...(opts?.name ? [ opts.name ] : []),
+        );
+        if (typeof tool === 'object' && tool && 'name' in tool && typeof tool.name === 'string') {
+          registeredToolNames.push(tool.name);
+        }
+      },
+      on: noop,
+    } as any);
+
+    const declaredTools = new Set(manifest.contracts?.tools ?? []);
+    const missingTools = [ ...new Set(registeredToolNames) ]
+      .filter(name => !declaredTools.has(name))
+      .sort();
+
+    assert.deepEqual(missingTools, []);
+    assert.equal(declaredTools.has('hitl_request'), false);
+  });
+
+  it('requires a ws version with the known close reason fix', () => {
+    const pkg = JSON.parse(
+      readFileSync(join(__dirname, '..', 'package.json'), 'utf8'),
+    ) as {
+      dependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      openclaw?: { compat?: { pluginApi?: string } };
+    };
+
+    assert.equal(pkg.dependencies?.ws, '^8.18.3');
+    assert.equal(pkg.peerDependencies?.openclaw, '>=2026.3.28');
+    assert.equal(pkg.openclaw?.compat?.pluginApi, '>=2026.3.28');
+  });
+
+  it('does not ship internal-only integrations or endpoints in public source files', () => {
+    const forbidden = [
+      'hitl',
+      'SECBAAS',
+      'humanloop',
+      'function.alipay.com',
+      'AGENTCLAW_SANDBOX',
+      'tc_sdb_nenv',
+      'bcs.example.com',
+      'env-detect',
+    ];
+    const matches: string[] = [];
+
+    for (const file of listSourceFiles(join(__dirname, '..', 'src'))) {
+      const content = readFileSync(file, 'utf-8');
+      for (const token of forbidden) {
+        if (content.includes(token)) {
+          matches.push(`${file.slice(join(__dirname, '..').length + 1)}:${token}`);
+        }
+      }
+    }
+
+    assert.deepEqual(matches, []);
+  });
+
+  it('warns once when plugin loads without channels.bcs.bcsUrl configured', async () => {
+    const warnings: string[] = [];
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {
+            channels: {
+              bcs: {
+                enabled: true,
+              },
+            },
+          };
+        },
+      },
+    };
+
+    plugin.register({
+      runtime,
+      logging: {
+        getLogger() {
+          return {
+            warn(message: string) {
+              warnings.push(message);
+            },
+          };
+        },
+      },
+      registerChannel: noop,
+      registerTool: noop,
+      on: noop,
+    } as any);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /plugin loaded, but BCS channel runtime did not start/i);
+    assert.match(warnings[0], /channels\.bcs\.bcsUrl/);
+
+    plugin.register({
+      runtime,
+      logging: {
+        getLogger() {
+          return {
+            warn(message: string) {
+              warnings.push(message);
+            },
+          };
+        },
+      },
+      registerChannel: noop,
+      registerTool: noop,
+      on: noop,
+    } as any);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(warnings.length, 1, 'warning should only be emitted once');
+  });
+
+  it('does not register internal HITL tools or before_tool_call hooks in the public package', () => {
+    const registeredToolNames: string[] = [];
+    const registeredEvents: string[] = [];
+
+    plugin.register({
+      runtime: {},
+      registerChannel: noop,
+      registerTool(tool: unknown, opts?: { name?: string; names?: string[] }) {
+        registeredToolNames.push(
+          ...(opts?.names ?? []),
+          ...(opts?.name ? [ opts.name ] : []),
+        );
+        if (typeof tool === 'object' && tool && 'name' in tool && typeof tool.name === 'string') {
+          registeredToolNames.push(tool.name);
+        }
+      },
+      on(eventName: string) {
+        registeredEvents.push(eventName);
+      },
+    } as any);
+
+    assert.deepEqual(
+      [ ...new Set(registeredToolNames) ].sort(),
+      [ 'bcs_assign_task', 'bcs_route', 'bcs_send_task_message', 'bcs_task_complete' ].sort(),
+    );
+    assert.equal(registeredEvents.includes('before_tool_call'), false);
+  });
+
+  it('aborts an exact run, fences late terminals, and keeps idempotent tombstones', async () => {
+    const responses: Array<{
+      id: string;
+      ok: boolean;
+      payload?: Record<string, unknown>;
+      error?: Record<string, unknown>;
+    }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
+    let rejectLoad: ((error: Error) => void) | undefined;
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    const client = {
+      sendResponse(
+        id: string,
+        ok: boolean,
+        payload?: Record<string, unknown>,
+        error?: Record<string, unknown>,
+      ) {
+        responses.push({ id, ok, payload, error });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>) {
+        events.push({ event, payload });
+      },
+    };
+    setBcsRuntime({
+      config: {
+        loadConfig() {
+          return new Promise((_resolve, reject) => {
+            rejectLoad = reject;
+          });
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => { agentEventHandler = undefined; };
+        },
+      },
+    } as any);
+    initAgentEventsSubscription();
+    const account = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: { summary: '', domains: [], skills: [], scopes: [] },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    } as ResolvedBcsAccount;
+    const send = handleChatSend({
+      type: 'req',
+      id: 'send-command',
+      method: 'chat.send',
+      params: {
+        idempotency_key: 'run-exact',
+        session_key: 'session-1',
+        bcs_session_id: 'session-1',
+        bcs_group_id: 'group-1',
+        channel: { source: 'api' },
+        session_context: {},
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'work' }],
+          timestamp: Date.now(),
+        },
+      },
+    }, client as any, account);
+
+    assert.equal(responses[0]?.ok, true, 'chat.send ACK follows controller registration');
+    await handleChatAbort({
+      type: 'req', id: 'wrong-scope', method: 'chat.abort',
+      params: { session_key: 'session-other', run_id: 'run-exact' },
+    }, client as any);
+    assert.equal(responses.at(-1)?.error?.code, 'SCOPE_MISMATCH');
+
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'assistant', ts: 1,
+      data: { text: '工具前', delta: '工具前' },
+    });
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'tool', ts: 2,
+      data: { phase: 'start', toolCallId: 'tool-1', name: 'read', args: {} },
+    });
+    agentEventHandler?.({
+      runId: 'run-exact', stream: 'assistant', ts: 3,
+      data: { text: '工具前工具后未完成', delta: '工具后未完成' },
+    });
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-1', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-exact' },
+    }, client as any);
+    assert.deepEqual(responses.at(-1)?.payload?.aborted_run_ids, [ 'run-exact' ]);
+    assert.deepEqual(
+      events.filter(event => event.event === 'chat').map(event => [ event.payload.state, event.payload.content ]),
+      [[ 'delta', '工具前' ], [ 'delta', '工具后未完成' ], [ 'aborted', undefined ]],
+    );
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-repeat', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-exact' },
+    }, client as any);
+    assert.deepEqual(responses.at(-1)?.payload?.aborted_run_ids, []);
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-unknown', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-unknown' },
+    }, client as any);
+    assert.equal(responses.at(-1)?.error?.code, 'RUN_NOT_FOUND');
+
+    rejectLoad?.(new Error('stop after abort'));
+    await send;
+    assert.equal(events.filter(event => event.payload.state === 'aborted').length, 1);
+    assert.equal(events.filter(event => event.event === 'chat').length, 3);
+    cleanupAgentEventsSubscription();
+    abortAllStreams();
+  });
+
+  it('does not activate manager task tools for legacy task groups without a local bot uuid', () => {
+    const originalBotUuid = process.env.BCN_BOT_UUID;
+    delete process.env.BCN_BOT_UUID;
+    abortAllStreams();
+
+    try {
+      rememberTaskToolSession('legacy-task-session', {} as any, 'group-1', {
+        session_id: 'group-1',
+        participants: [ 'Manager(bot-manager)', 'Worker(bot-worker)' ],
+        originator: 'Manager(bot-manager)',
+        from: 'Manager(bot-manager)',
+        you_are_mentioned: true,
+        is_sender: false,
+        mentions: [ 'Worker' ],
+        message: 'task',
+        group_type: 'manager_worker',
+      });
+
+      const factories = new Map<string, RegisteredToolFactory>();
+      registerBcsCore({
+        runtime: {},
+        registerChannel: noop,
+        registerTool(tool: unknown, opts?: { name?: string }) {
+          if (typeof tool === 'function' && opts?.name) {
+            factories.set(opts.name, tool as RegisteredToolFactory);
+          }
+        },
+        on: noop,
+      } as any, { warnWhenMissingBcsUrl: false });
+
+      const ctx = { messageChannel: 'bcs', sessionKey: 'legacy-task-session' };
+      assert.equal(factories.get('bcs_assign_task')?.(ctx), null);
+      assert.equal(factories.get('bcs_task_complete')?.(ctx), null);
+    } finally {
+      abortAllStreams();
+      if (originalBotUuid === undefined) {
+        delete process.env.BCN_BOT_UUID;
+      } else {
+        process.env.BCN_BOT_UUID = originalBotUuid;
+      }
+    }
+  });
+
+  it('exposes BCS channel metadata', () => {
+    assert.equal(plugin.id, 'openclaw-channel-bcn');
+    assert.equal(bcsPlugin.id, 'bcs');
+    assert.equal(bcsPlugin.meta.label, 'BCS');
+    assert.equal(bcsPlugin.capabilities.media, true);
+  });
+
+  it('does not synthesize a fallback reply when OpenClaw returns no text', () => {
+    assert.equal(combineDeliveredReplyParts([]), undefined);
+    assert.equal(combineDeliveredReplyParts([ '  ', '' ]), undefined);
+    assert.equal(combineDeliveredReplyParts([ 'first', 'second' ]), 'first\n\nsecond');
+  });
+
+  it('builds chat deltas and final from assistant agent events', async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), 'bcn-inbound-image-'));
+    const savedImagePath = join(mediaDir, 'diagram.png');
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    const fetchCalls: any[] = [];
+    const saveCalls: any[] = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let capturedReplyOptions: Record<string, unknown> | undefined;
+    let capturedInboundContext: Record<string, unknown> | undefined;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        media: {
+          async fetchRemoteMedia(options: any) {
+            fetchCalls.push(options);
+            return {
+              buffer: Buffer.from([ 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a ]),
+              contentType: 'image/png',
+              fileName: 'diagram.png',
+            };
+          },
+          async saveMediaBuffer(...args: any[]) {
+            saveCalls.push(args);
+            writeFileSync(savedImagePath, 'stored-image');
+            return {
+              path: savedImagePath,
+              size: 3,
+              contentType: 'image/png',
+            };
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            capturedInboundContext = ctx;
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
+            capturedReplyOptions = replyOptions;
+            const runId = replyOptions.runId;
+            agentEventHandler?.({
+              runId,
+              stream: 'thinking',
+              ts: 0,
+              data: { delta: 'planning' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 1,
+              data: { text: 'snapshot: before tool', delta: 'before tool' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'tool',
+              ts: 2,
+              data: { phase: 'start', toolCallId: 'tool-1', name: 'read', args: { path: '/tmp/a' } },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 3,
+              data: { text: 'snapshot: before tool after first tool draft', delta: '\nafter first tool draft' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 4,
+              data: { text: '\nafter first tool', delta: '', replace: true },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'tool',
+              ts: 5,
+              data: {
+                phase: 'result',
+                toolCallId: 'tool-1',
+                name: 'read',
+                result: { content: [{ type: 'text', text: 'ok' }] },
+                isError: false,
+              },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 6,
+              data: { text: 'ignored snapshot without delta' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 7,
+              data: { text: 'ignored empty delta snapshot', delta: '' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 8,
+              data: { text: 'snapshot: before tool after first tool final answer', delta: '\nfinal answer' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 9,
+              data: { phase: 'end' },
+            });
+            await dispatcherOptions.deliver({ text: 'stale dispatcher block' }, { kind: 'block' });
+            await dispatcherOptions.deliver({ text: 'stale dispatcher final' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    const request: RequestFrame = {
+      type: 'req',
+      id: 'chat-1',
+      method: 'chat.send',
+      params: {
+        idempotency_key: 'upstream-run-1',
+        bcs_group_id: 'group-1',
+        bcs_session_id: 'group-1:session-1',
+        channel: { source: 'api', user_id: 'user-1' },
+        session_context: {},
+        message: {
+          role: 'user',
+          content: [],
+          timestamp: Date.now(),
+        },
+        attachments: [{
+          attachment_id: 'att-1',
+          type: 'image',
+          file_name: 'diagram.png',
+          url: 'https://download.dingtalk.example/temporary-image-token',
+        }],
+      },
+    };
+
+    try {
+      await handleChatSend(request, client as any, account);
+
+      assert.equal(responses.length, 1);
+      assert.equal(responses[0].ok, true);
+      const runId = responses[0].payload?.run_id;
+      assert.equal(runId, 'upstream-run-1');
+      assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
+      assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
+      assert.equal(capturedInboundContext?.Body, '[Image: diagram.png]');
+      assert.equal(capturedInboundContext?.SenderName, 'user-1');
+      assert.equal(capturedInboundContext?.SenderId, undefined);
+      assert.equal(capturedInboundContext?.MediaPath, savedImagePath);
+      assert.equal(capturedInboundContext?.MediaType, 'image/png');
+      assert.deepEqual(capturedInboundContext?.MediaPaths, [ savedImagePath ]);
+      assert.deepEqual(capturedInboundContext?.MediaTypes, [ 'image/png' ]);
+      assert.equal(capturedInboundContext?.MediaUrl, undefined);
+      assert.equal(capturedInboundContext?.MediaUrls, undefined);
+      assert.equal(fetchCalls.length, 1);
+      assert.equal(fetchCalls[0].url, 'https://download.dingtalk.example/temporary-image-token');
+      assert.equal(fetchCalls[0].filePathHint, 'diagram.png');
+      assert.equal(fetchCalls[0].maxBytes, 20 * 1024 * 1024);
+      assert.equal(fetchCalls[0].maxRedirects, 3);
+      assert.ok(fetchCalls[0].requestInit.signal instanceof AbortSignal);
+      assert.deepEqual(saveCalls[0].slice(1), [
+        'image/png',
+        'inbound',
+        20 * 1024 * 1024,
+        'diagram.png',
+      ]);
+      assert.equal(existsSync(savedImagePath), false);
+      const agentEvents = events.filter(item => item.event === 'agent');
+      assert.equal(agentEvents.length, 10);
+      const thinkingEvent = agentEvents.find(item => item.payload.stream === 'thinking');
+      assert.equal(thinkingEvent?.payload.deltaText, 'planning');
+      assert.equal(thinkingEvent?.payload.delta, undefined);
+      const toolEvents = agentEvents.filter(item => item.payload.stream === 'tool');
+      assert.deepEqual(toolEvents.map(item => item.payload.phase), [ 'start', 'result' ]);
+      assert.deepEqual(toolEvents.map(item => item.payload.name), [ 'read', 'read' ]);
+      assert.deepEqual(toolEvents.map(item => item.payload.toolCallId), [ 'tool-1', 'tool-1' ]);
+      assert.deepEqual(toolEvents[0].payload.args, { path: '/tmp/a' });
+      assert.deepEqual(toolEvents[1].payload.result, { content: [{ type: 'text', text: 'ok' }] });
+      assert.equal(toolEvents[1].payload.isError, false);
+      assert.equal(toolEvents.some(item => 'data' in item.payload), false);
+      const chatEvents = events.filter(item => item.event === 'chat');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
+      assert.deepEqual(
+        chatEvents.map(item => item.payload.content),
+        [
+          'before tool',
+          '\nafter first tool',
+          '\nfinal answer',
+          'before tool\nafter first tool\nfinal answer',
+        ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [ runId, runId, runId, runId ]);
+      assert.deepEqual(
+        chatEvents.map(item => item.payload.sessionId),
+        [
+          'group-1:session-1',
+          'group-1:session-1',
+          'group-1:session-1',
+          'group-1:session-1',
+        ],
+      );
+      assert.equal(chatEvents.some(item => 'message' in item.payload || 'deltaText' in item.payload), false);
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+      await rm(mediaDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an oversized downloaded image before starting an agent run', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let routeResolved = false;
+    let replyDispatched = false;
+    let mediaSaved = false;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    setBcsRuntime({
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            throw Object.assign(new Error('must not be exposed'), { code: 'max_bytes' });
+          },
+          async saveMediaBuffer() {
+            mediaSaved = true;
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            routeResolved = true;
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher() {
+            replyDispatched = true;
+          },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-image-too-large',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'analyze this image' }],
+            timestamp: Date.now(),
+          },
+          attachments: [{
+            attachment_id: 'att-too-large',
+            type: 'image',
+            file_name: 'large.png',
+            url: 'https://download.dingtalk.example/large-image-token',
+          }],
+        },
+      }, client as any, {
+        accountId: 'default',
+        botId: 'bot-1',
+      } as any);
+
+      assert.equal(responses.length, 1);
+      assert.equal(responses[0].ok, true);
+      assert.equal(typeof responses[0].payload?.run_id, 'string');
+      assert.equal(routeResolved, false);
+      assert.equal(replyDispatched, false);
+      assert.equal(mediaSaved, false);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].event, 'chat');
+      assert.equal(events[0].payload.state, 'error');
+      assert.equal(
+        events[0].payload.content,
+        'The attached image exceeds the 20 MB limit.',
+      );
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('rejects non-image bytes even when the URL and MIME claim PNG', async () => {
+    const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
+    let routeResolved = false;
+    const client = {
+      sendResponse() {},
+      sendEvent(event: string, payload: Record<string, unknown>) {
+        events.push({ event, payload });
+      },
+    };
+    setBcsRuntime({
+      config: { async loadConfig() { return {}; } },
+      channel: {
+        media: {
+          async fetchRemoteMedia() {
+            return {
+              buffer: Buffer.from('not an image'),
+              contentType: 'image/png',
+              fileName: 'spoofed.png',
+            };
+          },
+          async saveMediaBuffer() {
+            throw new Error('must not save spoofed content');
+          },
+        },
+        routing: {
+          resolveAgentRoute() {
+            routeResolved = true;
+          },
+        },
+      },
+    } as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-image-spoofed',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: { role: 'user', content: [], timestamp: Date.now() },
+          attachments: [{
+            attachment_id: 'att-spoofed',
+            type: 'image',
+            file_name: 'spoofed.png',
+            mime_type: 'image/png',
+            url: 'https://download.dingtalk.example/spoofed.png',
+          }],
+        },
+      }, client as any, { accountId: 'default', botId: 'bot-1' } as any);
+
+      assert.equal(routeResolved, false);
+      assert.equal(events.length, 1);
+      assert.equal(events[0].payload.state, 'error');
+      assert.equal(
+        events[0].payload.content,
+        'Unsupported image format. Supported formats are JPEG, PNG, GIF, and WebP.',
+      );
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('sends lifecycle final before dispatcher settles without duplicating final', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let releaseDispatch: (() => void) | undefined;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            const runId = replyOptions.runId;
+            agentEventHandler?.({
+              runId,
+              stream: 'assistant',
+              ts: 1,
+              data: { delta: 'reply before dispatcher completion' },
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 2,
+              data: null,
+            });
+            agentEventHandler?.({
+              runId,
+              stream: 'lifecycle',
+              ts: 3,
+              data: { phase: 'end' },
+            });
+            await new Promise<void>(resolve => {
+              releaseDispatch = resolve;
+            });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    const request: RequestFrame = {
+      type: 'req',
+      id: 'chat-lifecycle-final',
+      method: 'chat.send',
+      params: {
+        bcs_group_id: 'group-1',
+        bcs_session_id: 'group-1:session-1',
+        channel: { source: 'api', user_id: 'user-1' },
+        session_context: {},
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'finish from lifecycle' }],
+          timestamp: Date.now(),
+        },
+      },
+    };
+
+    try {
+      const pending = handleChatSend(request, client as any, account);
+      await new Promise(resolve => setImmediate(resolve));
+
+      assert.equal(responses.length, 1);
+      const runId = responses[0].payload?.run_id;
+      const chatEventsBeforeDispatchSettles = events.filter(item => item.event === 'chat');
+      assert.deepEqual(
+        chatEventsBeforeDispatchSettles.map(item => item.payload.state),
+        [ 'delta', 'final' ],
+      );
+      assert.deepEqual(
+        chatEventsBeforeDispatchSettles.map(item => item.payload.content),
+        [ 'reply before dispatcher completion', 'reply before dispatcher completion' ],
+      );
+      assert.deepEqual(chatEventsBeforeDispatchSettles.map(item => item.payload.runId), [ runId, runId ]);
+
+      const terminalLifecycleIndex = events.findIndex(
+        item => item.event === 'agent' && item.payload.stream === 'lifecycle' && item.payload.phase === 'end',
+      );
+      const terminalChatIndex = events.findIndex(
+        item => item.event === 'chat' && item.payload.state === 'final',
+      );
+      assert.ok(terminalLifecycleIndex >= 0, 'terminal lifecycle event should be forwarded');
+      assert.ok(
+        terminalLifecycleIndex < terminalChatIndex,
+        'terminal lifecycle event must precede the terminal chat frame',
+      );
+
+      assert.ok(releaseDispatch, 'dispatcher should still be waiting when lifecycle final is sent');
+      releaseDispatch();
+      await pending;
+
+      const finalEvents = events
+        .filter(item => item.event === 'chat')
+        .filter(item => item.payload.state === 'final');
+      assert.equal(finalEvents.length, 1, 'dispatcher completion must not send a duplicate final');
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+      releaseDispatch?.();
+    }
+  });
+
+  it('uses a message-less final only for tool runs without assistant text', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let dispatchCount = 0;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            dispatchCount += 1;
+            const agentRunId = `queued-agent-run-${dispatchCount}`;
+            replyOptions.onAgentRunStart(agentRunId);
+            if (dispatchCount !== 2) {
+              agentEventHandler?.({
+                runId: agentRunId,
+                sessionKey: 'bcs:group-1',
+                stream: 'tool',
+                ts: 2,
+                data: { phase: 'start', name: 'noop', toolCallId: `tool-${dispatchCount}` },
+              });
+            }
+            if (dispatchCount === 3) {
+              agentEventHandler?.({
+                runId: agentRunId,
+                sessionKey: 'bcs:group-1',
+                stream: 'assistant',
+                ts: 3,
+                data: { delta: 'NO_REPLY' },
+              });
+            }
+            agentEventHandler?.({
+              runId: agentRunId,
+              sessionKey: 'bcs:group-1',
+              stream: 'lifecycle',
+              ts: 4,
+              data: { phase: 'end' },
+            });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    function request(id: string, text: string): RequestFrame {
+      return {
+        type: 'req',
+        id,
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text }],
+            timestamp: Date.now(),
+          },
+        },
+      };
+    }
+
+    try {
+      await handleChatSend(request('chat-tool-only', 'run a tool without replying'), client as any, account);
+      await handleChatSend(request('chat-no-tool', 'finish without tool or reply'), client as any, account);
+      await handleChatSend(request('chat-tool-text', 'run a tool and mention NO_REPLY'), client as any, account);
+
+      assert.equal(responses.length, 3);
+      const runIds = responses.map(response => response.payload?.run_id);
+      const chatEvents = events.filter(item => item.event === 'chat');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final', 'final', 'delta', 'final' ]);
+      assert.equal(chatEvents[0].payload.content, undefined);
+      assert.equal(chatEvents[0].payload.stopReason, undefined);
+      assert.equal(chatEvents[1].payload.content, 'NO_REPLY');
+      assert.deepEqual(
+        chatEvents.slice(2).map(item => item.payload.content),
+        [ 'NO_REPLY', 'NO_REPLY' ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [
+        runIds[0],
+        runIds[1],
+        runIds[2],
+        runIds[2],
+      ]);
+      assert.deepEqual(
+        events.filter(item => item.event === 'agent').map(item => item.payload.stream),
+        [ 'tool', 'lifecycle', 'lifecycle', 'tool', 'assistant', 'lifecycle' ],
+      );
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+    }
+  });
+
+  it('keeps a queued run context after dispatcher settlement and binds the later agent run exactly', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    let agentEventHandler: ((evt: Record<string, unknown>) => boolean) | undefined;
+    let notifyAgentRunStart: ((runId: string) => void) | undefined;
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      events: {
+        onAgentEvent(handler: (evt: Record<string, unknown>) => boolean) {
+          agentEventHandler = handler;
+          return () => {
+            agentEventHandler = undefined;
+          };
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:queued-group' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ replyOptions }: any) {
+            notifyAgentRunStart = replyOptions.onAgentRunStart;
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+    initAgentEventsSubscription();
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-queued',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'queued-group',
+          bcs_session_id: 'queued-group:session-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'wait behind the active run' }],
+            timestamp: Date.now(),
+          },
+        },
+      }, client as any, account);
+
+      const bcsRunId = responses[0].payload?.run_id;
+      assert.equal(typeof bcsRunId, 'string');
+      assert.equal(events.filter(item => item.event === 'chat').length, 0);
+
+      agentEventHandler?.({
+        runId: 'unrelated-active-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'assistant',
+        ts: 1,
+        data: { delta: 'must not be claimed by the queued BCS run' },
+      });
+      assert.equal(events.filter(item => item.event === 'chat').length, 0);
+
+      assert.ok(notifyAgentRunStart, 'dispatcher should expose onAgentRunStart');
+      notifyAgentRunStart('actual-queued-agent-run');
+      agentEventHandler?.({
+        runId: 'actual-queued-agent-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'assistant',
+        ts: 2,
+        data: { delta: 'queued answer' },
+      });
+      agentEventHandler?.({
+        runId: 'actual-queued-agent-run',
+        sessionKey: 'bcs:queued-group',
+        stream: 'lifecycle',
+        ts: 3,
+        data: { phase: 'end' },
+      });
+
+      const chatEvents = events.filter(item => item.event === 'chat');
+      assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'final' ]);
+      assert.deepEqual(
+        chatEvents.map(item => item.payload.content),
+        [ 'queued answer', 'queued answer' ],
+      );
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [ bcsRunId, bcsRunId ]);
+      assert.deepEqual(
+        events
+          .filter(item => item.event === 'agent')
+          .map(item => item.payload.runId),
+        [ bcsRunId, bcsRunId ],
+      );
+    } finally {
+      cleanupAgentEventsSubscription();
+      abortAllStreams();
+    }
+  });
+
+  it('returns route.resolve candidates when bcs_route targets an unknown name', async () => {
+    const requests: Array<{ method: string; params: Record<string, unknown>; timeoutMs?: number }> = [];
+    const client = {
+      sendRequest(method: string, params: Record<string, unknown>, timeoutMs?: number) {
+        requests.push({ method, params, timeoutMs });
+        return Promise.resolve({
+          type: 'res',
+          id: 'route-1',
+          ok: true,
+          payload: {
+            ok: false,
+            error: 'UNKNOWN_ROUTE_TARGET',
+            message: 'No participant matched name "钻石玩家"',
+            candidates: [
+              {
+                bot_uuid: '20260604_m869qsxf:146836',
+                bot_name: 'qz的德州钻石玩家bot_v1',
+                role: 'consultant',
+              },
+            ],
+          },
+        });
+      },
+    };
+
+    try {
+      rememberTaskToolSession('route-miss-session', client as any, 'group-1', {
+        session_id: 'group-1:abcdef12',
+        participants: [ '20260604_m869qsxf:146836' ],
+        originator: '20260512_1fl0038o:437240',
+        from: '20260512_1fl0038o:437240',
+        you_are_mentioned: true,
+        is_sender: false,
+        mentions: [],
+        message: '轮到我了，先看下手牌。',
+      });
+
+      const result = await handleBcsRouteTool('run-route-miss', 'route-miss-session', {
+        to: [{ type: 'name', value: '钻石玩家' }],
+        reason: 'ask target player to respond',
+      });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'UNKNOWN_ROUTE_TARGET');
+      assert.deepEqual(result.candidates, [
+        {
+          bot_uuid: '20260604_m869qsxf:146836',
+          bot_name: 'qz的德州钻石玩家bot_v1',
+          role: 'consultant',
+        },
+      ]);
+      assert.deepEqual(requests, [
+        {
+          method: 'route.resolve',
+          params: {
+            group_id: 'group-1',
+            session_id: 'group-1:abcdef12',
+            selectors: [{ type: 'name', value: '钻石玩家' }],
+          },
+          timeoutMs: 10000,
+        },
+      ]);
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('normalizes v2 session-form bcs_group_id before route.resolve', async () => {
+    const requests: Array<{ method: string; params: Record<string, unknown>; timeoutMs?: number }> = [];
+    const client = {
+      sendRequest(method: string, params: Record<string, unknown>, timeoutMs?: number) {
+        requests.push({ method, params, timeoutMs });
+        return Promise.resolve({
+          type: 'res',
+          id: 'route-v2-session',
+          ok: true,
+          payload: {
+            ok: true,
+            resolved: [
+              {
+                type: 'bot',
+                value: 'bot-target',
+                bot_name: 'Target Bot',
+                role: 'consultant',
+              },
+            ],
+          },
+        });
+      },
+    };
+
+    try {
+      rememberTaskToolSession('route-v2-session', client as any, 'group-1:abcdef12', {
+        session_id: 'group-1',
+        participants: [ 'bot-target' ],
+        originator: 'bot-driver',
+        from: 'bot-driver',
+        you_are_mentioned: true,
+        is_sender: false,
+        mentions: [],
+        message: 'route this',
+      });
+
+      const result = await handleBcsRouteTool('run-route-v2-session', 'route-v2-session', {
+        to: [{ type: 'name', value: 'Target Bot' }],
+        reason: 'ask target to respond',
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(requests, [
+        {
+          method: 'route.resolve',
+          params: {
+            group_id: 'group-1',
+            session_id: 'group-1:abcdef12',
+            selectors: [{ type: 'name', value: 'Target Bot' }],
+          },
+          timeoutMs: 10000,
+        },
+      ]);
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('captures canonical bot selectors returned by route.resolve', async () => {
+    const client = {
+      sendRequest() {
+        return Promise.resolve({
+          type: 'res',
+          id: 'route-2',
+          ok: true,
+          payload: {
+            ok: true,
+            resolved: [
+              {
+                type: 'bot',
+                value: '20260604_m869qsxf:146836',
+                bot_name: 'qz的德州钻石玩家bot_v1',
+                role: 'consultant',
+              },
+            ],
+          },
+        });
+      },
+    };
+
+    try {
+      rememberTaskToolSession('route-hit-session', client as any, 'group-1', {
+        session_id: 'group-1:abcdef12',
+        participants: [ '20260604_m869qsxf:146836' ],
+        originator: '20260512_1fl0038o:437240',
+        from: '20260512_1fl0038o:437240',
+        you_are_mentioned: true,
+        is_sender: false,
+        mentions: [],
+        message: '轮到我了，先看下手牌。',
+      });
+
+      const result = await handleBcsRouteTool('run-route-hit', 'route-hit-session', {
+        to: [{ type: 'name', value: 'qz的德州钻石玩家bot_v1' }],
+        reason: 'ask exact target to respond',
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.captured, true);
+      assert.deepEqual(result.resolved, [
+        {
+          type: 'bot',
+          value: '20260604_m869qsxf:146836',
+          bot_name: 'qz的德州钻石玩家bot_v1',
+          role: 'consultant',
+        },
+      ]);
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('deduplicates and caps accumulated bcs_route intents on the final chat event', async () => {
+    const responses: Array<{ id: string; ok: boolean; payload?: Record<string, unknown> }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown>; seq: number }> = [];
+    const client = {
+      sendResponse(id: string, ok: boolean, payload?: Record<string, unknown>) {
+        responses.push({ id, ok, payload });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>, seq: number) {
+        events.push({ event, payload, seq });
+      },
+      sendRequest(_method: string, params: Record<string, unknown>) {
+        const selector = (params.selectors as Array<{ value: string }>)[0];
+        return Promise.resolve({
+          type: 'res',
+          id: 'route-limit',
+          ok: true,
+          payload: {
+            ok: true,
+            resolved: [
+              {
+                type: 'bot',
+                value: selector.value,
+                bot_name: selector.value,
+              },
+            ],
+          },
+        });
+      },
+    };
+    const account: ResolvedBcsAccount = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: {
+        summary: 'test bot',
+        domains: [],
+        skills: [],
+        scopes: [],
+      },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    };
+    const runtime = {
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'route-limit-session' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions, replyOptions }: any) {
+            const runId = String(replyOptions.runId);
+            for (let index = 0; index < 25; index += 1) {
+              await handleBcsRouteTool(runId, 'route-limit-session', {
+                to: [{ type: 'bot', value: `bot-${index}` }],
+                reason: `reason-${index}-${'x'.repeat(30)}`,
+              });
+            }
+            await handleBcsRouteTool(runId, 'route-limit-session', {
+              to: [{ type: 'bot', value: 'bot-3' }],
+              reason: 'duplicate target should not grow responders',
+            });
+            await dispatcherOptions.deliver({ text: 'final answer' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-test';
+          },
+          async recordInboundSession() {
+            return undefined;
+          },
+        },
+      },
+    };
+    setBcsRuntime(runtime as any);
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-route-limit',
+        method: 'chat.send',
+        params: {
+          bcs_group_id: 'group-route-limit',
+          bcs_session_id: 'group-route-limit:session-1',
+          channel: { source: 'api', user_id: 'user-1' },
+          session_context: {},
+          message: {
+            role: 'user',
+            content: [{ type: 'text', text: 'route to many bots' }],
+            timestamp: Date.now(),
+          },
+        },
+      }, client as any, account);
+
+      assert.equal(responses[0]?.ok, true);
+      const finalEvent = events.find(item => item.payload.state === 'final');
+      const routing = finalEvent?.payload.routing as any;
+      assert.equal(routing.responders.length, 20);
+      assert.equal(new Set(routing.responders.map((item: { value: string }) => item.value)).size, 20);
+      assert.deepEqual(
+        routing.responders.map((item: { value: string }) => item.value),
+        Array.from({ length: 20 }, (_item, index) => `bot-${index}`),
+      );
+      assert.equal(routing.reason.length <= 500, true);
+    } finally {
+      abortAllStreams();
+    }
+  });
+});

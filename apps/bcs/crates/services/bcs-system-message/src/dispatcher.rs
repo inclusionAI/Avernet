@@ -1,0 +1,636 @@
+//! System-message dispatcher implementation.
+//!
+//! Routes `SystemMessageEvent`s through registered producers and delivers
+//! the resulting messages to recipients via `BotDeliveryPort`.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use bcs_domain::{
+    DeliveryType, Group, GroupStrategy, MessageAudience, MessageVisibilityDomain, NewMessage,
+    Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent,
+    SystemMessageEventKind, system_message_visibility,
+};
+use bcs_protocol::{
+    build_chat_inject_frame, build_chat_send_frame, now_ms, BcsFrame, BotDeliveryKind,
+    GroupContextInput, GroupContextParticipant,
+};
+use bcs_service_api::core::BCS_SYSTEM_MESSAGE;
+use bcs_service_api::{
+    ActiveBotRunContext, BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope, BotRunTransportOwner,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryTarget, ProviderStreamGrayList, ServiceError,
+    ServiceResult, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
+    SystemMessageProducerService, SystemMessageRecipientResult, port::repo::MessageRepoPort,
+};
+use futures::future::join_all;
+
+/// Concrete dispatcher that holds a producer registry and delivery port.
+pub struct SystemMessageDispatcherImpl {
+    producers: HashMap<SystemMessageEventKind, Box<dyn SystemMessageProducerService>>,
+    registry: Arc<dyn BotRegistryCoreService>,
+    /// Delivery port for sending inject frames to target bots.
+    delivery: Arc<dyn BotDeliveryPort>,
+    /// Delivery port for publishing events to frontend WebSocket clients.
+    frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    /// Optional run-context registry for HTTP-provider final callbacks.
+    bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    /// Fallback deadline for Provider `chat.send` runs without an explicit timeout.
+    provider_chat_run_timeout_ms: u64,
+    /// Optional message repo for persisting system messages to history.
+    message_repo: Option<Arc<dyn MessageRepoPort>>,
+    /// Deprecated compatibility setting. Provider 2.0 `chat.send` is always
+    /// SSE-first and no longer consults this gray list.
+    _provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    queue: Option<Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>>,
+}
+
+impl SystemMessageDispatcherImpl {
+    /// Return a builder for assembling the dispatcher.
+    pub fn builder() -> SystemMessageDispatcherBuilder {
+        SystemMessageDispatcherBuilder::default()
+    }
+}
+
+/// Builder for `SystemMessageDispatcherImpl`.
+#[derive(Default)]
+pub struct SystemMessageDispatcherBuilder {
+    producers: HashMap<SystemMessageEventKind, Box<dyn SystemMessageProducerService>>,
+    registry: Option<Arc<dyn BotRegistryCoreService>>,
+    delivery: Option<Arc<dyn BotDeliveryPort>>,
+    frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
+    bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    provider_chat_run_timeout_ms: Option<u64>,
+    message_repo: Option<Arc<dyn MessageRepoPort>>,
+    provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    queue: Option<Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>>,
+}
+
+impl SystemMessageDispatcherBuilder {
+    pub fn with_queue(mut self, queue: Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>) -> Self {
+        self.queue = Some(queue);
+        self
+    }
+    /// Set the bot-registry core service.
+    pub fn with_registry(mut self, registry: Arc<dyn BotRegistryCoreService>) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Set the bot-delivery port.
+    pub fn with_delivery(mut self, delivery: Arc<dyn BotDeliveryPort>) -> Self {
+        self.delivery = Some(delivery);
+        self
+    }
+
+    /// Set the frontend delivery port.
+    pub fn with_frontend_delivery(
+        mut self,
+        frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    ) -> Self {
+        self.frontend_delivery = Some(frontend_delivery);
+        self
+    }
+
+    /// Set the run-context registry used by HTTP provider callbacks.
+    pub fn with_bot_run_context(mut self, bot_run_context: Arc<dyn BotRunContextPort>) -> Self {
+        self.bot_run_context = Some(bot_run_context);
+        self
+    }
+
+    /// Set the fallback deadline for Provider `chat.send` run contexts.
+    pub fn with_provider_chat_run_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.provider_chat_run_timeout_ms = Some(timeout_ms);
+        self
+    }
+
+    /// Set the optional message repo for persisting system messages to history.
+    pub fn with_message_repo(mut self, message_repo: Arc<dyn MessageRepoPort>) -> Self {
+        self.message_repo = Some(message_repo);
+        self
+    }
+
+    /// Retain the deprecated provider SSE gray-list builder API for config
+    /// compatibility. Provider 2.0 `chat.send` no longer consults this value.
+    pub fn with_provider_stream_gray_list(
+        mut self,
+        gray_list: Arc<ProviderStreamGrayList>,
+    ) -> Self {
+        self.provider_stream_gray_list = Some(gray_list);
+        self
+    }
+
+    /// Register a producer for its declared event kind.
+    pub fn register<P: SystemMessageProducerService + 'static>(mut self, producer: P) -> Self {
+        let kind = producer.kind();
+        self.producers.insert(kind, Box::new(producer));
+        self
+    }
+
+    /// Build the dispatcher, failing if required dependencies are missing.
+    pub fn build(self) -> Result<SystemMessageDispatcherImpl, String> {
+        Ok(SystemMessageDispatcherImpl {
+            producers: self.producers,
+            registry: self.registry.ok_or("registry required")?,
+            delivery: self.delivery.ok_or("delivery required")?,
+            frontend_delivery: self.frontend_delivery.ok_or("frontend_delivery required")?,
+            bot_run_context: self.bot_run_context,
+            provider_chat_run_timeout_ms: self
+                .provider_chat_run_timeout_ms
+                .unwrap_or(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
+            message_repo: self.message_repo,
+            _provider_stream_gray_list: self.provider_stream_gray_list,
+            queue: self.queue,
+        })
+    }
+}
+
+struct PendingSystemMessageDelivery {
+    cmd: BotDeliveryCommand,
+    recipient_id: String,
+    run_id: String,
+    record_run_context: bool,
+    is_provider_send: bool,
+    delivery_type: DeliveryType,
+    group_id: String,
+    bcs_session_id: Option<String>,
+}
+
+fn request_session_key(frame: &BcsFrame) -> Option<String> {
+    let BcsFrame::Request(request) = frame else {
+        return None;
+    };
+    request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("session_key"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+async fn discard_send_context(
+    run_context: &dyn BotRunContextPort,
+    context: &ActiveBotRunContext,
+) -> ServiceResult<()> {
+    let _ = run_context.mark_terminal(&context.canonical_run_id).await;
+    run_context
+        .remove_active_run(&context.scope, &context.canonical_run_id)
+        .await?;
+    Ok(())
+}
+
+#[async_trait]
+impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
+    async fn dispatch(
+        &self,
+        event: SystemMessageEvent,
+        group: &Group,
+        session_id: &str,
+        participants: &[Participant],
+    ) -> ServiceResult<SystemMessageDispatchOutcome> {
+        let kind = event.kind();
+        tracing::info!(group_id = %group.id, event_kind = ?kind, %session_id, "dispatching system message");
+
+        let producer = self.producers.get(&kind).ok_or_else(|| {
+            ServiceError::InternalError(format!("No producer registered for kind {:?}", kind))
+        })?;
+
+        let (bot_messages, user_message) = producer
+            .produce(&event, group, self.registry.as_ref(), participants)
+            .await;
+
+        let queued = match &self.queue {
+            Some(queue) => queue.admit(group, session_id, participants, kind, &bot_messages).await?,
+            None => None,
+        };
+
+        // Persist system messages according to each message's PersistMode:
+        // - PerRecipient: one record per recipient with owner_bot_id = recipient
+        //   (personalized per-bot context, readable only in that bot's view).
+        // - Public: exactly one record with owner_bot_id = None so the notice
+        //   joins the public history that human viewers read (their history
+        //   filter is owner_bot_id IS NULL); persisted even when recipients is
+        //   empty (e.g. last bot leaving) since the event is still broadcast
+        //   to human viewers via user_message.
+        // - Skip: no record.
+        // user_message is NOT persisted (frontend-only).
+        if let Some(ref repo) = self.message_repo.as_ref().filter(|_| queued.is_none()) {
+            let mut persisted_count = 0usize;
+            let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| {
+                let (visibility_domain, audience) = system_message_visibility(
+                    group.group_strategy,
+                    kind,
+                    owner_bot_id.as_deref(),
+                );
+                NewMessage {
+                    group_id: group.id.clone(),
+                    session_id: session_id.to_string(),
+                    sender_id: "system".to_string(),
+                    sender_type: SenderType::System,
+                    message_type: "system".to_string(),
+                    content: serde_json::Value::String(msg.message.clone()),
+                    client_msg_id: None,
+                    owner_bot_id,
+                    created_at: now_ms(),
+                    run_id: String::new(),
+                    visibility_domain,
+                    audience,
+                }
+            };
+            for msg in &bot_messages {
+                let records: Vec<NewMessage> = match msg.persist {
+                    PersistMode::Skip => vec![],
+                    PersistMode::Public => vec![new_record(msg, None)],
+                    PersistMode::PerRecipient => msg
+                        .recipients
+                        .iter()
+                        .map(|recipient| new_record(msg, Some(recipient.clone())))
+                        .collect(),
+                };
+                for new_msg in records {
+                    repo.append_message(new_msg).await.map_err(|error| ServiceError::InternalError(format!("system message persistence failed: {error}")))?;
+                    persisted_count += 1;
+                }
+            }
+            tracing::info!(group_id = %group.id, count = persisted_count, "system message persisted");
+        }
+        let protocol_group = group_context_input(group, session_id);
+        let group_type = group_type_wire(group.group_strategy);
+
+        let mut total = 0usize;
+        let mut success = 0usize;
+        let mut failed = 0usize;
+        let queued = queued.map(|outcome| outcome.recipients).unwrap_or_default();
+        let queued_keys: Vec<_> = queued.iter().map(|(index, result)| (*index, result.recipient_id.clone())).collect();
+        let mut results: Vec<_> = queued.into_iter().map(|(_, result)| result).collect();
+        let mut commands = Vec::new();
+        for (index, msg) in bot_messages.iter().enumerate() {
+            for recipient in &msg.recipients {
+                total += 1;
+                if queued_keys.iter().any(|(i, id)| *i == index && id == recipient) { continue; }
+                let run_id = uuid::Uuid::new_v4().to_string();
+                let target = match self.registry.resolve_delivery_target(recipient).await {
+                    Ok(target) => target,
+                    Err(error) => {
+                        tracing::warn!(
+                            %recipient,
+                            error = %error,
+                            "system message target resolution failed"
+                        );
+                        results.push(SystemMessageRecipientResult {
+                            recipient_id: recipient.clone(),
+                            run_id,
+                            delivery_type: msg.delivery_type,
+                            delivery_id: None,
+                            delivered: false,
+                            error: Some(error),
+                        });
+                        continue;
+                    }
+                };
+                let protocol_version = frame_protocol_version(
+                    self.registry.get_protocol_version(recipient).await,
+                    &target,
+                );
+                let provider_tags = if target.is_http_provider() {
+                    participants
+                        .iter()
+                        .find(|participant| participant.bot_uuid == *recipient)
+                        .map(|participant| participant.tags.as_slice())
+                        .unwrap_or(&[])
+                } else {
+                    &[]
+                };
+                let (frame, delivery_kind) = match msg.delivery_type {
+                    DeliveryType::Send => (
+                        build_chat_send_frame(
+                            &run_id,
+                            &group.id,
+                            &protocol_group,
+                            &msg.message,
+                            BCS_SYSTEM_MESSAGE,
+                            BCS_SYSTEM_MESSAGE,
+                            &[],
+                            recipient,
+                            provider_tags,
+                            &None,
+                            &None,
+                            false,
+                            protocol_version,
+                            None,
+                            group_type.clone(),
+                            Some(session_id),
+                        ),
+                        BotDeliveryKind::Send,
+                    ),
+                    DeliveryType::Inject => (
+                        build_chat_inject_frame(
+                            &run_id,
+                            &group.id,
+                            &protocol_group,
+                            &msg.message,
+                            BCS_SYSTEM_MESSAGE,
+                            BCS_SYSTEM_MESSAGE,
+                            &[],
+                            recipient,
+                            provider_tags,
+                            &None,
+                            false,
+                            protocol_version,
+                            None,
+                            group_type.clone(),
+                            Some(session_id),
+                        ),
+                        BotDeliveryKind::Inject,
+                    ),
+                };
+                commands.push(PendingSystemMessageDelivery {
+                    recipient_id: recipient.clone(),
+                    run_id: run_id.clone(),
+                    record_run_context: msg.delivery_type == DeliveryType::Send,
+                    is_provider_send: msg.delivery_type == DeliveryType::Send
+                        && target.is_http_provider(),
+                    delivery_type: msg.delivery_type,
+                    group_id: group.id.clone(),
+                    bcs_session_id: Some(session_id.to_string()),
+                    cmd: BotDeliveryCommand {
+                        target,
+                        run_id,
+                        frame,
+                        delivery_kind,
+                        provider_transport: Default::default(),
+                        provider_bypass_headers: Vec::new(),
+                    },
+                });
+            }
+        }
+
+        let delivery = self.delivery.clone();
+        let bot_run_context = self.bot_run_context.clone();
+        let provider_chat_run_timeout_ms = self.provider_chat_run_timeout_ms;
+        let delivery_outcomes = join_all(commands.into_iter().map(|cmd| {
+            let recipient = cmd.recipient_id.clone();
+            let delivery = delivery.clone();
+            let bot_run_context = bot_run_context.clone();
+            async move {
+                let is_provider_send = cmd.is_provider_send;
+                let active_context = if cmd.record_run_context {
+                    if let Some(run_context) = bot_run_context.as_ref() {
+                        let deadline_ms =
+                            now_ms().saturating_add(provider_chat_run_timeout_ms);
+                        let session_id = cmd
+                            .bcs_session_id
+                            .clone()
+                            .unwrap_or_else(|| cmd.group_id.clone());
+                        run_context
+                            .put_context(BotRunContext {
+                                run_id: cmd.run_id.clone(),
+                                bot_id: recipient.clone(),
+                                group_id: cmd.group_id.clone(),
+                                bcs_session_id: Some(session_id.clone()),
+                                deadline_ms,
+                                terminal: false,
+                            })
+                            .await;
+                        let transport_owner = match &cmd.cmd.target {
+                            BotDeliveryTarget::WebSocket { .. } => {
+                                BotRunTransportOwner::WebSocket
+                            }
+                            BotDeliveryTarget::HttpProvider {
+                                provider_id,
+                                provider_bot_ref,
+                                ..
+                            } => BotRunTransportOwner::HttpProvider {
+                                provider_id: provider_id.clone(),
+                                provider_bot_ref: provider_bot_ref.clone(),
+                            },
+                        };
+                        let context = ActiveBotRunContext {
+                            canonical_run_id: cmd.run_id.clone(),
+                            downstream_run_id: cmd.run_id.clone(),
+                            downstream_session_key: request_session_key(&cmd.cmd.frame),
+                            scope: BotRunScope {
+                                group_id: cmd.group_id.clone(),
+                                session_id,
+                                bot_id: recipient.clone(),
+                            },
+                            transport_owner,
+                            provider_bypass_headers: cmd.cmd.provider_bypass_headers.clone(),
+                            deadline_ms,
+                        };
+                        if let Err(error) = run_context.register_active_run(context.clone()).await {
+                            let _ = run_context.mark_terminal(&cmd.run_id).await;
+                            return (
+                                SystemMessageRecipientResult {
+                                    recipient_id: recipient,
+                                    run_id: cmd.run_id,
+                                    delivery_type: cmd.delivery_type,
+                                    delivery_id: None,
+                                    delivered: false,
+                                    error: Some(error),
+                                },
+                                is_provider_send,
+                            );
+                        }
+                        Some(context)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let (delivered, mut error) = match delivery.deliver(cmd.cmd).await {
+                    Ok(r) => (r.delivered, r.error),
+                    Err(e) => {
+                        tracing::warn!(%recipient, error = %e, "system message delivery failed");
+                        (false, Some(e))
+                    }
+                };
+                if !delivered {
+                    if let (Some(run_context), Some(context)) =
+                        (bot_run_context.as_ref(), active_context.as_ref())
+                    {
+                        if let Err(cleanup_error) =
+                            discard_send_context(run_context.as_ref(), context).await
+                        {
+                            tracing::warn!(
+                                %recipient,
+                                error = %cleanup_error,
+                                "failed to discard system message run context"
+                            );
+                            if error.is_none() {
+                                error = Some(cleanup_error);
+                            }
+                        }
+                    }
+                }
+                if !delivered && error.is_none() {
+                    error = Some(ServiceError::InternalError("delivery failed".to_string()));
+                }
+                let provider_delivery_failed = is_provider_send && !delivered;
+                (
+                    SystemMessageRecipientResult {
+                        recipient_id: recipient,
+                        run_id: cmd.run_id,
+                        delivery_type: cmd.delivery_type,
+                        delivery_id: None,
+                        delivered,
+                        error,
+                    },
+                    provider_delivery_failed,
+                )
+            }
+        }))
+        .await;
+        let provider_delivery_failed = delivery_outcomes
+            .iter()
+            .any(|(_, provider_delivery_failed)| *provider_delivery_failed);
+        results.extend(delivery_outcomes.into_iter().map(|(result, _)| result));
+
+        for r in &results {
+            if r.accepted() {
+                success += 1;
+            } else {
+                failed += 1;
+            }
+        }
+
+        // Publish the user-facing text to frontend WebSocket clients (single
+        // session-level broadcast; NOT persisted). bot_messages are never
+        // broadcast to the frontend.
+        if let Some(content) = user_message.filter(|s| !s.trim().is_empty()) {
+            let visibility_domain = match group.group_strategy {
+                GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+                GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+                GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+            };
+            let audience = (visibility_domain != MessageVisibilityDomain::Chat)
+                .then_some(MessageAudience::Public);
+            let event_json = build_frontend_system_event_frame(&group.id, &content, session_id);
+            let target = FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            };
+            if let Err(e) = self
+                .frontend_delivery
+                .publish(FrontendDeliveryCommand {
+                    target,
+                    event_json,
+                    delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                    run_fallback: None,
+                    exclude_conn_id: None,
+                    visibility_domain,
+                    audience,
+                })
+                .await
+            {
+                tracing::warn!(
+                    group_id = %group.id, %session_id, error = %e,
+                    "system message frontend delivery failed"
+                );
+            }
+        }
+        if provider_delivery_failed {
+            let content = "消息投递失败，请稍后重试。";
+            let event_json = build_frontend_system_event_frame(&group.id, content, session_id);
+            let target = FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            };
+            let visibility_domain = match group.group_strategy {
+                GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+                GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+                GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+            };
+            let audience = (visibility_domain != MessageVisibilityDomain::Chat)
+                .then_some(MessageAudience::Public);
+            if let Err(e) = self
+                .frontend_delivery
+                .publish(FrontendDeliveryCommand {
+                    target,
+                    event_json,
+                    delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                    run_fallback: None,
+                    exclude_conn_id: None,
+                    visibility_domain,
+                    audience,
+                })
+                .await
+            {
+                tracing::warn!(
+                    group_id = %group.id, %session_id, error = %e,
+                    "provider delivery failure notice delivery failed"
+                );
+            }
+        }
+
+        tracing::info!(
+            group_id = %group.id,
+            event_kind = ?kind,
+            total_recipients = total,
+            successful = success,
+            failed = failed,
+            "system message dispatch complete"
+        );
+
+        Ok(SystemMessageDispatchOutcome {
+            total_recipients: total,
+            successful_deliveries: success,
+            failed_deliveries: failed,
+            recipient_results: results,
+        })
+    }
+}
+
+/// Build the frontend JSON event frame for a system message.
+/// Follows the exact format used by `group_flow.rs::publish_group_callback_event`.
+fn build_frontend_system_event_frame(group_id: &str, content: &str, session_id: &str) -> String {
+    bcs_protocol::frontend::build_frontend_system_event_frame(
+        group_id, content, session_id, BCS_SYSTEM_MESSAGE,
+        &uuid::Uuid::new_v4().to_string(), now_ms(),
+    )
+}
+
+fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
+    if target.is_http_provider() {
+        protocol_version.max(3)
+    } else {
+        protocol_version
+    }
+}
+
+fn group_context_input(group: &Group, session_id: &str) -> GroupContextInput {
+    GroupContextInput {
+        session_id: group.id.clone(),
+        driver_bot: group.driver_bot.clone(),
+        originator: group.originator().to_string(),
+        participants: group
+            .participants
+            .iter()
+            .map(|participant| GroupContextParticipant {
+                id: participant.bot_uuid.clone(),
+                name: participant.bot_name.clone(),
+                role: Some(
+                    match participant.role {
+                        bcs_domain::ParticipantRole::Driver => "driver",
+                        bcs_domain::ParticipantRole::Consultant => "consultant",
+                        bcs_domain::ParticipantRole::Manager => "manager",
+                        bcs_domain::ParticipantRole::Worker => "worker",
+                        bcs_domain::ParticipantRole::Observer => "observer",
+                    }
+                    .to_string(),
+                ),
+                is_bot: participant.is_bot(),
+            })
+            .collect(),
+        bcs_session_id: Some(session_id.to_string()),
+    }
+}
+
+fn group_type_wire(strategy: GroupStrategy) -> Option<String> {
+    match strategy {
+        GroupStrategy::ManagerWorker => Some("manager_worker".to_string()),
+        GroupStrategy::StateMachine => Some("state_machine".to_string()),
+        GroupStrategy::Chat => None,
+    }
+}

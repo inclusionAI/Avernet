@@ -1,0 +1,981 @@
+"""Tests for local_k8s Arca sandbox plugin."""
+
+from __future__ import annotations
+
+import json
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+import yaml
+
+from secbaas.community.api.device_manage import (
+    ArcaCredentials,
+    HeaderOperationRule,
+    OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
+    ResourceSpecification,
+)
+from secbaas.community.plugins.sandbox.arca.local_k8s import (
+    LocalK8sArcaSandbox,
+    LocalK8sArcaSandboxPlugin,
+)
+from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+    LocalK8sClientManager,
+    _convert_outbound_rules,
+    _image_pull_policy,
+    _use_incluster_config,
+)
+from secbaas.community.spi.sandbox.arca import ArcaSandboxInfo
+
+
+def _make_credentials(**overrides: object) -> ArcaCredentials:
+    defaults = {
+        "template_id": 1,
+        "template_uuid": "tpl-test",
+        "tenant_name": "test-tenant",
+        "base_url": "",
+        "api_key": "",
+    }
+    defaults.update(overrides)
+    return ArcaCredentials(**defaults)
+
+
+class TestOutboundRulesConversion:
+    def test_overlapping_domain_groups_emit_one_rule_per_domain(self) -> None:
+        """Overlapping groups must not produce duplicate Envoy domains."""
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["a.example.com", "b.example.com"],
+                    action="set",
+                    header_name="X-A",
+                    value="value-a",
+                ),
+                HeaderOperationRule(
+                    domains=["b.example.com", "c.example.com"],
+                    action="set",
+                    header_name="X-B",
+                    value="value-b",
+                ),
+            ]
+        )
+
+        rendered = yaml.safe_load(_convert_outbound_rules(rule))
+        assert [item["domains"] for item in rendered["rules"]] == [
+            ["a.example.com"],
+            ["b.example.com"],
+            ["c.example.com"],
+        ]
+        assert rendered["rules"][1]["set"] == [
+            {"header": "X-A", "value": "value-a"},
+            {"header": "X-B", "value": "value-b"},
+        ]
+
+
+@pytest.fixture
+def mock_client():
+    return MagicMock()
+
+
+@pytest.fixture
+def plugin(mock_client):
+    # Plugin now reads local_k8s params from env vars.
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "LOCAL_K8S_NAMESPACE": "default",
+                "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                "LOCAL_K8S_CONTAINER_PORT": "8080",
+                "LOCAL_K8S_OUTBOUND_RULE": "",
+            },
+            clear=False,
+        ),
+        patch(
+            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+            return_value="apiVersion: v1\nkind: Config",
+        ),
+    ):
+        plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+        plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+        yield plugin
+
+
+class TestLocalK8sPluginCreate:
+    """Tests for create_sync_sandbox."""
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_returns_sandbox(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """Plugin should create Deployment + Service and return a sandbox."""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "tpl-test-abc-12345-xyz12"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        sandbox = plugin.create_sync_sandbox(
+            template_id="openclaw-default",
+            envs={"FOO": "bar"},
+            resource_spec=ResourceSpecification(cpu=1, memory=2),
+            image="custom-image:tag",
+        )
+
+        assert isinstance(sandbox, LocalK8sArcaSandbox)
+        # ConfigMap was created
+        mock_core.create_namespaced_config_map.assert_called_once()
+        # Deployment was created
+        mock_apps.create_namespaced_deployment.assert_called_once()
+        # Service was created
+        mock_core.create_namespaced_service.assert_called_once()
+        # Pod was polled
+        assert mock_core.list_namespaced_pod.call_count >= 1
+
+        # Verify service type is NodePort
+        svc = mock_core.create_namespaced_service.call_args[1]["body"]
+        assert svc.spec.type == "NodePort"
+
+        # Deployment has bot-runtime and envoy-sidecar
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        container_names = [c.name for c in deployment.spec.template.spec.containers]
+        assert container_names == ["bot-runtime", "envoy-sidecar"]
+        sidecar = deployment.spec.template.spec.containers[1]
+        assert sidecar.env[0].name == "HEADER_RULES"
+        assert sidecar.env[0].value == "/etc/sidecar/header-rules/header-rules.yaml"
+        assert sidecar.volume_mounts[0].mount_path == "/etc/sidecar/header-rules"
+        assert not sidecar.volume_mounts[0].sub_path
+        volumes = deployment.spec.template.spec.volumes
+        assert len(volumes) == 1
+        assert volumes[0].config_map.name.startswith("envoy-header-rules-")
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_nodeport_uses_service(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        mock_client,
+    ) -> None:
+        """NodePort mode should create a NodePort Service."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                    "LOCAL_K8S_NODE_PORT": "30080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "bot-pod"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            plugin.create_sync_sandbox(template_id="openclaw-default")
+
+        svc = mock_core.create_namespaced_service.call_args[1]["body"]
+        assert svc.spec.type == "NodePort"
+        assert svc.spec.ports[0].node_port == 30080
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_uses_outbound_rule_from_env(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """LOCAL_K8S_OUTBOUND_RULE 应作为入参 fallback 写入 ConfigMap。"""
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Token",
+                    value="secret",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": rule.model_dump_json()},
+            clear=False,
+        ):
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "bot-pod"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            plugin.create_sync_sandbox(template_id="openclaw-default")
+
+        configmap = mock_core.create_namespaced_config_map.call_args[1]["body"]
+        yaml_text = configmap.data["header-rules.yaml"]
+        assert "example.com" in yaml_text
+        assert "X-Token" in yaml_text
+        assert "secret" in yaml_text
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_outbound_rule_arg_overrides_env(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """入参 outbound_operation_rule 优先级高于 LOCAL_K8S_OUTBOUND_RULE。"""
+        env_rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["env.example.com"],
+                    action="set",
+                    header_name="X-Env",
+                    value="env",
+                )
+            ]
+        )
+        arg_rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["arg.example.com"],
+                    action="set",
+                    header_name="X-Arg",
+                    value="arg",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": env_rule.model_dump_json()},
+            clear=False,
+        ):
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "bot-pod"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            plugin.create_sync_sandbox(
+                template_id="openclaw-default",
+                outbound_operation_rule=arg_rule,
+            )
+
+        configmap = mock_core.create_namespaced_config_map.call_args[1]["body"]
+        yaml_text = configmap.data["header-rules.yaml"]
+        assert "arg.example.com" in yaml_text
+        assert "X-Arg" in yaml_text
+        assert "env.example.com" not in yaml_text
+
+    def test_connect_sync_sandbox_preserves_sidecar_container(
+        self,
+        plugin,
+        mock_client,
+    ) -> None:
+        """重连时也要保留 sidecar 容器名，供原地刷新使用。"""
+        with patch.object(
+            LocalK8sArcaSandboxPlugin,
+            "_find_pod_name",
+            return_value="bot-pod",
+        ):
+            sandbox = plugin.connect_sync_sandbox("tpl-test-abc")
+        assert sandbox._sidecar_container_name == "envoy-sidecar"
+
+    def test_create_sync_sandbox_missing_image_raises(self, mock_client) -> None:
+        """Missing image should raise ValueError."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_IMAGE": "",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            with pytest.raises(ValueError, match="requires an image"):
+                plugin.create_sync_sandbox(template_id="openclaw-default")
+
+
+class TestLocalK8sPluginResolve:
+    """Tests for connection info resolution."""
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_resolve_ws_nodeport_reads_assigned_port(
+        self,
+        mock_core_cls,
+        mock_client,
+    ) -> None:
+        """nodeport mode reads auto-assigned NodePort."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30081)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_ws_conn_info(
+                paas_device_id="tpl-test-abc",
+                port=8080,
+                path="/api/openclaw/ws",
+            )
+
+        assert conn.ws_url == "ws://localhost:30081/api/openclaw/ws"
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_resolve_http_nodeport(
+        self,
+        mock_core_cls,
+        mock_client,
+    ) -> None:
+        """HTTP connection resolves to localhost via NodePort."""
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.ports = [MagicMock(node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_http_connection_info(
+                paas_device_id="tpl-test-abc", port=8080, path="/health"
+            )
+
+        assert conn.http_url == "http://localhost:30082/health"
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_resolve_http_incluster_uses_cluster_ip_and_service_port(
+        self,
+        mock_core_cls,
+        mock_client,
+    ) -> None:
+        """In-cluster backend calls must not use localhost/NodePort.
+
+        The backend pod cannot reach a bot runtime through the host's
+        localhost NodePort, so the connection info must use the runtime
+        Service's ClusterIP and port. Otherwise OpenAPI engine-backed routes
+        surface the transport failure as a generic 502.
+        """
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_KUBECONFIG": "in-cluster",
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=True,
+            ),
+        ):
+            plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
+            plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
+
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+            mock_svc = MagicMock()
+            mock_svc.spec.cluster_ip = "10.96.42.7"
+            mock_svc.spec.ports = [MagicMock(port=8080, node_port=30082)]
+            mock_core.read_namespaced_service.return_value = mock_svc
+
+            conn = plugin.resolve_http_connection_info(
+                paas_device_id="tpl-test-abc", port=8080, path="/health"
+            )
+
+        assert conn.http_url == "http://10.96.42.7:8080/health"
+        assert conn.target == "10.96.42.7:8080"
+
+
+class TestImagePullPolicy:
+    """Tests for `_image_pull_policy` default behavior based on image tag."""
+
+    @pytest.mark.parametrize(
+        ("image", "expected"),
+        [
+            ("avernet-engine:latest", "Always"),
+            ("avernet-engine", "Always"),
+            ("registry.local:5000/avernet-engine:latest", "Always"),
+            ("registry.local:5000/avernet-engine", "Always"),
+            ("avernet-engine:1.2.3", "IfNotPresent"),
+            ("registry.local:5000/avernet-engine:1.2.3", "IfNotPresent"),
+        ],
+    )
+    def test_default_policy_depends_on_tag(self, image: str, expected: str) -> None:
+        """latest or missing tag defaults to Always; explicit tag defaults to IfNotPresent."""
+        with patch.dict(os.environ, {}, clear=True):
+            assert _image_pull_policy(image) == expected
+
+    @pytest.mark.parametrize(
+        ("image", "env_policy", "expected"),
+        [
+            ("avernet-engine:latest", "IfNotPresent", "IfNotPresent"),
+            ("avernet-engine:1.2.3", "Always", "Always"),
+            ("avernet-engine:latest", "Never", "Never"),
+        ],
+    )
+    def test_explicit_env_policy_overrides_default(
+        self, image: str, env_policy: str, expected: str
+    ) -> None:
+        """LOCAL_K8S_IMAGE_PULL_POLICY is respected regardless of image tag."""
+        with patch.dict(
+            os.environ, {"LOCAL_K8S_IMAGE_PULL_POLICY": env_policy}, clear=True
+        ):
+            assert _image_pull_policy(image) == expected
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_deployment_uses_expected_policy(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """End-to-end: create_sync_sandbox applies the resolved policy to containers."""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        with patch.dict(os.environ, {}, clear=False):
+            plugin.create_sync_sandbox(
+                template_id="openclaw-default",
+                image="custom-image:latest",
+            )
+
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        bot_container = deployment.spec.template.spec.containers[0]
+        sidecar_container = deployment.spec.template.spec.containers[1]
+        assert bot_container.image_pull_policy == "Always"
+        assert sidecar_container.image_pull_policy == "Always"
+
+
+class _FakeWsClient:
+    """模拟 kubernetes WSClient，仅实现 _exec_in_container 用到的接口。"""
+
+    def __init__(self, error_channel: str = "") -> None:
+        self._error_channel = error_channel
+
+    def run_forever(self, timeout: float | None = None) -> None:
+        pass
+
+    def is_open(self) -> bool:
+        return False
+
+    def read_channel(self, channel: int, timeout: float | None = 0) -> str:
+        if channel == 3:  # kubernetes.stream.ws_client.ERROR_CHANNEL
+            data, self._error_channel = self._error_channel, ""
+            return data
+        return ""
+
+    def read_stdout(self, timeout: float | None = None) -> str:
+        return ""
+
+    def read_stderr(self, timeout: float | None = None) -> str:
+        return ""
+
+
+class TestLocalK8sSandbox:
+    """Tests for LocalK8sArcaSandbox."""
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox.LocalK8sArcaSandbox._read_pod"
+    )
+    def test_get_info_returns_running(self, mock_read_pod, mock_client) -> None:
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.status.pod_ip = "10.42.0.10"
+        mock_read_pod.return_value = mock_pod
+
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            resources=ResourceSpecification(cpu=1, memory=2),
+        )
+
+        info = sandbox.get_info()
+        assert isinstance(info, ArcaSandboxInfo)
+        assert info.status == "Running"
+        assert info.is_ready is True
+        assert info.metadata["pod_ip"] == "10.42.0.10"
+        assert info.metadata["ip_addr"] == "10.42.0.10"
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_destroy_deletes_resources(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        mock_client,
+    ) -> None:
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+
+        assert sandbox.destroy() is True
+        mock_apps.delete_namespaced_deployment.assert_called_once()
+        mock_core.delete_namespaced_service.assert_called_once()
+        mock_core.delete_namespaced_config_map.assert_called_once()
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_refreshes_sidecar_without_rolling_deployment(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        mock_client,
+    ) -> None:
+        """出站规则更新只刷新 envoy sidecar，不滚动 Deployment。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        sandbox._exec_in_container = MagicMock(return_value=MagicMock(exit_code=0))
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+
+        mock_core = mock_core_cls.return_value
+        mock_core.patch_namespaced_config_map.assert_called_once()
+        mock_apps_cls.assert_not_called()
+
+        exec_calls = sandbox._exec_in_container.call_args_list
+        assert len(exec_calls) == 2
+        assert all(
+            call.kwargs["container_name"] == "envoy-sidecar" for call in exec_calls
+        )
+        assert any("quitquitquit" in arg for arg in exec_calls[0].kwargs["command"])
+        assert any("ready" in arg for arg in exec_calls[1].kwargs["command"])
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_empty_rule(self, mock_core_cls, mock_client) -> None:
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        sandbox._exec_in_container = MagicMock(return_value=MagicMock(exit_code=0))
+        assert sandbox.update_outbound_rule(None, MagicMock()) is True
+
+    @patch("kubernetes.stream.stream")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_exec_in_container_returns_readable_error_on_container_not_found(
+        self, mock_core_cls, mock_stream, mock_client
+    ) -> None:
+        """容器重启空窗期 exec 应返回可读错误，而不是让 ValueError 逃逸。"""
+        message = (
+            'unable to upgrade connection: container not found ("envoy-sidecar")'
+        )
+        mock_stream.return_value = _FakeWsClient(
+            error_channel=json.dumps(
+                {
+                    "kind": "Status",
+                    "status": "Failure",
+                    "message": message,
+                    "details": {"causes": [{"message": message}]},
+                }
+            )
+        )
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+
+        result = sandbox._exec_in_container(
+            container_name="envoy-sidecar",
+            command=["curl", "-fsS", "http://127.0.0.1:38081/ready"],
+        )
+
+        assert result.exit_code == -1
+        assert "container not found" in result.stderr
+
+    @patch("kubernetes.stream.stream")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_exec_in_container_parses_nonzero_exit_code(
+        self, mock_core_cls, mock_stream, mock_client
+    ) -> None:
+        """常规失败：causes[0].message 为数字退出码时应原样返回。"""
+        mock_stream.return_value = _FakeWsClient(
+            error_channel=json.dumps(
+                {
+                    "kind": "Status",
+                    "status": "Failure",
+                    "message": "command terminated with non-zero exit code",
+                    "details": {"causes": [{"message": "42"}]},
+                }
+            )
+        )
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+
+        result = sandbox._exec_in_container(
+            container_name="bot-runtime",
+            command=["/bin/sh", "-c", "exit 42"],
+        )
+
+        assert result.exit_code == 42
+        assert result.stderr == ""
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_tolerates_sidecar_restart_window(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """重启空窗期 quitquitquit 报 container not found 时应继续等待就绪。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        not_found = MagicMock(
+            exit_code=-1,
+            stdout="",
+            stderr=(
+                'unable to upgrade connection: container not found ("envoy-sidecar")'
+            ),
+        )
+        sandbox._exec_in_container = MagicMock(
+            side_effect=[not_found, MagicMock(exit_code=0)]
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+        assert sandbox._exec_in_container.call_count == 2
+
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_tolerates_sidecar_admin_not_ready(
+        self, mock_core_cls, mock_client
+    ) -> None:
+        """sidecar admin port 未就绪时 quitquitquit 报 Connection refused 应继续等待就绪。"""
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+            sidecar_container_name="envoy-sidecar",
+        )
+        refused = MagicMock(
+            exit_code=-1,
+            stdout="",
+            stderr=(
+                "curl: (7) Failed to connect to 127.0.0.1 port 38081 after 3 ms: "
+                "Connection refused"
+            ),
+        )
+        sandbox._exec_in_container = MagicMock(
+            side_effect=[refused, MagicMock(exit_code=0)]
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(rule, OutBoundOperationRuleUpdatedMode.REPLACE)
+            is True
+        )
+        assert sandbox._exec_in_container.call_count == 2
+
+
+class TestResolveOutboundRule:
+    """Tests for _resolve_outbound_rule helper."""
+
+    def test_resolve_outbound_rule_returns_none_when_missing(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert _resolve_outbound_rule() is None
+
+    def test_resolve_outbound_rule_returns_none_for_whitespace(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": "   \n  "},
+            clear=True,
+        ):
+            assert _resolve_outbound_rule() is None
+
+    def test_resolve_outbound_rule_parses_valid_json(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="remove",
+                    header_name="X-Old",
+                    value="",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": rule.model_dump_json()},
+            clear=True,
+        ):
+            resolved = _resolve_outbound_rule()
+            assert resolved is not None
+            assert resolved.header_operation_rules is not None
+            assert len(resolved.header_operation_rules) == 1
+            assert resolved.header_operation_rules[0].domains == ["example.com"]
+            assert resolved.header_operation_rules[0].action == "remove"
+
+    def test_resolve_outbound_rule_raises_on_invalid_json(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": "not-json"},
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
+                _resolve_outbound_rule()
+
+    def test_resolve_outbound_rule_raises_on_bad_schema(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "LOCAL_K8S_OUTBOUND_RULE": '{"header_operation_rules": [{"domains": 42}]}'
+            },
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
+                _resolve_outbound_rule()
+
+
+class TestInClusterConfig:
+    """Tests for ServiceAccount / in-cluster config detection."""
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=False,
+    )
+    def test_explicit_incluster_forces_true(self, _mock_isfile) -> None:
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_KUBECONFIG": "in-cluster"},
+            clear=True,
+        ):
+            assert _use_incluster_config() is True
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=True,
+    )
+    def test_auto_incluster_when_token_present(self, _mock_isfile) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert _use_incluster_config() is True
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=True,
+    )
+    def test_explicit_kubeconfig_disables_incluster(self, _mock_isfile) -> None:
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_KUBECONFIG": "/tmp/kubeconfig"},
+            clear=True,
+        ):
+            assert _use_incluster_config() is False
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=False,
+    )
+    def test_no_kubeconfig_no_token_returns_false(self, _mock_isfile) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert _use_incluster_config() is False
+
+    def test_client_manager_loads_incluster_config(self) -> None:
+        manager = LocalK8sClientManager()
+        with (
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=True,
+            ),
+            patch(
+                "kubernetes.config.load_incluster_config",
+            ) as mock_load,
+            patch(
+                "kubernetes.client.ApiClient",
+            ) as mock_api_client_cls,
+        ):
+            mock_api_client = MagicMock()
+            mock_api_client_cls.return_value = mock_api_client
+
+            client = manager.get_client("", None)
+
+            mock_load.assert_called_once()
+            mock_api_client_cls.assert_called_once()
+            assert client is mock_api_client
+            # cached on second call
+            assert manager.get_client("", None) is mock_api_client
+            mock_load.assert_called_once()

@@ -14,13 +14,13 @@ Docker 路径分为两步：
 | 组件 | 说明 |
 |---|---|
 | BCS server | Rust 写的 Bot Coordination Service，对外暴露 `:21000` |
-| 前端工作台 | 从 `src/frontend` 构建出的 Avernet 静态前端，对外暴露 `:8000` |
+| 前端工作台 | 从 `apps/frontend` 构建出的 Avernet 静态前端，对外暴露 `:8000` |
 | `bcs-cli` | 命令行工具，位于 `/opt/ocb/src/bcs/target/debug/bcs-cli` |
 | `openclaw` 全局命令 | 公网 npm 安装，方便容器内或主机端跑 OpenClaw |
 | BCN 插件 | `openclaw-channel-bcn`，从源码 build 后软链到 `/root/.openclaw/extensions/openclaw-channel-bcn`，让 OpenClaw 能连 BCS |
 | 5 个 OpenClaw 实例 | 容器启动后跑 5 个 OpenClaw demo 角色（CEO / 产品经理 / 研发 / 验证 / 客服），每个通过 BCN 插件连 BCS 并自动 onboard，监听 `:30001`/`:30011`/`:30021`/`:30031`/`:30041` |
 
-前端服务会托管构建产物 `src/frontend/dist`，并把同源 `/bcnproxy/*` 请求代理到容器内的 BCS server。
+前端服务会托管构建产物 `apps/frontend/dist`，并把同源 `/bcnproxy/*` 请求代理到容器内的 BCS server。
 
 ## 你需要准备什么
 

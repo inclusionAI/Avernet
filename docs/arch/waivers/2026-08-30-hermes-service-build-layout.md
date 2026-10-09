@@ -12,7 +12,7 @@ This waiver records a temporary conflict under `docs/arch/arch.rules.md` Rule
 18 and the Governance Addendum. It waives only:
 
 - repository `AGENTS.md`, Skills Architecture bullet 2; and
-- `src/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`,
+- `apps/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`,
   section 9, Engine physical-layout ownership,
 
 for `WorkspaceConfig.hermes_root` and the Hermes service-build compatibility

@@ -1,0 +1,140 @@
+# bcs-message-store Context
+
+## Provides
+
+admit_batch commits canonical sources, target admissions, sequence allocation and
+events for one Session atomically. Results contain final post-binding delivery
+versions. Required-context metadata is included alongside the bounded ordinary
+page; LanePendingContextCarrier filters expiry before LIMIT 1 so expired backlog
+cannot hide initialization during disabled-policy drain. No new database column
+is needed; required_context is an explicit semantic projection flag.
+The sequence baseline uses a transactional primary read (locking on MySQL) before
+the existing compare-and-set commit, so a newly committed Session is not mistaken
+for a missing canonical Session because of replica lag.
+
+Fixed Loop output uses the existing caller-owned message primary key and
+content.metadata.state_machine.execution, without new SQL columns. The runtime
+owns construction, identity validation and visibility (Bot FullOnly / Human
+directed); stores preserve content verbatim and batch canonical ID reads.
+
+Caller-owned stable message IDs use the existing message primary key. Concurrent
+append_message_with_id calls return the original stored message and allocate
+one Session sequence; a duplicate SQL insert rolls its sequence increment back
+in the same local transaction. Matching legacy client keys may return their
+original generated message ID. Callers validate content and identity before
+treating an existing record as their successful write. This does not make
+ordinary client_msg_id lookups a database uniqueness constraint or guarantee
+external delivery. Memory, SQLite and MySQL Text/Prepared share this contract.
+
+Delivery decoding failures emit rate-limited column names/types and a fixed error
+category, never row values or serde errors that could include message/header data.
+
+Application-supplied admission rejections commit as unsent Failed rows (Send or
+Inject), with a fixed last_error_code, alongside other admitted recipients.
+Stores do not inspect Header values or decide Header policy.
+
+Opt-in `bcs_reply_profile` DEBUG timing separates delivery_writer wait from
+hold time. A held-writer span lets the isolated load test attribute SQLite SQL
+category timings/counts to the critical section without logging SQL or payloads.
+Timing is diagnostic only and does not change public APIs.
+
+Internal run_chat_segments reads exact env/session/sender/run in sequence order.
+SQLite 025 / MySQL 024 index this reconstruction; public history filters run_reply
+before pagination, while canonical ID reads retain it. Admission can atomically
+append one visible chat companion and its event before the non-eventful summary,
+alongside terminal CAS and reply target admission. Memory and SQL share conformance.
+
+Control batches query four independent action ranges, reserve equal shares and
+lend spare capacity under a single result limit. They ignore the legacy ID cursor;
+successful actions leave their due set. SQLite 024 / MySQL 023 add a pending-abort
+index; existing deadline indexes serve the timeout classes. Memory follows the
+same selection contract; remote execution plans need deployment verification.
+
+Bounded-context reads return newest metadata plus a complete bound count, never
+canonical bodies. SQLite 023 / MySQL 022 add context_selection_json and an
+ordered bound lookup index; transitions persist selection with send-start and
+context outcomes with terminal replies under the existing CAS transaction.
+
+Purpose-specific delivery reads own SQL filtering, cursor ordering, complete
+counts, bounded due batches and low-frequency queue GROUP BY statistics. A
+downstream run alias column is an indexed projection of transport metadata,
+updated in the same transition; SQLite 022 / MySQL 021 backfill existing data.
+Selected canonical payloads use 200-ID batches; ordinary scheduling reads no JSON.
+
+MessageDeliveryRepoPort also persists one environment-scoped versioned policy snapshot with CAS and latest actor/time metadata; Memory and SQL share the policy conformance contract.
+
+- `MessageRepoPort` and `MessageDeliveryRepoPort` implementations for Memory and
+  MySQL/SQLite canonical-message and target-delivery storage.
+- Atomic admission, sender-scoped idempotency, target capacity rejection,
+  context binding, version-checked transitions and terminal reply admission.
+- Public history projection that excludes queue-retained attachment URLs.
+
+## Consumes
+
+- `bcs-service-api` repository contracts and `bcs-domain` data.
+- `bcs-db-api` SQL transactions and `bcs-event-store` event transaction plans.
+
+## Allowed dependencies
+
+- Contract crates, database plugin API, session-store memory registry and event-store transaction composition,
+  serialization and process-local synchronization utilities.
+
+## Forbidden dependencies
+
+- HTTP/WS adapters, Bot transport implementations and bootstrap runtime code.
+- Runtime production DDL, environment reads, queues or workflow scheduling policy.
+
+## Configuration
+
+- Bootstrap supplies the database flavor, configured env and shared store instance.
+- Clones share a weak keyed lock directory: managed writes lock their sessions;
+  Send changes/admissions additionally lock target Bot capacity across sessions.
+  Capacity keys precede session keys; all keys are sorted and deduplicated.
+  SQL conditional writes independently guard sequence allocation and stale changes.
+  Once DB commit starts, guards outlive caller cancellation until it finishes.
+
+## Runtime ownership
+
+The store owns persistence transactions, not network attempts, timers or user
+authorization. The application supplies all lifecycle and related context changes
+to one transaction. Memory is test/development storage, not restart durability.
+
+## Tests
+
+- `cargo test --manifest-path src/bcs/Cargo.toml -p bcs-message-store`
+- Shared delivery contract runs against Memory and migrated SQLite. Remote
+  MySQL/OceanBase execution additionally requires a configured test database.
+
+StateMachine canonical history lookup uses physical IDs and stored client keys,
+scoped to environment/Session and excluding published chat. Each 200-key chunk
+uses two scoped queries with LIMIT 401; more than 400 matches is an explicit
+duplicate-data error. Empty lookups issue no query; failures stop subsequent
+chunks. No schema/index additions: client-key queries use existing Session/type
+indexes and may scan more rows than the returned limit. Memory/SQLite
+contracts cover identities, isolation, 200/201/450-key costs and error paths.
+
+`list_state_machine_history` scopes one bounded SELECT to environment, group and
+Session. It filters four StateMachine history types and audience before LIMIT,
+excludes prompts for Full/Bot views, and orders by created_at/session_seq. The
+limit is 1..1000 plus one lookahead row; its composite cursor is internal. Public
+HTTP before remains an exclusive millisecond timestamp. It reads no Run, Node,
+definition or checkpoint and never fetches Bot-native history or writes rows.
+Published chat results remain in the ordinary history query.
+
+Ordinary Chat window resolution retains physical join anchors and skips only
+StateMachine rows with history_schema_version=1. Legacy rows and ordinary gaps
+still consume positions. Indexed scans return at most 512 sequence/marker pairs
+per query, with a 16384 supplemental-row budget; budget or DB failures propagate.
+The application receives no bodies; SQL still reads/parses candidate content
+JSON. No counters, initialization tasks, or write transactions are used. Supplemental positions/markers must be retained for
+the lifetime of the Session. Audience checks remain independent of this marker.
+
+## Direct A2A admission
+
+Direct requests use the same atomic admission plan with an empty group, one Send,
+a Directed audience and the caller's ChatRun run ID. Their sequence CAS belongs
+to the environment-scoped Session registry. Group sequence ownership stays in
+bcs_group_sessions. Batches cannot mix the two sequence sources. Memory composition
+shares `bcs-session-store::registry::MemorySessionRegistry` with the Session writer;
+this concrete store dependency is limited to atomic in-memory transaction composition.
+Delivery recovery supports at most eight IDs in a single lookup.
