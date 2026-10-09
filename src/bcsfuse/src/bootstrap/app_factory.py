@@ -166,6 +166,10 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
         lifespan=lifespan,
     )
 
+    from src.infra.public.observability.trace_middleware import TraceIdMiddleware
+
+    app.add_middleware(TraceIdMiddleware)
+
     # Store context in app state
     app.state.context = context
 

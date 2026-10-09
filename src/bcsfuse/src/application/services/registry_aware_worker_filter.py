@@ -156,8 +156,9 @@ class RegistryAwareWorkerFilter:
                 logger.info("[Filter] 严格模式，返回空集")
                 return set()
             else:
-                logger.info("[Filter] 兼容模式，返回所有 profile_keys")
-                return set(all_profile_keys or [])
+                # Compatibility only admits profiles absent from the registry.
+                # Registered inactive/disabled workers remain excluded.
+                return set(all_profile_keys or []) - self._get_registered_profile_keys()
 
         # 获取所有 active workers 的运行态
         worker_ids = [w.id for w in active_workers]

@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -117,13 +117,25 @@ class MySQLWorkerAuditLogStore:
             source_type=row["source_type"],
             source_ref=row["source_ref"],
             performed_by=row["performed_by"],
-            performed_at=row["performed_at"],
+            performed_at=self._event_time(row),
         )
+
+    @staticmethod
+    def _event_epoch(value: datetime) -> float:
+        # Domain events without tzinfo have historically represented UTC.
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.timestamp()
+
+    @staticmethod
+    def _event_time(row: dict) -> datetime:
+        # Keep the domain's naive-UTC convention independent of the DB session.
+        return datetime.fromtimestamp(
+            float(row["performed_at_epoch"]), timezone.utc
+        ).replace(tzinfo=None)
 
     def append_log(self, audit_log: WorkerAuditLog) -> None:
         """Append an audit log."""
-        now = datetime.utcnow()
-        performed_at = audit_log.performed_at or now
 
         def as_json(value: str | None) -> str | None:
             if value is None:
@@ -141,9 +153,8 @@ class MySQLWorkerAuditLogStore:
                 cursor.execute("""
                     INSERT INTO bcsfuse_worker_audit_logs (
                         id, worker_id, action, old_value, new_value,
-                        source_type, source_ref, performed_by, performed_at,
-                        gmt_create, gmt_modify
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        source_type, source_ref, performed_by, performed_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FROM_UNIXTIME(%s))
                 """, (
                     audit_log.id,
                     audit_log.worker_id,
@@ -153,9 +164,7 @@ class MySQLWorkerAuditLogStore:
                     audit_log.source_type.value,
                     audit_log.source_ref,
                     audit_log.performed_by,
-                    performed_at,
-                    now,
-                    now,
+                    self._event_epoch(audit_log.performed_at),
                 ))
                 conn.commit()
             finally:
@@ -171,7 +180,7 @@ class MySQLWorkerAuditLogStore:
         offset: int = 0,
     ) -> List[WorkerAuditLog]:
         """List audit logs with optional filters."""
-        sql = "SELECT * FROM bcsfuse_worker_audit_logs WHERE 1=1"
+        sql = "SELECT *, UNIX_TIMESTAMP(performed_at) AS performed_at_epoch FROM bcsfuse_worker_audit_logs WHERE 1=1"
         params = []
 
         if worker_id:
@@ -205,7 +214,7 @@ class MySQLWorkerAuditLogStore:
             cursor = conn.cursor(dictionary=True)
             try:
                 cursor.execute(
-                    "SELECT * FROM bcsfuse_worker_audit_logs WHERE worker_id = %s ORDER BY performed_at DESC LIMIT 1",
+                    "SELECT *, UNIX_TIMESTAMP(performed_at) AS performed_at_epoch FROM bcsfuse_worker_audit_logs WHERE worker_id = %s ORDER BY performed_at DESC LIMIT 1",
                     (worker_id,),
                 )
                 row = cursor.fetchone()
@@ -247,8 +256,12 @@ class MySQLWorkerAuditLogStore:
         limit: int = 100,
     ) -> List[dict]:
         """Query audit logs by time range (legacy dict-compatible API)."""
-        sql = "SELECT * FROM bcsfuse_worker_audit_logs WHERE performed_at >= %s AND performed_at <= %s"
-        params = [start_time, end_time]
+        sql = (
+            "SELECT *, UNIX_TIMESTAMP(performed_at) AS performed_at_epoch "
+            "FROM bcsfuse_worker_audit_logs "
+            "WHERE performed_at >= FROM_UNIXTIME(%s) AND performed_at <= FROM_UNIXTIME(%s)"
+        )
+        params = [self._event_epoch(start_time), self._event_epoch(end_time)]
 
         if event_type:
             sql += " AND action = %s"
@@ -269,7 +282,7 @@ class MySQLWorkerAuditLogStore:
                         "worker_id": row["worker_id"],
                         "event_type": row["action"],
                         "event_data": self._build_event_data(row),
-                        "timestamp": row["performed_at"].isoformat() if row["performed_at"] else None,
+                        "timestamp": self._event_time(row).isoformat(),
                     }
                     for row in rows
                 ]

@@ -378,6 +378,25 @@ async def activate_worker_profile(
             },
         ) from error
 
+    # Index refresh is a separate side effect after durable activation. Never
+    # compensate the saved binding/content merely because its index needs retry.
+    from src.bootstrap.profile_activation_index import refresh_activated_profile_index
+
+    try:
+        refresh_activated_profile_index(registry, persisted_worker, profile_id)
+    except Exception as error:
+        logger.exception("[Profiles OSS] Activated profile index refresh failed for %s", worker_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "ACTIVATE_PROFILE_INDEX_ERROR",
+                "message": "Profile activation persisted; retry activation to refresh its index",
+                "activation_persisted": True,
+                "index_updated": False,
+                "retryable": True,
+            },
+        ) from error
+
     return {
         "worker_id": worker_id,
         "profile_id": profile_id,
@@ -431,6 +450,7 @@ async def delete_worker(worker_id: str, request: Request) -> dict:
         profiles = profile_service.list_profiles(worker_id)
         for profile in profiles.items:
             profile_service.delete_profile_vectors(worker_id, profile.profile_id)
+        profile_service.delete_worker_vectors(worker_id)
         store.delete(worker_id)
         return {"success": True, "worker_id": worker_id, "deleted": True}
     except HTTPException:

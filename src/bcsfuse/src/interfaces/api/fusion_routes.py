@@ -408,7 +408,8 @@ def create_group_fusion(
             question=result.question,
             driver_bot_id=result.driver_bot_id,
             perspectives=[
-                PerspectiveResponse(**p.model_dump()) for p in result.perspectives
+                PerspectiveResponse(**p.model_dump(include=set(PerspectiveResponse.model_fields)))
+                for p in result.perspectives
             ],
             recommendation=(
                 RecommendationResponse(**result.recommendation.model_dump())

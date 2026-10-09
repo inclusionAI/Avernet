@@ -16,6 +16,7 @@ from src.infra.public.audit.in_memory_worker_audit_log_store import (
     InMemoryWorkerAuditLogStore,
 )
 from src.interfaces.api import worker_profile_parity_routes as routes
+from src.interfaces.api.worker_profile_routes import analysis, common, vector_sync
 
 
 @pytest.fixture
@@ -36,11 +37,11 @@ def sync_app(monkeypatch):
     app.include_router(routes.api_router, prefix="/api/v1")
     app.include_router(routes.compat_router, prefix="/v1")
     app.include_router(routes.mgmt_router, prefix="/v1")
-    monkeypatch.setattr(routes, "_require_auth", lambda request: None)
-    monkeypatch.setattr(routes, "_sync_runtime_state_to_vector_store", MagicMock())
+    monkeypatch.setattr(common, "_require_auth", lambda request: None)
+    monkeypatch.setattr(vector_sync, "_sync_runtime_state_to_vector_store", MagicMock())
     availability_sync = MagicMock()
-    monkeypatch.setattr(routes, "_sync_availability_to_vector_store", availability_sync)
-    monkeypatch.setattr(routes, "_analyze_and_persist_async", AsyncMock())
+    monkeypatch.setattr(vector_sync, "_sync_availability_to_vector_store", availability_sync)
+    monkeypatch.setattr(analysis, "_analyze_and_persist_async", AsyncMock())
     monkeypatch.setattr(
         drm_config_helper,
         "is_capability_verify_enabled",
@@ -338,7 +339,7 @@ def test_worker_config_update_preserves_audit_side_effect(sync_app):
 
 def test_sync_passes_complete_profile_snapshot_to_analysis(sync_app):
     client, _, _, _, _ = sync_app
-    analyzer_task = routes._analyze_and_persist_async
+    analyzer_task = analysis._analyze_and_persist_async
     analyzer_task.reset_mock()
 
     response = client.post(
@@ -416,7 +417,7 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     context = SimpleNamespace(
         registry={"worker_profile_content_store": profile_store},
     )
-    monkeypatch.setattr(routes, "_get_profile_analyzer", lambda: analyzer)
+    monkeypatch.setattr(analysis, "_get_profile_analyzer", lambda: analyzer)
     monkeypatch.setattr(fusion_dependencies, "get_app_context", lambda: context)
     monkeypatch.setattr(
         fusion_dependencies,
@@ -426,7 +427,7 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     monkeypatch.setattr(profile_routes, "_trigger_index_sync", lambda worker_id: None)
     monkeypatch.setattr(asyncio, "get_event_loop", lambda: CapturingLoop())
 
-    await routes._analyze_and_persist_async(
+    await analysis._analyze_and_persist_async(
         worker_id="20261008_j8u4z0l7:334018",
         profile_id="default",
         profile_data={
@@ -449,6 +450,6 @@ async def test_background_analysis_preserves_profile_identity_and_skills(monkeyp
     assert content.display_name == "墨韵研发2号"
     assert content.description == "研发协作机器人"
     assert [skill.name for skill in content.skill_sets] == ["code_review"]
-    assert used_executors == [routes._get_llm_analysis_executor()]
+    assert used_executors == [analysis._get_llm_analysis_executor()]
     persisted = profile_store.upsert_profile.call_args.args[2]
     assert persisted["contents"]["capabilities"] == ["代码评审"]

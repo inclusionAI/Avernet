@@ -133,6 +133,7 @@ class TestWorkerCandidateRecommendationServiceMock:
                 recs = [
                     CandidateRecommendation(
                         profile_key=p,
+                        worker_id=p.rsplit(":", 1)[0],
                         score=0.9,
                         is_supplement=False,
                     )
@@ -172,11 +173,13 @@ class TestWorkerCandidateRecommendationServiceMock:
                 recs = [
                     CandidateRecommendation(
                         profile_key="staff_001:default",
+                        worker_id='staff_001',
                         score=0.85,
                         is_supplement=True,
                     ),
                     CandidateRecommendation(
                         profile_key="staff_002:default",
+                        worker_id='staff_002',
                         score=0.8,
                         is_supplement=True,
                     ),

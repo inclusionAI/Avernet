@@ -11,6 +11,7 @@ ID 格式: trace_{timestamp_ms}_{8位随机hex}
 import logging
 import time
 import secrets
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 _trace_id: ContextVar[str] = ContextVar("trace_id", default="")
@@ -63,6 +64,16 @@ def set_trace_id(trace_id: str) -> None:
 def get_trace_id() -> str:
     """读取当前请求的 trace_id"""
     return _trace_id.get()
+
+
+@contextmanager
+def bind_trace_id(trace_id: str):
+    """Bind a request trace and restore its caller's context on every exit."""
+    previous_context = _trace_id.set(trace_id)
+    try:
+        yield
+    finally:
+        _trace_id.reset(previous_context)
 
 
 __all__ = [

@@ -52,6 +52,18 @@ class MockVectorStore:
     def size(self) -> int:
         return len(self._points)
 
+    def get(self, id: str) -> VectorPoint | None:
+        return self._points.get(id)
+
+    def get_vector_ids(self) -> list[str]:
+        return list(self._points)
+
+    def text_search(self, query: str, top_k: int, filters: dict | None = None):
+        raise NotImplementedError("This test double does not implement BM25")
+
+    def batch_text_search(self, queries: list[str], top_k: int, filters: dict | None = None):
+        return [self.text_search(query, top_k, filters) for query in queries]
+
 
 class TestVectorStoreAdapterProtocol:
     """Test VectorStoreAdapter protocol."""

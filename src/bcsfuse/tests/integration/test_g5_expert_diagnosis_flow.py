@@ -43,11 +43,44 @@ class MockG5PerspectiveProvider(PerspectiveProvider):
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """创建测试客户端"""
+    from src.application.services.participant_availability_checker import ParticipantAvailabilityChecker
+    from src.domain.models.worker_runtime_state import WorkerRuntimeState
+    from src.domain.models.worker_source_info import WorkerSourceType
+    from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+    from src.infra.adapters.sqlite_worker_runtime_state_store import SQLiteWorkerRuntimeStateStore
+    from src.interfaces.api.dependencies import fusion_dependencies
+    from src.interfaces.api import fusion_routes
+    from src.application.services.group_fusion_service import GroupFusionService
+    from src.domain.models.worker import Worker, WorkerIdentity, WorkerState, WorkerType, Availability, TrustLevel
+    from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+
+    bindings = SQLiteWorkerProfileBindingStore()
+    states = SQLiteWorkerRuntimeStateStore()
+    registry = SQLiteWorkerRegistryStore()
+    for worker_id in ["anquan", "fawu", "dba", "security", "legal", "tech", "ops"]:
+        registry.create(Worker(
+            id=worker_id, type=WorkerType.BOT, identity=WorkerIdentity(name=worker_id, handle=worker_id),
+            responsibilities=[], capabilities=[],
+            state=WorkerState(availability=Availability.PUBLIC, trust_level=TrustLevel.TRUSTED),
+        ))
+        bindings.bind_profile(worker_id, f"{worker_id}:default", WorkerSourceType.API)
+        states.set_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
+    checker = ParticipantAvailabilityChecker(bindings, states, registry)
+    monkeypatch.setattr(fusion_routes, "get_service", lambda: GroupFusionService(
+        provider=fusion_routes._provider or MockG5PerspectiveProvider(),
+        availability_checker=checker,
+    ))
+    monkeypatch.setattr(fusion_routes, "_provider", None)
+    fusion_dependencies.reset_fusion_services()
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
-    return TestClient(app)
+    yield TestClient(app)
+    fusion_dependencies.reset_fusion_services()
+    bindings.close()
+    states.close()
+    registry.close()
 
 
 @pytest.fixture
@@ -506,10 +539,10 @@ class TestG5ErrorScenarios:
 
         assert response.status_code == 422
 
-    def test_invalid_group_id(self, client: TestClient):
-        """测试无效的 group_id"""
+    def test_external_group_id_is_preserved(self, client: TestClient):
+        """Group identifiers are opaque identifiers supplied by the owning service."""
         response = client.post(
-            "/api/v1/groups/invalid-group-id/fuse",
+            "/api/v1/groups/external-group-id/fuse",
             json={
                 "question": "test",
                 "participants": ["anquan"],
@@ -518,8 +551,8 @@ class TestG5ErrorScenarios:
             },
         )
 
-        # FastAPI Path 参数校验返回 422
-        assert response.status_code in [400, 422]
+        assert response.status_code == 200
+        assert response.json()["group_id"] == "external-group-id"
 
 
 class TestG5ResponseStructure:

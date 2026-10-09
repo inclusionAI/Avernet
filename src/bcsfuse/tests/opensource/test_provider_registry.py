@@ -185,8 +185,9 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
         "bcsfuse-internal",
     ]
 
-    oss_provider_dir = Path("src/infra/oss")
-    bootstrap_dir = Path("src/bootstrap")
+    module_root = Path(__file__).resolve().parents[2]
+    oss_provider_dir = module_root / "src/infra/public"
+    bootstrap_dir = module_root / "src/bootstrap"
 
     violations = []
 
@@ -204,6 +205,10 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     module_name = node.module if isinstance(node, ast.ImportFrom) else None
                     if module_name:
+                        # This is our environment/YAML adapter, not the internal
+                        # DRM SDK. Its own imports are scanned below as well.
+                        if module_name == "src.infra.public.config.drm_config_provider":
+                            continue
                         for pattern in forbidden_patterns:
                             if pattern.lower() in module_name.lower():
                                 violations.append(f"{file_path}: imports {module_name}")

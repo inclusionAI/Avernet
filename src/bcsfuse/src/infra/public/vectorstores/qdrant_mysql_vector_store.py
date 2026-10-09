@@ -13,11 +13,8 @@ Architecture:
 from __future__ import annotations
 
 import logging
-import math
-import re
 import threading
 import time
-from collections import Counter
 from typing import Any, List, Optional
 
 from src.domain.models.vector_point import VectorPoint
@@ -81,8 +78,6 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         # Compatibility alias for existing diagnostics and tests.
         self._mysql = self._persistence
         self._last_sync_time = 0.0
-        self._text_documents: dict[str, dict] = {}
-        self._text_lock = threading.RLock()
         self._index_lock = threading.RLock()
 
         logger.info(
@@ -153,6 +148,26 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 "DEGRADED_REBUILD_REQUIRED: "
                 "QDRANT_INDEX_UPDATE_FAILED_AFTER_DURABLE_WRITE. Rebuild required"
             ) from e
+
+    def update_payload_by_worker(self, worker_id: str, payload_updates: dict) -> int:
+        """Write through all exact-owner points, including locally unseen ones."""
+        with self._index_lock:
+            points = [
+                VectorPoint(id=point.id, vector=point.vector,
+                            payload={**point.payload, **payload_updates})
+                for point in self._persistence.load_all()
+                if point.payload.get("worker_id") == worker_id
+            ]
+            self.upsert(points)
+            return len(points)
+
+    def delete_by_worker(self, worker_id: str) -> int:
+        """Delete owned vectors from durable storage and the local index."""
+        with self._index_lock:
+            ids = [point.id for point in self._persistence.load_all()
+                   if point.payload.get("worker_id") == worker_id]
+            self.delete(ids)
+            return len(ids)
 
     def delete(self, ids: List[str]) -> None:
         """Delete vectors by business IDs."""
@@ -250,65 +265,9 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         top_k: int,
         filters: Optional[dict] = None,
     ) -> List[VectorSearchHit]:
-        """Search indexed fragment content with deterministic BM25 scoring."""
-        query_terms = self._tokenize(query)
-        if not query_terms or top_k <= 0:
-            return []
-
-        with self._text_lock:
-            candidates = {
-                point_id: dict(payload)
-                for point_id, payload in self._text_documents.items()
-                if self._matches_filters(payload, filters)
-            }
-
-        tokenized = {
-            point_id: self._tokenize(self._searchable_content(payload))
-            for point_id, payload in candidates.items()
-        }
-        tokenized = {point_id: terms for point_id, terms in tokenized.items() if terms}
-        if not tokenized:
-            return []
-
-        document_count = len(tokenized)
-        average_length = sum(len(terms) for terms in tokenized.values()) / document_count
-        document_frequency = Counter(
-            term
-            for terms in tokenized.values()
-            for term in set(terms)
-            if term in query_terms
-        )
-        k1 = 1.5
-        b = 0.75
-        scored: list[VectorSearchHit] = []
-        for point_id, terms in tokenized.items():
-            frequencies = Counter(terms)
-            score = 0.0
-            for term in query_terms:
-                frequency = frequencies.get(term, 0)
-                if frequency == 0:
-                    continue
-                frequency_in_documents = document_frequency[term]
-                inverse_document_frequency = math.log(
-                    1
-                    + (document_count - frequency_in_documents + 0.5)
-                    / (frequency_in_documents + 0.5)
-                )
-                denominator = frequency + k1 * (
-                    1 - b + b * len(terms) / average_length
-                )
-                score += inverse_document_frequency * frequency * (k1 + 1) / denominator
-            if score > 0:
-                scored.append(
-                    VectorSearchHit(
-                        id=point_id,
-                        score=score,
-                        payload=candidates[point_id],
-                    )
-                )
-
-        scored.sort(key=lambda hit: (-hit.score, hit.id))
-        return scored[:top_k]
+        """Text search remains unsupported, as in the original public backend."""
+        logger.warning("[QdrantMySQLVectorStore] text_search not implemented")
+        return []
 
     def batch_text_search(
         self,
@@ -316,14 +275,16 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         top_k: int,
         filters: Optional[dict] = None,
     ) -> List[List[VectorSearchHit]]:
-        return [self.text_search(query, top_k, filters) for query in queries]
+        """Return one empty result per query; do not add a keyword fallback."""
+        logger.warning("[QdrantMySQLVectorStore] batch_text_search not implemented")
+        return [[] for _ in queries]
 
     # ------------------------------------------------------------------
     # Rebuild from MySQL
     # ------------------------------------------------------------------
 
     def rebuild_from_backend(self, batch_size: int = 100) -> dict[str, Any]:
-        """Rebuild local Qdrant and text indexes from the durable backend."""
+        """Rebuild the local Qdrant index from the durable backend."""
         logger.info("[QdrantMySQLVectorStore] Rebuilding indexes from durable backend...")
         start = time.time()
         supports_incremental_sync = isinstance(
@@ -360,11 +321,6 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 total_indexed += len(points)
             for point_id in stale_ids:
                 self._qdrant.delete(point_id)
-            with self._text_lock:
-                self._text_documents = {
-                    point.id: dict(point.payload or {}) for point in all_points
-                }
-
             if supports_incremental_sync:
                 changes = self._persistence.load_changes_since(rebuild_checkpoint)
                 if changes.upserts:
@@ -440,45 +396,12 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         with self._index_lock:
             self._ensure_client()
             self._qdrant.upsert(points)
-            with self._text_lock:
-                for point in points:
-                    self._text_documents[point.id] = dict(point.payload or {})
 
     def _delete_local(self, ids: list[str]) -> None:
         with self._index_lock:
             self._ensure_client()
             for point_id in ids:
                 self._qdrant.delete(point_id)
-            with self._text_lock:
-                for point_id in ids:
-                    self._text_documents.pop(point_id, None)
-
-    @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        return [token for token in re.findall(r"\w+", text.lower()) if token]
-
-    @staticmethod
-    def _searchable_content(payload: dict) -> str:
-        content = (
-            payload.get("content")
-            or payload.get("searchable_text")
-            or payload.get("content_preview")
-            or ""
-        )
-        return content if isinstance(content, str) else str(content)
-
-    @staticmethod
-    def _matches_filters(payload: dict, filters: Optional[dict]) -> bool:
-        if not filters:
-            return True
-        for key, expected in filters.items():
-            actual = payload.get(key)
-            if isinstance(expected, list):
-                if actual not in expected:
-                    return False
-            elif actual != expected:
-                return False
-        return True
 
 
 __all__ = ["QdrantMySQLVectorStore"]

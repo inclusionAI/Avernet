@@ -17,10 +17,11 @@ from unittest.mock import patch, MagicMock
 import sys
 
 
-@pytest.fixture(scope="module")
-def test_client():
+@pytest.fixture
+def test_client(monkeypatch):
     """Create test client for dev_smoke mode."""
     # Set environment for dev_smoke mode
+    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "false")
     original_mode = os.getenv("BCSFUSE_PROVIDER_MODE")
     original_token = os.getenv("BCSFUSE_AUTH_TOKEN")
     os.environ["BCSFUSE_PROVIDER_MODE"] = "dev_smoke"
@@ -30,8 +31,8 @@ def test_client():
         from src.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
-        client = TestClient(app)
-        yield client
+        with TestClient(app) as client:
+            yield client
     finally:
         # Restore original mode
         if original_mode is not None:
@@ -164,7 +165,7 @@ class TestOpencoreVerifyE2E:
         """Test that verify endpoint is accessible"""
         # Check that verify endpoint exists
         response = test_client.post(
-            "/api/v1/verify/batch",
+            "/v1/verify/batch",
             json={},
             headers={"Authorization": "Bearer test_token_for_e2e"}
         )
@@ -172,23 +173,25 @@ class TestOpencoreVerifyE2E:
         # Should not return 404 (endpoint exists)
         assert response.status_code != 404, "Verify endpoint should exist"
 
-    def test_verify_with_valid_public_safe_request(self, test_client):
-        """Test verify with minimal valid request"""
+    def test_verify_without_model_service_fails_explicitly(self, test_client):
+        """No fake successful verification when the model service is unavailable."""
         request_data = {
             "worker_ids": ["worker-1", "worker-2"],
             "capabilities": ["coding"],
             "verify_options": {}
         }
 
-        response = test_client.post(
-            "/api/v1/verify/batch",
-            json=request_data,
-            headers={"Authorization": "Bearer test_token_for_e2e"}
-        )
-
-        # Should accept the request (2xx or 4xx validation error, not 5xx)
-        assert response.status_code in [200, 201, 400, 422], \
-            f"Verify should handle valid request, got {response.status_code}: {response.text}"
+        with patch(
+            "src.interfaces.api.dependencies.fusion_dependencies.get_capability_verify_service",
+            return_value=None,
+        ):
+            response = test_client.post(
+                "/v1/verify/batch",
+                json=request_data,
+                headers={"Authorization": "Bearer test_token_for_e2e"},
+            )
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "SERVICE_UNAVAILABLE"
 
     def test_verify_response_has_schema_and_metadata(self, test_client):
         """Test that verify response has proper schema and metadata"""
@@ -199,7 +202,7 @@ class TestOpencoreVerifyE2E:
         }
 
         response = test_client.post(
-            "/api/v1/verify/batch",
+            "/v1/verify/batch",
             json=request_data,
             headers={"Authorization": "Bearer test_token_for_e2e"}
         )
@@ -224,7 +227,7 @@ class TestOpencoreVerifyE2E:
         }
 
         response = test_client.post(
-            "/api/v1/verify/batch",
+            "/v1/verify/batch",
             json=request_data,
             headers={"Authorization": "Bearer test_token_for_e2e"}
         )
@@ -252,7 +255,7 @@ class TestOpencoreVerifyE2E:
         }
 
         response = test_client.post(
-            "/api/v1/verify/batchAll",
+            "/v1/verify/batchAll",
             json=request_data,
             headers={"Authorization": "Bearer test_token_for_e2e"}
         )
@@ -307,7 +310,7 @@ class TestOpencoreVerifyE2E:
 
             # Verify should work without real LLM credentials
             verify_response = test_client.post(
-                "/api/v1/verify/batch",
+                "/v1/verify/batch",
                 json={
                     "worker_ids": ["worker-1"],
                     "capabilities": ["coding"],

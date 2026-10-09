@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 import pytest
+from tests.fixtures.recommendation_dependencies import vector_dependencies
 
 from src.domain.models.candidate_recommendation import (
     CandidateRecommendation,
@@ -42,7 +43,7 @@ from src.application.services.worker_candidate_recommendation_impl import (
 def sample_profile_1():
     """创建测试用 WorkerProfile 1"""
     return WorkerProfile(
-        staff_id="001",  # 修改：不带 staff_ 前缀，profile_key 会变成 staff_001:default
+        staff_id="staff_001",
         profile_id="default",
         profile_type=ProfileType.DEFAULT,
         source_root="/test/profiles",
@@ -69,7 +70,7 @@ def sample_profile_1():
 def sample_profile_2():
     """创建测试用 WorkerProfile 2"""
     return WorkerProfile(
-        staff_id="002",  # 修改：不带 staff_ 前缀
+        staff_id="staff_002",
         profile_id="default",
         profile_type=ProfileType.DEFAULT,
         source_root="/test/profiles",
@@ -96,7 +97,7 @@ def sample_profile_2():
 def sample_profile_3():
     """创建测试用 WorkerProfile 3"""
     return WorkerProfile(
-        staff_id="003",  # 修改：不带 staff_ 前缀
+        staff_id="staff_003",
         profile_id="default",
         profile_type=ProfileType.DEFAULT,
         source_root="/test/profiles",
@@ -149,10 +150,11 @@ def mock_retrieval_service(sample_profile_1, sample_profile_2, sample_profile_3)
 
 
 @pytest.fixture
-def recommendation_impl(mock_retrieval_service):
+def recommendation_impl(mock_retrieval_service, sample_profile_1, sample_profile_2, sample_profile_3):
     """创建 WorkerCandidateRecommendationImpl 实例"""
     return WorkerCandidateRecommendationImpl(
         retrieval_service=mock_retrieval_service,
+        **vector_dependencies([sample_profile_1, sample_profile_2, sample_profile_3]),
     )
 
 
@@ -469,6 +471,12 @@ class TestWorkerCandidateRecommendationImplRecommend:
             participants=None,
         )
 
+        # 显式参与者通过 profile retrieval 加载。
+        impl.recommend(
+            question="How to secure the API?",
+            mode=RetrievalMode.EXPERT_DIAGNOSIS,
+            participants=["staff_001:default"],
+        )
         # 验证 retrieval 被调用时使用了正确的模式
         mock_retrieval_service.retrieve.assert_called()
         call_kwargs = mock_retrieval_service.retrieve.call_args
@@ -567,7 +575,7 @@ class TestVectorMatchIntegration:
     核心约定：
     1. G5-first: 只有 EXPERT_DIAGNOSIS 模式使用 vector match
     2. 显式 participants 永远优先
-    3. Vector match 失败时 graceful fallback 到现有 keyword 检索
+    3. Vector match 失败时返回空补充列表
     4. 不影响 G1/G2 模式行为
     """
 
@@ -592,7 +600,10 @@ class TestVectorMatchIntegration:
                 profile_key=profile.profile_key,
                 domains=[profile.active_skills[0].name.lower()] if profile.active_skills else [],
                 active_skill_names=[s.name for s in profile.active_skills],
-                metadata={"staff_id": profile.staff_id},
+                staff_id=profile.staff_id,
+                profile_id=profile.profile_id,
+                profile_type=profile.profile_type.value,
+                source_root=profile.source_root,
             )
 
         def mock_match(query_embedding, top_k, filters=None, excluded_profile_keys=None, **kwargs):
@@ -622,8 +633,23 @@ class TestVectorMatchIntegration:
         from unittest.mock import Mock
 
         generator = Mock()
-        generator.generate.return_value = [0.1] * 384  # Fake embedding
+        generator.embed.return_value = [0.1] * 384  # Fake embedding
         return generator
+
+    @pytest.mark.parametrize("dimension", [1, 2, 3])
+    def test_small_valid_embeddings_reach_vector_matching(
+        self, dimension, mock_retrieval_service, sample_profile_1,
+    ):
+        dependencies = vector_dependencies([sample_profile_1])
+        dependencies["embedding_generator"].embed.return_value = [0.5] * dimension
+        service = WorkerCandidateRecommendationImpl(
+            retrieval_service=mock_retrieval_service, **dependencies,
+        )
+
+        result = service.recommend("security", RetrievalMode.EXPERT_DIAGNOSIS)
+
+        assert [candidate.worker_id for candidate in result.recommendations] == ["staff_001"]
+        assert dependencies["vector_match_service"].match.call_args.kwargs["query_embedding"] == [0.5] * dimension
 
     @pytest.fixture
     def recommendation_impl_with_vector(
@@ -700,21 +726,22 @@ class TestVectorMatchIntegration:
         # 不应该调用 vector match service
         mock_vector_match_service.match.assert_not_called()
 
-        # 应该使用 retrieval service (fallback)
-        assert mock_retrieval_service.retrieve.called
+        # 非 G5 不进行候选补充
+        assert response.recommendations == []
+        mock_retrieval_service.retrieve.assert_not_called()
 
     # =========================================================================
-    # Test 3: Vector Match Failure Falls Back to Existing Logic
+    # Test 3: Vector Failure Preserves Candidate Scope
     # =========================================================================
 
-    def test_vector_match_failure_falls_back_to_existing_logic(
+    def test_vector_match_failure_returns_empty_without_keyword_fallback(
         self,
         mock_retrieval_service,
         mock_vector_match_service,
         mock_embedding_generator,
     ):
         """
-        Vector match service 失败时，应该 fallback 到现有的 retrieval service
+        Vector match service 失败时不扩大召回范围
         """
         # 让 vector match 抛出异常
         mock_vector_match_service.match.side_effect = Exception("Vector store error")
@@ -731,25 +758,27 @@ class TestVectorMatchIntegration:
             participants=None,
         )
 
-        # 应该返回结果（通过 fallback）
+        # 返回结构化的空候选响应
         assert isinstance(response, CandidateRecommendationResponse)
-        # retrieval service 应该被调用 (fallback)
-        assert mock_retrieval_service.retrieve.called
+        # 不应通过 keyword retrieval 绕过向量过滤
+        assert response.recommendations == []
+        mock_retrieval_service.retrieve.assert_not_called()
 
     # =========================================================================
-    # Test 4: Vector Match Empty Result Falls Back
+    # Test 4: Empty Vector Results Preserve Candidate Scope
     # =========================================================================
 
-    def test_vector_match_empty_result_falls_back(
+    def test_vector_match_empty_result_does_not_expand_candidate_scope(
         self,
         mock_retrieval_service,
         mock_vector_match_service,
         mock_embedding_generator,
     ):
         """
-        Vector match 返回空结果时，应该 fallback 到现有的 retrieval service
+        Vector match 返回空结果时不扩大召回范围
         """
         # 让 vector match 返回空列表
+        mock_vector_match_service.match.side_effect = None
         mock_vector_match_service.match.return_value = []
 
         impl = WorkerCandidateRecommendationImpl(
@@ -764,10 +793,11 @@ class TestVectorMatchIntegration:
             participants=None,
         )
 
-        # 应该返回结果（通过 fallback）
+        # 返回结构化的空候选响应
         assert isinstance(response, CandidateRecommendationResponse)
-        # retrieval service 应该被调用 (fallback)
-        assert mock_retrieval_service.retrieve.called
+        # 不应通过 keyword retrieval 绕过向量过滤
+        assert response.recommendations == []
+        mock_retrieval_service.retrieve.assert_not_called()
 
     # =========================================================================
     # Test 5: Explicit Participants Still Priority With Vector Enabled
@@ -846,15 +876,15 @@ class TestVectorMatchIntegration:
         assert isinstance(response.selected_candidates, int)
 
     # =========================================================================
-    # Test 7: Without Vector Match Service Falls Back Gracefully
+    # Test 7: Missing Vector Service Returns No Supplements
     # =========================================================================
 
-    def test_without_vector_match_service_uses_retrieval_only(
+    def test_without_vector_match_service_returns_no_supplements(
         self,
         mock_retrieval_service,
     ):
         """
-        没有提供 vector_match_service 时，G5 模式仍然可用 retrieval service
+        没有提供 vector_match_service 时，不生成补充推荐
         """
         impl = WorkerCandidateRecommendationImpl(
             retrieval_service=mock_retrieval_service,
@@ -867,10 +897,10 @@ class TestVectorMatchIntegration:
             participants=None,
         )
 
-        # 应该返回结果（通过 retrieval service）
+        # 缺少向量服务时返回空候选响应
         assert isinstance(response, CandidateRecommendationResponse)
-        assert len(response.recommendations) > 0
-        assert mock_retrieval_service.retrieve.called
+        assert response.recommendations == []
+        mock_retrieval_service.retrieve.assert_not_called()
 
     # =========================================================================
     # Test 8: Excluded Profile Keys Passed to Vector Match

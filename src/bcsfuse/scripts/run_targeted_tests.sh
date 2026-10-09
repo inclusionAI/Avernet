@@ -1,45 +1,75 @@
-#!/bin/bash
-
-# OPENCORE-P1 Targeted Tests Runner
-# Tests S5, S6, S7, S9, S18 - Worker CRUD, Profile Lifecycle, Recommend with Reranker
-
-set -e
-
-# Environment setup
-export BCSFUSE_AUTH_TOKEN="test-token-for-local-e2e"
-export BCSFUSE_PROVIDER_MODE="runtime"
-export WORKER_REGISTRY_DATABASE_MODE="mysql"
-export BCSFUSE_RUN_REAL_SERVICES_E2E="1"
-export ENABLE_CAPABILITY_VERIFY="true"
-export CAPABILITY_VERIFY_ENABLED="true"
-export MYSQL_HOST="127.0.0.1"
-export MYSQL_PORT="3306"
-export MYSQL_USER="root"
-export MYSQL_PASSWORD="<YOUR_MYSQL_PASSWORD>"  # Set your MySQL password
-export MYSQL_DATABASE="bcsfuse_oss_test"
-export SERVICE_URL="http://127.0.0.1:8765"
-
-echo "========================================="
-echo "OPENCORE-P1 Targeted Tests (S5, S6, S7, S9, S18)"
-echo "========================================="
-echo ""
-echo "Environment:"
-echo "  BCSFUSE_PROVIDER_MODE: ${BCSFUSE_PROVIDER_MODE}"
-echo "  WORKER_REGISTRY_DATABASE_MODE: ${WORKER_REGISTRY_DATABASE_MODE}"
-echo "  MYSQL_HOST: ${MYSQL_HOST}"
-echo "  MYSQL_DATABASE: ${MYSQL_DATABASE}"
-echo "  SERVICE_URL: ${SERVICE_URL}"
-echo ""
-
-# Run targeted tests
-cd "$(dirname "$0")/.."
-
-python -m pytest \
-  tests/integration/test_opencore_runtime_real_services_e2e_core.py \
-  -v --tb=short \
-  -k "worker_create_get_update_delete or profile_lifecycle or recommend_with_real_reranker or reranker_unavailable"
-
-echo ""
-echo "========================================="
-echo "Targeted Tests Complete"
-echo "========================================="
+#!/usr/bin/env bash
+# Default: isolated SQLite/Qdrant acceptance, never the developer's running app.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+test_python="${PYTHON:-.venv/bin/python}"
+export BCSFUSE_RUN_EXTERNAL_ACCEPTANCE=0
+export BCSFUSE_RUN_MYSQL_INTEGRATION=0
+case "${1:---isolated}" in
+  --core|--core-mysql)
+    if [[ "$1" == "--core-mysql" ]]; then
+      export BCSFUSE_RUN_MYSQL_INTEGRATION=1
+    fi
+    # Search includes /recommend, used by catalog discovery. Fuse includes
+    # its mode dispatch and shared-profile storage, not just route existence.
+    # These tests use controlled model providers; they do not certify live LLMs.
+    exec "$test_python" -m pytest -q --tb=short \
+      tests/integration/test_isolated_runtime_acceptance.py \
+      tests/integration/test_profile_activation_index_acceptance.py \
+      tests/integration/test_worker_runtime_vector_sync.py \
+      tests/contract/api/test_worker_api_contract.py \
+      tests/contract/api/test_legacy_worker_api_contract.py \
+      tests/contract/test_sync_identity_activation_contract.py \
+      tests/contract/test_profile_identifier_content.py \
+      tests/contract/test_composed_embedding_provider.py \
+      tests/contract/test_composed_trace_contract.py \
+      tests/contract/test_auth_provider_contract.py \
+      tests/contract/test_vector_metadata_filter_contract.py \
+      tests/contract/test_legacy_fragment_identity.py \
+      tests/contract/test_faiss_get_contract.py \
+      tests/contract/test_mysql_storage_clock_contract.py \
+      tests/integration/test_mysql_storage_timestamps.py \
+      tests/integration/test_mysql_registry_delete.py \
+      tests/unit/application/test_worker_vector_match_service.py \
+      tests/unit/application/test_worker_candidate_recommendation_impl.py \
+      tests/integration/test_registry_aware_filtering.py \
+      tests/contract/api/test_fusion_api_contract.py \
+      tests/contract/test_fusion_profile_store_wiring.py \
+      tests/contract/test_fusion_response_projection.py \
+      tests/unit/application/test_group_fusion_service.py \
+      tests/unit/interfaces/test_run_fuse_threadpool.py \
+      tests/integration/test_group_fusion_flow.py \
+      tests/integration/test_g9_core_acceptance.py \
+      tests/integration/test_g2_conflict_alignment_flow.py \
+      tests/integration/test_g5_expert_diagnosis_flow.py \
+      tests/integration/test_g5_vector_recommendation_flow.py \
+      tests/unit/bootstrap/test_route_mount_contract.py \
+      tests/unit/bootstrap/test_trust_gateway_auth.py \
+      tests/contract/test_runtime_acceptance_cleanup.py \
+      tests/contract/test_acceptance_runner.py
+    ;;
+  --isolated|--mysql)
+    if [[ "${1:-}" == "--mysql" ]]; then
+      # Uses disposable UUID databases on the local test MySQL server.
+      export BCSFUSE_RUN_MYSQL_INTEGRATION=1
+    fi
+    exec "$test_python" -m pytest -q --tb=short \
+      tests/integration/test_isolated_runtime_acceptance.py \
+      tests/integration/test_profile_activation_index_acceptance.py \
+      tests/integration/test_worker_runtime_vector_sync.py \
+      tests/contract/test_composed_embedding_provider.py \
+      tests/contract/test_runtime_acceptance_cleanup.py
+    ;;
+  --external)
+    # This mode creates and removes only uniquely named acceptance workers.
+    : "${BCSFUSE_ACCEPTANCE_URL:?Set BCSFUSE_ACCEPTANCE_URL to the approved test deployment}"
+    : "${BCSFUSE_AUTH_TOKEN:?Set BCSFUSE_AUTH_TOKEN securely in the environment}"
+    export BCSFUSE_RUN_EXTERNAL_ACCEPTANCE=1
+    exec "$test_python" -m pytest -q --tb=short \
+      tests/integration/test_opencore_runtime_real_services_e2e_core.py
+    ;;
+  *)
+    echo "Usage: bash scripts/run_targeted_tests.sh [--core|--core-mysql|--isolated|--mysql|--external]" >&2
+    exit 2
+    ;;
+esac

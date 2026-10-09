@@ -54,6 +54,11 @@ the returned upserts and deletions successfully.
 
 ## Compatibility guidance
 
+- `QdrantMySQLVectorStore` retains its original unsupported text-query behavior:
+  `text_search` logs a warning and returns `[]`; `batch_text_search` returns one
+  empty list per query. It does not add an in-process BM25 index. This does not
+  remove the existing application-level `SparseRetriever` or change its fallback
+  policy. Dense search, durable persistence and incremental replay are unchanged.
 - Existing providers may continue to implement only
   `VectorPersistenceBackend`; callers must use a full rebuild for them.
 - Incremental providers must satisfy both protocols and return

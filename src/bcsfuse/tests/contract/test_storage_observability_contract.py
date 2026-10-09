@@ -137,7 +137,7 @@ class TestSecretRedaction:
 
         assert sanitized["host"] == "localhost"
         assert sanitized["port"] == 3306
-        assert sanitized["user"] == "admin"
+        assert sanitized["user"] == "testuser"
         assert sanitized["password"] == "***MASKED***"
         assert sanitized["api_key"] == "***MASKED***"
         assert sanitized["auth_token"] == "***MASKED***"
@@ -380,37 +380,30 @@ class TestNoInternalDependencies:
 class TestLoggingWithoutRealResources:
     """Test logging without requiring real MySQL or Qdrant."""
 
-    def test_mysql_connection_failure_logging_masks_password(self, caplog):
-        """Test that MySQL connection failure logs don't expose password."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
-            MySQLWorkerProfileBindingStore,
+    @pytest.mark.parametrize("phase", ["initialization", "acquisition"])
+    def test_mysql_connection_failure_logging_masks_password(self, caplog, phase):
+        """Driver errors must not expose configured credentials in logs/errors."""
+        from mysql.connector import Error
+        from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+
+        secret = "not-a-real-token"
+        pool = MySQLConnectionPoolProvider(
+            host="localhost", user="test_user", password=secret, database="test_db",
         )
-
-        with caplog.at_level(logging.ERROR):
-            # Try to connect to non-existent MySQL with password
-            store = MySQLWorkerProfileBindingStore(
-                host="nonexistent_host",
-                port=3306,
-                user="test_user",
-                password="super_secret_password_123",
-                database="test_db",
-            )
-
-            # Try to trigger connection (should fail)
-            try:
-                store._ensure_connection()
-            except RuntimeError:
-                pass
-
-            # Check logs don't contain password
-            log_messages = [record.message for record in caplog.records]
-            for message in log_messages:
-                assert "super_secret_password_123" not in message
-
-            # Check extra fields
-            for record in caplog.records:
-                if hasattr(record, 'password'):
-                    assert record.password == "***MASKED***" or record.password != "super_secret_password_123"
+        driver_error = Error("connection rejected: " + secret)
+        if phase == "acquisition":
+            pool._pool = Mock()
+            pool._pool.get_connection.side_effect = driver_error
+        with patch(
+            "src.infra.public.database.mysql_connection_pool.pooling.MySQLConnectionPool",
+            side_effect=driver_error,
+        ), caplog.at_level(logging.ERROR):
+            with pytest.raises(RuntimeError) as raised:
+                pool.get_connection()
+        assert caplog.records, "A connection failure must be logged"
+        assert secret not in caplog.text
+        assert secret not in str(raised.value)
+        assert raised.value.__suppress_context__
 
     def test_qdrant_init_failure_logging_masks_secrets(self, caplog):
         """Test that Qdrant initialization logs don't expose secrets."""
@@ -455,26 +448,21 @@ class TestRequiredFieldsPresence:
             # Note: duration_ms and result are only on success/failure logs
         ]
 
+        from mysql.connector import Error
+        connection = MagicMock()
+        connection.cursor.return_value.execute.side_effect = Error("controlled schema failure")
+        pool = Mock()
+        pool.get_connection.return_value = connection
+        store = MySQLWorkerProfileBindingStore(connection_pool=pool)
         with caplog.at_level(logging.DEBUG):
-            # Try to connect
-            store = MySQLWorkerProfileBindingStore(
-                host="localhost",
-                port=3306,
-                user="test_user",
-                password="test_password",
-                database="test_db",
-            )
+            with pytest.raises(Error, match="controlled schema failure"):
+                store.get_active_binding("test-worker")
 
-            try:
-                store._ensure_connection()
-            except RuntimeError:
-                pass
-
-            # Check that logs have required fields
-            for record in caplog.records:
-                if hasattr(record, 'component'):
-                    for field in required_fields:
-                        assert hasattr(record, field), f"Missing required field: {field}"
+        records = [record for record in caplog.records if hasattr(record, "component")]
+        assert records, "Schema failure must produce structured storage logs"
+        for record in records:
+            for field in required_fields:
+                assert hasattr(record, field), f"Missing required field: {field}"
 
     def test_qdrant_logs_include_all_required_fields(self, caplog):
         """Test that Qdrant logs include all required fields from policy."""

@@ -5,21 +5,31 @@ from __future__ import annotations
 import json
 import pytest
 
+from src.domain.models.llm_request import LLMRequest
+from src.domain.models.llm_response import LLMResponse
+
 from src.application.services.verify_prompt_composer import VerifyPromptComposer
 from src.domain.models.verify_dto import CapabilityProbes, DimensionProbe, VerifyData
 from src.domain.models.worker import Capability, CapabilityLevel
 
 
-class FakeLLMProvider:
-    """Mock LLM Provider。"""
+class FakeLLMGateway:
+    """Mock LLM gateway。"""
 
     def __init__(self, output: str) -> None:
         self._output = output
         self.calls: list[str] = []
 
-    def generate(self, prompt: str) -> str:
-        self.calls.append(prompt)
-        return self._output
+    def generate(self, request: LLMRequest) -> LLMResponse:
+        self.calls.append(request.user_prompt)
+        return LLMResponse(
+            provider_id="test",
+            model_id="test",
+            raw_text=self._output,
+            parse_success=False,
+            latency_ms=0,
+            finish_reason="stop",
+        )
 
 
 def _make_verify_data() -> VerifyData:
@@ -50,8 +60,8 @@ VALID_LLM_OUTPUT = json.dumps({
 class TestVerifyPromptComposerCompose:
     @pytest.mark.asyncio
     async def test_compose_returns_probes(self) -> None:
-        provider = FakeLLMProvider(VALID_LLM_OUTPUT)
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway(VALID_LLM_OUTPUT)
+        composer = VerifyPromptComposer(llm_gateway=provider)
         result = await composer.compose(_make_verify_data())
         assert len(result) == 1
         assert result[0].capability_name == "coding"
@@ -59,8 +69,8 @@ class TestVerifyPromptComposerCompose:
 
     @pytest.mark.asyncio
     async def test_compose_calls_llm_with_prompt(self) -> None:
-        provider = FakeLLMProvider(VALID_LLM_OUTPUT)
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway(VALID_LLM_OUTPUT)
+        composer = VerifyPromptComposer(llm_gateway=provider)
         await composer.compose(_make_verify_data())
         assert len(provider.calls) == 1
         assert "coding" in provider.calls[0]
@@ -68,27 +78,27 @@ class TestVerifyPromptComposerCompose:
 
 class TestVerifyPromptComposerParseOutput:
     def test_parse_valid_json(self) -> None:
-        provider = FakeLLMProvider("")
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway("")
+        composer = VerifyPromptComposer(llm_gateway=provider)
         result = composer._parse_output(VALID_LLM_OUTPUT)
         assert len(result) == 1
 
     def test_parse_json_with_code_fence(self) -> None:
         fenced = f"```json\n{VALID_LLM_OUTPUT}\n```"
-        provider = FakeLLMProvider("")
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway("")
+        composer = VerifyPromptComposer(llm_gateway=provider)
         result = composer._parse_output(fenced)
         assert len(result) == 1
 
     def test_parse_invalid_json_raises(self) -> None:
-        provider = FakeLLMProvider("")
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway("")
+        composer = VerifyPromptComposer(llm_gateway=provider)
         with pytest.raises(json.JSONDecodeError):
             composer._parse_output("not json")
 
     @pytest.mark.asyncio
     async def test_compose_llm_failure_raises(self) -> None:
-        provider = FakeLLMProvider("bad output")
-        composer = VerifyPromptComposer(llm_provider=provider)
+        provider = FakeLLMGateway("bad output")
+        composer = VerifyPromptComposer(llm_gateway=provider)
         with pytest.raises(Exception):
             await composer.compose(_make_verify_data())

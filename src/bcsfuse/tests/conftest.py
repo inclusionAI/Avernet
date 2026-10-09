@@ -33,7 +33,7 @@ def setup_test_environment():
 
 
 @pytest.fixture(scope="function", autouse=True)
-def reset_stores_before_test():
+def reset_stores_before_test(monkeypatch):
     """
     每个测试前重置存储实例
 
@@ -41,15 +41,23 @@ def reset_stores_before_test():
     """
     from src.interfaces.api.dependencies.worker_dependencies import reset_stores
     from src.interfaces.api.dependencies.fusion_dependencies import reset_fusion_services
+    from src.interfaces.api.dependencies import fusion_dependencies
+    from src.infra.config.feature_flags import FeatureFlags
+
+    # A composed app from a previous test must not supply stores to an
+    # unrelated legacy app test. Provider selection is application-scoped.
+    monkeypatch.setattr(fusion_dependencies, "_app_context", None)
 
     reset_stores()
     reset_fusion_services()
+    FeatureFlags.reset()
 
     yield
 
     # 测试结束后再次重置
     reset_stores()
     reset_fusion_services()
+    FeatureFlags.reset()
 
 
 @pytest.fixture

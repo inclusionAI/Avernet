@@ -78,7 +78,7 @@ def sample_candidate_bundle() -> CandidateBundle:
         ],
         domains=["architecture"],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.0,
         ),
@@ -327,7 +327,7 @@ class TestCompositionInputEdgeCases:
                 ],
                 domains=["development"],
                 state=WorkerState(
-                    availability=Availability.AVAILABLE,
+                    availability=Availability.PUBLIC,
                     trust_level=TrustLevel.TRUSTED,
                     current_load=0.0,
                 ),

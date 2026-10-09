@@ -20,7 +20,6 @@ import os
 import threading
 import time
 import uuid
-from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 import mysql.connector
@@ -38,6 +37,7 @@ from src.infra.public.observability.storage_logging import (
 
 if TYPE_CHECKING:
     from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+    from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
 
 logger = logging.getLogger(__name__)
 
@@ -210,23 +210,23 @@ class MySQLWorkerProfileBindingStore:
     ) -> WorkerProfileBinding:
         """Bind Profile to Worker (thread-safe with connection pool)."""
         conn = self._pool.get_connection()
+        original_autocommit = conn.autocommit
         try:
             self._ensure_schema(conn)
-
+            conn.autocommit = False
             cursor = conn.cursor(dictionary=True)
 
             try:
-                now = datetime.utcnow()
                 binding_id = f"binding_{uuid.uuid4().hex[:12]}"
 
                 # First, deactivate all active bindings for this worker
                 cursor.execute(
                     """
                     UPDATE bcsfuse_worker_profile_bindings
-                    SET is_active = FALSE, unbound_at = %s, updated_at = %s
+                    SET is_active = FALSE, unbound_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                     WHERE worker_id = %s AND is_active = TRUE
                     """,
-                    (now, now, worker_id),
+                    (worker_id,),
                 )
 
                 # Check if this binding already exists
@@ -244,10 +244,10 @@ class MySQLWorkerProfileBindingStore:
                     cursor.execute(
                         """
                         UPDATE bcsfuse_worker_profile_bindings
-                        SET is_active = TRUE, unbound_at = NULL, updated_at = %s
+                        SET is_active = TRUE, unbound_at = NULL, updated_at = CURRENT_TIMESTAMP
                         WHERE binding_id = %s
                         """,
-                        (now, existing["binding_id"]),
+                        (existing["binding_id"],),
                     )
 
                     cursor.execute(
@@ -258,16 +258,20 @@ class MySQLWorkerProfileBindingStore:
                         (existing["binding_id"],),
                     )
                     row = cursor.fetchone()
-                    return self._row_to_binding(row)
+                    if row is None:
+                        raise RuntimeError("updated profile binding could not be read back")
+                    binding = self._row_to_binding(row)
+                    conn.commit()
+                    return binding
 
                 # Create new binding
                 cursor.execute(
                     """
                     INSERT INTO bcsfuse_worker_profile_bindings
-                    (binding_id, worker_id, profile_key, source_type, is_active, bound_at, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)
+                    (binding_id, worker_id, profile_key, source_type, is_active, bound_at)
+                    VALUES (%s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
                     """,
-                    (binding_id, worker_id, profile_key, source_type.value, now, now, now),
+                    (binding_id, worker_id, profile_key, source_type.value),
                 )
 
                 logger.debug(
@@ -275,15 +279,15 @@ class MySQLWorkerProfileBindingStore:
                     f"worker_id={worker_id}, profile_key={profile_key}, binding_id={binding_id}"
                 )
 
-                binding = WorkerProfileBinding(
-                    id=binding_id,
-                    worker_id=worker_id,
-                    profile_key=profile_key,
-                    source_type=source_type,
-                    is_active=True,
-                    bound_at=now,
-                    updated_at=now,
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_bindings WHERE binding_id = %s",
+                    (binding_id,),
                 )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("created profile binding could not be read back")
+                binding = self._row_to_binding(row)
+                conn.commit()
 
                 # Phase C-Fast-3: Sync denormalized column workers.active_profile_key
                 # This is CRITICAL for G5 fusion retrieval to find the active profile
@@ -316,10 +320,14 @@ class MySQLWorkerProfileBindingStore:
 
                 return binding
 
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 cursor.close()
 
         finally:
+            conn.autocommit = original_autocommit
             conn.close()
 
     def unbind_profile(self, worker_id: str, profile_key: str) -> bool:
@@ -331,17 +339,17 @@ class MySQLWorkerProfileBindingStore:
             cursor = conn.cursor()
 
             try:
-                now = datetime.utcnow()
                 cursor.execute(
                     """
                     UPDATE bcsfuse_worker_profile_bindings
-                    SET is_active = FALSE, unbound_at = %s, updated_at = %s
+                    SET is_active = FALSE, unbound_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                     WHERE worker_id = %s AND profile_key = %s
                     """,
-                    (now, now, worker_id, profile_key),
+                    (worker_id, profile_key),
                 )
 
                 result = cursor.rowcount > 0
+                conn.commit()
 
                 logger.debug(
                     f"[MySQLWorkerProfileBindingStore] unbind_profile() completed: "
@@ -432,8 +440,6 @@ class MySQLWorkerProfileBindingStore:
             )
 
             try:
-                now = datetime.utcnow()
-
                 # Start transaction
                 conn.autocommit = False
 
@@ -441,20 +447,20 @@ class MySQLWorkerProfileBindingStore:
                 cursor.execute(
                     """
                     UPDATE bcsfuse_worker_profile_bindings
-                    SET is_active = FALSE, unbound_at = %s, updated_at = %s
+                    SET is_active = FALSE, unbound_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                     WHERE worker_id = %s AND is_active = TRUE
                     """,
-                    (now, now, worker_id),
+                    (worker_id,),
                 )
 
                 # Activate the target binding
                 cursor.execute(
                     """
                     UPDATE bcsfuse_worker_profile_bindings
-                    SET is_active = TRUE, unbound_at = NULL, updated_at = %s
+                    SET is_active = TRUE, unbound_at = NULL, updated_at = CURRENT_TIMESTAMP
                     WHERE worker_id = %s AND profile_key = %s
                     """,
-                    (now, worker_id, profile_key),
+                    (worker_id, profile_key),
                 )
 
                 if cursor.rowcount == 0:

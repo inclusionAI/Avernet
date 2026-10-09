@@ -835,6 +835,10 @@ def _get_embedding_generator():
         RealEmbeddingProvider 或 None
     """
     global _embedding_generator
+    context = get_app_context()
+    if context is not None:
+        _embedding_generator = context.registry.get("embedding_provider")
+        return _embedding_generator
     if _embedding_generator is None:
         try:
             from src.infra.embedding.config.embedding_settings import EmbeddingSettings

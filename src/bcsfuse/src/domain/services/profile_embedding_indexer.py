@@ -748,6 +748,24 @@ class ProfileEmbeddingIndexer:
             )
             return []
     
+    def delete_by_worker(self, worker_id: str) -> int:
+        """Delete exact-owner vectors, including generated or removed profiles."""
+        store = self._profile_store.vector_store
+        native_delete = getattr(store, "delete_by_worker", None)
+        if callable(native_delete):
+            return native_delete(worker_id)
+        ids = []
+        for vector_id in store.get_vector_ids():
+            point = store.get(vector_id)
+            if point is None:
+                continue
+            payload = point.get("metadata", point.get("payload", {})) if isinstance(point, dict) else point.payload
+            if payload.get("worker_id") == worker_id:
+                ids.append(vector_id)
+        if ids:
+            self._profile_store.delete(ids)
+        return len(ids)
+
     def delete_by_profile(self, profile_key: str) -> int:
         """
         删除指定 profile 的所有向量

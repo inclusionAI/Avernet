@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from src.domain.models.worker_audit_log import WorkerAuditAction, WorkerAuditLog
 from src.infra.public.audit.mysql_worker_audit_log_store import (
@@ -80,3 +83,16 @@ def test_append_log_preserves_values_that_are_already_json() -> None:
     assert params is not None
     assert params[3] == '{"enabled": false}'
     assert params[4] == '{"enabled": true}'
+
+
+@pytest.mark.parametrize("aware", [False, True])
+def test_append_log_preserves_event_epoch_independent_of_local_timezone(aware):
+    pool = RecordingPool()
+    store = MySQLWorkerAuditLogStore(connection_pool=pool)
+    instant = datetime(2026, 1, 1, 3, 0, tzinfo=timezone.utc)
+    value = instant.astimezone(timezone(timedelta(hours=8))) if aware else instant.replace(tzinfo=None)
+    store.append_log(WorkerAuditLog(
+        worker_id="worker-1", action=WorkerAuditAction.CREATED, performed_at=value,
+    ))
+    params = pool.connections[-1].cursor_instance.params
+    assert params[-1] == instant.timestamp()

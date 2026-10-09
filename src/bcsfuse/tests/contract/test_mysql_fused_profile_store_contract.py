@@ -20,6 +20,16 @@ import pytest
 from typing import Optional
 
 
+class UnavailablePool:
+    """Deterministic failure at the external database boundary, not localhost."""
+    def __init__(self):
+        self.requests = 0
+
+    def get_connection(self):
+        self.requests += 1
+        raise RuntimeError("controlled MySQL outage")
+
+
 class TestMySQLFusedProfileStoreContract:
     """Contract tests for MySQLFusedProfileStore without real DB."""
 
@@ -35,30 +45,14 @@ class TestMySQLFusedProfileStoreContract:
         assert True
 
     def test_store_constructs_without_connecting(self):
-        """Test that the store can be constructed without database connection."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
-            MySQLFusedProfileStore,
-        )
+        from unittest.mock import patch
+        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
-        # Should not raise error on construction
-        store = MySQLFusedProfileStore()
-        assert store is not None
-        assert store.host == "localhost"
-        assert store.port == 3306
-
-        # Should also accept explicit config without connecting
-        store = MySQLFusedProfileStore(
-            host="test-host",
-            port=3307,
-            user="test-user",
-            password="test-password",
-            database="test-db",
-        )
-        assert store.host == "test-host"
-        assert store.port == 3307
-        assert store.user == "test-user"
-        assert store.password == "test-password"
-        assert store.database == "test-db"
+        with patch("src.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider") as factory:
+            config = dict(host="test-host", port=3307, user="test-user", password="test-password", database="test-db")
+            MySQLFusedProfileStore(**config)
+            factory.assert_called_once_with(**config)
+            factory.return_value.get_connection.assert_not_called()
 
     def test_required_methods_exist(self):
         """Test that all required methods exist."""
@@ -150,94 +144,42 @@ class TestMySQLFusedProfileStoreContract:
             assert keyword not in result.stderr.lower(), f"Forbidden import found: {keyword}"
 
     def test_no_fallback_to_inmemory_or_sqlite(self):
-        """Test that the store does not fallback to InMemory or SQLite."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
-            MySQLFusedProfileStore,
-        )
+        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
-        store = MySQLFusedProfileStore()
-
-        # All methods should fail with MySQL connection error, not fallback
-        with pytest.raises(RuntimeError) as exc_info:
+        store = MySQLFusedProfileStore(connection_pool=UnavailablePool())
+        with pytest.raises(RuntimeError, match="controlled MySQL outage"):
             store.find_by_key("test-fusion-id")
 
-        error_msg = str(exc_info.value).lower()
-        assert "inmemory" not in error_msg
-        assert "sqlite" not in error_msg
-        assert "fallback" not in error_msg
-
-        # Should mention MySQL connection failure
-        assert "mysql" in error_msg or "connection" in error_msg
-
     def test_fail_fast_without_mysql_config(self):
-        """Test that methods fail fast with clear MySQL error when DB not configured."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
-            MySQLFusedProfileStore,
-        )
+        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
+        from src.domain.models.profile_fusion import FusedProfileRecord, ConversationTurn
 
-        store = MySQLFusedProfileStore()
-
-        # All methods should fail with clear MySQL connection error
-        with pytest.raises(RuntimeError) as exc_info:
-            store.save(None)
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.find_by_key("fusion-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.find_by_participant("participant-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.find_by_group("group-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.append_turn("fusion-1", None)
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.get_conversation("fusion-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.update_status("fusion-1", "completed")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.exists("fusion-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
-
-        with pytest.raises(RuntimeError) as exc_info:
-            store.update(None)
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        store = MySQLFusedProfileStore(connection_pool=UnavailablePool())
+        record = FusedProfileRecord(fusion_id="fusion-1", fusion_mode="G9")
+        operations = [
+            lambda: store.save(record),
+            lambda: store.find_by_key("fusion-1"),
+            lambda: store.find_by_participant("participant-1"),
+            lambda: store.find_by_group("group-1"),
+            lambda: store.append_turn("fusion-1", ConversationTurn(turn_index=1, question="test")),
+            lambda: store.get_conversation("fusion-1"),
+            lambda: store.update_status("fusion-1", "completed"),
+            lambda: store.exists("fusion-1"),
+            lambda: store.update(record),
+        ]
+        for operation in operations:
+            with pytest.raises(RuntimeError, match="controlled MySQL outage"):
+                operation()
 
     def test_lazy_connection_initialization(self):
-        """Test that connection is lazy - not established until first method call."""
-        from src.infra.public.stores.mysql_fused_profile_store import (
-            MySQLFusedProfileStore,
-        )
+        from src.infra.public.stores.mysql_fused_profile_store import MySQLFusedProfileStore
 
-        # Construction should not connect
-        store = MySQLFusedProfileStore(
-            host="nonexistent-host",
-            port=9999,
-            user="invalid",
-            password="invalid",
-            database="invalid",
-        )
-
-        # Connection should not be established yet
-        assert store._conn is None
-        assert not store._schema_initialized
-
-        # Only when we call a method should it try to connect and fail
-        with pytest.raises(RuntimeError) as exc_info:
+        pool = UnavailablePool()
+        store = MySQLFusedProfileStore(connection_pool=pool)
+        assert pool.requests == 0
+        with pytest.raises(RuntimeError, match="controlled MySQL outage"):
             store.find_by_key("test-id")
-
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert pool.requests == 1
 
 
 # Skip real MySQL integration tests unless explicitly enabled

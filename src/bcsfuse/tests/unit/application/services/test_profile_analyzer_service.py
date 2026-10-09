@@ -107,7 +107,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         assert result.semantic_profile is not None
         assert "【职责定位】" in result.semantic_profile
         assert "【经验能力】" in result.semantic_profile
-        assert "【Skill能力】" in result.semantic_profile
+        assert "dima-for-teamclaw" in result.semantic_profile
         assert "刻薄的AI助手" in result.semantic_profile
         assert result.capability_tags == [
             "实时计算",
@@ -200,7 +200,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         profile = service._build_semantic_profile(raw_text)
         assert "【职责定位】" in profile
         assert "【经验能力】" in profile
-        assert "【Skill能力】" in profile
+        assert "skill-a: 技能A" in profile
 
     def test_parse_structured_response(self, service):
         """测试结构化响应解析（正常/边界）"""
@@ -218,8 +218,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         assert result.semantic_profile is None
         assert result.capability_tags == []
 
-        # 超长截断
+        # Match the internal contract: preserve the complete structured profile.
         long_profile = "这是一个很长的描述。" * 200
         result = service._parse_structured_response({"semantic_profile": long_profile})
-        assert len(result.semantic_profile) <= 503
-        assert result.semantic_profile.endswith("...")
+        assert result.semantic_profile == long_profile
