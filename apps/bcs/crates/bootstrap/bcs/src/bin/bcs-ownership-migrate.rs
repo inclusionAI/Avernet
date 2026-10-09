@@ -31,6 +31,44 @@ use serde_json::json;
 /// command instead of spinning. 10,000 pages = 1M candidates read.
 const MAX_INSPECT_PAGES: usize = 10_000;
 
+/// Run-failure taxonomy (implemented here, documented in the runbook's
+/// exit-code table — the two must stay aligned):
+/// - [`RunFailure::Usage`] -> exit `2`: operator/input mistakes (unreadable
+///   or mis-shaped confirmation file, over-limit page, blank batch id,
+///   blank anchors — plus clap's own argument-level errors, which exit `2`
+///   before `run` is reached). Fix the invocation/input; never re-run the
+///   same batch expecting recovery.
+/// - [`RunFailure::Execution`] -> exit `1`: execution failures at the
+///   storage/config boundary; a committed batch prefix recovers by re-running
+///   the SAME `--batch-id`.
+enum RunFailure {
+    /// Operator/input error: exit code `2` (same class as clap usage errors).
+    Usage(String),
+    /// Execution failure (storage/config): exit code `1`.
+    Execution(String),
+}
+
+impl RunFailure {
+    fn exit_code(&self) -> u8 {
+        match self {
+            Self::Usage(_) => 2,
+            Self::Execution(_) => 1,
+        }
+    }
+}
+
+/// Service errors split along the same line: a rejected request shape
+/// (`InvalidOperation`: over-limit page, blank batch id, blank ids/anchor)
+/// is a usage error, everything else is an execution failure.
+fn migration_failure(context: &str, error: bcs_service_api::ServiceError) -> RunFailure {
+    match error {
+        bcs_service_api::ServiceError::InvalidOperation { .. } => {
+            RunFailure::Usage(format!("{context}: rejected request shape: {error}"))
+        }
+        other => RunFailure::Execution(format!("{context}: {other}")),
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "bcs-ownership-migrate",
@@ -88,19 +126,30 @@ fn main() -> ExitCode {
         .expect("tokio runtime");
     match runtime.block_on(run(args)) {
         Ok(code) => ExitCode::from(code),
-        Err(message) => {
-            eprintln!("bcs-ownership-migrate: {message}");
-            ExitCode::from(1)
+        Err(failure) => {
+            let code = failure.exit_code();
+            match failure {
+                RunFailure::Usage(message) | RunFailure::Execution(message) => {
+                    eprintln!("bcs-ownership-migrate: {message}")
+                }
+            }
+            if code == 1 {
+                eprintln!(
+                    "bcs-ownership-migrate: storage failure; re-run the SAME --batch-id to \
+                     recover the batch from its committed prefix"
+                );
+            }
+            ExitCode::from(code)
         }
     }
 }
 
-async fn run(args: Args) -> Result<u8, String> {
+async fn run(args: Args) -> Result<u8, RunFailure> {
     // Only the existing configuration chain selects the datasource.
     let config = bcs::BcsConfig::load_with_env(args.config_dir.as_ref());
     let service = bcs::ownership_migration_wiring::ownership_migration_service_from_config(&config)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| RunFailure::Execution(format!("datasource selection failed: {error}")))?;
     match args.command {
         Command::Inspect { limit, after_bot_id } => {
             let mut after = after_bot_id;
@@ -110,7 +159,7 @@ async fn run(args: Args) -> Result<u8, String> {
                 let page = service
                     .inspect_batch(after.clone(), limit)
                     .await
-                    .map_err(|error| format!("ownership migration dry-run failed: {error}"))?;
+                    .map_err(|error| migration_failure("ownership migration dry-run failed", error))?;
                 pages += 1;
                 let next = page.next_bot_id.clone();
                 candidates.extend(page.candidates);
@@ -119,10 +168,10 @@ async fn run(args: Args) -> Result<u8, String> {
                     None => break,
                 }
                 if pages >= MAX_INSPECT_PAGES {
-                    return Err(format!(
+                    return Err(RunFailure::Usage(format!(
                         "the dry-run walk exceeded {MAX_INSPECT_PAGES} pages; rerun with \
                          a stricter --after-bot-id anchor"
-                    ));
+                    )));
                 }
             }
             let summary = candidates.iter().fold(std::collections::BTreeMap::new(), |mut acc, candidate| {
@@ -139,27 +188,29 @@ async fn run(args: Args) -> Result<u8, String> {
             Ok(0)
         }
         Command::Apply { batch_id, confirm_file } => {
+            // Input mistakes are USAGE failures: the batch never started, so
+            // the runbook's "re-run the same batch" guidance does not apply.
             let raw = std::fs::read_to_string(&confirm_file)
-                .map_err(|error| format!("cannot read confirmation file: {error}"))?;
+                .map_err(|error| RunFailure::Usage(format!("cannot read confirmation file: {error}")))?;
             let parsed: serde_json::Value = serde_json::from_str(&raw)
-                .map_err(|error| format!("confirmation file is not valid JSON: {error}"))?;
+                .map_err(|error| RunFailure::Usage(format!("confirmation file is not valid JSON: {error}")))?;
             let confirmed: Vec<String> = parsed
                 .as_array()
-                .ok_or_else(|| "confirmation file must be a JSON array".to_string())?
+                .ok_or_else(|| RunFailure::Usage("confirmation file must be a JSON array".to_string()))?
                 .iter()
                 .map(|item| {
                     item.as_str()
                         .map(str::to_string)
-                        .ok_or_else(|| "confirmation entries must be Bot id strings".to_string())
+                        .ok_or_else(|| RunFailure::Usage("confirmation entries must be Bot id strings".to_string()))
                 })
-                .collect::<Result<Vec<String>, String>>()?;
+                .collect::<Result<Vec<String>, RunFailure>>()?;
             let report = service
                 .initialize_batch(confirmed, batch_id)
                 .await
-                .map_err(|error| format!("ownership migration apply failed: {error}"))?;
+                .map_err(|error| migration_failure("ownership migration apply failed", error))?;
             let failed = report.failed.len();
             let document = serde_json::to_string(&report)
-                .map_err(|error| format!("report serialization failed: {error}"))?;
+                .map_err(|error| RunFailure::Execution(format!("report serialization failed: {error}")))?;
             println!("{document}");
             let _ = std::io::stdout().flush();
             if failed > 0 {

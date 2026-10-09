@@ -613,10 +613,10 @@ async fn binary_requires_maintenance_and_dry_run_writes_nothing() {
 
     // Missing maintenance acknowledgment: nonzero usage exit, no writes.
     let refused = run_binary(&["inspect"], config_dir.as_path());
-    assert_ne!(
+    assert_eq!(
         refused.status.code(),
-        Some(0),
-        "without --maintenance the cutover binary must refuse"
+        Some(2),
+        "without --maintenance the cutover binary must refuse with the usage exit code"
     );
     assert!(
         String::from_utf8_lossy(&refused.stderr)
@@ -735,7 +735,9 @@ async fn binary_apply_writes_once_and_replays_the_same_batch() {
         "the ledger records the initialization exactly once"
     );
 
-    // A missing confirm file is a usage failure: nonzero, no side effects.
+    // A missing confirm file is a usage failure: exit 2, no side effects —
+    // deliberately NOT the storage-failure code, so the runbook's
+    // "re-run the same batch" recovery guidance never kicks in.
     let missing_confirm = run_binary(
         &[
             "--maintenance",
@@ -747,21 +749,89 @@ async fn binary_apply_writes_once_and_replays_the_same_batch() {
         ],
         config_dir.as_path(),
     );
-    assert_ne!(missing_confirm.status.code(), Some(0));
+    assert_eq!(missing_confirm.status.code(), Some(2));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn binary_storage_failure_exits_nonzero() {
+async fn binary_usage_errors_exit_three_paths_with_code_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("library.sqlite");
+    {
+        let db = migrated_sqlite_file(&db_path).await;
+        seed_binary_library(db.as_ref()).await;
+    }
+    let config_dir = config_dir_with_sqlite(&db_path);
+    let confirm = confirm_file(dir.path(), &["bot-bin-clean"]);
+
+    // Over-limit page: refused request shape, not a storage failure.
+    let over_limit = run_binary(
+        &["--maintenance", "inspect", "--limit", "101"],
+        config_dir.as_path(),
+    );
+    assert_eq!(
+        over_limit.status.code(),
+        Some(2),
+        "an over-limit page is a usage error: {over_limit:?}"
+    );
+
+    // Blank batch id: refused request shape.
+    let blank_batch = run_binary(
+        &[
+            "--maintenance",
+            "apply",
+            "--batch-id",
+            "   ",
+            "--confirm-file",
+            confirm.to_str().unwrap(),
+        ],
+        config_dir.as_path(),
+    );
+    assert_eq!(
+        blank_batch.status.code(),
+        Some(2),
+        "a blank batch id is a usage error: {blank_batch:?}"
+    );
+
+    // Mis-shaped confirmation file (non-string entries): usage error.
+    let misshaped = dir.path().join("misshaped.json");
+    std::fs::write(&misshaped, serde_json::json!([42]).to_string()).unwrap();
+    let misshaped_apply = run_binary(
+        &[
+            "--maintenance",
+            "apply",
+            "--batch-id",
+            "batch-binary-shape",
+            "--confirm-file",
+            misshaped.to_str().unwrap(),
+        ],
+        config_dir.as_path(),
+    );
+    assert_eq!(
+        misshaped_apply.status.code(),
+        Some(2),
+        "a mis-shaped confirmation file is a usage error: {misshaped_apply:?}"
+    );
+
+    // Usage errors wrote NOTHING: the clean candidate is still version 0
+    // with no initialization ledger row.
+    let unaffected = reopen_fingerprint(&db_path, "bot-bin-clean").await;
+    assert_eq!(unaffected.version, 0);
+    assert_eq!(unaffected.initializations, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn binary_storage_failure_exits_one() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("corrupt.sqlite");
     std::fs::write(&db_path, b"this is not a sqlite database file").unwrap();
     let config_dir = config_dir_with_sqlite(&db_path);
     let failed = run_binary(&["--maintenance", "inspect"], config_dir.as_path());
     let code = failed.status.code();
-    assert_ne!(
+    assert_eq!(
         code,
-        Some(0),
-        "any storage failure must exit the command nonzero: {failed:?}"
+        Some(1),
+        "any storage failure must exit the command with the storage-failure \
+         code (the batch-recovery contract), nonzero: {failed:?}"
     );
 }
 
