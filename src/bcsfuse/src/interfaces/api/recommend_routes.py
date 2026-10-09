@@ -201,16 +201,11 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
 
     effective_min_score = vector_min_score
 
-    logger.info(
-        f"[RECOMMEND][{trace_id}] request | "
-        f"question_length={len(request.question)}, topK={request.topK}, type={request.type}, "
-        f"min_score={request.min_score}, group_id={request.group_id}, "
-        f"expand_factor={request.expand_factor}, enable_rerank={enable_rerank}, "
-        f"vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
-    )
+    log_stage(logger, "request", question_length=len(request.question), top_k=request.topK,
+              rerank_requested=enable_rerank, expand_factor=request.expand_factor)
 
     # 兼容性诊断日志
-    logger.info(
+    logger.debug(
         f"[RECOMMEND][{trace_id}] COMPAT | "
         f"explicit_min_score_provided={explicit_min_score_provided}, "
         f"min_score_source={min_score_source}, "

@@ -175,7 +175,7 @@ class WorkerCandidateRecommendationImpl:
                 default_visibility_filters["availability"]
             )
 
-        logger.info(
+        logger.debug(
             "[VISIBILITY-TRACE] stage=final_filters, endpoint=recommend, user_filters=%s, "
             "default_filters=%s, merged_filters=%s",
             filters,
@@ -556,14 +556,14 @@ class WorkerCandidateRecommendationImpl:
             vector_min_score = min_score
             rerank_min_score = min_score
 
-        logger.info(
+        logger.debug(
             "[CandidateRec-Supplement] START | "
             f"mode={mode.value}, max_supplements={max_supplements}, "
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
         )
 
         if max_supplements <= 0:
-            logger.info("[CandidateRec-Supplement] SKIP | max_supplements <= 0")
+            logger.debug("[CandidateRec-Supplement] SKIP | max_supplements <= 0")
             return []
 
         # 检查 vector-aware recommendation 是否启用
@@ -578,7 +578,7 @@ class WorkerCandidateRecommendationImpl:
         # G5-first: 使用向量匹配
         if mode == RetrievalMode.EXPERT_DIAGNOSIS:
             if self._vector_match_service is not None:
-                logger.info(
+                logger.debug(
                     "[CandidateRec-Supplement] USING_VECTOR_MATCH | "
                     "mode=EXPERT_DIAGNOSIS, vector_match_service available, calling _try_vector_match"
                 )
@@ -593,7 +593,7 @@ class WorkerCandidateRecommendationImpl:
                 )
                 if result:
                     recommendations, reranker_called = result
-                    logger.info(
+                    logger.debug(
                         "[CandidateRec-Supplement] VECTOR_SUCCESS | "
                         f"got {len(recommendations)} recommendations from vector match, "
                         f"reranker_called={reranker_called}"
@@ -710,7 +710,7 @@ class WorkerCandidateRecommendationImpl:
             )
 
             if not match_results:
-                logger.info("[VectorMatch-Try] NO_RESULTS | see retrieval stage counts for cause")
+                logger.debug("[VectorMatch-Try] NO_RESULTS | see retrieval stage counts for cause")
                 return None
 
             logger.debug(

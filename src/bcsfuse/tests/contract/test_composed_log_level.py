@@ -24,6 +24,10 @@ def logging_state(monkeypatch):
     business = logging.getLogger("src")
     handlers, level, business_level = root.handlers[:], root.level, business.level
     factory = logging.getLogRecordFactory()
+    logger_levels = {
+        name: logger.level for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
     root.handlers = []
     root.setLevel(logging.WARNING)
     business.setLevel(logging.NOTSET)
@@ -34,6 +38,9 @@ def logging_state(monkeypatch):
     root.handlers = handlers
     root.setLevel(level)
     business.setLevel(business_level)
+    for name, logger in list(logging.Logger.manager.loggerDict.items()):
+        if isinstance(logger, logging.Logger):
+            logger.setLevel(logger_levels.get(name, logging.NOTSET))
     logging.setLogRecordFactory(factory)
     FeatureFlags.reset()
 

@@ -45,9 +45,53 @@ routing remain intact; their own filtering still applies. Third-party logger
 levels are not raised to DEBUG. A public process without host handlers gets a
 console handler with request trace IDs.
 
-INFO retrieval logs summarize stage counts, thresholds and timing. DEBUG adds
-candidate IDs and scores for tracing where a candidate was removed, without
-logging query text, profile contents or credentials in those diagnostic records.
+INFO retrieval logs include stage counts, thresholds, timing and bounded batches
+of candidate decisions (IDs, scores, ranks, admission/removal reasons). DEBUG adds
+raw fragment hit details. These diagnostics never log query text, profile
+contents, vectors or credentials.
+Dependency construction, Qdrant adapter details and embedding request setup are
+shown only when `LOG_LEVEL=DEBUG`; their WARNING/ERROR records remain visible at
+INFO. HTTP client wire chatter stays at WARNING even in business DEBUG mode.
+Initialization logs describe defaults, not the current request's rerank state.
+Use `candidate_selection.rerank_enabled` for the effective request decision and
+the subsequent `reranker` input/output/degradation counts for execution evidence.
+Candidate selection is logged before reranking. `candidate_decisions` has an
+explicit `fields` array and at most 25 compact `entries` per INFO record, with no
+silent truncation. `max_rank` and `weighted_rank` rank eligible profiles, not
+fragments. `hit_types` identifies the fragment types actually recalled.
+`max_head`, `weighted_head`, `both_heads`, `max_refill`, and `weighted_refill`
+indicate admission; `budget_rejected` means the profile was recalled but did not
+fit the rerank budget. `fragment_type_removed`, `candidate_excluded`, and
+`candidate_metadata_removed` explain earlier filtering. `reranker_returned`,
+`reranker_not_returned`, `result_build_removed`, `registry_removed`,
+`before_threshold`, and `threshold_removed` identify later stages at INFO.
+Not being returned by the reranker is not proof of a particular model score:
+the model can return only its top K and existing degradation policy also applies.
+`reranker_returned.score_source` distinguishes model scores from
+`aggregate_fallback`; `reranker_not_returned` lists the original weighted score,
+not an inferred model score.
+A profile absent from both candidate decisions and removal records did not reach
+the eligible pool; these logs alone cannot distinguish missing index data,
+payload prefilter rejection, or a fragment outside the initial search limit.
+
+### Bounded fragment rerank candidate selection (HTTP v1 compatible)
+
+The existing fragment search limit, eligibility filters, aggregation formula,
+weights, rerank model input text and thresholds are unchanged. For rerank budget
+`N = topK * expand_factor`, select the top `ceil(N/2)` eligible profiles by
+highest **raw** fragment similarity and top `floor(N/2)` by existing aggregate
+score. Deduplicate by complete `profile_key`, then alternate through the max
+and aggregate tails, skipping already selected keys, until N unique profiles
+or all available profiles are selected. Ties use ascending `profile_key`.
+For topK=10 and expand_factor=10, the initial quotas are 50/50, not 100/100.
+This operates only within the initially recalled fragment pool, not the whole
+database, and adds no keyword search, extra vector query or re-embedding.
+
+Selected candidates are supplied in aggregate-score order to preserve existing
+no-provider/error fallback ordering. Explicitly disabling rerank retains the
+existing aggregate-only selection and ranking. This change does not repair
+historical partial-batch/zero-score degradation semantics. Existing API fields,
+storage schemas and durable vector data are unchanged; no reindex is required.
 
 ## Required providers
 

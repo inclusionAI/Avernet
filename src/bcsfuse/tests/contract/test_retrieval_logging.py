@@ -144,7 +144,7 @@ def test_rerank_logs_never_dump_profile_text_even_at_debug(caplog):
         def rerank(self, query, candidates, top_k):
             return [{"id": candidates[0]["id"], "score": 0.8}]
 
-    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="src")
     results = FragmentRerankerService(reranker=FixedReranker()).rerank(
         RerankRequest("private-query-sentinel", [_candidate("bot:1:default")], 1)
     )
@@ -178,7 +178,7 @@ def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog
         vector_store=vectors, metadata_store=FileMetadataStoreAdapter(storage_dir=str(tmp_path / "metadata")),
         fragment_config=FragmentRetrievalConfig(aggregation_strategy="max"),
     )
-    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="src")
     try:
         results = service.match(query_embedding=[1.0, 0.0], query="private-query-sentinel",
                                 top_k=10, mode="fragment", vector_min_score=0.08)
@@ -188,8 +188,10 @@ def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog
         assert stages["candidate_selection"].candidate_count == 2
         assert stages["threshold"].before_count == 2
         assert stages["threshold"].after_count == 1
-        assert stages["threshold"].before_score_sample[1]["profile_key"] == "bot:removed:default"
-        assert stages["threshold"].sample_truncated is False
+        # Explicit INFO decision records are separate from the count summary.
+        assert "bot:removed:default" not in stages["threshold"].getMessage()
+        assert any(r.levelno == logging.INFO and "threshold_removed" in r.getMessage()
+                   and "bot:removed:default" in r.getMessage() for r in caplog.records)
         assert "bot:removed:default" in caplog.text
         assert "private-profile-sentinel" not in caplog.text
         assert "private-summary-sentinel" not in caplog.text
@@ -219,7 +221,7 @@ async def test_recommend_route_logs_summary_without_query_or_response_content(mo
             )
 
     monkeypatch.setattr(recommend_routes, "get_candidate_recommendation_service", CandidateService)
-    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="src")
     response = await recommend_routes.recommend_bots(BotRecommendationRequest(
         question="private-query-sentinel", topK=10, min_score=0.005, enable_rerank=True,
     ))

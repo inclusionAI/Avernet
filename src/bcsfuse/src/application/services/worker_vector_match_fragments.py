@@ -11,8 +11,9 @@ from src.domain.models.profile_fragment import (
 )
 from src.domain.models.vector_search_hit import VectorSearchHit
 from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
-from src.domain.services.retrieval_logging import log_stage, log_candidates
+from src.domain.services.retrieval_logging import log_stage, log_candidates, log_rows
 from src.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
+from src.application.services.fragment_candidate_selection import select_rerank_candidates
 
 logger = logging.getLogger("src.application.services.worker_vector_match_service")
 
@@ -125,7 +126,12 @@ class FragmentMatchingMixin:
             log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
 
             # 过滤掉未启用的 fragment 类型（使用运行时权重决定）
+            unfiltered_hits = fragment_hits
             fragment_hits = self._filter_fragment_hits(fragment_hits, enabled_fragment_types)
+            retained_ids = {hit.id for hit in fragment_hits}
+            log_candidates(logger, "fragment_type_removed", (
+                (hit.id, hit.score) for hit in unfiltered_hits if hit.id not in retained_ids
+            ), level=logging.INFO)
             log_stage(logger, "vector_search", index_size=vector_size, search_k=search_k,
                       hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
                       duration_ms=round((perf_counter() - search_started) * 1000, 2))
@@ -150,6 +156,13 @@ class FragmentMatchingMixin:
         candidates = []
         excluded_by_set = 0
         excluded_by_meta = 0
+        log_candidates(logger, "candidate_excluded", (
+            (key, data["final_score"]) for key, data in aggregated.items() if key in excluded_set
+        ), level=logging.INFO)
+        log_candidates(logger, "candidate_metadata_removed", (
+            (key, data["final_score"]) for key, data in aggregated.items()
+            if key not in excluded_set and candidate_keys is not None and key not in candidate_keys
+        ), level=logging.INFO)
         for profile_key, data in aggregated.items():
             if profile_key in excluded_set:
                 excluded_by_set += 1
@@ -172,17 +185,14 @@ class FragmentMatchingMixin:
         # Stage 4: Reranker 精排（如果启用）
         rerank_input_count = 0
         if enable_rerank:
-            # 按 aggregated_score 排序，取 expand_factor * top_k 个进入 Reranker
-            rerank_candidates_count = min(
-                len(candidates),
-                effective_expand_factor * top_k
+            sorted_candidates, selection_stats = select_rerank_candidates(
+                candidates, effective_expand_factor * top_k,
             )
-            sorted_candidates = sorted(
-                candidates,
-                key=lambda x: x.aggregated_score,
-                reverse=True
-            )[:rerank_candidates_count]
             rerank_input_count = len(sorted_candidates)
+            log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
+                      candidate_count=len(candidates), excluded_count=excluded_by_set,
+                      metadata_removed_count=excluded_by_meta, rerank_enabled=True,
+                      rerank_input_count=rerank_input_count, **selection_stats)
             log_candidates(logger, "reranker_input", ((c.profile_key, c.aggregated_score) for c in sorted_candidates))
             results = self._execute_rerank(
                 query=query,
@@ -192,6 +202,10 @@ class FragmentMatchingMixin:
                 reranker_fail_action=effective_reranker_fail_action,
             )
         else:
+            log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
+                      candidate_count=len(candidates), excluded_count=excluded_by_set,
+                      metadata_removed_count=excluded_by_meta, rerank_enabled=False,
+                      rerank_input_count=0)
             # 按 aggregated_score 降序排序后再截断
             sorted_candidates = sorted(
                 candidates,
@@ -200,10 +214,6 @@ class FragmentMatchingMixin:
             )
             results = self._build_results_from_aggregation(sorted_candidates[:top_k])
 
-        log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
-                  candidate_count=len(candidates), excluded_count=excluded_by_set,
-                  metadata_removed_count=excluded_by_meta, rerank_enabled=bool(enable_rerank),
-                  rerank_input_count=rerank_input_count, ranked_count=len(results))
         log_candidates(logger, "eligible_candidates", ((c.profile_key, c.aggregated_score) for c in candidates))
         log_candidates(logger, "ranked_results", ((r.profile_key, r.score) for r in results))
 
@@ -320,7 +330,28 @@ class FragmentMatchingMixin:
                 top_k=top_k,
             )
             rerank_results = reranker.rerank(rerank_request)
+            returned_rows = []
+            for result in rerank_results:
+                if hasattr(result, "profile_key"):
+                    key, score = result.profile_key, result.final_score
+                    rerank_metadata = getattr(result, "rerank_metadata", {})
+                else:
+                    key, score = result["profile_key"], result.get("final_score", 0.0)
+                    rerank_metadata = result.get("rerank_metadata", {})
+                score_source = "aggregate_fallback" if rerank_metadata.get("degraded") else "reranker"
+                returned_rows.append([key, round(score, 6), score_source])
+            returned_scores = [(row[0], row[1]) for row in returned_rows]
+            returned_keys = {key for key, _ in returned_scores}
+            log_rows(logger, "reranker_returned", ["profile_key", "score", "score_source"], returned_rows)
+            log_rows(logger, "reranker_not_returned", ["profile_key", "weighted_score"], (
+                [c.profile_key, round(c.aggregated_score, 6)]
+                for c in candidates if c.profile_key not in returned_keys
+            ))
             results = self._build_results_from_rerank(rerank_results, candidates)
+            built_keys = {result.profile_key for result in results}
+            log_candidates(logger, "result_build_removed", (
+                (key, score) for key, score in returned_scores if key not in built_keys
+            ), level=logging.INFO)
             logger.debug("[FRAGMENT-MATCH] rerank done: %d results", len(results))
             return results
         except Exception as e:

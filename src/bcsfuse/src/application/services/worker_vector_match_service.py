@@ -169,15 +169,15 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                     reranker_model=self._fragment_config.reranker_model,
                     fail_action=RerankFailAction(self._fragment_config.reranker_fail_action),
                 )
-                logger.info(
-                    "[VECTOR-MATCH] Rerank enabled with model: %s",
+                logger.debug(
+                    "[VECTOR-MATCH-INIT] default_rerank_enabled=true model=%s; request may override",
                     self._fragment_config.reranker_model
                 )
             except Exception as e:
                 logger.warning("[VECTOR-MATCH] Failed to initialize reranker: %s", e)
                 self._reranker_service = None
         else:
-            logger.info("[VECTOR-MATCH] Rerank disabled")
+            logger.debug("[VECTOR-MATCH-INIT] default_rerank_enabled=false; request may override")
 
         # 获取启用的 fragment 类型（用于检索过滤）
         self._enabled_fragment_types = set(ProfileFragmentDecomposer.get_active_types())
@@ -190,7 +190,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             store: MySQLWorkerProfileContentStore 实例
         """
         self._profile_content_store = store
-        logger.info("[VECTOR-MATCH] Profile content store injected for fragment content reload")
+        logger.debug("[VECTOR-MATCH] Profile content store injected for fragment content reload")
 
     def _load_fragment_content_from_mysql(self, profile_key: str, payload: dict | None = None) -> str | None:
         """
@@ -449,15 +449,14 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # - 如果启用了 rerank，使用 rerank_min_score 过滤
         # - 如果未启用 rerank，使用 vector_min_score 过滤
         effective_threshold = rerank_min_score if any(r.is_reranked for r in results) else vector_min_score
-        score_sample = [{"profile_key": r.profile_key, "score": r.score} for r in results[:10]]
 
-        log_candidates(logger, "before_threshold", ((r.profile_key, r.score) for r in results))
+        log_candidates(logger, "before_threshold", ((r.profile_key, r.score) for r in results), level=logging.INFO)
 
         # 应用相似度阈值过滤
         if effective_threshold > 0.0:
             log_candidates(logger, "threshold_removed", (
                 (r.profile_key, r.score) for r in results if r.score < effective_threshold
-            ))
+            ), level=logging.INFO)
             filtered_results = [r for r in results if r.score >= effective_threshold]
             removed_count = len(results) - len(filtered_results)
             results = filtered_results
@@ -466,8 +465,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
 
         log_stage(logger, "threshold", before_count=pre_filter_count, after_count=len(results),
                   removed_count=removed_count, effective_threshold=effective_threshold,
-                  vector_min_score=vector_min_score, rerank_min_score=rerank_min_score,
-                  before_score_sample=score_sample, sample_truncated=pre_filter_count > 10)
+                  vector_min_score=vector_min_score, rerank_min_score=rerank_min_score)
         log_candidates(logger, "final_matches", ((r.profile_key, r.score) for r in results))
         return results
 
@@ -485,7 +483,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             过滤后的结果列表
         """
         if self._profile_filter is None:
-            log_stage(logger, "registry_filter", before_count=len(results), after_count=len(results), enabled=False)
+            logger.debug("[RETRIEVAL] stage=registry_filter enabled=false; using vector payload filters")
             return results
 
         # 获取允许的 profile_keys
@@ -499,7 +497,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                   removed_count=removed_count, enabled=True)
         log_candidates(logger, "registry_removed", (
             (r.profile_key, r.score) for r in results if r.profile_key not in allowed_keys
-        ))
+        ), level=logging.INFO)
         if removed_count > 0:
             removed = [r.profile_key for r in results if r.profile_key not in allowed_keys]
             logger.debug("[REGISTRY-FILTER] %d -> %d (removed=%d, keys=%s)",
