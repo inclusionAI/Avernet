@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,6 +37,7 @@ from agentclaw.community.core.spaces.repository.models import (
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
     WorkOrderNotFoundError,
     WorkOrderSkillApplicantAlreadyEditorError,
@@ -42,6 +45,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderApproverStatus,
     WorkOrderBizType,
     WorkOrderEventType,
@@ -444,6 +448,126 @@ def test_skill_application_auto_path_grants_and_notifies_without_owner_todo(db) 
         assert len(notices) == 1
         assert notices[0].recipient_user_id == "applicant-1"
         assert notices[0].notification_category == "NOTICE"
+
+
+def test_concurrent_auto_applications_create_only_one_approved_order(
+    db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    space_id, skill_id = _space_skill(db)
+    skill_repository = _skill_editor_requests(db)
+    skill_repository.update_editor_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    )
+    work_orders = _work_orders(db)
+    callbacks = MagicMock()
+    callbacks.requires_callback.return_value = False
+    staff = LocalStaffDeptService()
+    work_order_service = WorkOrderService(
+        work_orders,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        staff,
+        MagicMock(),
+        callbacks,
+    )
+    service = SpaceSkillEditorRequestService(
+        work_orders, skill_repository, work_order_service, staff, lambda: "dev"
+    )
+    inspected = skill_repository.inspect_editor_request
+    both_inspected = Barrier(2)
+
+    def inspect_then_wait(**kwargs):
+        admission = inspected(**kwargs)
+        both_inspected.wait(timeout=5)
+        return admission
+
+    monkeypatch.setattr(skill_repository, "inspect_editor_request", inspect_then_wait)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(
+                service.create_request,
+                space_id=space_id,
+                skill_id=skill_id,
+                applicant_user_id="applicant-1",
+                reason="共同维护",
+            )
+            for _ in range(2)
+        ]
+        outcomes = []
+        for future in futures:
+            try:
+                outcomes.append(future.result(timeout=10))
+            except Exception as exc:
+                outcomes.append(exc)
+
+    approved = [
+        outcome
+        for outcome in outcomes
+        if not isinstance(outcome, Exception)
+        and outcome.status is WorkOrderStatus.APPROVED
+    ]
+    with db.orm_session() as session:
+        orders = session.query(WorkOrderModel).all()
+        notices = session.query(WorkOrderNotificationModel).all()
+        grants = (
+            session.query(SkillGrant)
+            .filter_by(skill_id=skill_id, user_id="applicant-1", env="dev")
+            .all()
+        )
+        assert (
+            len(approved),
+            len(orders),
+            len(notices),
+            len(grants),
+        ) == (1, 1, 1, 1)
+        assert (
+            sum(
+                isinstance(
+                    outcome,
+                    (
+                        WorkOrderAlreadyPendingError,
+                        WorkOrderSkillApplicantAlreadyEditorError,
+                    ),
+                )
+                for outcome in outcomes
+            )
+            == 1
+        )
+        assert orders[0].status == WorkOrderStatus.APPROVED.value
+
+
+def test_auto_order_creation_rechecks_skill_policy_before_inserting(db) -> None:
+    space_id, skill_id = _space_skill(db)
+
+    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError, match="disabled"):
+        _work_orders(db).create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            biz_id=str(skill_id),
+            event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+            applicant_user_id="applicant-1",
+            approver_user_ids=[],
+            recipient_user_ids=["applicant-1"],
+            title="Skill editor request",
+            content=None,
+            apply_reason="共同维护",
+            biz_data=json.dumps({"space_id": space_id, "skill_id": skill_id}),
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        assert session.query(WorkOrderModel).count() == 0
+        assert session.query(WorkOrderNotificationModel).count() == 0
 
 
 def _apply_auto(db, order_id: int) -> None:

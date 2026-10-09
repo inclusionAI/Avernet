@@ -263,7 +263,9 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 WorkOrderModel.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value,
                 WorkOrderModel.biz_id == str(skill_id),
                 WorkOrderModel.applicant_user_id == applicant_user_id,
-                WorkOrderModel.status == WorkOrderStatus.PENDING.value,
+                WorkOrderModel.status.in_(
+                    (WorkOrderStatus.PENDING.value, WorkOrderStatus.PROCESSING.value)
+                ),
                 WorkOrderModel.env == env,
             )
             .first()
@@ -285,6 +287,48 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             return SkillEditorRequestAdmission(
                 auto_approve=auto_approve, skill_name=skill.name
+            )
+
+    @staticmethod
+    def _auto_order_identity(*, biz_id: str, biz_data: str | None) -> tuple[int, int]:
+        try:
+            data = json.loads(biz_data or "{}")
+            space_id = int(data["space_id"])
+            skill_id = int(data["skill_id"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "work-order Skill identity is invalid"
+            ) from exc
+        if str(skill_id) != biz_id:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "work-order Skill identity is inconsistent"
+            )
+        return space_id, skill_id
+
+    def admit_auto_skill_editor_request(
+        self,
+        *,
+        session: Session,
+        biz_id: str,
+        biz_data: str | None,
+        applicant_user_id: str | None,
+        env: str,
+    ) -> None:
+        if not applicant_user_id:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "Skill editor applicant is required"
+            )
+        space_id, skill_id = self._auto_order_identity(biz_id=biz_id, biz_data=biz_data)
+        _, _, auto_approve = self._qualified_editor_request(
+            session,
+            space_id=space_id,
+            skill_id=skill_id,
+            applicant_user_id=applicant_user_id,
+            env=env,
+        )
+        if not auto_approve:
+            raise WorkOrderSkillEditorRequestNotAllowedError(
+                "automatic Skill editor approval is disabled"
             )
 
     def create_skill_editor_request(
@@ -580,18 +624,9 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             raise WorkOrderSkillEditorRequestNotAllowedError(
                 "Skill editor applicant is required"
             )
-        try:
-            data = json.loads(order.biz_data or "{}")
-            space_id = int(data["space_id"])
-            skill_id = int(data["skill_id"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise WorkOrderSkillEditorRequestNotAllowedError(
-                "work-order Skill identity is invalid"
-            ) from exc
-        if str(skill_id) != order.biz_id:
-            raise WorkOrderSkillEditorRequestNotAllowedError(
-                "work-order Skill identity is inconsistent"
-            )
+        space_id, skill_id = self._auto_order_identity(
+            biz_id=order.biz_id, biz_data=order.biz_data
+        )
         if (
             session.query(WorkOrderApproverModel.id)
             .filter(

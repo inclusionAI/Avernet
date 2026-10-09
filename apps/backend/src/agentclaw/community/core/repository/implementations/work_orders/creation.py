@@ -10,6 +10,9 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
 )
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
+)
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAlreadyPendingError,
     WorkOrderNoReviewerError,
@@ -41,8 +44,13 @@ class _WorkOrderCreationRepository:
 
     _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+    ) -> None:
         self._db = db
+        self._skill_editor_requests = skill_editor_requests
         self._WorkOrder = WorkOrderModel
         self._Notification = WorkOrderNotificationModel
         self._Approver = WorkOrderApproverModel
@@ -83,6 +91,18 @@ class _WorkOrderCreationRepository:
             raise WorkOrderNoReviewerError("no work-order recipient")
 
         with self._db.transactional_orm_session() as db:
+            if (
+                event_category is NotificationCategory.APPROVAL
+                and approval_mode is WorkOrderApprovalMode.AUTO
+                and biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
+            ):
+                self._skill_editor_requests.admit_auto_skill_editor_request(
+                    session=db,
+                    biz_id=biz_id,
+                    biz_data=biz_data,
+                    applicant_user_id=applicant_user_id,
+                    env=env,
+                )
             work_order_id: int | None = None
             work_order_no: str | None = None
             result_status = WorkOrderEventStatus.CREATED

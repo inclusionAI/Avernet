@@ -33,7 +33,7 @@ consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
   - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned manual review policy"
-  - "SkillEditorRequestRepositoryProtocol — Skill-owned AUTO qualification and Grant write in the WorkOrder transaction"
+  - "SkillEditorRequestRepositoryProtocol — Skill-owned admission in the AUTO creation transaction and Grant write in the completion transaction"
   - "Qualified BCN HttpClient Plugin API — required friend-request approval callbacks"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
@@ -74,8 +74,11 @@ delivery. This is a user-facing ingress rule, not a Skill qualification rule
 inside the generic WorkOrder Service. A qualified
 business module may call `WorkOrderService.create_work_order_event` in-process
 with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
-`recipient_user_ids`. AUTO creates no human approver row. WorkOrder creates the
-order as PROCESSING in the creation transaction, then completes the local business effect, APPROVED /
+`recipient_user_ids`. AUTO creates no human approver row. For Skill requests,
+the creation transaction calls Skill-owned admission while holding the binding
+lock; it rejects an existing active Grant or PENDING/PROCESSING request before
+inserting the order. WorkOrder then creates the order as PROCESSING and completes
+the local business effect, APPROVED /
 SYSTEM state, and result notices in one transaction. The response includes the
 created result-notification IDs. The Skill business module validates the
 applicant before requesting AUTO, while the Skill Grant step rechecks the

@@ -45,6 +45,19 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
     ) -> SkillEditorRequestAdmission: ...
 
     @abstractmethod
+    def admit_auto_skill_editor_request(
+        self,
+        *,
+        session: Session,
+        biz_id: str,
+        biz_data: str | None,
+        applicant_user_id: str | None,
+        env: str,
+    ) -> None:
+        """Recheck Skill eligibility before the caller inserts an AUTO order."""
+        ...
+
+    @abstractmethod
     def create_skill_editor_request(
         self,
         *,

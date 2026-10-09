@@ -34,8 +34,12 @@ delivery and the dedicated editor-request entry remain available.
 
 ## Transaction and failure contract
 
-WorkOrder persists an AUTO Skill order as PROCESSING in the creation transaction. Its repository
-opens one database transaction, verifies the persisted AUTO Skill identity,
+WorkOrder's AUTO Skill creation transaction calls Skill-owned admission under
+the binding lock. It rechecks eligibility, the enabled policy, any active Grant,
+and existing PENDING/PROCESSING requests before inserting a PROCESSING order.
+This closes the gap between the Skill entry's preliminary inspection and the
+WorkOrder write: concurrent requests cannot each create an approved order.
+Its repository then opens a completion transaction, verifies the persisted AUTO Skill identity,
 calls `SkillEditorRequestRepositoryProtocol.apply_auto_skill_editor_request`
 with the same SQLAlchemy Session, then writes APPROVED/SYSTEM and one applicant
 result notice before commit. The Skill step rechecks the live Team binding,

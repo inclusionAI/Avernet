@@ -89,7 +89,7 @@ class WorkOrderRepository(
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
         self._skill_editor = skill_editor_requests
-        self._creation = _WorkOrderCreationRepository(db)
+        self._creation = _WorkOrderCreationRepository(db, skill_editor_requests)
         self._notifications = _WorkOrderNotificationRepository(db)
 
     @staticmethod
