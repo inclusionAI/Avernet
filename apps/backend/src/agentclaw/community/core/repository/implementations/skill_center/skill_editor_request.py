@@ -311,7 +311,7 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
         session: Session,
         biz_id: str,
         biz_data: str | None,
-        applicant_user_id: str | None,
+        applicant_user_id: str,
         env: str,
     ) -> None:
         if not applicant_user_id:

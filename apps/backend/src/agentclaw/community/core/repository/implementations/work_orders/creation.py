@@ -15,6 +15,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 )
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAlreadyPendingError,
+    WorkOrderInvalidEventError,
     WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
 )
@@ -96,6 +97,10 @@ class _WorkOrderCreationRepository:
                 and approval_mode is WorkOrderApprovalMode.AUTO
                 and biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
             ):
+                if applicant_user_id is None:
+                    raise WorkOrderInvalidEventError(
+                        "AUTO approval requires applicant_user_id"
+                    )
                 self._skill_editor_requests.admit_auto_skill_editor_request(
                     session=db,
                     biz_id=biz_id,

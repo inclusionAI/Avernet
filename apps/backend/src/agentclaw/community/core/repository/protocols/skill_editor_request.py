@@ -51,10 +51,14 @@ class SkillEditorRequestRepositoryProtocol(Protocol):
         session: Session,
         biz_id: str,
         biz_data: str | None,
-        applicant_user_id: str | None,
+        applicant_user_id: str,
         env: str,
     ) -> None:
-        """Recheck Skill eligibility before the caller inserts an AUTO order."""
+        """Lock the Skill Space binding and recheck before AUTO order insertion.
+
+        The caller owns ``session`` and must keep its transaction open through
+        the WorkOrder insert and commit. This method does not commit or close it.
+        """
         ...
 
     @abstractmethod
