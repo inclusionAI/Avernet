@@ -294,8 +294,7 @@ session 一致。执行协同操作时以 start 的工具名称做权限判断�
 固定兼容用例为 `crates/test-support/fixtures/baas_command_output_end_without_name.json`：
 AICoding 的 `command_output/phase=end` 带 `toolName`，BaaS 转换后的 result 不带
 `name`，BCS 仍须执行 `stored` 的 v2 派单意图并生成 worker 投递及 Applied 回执。
-BaaS 的 `test_command_output_end_contract.py` 与 BCS 的
-`baas_command_output_end_without_name_dispatches_stored_intent` 共用此样本；
+BCS 的 `baas_command_output_end_without_name_dispatches_stored_intent` 使用此样本；
 后续改动不得通过补 result 名称或删除样本来绕过这一兼容要求。
 
 ### 4.2 thinking

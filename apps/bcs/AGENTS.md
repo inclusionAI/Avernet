@@ -11,8 +11,8 @@ architecture, layering, testing, and coding rules. If this file and
 ## BaaS End Result Compatibility
 
 `crates/test-support/fixtures/baas_command_output_end_without_name.json` is a
-permanent compatibility case, verified by BaaS converter and BCS coordination
-tests. Its provider result intentionally has no `name` or `toolName`. Do not
+permanent compatibility case, verified by BCS coordination tests. Its provider
+result intentionally has no `name` or `toolName`. Do not
 add those fields, remove this case, or require a result name to dispatch its
 stored intent unless the user explicitly changes this compatibility contract.
 Authorize using the matching cached start and retain run, toolCallId, Bot and
