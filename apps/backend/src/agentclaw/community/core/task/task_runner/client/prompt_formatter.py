@@ -359,3 +359,18 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
     return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
+
+
+def compose_benchmark_a2a_session_id(now: float | None = None) -> str:
+    """benchmark A2A 分支的 BCS session_key 生成器(非确定性,防多请求撞会话)。
+
+    格式 ``bcs-cli:task-{YYYYMMDDHHMMSS}{mmm}-{6位随机数字}``,如
+    ``bcs-cli:task-20261009190011123-198568``。字符集满足 BCS session_id 校验
+    (ASCII 字母数字 + ``- _ : .``)。``now`` 仅测试注入(epoch 秒);生产取当前时刻。
+    """
+    import random
+    from datetime import datetime
+
+    moment = datetime.now() if now is None else datetime.fromtimestamp(now)
+    timestamp = moment.strftime("%Y%m%d%H%M%S") + f"{moment.microsecond // 1000:03d}"
+    return f"bcs-cli:task-{timestamp}-{random.randint(0, 999999):06d}"

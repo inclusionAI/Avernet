@@ -91,6 +91,20 @@ class ExecutionConfigDTO(BaseModel):
         None,
         description="state_machine 协作群 opening_message 使用的业务面板组件名",
     )
+    target_bot_id: str | None = Field(
+        None,
+        description=(
+            "A2A 目标 bot id(仅 benchmark_execute 消费;与 target_user_id 同时非空时"
+            "走 BCS A2A 通道,消息由 owner_bot 发给该 bot)"
+        ),
+    )
+    target_user_id: str | None = Field(
+        None,
+        description=(
+            "A2A 目标 bot 归属 userId(仅 benchmark_execute 消费;与 target_bot_id 组成"
+            " `bot_id:owner_id` 寻址)"
+        ),
+    )
 
 
 class TaskInfoRequestDTO(BaseModel):

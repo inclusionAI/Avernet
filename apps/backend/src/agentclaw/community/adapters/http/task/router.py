@@ -52,8 +52,15 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.domain.models import TaskOpResult
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BcsClientPort,
+    OpenApiBotPort,
+)
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+    compose_benchmark_a2a_session_id,
     format_benchmark_prompt,
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
@@ -98,18 +105,53 @@ async def benchmark_execute_task_internal(
     body: TaskInfoRequestDTO,
     request: Request,
     bot_port: OpenApiBotPort = Injected(OpenApiBotPort),  # noqa: B008
+    bcs_client: BcsClientPort = Injected(BcsClientPort),  # noqa: B008
+    bot_tokens: BcsBotTokenProvider = Injected(BcsBotTokenProvider),  # noqa: B008
 ) -> Envelope[TaskOpResultDTO]:
     """Benchmark 执行(内部副本,不经 spanner)。构造 prompt 直接发给 bot,不创建 task。
 
     task_id 由 bot 在 session 中自行生成;本端点只负责把 task_spec 构造为 prompt 并通过
-    OpenApiBotPort.send_message 发给 owner_bot。返回 benchmark_run_id / benchmark_session_id。"""
+    OpenApiBotPort.send_message 发给 owner_bot。返回 benchmark_run_id / benchmark_session_id。
+
+    A2A 分支(execution_config.target_bot_id 与 target_user_id 同时非空):不建 task、不改走
+    openapi messages 通道,由 owner_bot 经 BCS A2A ``chat-async`` 直接发给目标 bot
+    (``POST /bots/{target_bot_id}:{target_user_id}/chat-async``);发送方身份取
+    ``BcsBotTokenProvider.get_token(owner_bot_id)``(bcs_bots.session_token)作 Bearer;
+    sessionId 由服务端生成(``compose_benchmark_a2a_session_id``,格式
+    ``bcs-cli:task-<时间戳>-<随机6位>``)。"""
     # 构造 prompt 并直接发给 bot(不调 service.execute,不创建 task)
     task_spec_dict = body.task_spec.model_dump()
     prompt = format_benchmark_prompt(task_spec_dict)
     bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
 
+    a2a_target_bot = str(body.execution_config.target_bot_id or "").strip() or None
+    a2a_target_user = str(body.execution_config.target_user_id or "").strip() or None
+
     extend_props: dict[str, Any] = {}
-    if bot_port is not None:
+    if a2a_target_bot and a2a_target_user:
+        # A2A 分支:owner_bot → target_bot 的 BCS chat-async;不走 ensure_grant/openapi 通道。
+        session_id = compose_benchmark_a2a_session_id()
+        extend_props["benchmark_channel"] = "a2a"
+        extend_props["benchmark_session_id"] = session_id
+        if bcs_client is not None:
+            try:
+                caller_token = (
+                    bot_tokens.get_token(body.owner_bot_id) if bot_tokens is not None else None
+                )
+                sent = await bcs_client.send_message_a2a(
+                    target_bot_id=a2a_target_bot,
+                    target_user_id=a2a_target_user,
+                    message=prompt,
+                    session_id=session_id,
+                    caller_bot_token=caller_token,
+                )
+                extend_props["benchmark_run_id"] = sent.run_id
+                extend_props["benchmark_send"] = "ok"
+            except Exception as exc:  # noqa: BLE001
+                extend_props["benchmark_send"] = f"error: {exc}"
+        else:
+            extend_props["benchmark_send"] = "skip"
+    elif bot_port is not None:
         try:
             await bot_port.ensure_grant(bot_identity)
             sent = await bot_port.send_message(
