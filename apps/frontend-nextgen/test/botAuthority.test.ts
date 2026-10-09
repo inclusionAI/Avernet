@@ -34,6 +34,18 @@ const createBotOwnershipTransfer = (ownershipController as unknown as {
 }).createBotOwnershipTransfer;
 const revokeBotManager = (ownershipController as unknown as { revokeBotManager: jest.Mock<any> })
   .revokeBotManager;
+const acceptBotOwnershipTransfer = (ownershipController as unknown as {
+  acceptBotOwnershipTransfer: jest.Mock<any>;
+}).acceptBotOwnershipTransfer;
+const rejectBotOwnershipTransfer = (ownershipController as unknown as {
+  rejectBotOwnershipTransfer: jest.Mock<any>;
+}).rejectBotOwnershipTransfer;
+const cancelBotOwnershipTransfer = (ownershipController as unknown as {
+  cancelBotOwnershipTransfer: jest.Mock<any>;
+}).cancelBotOwnershipTransfer;
+const listBotOwnershipTransfers = (ownershipController as unknown as {
+  listBotOwnershipTransfers: jest.Mock<any>;
+}).listBotOwnershipTransfers;
 
 function mineEnvelope(items: unknown[]) {
   return { code: 20000, message: '', request_id: 'r', data: { items, total: items.length, offset: 0, limit: 20 } };
@@ -69,6 +81,10 @@ beforeEach(() => {
   getBotOwnership.mockReset();
   createBotOwnershipTransfer.mockReset();
   revokeBotManager.mockReset();
+  acceptBotOwnershipTransfer.mockReset();
+  rejectBotOwnershipTransfer.mockReset();
+  cancelBotOwnershipTransfer.mockReset();
+  listBotOwnershipTransfers.mockReset();
   listBots.mockResolvedValue({ code: 200000, message: '', request_id: 'r-engine', data: { items: [] } });
   useWorkspaceStore.getState().setIdentities([], null);
 });
@@ -154,6 +170,61 @@ describe('botAuthorityService 保留角色与 sources 结果', () => {
   });
 });
 
+describe('转交处理 403 → 刷新并清理失权视角', () => {
+  const forbidden = { status: 403, data: { data: { error_code: 'forbidden' } } };
+  const refreshedMine = () =>
+    mineEnvelope([{ kind: 'human', bot_id: 'human-1', name: '示例用户', status: 'online' }]);
+
+  beforeEach(() => {
+    // 刷新后 mine 只剩 human 行：manager/owner 权限已被撤。
+    listMyBots.mockResolvedValue(refreshedMine());
+  });
+
+  it.each([
+    ['acceptTransfer', () => acceptBotOwnershipTransfer],
+    ['rejectTransfer', () => rejectBotOwnershipTransfer],
+    ['cancelTransfer', () => cancelBotOwnershipTransfer],
+  ] as Array<[string, () => jest.Mock<any>]>)(
+    '%s 收到 403 时刷新身份并清理失权选中视角',
+    async (lane, cardMock) => {
+      listMyBots.mockResolvedValue(authorityMineEnvelope());
+      const identities = await identityService.loadIdentities();
+      if (!identities.ok) throw new Error('identities 失败');
+      // 403 后的刷新结果：mine 只剩 human 行（beforeEach 已预置，此处重取防串污）。
+      listMyBots.mockResolvedValue(refreshedMine());
+      useWorkspaceStore.getState().setIdentities(identities.data.identities, 'bot-managed');
+
+      cardMock().mockRejectedValue(forbidden);
+      const res = await botAuthorityService[lane as 'acceptTransfer']('transfer-1');
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('OWNERSHIP_FORBIDDEN');
+
+      const store = useWorkspaceStore.getState();
+      expect(store.identities.some((i) => i.id === 'bot-managed')).toBe(false);
+      expect(store.activeIdentityId).not.toBe('bot-managed');
+    },
+  );
+
+  it('listTransfers 收到 403 时同样刷新身份并清理失权选中视角', async () => {
+    listMyBots.mockResolvedValue(authorityMineEnvelope());
+    const identities = await identityService.loadIdentities();
+    if (!identities.ok) throw new Error('identities 失败');
+    listMyBots.mockResolvedValue(
+      mineEnvelope([{ kind: 'human', bot_id: 'human-1', name: '示例用户', status: 'online' }]),
+    );
+    useWorkspaceStore.getState().setIdentities(identities.data.identities, 'bot-managed');
+
+    listBotOwnershipTransfers.mockRejectedValue(forbidden);
+    const res = await botAuthorityService.listTransfers('sent');
+    expect(res.ok).toBe(false);
+    if (res.ok) throw new Error('应失败');
+
+    const store = useWorkspaceStore.getState();
+    expect(store.identities.some((i) => i.id === 'bot-managed')).toBe(false);
+    expect(store.activeIdentityId).not.toBe('bot-managed');
+  });
+});
+
 describe('ownership transfer 提交幂等键', () => {
   it('提交成功响应丢失后用同 client_request_id 重试；成功后重新发起换新 key', async () => {
     const receipt = {
@@ -199,6 +270,54 @@ describe('ownership transfer 提交幂等键', () => {
     await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-c', 3);
     const freshKey = createBotOwnershipTransfer.mock.calls[2][1].client_request_id;
     expect(freshKey).not.toBe(firstKey);
+  });
+
+  it('创建失败后更换 payload（收件人/版本）必须换新 key，same-key-different-body 不可能发生', async () => {
+    createBotOwnershipTransfer
+      .mockRejectedValueOnce(new Error('network dropped'))
+      .mockResolvedValueOnce({
+        code: 20100,
+        message: '',
+        request_id: 'r',
+        data: { transfer_id: 'transfer-c', status: 'pending', bot_id: 'bot-owned', from_user_id: 'user-a', to_user_id: 'user-c', expected_owner_version: 3, expires_at: 1, bot_name_snapshot: 'Owned Bot', gmt_create: 1, gmt_modified: 1 },
+      });
+
+    const first = await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-b', 3);
+    expect(first.ok).toBe(false);
+    // 失败后用户改收件人再提交（同 session，无刷新）：payload 变了 → 新 key。
+    const second = await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-c', 3);
+    if (!second.ok) throw new Error('更换收件人后重试应成功');
+
+    const calls = createBotOwnershipTransfer.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1].to_user_id).toBe('user-b');
+    expect(calls[1][1].to_user_id).toBe('user-c');
+    // 同 key 不同载荷会被服务端 409 idempotency_conflict 永久卡死 → 必须也不可能发生。
+    expect(calls[1][1].client_request_id).not.toBe(calls[0][1].client_request_id);
+  });
+
+  it('创建失败后仅改 expected_owner_version 也换新 key；同 payload 响应丢失重试仍用同 key', async () => {
+    createBotOwnershipTransfer
+      .mockRejectedValueOnce(new Error('network dropped'))
+      .mockRejectedValueOnce(new Error('network dropped'))
+      .mockResolvedValueOnce({
+        code: 20100,
+        message: '',
+        request_id: 'r',
+        data: { transfer_id: 'transfer-v4', status: 'pending', bot_id: 'bot-owned', from_user_id: 'user-a', to_user_id: 'user-b', expected_owner_version: 4, expires_at: 1, bot_name_snapshot: 'Owned Bot', gmt_create: 1, gmt_modified: 1 },
+      });
+
+    await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-b', 3);
+    // 版本快照变了 → 新 key（同 key 不同载荷禁止）。
+    await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-b', 4);
+    const calls = createBotOwnershipTransfer.mock.calls;
+    expect(calls[1][1].expected_owner_version).toBe(4);
+    expect(calls[1][1].client_request_id).not.toBe(calls[0][1].client_request_id);
+    // 同 payload 重试（响应丢失）→ 沿用该 payload 绑定的 key。
+    const third = await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-b', 4);
+    expect(third.ok).toBe(true);
+    const callsAfter = createBotOwnershipTransfer.mock.calls;
+    expect(callsAfter[2][1].client_request_id).toBe(callsAfter[1][1].client_request_id);
   });
 
   it('409 ownership_changed 归类为 OWNERSHIP_CHANGED（由消费方重读快照）', async () => {

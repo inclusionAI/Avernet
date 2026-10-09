@@ -25,7 +25,8 @@ export type BotAccessRelation = 'owner' | 'manager';
 export interface BotAuthorityView {
   botId: string;
   name?: string;
-  accessRelation: BotAccessRelation;
+  /** 标签只来自 mine 行本身；缺省即 mine 未下发（合同错误对 Bot 行已判）。 */
+  accessRelation?: BotAccessRelation;
   createdBy?: string;
 }
 
@@ -241,8 +242,9 @@ export const botAuthorityService = {
         authorities.push({
           botId,
           ...(isNonEmptyString(record.name) ? { name: record.name.trim() } : {}),
-          // human 自显行是兼容投影，应为 owner 标签；Bot 行已在上方合同检查。
-          accessRelation: record.kind === 'human' ? 'owner' : relation!,
+          // 标签只从 mine 行本身读取（含 human 自显行的 owner 兼容标签）；
+          // 缺失保持缺省，绝不伪造。
+          accessRelation: relation,
           ...(isNonEmptyString(record.created_by) ? { createdBy: record.created_by } : {}),
         });
       }
@@ -386,20 +388,24 @@ export const botAuthorityService = {
   },
 
   /**
-   * 发起转交。client_request_id 由服务层按 bot 托管：提交成功响应丢失后，
-   * 同参重试沿用同一把 key（201-once / 200-replay）；拿到 committed receipt
-   * 后 key 用尽，下次全新发起换新 key。409 ownership_changed 时自动重读
-   * ownership 快照并归类 OWNERSHIP_CHANGED。
+   * 发起转交。client_request_id 与 payload 绑定后由服务层按 bot 托管：
+   * to_user_id / expected_owner_version 不变的响应丢失重试沿用同一把 key
+   * （服务端 201-once / 200-replay）；payload 变了必须换新 key——
+   * 同 key 不同载荷的 409 idempotency_conflict 从本端不可能发生。
+   * 拿到 committed receipt 或遇到非重放失败（403/409 ownership_changed）
+   * 后 key 用尽，下次全新发起换新 key。
    */
   async createOwnershipTransfer(
     botId: string,
     toUserId: string,
     expectedOwnerVersion: number,
   ): Promise<DomainResult<BotOwnershipTransferView>> {
-    let clientRequestId = botAuthorityState.clientRequestIds.get(botId);
-    if (!clientRequestId) {
-      clientRequestId = newClientRequestId();
-      botAuthorityState.clientRequestIds.set(botId, clientRequestId);
+    const payloadStamp = `${toUserId}\u0000${expectedOwnerVersion}`;
+    const cached = botAuthorityState.clientRequestIds.get(botId);
+    const payloadUnchanged = Boolean(cached && cached.payloadStamp === payloadStamp);
+    const clientRequestId = payloadUnchanged ? cached!.key : newClientRequestId();
+    if (!payloadUnchanged) {
+      botAuthorityState.clientRequestIds.set(botId, { payloadStamp, key: clientRequestId });
     }
     try {
       const resp = await createBotOwnershipTransferApi(botId, {
@@ -425,15 +431,13 @@ export const botAuthorityService = {
         fallbackCode: 'OWNERSHIP_TRANSFER_FAILED',
         fallbackMessage: 'ownership 转交提交失败，请重试',
       });
-      // 重试仍用同一把幂等 key（响应丢失 ≠ 服务端未提交）。
-      if (mapped.forbidden) {
+      // 重试仍用同一把幂等 key 的前提是 payload 完全一致（见上）；
+      // 任何失权/版本过期的失败：key 作废，不给 stale 载荷续用。
+      if (mapped.forbidden || mapped.ownershipChanged) {
         botAuthorityState.clientRequestIds.delete(botId);
-        await refreshAfterForbidden();
       }
-      if (mapped.ownershipChanged) {
-        // 版本快照已过期：丢弃该次提交的幂等 key，
-        // 由消费方重读 ownership 后重新发起（stale version 不重试）。
-        botAuthorityState.clientRequestIds.delete(botId);
+      if (mapped.forbidden) {
+        await refreshAfterForbidden();
       }
       return { ok: false, error: mapped.error };
     }
@@ -462,6 +466,9 @@ export const botAuthorityService = {
         fallbackCode: 'OWNERSHIP_LOAD_FAILED',
         fallbackMessage: '加载转交收发件失败，请稍后重试。',
       });
+      // 失权 403 与其它 ownership 读同路：刷新 mine 身份，
+      // 失掉的选中视角由 applyIdentityLoadResult 清理。
+      if (mapped.forbidden) await refreshAfterForbidden();
       return { ok: false, error: mapped.error };
     }
   },
@@ -501,16 +508,19 @@ export const botAuthorityService = {
         fallbackCode,
         fallbackMessage: 'ownership 转交操作失败，请重试。',
       });
+      // 失权 403 同路刷新：确认/拒绝/取消时的失权选中视角同样被清理。
+      if (mapped.forbidden) await refreshAfterForbidden();
       return { ok: false, error: mapped.error };
     }
   },
 };
 
 /** 模块级状态：单飞 + 每 Bot 幂等 key（按既有 service 模式，无全局写状态）。 */
+/** 幂等 key 与 payload（to_user_id + expected_owner_version）绑定存储。 */
 const botAuthorityState: {
   inflight: Promise<DomainResult<BotAuthorityView[]>> | null;
-  clientRequestIds: Map<string, string>;
+  clientRequestIds: Map<string, { payloadStamp: string; key: string }>;
 } = {
   inflight: null,
-  clientRequestIds: new Map<string, string>(),
+  clientRequestIds: new Map<string, { payloadStamp: string; key: string }>(),
 };

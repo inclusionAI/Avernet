@@ -38,15 +38,14 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
         : ('worker' as const),
     ...(participant.message_view_scope ? { message_view_scope: participant.message_view_scope } : {}),
   }));
+  const originator = normalizeGroupOriginator(input.originator);
   const base = {
     group_kind: 'normal' as const,
     name: input.name,
     context: input.context,
     participants,
     driver_bot_uuid: input.driverBotUuid,
-    ...(normalizeGroupOriginator(input.originator)
-      ? { originator: normalizeGroupOriginator(input.originator) }
-      : {}),
+    ...(originator ? { originator } : {}),
   };
   if (input.strategy === 'chat') {
     return {
