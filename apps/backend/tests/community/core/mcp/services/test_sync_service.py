@@ -1047,6 +1047,9 @@ class TestSyncMcpDetailToAllBots:
         config = MagicMock()
         config.build_mcp_sync_payload.return_value = (None, {}, "PROD", "SSE")
         config.get_bot_override.return_value = {"url": "https://bot.example.test/mcp"}
+        config.get_user_unified_config.return_value = {
+            "url": "https://global.example.test/mcp"
+        }
         bot_repo = MagicMock()
         bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
         service = _make_sync_service(
@@ -1075,6 +1078,39 @@ class TestSyncMcpDetailToAllBots:
             plugin.sync_single_mcp.call_args.kwargs["strict_transport_protocol"]
             is False
         )
+
+    @pytest.mark.asyncio
+    async def test_forwards_global_url_when_bot_has_no_url_override(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.build_mcp_sync_payload.return_value = (None, {"X-User": "yes"}, "PROD", "SSE")
+        config.get_bot_override.return_value = {"headers": {"X-Bot": "yes"}}
+        config.get_user_unified_config.return_value = {
+            "url": "https://global.example.test/mcp"
+        }
+        config.validate_bot_override.return_value = {"valid": True, "error": None}
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo, mcp_config_service=config,
+            resolver=resolver, dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1", entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert plugin.sync_single_mcp.call_args.kwargs["url_override"] == (
+            "https://global.example.test/mcp"
+        )
+        assert config.build_mcp_sync_payload.call_args.kwargs["user_config_snapshot"] == {
+            "url": "https://global.example.test/mcp"
+        }
+        config.get_user_unified_config.assert_called_once_with("u1", "mcp.x")
 
     @pytest.mark.asyncio
     async def test_marks_manifest_transport_selection_as_strict(self):
