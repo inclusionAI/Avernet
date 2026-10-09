@@ -106,6 +106,10 @@ class _Collaborators:
             raise RuntimeError("collaborator table is unavailable")
         return self.level
 
+    def get_explicit_permission_level(self, *, bot, user_id, env=None):
+        # The doubles' members hold real rows; the explicit ladder agrees.
+        return self.level
+
     def get_permission_level(self, *a, **k):  # pragma: no cover - fallback path
         return self.get_operable_permission_level(bot={}, user_id=CALLER)
 
@@ -274,8 +278,8 @@ def test_an_explicit_bar_refuses_a_space_synthesized_member():
     class _SpaceMember:
         """:meth:`get_operable_permission_level` synthesizes, the raw does not."""
 
-        def has_explicit_standing(self, *, bot, user_id, env=None):
-            return False  # no collaborator row: the MEMBER is Space-synthesized
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
+            return PermissionLevel.NONE  # no row: the MEMBER is Space-synthesized
 
         def get_operable_permission_level(self, *, bot, user_id, env=None):
             return PermissionLevel.MEMBER

@@ -203,6 +203,11 @@ class _Collaborators:
             return PermissionLevel.OWNER
         return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
+    def get_explicit_permission_level(self, *, bot, user_id, env=None):
+        # The configured rows ARE explicit rows: the relay's bot resolution
+        # adjudicates on the explicit ladder now; both ladders read one table.
+        return self.get_operable_permission_level(bot=bot, user_id=user_id, env=env)
+
 
 class _BindingStatusRepo:
     """Stands in for ``DeviceBindingRepository.get_by_id`` (retained-verify)."""
@@ -1023,7 +1028,7 @@ def test_a_collaborator_lookup_failure_refuses():
     does, and it must not admit a stranger."""
 
     class _Broken:
-        def get_operable_permission_level(self, *, bot, user_id, env=None):
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
             raise RuntimeError("collaborator service unavailable")
 
     with pytest.raises(BotNotFoundError):

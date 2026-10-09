@@ -16,6 +16,9 @@ from inspect import signature
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 @runtime_checkable
@@ -47,11 +50,12 @@ class CollaboratorServiceProtocol(Protocol):
         """获取叠加实时 Space 成员关系后的有效 Bot 权限."""
         ...
 
-    def has_explicit_standing(self, *args: Any, **kwargs: Any) -> Any:
-        """该用户对 Bot 的等级是否立足于显式协作者行或所有权.
+    def get_explicit_permission_level(self, *args: Any, **kwargs: Any) -> Any:
+        """显式阶梯的 Bot 权限等级（一次协作者表读）.
 
-        Space 成员身份合成的 MEMBER 不算显式：编辑/操作域的行
-        (Check … explicit=True) 只认 Owner 与被授权/审批过的共同编辑者。
+        只认所有权与显式协作者行：Space 成员身份合成的 MEMBER 在这里
+        没有发言权（编辑/操作域的行 ``Check … explicit=True`` 就发布在这
+        上面）。行级答案仍过 COSEC 复核——被移出空间的编辑者即时吊销。
         """
         ...
 
@@ -93,32 +97,30 @@ def resolve_explicit_permission_level(
     owner_id: str,
     env: str | None = None,
 ) -> PermissionLevel:
-    """The effective level with the Space synthesis vetoed, as an explicit row demands.
+    """The level with the Space synthesis vetoed, as an explicit row demands.
 
-    First the same owner short-circuit :func:`resolve_operable_permission_level`
-    answers: ownership is the most explicit standing there is. Otherwise the
-    answer requires explicit standing — a real collaborator row — and is then
-    read through the **effective** policy rather than the raw one, so a revoked
-    Space membership still revokes even an explicit editor's operations (the
-    COSEC rule the single resolve's own comment records). Without explicit
-    standing the answer is ``NONE``: this is the whole refusal the edit/
-    operations rows (``Check … explicit=True``) publish, so a Space member's
-    synthesized MEMBER carries no further here.
-
-    A collaborator service that has not grown ``has_explicit_standing`` yet
-    falls back to the effective answer: the legacy doubles this resolver was
-    built for predate the split, and their members were all explicit — the
-    production service carries the real judgment.
+    Delegates to the service's own explicit ladder
+    (``get_explicit_permission_level``: ownership → one row read → COSEC),
+    so a request answers with one collaborator query rather than a standing
+    probe plus a level read. The refusal is fail-closed: a service that has
+    not grown the explicit ladder is an unresolvable authority, and a gate
+    must not quietly fall back to the synthesized answer — that direction
+    re-opens exactly the hole this resolver exists to close. The absence is
+    logged, because a silently missing capability is a wiring fault to fix
+    and not a state to serve.
     """
     if user_id == owner_id:
+        # The same owner short-circuit the operable resolver answers: the
+        # two ladders agree on ownership, and doubles that key their rows off
+        # the wire pair keep working on either side.
         return PermissionLevel.OWNER
-    method = getattr(type(collaborators), "has_explicit_standing", None)
+    method = getattr(type(collaborators), "get_explicit_permission_level", None)
     if not callable(method):
-        return resolve_operable_permission_level(
-            collaborators, bot=bot, user_id=user_id, owner_id=owner_id, env=env
+        logger.warning(
+            "[resolve_explicit] collaborator service has no explicit ladder "
+            "(bot_pk=%r); refusing rather than falling back to the "
+            "Space-synthesized answer",
+            bot.get("id"),
         )
-    if not method(collaborators, bot=bot, user_id=user_id, env=env):
         return PermissionLevel.NONE
-    return resolve_operable_permission_level(
-        collaborators, bot=bot, user_id=user_id, owner_id=owner_id, env=env
-    )
+    return PermissionLevel(method(collaborators, bot=bot, user_id=user_id, env=env))

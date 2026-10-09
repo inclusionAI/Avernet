@@ -104,9 +104,19 @@ class BotInventoryService(BotInventoryServiceProtocol):
             levels = self._access.get_operable_permission_levels(
                 bots=cloud_rows, user_id=owner_id
             )
-            explicit_pks = self._access.has_explicit_membership(
-                bots=cloud_rows, user_id=owner_id
-            )
+            try:
+                explicit_pks = self._access.has_explicit_membership(
+                    bots=cloud_rows, user_id=owner_id
+                )
+            except AttributeError:
+                # Same fail-closed convention as the seam's explicit ladder:
+                # an unresolvable authority answers "standing is explicit
+                # nowhere", so EDIT leaves every card — never an open 500.
+                logger.error(
+                    "[bot_inventory] access port has no explicit membership "
+                    "judgment; every card resolves read-only"
+                )
+                explicit_pks = frozenset()
             cards.extend(
                 self._to_item(
                     row,
@@ -374,11 +384,13 @@ class BotInventoryService(BotInventoryServiceProtocol):
         owner_id: str,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
-        explicit: bool = True,
+        explicit: bool,
     ) -> BotInventoryItem:
         bot_type = str(row.get("bot_type") or "personal")
         if bot_type == "desktop":
-            return self._to_local_item(row, owner_id, current_space, level, explicit)
+            # Local Bots are the caller's own: ownership is explicit by
+            # definition, so no caller of this branch has a say in the flag.
+            return self._to_local_item(row, owner_id, current_space, level)
         return self._to_cloud_item(row, owner_id, current_space, level, explicit)
 
     def _to_cloud_item(
@@ -387,7 +399,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         owner_id: str,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
-        explicit: bool = True,
+        explicit: bool,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
@@ -405,7 +417,6 @@ class BotInventoryService(BotInventoryServiceProtocol):
         owner_id: str,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
-        explicit: bool = True,
     ) -> BotInventoryItem:
         # Local rows are the caller's own desktop Bots — resolved at OWNER,
         # which is explicit standing by definition.
@@ -426,7 +437,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         lifecycle_card: ServiceLifecycleCard,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
-        explicit: bool = True,
+        explicit: bool,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
@@ -449,7 +460,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         deploy_mode: DeployMode,
         lifecycle_card: ServiceLifecycleCard | None = None,
         current_space: BusinessSpaceRef | None = None,
-        explicit: bool = True,
+        explicit: bool,
     ) -> BotInventoryItem:
         ext = _as_mapping(row.get("ext"))
         normalized = {**dict(row), "ext": ext}
@@ -523,7 +534,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         actions: tuple[BotAction, ...],
         disabled: dict[str, str],
         level: PermissionLevel,
-        explicit: bool = True,
+        explicit: bool,
     ) -> tuple[tuple[BotAction, ...], dict[str, str]]:
         # ``explicit=False``: the caller's MEMBER is Space-synthesized — no
         # collaborator row, just membership of the Bot's Space. The product
@@ -571,12 +582,20 @@ class BotInventoryService(BotInventoryServiceProtocol):
         # (restart/delete/update...) remain disabled. NONE keeps view-only.
         # Space-synthesized MEMBER edits nothing (see above), so it lands on
         # the same shape the NONE branch produces: read-only, with the reason.
+        # CHAT stays on both MEMBER origins: the chat face is a plain read
+        # row, so withholding it would publish a disabled reason the backend
+        # contradicts the moment the caller opens a session — the "default
+        # chat" the module docstring promises (the direct callback of the
+        # 迭代11 rule: view and chat for Space members, edit for the
+        # explicit editors the Owner granted or approved).
         kept = [
             action
             for action in actions
-            if action is BotAction.EDIT
+            if (
+                action is BotAction.CHAT
+                or (action is BotAction.EDIT and explicit)
+            )
             and level >= PermissionLevel.MEMBER
-            and explicit
         ]
         for action in actions:
             if action is BotAction.VIEW or action in kept:

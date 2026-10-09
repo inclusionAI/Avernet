@@ -11,6 +11,7 @@ from .models_authorization import (
     NoCheck,
     ServiceChecked,
 )
+from .rule_shape_audit import assert_member_writes_name_explicit_origin
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
@@ -981,3 +982,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
 }
+
+
+# The table asserts its own shape while it imports (Instruction #2551): a
+# MEMBER write/operations row without its explicit origin fails the boot —
+# the audit lives in ``rule_shape_audit.py`` to keep this file within the
+# module-size cap.
+assert_member_writes_name_explicit_origin(AUTHORIZATION)

@@ -631,6 +631,7 @@ def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
         actions=actions,
         disabled={},
         level=PermissionLevel.OWNER,
+        explicit=True,
     )
     assert owner_actions == actions
     assert owner_disabled == {}
@@ -641,6 +642,7 @@ def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
             actions=actions,
             disabled={},
             level=level,
+            explicit=True,
         )
         assert kept_actions == (BotAction.VIEW, BotAction.EDIT)
         assert disabled == {
@@ -653,6 +655,7 @@ def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
         actions=actions,
         disabled={},
         level=PermissionLevel.NONE,
+        explicit=True,
     )
     assert none_actions == (BotAction.VIEW,)
     assert none_disabled == {
@@ -680,9 +683,10 @@ def test_space_member_without_explicit_row_edits_nothing() -> None:
         level=PermissionLevel.MEMBER,
         explicit=False,
     )
-    assert space_actions == (BotAction.VIEW,)
+    # CHAT survives: the chat face is a plain read row, and the card must not
+    # publish a reason the backend contradicts the moment a session opens.
+    assert space_actions == (BotAction.VIEW, BotAction.CHAT)
     assert space_disabled == {
-        "chat": "Bot editor permission required",
         "edit": "Bot editor permission required",
     }
 
@@ -789,11 +793,16 @@ def test_inventory_page_splits_space_member_from_explicit_editor() -> None:
 
     assert total == 2
     by_id = {item.bot_id: item for item in items}
-    assert by_id["explicit-editor"].actions == (BotAction.VIEW, BotAction.EDIT)
+    assert by_id["explicit-editor"].actions == (
+        BotAction.VIEW,
+        BotAction.CHAT,
+        BotAction.EDIT,
+    )
     explicit_disabled = by_id["explicit-editor"].disabled_actions or {}
     assert "edit" not in explicit_disabled
     space_card = by_id["space-member"]
     assert BotAction.EDIT not in space_card.actions
+    assert BotAction.CHAT in space_card.actions  # plain-read face stays open
     assert space_card.disabled_actions is not None
     assert space_card.disabled_actions.get("edit") == "Bot editor permission required"
 
@@ -806,6 +815,7 @@ def test_service_upgrade_action_requires_admin() -> None:
         actions=actions,
         disabled={},
         level=PermissionLevel.MEMBER,
+        explicit=True,
     )
     assert member_actions == (BotAction.VIEW,)
     assert member_disabled == {
@@ -818,6 +828,7 @@ def test_service_upgrade_action_requires_admin() -> None:
         actions=actions,
         disabled={},
         level=PermissionLevel.ADMIN,
+        explicit=True,
     )
     assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
     assert admin_disabled == {"delete": "Bot Owner permission required"}
