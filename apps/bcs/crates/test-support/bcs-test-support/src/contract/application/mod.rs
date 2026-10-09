@@ -1,5 +1,6 @@
 //! Application service contract harnesses.
 
+pub mod delivery_authorization;
 pub mod message_delivery;
 pub mod queued_task;
 

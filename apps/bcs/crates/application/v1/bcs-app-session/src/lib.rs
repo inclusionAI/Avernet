@@ -15,6 +15,7 @@
 
 mod authorization;
 mod connection;
+mod delivery_authorization;
 mod file;
 mod mutations;
 mod queries;
@@ -24,6 +25,7 @@ mod tests;
 
 pub use authorization::{SessionServiceConfig, SessionServiceImpl};
 pub use connection::GroupSessionConnectionServiceImpl;
+pub use delivery_authorization::DeliveryAuthorizationServiceImpl;
 pub use file::SessionFileApplicationServiceImpl;
 
 use bcs_service_api::application::v1::ApplicationError;
