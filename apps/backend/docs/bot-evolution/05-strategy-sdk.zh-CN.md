@@ -13,7 +13,8 @@
    不能读取封存的测试、不能触碰线上 Bot，也不能读取平台存储。因此无论策略是
    什么，隔离与预算都在同一处强制执行。（**预算**是在 Bot 的绑定中设置的每次
    运行的支出上限：以美元计的模型开销、挂钟时间以及评估 rollout 次数。每一次
-   模型调用和评估都通过 `ctx.budget` 计费，预算耗尽时运行即停止。）
+   模型调用（`ctx.models`）、智能体会话和评估都计入 `ctx.budget`，预算耗尽时
+   运行即停止。）
    这是一项有意为之的限制：策略只能使用能力目录（§4）提供的东西，不能自带模型
    密钥或智能体运行时。它自己的计算（解析、搜索、排序）不受限制。新的需求通过在
    第二个策略也需要它时新增一个目录条目来满足，而不是为某一个策略开例外。
@@ -78,14 +79,16 @@ class EvolutionStrategy(Protocol):
 ## 4. 能力目录
 
 平台拥有一个小型、封闭、带版本的能力目录。每个条目对应 `StrategyContext` 的
-一个部分，并且是一份契约：方法签名、数据模式、语义和一致性测试（R25）。策略只能
+一个字段，并且是一份契约：方法签名、数据模式、语义和一致性测试（R25）。策略只能
 声明目录中的名称。每个条目都有**按引擎划分的提供方**（例如，引擎适配器的会话
 导出为 OpenClaw 提供 `experience.sessions`），绑定检查正是据此得知一个 Bot 能
 提供什么。
 
 | 能力 | 上下文部分 | 提供什么 | 备注 |
 | --- | --- | --- | --- |
-| *（始终授予）* | `parent`、`workspace`、`submit`、`operations`、`budget`、`log`、`artifacts`、`cancelled` | 读取父修订版；将修订版物化到沙箱，并将差异转回补丁；提交候选；查询长时操作（§6.1）；预算、日志、产物、取消 | 无需声明 |
+| *（始终授予）* | `parent`、`workspace`、`operations`、`budget`、`log`、`artifacts`、`cancelled` | 读取父修订版；将修订版物化到沙箱，并将差异转回补丁；查询长时操作（§6.1）；预算、日志、产物、取消 | 无需声明 |
+| `candidates@1` *（始终授予）* | `ctx.candidates.submit(…)` → 候选 id、`ctx.candidates.verdict(id)` | 提交候选；按 id 查询候选的判定（§6） | 每个策略都需要它，因此不在 `needs` 中声明 |
+| `models@1` *（始终授予）* | `ctx.models.complete(…)` | 一次经平台路由的模型调用（输入提示，输出文本） | 每个策略都需要它，因此不在 `needs` 中声明。计入预算；所用模型会被记录，因此验证可以使用来自不同模型家族的评审（§4.1） |
 | `experience.sessions@1` | `ctx.experience.sessions()` | Bot 过去的对话，归一化为片段（episode），并经过过滤 | 读取对话历史；向所有者展示 |
 | `experience.feedback@1` | `ctx.experience.feedback()` | 收件箱中的评分、纠正、结果以及被测 Bot 的观察 | |
 | `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → 操作 id | 在沙箱工作区中运行策略自己的某个智能体定义，作为一个长时操作（§6.1） | 每个定义都指明其引擎；该 Bot 的引擎必须在其中（§4.2） |
@@ -123,6 +126,19 @@ async def sessions(self, *, days: int, limit: int = 500,
   "redactions": ["email", "phone"]           // personal data removed before the strategy sees it
 }
 ```
+
+```python
+# models@1 — always granted
+async def complete(self, *, messages: list[Message], model: str | None = None,
+                   max_tokens: int = 4096) -> Completion: ...
+```
+
+`models` 用于普通的模型调用：一次请求、一次响应，没有工具，也没有多个步骤。
+GEPA 式优化器改写提示词，或记忆整合时汇总反馈，都会使用它。策略自己没有模型
+密钥，也没有出站网络访问，因此每一次模型调用都必须经过它。平台把该调用计入
+预算，并在实验记录 H 中记录所用的模型。`model` 是平台模型列表中的一个名称；
+省略时使用平台默认模型。一次调用受 `max_tokens` 约束，因此它始终是一个短请求，
+而不是操作（§6.1）。
 
 ```python
 # agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
@@ -215,9 +231,9 @@ class StrategyContext(Protocol):
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
     attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
-    async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
-    async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
     operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6.1)
+    candidates: Candidates                          # candidates@1: submit(c) → candidate id; verdict(id)
+    models: Models                                  # models@1: complete(messages, model, max_tokens)
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -225,12 +241,15 @@ class StrategyContext(Protocol):
     evaluate: TrainEvaluator                        # evaluate.train@1
 ```
 
+上下文只包含字段。每个字段要么是一个值（`run_id`、`params`、`attempt`），要么
+是一个上下文部分或能力，策略调用它的方法；上下文本身没有方法。
+
 - **候选** = 针对某个基础修订版的基因组补丁、理由、证据 id，以及可选的自报指标
   （向评审者展示，绝不用于接受判断）。
-- `submit` 记录候选并立即返回它的**候选 id**；它不等待验证。它是幂等的：候选
+- `ctx.candidates.submit` 记录候选并立即返回它的**候选 id**；它不等待验证。它是幂等的：候选
   id 是补丁的内容哈希，因此重试提交（包括重新派发后重复的提交，§7）会返回相同
   的 id，不会产生重复。
-- **判定** = 按候选 id 查询的结果：状态为 `pending`、`accept`、`reject` 或
+- **判定** = `ctx.candidates.verdict(candidate_id)` 的结果：状态为 `pending`、`accept`、`reject` 或
   `inconclusive`，只附带验证**汇总值**，绝不包含逐用例的隐藏数据。id 是唯一的
   句柄；没有回调，也没有阻塞调用。
 - ClawEvolve 这类多轮策略会在上一个被接受的候选之上构建下一轮，它会按 id 查询
@@ -262,7 +281,8 @@ class StrategyContext(Protocol):
 - **工作区遵循同样的规则。** `ctx.workspace.materialise(revision, key)` 按键
   幂等，因此重新派发的运行会拿回同一个沙箱，包括某个智能体操作已经做出的编辑。
 
-始终很快的调用（读取经验、添加训练用例、`submit`、`verdict`、预算）仍是普通的
+始终很快的调用（读取经验、添加训练用例、`candidates.submit`、`candidates.verdict`、
+`models.complete`、预算）仍是普通的
 请求与响应。每个能力的目录契约（§4）会说明它的哪些调用是操作；任何工作可能超出
 一个短请求的调用都必须是操作。
 
@@ -284,7 +304,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 [06-interfaces.zh-CN.md](06-interfaces.zh-CN.md)）会返回一个**运行 id**。提交
 是幂等的，并由平台保证：调用方发送一个幂等键，使用相同键的重复提交会返回同一个
 运行 id，而不会启动第二次运行。此后，运行 id 是唯一的句柄：调用方通过它查询
-状态、提交和判定。下一层同样如此：策略的 `ctx.submit` 返回一个候选 id，判定
+状态、提交和判定。下一层同样如此：策略的 `ctx.candidates.submit` 返回一个候选 id，判定
 通过该 id 查询（§6）。
 
 ### 7.2 崩溃与重启
@@ -293,13 +313,13 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 | 关注点 | 所有者 | 方式 |
 | --- | --- | --- |
-| 运行记录、其冻结的输入、已花费的预算和已提交的候选 | 平台 | 在 `submit` 或运行提交返回之前持久化 |
+| 运行记录、其冻结的输入、已花费的预算和已提交的候选 | 平台 | 在 `candidates.submit` 或运行提交返回之前持久化 |
 | 发现运行的进程已死亡 | 平台 | 每次运行都是一个**带租约的作业**。worker（或进程内宿主）续租；租约到期时（进程崩溃、硬件故障、重启），作业回到 `queued`，并以相同的运行 id 和 `ctx.attempt + 1` 重新派发。fencing token 会拒绝旧持有者的调用。超过 `max_attempts` 后，运行以 `failed` 结束 |
 | 已经启动的智能体会话和训练评估 | 平台 | 它们是操作（§6.1）：由平台持久化和运行，独立于策略的进程。它们在重新派发期间继续运行；策略通过以相同的幂等键重复启动来重新接上它们 |
 | 策略自身的进度（轮次编号、搜索状态、历史） | 策略 | 策略把所需的任何内容持久化到**自己的存储**中，以运行 id 为键，并在重新派发时重新加载并继续。平台不提供检查点 API，也从不读取这部分状态；它的形态因策略而异 |
 
 重新派发的运行使用相同的冻结输入和相同的预算：之前各次尝试花掉的预算不会退回。
-由于 `submit` 是幂等的，策略在崩溃前已提交过的候选如果再次提交，会得到相同的
+由于 `candidates.submit` 是幂等的，策略在崩溃前已提交过的候选如果再次提交，会得到相同的
 候选 id。
 
 ## 8. 同一端口上的两个层级
@@ -342,8 +362,9 @@ POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.start_train →
 POST /evolution/v1/runs/{run}/evaluations/cases     ctx.evaluate.add_train_cases                     (if granted)
 GET  /evolution/v1/runs/{run}/operations/{id}       ctx.operations.get → {status, result?}
 POST /evolution/v1/runs/{run}/operations/{id}:cancel ctx.operations.cancel
-POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
-GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
+POST /evolution/v1/runs/{run}/models:complete       ctx.models.complete → completion
+POST /evolution/v1/runs/{run}/candidates            ctx.candidates.submit → {candidate_id}   (idempotent)
+GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.candidates.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
@@ -383,11 +404,11 @@ class ClawEvolveStrategy(EvolutionStrategy):
                 train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
                 train = (await ctx.operations.wait(train_op)).result      # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
-                    state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
-                                                               evidence=state.findings.ids))
+                    state.pending = await ctx.candidates.submit(Candidate(patch=ws.to_patch(), rationale=...,
+                                                                          evidence=state.findings.ids))
                     await self.store.save(ctx.run_id, state)             # survives a crash from here on
             if state.pending is not None:
-                verdict = await ctx.verdict(state.pending)               # the platform decides
+                verdict = await ctx.candidates.verdict(state.pending)    # the platform decides
                 if verdict.status == "pending":
                     await asyncio.sleep(ctx.params["poll_s"]); continue
                 if verdict.status == "accept":
