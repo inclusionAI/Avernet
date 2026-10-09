@@ -51,6 +51,30 @@ class AgentComputeTenantLimits:
 
 
 @dataclass(frozen=True)
+class AgentComputeAdmissionConfig:
+    max_global_concurrent_runs: int = 64
+    max_pending_jobs: int = 500
+
+
+@dataclass(frozen=True)
+class AgentComputeDrainConfig:
+    grace_seconds: float = 30.0
+    stop_claiming_signal: str = "SIGTERM"
+
+
+@dataclass(frozen=True)
+class AgentComputeUpstreamBreakerConfig:
+    failure_threshold: int = 5
+    open_seconds: float = 60.0
+
+
+@dataclass(frozen=True)
+class AgentComputeRetentionConfig:
+    artifact_ttl_days: int = 7
+    sweep_interval_seconds: float = 3600.0
+
+
+@dataclass(frozen=True)
 class AgentComputeConfig:
     llm: LlmConfig | None = None
     orchestration: AgentComputeOrchestrationConfig = field(
@@ -61,6 +85,18 @@ class AgentComputeConfig:
     )
     tenant_limits: AgentComputeTenantLimits = field(
         default_factory=AgentComputeTenantLimits
+    )
+    admission: AgentComputeAdmissionConfig = field(
+        default_factory=AgentComputeAdmissionConfig
+    )
+    drain: AgentComputeDrainConfig = field(
+        default_factory=AgentComputeDrainConfig
+    )
+    upstream_breaker: AgentComputeUpstreamBreakerConfig = field(
+        default_factory=AgentComputeUpstreamBreakerConfig
+    )
+    retention: AgentComputeRetentionConfig = field(
+        default_factory=AgentComputeRetentionConfig
     )
     artifact_store_root: str = "/tmp/agentcompute/artifacts"
     artifact_inline_threshold: int = 16384

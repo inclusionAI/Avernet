@@ -216,6 +216,15 @@ class RunRepository(RunRepositoryProtocol):
                 )
             ).scalar_one()
 
+    def count_active_runs_global(self) -> int:
+        with self._db.orm_session() as session:
+            return session.execute(
+                select(func.count()).select_from(om.AcAgentComputeRunModel).where(
+                    om.AcAgentComputeRunModel.status == dm.RunStatus.RUNNING.value,
+                    om.AcAgentComputeRunModel.is_deleted == False,
+                )
+            ).scalar_one()
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRunModel) -> dm.Run:
         catalog_raw = _loads(row.agent_catalog) or []
@@ -763,6 +772,15 @@ class JobRepository(JobRepositoryProtocol):
                 ).values(cancel_requested=True)
             )
         return result.rowcount > 0
+
+    def count_pending_jobs(self) -> int:
+        with self._db.orm_session() as session:
+            return session.execute(
+                select(func.count()).select_from(om.AcAgentComputeJobModel).where(
+                    om.AcAgentComputeJobModel.status == TaskQueueStatus.PENDING.value,
+                    om.AcAgentComputeJobModel.is_deleted == False,
+                )
+            ).scalar_one()
 
     def is_cancel_requested(self, run_id: dm.RunId, tenant: dm.TenantId) -> bool:
         with self._db.orm_session() as session:

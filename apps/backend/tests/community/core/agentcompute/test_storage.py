@@ -273,6 +273,27 @@ class TestRunRepository:
         assert run_repo.count_active_runs(TENANT_A) == 2
         assert run_repo.count_active_runs(TENANT_B) == 1
 
+    def test_count_active_runs_global(self, run_repo):
+        run_repo.create(_mk_run(tenant=TENANT_A))
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        completed = _mk_run(tenant=TENANT_A)
+        completed.status = dm.RunStatus.COMPLETED
+        run_repo.create(completed)
+        assert run_repo.count_active_runs_global() == 2
+
+    def test_count_pending_jobs(self, run_repo, job_repo):
+        run_one = _mk_run()
+        run_two = _mk_run(tenant=TENANT_B)
+        run_repo.create(run_one)
+        run_repo.create(run_two)
+        assert run_repo.count_active_runs_global() == 2
+        assert job_repo.count_pending_jobs() == 0
+        job_repo.enqueue(run_id=run_one.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        job_repo.enqueue(run_id=run_two.run_id, tenant=TENANT_B, deadline_seconds=3600)
+        assert job_repo.count_pending_jobs() == 2
+        job_repo.claim_batch("w1", None, 1, 60)
+        assert job_repo.count_pending_jobs() == 1
+
 
 class TestAgentRepository:
     def test_create_and_get(self, run_repo, agent_repo):
@@ -640,6 +661,7 @@ class TestMandatoryColumns:
             om.AcAgentComputeRoundModel.__table__,
             om.AcAgentComputeGuardEventModel.__table__,
             om.AcAgentComputeJobModel.__table__,
+            om.AcAgentComputeAuditModel.__table__,
         ])
         insp = sa.inspect(engine)
         for table_name in insp.get_table_names():
@@ -673,18 +695,19 @@ class TestMandatoryColumns:
 
     def test_ddl_orm_column_parity(self):
         import pathlib, re
-        ddl_path = pathlib.Path(
-            "src/agentclaw/community/core/agentcompute/sql/2026_10_08_agent_compute.sql"
-        )
-        text = ddl_path.read_text()
+        # Agentcompute DDL ships as dated forward files (migration policy 12.3);
+        # parity must hold across every file in sql/, not a single name.
+        ddl_dir = pathlib.Path("src/agentclaw/community/core/agentcompute/sql")
+        ddl_text = "\n".join(p.read_text() for p in sorted(ddl_dir.glob("*.sql")))
         ddl_tables: dict[str, set[str]] = {}
         for match in re.finditer(
-            r"CREATE TABLE IF NOT EXISTS `(\w+)`\s*\((.*?)\n\) ", text, re.DOTALL
+            r"CREATE TABLE IF NOT EXISTS `(\w+)`\s*\((.*?)\n\) ", ddl_text, re.DOTALL
         ):
             table_name, body = match.group(1), match.group(2)
             cols = set(re.findall(r"^\s+`(\w+)`", body, re.MULTILINE))
             ddl_tables[table_name] = cols
-        assert len(ddl_tables) == 7
+        assert len(ddl_tables) == len(om.ALL_MODELS)
+        assert len(ddl_tables) >= 8  # 7 swarm tables + append-only audit
         for model in om.ALL_MODELS:
             orm_cols = {c.name for c in model.__table__.columns}
             ddl_cols = ddl_tables[model.__tablename__]
