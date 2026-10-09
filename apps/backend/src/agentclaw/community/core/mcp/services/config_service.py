@@ -512,6 +512,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
         bot_override: dict[str, Any] | None = None,
+        user_config_snapshot: dict[str, Any] | None = None,
     ) -> tuple[Optional[str], dict[str, str], str, Optional[str]]:
         """根据用户配置与默认值构建合并后的 MCP 同步参数。
 
@@ -521,20 +522,22 @@ class MCPConfigService(MCPConfigServiceProtocol):
         _api_key = api_key
         _endpoint_env = endpoint_env or "PROD"
         _transport_protocol = transport_protocol
-        extra_config: dict[str, Any] = {}
+        extra_config: dict[str, Any] = user_config_snapshot or {}
 
-        # 用户自定义配置优先级高于默认值：先查用户是否写过该 MCP 的配置。
-        user_mcp_config = self.user_mcp_config_repo.get_by_user_and_server_code(
-            user_id, server_code
-        )
-        if user_mcp_config:
-            extra = user_mcp_config.get("extra_config", {})
-            if isinstance(extra, str):
-                try:
-                    extra = json.loads(extra)
-                except json.JSONDecodeError:
-                    extra = {}
-            extra_config = extra if isinstance(extra, dict) else {}
+        # 投影调用方传入同一次读取的配置快照，保证 Header/URL 一致。
+        if user_config_snapshot is None:
+            user_mcp_config = self.user_mcp_config_repo.get_by_user_and_server_code(
+                user_id, server_code
+            )
+            if user_mcp_config:
+                extra = user_mcp_config.get("extra_config", {})
+                if isinstance(extra, str):
+                    try:
+                        extra = json.loads(extra)
+                    except json.JSONDecodeError:
+                        extra = {}
+                extra_config = extra if isinstance(extra, dict) else {}
+        if extra_config:
             # 入参显式传了值则用入参，否则 fallback 到用户库里的配置。
             if _api_key is None and "api_key" in extra_config:
                 _api_key = extra_config.get("api_key")

@@ -133,7 +133,7 @@ def _compile_url_rules(
             parsed = urlsplit(url)
             valid = (
                 url == url.strip()
-                and not any(char.isspace() for char in url)
+                and not any(char.isspace() or ord(char) < 32 for char in url)
                 and parsed.scheme.lower() in {"http", "https"}
                 and bool(parsed.hostname)
                 and parsed.port != 0

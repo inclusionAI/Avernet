@@ -294,6 +294,10 @@ def test_mcps_run_collect_then_per_server_merge():
     assert inputs[0].url_override == "https://bot-a.example.test/mcp"
     assert inputs[0].strict_transport_protocol is False
     assert inputs[1].url_override == "https://global.example.test/mcp"
+    assert mcp_cfg.build_mcp_sync_payload.call_args_list[0].kwargs[
+        "user_config_snapshot"
+    ] == {"url": "https://global.example.test/mcp"}
+    assert mcp_cfg.get_user_unified_config.call_count == 2
     assert mcp_cfg.build_mcp_sync_payload.call_count == 2
     assert mcp_cfg.build_mcp_sync_payload.call_args_list[0].kwargs[
         "bot_override"

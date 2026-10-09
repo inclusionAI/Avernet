@@ -1107,6 +1107,10 @@ class TestSyncMcpDetailToAllBots:
         assert plugin.sync_single_mcp.call_args.kwargs["url_override"] == (
             "https://global.example.test/mcp"
         )
+        assert config.build_mcp_sync_payload.call_args.kwargs["user_config_snapshot"] == {
+            "url": "https://global.example.test/mcp"
+        }
+        config.get_user_unified_config.assert_called_once_with("u1", "mcp.x")
 
     @pytest.mark.asyncio
     async def test_marks_manifest_transport_selection_as_strict(self):

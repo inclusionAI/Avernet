@@ -178,3 +178,20 @@ def test_internal_post_null_url_rules_is_invalid_not_a_clear() -> None:
 
     assert response.status_code == 422
     command.replace.assert_not_called()
+
+
+def test_internal_post_url_rule_rejects_unknown_fields() -> None:
+    client, command = _client()
+
+    response = client.post("/api/mcp/config-groups", json={
+        "server_code": "mcp.weather",
+        "endpoint_env": "PROD",
+        "transport_protocol": "SSE",
+        "params": [],
+        "url_rules": [{
+            "url": "https://example.test/mcp", "bots": [], "ignored": "x",
+        }],
+    })
+
+    assert response.status_code == 422
+    command.replace.assert_not_called()

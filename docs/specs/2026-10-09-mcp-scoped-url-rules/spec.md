@@ -53,6 +53,8 @@ per-Bot delivery after commit is best-effort and reported through the existing
 `sync_results`/`sync_summary` fields. URL rules do not create installations.
 
 Online device projection and restart/whole-artifact composition resolve the
-same URL and Header precedence. The OCB enterprise build consumes this
+same URL and Header precedence. Each path reads the user-default row once per
+MCP, so its user Header and user URL come from the same snapshot; Bot overrides
+are read separately under the existing concurrency semantics. The OCB enterprise build consumes this
 Avernet code through its pinned `submodules/avernet` gitlink; source, corp
 adapter tests, and runtime readback are separate acceptance stages.

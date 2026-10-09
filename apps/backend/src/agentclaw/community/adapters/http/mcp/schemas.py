@@ -105,6 +105,8 @@ class MCPHeaderGroup(BaseModel):
 
 
 class MCPURLRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     url: str
     bots: List[str] = Field(default_factory=list)
 

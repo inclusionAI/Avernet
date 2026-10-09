@@ -793,6 +793,30 @@ class TestMCPConfigServiceBuildPayload:
         assert headers == {"x-region": "bot", "X-Trace": "on"}
         resolver.get_secret.assert_not_called()
 
+    def test_explicit_user_snapshot_avoids_a_second_config_read(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.side_effect = AssertionError(
+            "configuration must be read only once for URL and Headers"
+        )
+        svc = _service(repo=repo)
+        monkeypatch.setattr(
+            "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
+            lambda _engine: [],
+        )
+
+        api_key, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"},
+            user_config_snapshot={
+                "url": "https://global.example.test/mcp",
+                "api_key": "authorization=old-key",
+                "headers": {"X-User": "yes"},
+            },
+        )
+
+        assert api_key is None
+        assert headers == {"X-User": "yes"}
+        repo.get_by_user_and_server_code.assert_not_called()
+
     def test_managed_header_overrides_user_header_case_insensitively(self, monkeypatch):
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {

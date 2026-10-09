@@ -187,6 +187,7 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
     ("rules", "error"),
     [
         ((URLRule(url="file:///tmp/server", bots=()),), "Invalid MCP URL"),
+        ((URLRule(url="https://example.test/mcp\x00x", bots=()),), "Invalid MCP URL"),
         ((URLRule(url="https://example.test/mcp", bots=("other",)),), "not owned"),
         ((
             URLRule(url="https://a.example.test/mcp", bots=()),

@@ -901,6 +901,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 mcp_data = current_detail
 
         # 配置合并需读 DB；放入线程池，避免阻塞并发投递的 event loop。
+        user_config = await asyncio.to_thread(self.mcp_config_service.get_user_unified_config, user_id, server_code)
         _api_key, merged_headers, _endpoint_env, _transport_protocol = await asyncio.to_thread(
             self.mcp_config_service.build_mcp_sync_payload,
             user_id=user_id,
@@ -911,8 +912,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
             transport_protocol=transport_protocol,
             engine_type=engine_type,
             bot_override=bot_override,
+            user_config_snapshot=user_config or {},
         )
-        user_config = await asyncio.to_thread(self.mcp_config_service.get_user_unified_config, user_id, server_code)
         url_override = effective_mcp_url_override(user_config, bot_override)
         strict_transport_protocol = bool(
             bot_override
