@@ -597,6 +597,7 @@ def test_get_scoped_config_returns_only_declared_user_and_bot_groups(
             {"key": "B", "value": "2", "bots": []},
             {"key": "A", "value": "3", "bots": ["bot-x"]},
         ],
+        "url_rules": [],
         "sync_results": None,
         "sync_summary": None,
     }
