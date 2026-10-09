@@ -17,7 +17,7 @@ class AgentSpecDTO(BaseModel):
 
 
 class SubmitRunDTO(BaseModel):
-    tenant: str
+    tenant: str = Field(min_length=1)
     goal: str
     agents: list[AgentSpecDTO] = Field(min_length=1)
     provider: str | None = None

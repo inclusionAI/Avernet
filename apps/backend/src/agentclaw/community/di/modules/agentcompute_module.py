@@ -4,11 +4,11 @@ import logging
 
 from injector import Binder, Module, inject, provider, singleton
 
-from agentclaw.community.api.agentcompute.service import AgentComputeService
-from agentclaw.community.api.agentcompute.service_protocol import (
+from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol,
 )
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
+from agentclaw.community.core.agentcompute.service import AgentComputeService
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import Orchestrator
 from agentclaw.community.core.agentcompute.orchestration.termination import (
     GuardService, TerminationEvaluator,
@@ -43,21 +43,38 @@ logger = logging.getLogger(__name__)
 class AgentComputeModule(Module):
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(AgentComputeConfig, scope=singleton)
-        binder.bind(RunRepository, scope=singleton)
-        binder.bind(AgentRepository, scope=singleton)
-        binder.bind(MessageRepository, scope=singleton)
-        binder.bind(ResultShardRepository, scope=singleton)
-        binder.bind(RoundRepository, scope=singleton)
-        binder.bind(GuardEventRepository, scope=singleton)
-        binder.bind(JobRepository, scope=singleton)
         binder.bind(DecisionParser, scope=singleton)
         binder.bind(GuardService, scope=singleton)
-        binder.bind(Orchestrator, scope=singleton)
-        binder.bind(SubagentRuntime, scope=singleton)
-        binder.bind(SwarmRunHandler, scope=singleton)
-        binder.bind(AgentComputeWorker, scope=singleton)
-        binder.bind(AgentComputeServiceProtocol, to=AgentComputeService, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def agent_compute_service(
+        self,
+        run_repo: RunRepository,
+        job_repo: JobRepository,
+        agent_repo: AgentRepository,
+        round_repo: RoundRepository,
+        guard_repo: GuardEventRepository,
+        config: AgentComputeConfig,
+    ) -> AgentComputeService:
+        return AgentComputeService(
+            run_repo=run_repo,
+            job_repo=job_repo,
+            agent_repo=agent_repo,
+            round_repo=round_repo,
+            guard_repo=guard_repo,
+            config=config,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def agent_compute_service_protocol(
+        self,
+        service: AgentComputeService,
+    ) -> AgentComputeServiceProtocol:
+        return service
 
     @provider
     @singleton
@@ -206,22 +223,3 @@ class AgentComputeModule(Module):
         return AgentComputeWorker(
             config=config, handler=handler, job_repo=job_repo,
         )
-
-    @provider
-    @singleton
-    @inject
-    def provide_service(
-        self,
-        run_repo: RunRepository,
-        job_repo: JobRepository,
-        config: AgentComputeConfig,
-    ) -> AgentComputeService:
-        return AgentComputeService(
-            run_repo=run_repo,
-            job_repo=job_repo,
-            deadline_seconds=int_or(config.orchestration.slice_max_seconds, 3600),
-        )
-
-
-def int_or(val: float, default: int) -> int:
-    return int(val) if val else default

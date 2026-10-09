@@ -28,6 +28,7 @@ from agentclaw.community.di.config import (
 )
 
 from agentclaw.community.di.modules.access_module import AccessModule
+from agentclaw.community.di.modules.agentcompute_module import AgentComputeModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
@@ -151,6 +152,7 @@ def build_injector(
         BotManagementModule(),
         ExecutionIdentityModule(),
         DigitalEmployeeModule(),
+        AgentComputeModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
         ManifestDeliveryModule(),
