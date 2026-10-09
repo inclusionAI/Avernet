@@ -3,6 +3,7 @@
 import math
 
 import pytest
+
 from src.application.services.worker_vector_match_service import (
     FragmentRetrievalConfig,
     WorkerVectorMatchService,
@@ -16,7 +17,6 @@ from src.infra.metadatastores.file_metadata_store_adapter import (
 from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
-
 from tests.unit.infra.test_qdrant_durable_vector_store import FakePersistenceBackend
 
 
@@ -200,6 +200,40 @@ def seed(store):
     )
 
 
+@pytest.mark.parametrize("policy", ["empty", "degrade"])
+@pytest.mark.parametrize("failure", ["model", "exception", "unavailable", "degraded"])
+def test_configured_rerank_failure_policy_is_preserved(
+    store, tmp_path, policy, failure
+):
+    from src.domain.services.fragment_reranker_service import RerankFailAction
+
+    seed(store)
+    service, model = service_for(store, tmp_path, "fail")
+    service._fragment_config.reranker_fail_action = policy
+    service._reranker_service = FragmentRerankerService(
+        reranker=model,
+        fail_action=RerankFailAction.DEGRADE
+        if failure == "degraded"
+        else RerankFailAction(policy),
+    )
+    if failure == "unavailable":
+        service._reranker_service = None
+    elif failure == "exception":
+
+        class FailingAdapter:
+            def rerank(self, request):
+                raise RuntimeError("adapter failure")
+
+        service._reranker_service = FailingAdapter()
+    baseline, _ = run(service, False)
+    assert baseline
+    results, config = run(service, True)
+    assert config["_retrieval"]["rerank_degraded"] is True
+    assert [(r.profile_key, r.score) for r in results] == (
+        [] if policy == "empty" else [(r.profile_key, r.score) for r in baseline]
+    )
+
+
 def test_keyword_only_candidate_enters_bounded_deduplicated_rerank(store, tmp_path):
     seed(store)
     service, model = service_for(store, tmp_path)
@@ -302,6 +336,7 @@ def test_actual_http_adapter_propagates_failure_but_zero_is_a_valid_model_score(
     mode,
 ):
     import requests
+
     from src.infra.reranker.http_reranker import HttpReranker
 
     seed(store)

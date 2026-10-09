@@ -129,14 +129,16 @@ These are ranking scores, not probabilities, cosine similarities, or model score
 - Successful rerank: return model scores and apply `rerank_min_score`.
 - Rerank disabled: return the fused order/scores, without cosine/model thresholds.
 - Rerank unavailable or failed (including one failed batch or malformed/partial
-  model output): discard all model scores and use the same fused fallback as
-  disabled rerank. Do not mix raw lexical, dense and model score scales.
+  model output): with the default `reranker_fail_action=degrade`, discard all
+  model scores and use the same fused fallback as disabled rerank. With
+  `reranker_fail_action=empty`, return no recommendations, including when the
+  adapter raises or is unavailable. Do not mix raw lexical, dense and model
+  score scales.
 - No keyword matches, or keyword lookup unavailable: preserve dense ordering and
   scores; failed rerank returns aggregate scores rather than invented model scores.
 - Zero is a valid model score. Missing credentials, HTTP errors and incomplete
   responses must signal failure, not synthetic zero scores. The HTTP adapter
-  raises errors; the fragment rerank caller owns fallback, including when the
-  historical `empty` failure option is supplied on that matching path.
+  raises errors; the fragment rerank caller applies the effective failure policy.
 
 Existing response fields remain; response metadata adds `keyword_search_used`,
 `rerank_degraded` and `score_source` (`hybrid_rrf`, `vector_weighted`, `reranker`).
@@ -257,6 +259,12 @@ activation also refreshes the selected profile's vectors. Other profiles'
 vectors are retained, matching the existing activation policy; activation does
 not imply that search returns only the selected profile. Offline workers remain
 offline in vector metadata. Repeating activation is supported.
+
+After all new fragments are successfully written, activation removes obsolete
+fragment IDs belonging to that same profile (including a legacy unsplit ID).
+It does not delete other profiles or workers. Enumeration and deletion errors
+are reported as index refresh failures; they cannot silently acknowledge a
+partial cleanup. Failed embedding or replacement writes do not start cleanup.
 
 If indexing fails after activation is persisted,
 `PUT /v1/workers/{worker_id}/profiles/{profile_id}/activate` returns HTTP 500

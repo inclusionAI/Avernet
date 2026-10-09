@@ -226,7 +226,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                     payload = json.loads(row[2]) if row[2] else {}
                     points.append(VectorPoint(id=row[0], vector=vector, payload=payload))
                 except Exception as e:
-                    logger.warning("[MySQLVectorBackend] Failed to load vector %s: %s", row[0], e)
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
 
             logger.debug("[MySQLVectorBackend] Loaded %d vectors", len(points))
             return points
@@ -261,7 +261,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                     payload = json.loads(row[2]) if row[2] else {}
                     upserts.append(VectorPoint(id=row[0], vector=vector, payload=payload))
                 except Exception as e:
-                    logger.warning("[MySQLVectorBackend] Failed to load vector %s: %s", row[0], e)
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
 
             return VectorChangeSet(
                 upserts=upserts,

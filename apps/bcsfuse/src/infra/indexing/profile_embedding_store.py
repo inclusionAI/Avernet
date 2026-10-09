@@ -314,6 +314,32 @@ class ProfileEmbeddingStore:
             self._vector_store.delete(ids)
         logger.debug("[ProfileEmbeddingStore] Deleted %d vectors", len(ids))
 
+    def delete_stale_fragments(self, profile_key: str, current_ids: set[str], worker_id: str) -> None:
+        """Reconcile one successfully replaced profile; never swallow failures.
+
+        Read payloads only for obsolete IDs, not every retained embedding.
+        Ownership checks protect workers whose colon-containing IDs share a
+        prefix with this profile's key.
+        """
+        prefix = f"{profile_key}:"
+        stale_ids = []
+        for vector_id in self._vector_store.get_vector_ids():
+            if vector_id in current_ids:
+                continue
+            if vector_id != profile_key and not vector_id.startswith(prefix):
+                continue
+            point = self._vector_store.get(vector_id)
+            if point is None:
+                continue
+            payload = (point.get("metadata") if isinstance(point, dict) else point.payload) or {}
+            if payload.get("profile_key", profile_key) != profile_key:
+                continue
+            if payload.get("worker_id", worker_id) != worker_id:
+                continue
+            stale_ids.append(vector_id)
+        if stale_ids:
+            self.delete(stale_ids)
+
     def get_fragments_by_profile(self, profile_key: str) -> list[tuple[str, list[float], dict]]:
         """
         获取指定 profile 的所有 fragment vectors

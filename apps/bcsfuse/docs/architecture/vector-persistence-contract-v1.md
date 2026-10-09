@@ -52,6 +52,10 @@ provider must not return a partial change set with a checkpoint that skips the
 failed mutation. Consumers advance their local checkpoint only after applying
 the returned upserts and deletions successfully.
 
+The public MySQL backend also rejects undecodable live rows during `load_all()`;
+a rebuild must not silently acknowledge a partial snapshot. Incremental
+tombstones need only their ID and timestamp and do not decode deleted content.
+
 ## Compatibility guidance
 
 - Text search is not part of this durable persistence protocol.

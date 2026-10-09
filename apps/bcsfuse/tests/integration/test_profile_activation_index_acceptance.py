@@ -62,12 +62,12 @@ def test_activation_index_failure_is_durable_and_retryable(isolated_app_factory,
             }
 
 
-def test_activation_keeps_other_profiles_and_other_workers_vectors(isolated_app_factory):
+def test_activation_removes_stale_target_fragments_but_preserves_other_profiles(isolated_app_factory):
     with isolated_app_factory() as (client, registry, _embedding):
         with acceptance_run(client, TOKEN) as acceptance:
             worker_id, path = _prepare(acceptance)
             store = registry.require("vector_store")
-            other_id = f"{worker_id}:nested:default:skills:1"
+            other_id = f"{worker_id}:release:default:full"
             active_id = f"{worker_id}:release:skills:1"
             stale_id = f"{worker_id}:default:skills:1"
             store.upsert([
@@ -75,7 +75,7 @@ def test_activation_keeps_other_profiles_and_other_workers_vectors(isolated_app_
                     "worker_id": owner, "profile_key": profile_key,
                 })
                 for vector_id, owner, profile_key in (
-                    (other_id, f"{worker_id}:nested", f"{worker_id}:nested:default"),
+                    (other_id, f"{worker_id}:release", f"{worker_id}:release:default"),
                     (active_id, worker_id, f"{worker_id}:release"),
                     (stale_id, worker_id, f"{worker_id}:default"),
                 )
@@ -83,10 +83,47 @@ def test_activation_keeps_other_profiles_and_other_workers_vectors(isolated_app_
             try:
                 acceptance.request("PUT", path)
                 assert store.get(stale_id) is not None
-                assert store.get(active_id) is not None
+                assert store.get(active_id) is None
                 assert store.get(other_id) is not None
+                store.rebuild_from_backend()
+                assert store.get(active_id) is None
+                assert store.get(stale_id) is not None
+                assert store.get(other_id) is not None
+                assert store.get(f"{worker_id}:release:full") is not None
             finally:
                 store.delete(other_id)
+
+
+@pytest.mark.parametrize("failure", ["embedding", "write", "delete", "read", "read_point"])
+def test_activation_fragment_cleanup_failure_is_reported_and_retryable(isolated_app_factory, monkeypatch, failure):
+    with isolated_app_factory() as (client, registry, embedding):
+        with acceptance_run(client, TOKEN) as acceptance:
+            worker_id, path = _prepare(acceptance)
+            store = registry.require("vector_store")
+            stale_id = f"{worker_id}:release:skills:obsolete"
+            store.upsert([VectorPoint(id=stale_id, vector=[1.0] + [0.0] * 63, payload={
+                "worker_id": worker_id, "profile_key": f"{worker_id}:release",
+                "content": "obsolete-skill", "fragment_type": "skills",
+            })])
+
+            def fail(*args, **kwargs):
+                raise RuntimeError("injected refresh failure")
+
+            with monkeypatch.context() as patch:
+                if failure == "embedding":
+                    patch.setattr(embedding, "embed", fail)
+                else:
+                    method = {"write": "upsert", "delete": "delete", "read": "get_vector_ids", "read_point": "get"}[failure]
+                    patch.setattr(store, method, fail)
+                result = acceptance.request("PUT", path, expected=500)
+            assert result["detail"]["code"] == "ACTIVATE_PROFILE_INDEX_ERROR"
+            assert result["detail"]["activation_persisted"] is True
+            assert store.get(stale_id) is not None
+            _assert_active(registry, worker_id)
+            acceptance.request("PUT", path)
+            store.rebuild_from_backend()
+            assert store.get(stale_id) is None
+            assert store.get(f"{worker_id}:release:full") is not None
 
 
 def test_activation_without_index_feature_needs_no_embedding(isolated_app_factory, monkeypatch):

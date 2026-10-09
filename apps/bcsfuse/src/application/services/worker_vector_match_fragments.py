@@ -334,6 +334,8 @@ class FragmentMatchingMixin:
         if reranker is None:
             diagnostics["rerank_degraded"] = True
             logger.warning("[FRAGMENT-MATCH] reranker unavailable, skipping")
+            if reranker_fail_action == "empty":
+                return []
             return self._build_results_from_aggregation(candidates[:top_k])
 
         try:
@@ -351,7 +353,10 @@ class FragmentMatchingMixin:
             ):
                 diagnostics["rerank_degraded"] = True
                 log_stage(logger, "rerank_fallback", reason="model_failed_or_unavailable",
+                          fail_action=reranker_fail_action,
                           score_source=diagnostics.get("score_source", "vector_weighted"))
+                if reranker_fail_action == "empty":
+                    return []
                 return self._build_results_from_aggregation(candidates[:top_k])
             returned_rows = []
             for result in rerank_results:
@@ -381,6 +386,8 @@ class FragmentMatchingMixin:
         except Exception as e:
             diagnostics["rerank_degraded"] = True
             logger.error("[FRAGMENT-MATCH] rerank failed: %s", e)
+            if reranker_fail_action == "empty":
+                return []
             return self._build_results_from_aggregation(candidates[:top_k])
 
 

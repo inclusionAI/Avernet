@@ -1,6 +1,7 @@
 """Refresh the selected profile without deleting other profiles' vectors."""
 
 from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 from src.infra.config.feature_flags import FeatureFlags
 
 
@@ -65,9 +66,18 @@ def refresh_activated_profile_index(registry, worker, profile_id: str) -> None:
         "runtime_state": runtime,
     }
     checked_embedding = _CheckedEmbedding(embedding)
-    indexer = ProfileEmbeddingIndexer(checked_embedding, profile_store)
+    decomposer = ProfileFragmentDecomposer()
+    current_ids = {
+        fragment.compute_fragment_id(profile_key)
+        for fragment in decomposer.decompose(profile)
+    }
+    indexer = ProfileEmbeddingIndexer(checked_embedding, profile_store, fragment_decomposer=decomposer)
     # Rebuilding the one target also makes retries independent of partial or
     # stale fragment caches left by a previously interrupted refresh.
     result = indexer.build_index([profile], worker_states={worker.id: state})
     if checked_embedding.failed or result.failed_count or result.indexed_count != 1:
         raise RuntimeError("activated profile indexing failed")
+
+    # Only remove obsolete fragments of this target after replacement succeeds.
+    # Enumeration/deletion failures propagate, making a partial cleanup retryable.
+    profile_store.delete_stale_fragments(profile_key, current_ids, worker.id)
