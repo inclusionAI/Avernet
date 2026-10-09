@@ -550,7 +550,7 @@ class TestWorkerLifecycle:
         assert "run-x" not in worker._inflight
 
     @pytest.mark.asyncio
-    async def test_run_job_failure_records_job_fail_and_clears_inflight(self):
+    async def test_run_job_failure_force_fails_the_run_and_clears_inflight(self):
         handler = StubHandler(slice_error=ValueError("slice gone wrong"))
         repo = StubJobRepo()
         worker = AgentComputeWorker(
@@ -558,9 +558,11 @@ class TestWorkerLifecycle:
         )
         job = _job_dict()
         await worker._run_job(job, reclaimed=False)
-        assert repo.fails == [
-            ("run-1", TENANT, "slice gone wrong", worker._worker_id, 1),
+        assert handler.calls == [
+            ("handle-slice", "run-1", 1),
+            ("force-fail", "run-1", 1, "slice gone wrong"),
         ]
+        assert repo.fails == []
         assert "run-1" not in worker._inflight
 
 
@@ -589,6 +591,10 @@ class StubHandler:
 
     def force_stuck(self, run_id, tenant, epoch, error, worker_id=None):
         self.calls.append(("force-stuck", run_id))
+        return True
+
+    def force_fail(self, run_id, tenant, epoch, error, worker_id=None):
+        self.calls.append(("force-fail", run_id, epoch, error))
         return True
 
 

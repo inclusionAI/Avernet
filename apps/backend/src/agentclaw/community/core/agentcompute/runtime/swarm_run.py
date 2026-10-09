@@ -109,6 +109,25 @@ class SwarmRunHandler:
         self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
         return ok
 
+    def force_fail(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
+                   error: str, worker_id: str | None = None) -> bool:
+        """13.6 degradation: an unrecoverable slice error terminally fails the
+        run so it can never be left RUNNING with a dead job (stalled)."""
+        if worker_id is not None:
+            self._worker_id = worker_id
+        ok = self._run_repo.update_status(
+            run_id, tenant, RunStatus.FAILED,
+            termination_reason=TerminationReason.ERROR,
+            error=error, claim_epoch=claim_epoch,
+        )
+        if not ok:
+            # D28 fence rejected this claim's write — a newer worker owns the
+            # run and its outcome; this slice must not touch the job either.
+            return False
+        self.store.apply_run_retention(run_id, tenant)
+        self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
+        return True
+
     async def handle_slice(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                            cancel_requested: bool = False, *,
                            worker_id: str | None = None) -> str:

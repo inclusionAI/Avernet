@@ -194,9 +194,15 @@ class AgentComputeWorker(LifecycleBase):
             )
         except Exception as exc:
             logger.exception("[agentcompute][worker] run=%s error=%s", run_id, exc)
-            await asyncio.to_thread(
-                self._job_repo.fail, run_id, tenant, str(exc), self._worker_id, epoch
+            fenced = await asyncio.to_thread(
+                self._handler.force_fail,
+                run_id, tenant, epoch, str(exc), self._worker_id,
             )
+            if not fenced:
+                await asyncio.to_thread(
+                    self._job_repo.fail,
+                    run_id, tenant, str(exc), self._worker_id, epoch,
+                )
         finally:
             self._inflight.pop(run_id, None)
 

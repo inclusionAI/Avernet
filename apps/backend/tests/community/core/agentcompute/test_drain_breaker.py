@@ -371,6 +371,10 @@ class DrainHandler:
         self.calls.append(("force-stuck", run_id))
         return True
 
+    def force_fail(self, run_id, tenant, epoch, error, worker_id=None):
+        self.calls.append(("force-fail", run_id))
+        return True
+
 
 def _drain_config(grace: float, *, lease: float = 1.0,
                   poll: float = 0.02) -> AgentComputeConfig:
