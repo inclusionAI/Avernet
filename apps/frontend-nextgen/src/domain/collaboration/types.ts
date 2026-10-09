@@ -1,5 +1,7 @@
 export type IdentityStatus = 'online' | 'hidden';
 export type IdentityReachability = 'reachable' | 'unreachable';
+/** mine 行的 access_relation：后端按当前 authority 边计算的只读角色标签。 */
+export type IdentityAccessRelation = 'owner' | 'manager';
 export type IdentityView = {
   id: string;
   kind: 'user' | 'bot';
@@ -14,6 +16,11 @@ export type IdentityView = {
   botType?: string;
   /** Bot 群聊链路可达性；与运行状态分开表达。human 项无此字段。 */
   reachability?: IdentityReachability;
+  /**
+   * mine 当前 authority 角色标签（owner=当前 owner；manager=持有有效 manager 边）。
+   * 标签只来自 mine 行本身：缺失时保持 undefined，不用 created_by 兜底或 default 成 owner。
+   */
+  accessRelation?: IdentityAccessRelation;
 };
 export type GroupKind = 'free_chat' | 'task_master_slave' | 'task_dag';
 export type SessionKind = 'chat' | 'service_invocation';

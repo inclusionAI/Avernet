@@ -3,6 +3,7 @@ import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
+import { readBotAccessRelation } from '@/services/collaborationPrivacy/mappers';
 import { ENABLE_TEST_USER, TEST_USER_IDENTITY } from './testUser';
 
 export interface DomainError {
@@ -215,6 +216,10 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
         if (!b || !id) return [];
         const reachability = b.reachability === 'unreachable' ? 'unreachable' : 'reachable';
         const online = reachability === 'reachable';
+        // mine 的新角色标签（owner|manager）只直通行本身：manager 来源的 Bot
+        // 同样进入身份切换列表；缺失时保持 undefined——mine 缺字段是合同
+        // 错误（botAuthorityService 判定），绝不从 created_by 补默认 owner。
+        const accessRelation = b.kind === 'human' ? undefined : readBotAccessRelation(b);
         return [
           {
             id,
@@ -226,6 +231,7 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
             reachability,
             engine: readBotEngine(value),
             botType: readBotType(value),
+            ...(accessRelation ? { accessRelation } : {}),
           },
         ];
       }),

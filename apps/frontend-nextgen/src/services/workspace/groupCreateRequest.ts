@@ -7,10 +7,21 @@ export interface CreateGroupInput {
   deliveryPolicy?: 'send_to_driver' | 'inject_observers';
   definitionYaml?: string;
   driverBotUuid: string;
+  /** 具体 Human/Bot actor id；合成「我」与空值被省略（后端回落 Human Principal）。 */
   originator: string;
   participants: Array<{ actor_id: string; message_view_scope?: MessageViewScope }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;
+}
+
+/**
+ * Human 共同建群的 originator 归一：只有拿到具体身份 id（mine 的 human actor id、
+ * 或选中的 Bot id）才下发；'me'/空值一律省略，不伪造 originator。
+ * 可见性保持缺省：BCS 建群默认 private Group，body 不携带 visibility。
+ */
+export function normalizeGroupOriginator(originator: string): string | undefined {
+  const trimmed = typeof originator === 'string' ? originator.trim() : '';
+  return trimmed && trimmed !== 'me' ? trimmed : undefined;
 }
 
 export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
@@ -33,7 +44,9 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
     context: input.context,
     participants,
     driver_bot_uuid: input.driverBotUuid,
-    originator: input.originator,
+    ...(normalizeGroupOriginator(input.originator)
+      ? { originator: normalizeGroupOriginator(input.originator) }
+      : {}),
   };
   if (input.strategy === 'chat') {
     return {

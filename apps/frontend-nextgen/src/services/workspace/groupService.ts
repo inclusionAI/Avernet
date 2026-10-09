@@ -14,7 +14,11 @@ import {
   updateGroup,
 } from '@/services/backendApi/collaboration/collaborationGroupController';
 import { listGroupSessions } from '@/services/backendApi/collaboration/sessionController';
-import { buildCreateGroupBody, type CreateGroupInput } from './groupCreateRequest';
+import {
+  buildCreateGroupBody,
+  normalizeGroupOriginator,
+  type CreateGroupInput,
+} from './groupCreateRequest';
 import {
   createGroupViaExecute as execCreateGroupViaExecute,
   loadBcsGroupDetail as execLoadBcsGroupDetail,
@@ -237,7 +241,14 @@ export const groupService = {
    * 403→「无权创建」；其余 generic。成功后通过 loadGroupDetail 拉回最新 GroupView。
    */
   async createGroup(input: CreateGroupInput): Promise<DomainResult<GroupView>> {
-    const body = buildCreateGroupBody(input);
+    // Human 共同建群（受控 Bots = mine owner∪manager）：originator 只在
+    // 拿到具体 Human/Bot actor id 时下发；'me'/空值在此边界也归一为
+    // 省略，后端回落 Human Principal。可见性不传 = BCS 默认 private
+    // Group；参与者取自 mine/候选选择器，不为 Bot 伪造好友。
+    const body = buildCreateGroupBody({
+      ...input,
+      originator: normalizeGroupOriginator(input.originator) ?? '',
+    });
     try {
       const resp = await createGroupApi(body);
       const created = resp.data;

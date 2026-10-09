@@ -197,15 +197,78 @@ function isOwnedBot(participant: GroupParticipant, userId?: string): boolean {
 }
 
 /**
- * 选取查询群消息的视角 bot：仅限当前用户自己创建的 bot（有权限）。
- * 优先 worker（任务执行侧的本人 bot），次选归属本人的 master/manager；都没有则返回 null → 无查询权限。
+ * mine（owner∪manager 并集）受控 Bot actor id 集合（模块级短 TTL 缓存）。
+ * 资产目录禁反向 import services/stores，与群详情同走原生 fetch；
+ * 失败/限流一律返回空集，回落既有 created_by 匹配，不阻断消息加载。
  */
-export function resolveOwnedViewBot(participants: GroupParticipant[], userId?: string): GroupParticipant | null {
+let controlledBotIdsCache: { ids: Set<string>; expiresAt: number } | null = null;
+async function fetchControlledBotIds(): Promise<Set<string>> {
+  if (controlledBotIdsCache && controlledBotIdsCache.expiresAt > Date.now()) {
+    return controlledBotIdsCache.ids;
+  }
+  const empty = new Set<string>();
+  try {
+    const resp = await fetch('/openapi/v1/collaboration/bots/mine?limit=100', {
+      credentials: 'include',
+    });
+    if (!resp.ok) return empty;
+    const payload = unwrapHttpEnvelope(await resp.json());
+    const items =
+      payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).items)
+        ? ((payload as Record<string, unknown>).items as unknown[])
+        : [];
+    const ids = new Set<string>();
+    items.forEach((item) => {
+      const record = item as Record<string, unknown>;
+      const botId = typeof record?.bot_id === 'string' ? record.bot_id : '';
+      const relation = record?.access_relation;
+      // 仅认带 access_relation 标签的 bot 行（owner|manager），human 自显行不入选。
+      if (
+        botId &&
+        record?.kind === 'bot' &&
+        (relation === 'owner' || relation === 'manager')
+      ) {
+        ids.add(botId);
+        const normalized = botId.slice(0, botId.indexOf(':'));
+        if (botId.includes(':') && normalized) ids.add(normalized);
+      }
+    });
+    controlledBotIdsCache = { ids, expiresAt: Date.now() + 60_000 };
+    return ids;
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * 选取查询群消息的视角 bot：当前用户可控制的 bot（有权限）。
+ * 优先 worker（任务执行侧的本人 bot），次选归属本人的 master/manager；
+ * 两者都没有时用 mine 的 owner∪manager 受控 Bot（manager 来源）兜底；
+ * 都没有则返回 null → 无查询权限。controlledBotIds 缺省时保持旧语义（仅 created_by 匹配）。
+ */
+export function resolveOwnedViewBot(
+  participants: GroupParticipant[],
+  userId?: string,
+  controlledBotIds?: Iterable<string>,
+): GroupParticipant | null {
   const owned = participants.filter((p) => isOwnedBot(p, userId));
-  if (!owned.length) return null;
-  return (
-    owned.find((p) => p.role === 'worker') ?? owned.find((p) => p.role === 'manager' || p.role === 'driver') ?? owned[0]
-  );
+  if (owned.length) {
+    return (
+      owned.find((p) => p.role === 'worker') ?? owned.find((p) => p.role === 'manager' || p.role === 'driver') ?? owned[0]
+    );
+  }
+  // created_by 口径选不到时：manager 来源的受控 Bot 同样有该人视角权限。
+  if (controlledBotIds) {
+    const controlled = new Set(controlledBotIds);
+    const managed = participants.filter((p) => p.actor_kind === 'bot' && controlled.has(p.actor_id));
+    return (
+      managed.find((p) => p.role === 'worker') ??
+      managed.find((p) => p.role === 'manager' || p.role === 'driver') ??
+      managed[0] ??
+      null
+    );
+  }
+  return null;
 }
 
 export interface GroupMessage {
@@ -554,7 +617,40 @@ export const GroupSessionView: React.FC<{
             // 登录人无权 → 403;单聊跨用户他人 Bot → 404。统一转无权限提示(群成员/执行者仍展示);其余错误外抛。
             if (isGroup) {
               if (/（403）|forbidden/i.test(msg)) {
-                noMessagePerm = true;
+                if (!groupViewBotId && effectiveUserId) {
+                  // created_by 口径选不到本人 bot：403 后用 mine 的
+                  // manager 来源受控 Bot 重试一次（身份切换纳入全部
+                  // 有效 manager 来源；仍是 403 → 无权限态）。
+                  const controlledBotIds = await fetchControlledBotIds();
+                  const managedViewBot = resolveOwnedViewBot(
+                    g?.participants ?? [],
+                    '',
+                    controlledBotIds,
+                  );
+                  if (managedViewBot) {
+                    try {
+                      msgs = await fetchSessionMessages(
+                        sessionId,
+                        true,
+                        assignee,
+                        effectiveUserId,
+                        managedViewBot.actor_id,
+                      );
+                    } catch (retryErr) {
+                      if (cancelled) return;
+                      const retryMsg = retryErr instanceof Error ? retryErr.message : '会话消息请求失败';
+                      if (/（403）|forbidden/i.test(retryMsg)) {
+                        noMessagePerm = true;
+                      } else {
+                        throw retryErr;
+                      }
+                    }
+                  } else {
+                    noMessagePerm = true;
+                  }
+                } else {
+                  noMessagePerm = true;
+                }
               } else {
                 throw err;
               }

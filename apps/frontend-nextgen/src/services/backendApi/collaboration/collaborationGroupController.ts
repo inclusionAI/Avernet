@@ -80,7 +80,8 @@ export interface GroupCreateChatBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
-  originator: string;
+  /** 具体 Human/Bot actor id；契约中 originator 可选，'me'/空值由前端省略。 */
+  originator?: string;
   collaboration: GroupCollaborationChat;
 }
 export interface GroupCreateManagerWorkerBody {
@@ -89,7 +90,8 @@ export interface GroupCreateManagerWorkerBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
-  originator: string;
+  /** 具体 Human/Bot actor id；契约中 originator 可选，'me'/空值由前端省略。 */
+  originator?: string;
   collaboration: GroupCollaborationManagerWorker;
 }
 export interface GroupCreateStateMachineBody {
@@ -98,7 +100,8 @@ export interface GroupCreateStateMachineBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
-  originator: string;
+  /** 具体 Human/Bot actor id；契约中 originator 可选，'me'/空值由前端省略。 */
+  originator?: string;
   collaboration: GroupCollaborationStateMachine;
 }
 export type CreateGroupBody = GroupCreateChatBody | GroupCreateManagerWorkerBody | GroupCreateStateMachineBody;

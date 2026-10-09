@@ -87,6 +87,15 @@ export interface ListMyBotsParams {
   limit?: number;
 }
 
+/**
+ * mine（GET /collaboration/bots/mine）独立 DTO：access_relation 是后端按当前
+ * authority 边（owner∪manager）计算的 REQUIRED 角色标签（owner|manager），每行必有。
+ * created_by 只是创建渊源，永不决定该标签；通用 Bot DTO 不强加该必填字段。
+ */
+export type CollaborationMyBotDto = CollaborationBotDto & {
+  access_relation: 'owner' | 'manager';
+};
+
 export interface QueryCollaborationBotsBody {
   bot_ids: string[];
 }
@@ -102,14 +111,17 @@ export const COLLABORATION_BOT_ENDPOINTS = {
   friendRequests: (bot_id: string) => `/openapi/v1/collaboration/bots/${bot_id}/friend-requests`,
 };
 
-// 查询我可协作的 Bot（mine 版本，精确类型）。
+// 查询我可协作的 Bot（mine 版本，owner∪manager 并集 + human 自显行；每行带必填 access_relation）。
 export async function listMyBots(params: ListMyBotsParams = {}, signal?: AbortSignal) {
-  return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationBotDto>>>(COLLABORATION_BOT_ENDPOINTS.mine, {
-    method: 'GET',
-    params: params as Record<string, unknown>,
-    injectUserId: false,
-    signal,
-  });
+  return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationMyBotDto>>>(
+    COLLABORATION_BOT_ENDPOINTS.mine,
+    {
+      method: 'GET',
+      params: params as Record<string, unknown>,
+      injectUserId: false,
+      signal,
+    },
+  );
 }
 
 // 更新当前用户管理的 Bot 协作字段；好友策略字段来自已部署 Avernet owner-scoped PATCH DTO。

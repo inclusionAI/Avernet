@@ -8,6 +8,7 @@ import type {
 } from '@/domain/collaborationPrivacy/types';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { collaborationPrivacyService, type DirectSetting } from '@/services/collaborationPrivacy';
+import { refreshAfterForbidden } from '@/services/workspace/botAuthorityService';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -53,8 +54,13 @@ export function useCollaborationPrivacy() {
         const overview = await collaborationPrivacyService.loadOverview(userId, signal, loadScope);
         if (loadId === latestLoadId.current && !signal?.aborted) store.setOverview(overview);
       } catch (error) {
-        if (loadId === latestLoadId.current && (error as Error).name !== 'AbortError')
+        if (loadId === latestLoadId.current && (error as Error).name !== 'AbortError') {
+          // 403（失权）：重拉 mine 身份，选中视角若已失权由 applyIdentityLoadResult 清理。
+          if ((error as { status?: number })?.status === 403) {
+            await refreshAfterForbidden();
+          }
           store.setError(errorMessage(error));
+        }
       } finally {
         if (loadId === latestLoadId.current) store.setLoading(false);
       }

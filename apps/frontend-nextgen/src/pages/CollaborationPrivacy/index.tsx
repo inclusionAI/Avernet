@@ -1,4 +1,5 @@
 import { getCapabilities } from '@/capabilities';
+import { BotOwnershipTransferPanel } from '@/components/BotOwnershipTransferPanel';
 import { FriendApprovalEditor } from '@/components/CollaborationPrivacy/FriendApprovalEditor';
 import { IdentityCard } from '@/components/CollaborationPrivacy/IdentityCard';
 import { PermissionCard } from '@/components/CollaborationPrivacy/PermissionCard';
@@ -77,7 +78,7 @@ export default function CollaborationPrivacyPage() {
             />
           </Card>
         )}
-        {!privacy.loading && !privacy.error && overview && (
+        {!privacy.loading && !privacy.error && overview && privacy.activeIdentity && (
           <>
             {privacy.showIdentityCard && (
               <IdentityCard
@@ -91,6 +92,13 @@ export default function CollaborationPrivacyPage() {
                 onSync={() => void privacy.syncDepartment()}
               />
             )}
+            {/* BCS 协作权限区域：Bot 视角显示当前 ownership/manager 管理，
+                Human 视角显示转交收发件。角色标签取 mine access_relation，不本地推断。 */}
+            <BotOwnershipTransferPanel
+              mode={privacy.activeIdentity.kind === 'bot' ? 'bot' : 'human'}
+              botId={privacy.activeIdentity.id}
+              accessRelation={privacy.activeIdentity.accessRelation}
+            />
             {privacy.activeIdentity?.kind === 'bot' && (
               <>
                 {privacy.visibleBots.length === 0 ? (

@@ -122,6 +122,18 @@ function defaultFriendApproval(): FriendApprovalConfig {
   return { mode: 'all', exemptOrganizationPaths: [] };
 }
 
+export type BotAccessRelation = 'owner' | 'manager';
+
+/**
+ * mine 行的 access_relation 直读（owner|manager）。任意形态的缺失/非法值一律返回
+ * undefined——标签由后端按当前 authority 边计算，前端绝不从 created_by 或默认值推断。
+ */
+export function readBotAccessRelation(value: unknown): BotAccessRelation | undefined {
+  if (!isRecord(value)) return undefined;
+  const relation = value.access_relation;
+  return relation === 'owner' || relation === 'manager' ? relation : undefined;
+}
+
 function mapEngineLabel(engine?: string, providerName?: string) {
   const rawEngine = engine?.trim() || providerName?.trim();
   if (!rawEngine) return 'unknown';

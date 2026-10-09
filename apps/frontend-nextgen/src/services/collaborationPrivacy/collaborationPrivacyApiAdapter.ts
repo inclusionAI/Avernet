@@ -150,7 +150,7 @@ function normalizeBotId(botId: string) {
   return separatorIndex > 0 ? normalized.slice(0, separatorIndex) : normalized;
 }
 
-function enrichManagedBotsWithEngine(items: CollaborationBotDto[], summaries: OwnedBotDto[]) {
+function enrichManagedBotsWithEngine<T extends CollaborationBotDto>(items: T[], summaries: OwnedBotDto[]) {
   const exactEngineByBotId = new Map(
     summaries
       .filter((summary) => isNonEmptyString(summary.engine))
