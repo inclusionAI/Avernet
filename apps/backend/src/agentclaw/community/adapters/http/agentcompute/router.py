@@ -34,27 +34,20 @@ AgentComputeServiceDep = Annotated[
 router = APIRouter(prefix="/agentcompute/v1", tags=["agentcompute"])
 
 
-@router.post("/run")
-async def run_sync(
+@router.post("/runs")
+async def submit_run(
     dto: SubmitRunDTO,
+    request: Request,
     svc: AgentComputeServiceDep,
-) -> RunSummaryDTO:
+    wait: bool = Query(False, description="block until terminal and return the full run"),
+) -> SubmitRunResponseDTO | RunSummaryDTO:
     req = _to_domain(dto)
-    run = await svc.submit_sync(req)
-    return _to_summary(run)
+    if wait:
+        return _to_summary(await svc.submit_sync(req))
+    return SubmitRunResponseDTO(run_id=await svc.submit_async(req))
 
 
-@router.post("/jobs")
-async def submit_job(
-    dto: SubmitRunDTO,
-    svc: AgentComputeServiceDep,
-) -> SubmitRunResponseDTO:
-    req = _to_domain(dto)
-    run_id = await svc.submit_async(req)
-    return SubmitRunResponseDTO(run_id=run_id)
-
-
-@router.get("/jobs/{run_id}")
+@router.get("/runs/{run_id}")
 async def get_run(
     run_id: str,
     request: Request,
@@ -67,7 +60,7 @@ async def get_run(
     return _to_summary(run)
 
 
-@router.get("/jobs")
+@router.get("/runs")
 async def list_runs(
     request: Request,
     svc: AgentComputeServiceDep,
@@ -85,7 +78,7 @@ async def list_runs(
     )
 
 
-@router.post("/jobs/{run_id}/cancel")
+@router.post("/runs/{run_id}/cancel")
 async def cancel_run(
     run_id: str,
     request: Request,
@@ -98,7 +91,7 @@ async def cancel_run(
     return CancelResponseDTO(run_id=run_id, status=status)
 
 
-@router.get("/jobs/{run_id}/stream")
+@router.get("/runs/{run_id}/events")
 async def stream_run(
     run_id: str,
     request: Request,
@@ -159,7 +152,7 @@ async def stream_run(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-@router.get("/jobs/{run_id}/report", response_class=HTMLResponse)
+@router.get("/runs/{run_id}/report", response_class=HTMLResponse)
 async def report(
     run_id: str,
     request: Request,

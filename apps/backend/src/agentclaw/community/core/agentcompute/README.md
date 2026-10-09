@@ -156,24 +156,24 @@ Service Protocol (`service_protocol.py`): `submit_async`, `submit_sync`,
 
 ```bash
 # async submit -> {"run_id": "..."}
-curl -sS -X POST http://127.0.0.1:8000/agentcompute/v1/jobs -H 'Content-Type: application/json' -d '{
+curl -sS -X POST http://127.0.0.1:8000/agentcompute/v1/runs -H 'Content-Type: application/json' -d '{
   "tenant": "t1", "goal": "map the incident to owning services",
   "agents": [{"name": "scout", "role": "research"}],
   "idempotency_key": "inc-42"}'
 
 # sync submit (blocks until terminal or deadline)
-curl -sS -X POST http://127.0.0.1:8000/agentcompute/v1/run -H 'Content-Type: application/json' -d '{"tenant": "t1", "goal": "summarize logs", "agents": [{"name": "s1", "role": "research"}]}'
+curl -sS -X POST 'http://127.0.0.1:8000/agentcompute/v1/runs?wait=true' -H 'Content-Type: application/json' -d '{"tenant": "t1", "goal": "summarize logs", "agents": [{"name": "s1", "role": "research"}]}'
 
 # get / list / cancel
-curl -sS http://127.0.0.1:8000/agentcompute/v1/jobs/<run_id> -H 'X-Tenant-Id: t1'
-curl -sS 'http://127.0.0.1:8000/agentcompute/v1/jobs?page=1&page_size=20&status=COMPLETED' -H 'X-Tenant-Id: t1'
-curl -sS -X POST http://127.0.0.1:8000/agentcompute/v1/jobs/<run_id>/cancel -H 'X-Tenant-Id: t1'
+curl -sS http://127.0.0.1:8000/agentcompute/v1/runs/<run_id> -H 'X-Tenant-Id: t1'
+curl -sS 'http://127.0.0.1:8000/agentcompute/v1/runs?page=1&page_size=20&status=COMPLETED' -H 'X-Tenant-Id: t1'
+curl -sS -X POST http://127.0.0.1:8000/agentcompute/v1/runs/<run_id>/cancel -H 'X-Tenant-Id: t1'
 
 # SSE stream: status, then agent/round/guard deltas, progress heartbeats, terminal
-curl -sS -N http://127.0.0.1:8000/agentcompute/v1/jobs/<run_id>/stream -H 'X-Tenant-Id: t1'
+curl -sS -N http://127.0.0.1:8000/agentcompute/v1/runs/<run_id>/events -H 'X-Tenant-Id: t1'
 
 # report (HTML) + health
-curl -sS http://127.0.0.1:8000/agentcompute/v1/jobs/<run_id>/report -H 'X-Tenant-Id: t1'
+curl -sS http://127.0.0.1:8000/agentcompute/v1/runs/<run_id>/report -H 'X-Tenant-Id: t1'
 curl -sS http://127.0.0.1:8000/agentcompute/v1/health
 ```
 

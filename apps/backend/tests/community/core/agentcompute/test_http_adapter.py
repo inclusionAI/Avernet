@@ -65,6 +65,7 @@ class StubAgentComputeService:
         self.events: RunEvents | None = None
         self.run_events_calls: list[dict] = []
         self.submitted: list[SubmitRunRequest] = []
+        self.calls: list[str] = []
         self.list_calls: list[dict] = []
         self.cancelled: list[tuple[str, str]] = []
         self.active_counts: dict[str, int] = {}
@@ -74,12 +75,14 @@ class StubAgentComputeService:
         if self.submit_error is not None:
             raise self.submit_error
         self.submitted.append(req)
+        self.calls.append("submit_async")
         return self.run.run_id
 
     async def submit_sync(self, req: SubmitRunRequest) -> dm.Run:
         if self.submit_error is not None:
             raise self.submit_error
         self.submitted.append(req)
+        self.calls.append("submit_sync")
         return self.run
 
     def get_run(self, run_id: str, tenant: str) -> dm.Run | None:
@@ -167,30 +170,30 @@ def _read_sse(resp) -> list[tuple[str, dict]]:
 class TestTenantRequired:
 
     def test_post_run_without_tenant_is_422(self, client):
-        resp = client.post("/agentcompute/v1/run", json={**_spec_body(), "tenant": ""})
+        resp = client.post("/agentcompute/v1/runs", json={**_spec_body(), "tenant": ""})
         assert resp.status_code == 422
         del_body = _spec_body()
         del_body.pop("tenant")
-        resp = client.post("/agentcompute/v1/jobs", json=del_body)
+        resp = client.post("/agentcompute/v1/runs", json=del_body)
         assert resp.status_code == 422
 
     def test_get_without_tenant_header_is_400(self, client):
-        assert client.get("/agentcompute/v1/jobs/run-1").status_code == 400
+        assert client.get("/agentcompute/v1/runs/run-1").status_code == 400
         assert client.get(
-            "/agentcompute/v1/jobs/run-1", headers={"X-Tenant-Id": ""}
+            "/agentcompute/v1/runs/run-1", headers={"X-Tenant-Id": ""}
         ).status_code == 400
 
     def test_list_cancel_stream_report_without_tenant_header_are_400(self, client):
-        assert client.get("/agentcompute/v1/jobs").status_code == 400
-        assert client.post("/agentcompute/v1/jobs/run-1/cancel").status_code == 400
-        assert client.get("/agentcompute/v1/jobs/run-1/stream").status_code == 400
-        assert client.get("/agentcompute/v1/jobs/run-1/report").status_code == 400
+        assert client.get("/agentcompute/v1/runs").status_code == 400
+        assert client.post("/agentcompute/v1/runs/run-1/cancel").status_code == 400
+        assert client.get("/agentcompute/v1/runs/run-1/events").status_code == 400
+        assert client.get("/agentcompute/v1/runs/run-1/report").status_code == 400
 
 
 class TestSyncRunRoundTrip:
 
     def test_submit_sync_converts_dto_to_typed_request(self, client, stub):
-        resp = client.post("/agentcompute/v1/run", json=_spec_body())
+        resp = client.post("/agentcompute/v1/runs", json=_spec_body())
         assert resp.status_code == 200
         (req,) = stub.submitted
         assert req.tenant == TENANT
@@ -207,15 +210,33 @@ class TestSyncRunRoundTrip:
         assert agent.metadata == {"tier": "1"}
         body = resp.json()
         assert body["run_id"] == "run-1"
+        assert stub.calls == ["submit_async"]
+
+    def test_wait_true_uses_sync_path_and_returns_summary(self, client, stub):
+        resp = client.post(
+            "/agentcompute/v1/runs", params={"wait": "true"}, json=_spec_body()
+        )
+        assert resp.status_code == 200
+        assert stub.calls == ["submit_sync"]
+        body = resp.json()
+        assert body["run_id"] == "run-1"
         assert body["status"] == "COMPLETED"
         assert body["final_answer"] == "the build broke in stage 3"
+
+    def test_wait_false_defaults_to_async(self, client, stub):
+        resp = client.post(
+            "/agentcompute/v1/runs", params={"wait": "false"}, json=_spec_body()
+        )
+        assert resp.status_code == 200
+        assert stub.calls == ["submit_async"]
+        assert resp.json()["run_id"] == "run-1"
 
 
 class TestListRuns:
 
     def test_pagination_and_status_filter_passthrough(self, client, stub):
         resp = client.get(
-            "/agentcompute/v1/jobs",
+            "/agentcompute/v1/runs",
             headers={"X-Tenant-Id": TENANT},
             params={"page": 2, "page_size": 50, "status": "COMPLETED"},
         )
@@ -236,7 +257,7 @@ class TestListRuns:
 
     def test_invalid_status_is_422(self, client, stub):
         resp = client.get(
-            "/agentcompute/v1/jobs",
+            "/agentcompute/v1/runs",
             headers={"X-Tenant-Id": TENANT},
             params={"status": "WARPED"},
         )
@@ -245,9 +266,9 @@ class TestListRuns:
 
     def test_page_zero_and_oversized_page_size_are_422(self, client, stub):
         base = {"headers": {"X-Tenant-Id": TENANT}}
-        assert client.get("/agentcompute/v1/jobs", params={"page": 0}, **base).status_code == 422
+        assert client.get("/agentcompute/v1/runs", params={"page": 0}, **base).status_code == 422
         assert client.get(
-            "/agentcompute/v1/jobs", params={"page_size": 200}, **base
+            "/agentcompute/v1/runs", params={"page_size": 200}, **base
         ).status_code == 422
 
 
@@ -255,14 +276,14 @@ class TestCancel:
 
     def test_known_run_returns_status(self, client, stub):
         resp = client.post(
-            "/agentcompute/v1/jobs/run-1/cancel", headers={"X-Tenant-Id": TENANT}
+            "/agentcompute/v1/runs/run-1/cancel", headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 200
         assert resp.json() == {"run_id": "run-1", "status": "COMPLETED"}
 
     def test_unknown_run_is_404(self, client, stub):
         resp = client.post(
-            "/agentcompute/v1/jobs/nope/cancel", headers={"X-Tenant-Id": TENANT}
+            "/agentcompute/v1/runs/nope/cancel", headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 404
 
@@ -275,7 +296,7 @@ class TestSmokeRoutes:
 
     def test_report_renders_html(self, client):
         resp = client.get(
-            "/agentcompute/v1/jobs/run-1/report", headers={"X-Tenant-Id": TENANT}
+            "/agentcompute/v1/runs/run-1/report", headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 200
         assert "run-1" in resp.text
@@ -283,13 +304,13 @@ class TestSmokeRoutes:
 
     def test_unknown_run_report_is_404(self, client):
         resp = client.get(
-            "/agentcompute/v1/jobs/nope/report", headers={"X-Tenant-Id": TENANT}
+            "/agentcompute/v1/runs/nope/report", headers={"X-Tenant-Id": TENANT}
         )
         assert resp.status_code == 404
 
     def test_stream_emits_event_stream(self, client):
         with client.stream(
-            "GET", "/agentcompute/v1/jobs/run-1/stream", headers={"X-Tenant-Id": TENANT}
+            "GET", "/agentcompute/v1/runs/run-1/events", headers={"X-Tenant-Id": TENANT}
         ) as resp:
             assert resp.headers["content-type"].startswith("text/event-stream")
             first = next(resp.iter_lines())
@@ -297,7 +318,7 @@ class TestSmokeRoutes:
 
     def test_stream_unknown_run_emits_error_event(self, client):
         with client.stream(
-            "GET", "/agentcompute/v1/jobs/nope/stream", headers={"X-Tenant-Id": TENANT}
+            "GET", "/agentcompute/v1/runs/nope/events", headers={"X-Tenant-Id": TENANT}
         ) as resp:
             events = _read_sse(resp)
         assert events == [("error", {"error": "not found"})]
@@ -306,7 +327,7 @@ class TestSmokeRoutes:
         stub.events = _mk_events(status=dm.RunStatus.COMPLETED)
         stub.run = _mk_run(status=dm.RunStatus.COMPLETED)
         with client.stream(
-            "GET", "/agentcompute/v1/jobs/run-1/stream", headers={"X-Tenant-Id": TENANT}
+            "GET", "/agentcompute/v1/runs/run-1/events", headers={"X-Tenant-Id": TENANT}
         ) as resp:
             events = _read_sse(resp)
         assert events[0][0] == "status"
@@ -330,7 +351,7 @@ class TestSmokeRoutes:
 
     def test_stream_terminal_immediately_when_run_already_done(self, client, stub):
         with client.stream(
-            "GET", "/agentcompute/v1/jobs/run-1/stream", headers={"X-Tenant-Id": TENANT}
+            "GET", "/agentcompute/v1/runs/run-1/events", headers={"X-Tenant-Id": TENANT}
         ) as resp:
             events = _read_sse(resp)
         assert [name for name, _ in events] == ["status", "terminal"]
@@ -343,7 +364,7 @@ class TestErrorMapping:
 
     def test_tenant_limit_exceeded_maps_to_429(self, client, stub):
         stub.submit_error = TenantRunLimitExceeded(tenant=TENANT, limit=8)
-        resp = client.post("/agentcompute/v1/jobs", json=_spec_body())
+        resp = client.post("/agentcompute/v1/runs", json=_spec_body())
         assert resp.status_code == 429
         assert resp.json()["error"] == "tenant_run_limit_exceeded"
         assert resp.json()["tenant"] == TENANT
@@ -353,7 +374,7 @@ class TestErrorMapping:
         stub.submit_error = AgentComputeConfigError(
             "agentcompute llm config missing: base_url/api_key required"
         )
-        resp = client.post("/agentcompute/v1/run", json=_spec_body())
+        resp = client.post("/agentcompute/v1/runs", json=_spec_body())
         assert resp.status_code == 400
         assert "llm config missing" in resp.json()["error"]
 
@@ -370,7 +391,7 @@ class TestCrossTenantIsolation:
                 else None
             )
             return client.post(
-                "/agentcompute/v1/jobs", json={**_spec_body(), "tenant": tenant}
+                "/agentcompute/v1/runs", json={**_spec_body(), "tenant": tenant}
             ).status_code
 
         assert submit_for(TENANT) == 429

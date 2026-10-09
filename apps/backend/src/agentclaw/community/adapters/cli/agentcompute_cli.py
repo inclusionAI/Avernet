@@ -58,19 +58,19 @@ def _load_spec(path: str) -> dict[str, Any]:
 
 
 def _submit(client: httpx.Client, spec: dict[str, Any]) -> str:
-    resp = client.post("/agentcompute/v1/jobs", json=spec)
+    resp = client.post("/agentcompute/v1/runs", json=spec)
     resp.raise_for_status()
     return resp.json()["run_id"]
 
 
 def _get(client: httpx.Client, run_id: str, tenant: str) -> dict[str, Any]:
-    resp = client.get(f"/agentcompute/v1/jobs/{run_id}", headers={TENANT_HEADER: tenant})
+    resp = client.get(f"/agentcompute/v1/runs/{run_id}", headers={TENANT_HEADER: tenant})
     resp.raise_for_status()
     return resp.json()
 
 
 def _report(client: httpx.Client, run_id: str, tenant: str) -> str:
-    resp = client.get(f"/agentcompute/v1/jobs/{run_id}/report",
+    resp = client.get(f"/agentcompute/v1/runs/{run_id}/report",
                       headers={TENANT_HEADER: tenant})
     resp.raise_for_status()
     return resp.text
