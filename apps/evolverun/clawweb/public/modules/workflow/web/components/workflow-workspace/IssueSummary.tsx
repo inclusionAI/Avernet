@@ -8,6 +8,8 @@ export default function IssueSummary({ group }: { group: IssueGroupView }) {
   const sources = group.summarySources ?? group.sources;
   const coveredRuns = new Set(sources.flatMap(source => source.flowIds?.length ? source.flowIds : [source.flowId])).size;
   const currentRuns = new Set(group.flowIds ?? group.sources.flatMap(source => source.flowIds?.length ? source.flowIds : [source.flowId])).size;
+  const originalReasons = [...group.sources].filter(source => source.reasoning?.trim())
+    .sort((a, b) => b.completedAtMs - a.completedAtMs);
   return <section aria-label="问题原因总览">
     <h4 className="text-sm font-semibold text-slate-900">问题原因</h4>
     <div role="status" className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
@@ -24,6 +26,20 @@ export default function IssueSummary({ group }: { group: IssueGroupView }) {
           {group.aggregationInputSummary.fullSources} 条完整输入，{group.aggregationInputSummary.compactSources} 条精简输入。</p>}
       </details>
     </div>
+    {!group.summary && <div className="mt-4 space-y-3">
+      <h5 className="text-sm font-semibold text-slate-900">原始诊断 · 尚未汇总</h5>
+      {originalReasons.length ? <>
+        <p className="text-xs text-slate-500">以下按来源分别展示，不代表这些运行具有相同原因。</p>
+        {originalReasons.slice(0, 3).map(source => <article key={source.sourceId} className="rounded-lg border border-slate-200 p-3">
+          <p className="mb-2 break-all text-xs text-slate-500">运行 {source.flowId}
+            {source.completedAtMs > 0 && <> · {new Date(source.completedAtMs).toLocaleString()}</>}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">{source.reasoning.length > 360 ? `${source.reasoning.slice(0, 360)}…` : source.reasoning}</p>
+          {source.reasoning.length > 360 && <details className="mt-2 text-xs text-slate-600"><summary className="cursor-pointer">完整原始诊断</summary>
+            <p className="mt-2 whitespace-pre-wrap break-words leading-6">{source.reasoning}</p></details>}
+        </article>)}
+        {originalReasons.length > 3 && <p className="text-xs text-slate-500">展示最近 3 条，共 {originalReasons.length} 条；其余可在“证据与历史”查看。</p>}
+      </> : <p className="text-sm text-slate-600">原始诊断未记录原因，可在“证据与历史”核对运行事件；目前不能给出原因结论。</p>}
+    </div>}
     {group.summary && <>
       <p className="mt-3 text-sm leading-6 text-slate-700">{group.summary.summary.length > 180 ? `${group.summary.summary.slice(0, 180)}…` : group.summary.summary}</p>
       {group.summary.summary.length > 180 && <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">展开完整摘要</summary>

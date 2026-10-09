@@ -177,6 +177,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         if (value !== undefined && !requiredText(value, 4096)) fail('INVALID_INPUT', 'Invalid repair scope');
       }
       const includeHistorical = query.includeHistorical === true;
+      if (query.previewSignatures !== undefined && (!Array.isArray(query.previewSignatures)
+        || query.previewSignatures.length > 50 || query.previewSignatures.some(value => !requiredText(value, 4096)))) {
+        fail('INVALID_INPUT', 'Invalid issue preview scope');
+      }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
       const scopedItems = snapshot.items.filter(item => matchesScope(item, query) && (includeHistorical ||
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
@@ -197,6 +201,25 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };
+      if (query.previewSignatures) {
+        const groups = [...new Set(query.previewSignatures)].map(signature => ({ signature,
+          matches: filtered.filter(item => item.context?.signature === signature)
+            .sort((a, b) => Number(b.state === 'pending' && b.sourceAvailable) - Number(a.state === 'pending' && a.sourceAvailable)
+              || a.itemId.localeCompare(b.itemId)) }));
+        response.issuePreviews = groups.map(({ signature, matches }) => ({ signature, total: matches.length, items: [] }));
+        // Account for the base page and every issue's total before adding optional items.
+        // Leave room for the transport's canEdit field; never truncate an individual item.
+        let remainingBytes = MAX_INBOX_READ_BYTES - 256 - Buffer.byteLength(canonicalRepairJson(response), 'utf8');
+        groups.forEach(({ matches }, index) => {
+          const preview = response.issuePreviews![index];
+          for (const item of matches.slice(0, 3)) {
+            const bytes = Buffer.byteLength(canonicalRepairJson(item), 'utf8') + (preview.items.length ? 1 : 0);
+            if (bytes > remainingBytes) continue;
+            preview.items.push(item);
+            remainingBytes -= bytes;
+          }
+        });
+      }
       boundedRepairJson(response, MAX_INBOX_READ_BYTES);
       return response;
     });

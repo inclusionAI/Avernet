@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { RepairCandidatesResponse, RepairInboxItem, RepairInboxFilter } from '../../../../server/contracts/repair-workbench'
 import { repairBatches } from '../../../api/repair-batches'
 import { repairReadError } from '../../../api/repair-read-error'
@@ -7,30 +8,27 @@ import { changeSummary, sourceRunCount } from './RepairItemDetail'
 
 /** Compare and select suggestions within one issue; evidence is fetched only on expansion. */
 export default function IssueRepairSuggestions({ workflowId, signature, includeHistorical, initialItemId, onResult, renderItem,
-  selected = [], onToggle, canEdit = false, limit = 100 }: {
+  selected = [], onToggle, canEdit = false, limit = 100, cacheVersion = '', initialPage }: {
   workflowId: string; signature?: string; includeHistorical: boolean; initialItemId?: string | null
   selected?: string[]; onToggle?: (id: string) => void; canEdit?: boolean; limit?: number
+  cacheVersion?: string; initialPage?: RepairCandidatesResponse
   onResult: (result: RepairCandidatesResponse) => void; renderItem: (item: RepairInboxItem, canEdit: boolean) => ReactNode
 }) {
   const [page, setPage] = useState(1)
   const [state, setState] = useState<RepairInboxFilter>('all')
-  const [refresh, setRefresh] = useState(0)
-  const [data, setData] = useState<RepairCandidatesResponse | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const query = useQuery({ queryKey: ['repair-suggestions', workflowId, signature, includeHistorical, state, page, cacheVersion, canEdit],
+    queryFn: () => repairBatches.candidates(workflowId, { signature, state, page, pageSize: 20, includeHistorical }),
+    initialData: page === 1 && state === 'all' ? initialPage : undefined,
+    staleTime: 30_000, gcTime: 300_000, retry: false })
+  const data = query.error ? undefined : query.data
+  const error = query.error ? repairReadError(query.error) : ''
+  const loading = query.isPending
   const [expanded, setExpanded] = useState(initialItemId ?? '')
   const resultCallback = useRef(onResult)
   resultCallback.current = onResult
   useEffect(() => {
-    let current = true
-    setLoading(true); setError(''); setData(null)
-    repairBatches.candidates(workflowId, { signature, state, page, pageSize: 20, includeHistorical }).then(result => {
-      if (!current) return
-      setData(result); resultCallback.current(result)
-    }).catch(reason => { if (current) setError(repairReadError(reason)) })
-      .finally(() => { if (current) setLoading(false) })
-    return () => { current = false }
-  }, [workflowId, signature, includeHistorical, state, page, refresh])
+    if (data && !error) resultCallback.current(data)
+  }, [data, error])
   return <section aria-label="选择修复建议" className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h4 className="text-sm font-semibold text-slate-900">{signature ? '此问题的修复建议' : '全部修复建议'}{data ? ` · 共 ${data.page.total} 条` : ''}</h4>
@@ -40,9 +38,9 @@ export default function IssueRepairSuggestions({ workflowId, signature, includeH
           .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
     </div>
-    <p className="text-xs leading-5 text-slate-500">可多选，选择跨问题保留；生成前统一确认范围。同一字段的不同方案需先取舍。</p>
+    <p className="text-xs leading-5 text-slate-500">勾选要采用的方案，再生成修复草稿供审阅。可跨问题多选，不会直接应用或部署。</p>
     {loading ? <p role="status" className="text-sm text-slate-600">正在加载修复建议…</p>
-      : error ? <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => setRefresh(n => n + 1)}>重试建议</button></div>
+      : error ? <div role="alert" className="text-sm text-red-700">{error}<button className="ml-2 underline" onClick={() => void query.refetch()}>重试建议</button></div>
       : !data?.items.length ? <p className="text-sm text-slate-600">当前范围没有匹配的修复建议。可调整状态或历史范围，分析依据仍可查看。</p>
       : <div className="space-y-3">{data.items.map(item => {
         const reason = exclusion(item)

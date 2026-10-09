@@ -16,6 +16,21 @@ describe('repair workbench control service', () => {
     const request = { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: inbox.inputDigest, instructions: '', requestId: 'create-1' };
     return { ...f, service, inbox, request };
   }
+  it('fits large previews within the shared response budget without losing issue totals or full item data', async () => {
+    const f = await repairFixture(7); fixtures.push(f);
+    f.items.forEach((item, i) => {
+      item.context = { signature: `issue-${i}` };
+      if (i < 6) item.proposal = { summary: 'large', value: '界'.repeat(300_000) };
+    });
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const result = await service.candidates('wf-1', { pageSize: 1, previewSignatures: f.items.map((_, i) => `issue-${i}`) });
+    expect(Buffer.byteLength(JSON.stringify({ ...result, canEdit: true }))).toBeLessThan(4 * 1024 * 1024);
+    expect(result.issuePreviews?.map(preview => preview.total)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+    expect(result.issuePreviews?.some(preview => preview.total > preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.[6].items[0].itemId).toBe('item-6');
+    expect((await service.item('wf-1', 'item-5')).proposal).toEqual(f.items[5].proposal);
+    expect(result.page.total).toBe(7);
+  });
   it('keeps GET read-only, merges lifecycle history, and allows no_action/restore without AIS', async () => {
     const f = await setup(2, false);
     expect(f.inbox.capabilities).toMatchObject({ generation: false, publication: false });
@@ -42,6 +57,19 @@ describe('repair workbench control service', () => {
     expect(first.counts).toMatchObject({ pending: 39, all: 39 });
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
+  });
+  it('limits each issue preview but keeps its real total and reads sources only once', async () => {
+    const f = await repairFixture(8); fixtures.push(f);
+    f.items.forEach((item, i) => { item.context = { signature: i < 6 ? 'many' : 'few' }; });
+    const load = vi.spyOn(f.sourcePort, 'load');
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const result = await service.candidates('wf-1', { page: 2, pageSize: 1, previewSignatures: ['many', 'few', 'empty'] });
+    expect(result.page).toMatchObject({ page: 2, total: 8 });
+    expect(result.issuePreviews?.map(p => ({ total: p.total, ids: p.items.map(i => i.itemId) }))).toEqual([
+      { total: 6, ids: ['item-0', 'item-1', 'item-2'] }, { total: 2, ids: ['item-6', 'item-7'] }, { total: 0, ids: [] },
+    ]);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
   });
   it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
     const f = await setup(4, false);
