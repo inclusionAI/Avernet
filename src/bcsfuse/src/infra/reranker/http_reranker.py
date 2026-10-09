@@ -177,30 +177,29 @@ class HttpReranker(Reranker):
             sorted_results = sorted(result["results"], key=lambda x: x.get("index", 0))
             scores = [r.get("relevance_score", 0.0) for r in sorted_results]
             # DIAGNOSTIC: Log parsed relevance scores
-            logger.info(
+            logger.debug(
                 "[RERANKER-HTTP] Parsed 'results' format | count=%d | "
-                "top_scores=%s | all_scores=%s",
+                "first_scores=%s",
                 len(scores),
                 scores[:3] if scores else [],
-                scores
             )
         elif "scores" in result:
             scores = result["scores"]
-            logger.info(
+            logger.debug(
                 "[RERANKER-HTTP] Parsed 'scores' format | count=%d | top_scores=%s",
                 len(scores),
                 scores[:3] if scores else []
             )
         elif "data" in result and "scores" in result["data"]:
             scores = result["data"]["scores"]
-            logger.info(
+            logger.debug(
                 "[RERANKER-HTTP] Parsed 'data.scores' format | count=%d | top_scores=%s",
                 len(scores),
                 scores[:3] if scores else []
             )
         elif "output" in result:
             scores = result["output"].get("scores", [])
-            logger.info(
+            logger.debug(
                 "[RERANKER-HTTP] Parsed 'output' format | count=%d | top_scores=%s",
                 len(scores),
                 scores[:3] if scores else []
@@ -213,12 +212,11 @@ class HttpReranker(Reranker):
         while len(scores) < num_docs:
             scores.append(0.0)
 
-        logger.info(
-            "[RERANKER-HTTP] Final parsed scores | count=%d | min=%.4f | max=%.4f | scores=%s",
+        logger.debug(
+            "[RERANKER-HTTP] Final parsed scores | count=%d | min=%.4f | max=%.4f",
             len(scores),
             min(scores) if scores else 0.0,
             max(scores) if scores else 0.0,
-            scores
         )
 
         return scores[:num_docs]

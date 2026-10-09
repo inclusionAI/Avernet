@@ -1,6 +1,7 @@
 """Fragment matching and reranking implementation for WorkerVectorMatchService."""
 from __future__ import annotations
 import logging
+from time import perf_counter
 from collections import defaultdict
 from typing import Any
 from src.domain.models.metadata_record import MetadataRecord
@@ -10,6 +11,7 @@ from src.domain.models.profile_fragment import (
 )
 from src.domain.models.vector_search_hit import VectorSearchHit
 from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
+from src.domain.services.retrieval_logging import log_stage, log_candidates
 from src.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 
 logger = logging.getLogger("src.application.services.worker_vector_match_service")
@@ -104,6 +106,7 @@ class FragmentMatchingMixin:
         try:
             vector_size = self._vector_store.size()
             if vector_size == 0:
+                log_stage(logger, "vector_search", index_size=0, hit_count=0, reason="empty_index")
                 logger.error("[FRAGMENT-MATCH] vector store is empty")
                 return []
 
@@ -116,14 +119,19 @@ class FragmentMatchingMixin:
             )
 
             # 传递 filters 启用 Qdrant 前置过滤
+            search_started = perf_counter()
             fragment_hits = self._vector_store.search(query_embedding, top_k=search_k, filters=filters)
+            raw_hit_count = len(fragment_hits)
+            log_candidates(logger, "vector_hits", ((hit.id, hit.score) for hit in fragment_hits))
 
             # 过滤掉未启用的 fragment 类型（使用运行时权重决定）
             fragment_hits = self._filter_fragment_hits(fragment_hits, enabled_fragment_types)
-            logger.debug("[FRAGMENT-MATCH] search | index_size=%d, search_k=%d, hits=%d, after_type_filter=%d",
-                         vector_size, search_k, len(fragment_hits), len(fragment_hits))
+            log_stage(logger, "vector_search", index_size=vector_size, search_k=search_k,
+                      hit_count=raw_hit_count, after_type_filter=len(fragment_hits),
+                      duration_ms=round((perf_counter() - search_started) * 1000, 2))
 
         except Exception as e:
+            log_stage(logger, "vector_search", reason="provider_error", error_type=type(e).__name__)
             logger.warning("Fragment search failed: %s", e)
             return []
 
@@ -134,6 +142,7 @@ class FragmentMatchingMixin:
             runtime_weights=effective_weights,
         )
         if len(aggregated) == 0:
+            log_stage(logger, "candidate_selection", candidate_count=0, reason="no_aggregated_candidates")
             logger.warning("[FRAGMENT-MATCH] aggregation returned empty")
             return []
 
@@ -174,6 +183,7 @@ class FragmentMatchingMixin:
                 reverse=True
             )[:rerank_candidates_count]
             rerank_input_count = len(sorted_candidates)
+            log_candidates(logger, "reranker_input", ((c.profile_key, c.aggregated_score) for c in sorted_candidates))
             results = self._execute_rerank(
                 query=query,
                 candidates=sorted_candidates,
@@ -190,6 +200,13 @@ class FragmentMatchingMixin:
             )
             results = self._build_results_from_aggregation(sorted_candidates[:top_k])
 
+        log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
+                  candidate_count=len(candidates), excluded_count=excluded_by_set,
+                  metadata_removed_count=excluded_by_meta, rerank_enabled=bool(enable_rerank),
+                  rerank_input_count=rerank_input_count, ranked_count=len(results))
+        log_candidates(logger, "eligible_candidates", ((c.profile_key, c.aggregated_score) for c in candidates))
+        log_candidates(logger, "ranked_results", ((r.profile_key, r.score) for r in results))
+
         # Stage 5: Lightweight Rerank
         results = self._rerank(results)
 
@@ -199,7 +216,7 @@ class FragmentMatchingMixin:
         after_rerank_count = len(results)
         final_count = len(results[:top_k])
 
-        logger.info(
+        logger.debug(
             "[FRAGMENT-MATCH] pipeline | vector_search=%d, aggregated=%d, candidates=%d, "
             "rerank_in=%d, after_rerank=%d, result=%d",
             len(fragment_hits), len(aggregated), len(candidates),
@@ -367,7 +384,7 @@ class FragmentMatchingMixin:
                 hit.payload["fragment_type"] = "full"
             filtered = legacy_hits
 
-        logger.info(
+        logger.debug(
             "[FRAGMENT-FILTER] Filtered %d hits: %d passed, %d legacy, enabled_types=%s",
             len(hits), len(filtered), len(legacy_hits), enabled_types
         )
@@ -478,7 +495,7 @@ class FragmentMatchingMixin:
                     "active_skills": hit.payload.get("active_skills", []),
                     "short_profile": hit.payload.get("short_profile", ""),
                 }
-                logger.debug("[VECTOR-MATCH-Agg] Saved metadata for %s: short_profile='%s'", profile_key, p["metadata"].get("short_profile", ""))
+                logger.debug("[VECTOR-MATCH-Agg] Saved metadata for %r", profile_key)
 
         # 计算最终分数
         for profile_key, data in profile_map.items():
@@ -511,7 +528,7 @@ class FragmentMatchingMixin:
         candidate_map = {c.profile_key: c for c in candidates}
 
         # DIAGNOSTIC: Log incoming rerank results
-        logger.info(
+        logger.debug(
             "[MATCH-BUILD-RERANK] Incoming rerank_results count=%d | candidates_count=%d",
             len(rerank_results), len(candidates)
         )
@@ -529,7 +546,7 @@ class FragmentMatchingMixin:
 
             # DIAGNOSTIC: Log first 3 results
             if idx < 3:
-                logger.info(
+                logger.debug(
                     "[MATCH-BUILD-RERANK] rerank_result[%d] | profile_key=%s | final_score=%.4f | original_score=%.4f",
                     idx, profile_key, score, original_score
                 )
@@ -551,7 +568,7 @@ class FragmentMatchingMixin:
                 if metadata is None:
                     continue
                 if candidate_short_profile:
-                    logger.debug("[VECTOR-MATCH-Rerank] Created MetadataRecord with short_profile for %s: '%s'", profile_key, candidate_short_profile)
+                    logger.debug("[VECTOR-MATCH-Rerank] Created MetadataRecord for %r", profile_key)
             else:
                 # metadata_store 有记录，但 short_profile 可能为空，从 candidate 补充
                 if not getattr(metadata, 'short_profile', None) and candidate_short_profile:
@@ -570,12 +587,12 @@ class FragmentMatchingMixin:
 
             # DIAGNOSTIC: Log final MatchResult for top 3
             if idx < 3:
-                logger.info(
+                logger.debug(
                     "[MATCH-BUILD-RERANK] MatchResult[%d] | profile_key=%s | score=%.4f | is_reranked=%s",
                     idx, profile_key, result.score, result.is_reranked
                 )
 
-        logger.info(
+        logger.debug(
             "[MATCH-BUILD-RERANK] Final MatchResult count=%d | scores=%s",
             len(results),
             [r.score for r in results[:3]]
@@ -619,7 +636,7 @@ class FragmentMatchingMixin:
                         short_profile=candidate_short_profile,  # 使用从 candidate.metadata 提取的 short_profile
                     )
                     if candidate_short_profile:
-                        logger.debug("[VECTOR-MATCH-Build] Created MetadataRecord with short_profile for %s: '%s'", candidate.profile_key, candidate_short_profile)
+                        logger.debug("[VECTOR-MATCH-Build] Created MetadataRecord for %r", candidate.profile_key)
             else:
                 # metadata_store 有记录，但 short_profile 可能为空，从聚合的 metadata 补充
                 if not getattr(metadata, 'short_profile', None) and candidate_short_profile:

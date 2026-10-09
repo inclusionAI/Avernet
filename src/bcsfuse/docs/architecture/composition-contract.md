@@ -27,6 +27,28 @@ or read internal configuration in order to complete the provider graph.
 public deployment. It builds the public provider registry and delegates to
 `create_bcsfuse_app`.
 
+## Runtime business logging
+
+The composed app configures the shared `src` business logger at construction
+and reapplies its level after provider startup. `LOG_LEVEL` explicitly overrides
+the default: `DEBUG` for `prepub`/`pre`, `INFO` otherwise (including production
+and local startup). Environment selection follows `SERVER_ENV`, then
+`REAL_SERVER_ENV`, then `ALIPAY_APP_ENV`, using the first nonempty value.
+Accepted levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`;
+invalid values fail application construction rather than silently falling back.
+
+Set `LOG_LEVEL` in the **running application's environment**, not just in an
+image-build job. Restart the target instances to apply a change; there is no
+hot-reload endpoint. At INFO/DEBUG, startup logs `business_log_level` so operators
+can verify the selected level. Host handlers, formatters, filters and file
+routing remain intact; their own filtering still applies. Third-party logger
+levels are not raised to DEBUG. A public process without host handlers gets a
+console handler with request trace IDs.
+
+INFO retrieval logs summarize stage counts, thresholds and timing. DEBUG adds
+candidate IDs and scores for tracing where a candidate was removed, without
+logging query text, profile contents or credentials in those diagnostic records.
+
 ## Required providers
 
 Before creating the FastAPI application, the factory requires these registry

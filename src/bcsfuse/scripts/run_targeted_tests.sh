@@ -23,6 +23,8 @@ case "${1:---isolated}" in
       tests/contract/test_profile_identifier_content.py \
       tests/contract/test_composed_embedding_provider.py \
       tests/contract/test_composed_trace_contract.py \
+      tests/contract/test_retrieval_logging.py \
+      tests/contract/test_composed_log_level.py \
       tests/contract/test_auth_provider_contract.py \
       tests/contract/test_vector_metadata_filter_contract.py \
       tests/contract/test_legacy_fragment_identity.py \

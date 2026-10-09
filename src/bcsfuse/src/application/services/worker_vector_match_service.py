@@ -57,6 +57,8 @@ from src.application.services.worker_vector_match_types import MatchResult, Frag
 
 logger = logging.getLogger(__name__)
 
+from src.domain.services.retrieval_logging import log_stage, log_candidates
+
 
 @dataclass
 class RerankConfig:
@@ -270,15 +272,14 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
 
             if content:
                 # Phase C: 安全诊断日志
-                logger.info(
+                logger.debug(
                     "[CONTENT-RELOAD] Successfully loaded content for %s | "
                     "reload_worker_id=%s, reload_profile_id=%s, "
-                    "content_length=%d, content_hash_prefix=%s, content_reload_success=true",
+                    "content_length=%d, content_reload_success=true",
                     profile_key,
                     worker_id[:30] if worker_id else "N/A",
                     profile_id[:30] if profile_id else "N/A",
                     len(content),
-                    content[:16].encode('utf-8').hex() if len(content) >= 16 else content.encode('utf-8').hex()
                 )
                 return content
             else:
@@ -317,6 +318,8 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
 
         # 如果用户未提供过滤器，直接返回默认
         if not filters:
+            log_stage(logger, "filters", **default_visibility_filters,
+                      filter_fields=sorted(default_visibility_filters))
             logger.debug(
                 "[VISIBILITY-TRACE] stage=inject_default_filters, user_filters=None, "
                 "default_filters=%s",
@@ -345,13 +348,9 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                 default_visibility_filters["availability"]
             )
 
-        logger.info(
-            "[VISIBILITY-TRACE] stage=final_filters, user_filters=%s, "
-            "default_filters=%s, merged_filters=%s",
-            filters,
-            default_visibility_filters,
-            merged_filters
-        )
+        log_stage(logger, "filters", runtime_state=merged_filters.get("runtime_state"),
+                  availability=merged_filters.get("availability"),
+                  filter_fields=sorted(merged_filters))
 
         return merged_filters
 
@@ -407,7 +406,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # 确保 offline/private worker 不出现在结果中
         filters = self._inject_default_visibility_filters(filters)
 
-        logger.info(
+        logger.debug(
             "[MATCH-SVC] start | mode=%s, top_k=%d, vector_min_score=%.3f, rerank_min_score=%.3f, query_len=%d, dim=%d",
             mode, top_k, vector_min_score, rerank_min_score, len(query) if query else 0, len(query_embedding)
         )
@@ -450,41 +449,26 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # - 如果启用了 rerank，使用 rerank_min_score 过滤
         # - 如果未启用 rerank，使用 vector_min_score 过滤
         effective_threshold = rerank_min_score if any(r.is_reranked for r in results) else vector_min_score
+        score_sample = [{"profile_key": r.profile_key, "score": r.score} for r in results[:10]]
 
-        # DIAGNOSTIC: Log scores before threshold
-        if results:
-            logger.info(
-                "[THRESHOLD-BEFORE] before_threshold=%d | vector_min_score=%.4f | rerank_min_score=%.4f | effective_threshold=%.4f | scores=%s",
-                pre_filter_count,
-                vector_min_score,
-                rerank_min_score,
-                effective_threshold,
-                [f"{r.profile_key.split(':')[-1]}:{r.score:.4f}" for r in results[:5]]
-            )
+        log_candidates(logger, "before_threshold", ((r.profile_key, r.score) for r in results))
 
         # 应用相似度阈值过滤
         if effective_threshold > 0.0:
+            log_candidates(logger, "threshold_removed", (
+                (r.profile_key, r.score) for r in results if r.score < effective_threshold
+            ))
             filtered_results = [r for r in results if r.score >= effective_threshold]
             removed_count = len(results) - len(filtered_results)
             results = filtered_results
         else:
             removed_count = 0
 
-        # DIAGNOSTIC: Log scores after threshold
-        logger.info(
-            "[THRESHOLD-AFTER] after_threshold=%d | filtered=%d | effective_threshold=%.4f | scores=%s",
-            len(results),
-            removed_count,
-            effective_threshold,
-            [f"{r.profile_key.split(':')[-1]}:{r.score:.4f}" for r in results[:5]]
-        )
-
-        logger.info(
-            "[MATCH-SVC] done | before_threshold=%d, after_threshold=%d (filtered=%d, vector_min_score=%.3f, rerank_min_score=%.3f, effective_threshold=%.3f), "
-            "scores=[%s]",
-            pre_filter_count, len(results), removed_count, vector_min_score, rerank_min_score, effective_threshold,
-            ", ".join(f"{r.profile_key.split(':')[-1]}:{r.score:.4f}" for r in results[:5])
-        )
+        log_stage(logger, "threshold", before_count=pre_filter_count, after_count=len(results),
+                  removed_count=removed_count, effective_threshold=effective_threshold,
+                  vector_min_score=vector_min_score, rerank_min_score=rerank_min_score,
+                  before_score_sample=score_sample, sample_truncated=pre_filter_count > 10)
+        log_candidates(logger, "final_matches", ((r.profile_key, r.score) for r in results))
         return results
 
     def _apply_registry_filter(self, results: list[MatchResult]) -> list[MatchResult]:
@@ -501,6 +485,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
             过滤后的结果列表
         """
         if self._profile_filter is None:
+            log_stage(logger, "registry_filter", before_count=len(results), after_count=len(results), enabled=False)
             return results
 
         # 获取允许的 profile_keys
@@ -510,9 +495,14 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # 过滤结果
         filtered_results = [r for r in results if r.profile_key in allowed_keys]
         removed_count = len(results) - len(filtered_results)
+        log_stage(logger, "registry_filter", before_count=len(results), after_count=len(filtered_results),
+                  removed_count=removed_count, enabled=True)
+        log_candidates(logger, "registry_removed", (
+            (r.profile_key, r.score) for r in results if r.profile_key not in allowed_keys
+        ))
         if removed_count > 0:
             removed = [r.profile_key for r in results if r.profile_key not in allowed_keys]
-            logger.warning("[REGISTRY-FILTER] %d -> %d (removed=%d, keys=%s)",
+            logger.debug("[REGISTRY-FILTER] %d -> %d (removed=%d, keys=%s)",
                            len(results), len(filtered_results), removed_count,
                            str(removed[:5]) + ("..." if len(removed) > 5 else ""))
 

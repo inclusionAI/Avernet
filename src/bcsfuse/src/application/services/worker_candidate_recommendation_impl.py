@@ -25,12 +25,14 @@ Phase C: G1 Semantic Rerank V2
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
 
 from src.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
+from src.domain.services.retrieval_logging import log_stage
 from src.domain.models.domain_coverage import DomainCoverage
 from src.domain.models.retrieval_mode import RetrievalMode
 from src.domain.services.participants_sufficiency_checker import (
@@ -653,7 +655,7 @@ class WorkerCandidateRecommendationImpl:
             vector_min_score = min_score
             rerank_min_score = min_score
 
-        logger.info(
+        logger.debug(
             "[VectorMatch-Try] START | "
             f"question_len={len(question)}, top_k={top_k}, "
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
@@ -675,7 +677,7 @@ class WorkerCandidateRecommendationImpl:
             )
             return None
 
-        logger.info(
+        logger.debug(
             "[VectorMatch-Try] SERVICES_OK | "
             f"has_embedding_gen=True, has_vector_match=True, "
             f"real_embedding_flag={real_embedding_enabled}"
@@ -683,19 +685,17 @@ class WorkerCandidateRecommendationImpl:
 
         try:
             # 生成查询向量
-            logger.info("[VectorMatch-Try] GENERATING_EMBEDDING | question_length=%d", len(question))
+            logger.debug("[VectorMatch-Try] GENERATING_EMBEDDING | question_length=%d", len(question))
+            embedding_started = perf_counter()
             query_embedding = self._embedding_generator.embed(question)
-            logger.info(
-                "[VectorMatch-Try] EMBEDDING_GENERATED | "
-                f"dimension={len(query_embedding)}, "
-                f"first_3_values={[round(value, 4) for value in query_embedding[:3]]}"
-            )
+            log_stage(logger, "embedding", dimension=len(query_embedding),
+                      duration_ms=round((perf_counter() - embedding_started) * 1000, 2))
 
             # 执行向量匹配（传入运行时配置和阈值）
             # Phase B: 传递两个独立的阈值
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] CALLING_MATCH | "
-                f"runtime_config={runtime_config}, filters={filters}, "
+                f"filter_fields={sorted(filters or {})}, "
                 f"vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
             )
             match_results = self._vector_match_service.match(
@@ -710,15 +710,10 @@ class WorkerCandidateRecommendationImpl:
             )
 
             if not match_results:
-                logger.warning(
-                    "[VectorMatch-Try] NO_RESULTS | "
-                    "vector_match_service.match() returned empty list. "
-                    "This could mean: (1) vector store is empty, "
-                    "(2) no profiles match filters, or (3) min_score too high."
-                )
+                logger.info("[VectorMatch-Try] NO_RESULTS | see retrieval stage counts for cause")
                 return None
 
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] GOT_RESULTS | "
                 f"match_count={len(match_results)}, "
                 f"top_scores=[{', '.join([f'{r.score:.4f}' for r in match_results[:3]])}]"
@@ -726,7 +721,7 @@ class WorkerCandidateRecommendationImpl:
 
             # 直接使用 MatchResult.metadata 中的 payload 数据构建推荐
             # 避免调用 retrieval service，大幅提升性能
-            logger.info("[VectorMatch-Try] BUILDING_RECOMMENDATIONS | from metadata payload")
+            logger.debug("[VectorMatch-Try] BUILDING_RECOMMENDATIONS | from metadata payload")
 
             recommendations = []
             for result in match_results:
@@ -744,7 +739,7 @@ class WorkerCandidateRecommendationImpl:
             # R43: 检查是否有任何结果经过 rerank
             reranker_called = any(r.is_reranked for r in match_results) if match_results else False
 
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] SUCCESS | "
                 f"built {len(recommendations)} recommendations, "
                 f"reranker_called={reranker_called}, "

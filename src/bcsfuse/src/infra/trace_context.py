@@ -16,28 +16,6 @@ from contextvars import ContextVar
 
 _trace_id: ContextVar[str] = ContextVar("trace_id", default="")
 
-# 保存原始 LogRecord 工厂，用于包装
-_original_log_record_factory = logging.getLogRecordFactory()
-
-
-def _trace_aware_record_factory(*args, **kwargs) -> logging.LogRecord:
-    """
-    自定义 LogRecord 工厂，在创建每条日志记录时注入 traceid 和 trace_id。
-
-    使用 setLogRecordFactory 替代 Filter，确保在任何 formatter 格式化之前
-    字段就已存在，避免 KeyError: 'traceid'。
-
-    两种格式均可使用：
-    - %(traceid)s  — 空串时显示 "-"
-    - %(trace_id)s — 空串时显示 ""
-    """
-    record = _original_log_record_factory(*args, **kwargs)
-    tid = _trace_id.get()
-    record.traceid = tid or "-"  # type: ignore[attr-defined]
-    record.trace_id = tid  # type: ignore[attr-defined]
-    return record
-
-
 def install_trace_record_factory() -> None:
     """
     安装自定义 LogRecord 工厂，使所有日志记录自动携带 traceid/trace_id。
@@ -46,9 +24,19 @@ def install_trace_record_factory() -> None:
     LogRecord 创建时就注入字段，避免 formatter 找不到字段而报 KeyError。
     """
     current_factory = logging.getLogRecordFactory()
-    # 避免重复安装
-    if current_factory is not _trace_aware_record_factory:
-        logging.setLogRecordFactory(_trace_aware_record_factory)
+    if getattr(current_factory, "_bcsfuse_trace_factory", False):
+        return
+
+    def trace_aware_factory(*args, **kwargs) -> logging.LogRecord:
+        # Chain the current factory, including fields installed by the host SDK.
+        record = current_factory(*args, **kwargs)
+        tid = _trace_id.get()
+        record.traceid = tid or getattr(record, "traceid", "-")
+        record.trace_id = tid or getattr(record, "trace_id", "")
+        return record
+
+    trace_aware_factory._bcsfuse_trace_factory = True
+    logging.setLogRecordFactory(trace_aware_factory)
 
 
 def generate_trace_id() -> str:
