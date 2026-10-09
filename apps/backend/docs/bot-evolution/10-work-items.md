@@ -66,8 +66,10 @@ the rest.
   checks, run lifecycle and failure semantics (R11): idempotent run
   submission returning a run id, leased jobs re-dispatched after a crash
   with the same run id, strategy-owned progress persistence (no platform
-  checkpoint API); isolation (R13); and the Job Protocol mapping of every
-  `ctx` call.
+  checkpoint API); long-running operations for agent sessions and train
+  evaluations (start returns an operation id, idempotent per key; status
+  looked up by id; no request held open while work runs); isolation (R13);
+  and the Job Protocol mapping of every `ctx` call.
 - **Read first**: [05-strategy-sdk.md](05-strategy-sdk.md); ClawEvolve
   `official-stage-catalog.json`, `routes/internal/evolve.ts`;
   `docs/arch/protocol-contract-tests.md`.
@@ -130,7 +132,8 @@ the rest.
 - **Done when**: singlebox story: start run with reference strategy →
   candidate recorded → gate → promoted → bot updated → rollback; repeating
   the start with the same idempotency key returns the same run id; killing
-  the worker mid-run leads to re-dispatch under the same run id.
+  the worker mid-run leads to re-dispatch under the same run id, which
+  re-attaches to its running operations instead of starting them again.
 
 ### RSI-09 Strategy SDK and conformance kit
 - **Module**: evolution

@@ -44,8 +44,8 @@ Registration record: `needs` = `experience.sessions@1`,
 | `acquisition/discovery.py`, `sessions.py`, `service_export.py` | Provider of `experience.sessions` for OpenClaw (platform side) | Move behind the engine session-export contract; normalize to `Episode`; tag with genome revision |
 | `clawevolve-diagnose` | Inside the strategy | Read episodes via `ctx.experience.sessions()` instead of disk |
 | `clawevolve-plan` (bench cases) | Inside the strategy | Add cases via `ctx.evaluate.add_train_cases()`; the platform assigns splits (removes its own 80/20 split authority) |
-| `clawevolve-tune` + `clawevolve-review` | Inside the strategy | **Edit a sandbox from `ctx.workspace.materialise()`, not the live workspace**; run agents via `ctx.agents.run()`; submit `ws.to_patch()` |
-| Train bench runs (`bench-full-opt`) | `ctx.evaluate.train()` | ClawBench grading moves into the Verification Service as `platform/clawbench` |
+| `clawevolve-tune` + `clawevolve-review` | Inside the strategy | **Edit a sandbox from `ctx.workspace.materialise()`, not the live workspace**; run agents via `ctx.agents.start()` as long-running operations looked up by id; submit `ws.to_patch()` |
+| Train bench runs (`bench-full-opt`) | `ctx.evaluate.start_train()` (an operation looked up by id) | ClawBench grading moves into the Verification Service as `platform/clawbench` |
 | `action_accept` (`test > baseline`) + advisory gates | Internal filter on what to submit | Acceptance becomes the platform verdict under the binding's verification profile; ClawEvolve's gate thresholds can seed a stricter profile |
 | baseline-pack / restore / pack / deploy | — (removed) | Not needed: the strategy never changes the live bot |
 | `ce_tasks` / `ce_steps` / claim-report | — (replaced) | Platform Run Orchestrator + Job Protocol |
@@ -60,7 +60,7 @@ Coupling points found and how each is removed:
 | Coupling | Replace with |
 | --- | --- |
 | Hard-coded `/home/admin/.openclaw/workspace` and `~/.openclaw/agents/*/sessions` | `ctx.workspace` (materialised genome) for edits; `ctx.experience.sessions()` for sessions |
-| `openclaw agent --local --agent …` to run tune/review/judge/bench | `ctx.agents.run()` (the `agents` capability), OpenClaw provider first; bench execution moves to eval bots in the Verification Service |
+| `openclaw agent --local --agent …` to run tune/review/judge/bench | `ctx.agents.start()` (the `agents` capability; an operation looked up by id), OpenClaw provider first; bench execution moves to eval bots in the Verification Service |
 | OpenClaw md conventions (SOUL/AGENTS/TOOLS, `skills/skills-local`, `config/mcporter.json`) | Genome genes (`persona`, `skills`, `tools.mcp`); engine projection owns paths |
 | `active_engine='openclaw'`, `bot_type='personal'` filters in `singlebox/bot-runtime.ts` | Binding check: the bot's engine must have providers for everything in `needs` |
 | Direct SQLite reads of Backend tables (`ac_bots`, …) | Genome Registry / Backend APIs |

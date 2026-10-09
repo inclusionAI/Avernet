@@ -98,11 +98,11 @@ OpenClaw), which is how a binding check knows what a bot can supply.
 
 | Capability | Context part | What it gives | Notes |
 | --- | --- | --- | --- |
-| *(always granted)* | `parent`, `workspace`, `submit`, `budget`, `log`, `artifacts`, `cancelled` | Read the parent revision; materialise revisions to a sandbox and diff back to a patch; submit candidates; budget, logs, artifacts, cancellation | Nothing to declare |
+| *(always granted)* | `parent`, `workspace`, `submit`, `operations`, `budget`, `log`, `artifacts`, `cancelled` | Read the parent revision; materialise revisions to a sandbox and diff back to a patch; submit candidates; look up long-running operations (§6.1); budget, logs, artifacts, cancellation | Nothing to declare |
 | `experience.sessions@1` | `ctx.experience.sessions()` | The bot's past conversations as normalized episodes, filtered | Reads conversation history; shown to owners |
 | `experience.feedback@1` | `ctx.experience.feedback()` | Ratings, corrections, outcomes, and subject-bot observations from the inbox | |
-| `agents@1` `{definitions}` | `ctx.agents.run(definition, …)` | Run one of the strategy's own agent definitions inside a sandbox workspace | Each definition names its engine; the bot's engine must be among them (§4.2) |
-| `evaluate.train@1` | `ctx.evaluate.train(…)`, `ctx.evaluate.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques; adding train cases | Validation, holdout, regression, and safety stay hidden |
+| `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → operation id | Run one of the strategy's own agent definitions inside a sandbox workspace, as a long-running operation (§6.1) | Each definition names its engine; the bot's engine must be among them (§4.2) |
+| `evaluate.train@1` | `ctx.evaluate.start_train(…)` → operation id, `ctx.evaluate.add_train_cases(…)` | Platform evaluation on the **train split only**, with scores and critiques, as a long-running operation (§6.1); adding train cases | Validation, holdout, regression, and safety stay hidden |
 
 **What `@1` means.** The number after `@` is the version of the
 *capability's contract* (its methods and data shapes), not the version of a
@@ -141,22 +141,25 @@ async def sessions(self, *, days: int, limit: int = 500,
 
 ```python
 # agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
-async def run(self, definition: str, *, workspace: Workspace,
-              prompt: str, timeout_s: int = 1800) -> AgentResult: ...
+async def start(self, definition: str, *, workspace: Workspace, prompt: str,
+                idempotency_key: str, timeout_s: int = 1800) -> str: ...  # operation id
+# when the operation succeeds, ctx.operations.get(op_id).result is an AgentResult
 ```
 
 An **agent** here is a multi-step, tool-using agent session (an LLM that
 reads and edits files over many steps), as opposed to a single model call.
 For example, ClawEvolve's tune step calls
-`ctx.agents.run("clawevolve-tune", workspace=ws, prompt=…)`. The platform
-starts that agent inside the sandbox `ws`, not on the live bot, and returns
-its transcript and exit status. Files it changed stay in `ws` until the
+`ctx.agents.start("clawevolve-tune", workspace=ws, prompt=…, idempotency_key=…)`.
+The platform starts that agent inside the sandbox `ws`, not on the live
+bot, and returns an operation id at once. An agent session can run for many
+minutes, so the strategy looks its status up by that id (§6.1); when it
+succeeds, the result holds the transcript and exit status. Files it changed stay in `ws` until the
 strategy turns them into a patch. A call naming a definition the strategy
 did not register is refused.
 
 ### 4.2 Where agent definitions come from
 
-`ctx.agents.run` names an agent, but the platform also needs the agent's
+`ctx.agents.start` names an agent, but the platform also needs the agent's
 **definition**: its instructions, skills, and tool configuration. Today,
 ClawEvolve's tune agent is the `clawevolve-tune` skill (`SKILL.md` plus
 references) in `clawevolve-skills`, installed into the OpenClaw runtime
@@ -179,7 +182,7 @@ runner has never seen its agents. The mechanism:
    engine validates the definition against that engine's definition
    contract. A definition for an engine with no provider, or one that does
    not validate, fails registration.
-4. **Loaded per call.** `ctx.agents.run("clawevolve-tune", …)` makes the
+4. **Loaded per call.** `ctx.agents.start("clawevolve-tune", …)` makes the
    provider load that definition by digest into the sandbox, next to the
    workspace `ws`. The definition is read-only to the agent; only `ws` is
    writable.
@@ -239,12 +242,13 @@ binding fields, owned by the bot owner. They are not strategy code.
 class StrategyContext(Protocol):
     run_id: str; params: dict                       # frozen at run start
     parent: GenomeRevisionView                      # read-only: spec, files by digest, lineage
-    workspace: WorkspaceFactory                     # materialise(revision) → sandbox dir; ws.to_patch()
+    workspace: WorkspaceFactory                     # materialise(revision, key) → sandbox; ws.to_patch()
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
     attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
     async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
     async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
+    operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6.1)
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -272,6 +276,40 @@ class StrategyContext(Protocol):
   worth submitting). Whether a candidate is accepted is the platform's
   choice: verification under the binding's profile, then the gate and risk
   tier ([08-governance.md §2](08-governance.md#2-the-gate)).
+
+### 6.1 Long-running calls are operations
+
+Some capability calls do work that takes minutes or longer: an agent
+session (`agents.start`) or a train evaluation over many rollouts
+(`evaluate.start_train`). These never hold a request open while the work
+runs:
+
+- **Start returns an id at once.** The start call records an
+  **operation**, hands the work to the platform, and returns its
+  **operation id**. Over the Job Protocol this is `202` with the id (§9).
+- **Status is looked up by id.** `ctx.operations.get(op_id)` returns the
+  status (`queued`, `running`, `succeeded`, `failed`, or `cancelled`) and,
+  once it has succeeded, the result. Every lookup is a short request.
+  `ctx.operations.wait(op_id)` is an SDK helper that repeats short lookups
+  until the operation finishes; it never holds one request open.
+- **Start is idempotent.** It takes an `idempotency_key`. Repeating a start
+  with the same key returns the same operation, finished or not, instead
+  of starting and paying for the work again. A strategy that builds keys
+  from the run id and its own step (for example `"<run>/round-2/tune"`)
+  re-attaches to its operations after a re-dispatch (§7.2) without having
+  stored the operation ids.
+- **Operations belong to the platform and the run.** They are persisted
+  and executed by the platform, independent of the strategy's process, so a
+  strategy crash does not stop them. Their cost is charged to the run's
+  budget. When the run ends, its unfinished operations are cancelled.
+- **Workspaces follow the same rule.** `ctx.workspace.materialise(revision,
+  key)` is idempotent per key, so a re-dispatched run gets back the same
+  sandbox, including the edits an agent operation already made.
+
+Calls that are always quick (reading experience, adding train cases,
+`submit`, `verdict`, budget) stay plain request and response. The catalog
+contract of each capability (§4) states which of its calls are operations;
+any call whose work can outlast a short request must be one.
 
 ## 7. Run lifecycle
 
@@ -306,6 +344,7 @@ The work is split between the platform and the strategy:
 | --- | --- | --- |
 | The run record, its frozen inputs, budget spent, and candidates submitted | Platform | Persisted before `submit` or run submission returns |
 | Noticing that a run's process died | Platform | Every run is a **leased job**. The worker (or the in-process host) renews the lease; when it expires (process crash, hardware failure, reboot), the job goes back to `queued` and is dispatched again with the same run id and `ctx.attempt + 1`. A fencing token rejects calls from the old holder. After `max_attempts` the run ends as `failed` |
+| Agent sessions and train evaluations already started | Platform | They are operations (§6.1): persisted and run by the platform, independent of the strategy's process. They keep running across a re-dispatch; the strategy re-attaches by repeating the start with the same idempotency key |
 | The strategy's own progress (round number, search state, history) | Strategy | The strategy persists whatever it needs in **its own storage**, keyed by run id, and on re-dispatch reloads it and continues. The platform has no checkpoint API and never reads this state; its shape differs from strategy to strategy |
 
 A re-dispatched run uses the same frozen inputs and the same budget: what
@@ -350,13 +389,22 @@ GET  /evolution/v1/runs/{run}/parent                ctx.parent
 GET  /evolution/v1/runs/{run}/content/{digest}      file bytes of the parent / workspace
 GET  /evolution/v1/runs/{run}/experience/sessions   ctx.experience.sessions   (if granted)
 GET  /evolution/v1/runs/{run}/experience/feedback   ctx.experience.feedback   (if granted)
-POST /evolution/v1/runs/{run}/agents:run            ctx.agents.run            (if granted)
-POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.train        (if granted)
+POST /evolution/v1/runs/{run}/workspaces            ctx.workspace.materialise {revision, key} → {workspace_id}   (idempotent)
+POST /evolution/v1/runs/{run}/agents:start          ctx.agents.start → 202 {operation_id}            (if granted; idempotent)
+POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.start_train → 202 {operation_id}    (if granted; idempotent)
+POST /evolution/v1/runs/{run}/evaluations/cases     ctx.evaluate.add_train_cases                     (if granted)
+GET  /evolution/v1/runs/{run}/operations/{id}       ctx.operations.get → {status, result?}
+POST /evolution/v1/runs/{run}/operations/{id}:cancel ctx.operations.cancel
 POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
 GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
+
+Every request returns promptly. Work that can outlast a short request is an
+operation (§6.1): its start returns `202` with an operation id, and the
+worker looks up its status by id. No request is held open while an agent
+session or evaluation runs.
 
 All payloads are JSON with JSON Schemas. A worker gets no credentials to
 the bot; endpoints for capabilities that were not granted return `403`;
@@ -382,11 +430,15 @@ class ClawEvolveStrategy(EvolutionStrategy):
             state = State(findings=findings, base=ctx.parent.id, next_round=0)
             await self.store.save(ctx.run_id, state)
         while state.next_round < ctx.params["max_rounds"]:
+            key = f"{ctx.run_id}/round-{state.next_round}"               # same keys after a re-dispatch
             if state.pending is None:
-                ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
-                await ctx.agents.run("clawevolve-tune", workspace=ws,
-                                     prompt=build_tune_prompt(state.findings, state.history))
-                train = await ctx.evaluate.train(ws)                     # replaces its own bench step
+                ws = await ctx.workspace.materialise(state.base, key=key) # sandbox, not the live bot
+                tune = await ctx.agents.start("clawevolve-tune", workspace=ws,
+                                              prompt=build_tune_prompt(state.findings, state.history),
+                                              idempotency_key=f"{key}/tune")   # operation id, returned at once
+                await ctx.operations.wait(tune)                           # short status lookups by id
+                train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
+                train = (await ctx.operations.wait(train_op)).result      # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
                     state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
                                                                evidence=state.findings.ids))
@@ -427,7 +479,7 @@ submits:
 | Package | For | Contents |
 | --- | --- | --- |
 | `avernet-evolution` (Python), `@avernet/evolution` (TS) | Callers: pipelines, CI, UI backends | Generated client for the Evolution API (bindings, runs, verdicts) |
-| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), a local harness with a fake platform (`avn strategy dev`), `avn strategy publish` (registers a version and uploads its agent definitions, §4.2), and the conformance kit |
+| `avernet-evolution-strategy` (Python first, TS second) | Strategy authors | `EvolutionStrategy` base, typed models, an in-process and a Job-Protocol `StrategyContext`, `WorkspaceFactory` (materialise / `to_patch`), `AgentRunner` (OpenClaw first), an `operations.wait` helper that polls by id, a local harness with a fake platform (`avn strategy dev`), `avn strategy publish` (registers a version and uploads its agent definitions, §4.2), and the conformance kit |
 
 Conformance runs on both sides of the port:
 
@@ -436,7 +488,8 @@ Conformance runs on both sides of the port:
   the run's `allowed_genes`; the strategy uses only granted capabilities;
   it stops on cancellation and on `BudgetExhausted`; resubmitting the same
   candidate is idempotent; killing the strategy mid-run and dispatching the
-  same run id again neither duplicates candidates nor exceeds the budget.
+  same run id again neither duplicates candidates or operations nor
+  exceeds the budget.
 - **Capability providers** (run by the platform and engine adapters): each
   catalog entry has a contract test per engine provider, following
   `docs/arch/protocol-contract-tests.md`.

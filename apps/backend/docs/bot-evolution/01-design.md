@@ -296,7 +296,8 @@ schedule because the failure-rate signal crossed a threshold.
    from the last 7 days, clusters root causes, and adds replayable train
    cases (the platform assigns splits; holdout and regression stay hidden).
 4. Its tune agent edits a **sandbox workspace** materialised from `r41`;
-   `ctx.evaluate.train` scores the result; the strategy submits a Genome
+   a train evaluation (`ctx.evaluate.start_train`, a long-running operation
+   looked up by id) scores the result; the strategy submits a Genome
    Patch (itemized: `persona/SOUL.md: replace section "Escalation"`,
    `skills/refund-policy: update SKILL.md`) with a rationale.
 5. Platform static checks pass; C1 records candidate revision `r42`
