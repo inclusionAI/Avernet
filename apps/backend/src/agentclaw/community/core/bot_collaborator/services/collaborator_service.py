@@ -30,6 +30,9 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
 )
+from agentclaw.community.core.bot_collaborator.services.explicit_standing import (
+    ExplicitStandingMixin,
+)
 from agentclaw.community.core.bot_collaborator.services.editor_policy import (
     EditorPolicy,
 )
@@ -72,7 +75,11 @@ __all__ = [
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
+class CollaboratorService(
+    ExplicitStandingMixin,
+    CollaboratorQueryMixin,
+    CollaboratorServiceProtocol,
+):
     """Bot 协作者管理服务。
 
     提供协作者的 CRUD 操作和权限检查功能。
@@ -246,56 +253,6 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
                 level = PermissionLevel.NONE
             result[bot_pk] = level
         return result
-
-    def has_explicit_standing(
-        self,
-        *,
-        bot: Mapping[str, Any],
-        user_id: str,
-        env: Optional[str] = None,
-    ) -> bool:
-        """Whether the user's standing rests on a real collaborator row or ownership.
-
-        The gate-side twin of :meth:`has_explicit_membership`: the Space
-        synthesis deliberately has no voice here, because the edit/operations
-        rows (``Check … explicit=True``) publish the product rule that keeps
-        those surfaces for the Owner and the editors the Owner granted or
-        approved (迭代11 编辑权限申请审批策略 §3.1).
-        """
-        if user_id == str(bot.get("owner_id") or ""):
-            return True
-        resolved_env = env or get_current_env()
-        role = self._collaborator_repo.get_user_role(
-            int(bot.get("id") or 0), user_id, resolved_env
-        )
-        return role is not None
-
-    def has_explicit_membership(
-        self,
-        *,
-        bots: Sequence[Mapping[str, Any]],
-        user_id: str,
-        env: Optional[str] = None,
-    ) -> frozenset[int]:
-        """Bot pks whose standing rests on an explicit collaborator row or ownership.
-
-        Shares the one ``list_by_user`` read with
-        :meth:`get_operable_permission_levels` so a page pays for its
-        membership questions once. Owners belong by definition; the Space
-        synthesis deliberately has no voice here — that is the whole point of
-        the method, and the inventory's edit-actions split consumes it.
-        """
-        resolved_env = env or get_current_env()
-        records = self._collaborator_repo.list_by_user(user_id, resolved_env)
-        role_pks = {record.bot_pk for record in records}
-        explicit: set[int] = {pk for pk in role_pks if pk > 0}
-        for bot in bots:
-            bot_pk = int(bot.get("id") or 0)
-            if bot_pk <= 0:
-                continue
-            if user_id == str(bot.get("owner_id") or ""):
-                explicit.add(bot_pk)
-        return frozenset(explicit)
 
     def _check_operable_permission(
         self,
