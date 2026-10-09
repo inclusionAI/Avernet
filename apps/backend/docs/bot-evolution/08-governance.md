@@ -83,9 +83,10 @@ Assigned per patch op; a patch takes the max of its ops.
   bots via `eval_env`, or ephemeral workspaces). No production credentials,
   no access to the live phenotype.
 - Each strategy declares the catalog capabilities it `needs` and its
-  runtime isolation (R13); its context grants nothing else, and the
-  orchestrator enforces network egress to model providers only unless
-  declared otherwise and approved.
+  runtime isolation (R13); its context grants nothing else. Strategies
+  have no network egress or model keys of their own: model calls go
+  through `ctx.models` and agent sessions through `ctx.agents`, both
+  charged to the run's budget.
 - Experience is **untrusted input** (prompt-injection and memory-poisoning
   vector). Strategies must treat episode text as data; patches derived from
   it get secret/PII/URL scanning; inbox submissions from subject bots (postponed

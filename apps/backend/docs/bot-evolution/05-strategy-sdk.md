@@ -15,8 +15,9 @@
    live bot, or read platform storage. Isolation and budgets are therefore
    enforced in one place, whatever the strategy is. (A **budget** is the
    per-run spending limit set in the bot's binding: model spend in USD,
-   wall-clock time, and evaluation rollouts. Every model call and evaluation
-   is charged through `ctx.budget`, and the run stops when it runs out.)
+   wall-clock time, and evaluation rollouts. Every model call
+   (`ctx.models`), agent session, and evaluation is charged to
+   `ctx.budget`, and the run stops when it runs out.)
    This is a deliberate limitation: a strategy can use only what the
    capability catalog (§4) provides, and cannot bring its own model keys
    or agent runtimes. Its own computation (parsing, search, ranking) is
@@ -90,7 +91,7 @@ compatibility from `needs` (§5).
 ## 4. Capability catalog
 
 The platform owns a small, closed, versioned catalog. Each entry names a
-part of `StrategyContext` and is a contract: method signatures, data schema,
+field of `StrategyContext` and is a contract: method signatures, data schema,
 semantics, and a conformance test (R25). Strategies can only declare names
 from the catalog. Each entry has **providers per engine** (for example, the
 engine adapter's session export provides `experience.sessions` for
@@ -98,7 +99,9 @@ OpenClaw), which is how a binding check knows what a bot can supply.
 
 | Capability | Context part | What it gives | Notes |
 | --- | --- | --- | --- |
-| *(always granted)* | `parent`, `workspace`, `submit`, `operations`, `budget`, `log`, `artifacts`, `cancelled` | Read the parent revision; materialise revisions to a sandbox and diff back to a patch; submit candidates; look up long-running operations (§6.1); budget, logs, artifacts, cancellation | Nothing to declare |
+| *(always granted)* | `parent`, `workspace`, `operations`, `budget`, `log`, `artifacts`, `cancelled` | Read the parent revision; materialise revisions to a sandbox and diff back to a patch; look up long-running operations (§6.1); budget, logs, artifacts, cancellation | Nothing to declare |
+| `candidates@1` *(always granted)* | `ctx.candidates.submit(…)` → candidate id, `ctx.candidates.verdict(id)` | Submit candidates; look up a candidate's verdict by id (§6) | Every strategy needs it, so it is not declared in `needs` |
+| `models@1` *(always granted)* | `ctx.models.complete(…)` | A single model call (prompt in, text out), routed through the platform | Every strategy needs it, so it is not declared in `needs`. Charged to the budget; the model used is recorded, so verification can use judges from a different model family (§4.1) |
 | `experience.sessions@1` | `ctx.experience.sessions()` | The bot's past conversations as normalized episodes, filtered | Reads conversation history; shown to owners |
 | `experience.feedback@1` | `ctx.experience.feedback()` | Ratings, corrections, outcomes, and subject-bot observations from the inbox | |
 | `agents@1` `{definitions}` | `ctx.agents.start(definition, …)` → operation id | Run one of the strategy's own agent definitions inside a sandbox workspace, as a long-running operation (§6.1) | Each definition names its engine; the bot's engine must be among them (§4.2) |
@@ -138,6 +141,21 @@ async def sessions(self, *, days: int, limit: int = 500,
   "redactions": ["email", "phone"]           // personal data removed before the strategy sees it
 }
 ```
+
+```python
+# models@1 — always granted
+async def complete(self, *, messages: list[Message], model: str | None = None,
+                   max_tokens: int = 4096) -> Completion: ...
+```
+
+`models` is for plain model calls: one request, one response, no tools and
+no steps. A GEPA-style optimizer rewriting a prompt, or memory
+consolidation summarizing feedback, uses it. Strategies have no model keys
+or network egress of their own, so every model call goes through it. The
+platform charges the call to the budget and records which model was used
+in the Experiment Ledger H. `model` is a name from the platform's model
+list; when omitted, the platform default is used. A call is bounded by
+`max_tokens`, so it stays a short request rather than an operation (§6.1).
 
 ```python
 # agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
@@ -246,9 +264,9 @@ class StrategyContext(Protocol):
     budget: BudgetMeter                             # remaining(); charge(); raises BudgetExhausted
     log: RunLog; artifacts: ArtifactSink; cancelled: CancellationToken
     attempt: int                                    # 1 on first dispatch, +1 on each re-dispatch (§7)
-    async def submit(self, c: Candidate) -> str: ...      # returns the candidate id
-    async def verdict(self, candidate_id: str) -> Verdict: ...  # status lookup by id
     operations: Operations                          # get(op_id), cancel(op_id); SDK helper wait(op_id) (§6.1)
+    candidates: Candidates                          # candidates@1: submit(c) → candidate id; verdict(id)
+    models: Models                                  # models@1: complete(messages, model, max_tokens)
 
     # present only if declared in `needs`; otherwise access raises CapabilityNotGranted
     experience: ExperienceQuery                     # experience.sessions@1 / experience.feedback@1
@@ -256,15 +274,20 @@ class StrategyContext(Protocol):
     evaluate: TrainEvaluator                        # evaluate.train@1
 ```
 
+The context holds only fields. Each field is either a value (`run_id`,
+`params`, `attempt`) or a context part or capability whose methods the
+strategy calls; the context itself has no methods.
+
 - **Candidate** = a Genome Patch against a base revision, a rationale,
   evidence ids, and optional self-reported metrics (shown to reviewers,
   never used for acceptance).
-- `submit` records the candidate and returns its **candidate id** at once;
+- `ctx.candidates.submit` records the candidate and returns its
+  **candidate id** at once;
   it does not wait for verification. It is idempotent: the candidate id is
   the content hash of the patch, so a retried submission (including one
   repeated after a re-dispatch, §7) returns the same id and creates no
   duplicate.
-- **Verdict** = the result of looking up a candidate id: status `pending`,
+- **Verdict** = the result of `ctx.candidates.verdict(candidate_id)`: status `pending`,
   `accept`, `reject`, or `inconclusive`, with validation **aggregates**
   only, never per-case hidden data. The id is the only handle; there is no
   callback and no blocking call.
@@ -307,7 +330,8 @@ runs:
   sandbox, including the edits an agent operation already made.
 
 Calls that are always quick (reading experience, adding train cases,
-`submit`, `verdict`, budget) stay plain request and response. The catalog
+`candidates.submit`, `candidates.verdict`, `models.complete`, budget) stay
+plain request and response. The catalog
 contract of each capability (§4) states which of its calls are operations;
 any call whose work can outlast a short request must be one.
 
@@ -333,7 +357,7 @@ idempotent, and the platform guarantees it: the caller sends an
 idempotency key, and a repeated submission with the same key returns the
 same run id instead of starting a second run. From then on, the run id is
 the only handle: callers look up status, submissions, and verdicts by it.
-The same holds one level down: a strategy's `ctx.submit` returns a
+The same holds one level down: a strategy's `ctx.candidates.submit` returns a
 candidate id, and verdicts are looked up by that id (§6).
 
 ### 7.2 Crashes and restarts
@@ -342,13 +366,13 @@ The work is split between the platform and the strategy:
 
 | Concern | Owner | How |
 | --- | --- | --- |
-| The run record, its frozen inputs, budget spent, and candidates submitted | Platform | Persisted before `submit` or run submission returns |
+| The run record, its frozen inputs, budget spent, and candidates submitted | Platform | Persisted before `candidates.submit` or run submission returns |
 | Noticing that a run's process died | Platform | Every run is a **leased job**. The worker (or the in-process host) renews the lease; when it expires (process crash, hardware failure, reboot), the job goes back to `queued` and is dispatched again with the same run id and `ctx.attempt + 1`. A fencing token rejects calls from the old holder. After `max_attempts` the run ends as `failed` |
 | Agent sessions and train evaluations already started | Platform | They are operations (§6.1): persisted and run by the platform, independent of the strategy's process. They keep running across a re-dispatch; the strategy re-attaches by repeating the start with the same idempotency key |
 | The strategy's own progress (round number, search state, history) | Strategy | The strategy persists whatever it needs in **its own storage**, keyed by run id, and on re-dispatch reloads it and continues. The platform has no checkpoint API and never reads this state; its shape differs from strategy to strategy |
 
 A re-dispatched run uses the same frozen inputs and the same budget: what
-earlier attempts spent stays spent. Because `submit` is idempotent, a
+earlier attempts spent stays spent. Because `candidates.submit` is idempotent, a
 strategy that resubmits a candidate it had already submitted before the
 crash gets the same candidate id back.
 
@@ -395,8 +419,9 @@ POST /evolution/v1/runs/{run}/evaluations:train     ctx.evaluate.start_train →
 POST /evolution/v1/runs/{run}/evaluations/cases     ctx.evaluate.add_train_cases                     (if granted)
 GET  /evolution/v1/runs/{run}/operations/{id}       ctx.operations.get → {status, result?}
 POST /evolution/v1/runs/{run}/operations/{id}:cancel ctx.operations.cancel
-POST /evolution/v1/runs/{run}/candidates            ctx.submit → {candidate_id}   (idempotent)
-GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.verdict → {status, aggregates}
+POST /evolution/v1/runs/{run}/models:complete       ctx.models.complete → completion
+POST /evolution/v1/runs/{run}/candidates            ctx.candidates.submit → {candidate_id}   (idempotent)
+GET  /evolution/v1/runs/{run}/candidates/{id}       ctx.candidates.verdict → {status, aggregates}
 POST /evolution/v1/runs/{run}/budget:charge         ctx.budget.charge
 POST /evolution/v1/jobs/{id}/complete | /fail       RunSummary | {reason, retryable}
 ```
@@ -440,11 +465,11 @@ class ClawEvolveStrategy(EvolutionStrategy):
                 train_op = await ctx.evaluate.start_train(ws, idempotency_key=f"{key}/train")
                 train = (await ctx.operations.wait(train_op)).result      # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
-                    state.pending = await ctx.submit(Candidate(patch=ws.to_patch(), rationale=...,
-                                                               evidence=state.findings.ids))
+                    state.pending = await ctx.candidates.submit(Candidate(patch=ws.to_patch(), rationale=...,
+                                                                          evidence=state.findings.ids))
                     await self.store.save(ctx.run_id, state)             # survives a crash from here on
             if state.pending is not None:
-                verdict = await ctx.verdict(state.pending)               # the platform decides
+                verdict = await ctx.candidates.verdict(state.pending)    # the platform decides
                 if verdict.status == "pending":
                     await asyncio.sleep(ctx.params["poll_s"]); continue
                 if verdict.status == "accept":

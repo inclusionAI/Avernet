@@ -59,8 +59,9 @@ the rest.
 - **Goal**: Define the strategy port (`run(ctx)`), `StrategyContext`,
   Candidate / Verdict (submission returns a candidate id; verdicts are
   looked up by id), the registration record schema, the
-  first capability catalog (`experience.sessions@1`,
-  `experience.feedback@1`, `agents@1`, `evaluate.train@1`) with per-engine
+  first capability catalog (always granted: `candidates@1`, `models@1`;
+  declared: `experience.sessions@1`, `experience.feedback@1`, `agents@1`,
+  `evaluate.train@1`) with per-engine
   provider contracts (for `agents@1`, the per-engine agent definition
   contract and the upload and loading of definitions, 05 §4.2), the evolution policy (binding) schema and binding
   checks, run lifecycle and failure semantics (R11): idempotent run
