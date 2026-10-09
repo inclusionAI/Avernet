@@ -67,11 +67,21 @@ async fn failed_run_delivery_and_full_frontend_queue_remain_observable_without_f
             .expect("a full queue must reject the event without blocking");
         assert_eq!(delivered, 0);
     }).await;
-    assert_eq!(rx.recv().await.as_deref(), Some("first-event"));
+    match rx.recv().await {
+        Some(bcs_ws::web::WorkbenchOutbound::PublicControl(payload)) => {
+            assert_eq!(payload, "first-event");
+        }
+        other => panic!("expected a PublicControl frame, got {other:?}"),
+    }
     assert!(rx.try_recv().is_err(), "overflow must not overwrite the queued event");
     assert_eq!(frontends.connection_count("session-diagnostic").await, 1, "a full queue is not a disconnection");
     assert_eq!(frontends.broadcast("session-diagnostic", "after-drain").await, 1);
-    assert_eq!(rx.recv().await.as_deref(), Some("after-drain"));
+    match rx.recv().await {
+        Some(bcs_ws::web::WorkbenchOutbound::PublicControl(payload)) => {
+            assert_eq!(payload, "after-drain");
+        }
+        other => panic!("expected a PublicControl frame, got {other:?}"),
+    }
     for message in ["Failed to send event to client channel", "frontend channel full"] {
         let warning = logs.iter().find(|event| event["fields"]["message"] == message).expect(message);
         assert_eq!(warning["level"], "WARN");

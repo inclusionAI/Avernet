@@ -42,6 +42,9 @@ use bcs_ws::web::{
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, timeout};
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[derive(Clone, Copy)]
 enum SessionHumanInputBehavior {
     Consumed,
@@ -387,6 +390,8 @@ struct TestState {
     group_session_connections: Arc<RecordingGroupSessionConnections>,
     message_flow: Arc<RecordingMessageFlow>,
     interactions: Arc<RecordingInteractions>,
+    /// The scope-aware application hook the adapter re-authorizes through.
+    protected: Arc<common::RecordingDeliveryAuthorization>,
     dispatch_state: Arc<WebDispatchState>,
 }
 
@@ -470,6 +475,11 @@ fn new_state_with_collaboration_runtime(
     let message_flow = Arc::new(RecordingMessageFlow::default());
     let interactions = Arc::new(RecordingInteractions::default());
     let frontend_connections = Arc::new(WorkbenchConnectionRegistry::new());
+    // Task 16: bound connections re-authorize through the application hook;
+    // this suite drives the adapter with the scope-aware recording double.
+    let protected: Arc<common::RecordingDeliveryAuthorization> =
+        common::RecordingDeliveryAuthorization::new();
+    frontend_connections.set_delivery_authorization(protected.clone());
     let dispatch_state = Arc::new(WebDispatchState {
         message_flow: message_flow.clone(),
         collaboration_runtime,
@@ -485,15 +495,26 @@ fn new_state_with_collaboration_runtime(
         group_session_connections,
         message_flow,
         interactions,
+        protected,
         dispatch_state,
     }
 }
 
-async fn recv_response(rx: &mut mpsc::Receiver<String>) -> ResponseFrame {
-    let raw = rx.recv().await.expect("expected ws response");
+async fn recv_response(rx: &mut mpsc::Receiver<bcs_ws::web::WorkbenchOutbound>) -> ResponseFrame {
+    let raw = recv_payload(rx).await;
     match serde_json::from_str::<BcsFrame>(&raw).unwrap() {
         BcsFrame::Response(res) => res,
         other => panic!("expected response frame, got {other:?}"),
+    }
+}
+
+/// Unwrap the payload of a typed queue item (the classic compat suite only
+/// ever receives PublicControl frames; any Protected frame would be a leak).
+async fn recv_payload(rx: &mut mpsc::Receiver<bcs_ws::web::WorkbenchOutbound>) -> String {
+    match rx.recv().await {
+        Some(bcs_ws::web::WorkbenchOutbound::PublicControl(payload)) => payload,
+        Some(bcs_ws::web::WorkbenchOutbound::Protected { payload, .. }) => payload,
+        None => panic!("expected a queued ws frame"),
     }
 }
 
@@ -688,7 +709,7 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
         1,
         "omitting view_actor_id must keep the legacy unprojected connection"
     );
-    assert_eq!(rx.recv().await.as_deref(), Some("legacy-full-only"));
+    assert_eq!(recv_payload(&mut rx).await, "legacy-full-only");
     let connects = state.workbench_sessions.connects.lock().await;
     assert_eq!(connects.len(), 1);
     assert_eq!(connects[0].group_id, "group-web-1");
@@ -709,6 +730,14 @@ async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
 async fn web_connect_with_explicit_human_view_binds_participant_projection() {
     let state = new_state();
     *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+    // The explicit human view creates a protected binding; the hooked
+    // visibility facts must answer SkipMessage for the FullOnly artifact.
+    state.protected.register(
+        "100001",
+        "human_100001",
+        "group-web-1",
+        common::BindingFacts::participant(),
+    );
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
@@ -1018,12 +1047,8 @@ async fn web_chat_send_is_consumed_by_the_single_pending_human_input_and_emits_e
     assert!(sent.ok, "response: {sent:?}");
     assert_eq!(sent.payload.unwrap()["runId"], "state-run-1");
 
-    let final_frame: serde_json::Value = serde_json::from_str(
-        &rx.recv()
-            .await
-            .expect("HumanInput completion should emit a final chat event"),
-    )
-    .unwrap();
+    let final_payload = recv_payload(&mut rx).await;
+    let final_frame: serde_json::Value = serde_json::from_str(&final_payload).unwrap();
     assert_eq!(final_frame["type"], "event");
     assert_eq!(final_frame["event"], "chat");
     assert_eq!(final_frame["group_id"], "group-web-1");
@@ -1090,12 +1115,8 @@ async fn web_chat_send_is_rejected_when_state_machine_has_no_pending_human_input
     );
     let response_error = rejected.error.as_ref().expect("conflict error");
 
-    let error_frame: serde_json::Value = serde_json::from_str(
-        &rx.recv()
-            .await
-            .expect("HumanInput rejection should emit a chat error event"),
-    )
-    .unwrap();
+    let error_payload = recv_payload(&mut rx).await;
+    let error_frame: serde_json::Value = serde_json::from_str(&error_payload).unwrap();
     assert_eq!(error_frame["type"], "event");
     assert_eq!(error_frame["event"], "chat");
     assert_eq!(error_frame["group_id"], "group-web-1");
@@ -1631,10 +1652,17 @@ fn session_bound_auth() -> WorkbenchConnectionAuth {
 
 async fn connect_session_bound(
     state: &TestState,
-    tx: &mpsc::Sender<String>,
-    rx: &mut mpsc::Receiver<String>,
+    tx: &mpsc::Sender<bcs_ws::web::WorkbenchOutbound>,
+    rx: &mut mpsc::Receiver<bcs_ws::web::WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
 ) -> WebDispatchOutcome {
+    // The verified Human's binding facts for the session-bound lane.
+    state.protected.register(
+        "100001",
+        "human_100001",
+        "session-bound-1",
+        common::BindingFacts::full(),
+    );
     let connect = BcsFrame::Request(RequestFrame::new(
         "connect-bound",
         "connect",
@@ -1681,7 +1709,7 @@ async fn session_bound_connect_replays_pending_interactions_after_ack() {
 
     connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
     let replay: serde_json::Value =
-        serde_json::from_str(&rx.recv().await.expect("pending interaction replay")).unwrap();
+        serde_json::from_str(&recv_payload(&mut rx).await).unwrap();
     assert_eq!(replay["event"], "interaction");
     assert_eq!(replay["bcsRunId"], "bcs-run-1");
     assert_eq!(replay["bcsSessionId"], "session-bound-1");
@@ -1733,10 +1761,9 @@ async fn user_bound_connect_replays_pending_interactions_after_ack() {
 
     assert!(recv_response(&mut rx).await.ok);
     let replay: serde_json::Value = serde_json::from_str(
-        &timeout(Duration::from_secs(1), rx.recv())
+        &timeout(Duration::from_secs(1), recv_payload(&mut rx))
             .await
-            .expect("pending interaction replay was not sent after connect")
-            .expect("interaction channel closed"),
+            .expect("pending interaction replay was not sent after connect"),
     )
     .unwrap();
     assert_eq!(replay["event"], "interaction");

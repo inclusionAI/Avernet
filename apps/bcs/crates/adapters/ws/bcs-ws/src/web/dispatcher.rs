@@ -27,6 +27,9 @@ use tracing::{debug, info, warn};
 
 use crate::shared::RunChannelManager;
 use crate::web::frontend_delivery::interaction_event_json;
+use crate::web::protected_delivery::{
+    ProtectedDeliveryBinding, WorkbenchOutbound, enqueue_single_protected,
+};
 use crate::web::{WorkbenchConnectionAuth, WorkbenchConnectionRegistry};
 
 const STATE_MACHINE_EVENT_BOT_UUID: &str = "bcs_state_machine";
@@ -103,7 +106,7 @@ pub struct WebClientConnectionState {
 pub async fn dispatch_client_frame(
     state: &Arc<WebDispatchState>,
     text: &str,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<WebDispatchOutcome> {
@@ -146,7 +149,7 @@ pub async fn dispatch_client_frame(
 async fn handle_client_request(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
@@ -216,7 +219,7 @@ struct ConnectResponse {
 async fn handle_connect(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
@@ -398,13 +401,38 @@ async fn handle_connect(
             })
         });
     let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
-    let conn_id = state
+    // Task 16: persist the REAL User / selected view / binding generation on
+    // the subscription. The binding is built ONLY from verified identity
+    // facts (the connection auth and the authorized view), never from client
+    // request payloads, and never from the registry's legacy actor slot.
+    // A cookie-bound connection only becomes a protected connection when the
+    // client explicitly SELECTED a participant view; implicit legacy
+    // unprojected connections stay on the PublicControl lane with the
+    // pre-existing visibility behavior. Session-bound token connections
+    // always bind their verified Human view.
+    let protected_view_actor_id = match auth {
+        WorkbenchConnectionAuth::UserBound { .. } => explicit_view_actor_id,
+        WorkbenchConnectionAuth::SessionBound { .. } => resolved_view_actor_id,
+    };
+    let protected_binding = binding_from_auth(
+        auth,
+        protected_view_actor_id,
+        if session_id.is_some() {
+            bcs_service_api::application::v1::delivery_authorization::DeliveryResourceKind::Session
+        } else {
+            bcs_service_api::application::v1::delivery_authorization::DeliveryResourceKind::Group
+        },
+        &subscription_key,
+        state.frontend_connections.trusted_env(),
+    );
+    let (conn_id, binding_id) = state
         .frontend_connections
-        .subscribe_with_shutdown(
+        .subscribe_bound(
             subscription_key.clone(),
             tx.clone(),
             resolved_view_actor_id.map(str::to_string),
             connection_human_view.clone(),
+            protected_binding.clone(),
             connection_state.shutdown.clone(),
         )
         .await?;
@@ -431,19 +459,40 @@ async fn handle_connect(
     send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
     if let Some(session_id) = session_id.as_deref() {
         match state.interactions.list_pending(session_id).await {
-            Ok(pending) => {
-                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
-                    view.allows_artifact(
-                        bcs_domain::MessageVisibilityDomain::StateMachine,
-                        Some(&bcs_domain::MessageAudience::FullOnly),
-                    )
-                });
-                if pending_visible {
+            Ok(pending) => match protected_binding {
+                // Interaction replay is a NEW protected dispatch (Task 16):
+                // each replayed frame re-authorizes at enqueue (position 1)
+                // and again before the actual send (position 2).
+                Some(binding) => {
                     for event in pending {
-                        send_interaction_event(tx, &event).await?;
+                        let payload = interaction_event_json(&event)?;
+                        enqueue_single_protected(
+                            &state.frontend_connections.protected_delivery(),
+                            tx,
+                            &binding,
+                            binding_id,
+                            payload,
+                            bcs_service_api::application::v1::delivery_authorization::DeliveryAction::ReplayFrame,
+                            bcs_domain::MessageVisibilityDomain::StateMachine,
+                            Some(&bcs_domain::MessageAudience::FullOnly),
+                        )
+                        .await;
                     }
                 }
-            }
+                None => {
+                    let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
+                        view.allows_artifact(
+                            bcs_domain::MessageVisibilityDomain::StateMachine,
+                            Some(&bcs_domain::MessageAudience::FullOnly),
+                        )
+                    });
+                    if pending_visible {
+                        for event in pending {
+                            send_interaction_event(tx, &event).await?;
+                        }
+                    }
+                }
+            },
             Err(error) => {
                 warn!(request_id = %bcs_observability::CurrentRequestId, session_id, %error, "pending interaction replay failed after connect");
             }
@@ -452,8 +501,44 @@ async fn handle_connect(
     Ok(())
 }
 
+/// Build the protected-delivery binding from VERIFIED connection identity
+/// facts. `None` keeps the connection on the legacy PublicControl lane:
+/// anonymous connections (no real User) and token sessions that failed to
+/// resolve their User never get a binding.
+fn binding_from_auth(
+    auth: &WorkbenchConnectionAuth,
+    resolved_view_actor_id: Option<&str>,
+    resource_kind: bcs_service_api::application::v1::delivery_authorization::DeliveryResourceKind,
+    resource_id: &str,
+    env: &str,
+) -> Option<ProtectedDeliveryBinding> {
+    let (tenant, user_id) = match auth {
+        WorkbenchConnectionAuth::UserBound { actor_id } => {
+            (None, actor_id.as_deref()?.strip_prefix("human_")?)
+        }
+        WorkbenchConnectionAuth::SessionBound {
+            tenant,
+            actor_id,
+            ..
+        } => (tenant.clone(), actor_id.strip_prefix("human_")?),
+    };
+    let user_id = user_id;
+    if user_id.is_empty() {
+        return None;
+    }
+    let view_actor_id = resolved_view_actor_id?;
+    Some(ProtectedDeliveryBinding {
+        tenant,
+        env: env.to_string(),
+        user_id: user_id.to_string(),
+        resource_kind,
+        resource_id: resource_id.to_string(),
+        view_actor_id: view_actor_id.to_string(),
+    })
+}
+
 async fn send_session_access_revoked(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     request_id: &str,
     connection_state: &mut WebClientConnectionState,
 ) -> Result<()> {
@@ -504,7 +589,7 @@ struct InteractionResolveParams {
 async fn handle_interaction_resolve(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
@@ -671,13 +756,15 @@ fn interaction_status_slug(status: InteractionStatus) -> &'static str {
 }
 
 async fn send_interaction_event(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     event: &InteractionFrontendEvent,
 ) -> Result<()> {
     let json = interaction_event_json(event)?;
-    tx.send(json).await.map_err(|error| {
-        WebWsDispatchError::WsProtocolError(format!("Failed to replay interaction event: {error}"))
-    })?;
+    tx.send(WorkbenchOutbound::PublicControl(json))
+        .await
+        .map_err(|error| {
+            WebWsDispatchError::WsProtocolError(format!("Failed to replay interaction event: {error}"))
+        })?;
     Ok(())
 }
 
@@ -710,7 +797,7 @@ struct ChatSendResponse {
 async fn handle_chat_send(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
@@ -940,16 +1027,34 @@ async fn handle_chat_send(
         .active_run_ids
         .extend(outcome.active_run_ids.iter().cloned());
     let run_session_key = session_id.unwrap_or_else(|| group_id.clone());
+    // Task 16: run lanes carry the SAME real identity context as the
+    // session subscription — run fallback / re-dispatch re-authorizes this
+    // exact binding, never the registry's legacy actor slot.
+    let protected_run_anchor = match sender_conn_id {
+        Some(conn_id) => state
+            .frontend_connections
+            .channel_binding_of(&run_session_key, conn_id)
+            .await,
+        None => None,
+    };
     for run_id in &outcome.active_run_ids {
         state
             .run_channels
-            .register_with_view(
+            .register_workbench_with_view(
                 run_id.clone(),
                 run_session_key.clone(),
                 tx.clone(),
                 Some("workbench-ws".to_string()),
                 bound_actor_id.map(str::to_string),
-                sender_human_view.clone(),
+                // A protected lane has no inline visibility filter: the
+                // application hook owns SkipMessage (a filter must never
+                // mask a revoke). Legacy lanes keep the old view filter.
+                if protected_run_anchor.is_some() {
+                    None
+                } else {
+                    sender_human_view.clone()
+                },
+                protected_run_anchor.clone(),
             )
             .await;
     }
@@ -1019,7 +1124,7 @@ struct ClientChatAbortParams {
 async fn handle_chat_abort(
     state: &Arc<WebDispatchState>,
     req: &RequestFrame,
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     connection_state: &mut WebClientConnectionState,
     auth: &WorkbenchConnectionAuth,
 ) -> Result<()> {
@@ -1255,18 +1360,18 @@ fn caller_context_from_bound_actor(
     CallerContext::Human(HumanActor { actor_id, staff_no })
 }
 
-async fn send_ok(tx: &mpsc::Sender<String>, req_id: &str, payload: Value) -> Result<()> {
+async fn send_ok(tx: &mpsc::Sender<WorkbenchOutbound>, req_id: &str, payload: Value) -> Result<()> {
     let response = ResponseFrame::ok(req_id, payload);
     let frame = BcsFrame::Response(response);
     let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
+    tx.send(WorkbenchOutbound::PublicControl(json)).await.map_err(|e| {
         WebWsDispatchError::WsProtocolError(format!("Failed to send response: {}", e))
     })?;
     Ok(())
 }
 
 async fn send_empty_human_input_final(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     group_id: &str,
     session_id: Option<&str>,
     run_id: &str,
@@ -1291,7 +1396,7 @@ async fn send_empty_human_input_final(
         },
     });
     let json = serde_json::to_string(&event)?;
-    tx.send(json).await.map_err(|error| {
+    tx.send(WorkbenchOutbound::PublicControl(json)).await.map_err(|error| {
         WebWsDispatchError::WsProtocolError(format!(
             "Failed to send HumanInput completion event: {}",
             error
@@ -1301,7 +1406,7 @@ async fn send_empty_human_input_final(
 }
 
 async fn send_human_input_error_event(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     group_id: &str,
     session_id: Option<&str>,
     error_code: &str,
@@ -1331,7 +1436,7 @@ async fn send_human_input_error_event(
         },
     });
     let json = serde_json::to_string(&event)?;
-    tx.send(json).await.map_err(|error| {
+    tx.send(WorkbenchOutbound::PublicControl(json)).await.map_err(|error| {
         WebWsDispatchError::WsProtocolError(format!(
             "Failed to send HumanInput error event: {}",
             error
@@ -1341,7 +1446,7 @@ async fn send_human_input_error_event(
 }
 
 async fn send_error(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     req_id: &str,
     code: &str,
     message: &str,
@@ -1361,14 +1466,14 @@ async fn send_error(
 }
 
 async fn send_error_shape(
-    tx: &mpsc::Sender<String>,
+    tx: &mpsc::Sender<WorkbenchOutbound>,
     req_id: &str,
     error: ErrorShape,
 ) -> Result<()> {
     let response = ResponseFrame::err(req_id, error);
     let frame = BcsFrame::Response(response);
     let json = serde_json::to_string(&frame)?;
-    tx.send(json).await.map_err(|e| {
+    tx.send(WorkbenchOutbound::PublicControl(json)).await.map_err(|e| {
         WebWsDispatchError::WsProtocolError(format!("Failed to send error response: {}", e))
     })?;
     Ok(())
