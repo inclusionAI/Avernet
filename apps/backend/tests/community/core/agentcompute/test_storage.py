@@ -1,0 +1,529 @@
+"""Storage integration tests: every repository exercised against a real
+SqliteDB DatabasePlugin (D19, D31, D32, tenant stamping, logical delete)."""
+from __future__ import annotations
+
+import time
+import uuid
+
+import pytest
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.agentcompute.domain import models as dm
+from agentclaw.community.core.agentcompute.repository import models as om
+from agentclaw.community.core.agentcompute.repository.impl import (
+    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
+    ResultShardRepository, RoundRepository, RunRepository,
+)
+
+
+class _TestDB:
+    def __init__(self, engine):
+        self._factory = sessionmaker(
+            bind=engine, autocommit=False, autoflush=False
+        )
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    session = orm_session
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[
+        om.AcAgentComputeRunModel.__table__,
+        om.AcAgentComputeAgentModel.__table__,
+        om.AcAgentComputeMessageModel.__table__,
+        om.AcAgentComputeResultShardModel.__table__,
+        om.AcAgentComputeRoundModel.__table__,
+        om.AcAgentComputeGuardEventModel.__table__,
+        om.AcAgentComputeJobModel.__table__,
+    ])
+    yield _TestDB(engine)
+    engine.dispose()
+
+
+@pytest.fixture()
+def run_repo(db):
+    return RunRepository(db)
+
+
+@pytest.fixture()
+def agent_repo(db):
+    return AgentRepository(db)
+
+
+@pytest.fixture()
+def msg_repo(db):
+    return MessageRepository(db)
+
+
+@pytest.fixture()
+def shard_repo(db):
+    return ResultShardRepository(db)
+
+
+@pytest.fixture()
+def round_repo(db):
+    return RoundRepository(db)
+
+
+@pytest.fixture()
+def guard_repo(db):
+    return GuardEventRepository(db)
+
+
+@pytest.fixture()
+def job_repo(db):
+    return JobRepository(db)
+
+
+TENANT_A = dm.TenantId("tenant-a")
+TENANT_B = dm.TenantId("tenant-b")
+
+
+def _now_ms():
+    return int(time.time() * 1000)
+
+
+def _mk_run(run_id=None, tenant=TENANT_A) -> dm.Run:
+    return dm.Run(
+        run_id=dm.RunId(run_id or uuid.uuid4().hex),
+        tenant=tenant,
+        goal="test goal",
+        agent_catalog=(
+            dm.AgentSpecRaw(name="r1", role="research"),
+        ),
+        provider=dm.ProviderId("stub"),
+        request_metadata=dm.RequestMetadata(),
+        status=dm.RunStatus.RUNNING,
+        started_at=dm.EpochMillis(_now_ms()),
+    )
+
+
+def _mk_agent(run: dm.Run, name="a1") -> dm.Agent:
+    env = dm.TaskEnvelope(
+        name=name, objective="do", output_schema={},
+        boundaries="", parent_goal=run.goal,
+    )
+    return dm.Agent(
+        agent_id=dm.AgentId(uuid.uuid4().hex),
+        run_id=run.run_id,
+        tenant=TENANT_A,
+        parent_agent_id=None,
+        depth=0,
+        name=name,
+        role="role",
+        kind=dm.AgentKind.LLM,
+        task_spec=env,
+        spawn_round=0,
+        status=dm.AgentStatus.QUEUED,
+        attempts=0,
+        idempotency_key=dm.IdempotencyKey(uuid.uuid4().hex),
+        output={},
+    )
+
+
+def _mk_shard(run: dm.Run, agent: dm.Agent) -> dm.ResultShard:
+    return dm.ResultShard(
+        id=dm.ShardId(uuid.uuid4().hex),
+        run_id=run.run_id,
+        tenant=TENANT_A,
+        source_agent_id=agent.agent_id,
+        payload={"result": "done"},
+        artifact_key=None,
+        routed_at=dm.EpochMillis(_now_ms()),
+    )
+
+
+class TestRunRepository:
+    def test_create_and_get(self, run_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.run_id == run.run_id
+        assert fetched.tenant == TENANT_A
+        assert fetched.goal == "test goal"
+
+    def test_tenant_isolation(self, run_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        assert run_repo.get(run.run_id, TENANT_B) is None
+        assert run_repo.get(run.run_id, TENANT_A) is not None
+
+    def test_update_status(self, run_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        ok = run_repo.update_status(
+            run.run_id, TENANT_A,
+            dm.RunStatus.COMPLETED,
+            termination_reason=dm.TerminationReason.FINISH,
+            final_answer="answer",
+        )
+        assert ok
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.status == dm.RunStatus.COMPLETED
+
+    def test_get_by_idempotency_running_only(self, run_repo):
+        run = _mk_run()
+        run.active_idempotency_key = dm.IdempotencyKey("idem-key-1")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is not None
+        run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED)
+        assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is None
+
+    def test_idempotency_tenant_isolated(self, run_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run.active_idempotency_key = dm.IdempotencyKey("idem-2")
+        run_repo.create(run)
+        assert run_repo.get_by_idempotency("idem-2", TENANT_B) is None
+
+    def test_get_nonexistent(self, run_repo):
+        assert run_repo.get("nope", TENANT_A) is None
+
+
+class TestAgentRepository:
+    def test_create_and_get(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.name == "a1"
+        assert fetched.status == dm.AgentStatus.QUEUED
+        assert fetched.kind == dm.AgentKind.LLM
+
+    def test_list_by_run(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent_repo.create(_mk_agent(run, "a1"))
+        agent_repo.create(_mk_agent(run, "a2"))
+        agents = agent_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(agents) == 2
+
+    def test_update_status_running(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        ok = agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.RUNNING.value,
+        )
+        assert ok
+        fetched = agent_repo.get(run.run_id, agent.id if hasattr(agent, 'id') else agent.agent_id, TENANT_A)
+        assert fetched.status == dm.AgentStatus.RUNNING
+
+    def test_update_output_and_error(self, run_repo, agent_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.FAILED.value,
+            error="something went wrong",
+        )
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched.status == dm.AgentStatus.FAILED
+        assert fetched.error == "something went wrong"
+
+    def test_tenant_isolation(self, run_repo, agent_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_B) is None
+        assert agent_repo.list_by_run(run.run_id, TENANT_B) == []
+
+
+class TestResultShardXOR:
+    def test_shard_with_payload(self, run_repo, agent_repo, shard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        shard = _mk_shard(run, agent)
+        shard_repo.create(shard)
+        fetched = shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.payload == {"result": "done"}
+
+    def test_shard_with_artifact_key(self, run_repo, agent_repo, shard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        shard = dm.ResultShard(
+            id=dm.ShardId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload=None,
+            artifact_key=dm.ArtifactKey("run/agent/result"),
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        shard_repo.create(shard)
+        fetched = shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert fetched is not None
+        assert fetched.artifact_key == dm.ArtifactKey("run/agent/result")
+
+    def test_shard_both_rejected(self, run_repo, agent_repo, shard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        bad = dm.ResultShard(
+            id=dm.ShardId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload={"result": "x"},
+            artifact_key=dm.ArtifactKey("key"),
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        with pytest.raises(ValueError):
+            shard_repo.create(bad)
+
+    def test_shard_neither_rejected(self, run_repo, agent_repo, shard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        bad = dm.ResultShard(
+            id=dm.ShardId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            source_agent_id=agent.agent_id,
+            payload=None,
+            artifact_key=None,
+            routed_at=dm.EpochMillis(_now_ms()),
+        )
+        with pytest.raises(ValueError):
+            shard_repo.create(bad)
+
+    def test_shard_tenant_isolation(self, run_repo, agent_repo, shard_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        shard = _mk_shard(run, agent)
+        shard_repo.create(shard)
+        assert shard_repo.get_by_run_agent(run.run_id, agent.agent_id, TENANT_B) is None
+
+
+class TestMessageRepository:
+    def test_list_by_agent(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        for i in range(5):
+            msg = dm.Message(
+                id=dm.MessageId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                agent_id=agent.agent_id,
+                seq=i,
+                role=dm.MessageRole.ASSISTANT,
+                content={"turn": i},
+            )
+            msg_repo.create(msg)
+        msgs = msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert len(msgs) == 5
+        assert msgs[0].seq == 0
+        assert msgs[4].seq == 4
+
+    def test_message_tenant_isolation(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run(tenant=TENANT_A)
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        msg = dm.Message(
+            id=dm.MessageId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=agent.agent_id,
+            seq=0,
+            role=dm.MessageRole.USER,
+            content="hello",
+        )
+        msg_repo.create(msg)
+        assert msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_B) == []
+
+
+class TestRoundRepository:
+    def test_create_and_list(self, run_repo, round_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        for i in range(3):
+            r = dm.Round(
+                id=dm.RoundId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                stage_index=i,
+                orchestrator_steps=1,
+                max_subagent_steps=2,
+                cohort_agent_ids=(dm.AgentId("a"),),
+                started_at=dm.EpochMillis(_now_ms()),
+            )
+            round_repo.create(r)
+        rounds = round_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(rounds) == 3
+
+
+class TestGuardEventRepository:
+    def test_create_and_list(self, run_repo, guard_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        ge = dm.GuardEvent(
+            id=dm.EventId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=None,
+            kind=dm.GuardKind.SERIAL_COLLAPSE,
+            details={"turns": 10},
+            created_at=dm.EpochMillis(_now_ms()),
+        )
+        guard_repo.create(ge)
+        events = guard_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(events) == 1
+        assert events[0].kind == dm.GuardKind.SERIAL_COLLAPSE
+
+
+class TestJobRepository:
+    def test_enqueue_and_claim(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            deadline_seconds=3600,
+        )
+        claimed = job_repo.claim_batch("worker-1", None, 1, 60)
+        assert len(claimed) == 1
+        assert claimed[0]["run_id"] == run.run_id
+        assert claimed[0]["claim_epoch"] == 1
+        assert claimed[0]["attempts"] == 1
+
+    def test_claim_increments_epoch(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        c1 = job_repo.claim_batch("w1", None, 1, 60)
+        assert c1[0]["claim_epoch"] == 1
+        job_repo.reschedule(run.run_id, TENANT_A, "w1", 0.1, None, 1)
+        import time as t
+        t.sleep(0.2)
+        c2 = job_repo.claim_batch("w2", None, 1, 60)
+        assert c2[0]["claim_epoch"] == 2
+
+    def test_renew_lease_by_valid_holder(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        epoch = claimed[0]["claim_epoch"]
+        ok = job_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, epoch)
+        assert ok
+
+    def test_renew_lease_rejected_by_stale_epoch(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        real_epoch = claimed[0]["claim_epoch"]
+        stale_epoch = real_epoch + 100
+        assert not job_repo.renew_lease(run.run_id, TENANT_A, "w1", 60, stale_epoch)
+
+    def test_complete(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        ok = job_repo.complete(run.run_id, TENANT_A, "w1", claimed[0]["claim_epoch"])
+        assert ok
+
+    def test_fail(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        ok = job_repo.fail(run.run_id, TENANT_A, "error", "w1", claimed[0]["claim_epoch"])
+        assert ok
+
+    def test_cancel_flow(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        assert not job_repo.is_cancel_requested(run.run_id, TENANT_A)
+        job_repo.request_cancel(run.run_id, TENANT_A)
+        assert job_repo.is_cancel_requested(run.run_id, TENANT_A)
+
+    def test_claim_visible_in_batch(self, run_repo, job_repo):
+        run_repo.create(_mk_run())
+        run_repo.create(_mk_run())
+        job_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        job_repo.enqueue(run_id=_mk_run().run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 10, 60)
+        assert len(claimed) >= 1
+
+
+class TestMandatoryColumns:
+    def test_all_tables_have_mandatory_columns(self):
+        import sqlalchemy as sa
+        engine = sa.create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine, tables=[
+            om.AcAgentComputeRunModel.__table__,
+            om.AcAgentComputeAgentModel.__table__,
+            om.AcAgentComputeMessageModel.__table__,
+            om.AcAgentComputeResultShardModel.__table__,
+            om.AcAgentComputeRoundModel.__table__,
+            om.AcAgentComputeGuardEventModel.__table__,
+            om.AcAgentComputeJobModel.__table__,
+        ])
+        insp = sa.inspect(engine)
+        for table_name in insp.get_table_names():
+            cols = {c["name"] for c in insp.get_columns(table_name)}
+            for required in ("id", "gmt_create", "gmt_modified", "env", "tenant", "is_deleted"):
+                assert required in cols, f"{table_name} missing {required}"
+
+    def test_unique_indexes_scoped_by_tenant(self):
+        for model in om.ALL_MODELS:
+            for idx in model.__table__.indexes:
+                if idx.unique:
+                    names = {c.name for c in idx.columns}
+                    assert "env" in names, f"{model.__tablename__}.{idx.name} not env-scoped"
+                    assert "tenant" in names, f"{model.__tablename__}.{idx.name} not tenant-scoped"
+
+    def test_orm_tables_not_pydantic(self):
+        import pydantic
+        for model in om.ALL_MODELS:
+            assert not issubclass(model, pydantic.BaseModel), \
+                f"{model.__name__} inherits pydantic.BaseModel"
+
+    def test_repository_impl_no_await_in_session(self):
+        import ast, pathlib
+        impl_path = pathlib.Path(
+            "src/agentclaw/community/core/agentcompute/repository/impl.py"
+        )
+        tree = ast.parse(impl_path.read_text())
+        for node in ast.walk(tree):
+            assert not isinstance(node, (ast.Await, ast.AsyncFor)), \
+                f"async construct at line {getattr(node, 'lineno', '?')}"

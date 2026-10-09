@@ -342,7 +342,7 @@ class ArtifactStore(Protocol):
     def sign_url(self, key: str, expires: int = 7200) -> str: ...
 ```
 
-### 4.4 Records (mutable domain dataclasses — field names match the tables)
+### 4.4 Records (mutable dataclasses — field names match the tables)
 
 ```python
 @dataclass
@@ -1283,6 +1283,10 @@ Emit metrics (queue depth, claim/reclaim, slice/run latency p50/p99, LLM error r
 
 ### D40 — Reclaim circuit breaker & full fencing
 State-mutating writes are epoch-guarded (§9.1). A run reclaimed `reclaim_max` times with no progress is marked `STUCK` (terminal) to prevent a poison-pill loop. (§9.2/§17.1)
+
+### D43 — Domain/value models use @dataclass; transport DTOs use Pydantic (matches codebase convention)
+
+Domain and value models are **`@dataclass`** (frozen via `@dataclass(frozen=True)` for immutable value objects), matching the backend codebase convention (`core/*/domain/*.py`, `types.py`, `task_queue/types.py` — 570+ `@dataclass` instances, zero framework import). HTTP transport DTOs are **Pydantic `BaseModel`** in `adapters/http/agentcompute/schemas.py` (the FastAPI boundary), matching existing `adapters/http/` schemas. D42 result-schema validation uses `jsonschema` (already a backend dep). Decisions are regular `@dataclass(frozen=True)` classes with a `DecisionKind` discriminator field; `Decision` is a plain union type alias. SQL ORM models are pure SQLAlchemy `Base` (never Pydantic).
 
 ### D41 — Avernet subagent calls the backend's own API (no gateway)
 
