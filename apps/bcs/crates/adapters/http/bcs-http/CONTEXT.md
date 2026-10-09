@@ -2,6 +2,13 @@
 
 ## Provides
 
+`GET /providers/by-slug/{slug}` is unauthenticated and exposes only Provider
+identity, name, auth mode, enabled status, protocol version and audit timestamps.
+It consumes the application service's credential-free projection. Existing
+registration/PATCH accepts optional slug with unchanged authentication; admin
+info responses add nullable slug and effective protocol_version. Core validates
+slugs, stores enforce uniqueness, and the adapter maps absence to 404.
+
 GET/PUT /admin/message-delivery/policy allow authenticated Human identities from the configured auth boundary to manage environment-wide policy. Explicit Bot/Provider/service credentials never fall back to local mock Human identity. The old version-prefixed route has no alias; ServiceKey permissions for other APIs are unchanged.
 
 - HTTP delivery adapter for BCS.
