@@ -24,6 +24,7 @@ bcs-domain = { workspace = true }
 bcs-config = { workspace = true }
 bcs-edge-permission = { workspace = true }
 bcs-friend = { workspace = true }
+bcs-jwt = { workspace = true }
 bcs-test-support = { workspace = true }
 tempfile = { workspace = true }
 time = { workspace = true }

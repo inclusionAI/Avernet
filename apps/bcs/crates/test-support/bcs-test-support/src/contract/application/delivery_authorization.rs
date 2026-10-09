@@ -200,7 +200,7 @@ fn chat() -> (MessageVisibilityDomain, Option<MessageAudience>) {
 
 /// The full continuous-authorization evidence suite (plan Task 15 Step 1/4).
 /// Every driver mounts this from its implementation via
-/// `tests/conformance_*` / `tests/delivery_authorization.rs`.
+/// `tests/conformance_delivery_authorization.rs` (R25 naming).
 #[allow(clippy::too_many_lines)]
 pub async fn delivery_authorization_service_contract_tests(
     harness: &DeliveryAuthorizationHarness,

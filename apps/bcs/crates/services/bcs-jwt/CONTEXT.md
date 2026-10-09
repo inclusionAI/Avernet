@@ -41,3 +41,7 @@ application layer and the authority store.
 ## Tests
 
 - `cargo test --package bcs-jwt --manifest-path src/bcs/Cargo.toml`
+- `tests/conformance_team_manager_credential.rs` registers
+  `TeamManagerJwtVerifier` against the shared
+  `team_manager_credential_verifier_port_contract_tests` harness (R25); the
+  exhaustive negative lattice stays in `tests/team_manager_credential.rs`.

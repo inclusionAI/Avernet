@@ -470,6 +470,7 @@ dependencies = [
  "bcs-domain",
  "bcs-edge-permission",
  "bcs-friend",
+ "bcs-jwt",
  "bcs-service-api",
  "bcs-test-support",
  "serde_json",
@@ -1466,6 +1467,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bcs-service-api",
+ "bcs-test-support",
  "hmac",
  "serde",
  "serde_json",
@@ -2049,6 +2051,7 @@ dependencies = [
  "bcs-session-file",
  "serde_json",
  "sha2",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",

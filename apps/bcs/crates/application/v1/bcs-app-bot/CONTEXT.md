@@ -63,3 +63,10 @@ requires Agent identity verification itself and supports Agents before registrat
 
 - `cargo test --package bcs-app-bot --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-app-bot --all-targets --manifest-path src/bcs/Cargo.toml`
+- R25 conformance drivers: `tests/conformance_bot_manager.rs`,
+  `tests/conformance_ownership_transfer.rs` and
+  `tests/conformance_team_manager_sync.rs` register the production
+  facades (`BotManagerServiceImpl`, `OwnershipTransferServiceImpl`,
+  `TeamManagerSyncServiceImpl`) against their shared harnesses, constructed
+  over the test-support recording hook + counting core (positive
+  team-credential round-trip included).
