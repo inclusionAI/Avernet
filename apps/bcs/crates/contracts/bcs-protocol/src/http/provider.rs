@@ -13,6 +13,10 @@ fn is_true(value: &bool) -> bool {
     *value
 }
 
+fn default_provider_protocol_version() -> String {
+    "1.0".to_string()
+}
+
 pub const BCN_PROTOCOL_VERSION_HEADER: &str = "X-BCN-Protocol-Version";
 pub const BCN_TRANSPORT_HEADER: &str = "X-BCN-Transport";
 pub const BCN_MESSAGE_ID_HEADER: &str = "X-BCN-Message-Id";
@@ -78,6 +82,8 @@ pub struct ProviderOrganizationManagementConfigDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderRequest {
     pub name: String,
+    #[serde(default)]
+    pub slug: Option<String>,
     /// Default downlink URL; absent when every Gateway Bot supplies its own.
     #[serde(default)]
     pub webhook_url: Option<String>,
@@ -105,13 +111,29 @@ pub struct RegisterProviderResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderBasicInfoResponse {
+    pub provider_id: String,
+    pub slug: String,
+    pub name: String,
+    pub auth_mode: ProviderAuthModeDto,
+    pub enabled: bool,
+    pub protocol_version: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfoResponse {
     pub provider_id: String,
+    #[serde(default)]
+    pub slug: Option<String>,
     pub name: String,
     pub webhook_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthModeDto,
+    #[serde(default = "default_provider_protocol_version")]
+    pub protocol_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordination: Option<ProviderCoordinationConfigDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,6 +147,9 @@ pub struct ProviderInfoResponse {
 pub struct PatchProviderRequest {
     #[serde(default)]
     pub name: Option<String>,
+    /// Omitted or null preserves the current slug.
+    #[serde(default)]
+    pub slug: Option<String>,
     #[serde(default)]
     pub webhook_url: Option<String>,
     #[serde(default)]

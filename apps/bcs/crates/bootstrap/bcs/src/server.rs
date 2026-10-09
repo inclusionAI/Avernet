@@ -5996,6 +5996,7 @@ mod tests {
 
         let registered = provider_management
             .register_provider(RegisterProviderCommand {
+                slug: None,
                 name: "Provider".to_string(),
                 webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),
                 admin_callback_url: None,
@@ -6532,6 +6533,7 @@ mod tests {
             .services
             .provider_management
             .register_provider(RegisterProviderCommand {
+                slug: None,
                 name: "Admin Provider".to_string(),
                 webhook_url: Some(callback_url.clone()),
                 admin_callback_url: Some(callback_url),

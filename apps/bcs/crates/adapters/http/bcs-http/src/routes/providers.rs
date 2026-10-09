@@ -7,7 +7,7 @@ use axum::{
 use bcs_protocol::{
     BCN_PROVIDER_ID_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAuthModeDto,
     ProviderBotConnectionModeDto, ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
-    ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
+    ProviderBasicInfoResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto, RegisterProviderBotRequest,
     RegisterProviderBotResponse, RegisterProviderRequest, RegisterProviderResponse,
 };
 use bcs_service_api::application::v1::{
@@ -110,6 +110,7 @@ pub async fn register_provider(
         .provider_management
         .register_provider(RegisterProviderCommand {
             name: req.name,
+            slug: req.slug,
             webhook_url: req.webhook_url,
             admin_callback_url: req.admin_callback_url,
             auth_mode: auth_mode_from_wire(req.auth.mode),
@@ -124,6 +125,31 @@ pub async fn register_provider(
         provider_id: outcome.provider_id,
         provider_admin_token: outcome.provider_admin_token,
         bcs_to_provider_token: outcome.bcs_to_provider_token,
+    }))
+}
+
+pub async fn get_provider_by_slug(
+    State(state): State<HttpAppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<ProviderBasicInfoResponse>, ProviderRouteError> {
+    let info = state.services.provider_management.get_provider_by_slug(&slug).await
+        .map_err(provider_error)?
+        .ok_or_else(|| ProviderRouteError {
+            status: StatusCode::NOT_FOUND, message: format!("provider slug '{slug}' not found"),
+        })?;
+    Ok(Json(ProviderBasicInfoResponse {
+        provider_id: info.provider_id,
+        slug: info.slug,
+        name: info.name,
+        auth_mode: match info.auth_mode {
+            ProviderAuthMode::StaticBearer => ProviderAuthModeDto::StaticBearer,
+            ProviderAuthMode::AgentPass => ProviderAuthModeDto::AgentPass,
+            ProviderAuthMode::ProviderAdmin => ProviderAuthModeDto::ProviderAdmin,
+        },
+        enabled: info.enabled,
+        protocol_version: info.protocol_version,
+        created_at: info.created_at,
+        updated_at: info.updated_at,
     }))
 }
 
@@ -161,6 +187,7 @@ pub async fn patch_provider(
             provider_admin_token,
             authenticated_staff_id,
             name: req.name,
+            slug: req.slug,
             webhook_url: req.webhook_url,
             admin_callback_url: req.admin_callback_url,
             protocol_version: req.protocol_version,
@@ -841,10 +868,13 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
 
     Ok(ProviderInfoResponse {
         provider_id: provider.provider_id,
+        slug: provider.slug,
         name: provider.name,
         webhook_url,
         admin_callback_url,
         auth_mode,
+        protocol_version: downlink.get("protocol_version").and_then(Value::as_str)
+            .filter(|version| !version.is_empty()).unwrap_or("1.0").to_string(),
         coordination,
         organization_management,
         disabled: provider.disabled,

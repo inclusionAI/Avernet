@@ -46,6 +46,7 @@ impl std::fmt::Debug for ProviderBotEventCredential {
 #[derive(Debug, Clone)]
 pub struct RegisterProviderCommand {
     pub name: String,
+    pub slug: Option<String>,
     pub webhook_url: Option<String>,
     pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthMode,
@@ -68,6 +69,7 @@ pub struct UpdateProviderCommand {
     pub provider_admin_token: String,
     pub authenticated_staff_id: String,
     pub name: Option<String>,
+    pub slug: Option<String>,
     pub webhook_url: Option<String>,
     pub admin_callback_url: Option<String>,
     pub protocol_version: Option<String>,
@@ -242,6 +244,16 @@ pub struct ProviderBotTaskModesFilter {
 
 #[async_trait]
 pub trait ProviderManagementService: Send + Sync {
+    /// Credential-free public discovery. Disabled Providers remain visible.
+    async fn get_provider_by_slug(
+        &self, slug: &str,
+    ) -> ServiceResult<Option<crate::core::ProviderBasicInfo>> {
+        let _ = slug;
+        Err(crate::ServiceError::InvalidOperation {
+            message: "provider slug lookup is not configured".to_string(), request_id: None,
+        })
+    }
+
     async fn register_provider(
         &self,
         command: RegisterProviderCommand,
