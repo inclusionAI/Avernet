@@ -30,7 +30,7 @@ and its scopes; services check scopes through the authorization hook.
 Bots reach the surface through the `avn` CLI and a shipped skill, delivered by
 Manifest `cli_tools`, following the `bcs-cli` precedent.
 
-Design: [`../06-interfaces.md`](../06-interfaces.md).
+Design: this proposal is postponed; the scope sketch that used to live in the interfaces doc was dropped and will be redesigned together with how bots talk to the platform.
 
 ## Consequences
 

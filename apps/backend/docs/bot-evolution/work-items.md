@@ -1,6 +1,6 @@
 # Work items
 
-> 中文版：[10-work-items.zh-CN.md](10-work-items.zh-CN.md)
+> 中文版：[work-items.zh-CN.md](work-items.zh-CN.md)
 
 > Status: DRAFT. Each item is sized for one follow-up session to take through
 > SDD (spec → plan → tasks → implement) or, for design-only items, to a
@@ -31,9 +31,9 @@ the rest.
   Manifest) and DR-2 (promotion is platform-owned). DR-3 (bot principal for
   the evolution surface) is postponed until the way bots talk to the
   platform is decided. Also decide open decision D-1 (control-plane module
-  placement) from [01-design.md §5](01-design.md#5-ownership-and-module-placement).
-- **Read first**: [01-design.md](01-design.md), [02-genome.md](02-genome.md),
-  [08-governance.md](08-governance.md), [06-interfaces.md §6](06-interfaces.md#6-authentication-and-authorization).
+  placement) from [design.md](design.md#6-ownership-and-module-placement).
+- **Read first**: [design.md](design.md), [01-genome.md](01-genome.md),
+  [design.md](design.md#5-guarantees-governance-summary), [decisions/0003-bot-principal-for-evolution-surface.md](decisions/0003-bot-principal-for-evolution-surface.md).
 - **Deliverable**: DR-1 and DR-2 accepted (promoted to `docs/adr/` with the next
   free numbers) or revised; D-1 recorded.
 - **Done when**: each ADR has an owner, and the engine owners have
@@ -44,9 +44,9 @@ the rest.
 - **Goal**: Normative JSON Schema for Genome Revision (`spec`, `policy`,
   `revision` metadata) and Genome Patch (ops, risk-tier mapping, rewrite
   threshold), canonicalisation rules for the content hash (RFC 8785 canonical JSON, see
-  [02-genome.md §7.3](02-genome.md#73-serialization-canonical-json)), and the mapping to
+  [01-genome.md](01-genome.md)), and the mapping to
   and from Manifest schema v1.
-- **Read first**: [02-genome.md](02-genome.md); `manifest-schema.zh-CN.md`;
+- **Read first**: [01-genome.md](01-genome.md); `manifest-schema.zh-CN.md`;
   `schema/validator.py`.
 - **Deliverable**: `apps/backend/specs/<date>-bot-genome-schema/` with schema files,
   examples, and a compatibility table against Manifest v1.
@@ -63,7 +63,7 @@ the rest.
   declared: `experience.sessions@1`, `experience.feedback@1`, `agents@1`,
   `evaluate.train@1`) with per-engine
   provider contracts (for `agents@1`, the per-engine agent definition
-  contract and the upload and loading of definitions, 05 §4.2), the evolution policy (binding) schema and binding
+  contract and the upload and loading of definitions, see 03-strategy.md), the evolution policy (binding) schema and binding
   checks, run lifecycle and failure semantics (R11): idempotent run
   submission returning a run id, leased jobs re-dispatched after a crash
   with the same run id, strategy-owned progress persistence (no platform
@@ -71,13 +71,14 @@ the rest.
   evaluations (start returns an operation id, idempotent per key; status
   looked up by id; no request held open while work runs); isolation (R13);
   and the Job Protocol mapping of every `ctx` call.
-- **Read first**: [05-strategy-sdk.md](05-strategy-sdk.md); ClawEvolve
+- **Read first**: [03-strategy.md](03-strategy.md),
+  [06-evolution-run.md](06-evolution-run.md); ClawEvolve
   `official-stage-catalog.json`, `routes/internal/evolve.ts`;
   `docs/arch/protocol-contract-tests.md`.
 - **Deliverable**: contract docs + JSON Schema files.
 - **Done when**: ClawEvolve's round loop can be written against the context
-  without reaching around it (checked with the §10 sketch in
-  05-strategy-sdk), and a non-ClawEvolve strategy (memory consolidation) fits
+  without reaching around it (checked with the ClawEvolve sketch in
+  04-default-strategies.md), and a non-ClawEvolve strategy (memory consolidation) fits
   with a different capability set.
 
 ### RSI-07 Evolution API and CLI contract
@@ -85,11 +86,11 @@ the rest.
 - **Goal**: OpenAPI for Genome and Evolution resources (async pattern,
   idempotency, ETags, error envelope consistent with OpenAPI v1), and the
   `avn` command tree with JSON output schema and exit codes.
-- **Read first**: [06-interfaces.md](06-interfaces.md);
+- **Read first**: [09-evolution-api.md](09-evolution-api.md);
   `apps/backend/docs/openapi-v1/README.md`; `apps/bcs/crates/tools/bcs-cli/CONTEXT.md`.
 - **Deliverable**: OpenAPI draft + CLI reference doc; decision on Q1 (new
   `avn` binary vs other).
-- **Done when**: every actor flow in interfaces §2 is executable on paper with
+- **Done when**: every caller flow in 09-evolution-api.md is executable on paper with
   the listed endpoints and scopes.
 
 ## P1 — Versioned bots (useful independently of RSI)
@@ -100,7 +101,7 @@ the rest.
   pinned source resolution into the content store, lineage queries.
   Promotion API that moves `active` and invokes Manifest apply.
 - **Depends on**: RSI-02.
-- **Read first**: [02-genome.md §2–§4](02-genome.md#2-shape); `core/bot_config_manifest/`.
+- **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
 - **Done when**: create revision from manifest, from patch; diff any two;
   move refs with conflict detection; conformance + unit tests; singlebox
   acceptance story "edit → revision → apply → go back two revisions by
@@ -131,7 +132,8 @@ the rest.
   deterministic checks) to exercise the loop end-to-end.
 - **Depends on**: RSI-06, RSI-07, RSI-03.
 - **Done when**: singlebox story: start run with reference strategy →
-  candidate recorded → gate → promoted → bot updated → rollback; repeating
+  candidate recorded → gate → promoted → bot updated → going back to the
+  previous revision; repeating
   the start with the same idempotency key returns the same run id; killing
   the worker mid-run leads to re-dispatch under the same run id, which
   re-attaches to its running operations instead of starting them again.
@@ -163,7 +165,7 @@ the rest.
 
 ### RSI-11 Verification Service (bot verification)
 - **Module**: evolution, backend (`eval_publish`, `eval_env`)
-- **Goal**: Implement [03-verification.md §3–§4](03-verification.md#3-verification-model):
+- **Goal**: Implement [07-verification.md](07-verification.md):
   suite registry seeded from the ClawWeb Bench model and ClawBench case
   format; platform-assigned splits incl. sealed holdout and must-pass
   regression/safety; `platform/clawbench` grader extracted from
@@ -171,8 +173,8 @@ the rest.
   paired comparator with repeated seeds and confidence intervals; judge
   ensembles; verdict policy with ClawEvolve's `full_opt_gate` /
   `candidate_opt_gate` made blocking; verification profiles.
-- **Read first**: [03-verification.md](03-verification.md) (§2 lists the existing
-  code to reuse); [08-governance.md §2, §4](08-governance.md#2-the-gate).
+- **Read first**: [07-verification.md](07-verification.md) (§2 lists the existing
+  code to reuse); [08-promotion.md](08-promotion.md).
 - **Done when**: a candidate is verified in a sandbox with paired baseline and
   per-split verdict; strategy job inputs provably exclude holdout,
   regression, and safety; the same case files run unchanged under ClawBench
@@ -190,13 +192,13 @@ the rest.
 ### RSI-13 Onboard ClawEvolve as default strategy
 - **Module**: evolverun, evolution
 - **Goal**: Strangler steps 1–3 from
-  [07-default-strategy.md §4](07-default-strategy.md#4-migration-plan-strangler-no-big-bang):
+  [04-default-strategies.md](04-default-strategies.md):
   shadow-record revisions → black-box adapter strategy → native strategy.
   Tune works on a sandbox from `ctx.workspace`; its accept rule becomes an
   internal submission filter while acceptance moves to platform
   verification; pack/restore removed from the flow; ClawEvolve persists
   its round state in its own store keyed by run id (today's `ce_tasks` /
-  `ce_steps` can serve) so a re-dispatched run continues; decide D-2, D-3.
+  `ce_steps` can serve) so a re-dispatched run continues; decide DS-1 and DS-2.
 - **Depends on**: RSI-09, RSI-10, RSI-11, RSI-12.
 - **Done when**: `clawevolve/bot-evolution` produces the same or better
   results as legacy AgentEvolve on its own bench, through the platform, without
@@ -211,7 +213,7 @@ the rest.
 ### RSI-21 Experiment Ledger (H)
 - **Module**: evolution
 - **Goal**: Record every level-2 experiment with the schema in
-  [04-recursion.md §3](04-recursion.md#3-experiment-ledger-h) (including rejected
+  [05-experiment-ledger.md](05-experiment-ledger.md) (including rejected
   candidates and later online outcomes); derived mechanism metrics; filesystem
   export for strategies; verifier-version tagging.
 - **Depends on**: RSI-08. In the first iteration this is the level-2
@@ -235,7 +237,7 @@ the rest.
 - **Goal**: (a) Offline replay tool over H for changes to verification profiles and submission filters,
   generalising `calibrate_evolution_gates.py` / `replay_candidate_gate.py`;
   (b) improvement-problem benchmark frozen from H and the mechanism
-  verification protocol of [04-recursion.md §5](04-recursion.md#5-mechanism-verification),
+  verification protocol of [10-meta-evolution.md](10-meta-evolution.md),
   used first for **human-authored** strategy changes.
 - **Depends on**: RSI-11, RSI-13, RSI-21.
 - **Done when**: a change to the ClawEvolve tune prompt is accepted or
@@ -246,14 +248,14 @@ the rest.
 - **Module**: evolution
 - **Goal**: A meta-strategy that reads H and proposes mechanism patches
   (thresholds, prompts, operators, step order), adopted only through RSI-23
-  and human approval; bounds of [04-recursion.md §6](04-recursion.md#6-bounds-what-recursion-may-not-touch)
+  and human approval; bounds of [10-meta-evolution.md](10-meta-evolution.md)
   enforced by static checks.
 - **Depends on**: RSI-23.
 
 ### RSI-20 UI for runs, review queue, lineage
 - **Module**: frontend-nextgen (or AgentEvolve interim)
 - **Goal**: Run list/detail, candidate report (diff + per-split eval), review
-  actions, genome lineage tree, rollback.
+  actions, genome lineage tree, going back.
 - **Depends on**: RSI-08, RSI-12.
 
 ## P5 — Bot-driven evolution
@@ -263,7 +265,8 @@ the rest.
   is decided. Do not pick up.
 - **Module**: gateway, backend, evolution, (bcs-cli conventions)
 - **Goal**: Implement DR-3: bot principal admission for evolution
-  endpoints only, scopes from interfaces §6 enforced via authorization hook;
+  endpoints only, scopes designed separately (the earlier scope sketch was
+  dropped) and enforced via the authorization hook;
   `avn` binary delivered via Manifest `cli_tools`; subject-bot and runner-bot
   `SKILL.md`; inbox and observation endpoints with rate limits.
 - **Done when**: a singlebox bot records an observation and submits an inbox
@@ -282,7 +285,7 @@ the rest.
 ### RSI-15 Memory consolidation strategy
 - **Module**: evolution
 - **Goal**: `platform/consolidate-memory` per
-  [07-default-strategy.md §5](07-default-strategy.md#5-a-second-non-clawevolve-default-memory-consolidation)
+  [04-default-strategies.md](04-default-strategies.md)
   — second, non-ClawEvolve default proving pluggability (R19).
 - **Depends on**: RSI-05 (or interim), RSI-13. Observations recorded by
   bots wait for RSI-14 (postponed); until then the strategy uses feedback
@@ -305,12 +308,16 @@ the rest.
 
 ## Cross-cutting open decisions (tracked here)
 
+Each doc also lists its own open decisions with a doc prefix: `G-` genome,
+`X-` experience, `S-` strategy, `DS-` default strategies, `L-` ledger, `ER-`
+evolution run, `V-` verification, `P-` promotion, `A-` API, `O-` meta-evolution.
+
 | ID | Decision | Where |
 | --- | --- | --- |
-| D-1 | Control-plane module placement | 01-design.md §5 → RSI-01 |
-| D-2 | Long-term host of default strategy runners (TS vs Python) | 07-default-strategy.md §6 → RSI-13 |
-| D-3 | ClawBench as platform default grader | 07-default-strategy.md §6 → RSI-11 |
-| D-4 | Workflow YAML as gene or separate artifact | 07-default-strategy.md §6 |
-| D-5 | ClawMind analyzer contract; dormant analyzers wire-or-remove | 07-default-strategy.md §6 |
-| D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 02-genome.md; RSI-03 |
-| Q1–Q3 | CLI binary, default bot run requests, event delivery | 06-interfaces.md §8 |
+| D-1 | Control-plane module placement | design.md → RSI-01 |
+| DS-1 (was D-2) | Long-term host of default strategy runners (TS vs Python) | 04-default-strategies.md → RSI-13 |
+| DS-2 (was D-3) | ClawBench as platform default grader | 04-default-strategies.md → RSI-11 |
+| DS-3 (was D-4) | Workflow YAML as gene or separate artifact | 04-default-strategies.md |
+| DS-4 (was D-5) | ClawMind analyzer contract; dormant analyzers wire-or-remove | 04-default-strategies.md |
+| D-6 | Genome storage: DB + content store (recommended) vs git repo per bot | 01-genome.md; RSI-03 |
+| A-n | Evolution API and CLI open decisions (CLI binary, event delivery; bot run requests postponed) | 09-evolution-api.md |

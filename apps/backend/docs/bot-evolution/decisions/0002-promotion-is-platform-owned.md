@@ -29,7 +29,7 @@ proposed by the meta-loop is adopted only after mechanism verification and
 human approval. Strategy inputs never include
 holdout, regression, or safety cases.
 
-Design: [`../08-governance.md`](../08-governance.md).
+Design: [`../08-promotion.md`](../08-promotion.md).
 
 ## Consequences
 
