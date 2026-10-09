@@ -5,6 +5,7 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
+import type { BotDirectory, DirectoryBot } from "../services/bot-directory.js";
 
 export type BotWorkflowPermissionRow = {
   id: number;
@@ -37,7 +38,45 @@ export type WorkflowViewScope =
 const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified" as const;
 
 export class BotWorkflowPermissionRepository {
-  constructor(private db: IDatabase) {}
+  constructor(private db: IDatabase, private botDirectory?: Pick<BotDirectory, "listBots">) {}
+
+  /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
+   * Directory failures remove this additional access path; direct grants still work.
+   * Do not cache relationships here: membership removal must take effect on the next check.
+   */
+  private async inheritedGrants(userId: string, workflowId?: string): Promise<BotWorkflowPermissionRow[]> {
+    if (!this.botDirectory) return [];
+    let bots: DirectoryBot[];
+    try {
+      bots = await this.botDirectory.listBots(userId, "all");
+    } catch {
+      console.warn("[workflow-permissions] Bot directory unavailable; using direct grants only", { userId });
+      return [];
+    }
+    const identities = new Map<string, { botId: string; ownerId: string }>();
+    for (const bot of bots) {
+      const botId = bot.botId?.trim();
+      const ownerId = bot.ownerId?.trim();
+      if (!botId || botId === "*" || !ownerId || ownerId === "*") continue;
+      identities.set(JSON.stringify([botId, ownerId]), { botId, ownerId });
+    }
+    const pairs = [...identities.values()];
+    const grants: BotWorkflowPermissionRow[] = [];
+    // Bound SQL placeholders for users with many Bots on both SQLite and MySQL.
+    for (let offset = 0; offset < pairs.length; offset += 100) {
+      const batch = pairs.slice(offset, offset + 100);
+      const conditions = batch.map(() => "(bot_id = ? AND (bot_owner_id = ? OR bot_owner_id = '*'))");
+      const params = batch.flatMap(({ botId, ownerId }) => [botId, ownerId]);
+      if (workflowId) params.push(workflowId);
+      const rows = await this.db.query<BotWorkflowPermissionRow>(
+        `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions
+         WHERE (${conditions.join(" OR ")})${workflowId ? " AND workflow_id = ?" : ""}`,
+        params,
+      );
+      grants.push(...rows);
+    }
+    return grants;
+  }
 
   async findByWorkflowId(workflowId: string): Promise<BotWorkflowPermissionRow[]> {
     return this.db.query<BotWorkflowPermissionRow>(
@@ -192,7 +231,11 @@ export class BotWorkflowPermissionRepository {
          AND (bot_owner_id = ? OR bot_owner_id = '*')`,
       [workflowId, userId],
     );
-    const botIds = botRows.map((r) => r.bot_id!).filter(Boolean);
+    const inherited = await this.inheritedGrants(userId, workflowId);
+    const botIds = [...new Set([
+      ...botRows.map((r) => r.bot_id!).filter(Boolean),
+      ...inherited.filter(r => r.can_view === 1 || r.can_edit === 1).map(r => r.bot_id!),
+    ])];
     if (botIds.length > 0) return { botIds };
 
     return "deny";
@@ -254,8 +297,26 @@ export class BotWorkflowPermissionRepository {
       );
     }
     const viewableIds = new Set(viewRows.map((r) => r.workflow_id));
+    if (!botId) {
+      for (const row of await this.inheritedGrants(ownerId)) {
+        if (row.can_view === 1 || row.can_edit === 1) viewableIds.add(row.workflow_id);
+      }
+    }
 
     return { restrictedIds, viewableIds };
+  }
+
+  /** Asset filtering only, NOT authorization. Zero-valued Bot grants must not
+   * override a user's separate grant when listing workflows in a Bot context.
+   */
+  async getWorkflowIdsInBotScope(ownerId: string, botId: string): Promise<Set<string>> {
+    const rows = await this.db.query<{ workflow_id: string }>(
+      `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
+       WHERE (bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*' OR bot_id = ?))
+          OR (bot_owner_id = '*' AND (bot_id = ? OR bot_id = '*'))`,
+      [ownerId, botId, botId],
+    );
+    return new Set(rows.map(row => row.workflow_id));
   }
 
   /**
@@ -289,7 +350,8 @@ export class BotWorkflowPermissionRepository {
         `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND can_edit = 1 LIMIT 1`,
         [workflowId, userId],
       );
-      return userRows.length > 0;
+      if (userRows.length > 0) return true;
+      return (await this.inheritedGrants(userId, workflowId)).some(row => row.can_edit === 1);
     }
 
     // Step 4: A concrete bot can inherit owner-level permission.
