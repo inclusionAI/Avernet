@@ -154,8 +154,15 @@ function DiagnosisPanel({
   const repairLoading = repairQuery.isPending || repairQuery.isFetching || !accessReady
   const repairError = repairQuery.error ? repairReadError(repairQuery.error) : ''
 
-  // Mutations and access/history changes must not resurrect another page's old lifecycle state.
+  const previousRepairScope = useRef({ queryClient, workflowId, includeHistorical, canEdit, repairRefresh })
+  // Evict on actual transitions, not mounting (including StrictMode effect replay).
+  // Returning from remedies must preserve other recently visited issue pages.
   useEffect(() => {
+    const previous = previousRepairScope.current
+    previousRepairScope.current = { queryClient, workflowId, includeHistorical, canEdit, repairRefresh }
+    if (previous.queryClient === queryClient && previous.workflowId === workflowId
+      && previous.includeHistorical === includeHistorical && previous.canEdit === canEdit
+      && previous.repairRefresh === repairRefresh) return
     queryClient.removeQueries({ queryKey: ['repair-issue-previews', workflowId], type: 'inactive' })
   }, [queryClient, workflowId, includeHistorical, canEdit, repairRefresh])
 
