@@ -2,9 +2,13 @@
 
 mod authority;
 mod bot_self;
+mod management;
 mod mine;
+mod team_sync;
 pub use authority::BotAuthorityHookImpl;
 pub use bot_self::BotSelfServiceImpl;
+pub use management::BotManagerServiceImpl;
+pub use team_sync::{TeamManagerSyncServiceConfig, TeamManagerSyncServiceImpl};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

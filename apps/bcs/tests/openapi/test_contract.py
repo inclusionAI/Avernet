@@ -33,6 +33,11 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/mine"),
+    # Task 13 manager list API (spec §6): Human principal, owner projected
+    # as a separate read-only field, idempotent direct grant/revoke.
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/managers"),
+    ("put", "/openapi/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
+    ("delete", "/openapi/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
     ("get", "/openapi/v1/collaboration/groups"),
     ("post", "/openapi/v1/collaboration/groups"),
     ("get", "/openapi/v1/collaboration/groups/{group_id}"),

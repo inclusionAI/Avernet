@@ -2,6 +2,23 @@
 
 ## Provides
 
+- The Task 13 Human-only manager surface (spec §6):
+  `GET/PUT/DELETE /openapi/v1/collaboration/bots/{bot_id}/managers…` inside
+  the ordinary Gateway Human-Principal middleware. The PUT/DELETE direct
+  requests carry NO business body (a `team` field is 400) and the verified
+  Human Principal is the only caller identity; the routes never query the
+  database, they forward exact identities into `BotManagerService`.
+
+- The Task 13 trusted team-manager sources slice (spec §6.1), mounted at
+  `/api/v1/bots/{bot_id}/manager-sources/teams/{team_id}` (PUT) plus the
+  `…/members` single-member INTERNAL repair endpoints (POST/DELETE), OUTSIDE
+  the generic Principal/invite-code middleware and ONLY mounted when the
+  composition root armed the credential boundary. The lane is never
+  anonymous: a trusted service credential in `Authorization: Bearer` is
+  verified through `TeamManagerSyncService::verify_service_credential`; the
+  verified identity + scopes (never a body value, never the raw credential)
+  flow into the sync/repair commands; responses are `no-store`.
+
 - Internal-only `GET /api/v1/collaboration/bots/me`, outside Gateway Principal
   and invite-code middleware. It passes only a parsed Bearer token to
   `BotSelfService`, which requires Agent identity authentication. Success and error

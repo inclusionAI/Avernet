@@ -66,7 +66,8 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 72)
+        # Task 13 added the manager list API's three operations.
+        self.assertEqual(len(operations), 75)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
@@ -117,9 +118,14 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 23)
+        # Task 13 added the team-manager sources slice's three operations.
+        self.assertEqual(len(operations), 26)
         self.assertTrue(
-            all(path.startswith("/api/v1/collaboration/") for _, path in operations)
+            all(
+                path.startswith("/api/v1/collaboration/")
+                or path.startswith("/api/v1/bots/")
+                for _, path in operations
+            )
         )
         self.assertIn(
             "/api/v1/collaboration/sessions/{session_id}/files",

@@ -717,3 +717,248 @@ UpdateBotRequest:
       description: Friend connection policy extension, including department scopes.
     friend_check_in_strategy:
       $ref: ../domain-models.yaml#/FriendCheckInStrategy
+
+# Task 13 manager list API (spec §6): Human-only control plane; the
+# current owner is projected as a separate read-only field; grants and
+# revokes are idempotent DIRECT-lane mutations that never touch team/*
+# sources and never change the owner.
+
+BotManagersPath:
+  get:
+    operationId: list_bot_managers
+    tags: ["Collaboration / Bots"]
+    summary: List the explicit managers of one Bot.
+    description: >-
+      Human control-plane read for the current owner/managers of one Bot
+      (initialized ownership only): the owner in the separate read-only
+      owner_user_id field plus one user-deduplicated, user_id-ASC-sorted
+      page of explicit managers. Positional pagination with limit 1..100
+      (default 20). The caller must hold a current owner-or-manager role.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: >-
+          The manager page, with the current owner in its own field (the
+          owner never mixes into items).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotManagerPageEnvelope
+      "400":
+        description: Invalid Bot identifier or pagination window.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The caller holds no current owner/manager role on the Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: The Bot's ownership has not been initialized yet.
+        x-error-codes:
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotManagerPath:
+  put:
+    operationId: grant_bot_manager
+    tags: ["Collaboration / Bots"]
+    summary: Idempotently grant one Human the direct manager source.
+    description: >-
+      Idempotent DIRECT-lane grant under a Human owner/manager caller;
+      the subject must be a live Human of the same environment and never
+      the current owner. The request carries NO business body: a team
+      field (or any other body content) is rejected, and the direct API
+      never grows a team parameter. Managers may re-grant/revoke other
+      managers (Gate 0); edges granted to third parties do not cascade
+      when their grantor loses the role.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: The idempotent grant result (changed=false when already granted).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotManagerGrantedEnvelope
+      "400":
+        description: >-
+          Body content on a bodyless request (including a team field), a
+          blank identity, or a subject that is not a resolvable live Human.
+        x-error-codes:
+          - invalid_request
+          - invalid_subject
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The caller holds no current owner/manager role on the Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The subject IS the current owner (the owner moves only through
+          the ownership-transfer flow), or the Bot's ownership is not
+          initialized.
+        x-error-codes:
+          - owner_role_requires_transfer
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: revoke_bot_manager
+    tags: ["Collaboration / Bots"]
+    summary: Idempotently revoke one Human's non-team manager sources.
+    description: >-
+      Idempotent revoke of the subject's direct and ownership_transfer
+      manager sources ONLY: team/* sources stay exactly as they are and
+      are reported in remaining_team_sources (the platform's team sync
+      owns them). revoked=true is NOT total loss of management rights; a
+      concurrent revocation of the caller never permits this idempotent
+      lane to change state.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: >-
+          The idempotent revoke result with the untouched team sources
+          the direct lane does not govern.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotManagerRevokedEnvelope
+      "400":
+        description: Blank identity or a malformed request.
+        x-error-codes:
+          - invalid_request
+          - invalid_subject
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The caller holds no current owner/manager role on the Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The subject IS the current owner (the owner moves only through
+          the ownership-transfer flow), or the Bot's ownership is not
+          initialized.
+        x-error-codes:
+          - owner_role_requires_transfer
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

@@ -13,7 +13,9 @@ try:
     from .bundle_openapi_contract import _rewrite_discriminator_mappings
     from .validate_openapi_contract import (
         HTTP_METHODS,
+        INTERNAL_COLLABORATION_PREFIX,
         PUBLIC_COLLABORATION_PREFIX,
+        TEAM_MANAGER_SOURCE_OPERATIONS,
         load_contract,
         validate_contract,
     )
@@ -21,7 +23,9 @@ except ImportError:
     from bundle_openapi_contract import _rewrite_discriminator_mappings
     from validate_openapi_contract import (
         HTTP_METHODS,
+        INTERNAL_COLLABORATION_PREFIX,
         PUBLIC_COLLABORATION_PREFIX,
+        TEAM_MANAGER_SOURCE_OPERATIONS,
         load_contract,
         validate_contract,
     )
@@ -37,12 +41,35 @@ def _validate_operation_prefixes(contract: dict[str, object], prefix: str) -> No
     for path, path_item in contract.get("paths", {}).items():
         if not isinstance(path_item, dict):
             continue
-        if any(method.lower() in HTTP_METHODS for method in path_item):
-            if not any(path.startswith(item) for item in prefixes):
-                joined = " or ".join(prefixes)
-                raise ValueError(
-                    f"OpenAPI operation path must use {joined}: {path}"
-                )
+        methods = tuple(
+            method.lower() for method in path_item if method.lower() in HTTP_METHODS
+        )
+        if not methods:
+            continue
+        # The internal team-manager sources slice is approved at its
+        # precise (method, template) pairs — mirrors the validator's
+        # allow-set; arbitrary /api/v1/* paths never dump.
+        approved_team_manager_source = (
+            prefix == INTERNAL_COLLABORATION_PREFIX
+            and any(
+                (method, path) in TEAM_MANAGER_SOURCE_OPERATIONS
+                for method in methods
+            )
+            and all(
+                (method, path) in TEAM_MANAGER_SOURCE_OPERATIONS
+                for method in methods
+            )
+        )
+        if not any(path.startswith(item) for item in prefixes) and not (
+            approved_team_manager_source
+            and path in {
+                template for _, template in TEAM_MANAGER_SOURCE_OPERATIONS
+            }
+        ):
+            joined = " or ".join(prefixes)
+            raise ValueError(
+                f"OpenAPI operation path must use {joined}: {path}"
+            )
 
 
 def dump_contract(

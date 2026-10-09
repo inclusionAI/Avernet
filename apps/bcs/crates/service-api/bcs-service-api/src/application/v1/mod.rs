@@ -8,6 +8,7 @@ pub mod auth;
 pub mod authorization;
 pub mod bot;
 pub mod bot_authority;
+pub mod bot_manager;
 pub mod bot_self;
 pub mod collaboration_definition;
 pub mod collaboration_template;
@@ -26,6 +27,7 @@ pub mod principal;
 pub mod register;
 pub mod session;
 pub mod session_file;
+pub mod team_manager_sync;
 
 pub use auth::*;
 pub use authorization::{
@@ -34,6 +36,7 @@ pub use authorization::{
 };
 pub use bot::*;
 pub use bot_authority::*;
+pub use bot_manager::*;
 pub use bot_self::*;
 pub use collaboration_definition::*;
 pub use collaboration_template::*;
@@ -55,3 +58,4 @@ pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
 pub use register::*;
 pub use session::*;
 pub use session_file::*;
+pub use team_manager_sync::*;

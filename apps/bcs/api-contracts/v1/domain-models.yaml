@@ -559,6 +559,172 @@ BotListEnvelope:
     request_id:
       type: string
 
+# Task 13 manager list API models (spec §6): the current owner is a
+# separate read-only field and never mixes into the manager page; every
+# listed item is a manager of the Bot.
+
+BotManagerEntry:
+  description: >-
+    One deduplicated manager-list item: the subject's bare trusted user
+    id, its Human actor id (human_<user_id>), and the fixed manager role
+    label.
+  type: object
+  additionalProperties: false
+  required:
+    - user_id
+    - actor_id
+    - role
+  properties:
+    user_id:
+      type: string
+      minLength: 1
+    actor_id:
+      type: string
+      minLength: 1
+    role:
+      type: string
+      const: manager
+
+BotManagerPage:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - owner_user_id
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+    owner_user_id:
+      type: string
+      minLength: 1
+    items:
+      type: array
+      items:
+        $ref: "#/BotManagerEntry"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+
+BotManagerPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotManagerPage"
+    request_id:
+      type: string
+
+BotManagerGranted:
+  description: >-
+    Result of one idempotent DIRECT grant: role is always manager and
+    changed=false means the stored edge already matched.
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - user_id
+    - role
+    - changed
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+    user_id:
+      type: string
+      minLength: 1
+    role:
+      type: string
+      const: manager
+    changed:
+      type: boolean
+
+BotManagerGrantedEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotManagerGranted"
+    request_id:
+      type: string
+
+BotManagerRevoked:
+  description: >-
+    Result of one idempotent non-team revoke: revoked states whether THIS
+    request changed the direct/ownership_transfer state;
+    remaining_team_sources lists the team/* sources the direct API
+    deliberately does not touch — a non-empty list means the subject is
+    still a manager through the platform's team synchronization, so
+    revoked=true is NOT total loss of management rights.
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - user_id
+    - revoked
+    - remaining_team_sources
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+    user_id:
+      type: string
+      minLength: 1
+    revoked:
+      type: boolean
+    remaining_team_sources:
+      type: array
+      items:
+        type: string
+        minLength: 1
+
+BotManagerRevokedEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotManagerRevoked"
+    request_id:
+      type: string
+
 Participant:
   type: object
   additionalProperties: false

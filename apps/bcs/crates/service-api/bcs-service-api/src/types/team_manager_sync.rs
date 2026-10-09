@@ -149,7 +149,15 @@ impl VerifiedTeamManagerService {
             }
         }
         if let Some(allowed) = &self.allowed_operations {
-            if !allowed.iter().any(|operation| *operation == command.operation) {
+            // Operation scopes constrain the operation KIND (`sync`/`move`,
+            // the Gate 0 credential vocabulary) — a credential allowing
+            // moves admits any move target that the team scopes permit;
+            // move targets are bounded by `allowed_teams`, not by this
+            // enum variant's payload.
+            if !allowed
+                .iter()
+                .any(|operation| operation.storage_str() == command.operation.storage_str())
+            {
                 return forbidden(format!(
                     "team-manager credential '{}' may not run this team operation",
                     self.service_id

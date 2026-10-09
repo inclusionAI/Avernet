@@ -2,6 +2,18 @@
 
 ## Provides
 
+- Task 13 manager/team application contracts (spec §6/§6.1):
+  `application::v1::BotManagerService` (Human-only
+  list/grant/revoke with the fixed `owner_role_requires_transfer` lane code),
+  `application::v1::TeamManagerSyncService` (credential verification through
+  the injected port, snapshot sync/move commands carrying the VERIFIED
+  `VerifiedTeamManagerService`, plus the internal single-member repairs), and
+  `port::TeamManagerCredentialVerifierPort` (fail-closed
+  `NoopTeamManagerCredentialVerifierPort` default). The lane's fixed
+  application codes are `invalid_manager_sync_source`,
+  `invalid_membership_snapshot`, and `manager_sync_conflict`; credentials and
+  signing keys never enter the contract types.
+
 - Internal `BotSelfService` authenticates Agent identity tokens through `AgentIdentityPort`
   before `BotRegistryCoreService::find_agent_registration`. The identity port
   exposes only verified `agent_code` and closed credential-free errors. The

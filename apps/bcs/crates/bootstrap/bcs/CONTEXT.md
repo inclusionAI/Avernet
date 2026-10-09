@@ -2,6 +2,15 @@
 
 ## Provides
 
+- Task 13 team-manager sync configuration plumbing (spec §6.1):
+  `config/team_manager_sync.rs` resolves the declarative `TeamManagerSyncConfig`
+  fail-closed (disabled stays `is_mounted() = false`; enabled-without-material
+  returns a startup configuration error, never an anonymous lane) and holds the
+  key only as a `secrecy::Secret`. `auth_wiring::build_team_manager_credential_verifier`
+  builds the pure `bcs-jwt` verifier for the injected material so the server
+  composition (plan Task 18) can arm the v1 team slice; the resolved key never
+  enters logs.
+
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
   without a registered verifier fail closed; multiple verifiers fail startup.

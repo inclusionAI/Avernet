@@ -128,4 +128,8 @@ pub use session_channel_outbound::{
     StateMachineTerminalEvent, StateMachineTerminalStatus,
 };
 pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};
+pub mod team_manager_credential;
+pub use team_manager_credential::{
+    NoopTeamManagerCredentialVerifierPort, TeamManagerCredentialVerifierPort,
+};
 pub mod agent_identity;

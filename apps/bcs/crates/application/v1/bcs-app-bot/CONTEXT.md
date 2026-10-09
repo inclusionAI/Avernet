@@ -12,6 +12,19 @@
   control-plane Service API.
 - Human-Principal authorization, Bot/Human projections, candidate visibility,
   reachability computation, and owner-scoped updates.
+- `BotManagerServiceImpl` (plan Task 13, spec §6): the Human-only manager
+  list/grant/revoke use cases. Every use case asks the centralized
+  `BotAuthorityHook` first, then mutates only through
+  `BotAuthorityCoreService` with `AuditActor::Human`; the lane's owner-target
+  conflicts surface the fixed `owner_role_requires_transfer` code.
+- `TeamManagerSyncServiceImpl` (plan Task 13, spec §6.1): the trusted
+  team-manager sync facade. It verifies the platform service credential
+  through the injected `TeamManagerCredentialVerifierPort` (the verified
+  identity + scopes are the only accepted actor shape; the raw credential is
+  never logged, audited, or persisted), re-validates the command's scopes,
+  and delegates to the Core's one-transaction sync lane. The internal
+  single-member repairs derive one full-snapshot reconcile under the same
+  lane.
 
 ## Consumes
 

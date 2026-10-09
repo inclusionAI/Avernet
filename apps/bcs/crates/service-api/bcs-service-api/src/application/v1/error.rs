@@ -25,6 +25,19 @@ pub const ERROR_CORRUPT_AUTHORITY: &str = "corrupt_authority";
 pub const ERROR_INVALID_SUBJECT: &str = "invalid_subject";
 pub const ERROR_AUTHORITY_CONFLICT: &str = "conflict";
 
+/// Manager/team application use cases (spec §6/§6.1, plan Task 13):
+/// fixed lane-specific codes. The manager API never touches the owner
+/// role — the owner moves only through the ownership-transfer flow
+/// (409 `owner_role_requires_transfer`). The team-sync lane carries its
+/// own snapshot/conflict vocabulary: permission failures are
+/// `invalid_manager_sync_source` (403), an unresolvable manager snapshot
+/// is `invalid_membership_snapshot` (400), and a same-key replay whose
+/// payload diverged is `manager_sync_conflict` (409).
+pub const ERROR_OWNER_ROLE_REQUIRES_TRANSFER: &str = "owner_role_requires_transfer";
+pub const ERROR_INVALID_MANAGER_SYNC_SOURCE: &str = "invalid_manager_sync_source";
+pub const ERROR_INVALID_MEMBERSHIP_SNAPSHOT: &str = "invalid_membership_snapshot";
+pub const ERROR_MANAGER_SYNC_CONFLICT: &str = "manager_sync_conflict";
+
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum ApplicationError {
@@ -110,6 +123,34 @@ impl ApplicationError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
+    }
+
+    /// Manager-lane conflict (spec §6): the requested subject IS the
+    /// current owner, whose role changes only through the
+    /// ownership-transfer flow (409 `owner_role_requires_transfer`).
+    pub fn owner_role_requires_transfer(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_OWNER_ROLE_REQUIRES_TRANSFER, message)
+    }
+
+    /// Team-sync permission failure (spec §6.1: the credential's
+    /// signature/env/scope did not admit the command;
+    /// 403 `invalid_manager_sync_source`).
+    pub fn invalid_manager_sync_source(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_INVALID_MANAGER_SYNC_SOURCE, message)
+    }
+
+    /// Team-sync snapshot failure (spec §6.1: the snapshot's members are
+    /// missing/invalid/shapes that can never produce a revoke;
+    /// 400 `invalid_membership_snapshot`).
+    pub fn invalid_membership_snapshot(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_MEMBERSHIP_SNAPSHOT, message)
+    }
+
+    /// Team-sync durable idempotency conflict (spec §6.1: same
+    /// idempotency key replayed with a different canonical payload;
+    /// 409 `manager_sync_conflict`).
+    pub fn manager_sync_conflict(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_MANAGER_SYNC_CONFLICT, message)
     }
 
     pub fn event_subscription_not_found(message: impl Into<String>) -> Self {

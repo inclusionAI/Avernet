@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use bcs_config_api::ManifestConfig;
 use bcs_service_api::application::v1::{
-    AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, InviteCodeService, RegisterService,
-    SessionFileApplicationService, SessionMessageService, SessionService,
+    AuthService as ApplicationAuthService, BotManagerService, BotService,
+    CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService,
+    FriendConnectionService, FriendshipService, GroupService, InvitationService,
+    InviteCodeService, RegisterService, SessionFileApplicationService, SessionMessageService,
+    SessionService, TeamManagerSyncService,
 };
 use bcs_service_api::application::channel::ChannelService;
 use bcs_service_api::application::CollaborationRuntimeService;
@@ -22,6 +25,13 @@ pub struct ApiState {
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,
     pub bot_service: Option<Arc<dyn BotService>>,
+    /// Task 13 Human-only manager lane (spec §6). Fail-closed (500) until
+    /// mounted by the composition root, like every other optional facade.
+    pub bot_manager_service: Option<Arc<dyn BotManagerService>>,
+    /// Task 13 trusted team-manager sync facade (spec §6.1). The team
+    /// write routes mount ONLY when this is present — an unconfigured
+    /// credential boundary never exposes a callable anonymous entry.
+    pub team_manager_sync_service: Option<Arc<dyn TeamManagerSyncService>>,
     pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
     pub group_service: Arc<dyn GroupService>,
     pub session_service: Arc<dyn SessionService>,
@@ -59,6 +69,8 @@ impl ApiState {
             auth_service: None,
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
+            bot_manager_service: None,
+            team_manager_sync_service: None,
             event_subscription_service: None,
             group_service,
             session_service,
@@ -107,6 +119,31 @@ impl ApiState {
     pub fn with_bot_service(mut self, bot_service: Arc<dyn BotService>) -> Self {
         self.bot_service = Some(bot_service);
         self
+    }
+
+    /// Add the Task 13 Human-only manager application facade (spec §6).
+    /// Handlers fail closed (internal) while absent; the authenticated
+    /// Human Principal stays the only caller identity of this lane.
+    pub fn with_bot_manager_service(mut self, service: Arc<dyn BotManagerService>) -> Self {
+        self.bot_manager_service = Some(service);
+        self
+    }
+
+    /// Add the Task 13 trusted team-manager sync facade (spec §6.1) AND
+    /// arm the team slice mounting: the credential-bound team write
+    /// routes exist only when the composition root verified the
+    /// boundary's configuration and injected this facade.
+    pub fn with_team_manager_sync_service(
+        mut self,
+        service: Arc<dyn TeamManagerSyncService>,
+    ) -> Self {
+        self.team_manager_sync_service = Some(service);
+        self
+    }
+
+    /// Whether the credential-bound team write routes may be mounted.
+    pub fn team_manager_routes_enabled(&self) -> bool {
+        self.team_manager_sync_service.is_some()
     }
 
     pub fn with_invite_code_service(mut self, service: Arc<dyn InviteCodeService>) -> Self {

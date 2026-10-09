@@ -1,3 +1,4 @@
+pub mod bot_managers;
 pub mod auth;
 pub mod bot;
 pub mod channel;
