@@ -18,6 +18,7 @@ mod storage_retry;
 pub mod delivery_runtime;
 pub mod delivery_policy;
 pub mod delivery_notifications;
+mod delivery_failure_notice;
 mod delivery_control;
 mod delivery_abort;
 pub(crate) mod human_notify_hook;

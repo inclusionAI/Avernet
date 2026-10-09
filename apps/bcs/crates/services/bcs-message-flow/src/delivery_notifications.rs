@@ -1,4 +1,5 @@
-//! Ephemeral, best-effort IM hints. Durable status queries remain authoritative.
+//! Best-effort legacy workbench failure notices and IM hints.
+//! Durable status queries remain authoritative.
 //! No notification replay, outbox, or per-message background task is created.
 use crate::BcsMessageFlow;
 use bcs_channel_api::{DeliveryReactionEvent, DeliveryReactionState};
@@ -8,7 +9,7 @@ use bcs_domain::{
 };
 use bcs_service_api::OutboundMessage;
 use bcs_service_api::{ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint};
-use std::{collections::BTreeMap, sync::Weak, time::Duration};
+use std::{collections::{BTreeMap, BTreeSet}, sync::Weak, time::Duration};
 
 const IM_QUEUED_HINT_DELAY_MS: i64 = 10_000;
 // Each attempt may wait two seconds on repository/provider I/O. Return to the
@@ -19,7 +20,16 @@ const MAX_IM_DELIVERY_ATTEMPTS_PER_TICK: usize = 1;
 struct PendingHint {
     rows: BTreeMap<String, PersistedMessageDelivery>,
     sent: Vec<&'static str>,
+    reported_failures: BTreeSet<String>,
     reaction: Option<DeliveryReactionState>,
+}
+
+fn unreported(entry: &PendingHint, row: &PersistedMessageDelivery, key: &str) -> bool {
+    if key == "failed" {
+        !entry.reported_failures.contains(&row.delivery_id)
+    } else {
+        !entry.sent.contains(&key)
+    }
 }
 
 fn reaction(entry: &PendingHint, now: i64) -> Option<DeliveryReactionState> {
@@ -121,7 +131,7 @@ pub async fn run(
                     let mut grouped: BTreeMap<&'static str, (&'static str, Vec<&PersistedMessageDelivery>)> = BTreeMap::new();
                     for row in entry.rows.values() {
                         if let Some((key, text)) = hint(row) {
-                            if !entry.sent.contains(&key) {
+                            if unreported(entry, row, key) {
                                 grouped.entry(key).or_insert_with(|| (text, Vec::new())).1.push(row);
                             }
                         }
@@ -134,12 +144,16 @@ pub async fn run(
                     let keys: Vec<_> = grouped.keys().copied().collect();
                     let result = tokio::time::timeout(Duration::from_secs(2), publish(&flow, &rows, text)).await;
                     if !matches!(result, Ok(Ok(()))) { tracing::warn!("delivery IM hint failed; not replaying an ambiguous external write"); }
+                    entry.reported_failures.extend(rows.iter()
+                        .filter(|row| hint(row).is_some_and(|(key, _)| key == "failed"))
+                        .map(|row| row.delivery_id.clone()));
                     entry.sent.extend(keys);
                 }
                 pending.retain(|_, entry| {
                     if !entry.rows.values().all(terminal) { return true; }
                     let reaction_pending = reaction(entry, now).is_some_and(|state| Some(state) != entry.reaction);
-                    let hint_pending = entry.rows.values().filter_map(hint).any(|(key, _)| !entry.sent.contains(&key));
+                    let hint_pending = entry.rows.values().any(|row|
+                        hint(row).is_some_and(|(key, _)| unreported(entry, row, key)));
                     reaction_pending || hint_pending
                 });
             }
@@ -211,6 +225,12 @@ async fn publish(
     rows: &[&PersistedMessageDelivery],
     text: String,
 ) -> bcs_service_api::ServiceResult<()> {
+    // Admission succeeds before downstream I/O. Report later failures using
+    // the same visible system chat as the synchronous path, not only a status
+    // event that existing workbench clients do not render.
+    if let Err(error) = crate::delivery_failure_notice::publish(flow, rows).await {
+        tracing::warn!(%error, "queued delivery failure notice failed; continuing IM notification");
+    }
     let (Some(channel), Some(repository), Some(row)) =
         (flow.channel.get(), flow.message_repo.as_ref(), rows.first())
     else {
