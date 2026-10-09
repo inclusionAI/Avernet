@@ -90,6 +90,9 @@ RevisionId = str          # "sha256:<hex64>" over canonical({spec, policy})
 Digest = str              # "sha256:<hex64>" address of bytes in the content store
 
 RevisionStatus = Literal["draft", "candidate", "accepted", "rejected", "promoted", "archived"]
+RiskTier = Literal["T0", "T1", "T2", "T3"]   # meaning of each tier: 08-promotion.md §5
+# BotRef {owner_id, bot_id}: the bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
 
 @dataclass(frozen=True)
 class Provenance:
@@ -102,7 +105,7 @@ class Provenance:
 class RevisionMetadata:
     id: RevisionId
     seq: int                         # per-bot, human-readable ("r42"); NOT an identity
-    bot_id: str
+    bot: BotRef                      # the bot this revision belongs to (owner + bot id)
     lineage_id: str                  # stable across descendants; a fork starts a new lineage
     parents: list[RevisionId]        # [] only for a bot's first revision; >1 for merge/crossover
     created_by: Provenance
@@ -122,10 +125,19 @@ class GenomeRevision:
 ```
 
 ```python
+# The persona files a bot may have: VALID_IDENTITY_FILES in
+# core/services/identity.py, minus MEMORY.md and IDENTITY.md (reserved, §7),
+# plus the proposed platform-managed LESSONS.md (§7 interim).
+PersonaFileType = Literal[
+    "SOUL.md", "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "OUTPUT.md", "USER.md",
+    "TOOLS.md", "HEARTBEAT.md", "BOOTSTRAP.md", "KNOWLEDGE.md", "CLAUDE.md", "GREETING.md",
+    "README.md", "LESSONS.md",
+]
+
 @dataclass(frozen=True)
 class PersonaFile:
-    type: str                        # "SOUL.md", "AGENTS.md", "RULES.md", "LESSONS.md", ...
-    digest: Digest
+    type: PersonaFileType            # which persona file this is
+    digest: Digest                   # address of its bytes in the content store
 
 @dataclass(frozen=True)
 class SkillOrigin:
@@ -165,7 +177,7 @@ class GenomeSpec:
   "revision": {                                   // computed / platform-written, not authored
     "id": "sha256:7c1e…",                         // hash of canonical({spec, policy}): content address
     "seq": 42,                                    // per-bot sequence number for humans ("r42"); not an identity
-    "bot_id": "bot_123",
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},   // owner + bot id; a bot id alone is not unique
     "lineage_id": "lin_support_agent",            // stable across forks; a fork starts a new lineage
     "parents": ["sha256:a90b…"],                  // r41; more than one parent allowed (crossover/merge)
     "created_by": {"kind": "strategy_run", "run_id": "run_7f3", "step": "propose",
@@ -215,13 +227,23 @@ class GenomeSpec:
 策略配置规定了自动化参与者可以在该 Bot 上变更什么。它由 Bot 所有者或租户管理员
 负责，从不由进化策略负责，平台会拒绝任何触及它的补丁。
 
+**为什么需要策略配置。** 策略配置保存所有者为*该* Bot 的进化设定的边界规则：哪些
+基因被锁定、哪些可变、哪些条目被固定，以及哪些基因使用更高的风险等级。它位于修订版
+内部并参与其哈希，因此每个修订版都记录了它在何种规则下产生并通过验证；查看一个旧
+修订版，就能知道当时自动化参与者被允许变更什么。进化策略可以读取它（以避免提议会被
+拒绝的变更），但任何补丁都不能修改它：只有所有者可以通过一次记录新修订版的常规编辑
+来修改（§4.4）。因此，自动化参与者无法放宽自身的限制。示例：在一个面向客户的支持
+Bot 上，所有者固定 `persona.RULES.md`（经法务签字确认的退款与升级规则），并保持
+`tools.mcp` 和 `tools.cli_tools` 锁定，这样夜间运行的进化策略可以改进 `SOUL.md`
+中的语气并添加技能，但永远无法改写这些规则，也无法为 Bot 添加新工具。
+
 ```python
 @dataclass(frozen=True)
 class GenomePolicy:
-    locked_genes: list[str]          # never changed by a patch; default includes "script", "tools.mcp", "policy"
-    mutable_genes: list[str]         # the only genes a patch may touch
-    pins: list[str]                  # individual write-protected items, e.g. "skills.refund-policy"
-    risk_overrides: dict[str, str]   # gene path -> risk tier ("T0".."T3"); may only RAISE a tier (proposed)
+    locked_genes: list[str]          # gene paths (§2.1) no patch may change; default includes "script", "tools.mcp", "policy"
+    mutable_genes: list[str]         # gene paths (§2.1) a patch may touch; everything else is off limits
+    pins: list[str]                  # single items inside a mutable gene that stay write-protected, e.g. "skills.refund-policy"
+    risk_overrides: dict[str, RiskTier]   # gene path -> tier to use instead of the default; may only RAISE a tier (proposed)
 ```
 
 ```jsonc
@@ -251,7 +273,10 @@ class GenomePolicy:
 ### 2.4 GenomeRef
 
 ```python
-RefName = str   # "active" | "previous" | "canary" | "draft" | "candidate/<run>/<n>"
+FixedRefName = Literal["active", "previous", "canary", "draft"]   # one each per bot (§5.1)
+# A ref name is one of the fixed names, or a run candidate ref of the exact form
+# "candidate/<run_id>/<n>" (validated on write; no other free-form names exist).
+RefName = FixedRefName | str
 
 @dataclass(frozen=True)
 class GenomeRef:
@@ -290,7 +315,7 @@ EditKind = Literal["replace_section", "insert_after"]   # full set fixed by RSI-
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
-    content: str
+    content: str                     # the new text to write
     heading: str | None = None       # for replace_section
     anchor: str | None = None        # for insert_after
 
@@ -301,19 +326,19 @@ class FileEdit:                      # op "file.edit": persona md, SKILL.md, res
 
 @dataclass(frozen=True)
 class SkillAdd:                      # op "skill.add"
-    name: str
+    name: str                        # the new skill's name, e.g. "invoice-lookup"
     files: dict[str, "str | DigestRef"]   # small text inline; larger files uploaded first, referenced by digest
 
 @dataclass(frozen=True)
 class SkillUpdate:                   # op "skill.update"
-    name: str
+    name: str                        # an existing bot-owned skill
     file_ops: list["UnifiedDiff"]    # {kind: "unified_diff", path, diff}
 
 @dataclass(frozen=True)
 class MemoryItem:
-    key: str
-    text: str
-    tags: list[str]
+    key: str                         # stable name of the item, e.g. "returns-window"; updates and retires address it
+    text: str                        # the fact, rule, or lesson itself
+    tags: list[str]                  # free-form topic labels, e.g. ["billing"]
     source: list[str]                # evidence ids, e.g. "episode:ep_91"
 
 @dataclass(frozen=True)
@@ -326,19 +351,19 @@ class MemoryUpdate:                  # op "memory.update" (proposed): replaces t
 
 @dataclass(frozen=True)
 class MemoryRetire:                  # op "memory.retire"
-    key: str
+    key: str                         # the item to retire
 
 @dataclass(frozen=True)
 class EngineConfigSet:               # op "engine_config.set"; allowlisted keys only
-    key: str
-    value: str
+    key: str                         # e.g. "reasoning_effort" (allowlist: open decision G-4)
+    value: str                       # always a string, e.g. "high" (no floats in hashed content)
 
 PatchOp = FileEdit | SkillAdd | SkillUpdate | MemoryAdd | MemoryUpdate | MemoryRetire | EngineConfigSet
 
 @dataclass(frozen=True)
 class GenomePatch:
-    patch_schema: int                # 1
-    base: RevisionId                 # must equal the parent; CAS on record
+    patch_schema: int                # schema version of the patch format; 1
+    base: RevisionId                 # the revision the patch was written against; must equal the parent (CAS on record)
     ops: list[PatchOp]
     rationale: str                   # required; shown to reviewers
     evidence: list[str]              # required for non-trivial ops
@@ -457,7 +482,8 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 1. **修订版标识与谱系**：一个内容哈希 id 加上一个可读的每 Bot 序号、父代、来源、
    状态，以及通过比较并交换移动的具名引用（§5）。
-2. **一个不可进化的 `policy` 部分**（§2.3）。
+2. **一个不可进化的 `policy` 部分**：所有者为该 Bot 的进化设定的边界规则，随每个
+   修订版一同记录，且只能由所有者修改（原因见 §2.3）。
 3. **固定版本的内容**：每个来源都解析为提交 SHA 或内容摘要，因此同一修订版总是
    产生相同的字节（§4.2）。
 4. **完整性**：每个修订版中都包含所有类别（§4.3）。
@@ -563,7 +589,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
   发出，并在发布记录上存储 `revision_id`。
 
 现有的服务 Bot 回滚功能保持不变。本设计既不替代也不扩展它。晋升端点
-（`POST /bots/{bot}/genome/promotions`）和发布规则在
+（`POST /bots/{bot_id}/genome/promotions`）和发布规则在
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义；基因组注册表提供它所使用的
 CAS 引用移动和编译步骤。
 
@@ -667,10 +693,10 @@ CAS 引用移动和编译步骤。
 class EngineMemoryProjection(Protocol):
     """Engine-owned. Backend never learns where or how memory is stored."""
 
-    def export_memory(self, bot_id: str) -> list[MemoryItem]:
+    def export_memory(self, bot: BotRef) -> list[MemoryItem]:
         """Read the engine's runtime memory into normalized items, for consolidation strategies."""
 
-    def project_memory(self, bot_id: str, items: list[MemoryItem],
+    def project_memory(self, bot: BotRef, items: list[MemoryItem],
                        mode: Literal["seed", "merge", "replace"]) -> None:
         """Materialise curated items into the engine's layout.
         seed: only if absent. merge: curated items upserted by key, runtime items untouched.
@@ -723,8 +749,8 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 - **在 Backend 内部，** `ManifestContentService.read(digest)` 返回字节，并在读取时
   重新校验哈希。
 - **在 Backend 外部**（UI、CLI、进化策略、评估器），注册表 API 提供
-  `GET /bots/{bot}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
-  本身并不是一种访问凭证。新内容通过 `PUT /bots/{bot}/genome/content` 上传，该接口
+  `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
+  本身并不是一种访问凭证。新内容通过 `PUT /bots/{bot_id}/genome/content` 上传，该接口
   返回其摘要。
 - **在应用时，** 编译修订版会输出按摘要指向内容存储的 Manifest 条目（§8 第 6 项）。
   应用将这些字节交给物化器，方式与目前处理获取到的内容完全相同。
@@ -754,8 +780,8 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
 （Meta-Harness 的经验），而无需让 git 成为事实来源。
 
 提议的表（名称仅为示意，由 RSI-03 确定）：`ac_genome_revision`
-（id、bot、seq、谱系、父代、来源、状态、`{spec, policy}` 的规范 JSON），
-`ac_genome_ref`（bot、名称、修订版、用于 CAS 的版本），
+（id、owner_id、bot_id、seq、谱系、父代、来源、状态、`{spec, policy}` 的规范
+JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 的版本），
 `ac_genome_ref_event`（仅追加的引用日志），`ac_genome_patch`（摘要、基础、规范 JSON）。
 
 ### 9.3 序列化：规范 JSON
@@ -805,15 +831,15 @@ from typing import Protocol, Literal
 
 class GenomeRegistry(Protocol):
     # --- revisions -------------------------------------------------------
-    def get_revision(self, bot_id: str, rev: RevisionId | str) -> GenomeRevision:
+    def get_revision(self, bot: BotRef, rev: RevisionId | str) -> GenomeRevision:
         """Accepts a revision id, "r<seq>", or a ref name. Raises NotFound."""
 
-    def list_revisions(self, bot_id: str, *, status: RevisionStatus | None = None,
+    def list_revisions(self, bot: BotRef, *, status: RevisionStatus | None = None,
                        parent: RevisionId | None = None, lineage_id: str | None = None,
                        page: int = 1, page_size: int = 20) -> "Page[RevisionMetadata]":
         """Metadata only, newest seq first."""
 
-    def record_patch(self, bot_id: str, patch: GenomePatch, *, created_by: Provenance,
+    def record_patch(self, bot: BotRef, patch: GenomePatch, *, created_by: Provenance,
                      status: Literal["draft", "candidate"],
                      allowed_genes: list[str] | None = None) -> GenomeRevision:
         """Validate (§6.2), store the patch content-addressed, apply it to `patch.base`,
@@ -821,48 +847,56 @@ class GenomeRegistry(Protocol):
         revision. `allowed_genes` is None for owner patches (policy only), a list for runs.
         Raises BaseMismatch, PatchRejected(reasons), LimitExceeded."""
 
-    def record_manifest(self, bot_id: str, manifest_yaml: str, *, created_by: Provenance,
+    def record_manifest(self, bot: BotRef, manifest_yaml: str, *, created_by: Provenance,
                         base: RevisionId | None) -> GenomeRevision:
         """Parse a Manifest document, fill omitted categories from `base` (or current state),
         pin every source, store canonical JSON, keep the YAML as provenance. Status `draft`."""
 
-    def set_status(self, bot_id: str, rev: RevisionId, status: RevisionStatus,
+    def set_status(self, bot: BotRef, rev: RevisionId, status: RevisionStatus,
                    *, actor: Provenance, reason: str) -> None:
         """Platform-internal (Promotion). Status is metadata; content never changes."""
 
-    def diff(self, bot_id: str, rev: RevisionId, against: RevisionId) -> "GenomeDiff":
+    def diff(self, bot: BotRef, rev: RevisionId, against: RevisionId) -> "GenomeDiff":
         """Per-category, per-item differences; text files as unified diffs."""
 
     # --- refs ------------------------------------------------------------
-    def list_refs(self, bot_id: str) -> list[GenomeRef]: ...
+    def list_refs(self, bot: BotRef) -> list[GenomeRef]: ...
 
-    def move_ref(self, bot_id: str, update: RefUpdate, *, actor: Provenance) -> GenomeRef:
+    def move_ref(self, bot: BotRef, update: RefUpdate, *, actor: Provenance) -> GenomeRef:
         """Compare-and-swap. Raises RefConflict(current) if the ref moved.
         Only the designated mover may move each ref kind (§5.1); `active`, `previous`,
         `canary` are moved only by Promotion."""
 
     # --- content ---------------------------------------------------------
-    def read_content(self, bot_id: str, digest: Digest) -> bytes:
+    def read_content(self, bot: BotRef, digest: Digest) -> bytes:
         """Access-checked against the bot; the digest must be reachable from one of its revisions
         or uploads. Hash re-verified on read."""
 
-    def put_content(self, bot_id: str, data: bytes, *, provenance: Provenance) -> Digest:
+    def put_content(self, bot: BotRef, data: bytes, *, provenance: Provenance) -> Digest:
         """Produced content (§9.1 extension 1). Idempotent by digest."""
 
     # --- apply / materialisation -----------------------------------------
-    def compile(self, bot_id: str, rev: RevisionId) -> CompiledManifest:
+    def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
         """Pinned, total Manifest document plus memory projection. Used by Promotion (apply,
         service-bot publish) and Verification (eval bot materialisation)."""
 ```
 
 ```python
+GeneChangeKind = Literal["added", "removed", "modified"]
+
+@dataclass(frozen=True)
+class GeneChange:
+    gene: str                        # gene path (§2.1), e.g. "persona.SOUL.md"
+    kind: GeneChangeKind
+    diff: str | None = None          # unified diff for modified text files; None otherwise
+
 @dataclass(frozen=True)
 class GenomeDiff:
-    revision: RevisionId
-    against: RevisionId
-    changes: list["GeneChange"]      # {gene, kind: added|removed|modified, diff?: str}
-    risk_tier: str                   # max tier over the changes, by the §6.3 mapping
-    rewrite_flags: list[str]         # files flagged `rewrite`
+    revision: RevisionId             # the newer side
+    against: RevisionId              # the side it is compared with
+    changes: list[GeneChange]
+    risk_tier: RiskTier              # highest tier over the changes, by the §6.3 mapping
+    rewrite_flags: list[str]         # paths of files flagged `rewrite` (§6.2)
 ```
 
 错误是带类型的，并映射到 §12 中的 HTTP 状态码：`NotFound` → 404，
@@ -879,7 +913,7 @@ class GenomeDiff:
 第一轮迭代中的调用方是人（UI、`avn` CLI）、流水线和平台服务；Bot 调用方推迟到之后
 单独的设计中。
 
-### GET /bots/{bot}/genome/revisions
+### GET /bots/{bot_id}/genome/revisions
 
 列出经过筛选的修订版元数据。调用方：UI、CLI（`avn genome log`）、流水线、
 实验记录读模型。
@@ -903,7 +937,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 
 错误：404 未知 Bot；400 无效筛选条件。
 
-### POST /bots/{bot}/genome/revisions
+### POST /bots/{bot_id}/genome/revisions
 
 从补丁（`{base, patch}`）或 Manifest 文档（`{manifest}`）记录修订版。调用方：
 进化运行（当进化策略调用 `ctx.candidates.submit` 时；进化策略从不直接调用此接口），
@@ -957,7 +991,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions?status=candidate&parent=sha256:a90
 422 `patch_rejected` 并附带原因（`locked_gene`、`pinned_item`、`gene_not_allowed`、
 `missing_rationale`、`schema`）；413 `limit_exceeded`。
 
-### GET /bots/{bot}/genome/revisions/{rev}
+### GET /bots/{bot_id}/genome/revisions/{rev}
 
 完整修订版（元数据、`spec`、`policy`）。`{rev}` 可以是 id、`r<seq>` 或引用名。
 调用方：UI、CLI（`avn genome show`）、进化运行（用于构建 `ctx.parent`）、验证。
@@ -970,7 +1004,8 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "genome_schema": 1,
-  "revision": {"id": "sha256:a90b…", "seq": 41, "bot_id": "bot_123", "lineage_id": "lin_support_agent",
+  "revision": {"id": "sha256:a90b…", "seq": 41, "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
+               "lineage_id": "lin_support_agent",
                "parents": ["sha256:5d02…"], "status": "promoted", "created_at": "2026-09-30T02:40:00Z",
                "created_by": {"kind": "user", "actor": "user_owner_1"}, "patch_from_parent": null,
                "evidence": [], "evaluations": ["eval:ev_288"], "annotations": {}},
@@ -984,7 +1019,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r41
 
 错误：404。
 
-### GET /bots/{bot}/genome/revisions/{rev}/diff?against=
+### GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=
 
 比较两个修订版的差异。调用方：评审 UI 和 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)
 中的候选报告、CLI（`avn genome diff`）。
@@ -1010,7 +1045,7 @@ GET /openapi/v1/bots/bot_123/genome/revisions/r42/diff?against=r41
 
 错误：404 任一修订版不存在；422 修订版属于不同的 Bot。
 
-### GET /bots/{bot}/genome/refs
+### GET /bots/{bot_id}/genome/refs
 
 列出引用。调用方：UI、CLI（`avn genome refs`）、进化运行（解析绑定的 `parent`）、
 晋升。
@@ -1033,11 +1068,11 @@ GET /openapi/v1/bots/bot_123/genome/refs
 }
 ```
 
-### PUT /bots/{bot}/genome/refs/draft
+### PUT /bots/{bot_id}/genome/refs/draft
 
 以比较并交换方式移动所有者的 `draft` 引用。由所有者通过 UI/CLI 调用。
 （`active`、`previous`、`canary` 不能在此移动；它们只能通过
-[08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的 `POST /bots/{bot}/genome/promotions`
+[08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的 `POST /bots/{bot_id}/genome/promotions`
 移动。）
 
 ```jsonc
@@ -1062,7 +1097,7 @@ GET /openapi/v1/bots/bot_123/genome/refs
 {"error": "ref_conflict", "ref": "draft", "expected_revision": "sha256:a90b…", "current_revision": "sha256:3e61…"}
 ```
 
-### GET /bots/{bot}/genome/content/{digest}
+### GET /bots/{bot_id}/genome/content/{digest}
 
 按摘要获取字节。针对 Bot 进行访问检查。调用方：UI、CLI
 （`avn genome content get`）、进化策略的工作区物化（通过进化运行）、验证。
@@ -1082,7 +1117,7 @@ You are the support agent for …
 
 错误：404 未知摘要，或该摘要无法从此 Bot 到达。
 
-### PUT /bots/{bot}/genome/content
+### PUT /bots/{bot_id}/genome/content
 
 上传产出型内容；返回其摘要。在提交按摘要引用大文件的补丁之前使用。调用方：
 进化运行（代表进化策略）、CLI（`avn genome content put`）。
@@ -1105,7 +1140,7 @@ def lookup(order_id): ...
 
 ### 由其他组件负责的相关端点
 
-`POST /bots/{bot}/genome/promotions` 移动 `active`（包括回到更早的修订版）。
+`POST /bots/{bot_id}/genome/promotions` 移动 `active`（包括回到更早的修订版）。
 它位于基因组路径下，但在 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义。
 
 ### 内部接口
@@ -1123,7 +1158,7 @@ def lookup(order_id): ...
 from avernet_evolution import Client, RefConflict
 
 c = Client.from_env()
-active = c.genome.get(bot="bot_123", rev="active")            # r41
+active = c.genome.get(bot_id="bot_123", rev="active")         # r41; the caller owns the bot, so no entity_id
 
 patch = {
     "patch_schema": 1, "base": active.revision.id,
@@ -1132,17 +1167,17 @@ patch = {
                         "content": "Confirm the order id before quoting amounts."}]}],
     "rationale": "Owner edit after a customer complaint.", "evidence": [],
 }
-rev = c.genome.record(bot="bot_123", base=active.revision.id, patch=patch, status="draft",
+rev = c.genome.record(bot_id="bot_123", base=active.revision.id, patch=patch, status="draft",
                       idempotency_key="owner-edit-2026-10-08-01")
 try:
-    c.genome.refs.set_draft(bot="bot_123", revision=rev.id, expected_revision=active.revision.id)
+    c.genome.refs.set_draft(bot_id="bot_123", revision=rev.id, expected_revision=active.revision.id)
 except RefConflict as e:
     print("someone else moved draft to", e.current_revision)   # re-read and decide
 
-print(c.genome.diff(bot="bot_123", rev=rev.id, against=active.revision.id).changes)
+print(c.genome.diff(bot_id="bot_123", rev=rev.id, against=active.revision.id).changes)
 
 # Going back later is just promoting the earlier revision (endpoint in 08-promotion.md)
-c.genome.promote(bot="bot_123", revision="r41", reason="r42 increased escalations")
+c.genome.promote(bot_id="bot_123", revision="r41", reason="r42 increased escalations")
 ```
 
 通过 CLI 完成同样的操作：
@@ -1162,7 +1197,8 @@ avn genome export bot_123 --format git ./bot_123-history
 # Illustrative only: inside apps/evolution, handling ctx.candidates.submit for run_7f3
 async def submit_candidate(run: Run, candidate: Candidate) -> str:
     rev = await genome_api.record_revision(
-        bot=run.bot_id, base=candidate.patch["base"], status="candidate",
+        bot_id=run.bot.bot_id, entity_id=run.bot.owner_id,   # the run's bot: id in the path, owner as entity_id
+        base=candidate.patch["base"], status="candidate",
         run={"run_id": run.id, "binding_id": run.binding_id, "allowed_genes": run.allowed_genes},
         patch=candidate.patch,
         idempotency_key=f"{run.id}/candidate/{candidate.patch_digest}",
@@ -1179,12 +1215,13 @@ async def submit_candidate(run: Run, candidate: Candidate) -> str:
 
 ```python
 # Illustrative only: inside Backend promotion, after the gate accepted r42
-compiled = registry.compile("bot_123", "sha256:7c1e…")
-registry.move_ref("bot_123", RefUpdate(name="previous", revision=current_active,
+bot = BotRef(owner_id="user_owner_5", bot_id="bot_123")
+compiled = registry.compile(bot, "sha256:7c1e…")
+registry.move_ref(bot, RefUpdate(name="previous", revision=current_active,
                   expected_revision=current_previous, reason=reason), actor=actor)
-registry.move_ref("bot_123", RefUpdate(name="active", revision=compiled.revision_id,
+registry.move_ref(bot, RefUpdate(name="active", revision=compiled.revision_id,
                   expected_revision=current_active, reason=reason), actor=actor)
-apply_service.apply(bot_id="bot_123", document=compiled.document,
+apply_service.apply(bot=bot, document=compiled.document,
                     revision_id=compiled.revision_id, document_digest=compiled.document_digest)
 ```
 

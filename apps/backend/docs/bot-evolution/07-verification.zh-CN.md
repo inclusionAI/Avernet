@@ -30,6 +30,21 @@
   （[§7](#7-治理防奖励作弊与验证器完整性)）。任何循环，包括第 3 层，都不得
   修改它们。
 
+**为什么验证不像进化策略那样可插拔。** 生成候选向众多进化策略开放，但评判
+候选是有意由平台负责的。如果提出变更的一方也能选择或编写自己的评判者，它就
+可以给自己的作业打分：Darwin Gödel Machine 曾禁用了它自己的幻觉检查器，而
+自我评分的循环一贯偏于宽松（[§7](#7-治理防奖励作弊与验证器完整性)）。
+*确实*可插拔的部分仍留在这条界线的平台一侧：
+
+- **执行器和评分器是插件协议**（[§9](#9-服务接口)）。平台实现它们，各团队也
+  可以贡献新的实现，但只能作为经过评审、由人批准的验证器变更，绝不能在某个
+  进化策略或某次运行内部进行。
+- **所有者为每个绑定选择验证配置。** 验证配置可以比平台默认更严格，但绝不能
+  更宽松。
+- **进化策略可以添加训练用例并使用训练划分评估**
+  （`evaluate.train@1`，[§5](#5-训练划分评估evaluatetrain1)），作为其自身搜索
+  的反馈；训练结果绝不决定是否接受。
+
 **负责：**
 
 - **套件注册表（Suite registry）**：套件、套件中的用例，以及由平台为每个
@@ -89,22 +104,27 @@ Backend 钩子（[§8](#8-部署位置复用与迁移)）。
 各自取判定创建时的当前版本。
 
 ```python
+RiskTier = Literal["T0", "T1", "T2", "T3"]          # meaning of each tier: 08-promotion.md
+ExecutorKind = Literal["local_sandbox", "deployed_sandbox"]   # the executor plugins of §2.3
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
+
 @dataclass(frozen=True)
 class Suite:
     suite_id: str                      # "support-core"
     version: int                       # increments on every reviewed change
     scope: SuiteScope                  # platform-wide, or one bot
-    case_format: Literal["clawbench-md@1"]
+    case_format: Literal["clawbench-md@1"]   # file format of the cases; a new format is a reviewed verifier change
     graders: list[GraderRef]           # default graders for cases that name none
     split_counts: dict[Split, int]     # counts are always visible; contents are not
     digest: str                        # content address of the whole suite version
     created_at: datetime
-    change_reason: str                 # human-reviewed changes only
+    change_reason: str                 # why this version was made; human-reviewed changes only
 
 @dataclass(frozen=True)
 class SuiteScope:
     kind: Literal["platform", "bot"]
-    bot_id: str | None                 # set only when kind == "bot"
+    bot: BotRef | None                 # the bot the suite belongs to; set only when kind == "bot"
 ```
 
 ```jsonc
@@ -112,7 +132,7 @@ class SuiteScope:
 {
   "suite_id": "support-core",
   "version": 7,
-  "scope": {"kind": "bot", "bot_id": "bot_123"},
+  "scope": {"kind": "bot", "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}},
   "case_format": "clawbench-md@1",
   "graders": [{"id": "platform/clawbench", "version": "1.0.0"}],
   "split_counts": {"train": 40, "validation": 30, "holdout": 20, "regression": 18, "safety": 12},
@@ -142,6 +162,11 @@ ClawBench 的 `interactions`）、工作区文件、预期行为以及评分规�
 只有 `validation` 决定是否有改进；`regression` 与 `safety` 只能阻断；
 `train` 绝不用于接受判断。
 
+**必过由划分决定，而不是由用例决定。** `regression` 或 `safety` 中的每个
+用例都是必过的，其他用例都不是（见下文的 `MUST_PASS_SPLITS`）。因此用例自身
+没有 `must_pass` 字段，验证配置也不能把额外的用例标记为必过：要让一个用例
+成为必过，需要通过一次经过评审的套件变更把它移入 `regression`。
+
 ```python
 class Split(StrEnum):
     TRAIN = "train"
@@ -150,18 +175,31 @@ class Split(StrEnum):
     REGRESSION = "regression"
     SAFETY = "safety"
 
+# The splits whose cases must not newly fail (within the profile's tolerance for regression).
+MUST_PASS_SPLITS: frozenset[Split] = frozenset({Split.REGRESSION, Split.SAFETY})
+
+class CaseCategory(StrEnum):
+    """Topical category of a case, used to group results and spot coverage gaps.
+    Open-ended by design: a new value is added by a reviewed suite change."""
+    SANITY = "sanity"                  # the fail-fast case (§4 step 2)
+    REFUNDS = "refunds"
+    RETURNS = "returns"
+    SHIPPING = "shipping"
+    BILLING = "billing"
+    ESCALATION = "escalation"
+    SAFETY = "safety"
+
 @dataclass(frozen=True)
 class Case:
     case_id: str                       # stable id within the suite
     suite_id: str
     suite_version: int
-    split: Split                       # assigned by the platform
-    must_pass: bool                    # true for regression and safety
+    split: Split                       # assigned by the platform; decides must-pass (MUST_PASS_SPLITS)
     digest: str                        # content address of the Markdown case file
     origin: CaseOrigin                 # where it came from (authored, mined, strategy-added)
-    name: str
-    category: str
-    timeout_s: int
+    name: str                          # short human-readable title
+    category: CaseCategory
+    timeout_s: int                     # the rollout is stopped and scored as failed after this many seconds
     grading: GradingSpec               # grader kind, rubric, weights
     source_episode: str | None         # set when the case was mined from a real episode
 
@@ -178,8 +216,7 @@ class CaseOrigin:
   "case_id": "refund_partial_03",
   "suite_id": "support-core",
   "suite_version": 7,
-  "split": "regression",
-  "must_pass": true,
+  "split": "regression",                    // must-pass because of its split
   "digest": "sha256:e19a…",
   "origin": {"kind": "mined", "run_id": null},
   "name": "Partial refund on a split shipment",
@@ -220,12 +257,12 @@ breakdown`，因为反思型进化策略（GEPA、ClawEvolve tune）需要的是
 ```python
 @dataclass(frozen=True)
 class GraderRef:
-    id: str                            # "platform/clawbench"
-    version: str                       # "1.0.0"
+    id: str                            # grader plugin id, e.g. "platform/clawbench"
+    version: str                       # grader plugin version, e.g. "1.0.0"
 
 @dataclass(frozen=True)
 class Grade:
-    score: float                       # 0.0 .. 1.0
+    score: float                       # 0.0 = complete failure .. 1.0 = perfect, by the case's grading spec
     critique: str                      # textual feedback; shown to strategies on train only
     breakdown: dict[str, float]        # per criterion or per sub-grader
     judges: list[JudgeScore]           # empty for automated grading
@@ -240,9 +277,9 @@ class JudgeScore:
 @dataclass(frozen=True)
 class Rollout:
     case_id: str
-    revision_id: str
-    seed: int
-    executor: str                      # "local_sandbox" | "deployed_sandbox"
+    revision_id: str                   # the bot version that was run
+    seed: int                          # which repetition of the case this is
+    executor: ExecutorKind
     transcript_ref: str                # eval trace stored in the Experience Store
     cost: Cost
     grade: Grade
@@ -284,13 +321,13 @@ class VerificationProfile:
     profile_id: str                    # "default"
     version: int                       # profiles are referenced as "default@1"
     stricter_than: list[str]           # profiles this one may replace in a binding
-    executor: Literal["local_sandbox", "deployed_sandbox"]
+    executor: ExecutorKind
     seeds: SeedPolicy
     validation: ValidationRule
     regression_tolerance: int          # newly failing must-pass regression cases allowed
     safety_tolerance: Literal[0]       # always zero
-    ensemble_from_tier: str            # "T2": use an ensemble for candidates at or above this risk tier
-    min_judge_agreement: float
+    ensemble_from_tier: RiskTier       # use a judge ensemble for candidates at or above this risk tier
+    min_judge_agreement: float         # below this inter-judge agreement the verdict is inconclusive
     holdout_on_final_candidate: bool
     overfit_guard: OverfitRule
     cost: CostRule
@@ -349,14 +386,14 @@ class CostRule:
 @dataclass(frozen=True)
 class Evaluation:
     evaluation_id: str                 # "ev_301"
-    bot_id: str
+    bot: BotRef                        # the bot whose revisions are evaluated (owner + bot id)
     purpose: Literal["verification", "train", "holdout_audit", "ad_hoc", "shadow"]
     subject: str                       # revision id, or a workspace id for train evaluations
     baseline: str | None               # revision id; None for unpaired (train, single-revision ad-hoc)
     suites: list[SuiteVersionRef]
     splits: list[Split]
-    executor: str
-    seeds: int
+    executor: ExecutorKind
+    seeds: int                         # repetitions per case (each is one rollout per revision)
     operation_id: str                  # status lives on the operation
     status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
     rollouts: list[Rollout]            # filled as it runs
@@ -378,7 +415,7 @@ class VerifierVersion:
 // A finished paired verification evaluation, summarised (rollouts truncated to one).
 {
   "evaluation_id": "ev_301",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "purpose": "verification",
   "subject": "sha256:7c1e…",               // r42, the candidate revision
   "baseline": "sha256:a90b…",              // r41, its parent
@@ -416,6 +453,20 @@ class VerifierVersion:
 
 ```python
 VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
+SanityResult = Literal["pass", "fail", "not_run"]
+OverfitFlag = Literal["gain_ratio_exceeded", "seed_fluctuation_exceeded"]   # the two OverfitRule checks
+# Reason categories a strategy may see (proposed): one per outcome of the verdict
+# policy in §4.1. They name a rule, never a case. Added only by a reviewed change.
+VerdictReasonCategory = Literal[
+    "validation_improved",             # accept: CI lower bound cleared min_effect
+    "validation_not_improved",         # reject: CI upper bound below min_effect
+    "validation_inconclusive",         # inconclusive: the interval straddles min_effect
+    "judge_disagreement",              # inconclusive: judges agreed less than min_judge_agreement
+    "must_pass_failure",               # reject: a regression or safety case newly fails beyond tolerance
+    "holdout_drop",                    # reject: the holdout audit got worse
+    "sanity_failed",                   # reject: the fail-fast case failed
+    "floor_rejected",                  # reject: Promotion's static floor refused the patch
+]
 
 @dataclass(frozen=True)
 class FloorRef:                        # Promotion's static floor, run at submission (08-promotion.md)
@@ -425,22 +476,22 @@ class FloorRef:                        # Promotion's static floor, run at submis
 @dataclass(frozen=True)
 class Verdict:
     candidate: str                     # candidate id: content hash of the patch
-    bot_id: str
+    bot: BotRef                        # the bot the candidate is for (owner + bot id)
     run_id: str | None                 # None for a publish-flow verification outside a run
     revision: str | None               # candidate revision id recorded by the Genome Registry; present once recorded
     parent_revision: str
     profile: str                       # "default@1"
     status: VerdictStatus
     floor: FloorRef                    # reference only: floor rules and results are owned by Promotion
-    sanity: Literal["pass", "fail", "not_run"]
+    sanity: SanityResult
     splits: dict[Split, SplitResult]   # per-split aggregates: validation, regression, safety, holdout (when run)
-    judge_agreement: float | None
-    overfit_flags: list[str]
+    judge_agreement: float | None      # 0..1; None when fewer than two judges graded
+    overfit_flags: list[OverfitFlag]
     tolerance_used: bool               # a regression tolerance was spent; Promotion routes to review
     cost: CostComparison
     evaluations: list[str]             # evaluation ids
     verifier: VerifierVersion
-    reasons: list[str]
+    reasons: list[str]                 # human-readable explanation for operators, e.g. "no must-pass failures"
     decided_at: datetime | None
 
 @dataclass(frozen=True)
@@ -465,7 +516,7 @@ class StrategyVerdictView:             # what ctx.candidates.verdict(id) returns
     status: VerdictStatus
     revision: str | None               # candidate revision, so the next round can build on it
     aggregates: dict[str, AggregateScores]   # {"validation": ...} only; empty while pending
-    reasons: list[str]                 # categories only, e.g. "must_pass_failure"; no case ids
+    reasons: list[VerdictReasonCategory]   # categories only; no case ids
 ```
 
 ```jsonc
@@ -473,7 +524,7 @@ class StrategyVerdictView:             # what ctx.candidates.verdict(id) returns
 // The full verdict as stored and shown to operators and reviewers.
 {
   "candidate": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "run_id": "run_7f3",
   "revision": "sha256:7c1e…",
   "parent_revision": "sha256:a90b…",
@@ -602,7 +653,7 @@ inconclusive ⇔ otherwise  → the strategy may spend more budget (submit with 
 ```
 
 ```python
-def decide(floor: FloorRef, sanity: str, splits: dict[Split, SplitResult],
+def decide(floor: FloorRef, sanity: SanityResult, splits: dict[Split, SplitResult],
            agreement: float | None, p: VerificationProfile) -> VerdictStatus:
     """Pure function; the default verdict policy above."""
     if not floor.passed or sanity == "fail":
@@ -800,7 +851,7 @@ ClawEvolve/ClawBench 条目（ClawBench 运行器、ClawWeb Bench 存储、ClawE
 | 部件 | 负责方 | 说明 |
 | --- | --- | --- |
 | 验证服务（计划、比较器、判定、验证配置） | `apps/evolution`（C5） | 由进化运行、晋升（留出集审计、候选报告）、服务型 Bot 发布流程以及运维人员调用 |
-| 套件注册表 | `apps/evolution` | 以 ClawWeb Bench 数据模型和 ClawBench 用例格式为起点；增加 `split`、`must_pass` 和可见性 |
+| 套件注册表 | `apps/evolution` | 以 ClawWeb Bench 数据模型和 ClawBench 用例格式为起点；增加 `split`（它同时决定是否必过）和可见性 |
 | 执行器插件 | 本地沙箱：`apps/evolution`。已部署沙箱：**Backend** `eval_publish` + `eval_env` 接缝 | 把评估环境插件协议做实（目前是 Noop）是这项工作的一部分 |
 | 评分器插件 | 归验证器所有 | 先做 `platform/clawbench`（automated / rubric / hybrid），再做 ensemble |
 | 发布流程钩子 | Backend | 在服务型 Bot 的 `VALIDATING → ONLINE_PUB` 上提供可选的验证门禁，使用的是同一个服务 |
@@ -867,11 +918,11 @@ class VerificationService(Protocol):
         baseline). Returns the operation id; the operation's result carries the
         evaluation_id. Never feeds promotion."""
 
-    async def get_evaluation(self, bot_id: str, evaluation_id: str,
+    async def get_evaluation(self, bot: BotRef, evaluation_id: str,
                              view: CallerView) -> Evaluation:
         """Evaluation with rollouts filtered to what the caller may see."""
 
-    async def audit_holdout(self, bot_id: str, revision_id: str, *,
+    async def audit_holdout(self, bot: BotRef, revision_id: str, *,
                             reason: Literal["final_candidate", "periodic"],
                             idempotency_key: str) -> str:
         """Score a revision on the sealed holdout, paired with its parent.
@@ -879,18 +930,18 @@ class VerificationService(Protocol):
 
 
 class SuiteRegistry(Protocol):
-    async def list_suites(self, *, bot_id: str | None = None) -> list[Suite]: ...
+    async def list_suites(self, *, bot: BotRef | None = None) -> list[Suite]: ...   # None: platform suites only
     async def get_suite(self, suite_id: str, *, version: int | None = None,
                         view: CallerView) -> SuiteDetail:
         """`version=None` means the current version. Case contents per caller view."""
-    async def cases_for(self, bot_id: str, splits: list[Split]) -> list[Case]:
+    async def cases_for(self, bot: BotRef, splits: list[Split]) -> list[Case]:
         """Platform suites plus the bot's suites, current versions. Internal only."""
 
 
 class Executor(Protocol):
     """Verifier-owned plugin: runs one revision on one case in a sandbox."""
-    kind: str                                   # "local_sandbox" | "deployed_sandbox"
-    async def prepare(self, bot_id: str, revision_id: str, key: str) -> SandboxHandle: ...
+    kind: ExecutorKind
+    async def prepare(self, bot: BotRef, revision_id: str, key: str) -> SandboxHandle: ...
     async def execute(self, sandbox: SandboxHandle, case: Case, seed: int) -> RolloutRecord: ...
     async def release(self, sandbox: SandboxHandle) -> None: ...
 
@@ -924,7 +975,7 @@ class Comparator(Protocol):
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// Request: GET /openapi/v1/evolution/suites?bot=bot_123
+// Request: GET /openapi/v1/evolution/suites?bot_id=bot_123  (owner: entity_id, defaults to the caller)
 {}
 ```
 
@@ -934,11 +985,11 @@ class Comparator(Protocol):
 {
   "total": 2,
   "items": [
-    {"suite_id": "support-core", "version": 7, "scope": {"kind": "bot", "bot_id": "bot_123"},
+    {"suite_id": "support-core", "version": 7, "scope": {"kind": "bot", "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}},
      "case_format": "clawbench-md@1",
      "split_counts": {"train": 40, "validation": 30, "holdout": 20, "regression": 18, "safety": 12},
      "digest": "sha256:3b8d…"},
-    {"suite_id": "platform-safety", "version": 3, "scope": {"kind": "platform", "bot_id": null},
+    {"suite_id": "platform-safety", "version": 3, "scope": {"kind": "platform", "bot": null},
      "case_format": "clawbench-md@1",
      "split_counts": {"train": 0, "validation": 0, "holdout": 0, "regression": 0, "safety": 25},
      "digest": "sha256:0f6a…"}
@@ -968,10 +1019,10 @@ class Comparator(Protocol):
   "version": 7,
   "digest": "sha256:3b8d…",
   "cases": [
-    {"case_id": "refund_partial_03", "split": "regression", "must_pass": true,
+    {"case_id": "refund_partial_03", "split": "regression",
      "digest": "sha256:e19a…", "name": "Partial refund on a split shipment",
      "content_ref": "/openapi/v1/evolution/suites/support-core/cases/refund_partial_03"},
-    {"case_id": "hold_17", "split": "holdout", "must_pass": false,
+    {"case_id": "hold_17", "split": "holdout",
      "digest": "sha256:44c0…", "name": null, "content_ref": null}
   ]
 }
@@ -979,16 +1030,16 @@ class Comparator(Protocol):
 
 错误：`404` 未知套件或版本。
 
-### POST /bots/{bot}/evolution/evaluations
+### POST /bots/{bot_id}/evolution/evaluations
 
 仅限运维人员的临时评估：在选定的套件和划分上评估一个修订版，可选择与一个
 基线配对。供 Bot 所有者和研究人员使用，例如在提议一个手写修订版之前先对其
 进行检查。需要 `Idempotency-Key` 请求头。返回 `202` 和
 `{operation_id}`；不做任何等待。状态通过
-`GET /bots/{bot}/evolution/operations/{operation}` 查询
+`GET /bots/{bot_id}/evolution/operations/{operation}` 查询
 （[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）；操作成功后，其 `result`
 携带 `evaluation_id`，评估本身通过
-`GET /bots/{bot}/evolution/evaluations/{evaluation}` 读取。临时评估永远不会产生用于晋升的
+`GET /bots/{bot_id}/evolution/evaluations/{evaluation}` 读取。临时评估永远不会产生用于晋升的
 判定。提议：它不能包含 `holdout`（按需运行留出集会通过选择过程将其
 泄漏）。
 
@@ -1016,7 +1067,7 @@ class Comparator(Protocol):
 幂等键但请求体不同；Bot 或租户的预算上限（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）
 会以共享的预算错误拒绝。
 
-### GET /bots/{bot}/evolution/evaluations/{evaluation}
+### GET /bots/{bot_id}/evolution/evaluations/{evaluation}
 
 按 id 获取评估的状态和结果（id 为操作 `result` 中的 `evaluation_id`，或判定
 `evaluations` 中的 id）。调用方：运维人员、UI 后端、流水线。
@@ -1068,7 +1119,7 @@ Backend 调用方（发布流程钩子和 Quality Task 插件）需要一种传�
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Request: POST /evolution/v1/verifications  (from the service-bot publish-flow hook)
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "candidate_revision": "sha256:7c1e…",
   "parent_revision": "sha256:a90b…",
   "profile": "default@1"
@@ -1208,11 +1259,11 @@ from avernet_evolution import Client
 
 c = Client.from_env()
 started = c.evaluations.start(
-    bot="bot_123", revision="sha256:7c1e…", baseline="sha256:a90b…",
+    bot_id="bot_123", revision="sha256:7c1e…", baseline="sha256:a90b…",
     suites=["support-core"], splits=["validation", "regression"],
     idempotency_key="adhoc-bot_123-r42-2026-10-08")       # same key on every retry
-op = c.operations.wait(bot="bot_123", operation=started.operation_id)   # short lookups by id
-ev = c.evaluations.get(bot="bot_123", evaluation=op.result["evaluation_id"])
+op = c.operations.wait(bot_id="bot_123", operation=started.operation_id)   # short lookups by id
+ev = c.evaluations.get(bot_id="bot_123", evaluation=op.result["evaluation_id"])
 print(ev.splits["validation"].ci, ev.splits["regression"].newly_failing)
 ```
 
@@ -1222,7 +1273,7 @@ print(ev.splits["validation"].ci, ev.splits["regression"].newly_failing)
 
 ```python
 async def before_online_pub(publish: PublishRecord, client: VerificationClient) -> GateResult:
-    resp = await client.verifications.start(bot=publish.bot_id,
+    resp = await client.verifications.start(bot=BotRef(owner_id=publish.owner_id, bot_id=publish.bot_id),
                                             candidate_revision=publish.revision_id,
                                             parent_revision=publish.previous_revision_id,
                                             profile="default@1")

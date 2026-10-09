@@ -25,7 +25,7 @@
 | 触发器 | 创建运行的定时、手动和事件触发器 | [§4](#4-触发器) |
 | 运行生命周期 | `queued → running → completed \| failed \| cancelled \| budget_exhausted`；启动、运行期间、结束、取消 | [§5](#5-运行生命周期) |
 | 幂等的运行提交 | 提交返回运行 id；使用相同幂等键的重复提交返回相同的 id | [§6](#6-幂等提交与按-id-查询状态) |
-| 租约与重新派发 | 每个运行都是一个租约作业；已死亡 worker 的运行会以相同的运行 id 再次派发 | [§7](#7-租约重新派发与崩溃恢复) |
+| 租约与重新派发 | 运行的每次尝试都是一个租约作业；已死亡 worker 的运行会作为一个新作业、以相同的运行 id 再次派发 | [§7](#7-租约重新派发与崩溃恢复) |
 | 长时操作（平台侧） | 智能体会话和训练评估是带 id 的持久化操作，由平台执行 | [§8](#8-长时操作平台侧) |
 | 运行时与作业协议 | 进程内策略，以及通过 HTTP 访问 `ctx` 的 job-worker 容器 | [§9](#9-运行时与作业协议) |
 | 沙箱 | 策略只在沙箱物化副本上工作，自身没有凭证、出网能力或模型密钥 | [§10](#10-沙箱) |
@@ -72,7 +72,7 @@ RSI-08）。
 | `Trigger` | 使绑定创建运行的原因：定时、仅手动，或平台事件 | 绑定的一部分 | 同绑定 |
 | `Budget` | 单次运行的花费上限：美元、挂钟时间、rollout 次数、token | 绑定的一部分；在运行上冻结 | 运行开始时冻结；已花费的数额永不重置 |
 | `Run` | 绑定的一次执行，策略版本、参数、父版本和预算在开始时冻结；运行 id 是它唯一的句柄 | 平台（本服务） | `queued → running → completed \| failed \| cancelled \| budget_exhausted`；永不删除 |
-| `Job` | 运行的可租约、可派发形式：持有者、租约到期时间、尝试次数、fencing token | 平台（本服务） | 每个运行一个；每次重新派发时重新租约；运行结束时关闭 |
+| `Job` | 运行的一次派发尝试，由 worker 在租约下执行：持有者、租约到期时间、尝试次数、fencing token | 平台（本服务） | 每次尝试一个；重新派发会为同一运行创建新作业；其尝试结束时关闭 |
 | `Operation` | 由运行发起、由平台持久化并执行的长时能力调用（智能体会话、训练评估） | 平台（本服务） | `queued → running → succeeded \| failed \| cancelled`；运行结束时取消未完成的操作 |
 | `Workspace` | 为某次运行以某个键创建的修订版沙箱物化副本 | 平台（本服务） | 按 `(run, key)` 幂等创建；运行结束后丢弃 |
 | `RunSummary` | `run(ctx)` 正常结束时返回的内容 | 策略 | 存储在运行上 |
@@ -84,26 +84,39 @@ RSI-08）。
 **预算**是单次运行的花费上限。每一次模型调用、智能体会话和评估都计入预算，
 任一维度耗尽时运行即停止。
 
+**rollout** 是针对一个 Bot 版本执行一个评估用例的一次执行。例如，针对沙箱候选运行一次
+测试用例“部分退款”就是一次 rollout；用 3 个种子运行它（重复 3 次，以平均掉模型的
+随机性）是 3 次 rollout；为了比较而同时针对父版本和候选运行它，两者都计数。策略启动的
+训练评估按 rollout 计数；对已提交候选的验证不计入运行的预算（§11.1）。
+
 ```python
 @dataclass(frozen=True)
 class Budget:
-    max_usd: float                      # model spend, agent sessions, evaluations
-    max_wall_clock_s: int               # from first start to end, across attempts (§7.3)
-    max_rollouts: int | None = None     # evaluation rollouts; None means no limit on this dimension
-    max_tokens: int | None = None       # model tokens; None means no limit on this dimension
+    max_usd: float                      # US dollars the run may spend in total: model calls, agent
+                                        # sessions, and train evaluations. At the limit the next charged
+                                        # call fails and the run ends as budget_exhausted
+    max_wall_clock_s: int               # seconds from the run's first start to its end, including time
+                                        # spent waiting and between attempts (§7.3); at the limit the run ends
+    max_rollouts: int | None = None     # how many evaluation rollouts (see above) the run may use;
+                                        # None = no limit on this dimension
+    max_tokens: int | None = None       # model tokens (input + output, all calls) the run may use;
+                                        # None = no limit on this dimension
 
 @dataclass(frozen=True)
-class BudgetUsage:
-    usd: float
-    wall_clock_s: int
-    rollouts: int
-    tokens: int
+class BudgetUsage:                      # what has been spent so far, in the same units as Budget
+    usd: float                          # US dollars charged so far
+    wall_clock_s: int                   # seconds since the run first started
+    rollouts: int                       # evaluation rollouts charged so far
+    tokens: int                         # model tokens charged so far
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
+  // Limits: at most $20, 2 hours, and 400 rollouts (for example 20 train cases x 2 versions x 10 rounds);
+  // no token limit because max_tokens is omitted.
   "budget": {"max_usd": 20, "max_wall_clock_s": 7200, "max_rollouts": 400},
+  // Spent so far: $6.42, about 30 minutes, 96 rollouts, 412,300 tokens.
   "budget_used": {"usd": 6.42, "wall_clock_s": 1830, "rollouts": 96, "tokens": 412300}
 }
 ```
@@ -119,14 +132,24 @@ class ScheduleTrigger:
 class ManualTrigger:
     manual: Literal[True]               # no automatic firing; runs only when submitted
 
+# Platform events a binding can be triggered by (proposed list, from §4). A new
+# event is added by a reviewed platform change, together with its producer.
+EventName = Literal[
+    "failure_rate_alert",               # the bot's failure rate crossed its alert threshold
+    "clawinsight_improvement_item",     # ClawInsight recorded an improvement item for the bot
+    "feedback_threshold_reached",       # N new feedback items arrived since the last run (memory consolidation)
+]
+
 @dataclass(frozen=True)
 class EventTrigger:
-    event: str                          # platform event name, e.g. "failure_rate_alert"
+    event: EventName                    # fire a run when this platform event arrives for the bot
 
 Trigger = ScheduleTrigger | ManualTrigger | EventTrigger
 
 @dataclass(frozen=True)
-class Rollout:                          # proposed; read by Promotion (08-promotion.md)
+class Rollout:                          # proposed; read by Promotion (08-promotion.md). How a promoted
+                                        # revision reaches a multi-instance bot; not the evaluation
+                                        # "rollouts" counted in Budget
     canary_share: str                   # share of instances on `canary`, decimal string, e.g. "0.1"
     auto_rollback: bool                 # owner-enabled auto-rollback rule
 
@@ -135,7 +158,8 @@ class Binding:
     id: str                             # chosen by the owner, unique within the bot, e.g. "bind_01"
     strategy: str                       # "<strategy id>@<version>", a registered, conformant version
     trigger: Trigger
-    parent: str                         # which revision runs start from; "active" in the first iteration
+    parent: "SelectorName"              # which revision runs start from (05-experiment-ledger.md §7);
+                                        # only "active" is accepted in the first iteration
     allowed_genes: list[str]            # what this strategy may change on THIS bot; within the bot's policy
     verification_profile: str           # e.g. "default@1"; owners may pick a stricter one, never a looser one
     budget: Budget
@@ -162,21 +186,31 @@ class Binding:
 
 ### 2.3 EvolutionPolicy
 
+每个 Bot 恰好有**一个**进化策略配置，该配置是一个绑定列表。每个绑定把一个策略挂接到
+Bot 上，并带有自己的触发器、允许的基因、验证配置、预算和参数。多个绑定意味着多个策略
+（或以不同设置运行的同一策略）按不同的时间表改进 Bot 的不同方面：例如，`bind_01` 每晚
+对 `persona` 和 `skills` 运行 ClawEvolve，`bind_02` 每周对 `memory` 运行
+`platform/consolidate-memory`，如下面的示例所示。绑定彼此独立运行：每个绑定同一时间
+最多只有一个活动运行（§4），但不同绑定的运行可以重叠。当两个绑定的候选基于同一个父
+版本构建，且其中一个先被晋升时，另一个获批时 `active` 已经移动；此时除非评审者显式
+覆盖，晋升会以 `409 stale_parent` 拒绝第二个候选
+（[08-promotion.zh-CN.md](08-promotion.zh-CN.md) 的 §6.2）。
+
 ```python
 @dataclass(frozen=True)
 class EvolutionPolicy:
-    bot: str
-    bindings: list[Binding]
+    bot: BotRef                         # the bot this policy belongs to (owner + bot id, 09-evolution-api.md §2.7)
+    bindings: list[Binding]             # one entry per strategy attached to the bot
     etag: str                           # changes on every successful PUT; used with If-Match
     updated_at: datetime
-    updated_by: str
+    updated_by: str                     # user id of whoever wrote this version
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Evolution policy of bot_123 (OpenClaw support bot)
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {
       "id": "bind_01",
@@ -210,27 +244,41 @@ Bot 级上限和 Bot 级冻结开关（§11）被提议作为该文档的附加�
 
 ### 2.4 Run
 
+**运行**是为一个 Bot 执行一个绑定的一次执行：平台在启动时冻结的父修订版上、在绑定的
+预算下，启动一次该绑定的策略。它是这次执行的持久业务记录（冻结了什么、花费了什么、
+提交了什么、如何结束），也是**调用方使用的唯一句柄**：调用方通过运行 id 启动它、查询
+它、列出其候选并取消它。运行永远不会消失，也永远不会以新 id 重新开始，即使其 worker
+崩溃也是如此。
+
 ```python
 RunStatus = Literal["queued", "running", "completed", "failed", "cancelled", "budget_exhausted"]
+# Why a run ended, when the status alone does not say (proposed; extended only by a reviewed change).
+EndReason = Literal[
+    "worker_failed",                    # the strategy reported a non-retryable failure
+    "max_attempts",                     # re-dispatched max_attempts times without finishing (§7.2)
+    "cancelled_by_owner",               # a caller cancelled it (POST …/runs/{run}:cancel)
+    "kill_switch",                      # a strategy, bot, or global kill switch stopped it (§11.3)
+    "consecutive_rejections",           # the escalation rule stopped it (§11.2)
+]
 
 @dataclass(frozen=True)
 class TriggerRecord:
     kind: Literal["schedule", "manual", "event"]
     fire_time: datetime | None          # set for schedule triggers
     event_id: str | None                # set for event triggers
-    requested_by: str | None            # set for manual submissions
+    requested_by: str | None            # set for manual submissions: the caller's user or pipeline client id
 
 @dataclass
 class Run:
-    id: str                             # "run_7f3"; the only handle
-    bot: str
+    id: str                             # "run_7f3"; globally unique; the only handle
+    bot: BotRef                         # the bot it runs against (owner + bot id)
     binding_id: str
-    idempotency_key: str                # (bot, key) -> run id
+    idempotency_key: str                # (owner_id, bot_id, key) -> run id
     trigger: TriggerRecord
     # frozen at submission
     strategy: str                       # "clawevolve/bot-evolution"
     strategy_version: str               # "2.0.0"
-    parent_ref: str                     # "active"
+    parent_ref: "SelectorName"          # the binding's `parent` at submission, e.g. "active"
     parent_revision: str                # resolved revision id, e.g. "sha256:a90b…"
     allowed_genes: list[str]
     verification_profile: str
@@ -247,7 +295,7 @@ class Run:
     created_at: datetime
     started_at: datetime | None         # first transition to running
     ended_at: datetime | None
-    end_reason: str | None              # e.g. "worker_failed", "max_attempts", "cancelled_by_owner"
+    end_reason: EndReason | None        # None while running, and for completed or budget_exhausted runs
     summary: dict | None                # RunSummary from a completed run
 ```
 
@@ -255,7 +303,7 @@ class Run:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "run_7f3",
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "binding_id": "bind_01",
   "idempotency_key": "bind_01/2026-10-08T02:00:00Z",
   "trigger": {"kind": "schedule", "fire_time": "2026-10-08T02:00:00Z", "event_id": null, "requested_by": null},
@@ -285,17 +333,25 @@ class Run:
 
 ### 2.5 Job
 
-**作业**（job）是运行的可派发形式。worker *认领*（claim）一个作业，并在
-**租约**（lease）下持有它：租约是 worker 必须持续续期的限时认领。**fencing
-token** 是随每次租约签发的值；携带旧 token 的调用会被拒绝，因此失去租约的
-worker 无法干扰新的持有者。
+**作业**（job）是运行的一次派发尝试：worker 认领（claim）并在**租约**（lease）下
+执行的单元，租约是 worker 必须持续续期的限时认领。一个运行每次尝试对应一个作业：当
+worker 崩溃且其租约到期时，平台把该运行作为一个新作业（尝试 `n + 1`）重新派发，对应的
+仍是**同一个**运行。**fencing token** 是随每次租约签发的值；携带旧 token 的调用会被
+拒绝，因此失去租约的 worker 无法干扰新的持有者。调用方从不看到作业；worker 只看到作业。
+
+| | 运行 | 作业 |
+| --- | --- | --- |
+| 代表什么 | 为一个 Bot 执行一个绑定的一次执行：业务记录（冻结输入、花费、候选、结果） | 在 worker 上、在租约下执行该运行的一次尝试 |
+| 生命周期 | 从提交到终止状态；永久保留 | 从派发到该尝试完成、失败或租约到期 |
+| 数量 | 每次提交（每个幂等键）一个 | 运行的每次尝试一个：1 个，崩溃后更多 |
+| 谁能看到 | 调用方（API、SDK、CLI、UI）通过运行 id；策略通过 `ctx.run_id` | 仅 worker 和作业协议，通过作业 id |
 
 ```python
 @dataclass
 class Job:
-    id: str                             # "job_7f3"; one job per run
-    run_id: str
-    attempt: int                        # equals the run's attempt
+    id: str                             # "job_7f3_2" (run_7f3, attempt 2); one job per attempt of the run
+    run_id: str                         # the run this attempt executes
+    attempt: int                        # which attempt of the run this job is (1, 2, …)
     worker_id: str | None               # current holder; None while queued
     lease_expires_at: datetime | None
     fencing_token: str | None           # new value on every claim
@@ -304,7 +360,7 @@ class Job:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "id": "job_7f3",
+  "id": "job_7f3_2",
   "run_id": "run_7f3",
   "attempt": 2,
   "worker_id": "worker-clawevolve-02",
@@ -326,7 +382,7 @@ OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled
 class Operation:
     id: str                             # "op_19a"
     run_id: str
-    kind: Literal["agent", "train_evaluation"]
+    kind: Literal["agent_session", "train_evaluation"]   # same values as Operation.kind in 03-strategy.md
     idempotency_key: str                # "<run>/<own step>", e.g. "run_7f3/round-1/tune"
     status: OperationStatus
     cost: BudgetUsage                   # charged to the run's budget as it accrues
@@ -341,7 +397,7 @@ class Operation:
 {
   "id": "op_19a",
   "run_id": "run_7f3",
-  "kind": "agent",
+  "kind": "agent_session",
   "idempotency_key": "run_7f3/round-1/tune",
   "status": "succeeded",
   "cost": {"usd": 1.12, "wall_clock_s": 640, "rollouts": 0, "tokens": 88100},
@@ -349,7 +405,7 @@ class Operation:
   "finished_at": "2026-10-08T02:23:20Z",
   "result": {
     "definition": "clawevolve-tune",
-    "exit_status": "ok",
+    "exit_status": "completed",
     "transcript_artifact": "art_tune_r1",
     "changed_files": ["persona/SOUL.md", "skills/refund-policy/SKILL.md"]
   },
@@ -398,7 +454,7 @@ class RunSummary:
 
 Bot 的**进化策略配置**（evolution policy）是一个**绑定**（binding）列表。不同的
 Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每晚对 persona 和 skills
-运行 ClawEvolve，每周对 memory 运行记忆整合）。
+运行 ClawEvolve，每周对 memory 运行记忆整合）；多个绑定的含义见 §2.3。
 
 关于策略的信息按其对谁成立来划分：
 
@@ -441,7 +497,8 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
    （pinned）项。
 5. `verification_profile` 存在，且不比平台默认更宽松。
 6. `budget` 落在 Bot 级和租户级上限之内。
-7. `trigger` 格式正确：有效的 cron 表达式，或已知的事件名。
+7. `trigger` 格式正确：有效的 cron 表达式，或一个 `EventName`
+   （§2.2）。
 8. 如果策略的注册记录中有 `params_schema`（提议，
    [03-strategy.zh-CN.md](03-strategy.zh-CN.md)），则 `params` 需通过其校验。
 
@@ -461,9 +518,11 @@ Bot 使用不同的策略，一个 Bot 也可以使用多个策略（例如每�
 | 手动 | `{"manual": true}` | 从不自动触发；仅当调用方提交运行时 | 由调用方选择 |
 | 事件 | `{"event": "failure_rate_alert"}` | 该 Bot 收到同名平台事件时 | `<binding_id>/<event_id>`（提议） |
 
-默认进化策略中事件触发器的例子：失败率告警、ClawInsight 改进项（ClawEvolve
-绑定的事件触发器），以及用于记忆整合的“N 条新反馈”
-（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）。
+默认进化策略中事件触发器的例子：失败率告警（`failure_rate_alert`）、ClawInsight
+改进项（`clawinsight_improvement_item`，ClawEvolve 绑定的事件触发器），以及用于记忆
+整合的“N 条新反馈”（`feedback_threshold_reached`）
+（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）。这三个是提议的
+`EventName` 取值（§2.2）。
 
 规则：
 
@@ -508,7 +567,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
    （`active`）此时被解析为修订版 id，因此运行期间的晋升不会改变运行的起点。
 3. 记录该策略版本的智能体定义摘要（digest），使结果可以归因到实际使用的提示词。
 4. 针对 Bot 级和租户级上限**预留**预算。
-5. 将运行连同其作业记录为 `queued`，并返回运行 id。
+5. 将运行连同其第一个作业记录为 `queued`，并返回运行 id。
 
 每次派发（认领）时，本服务构建恰好包含被授予能力的 `StrategyContext`：始终授予
 的部分（`parent`、`workspace`、`operations`、`budget`、`log`、`artifacts`、
@@ -574,7 +633,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 - 提交方发送一个**幂等键**（idempotency key）：由提交方选择的字符串，对同一逻辑
   请求的每次重试都相同，对不同请求则不同。
-- 平台存储 `(bot, key) → run id`。使用相同键的重复提交返回相同的运行 id，不启动
+- 平台存储 `(owner_id, bot_id, key) → run id`。使用相同键的重复提交返回相同的运行 id，不启动
   任何新内容，无论第一次运行现在处于什么状态。
 - 此后运行 id 是唯一的句柄。调用方通过它查询状态、候选和判定。不需要回调通道；
   CLI 的 `--wait` 只是重复查询。
@@ -602,7 +661,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 | 关注点 | 负责方 | 方式 |
 | --- | --- | --- |
 | 运行记录、其冻结输入、已花费预算和已提交候选 | 平台 | 在运行提交或 `candidates.submit` 返回之前持久化 |
-| 发现运行的进程已死亡 | 平台 | 每个运行都是一个**租约作业**。worker（或进程内宿主）续期租约；租约到期时，作业回到 `queued`，并以相同的运行 id 和 `ctx.attempt + 1` 再次派发。fencing token 拒绝来自旧持有者的调用。达到 `max_attempts` 后运行以 `failed` 结束 |
+| 发现运行的进程已死亡 | 平台 | 运行的每次尝试都是一个**租约作业**。worker（或进程内宿主）续期租约；租约到期时，运行回到 `queued`，并作为一个新作业、以相同的运行 id 和 `ctx.attempt + 1` 再次派发。fencing token 拒绝来自旧持有者的调用。达到 `max_attempts` 后运行以 `failed` 结束 |
 | 已启动的智能体会话和训练评估 | 平台 | 它们是操作（§8）：由平台持久化并执行，独立于策略的进程。它们在重新派发期间继续运行；策略通过以相同幂等键重复启动来重新关联 |
 | 策略自身的进度（轮次、搜索状态、历史） | 策略 | 策略把所需的一切持久化到**自己的存储**中，以运行 id 为键，并在重新派发时重新加载后继续。平台**没有检查点 API**，也从不读取这些状态；其结构因策略而异 |
 
@@ -698,7 +757,7 @@ SDK 中提供的两种 `StrategyContext` 实现（进程内和作业协议）运
 | 端点 | `ctx` 调用 |
 | --- | --- |
 | `POST /evolution/v1/jobs:claim` | （worker 循环）认领作业：`{worker_id, strategy_ids[]}` → `{job_id, run_id, attempt, params, parent, budget, granted, fencing_token}` |
-| `POST /evolution/v1/jobs/{id}/heartbeat` | 续期租约；租约过期会使作业重新排队 |
+| `POST /evolution/v1/jobs/{id}/heartbeat` | 续期租约；租约过期会使运行作为新作业重新排队 |
 | `GET /evolution/v1/runs/{run}/parent` | `ctx.parent` |
 | `GET /evolution/v1/runs/{run}/content/{digest}` | 父版本 / 工作区的文件字节 |
 | `GET /evolution/v1/runs/{run}/experience/sessions` | `ctx.experience.sessions`（若已授予） |
@@ -817,9 +876,9 @@ worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随
 
 | 表 | 键 | 内容 |
 | --- | --- | --- |
-| `evolution_policy` | `bot` | 绑定文档及其 ETag |
+| `evolution_policy` | `(owner_id, bot_id)` | 绑定文档及其 ETag |
 | `evolution_run` | `run_id` | `Run` 记录：冻结输入、状态、尝试次数、用量 |
-| `evolution_run_key` | `(bot, idempotency_key)` | `run_id`；使提交幂等 |
+| `evolution_run_key` | `(owner_id, bot_id, idempotency_key)` | `run_id`；使提交幂等 |
 | `evolution_job` | `job_id` | 租约持有者、到期时间、fencing token、尝试次数 |
 | `evolution_operation` | `operation_id`，唯一 `(run_id, idempotency_key)` | `Operation` 记录 |
 | `evolution_workspace` | `workspace_id`，唯一 `(run_id, key)` | `Workspace` 记录；沙箱文件存放在执行器中 |
@@ -838,10 +897,10 @@ worker 是平台运行的容器。作为 worker 的 Bot（“runner bot”）随
 
 ```python
 class EvolutionPolicyService(Protocol):
-    async def get_policy(self, bot: str) -> EvolutionPolicy:
+    async def get_policy(self, bot: BotRef) -> EvolutionPolicy:
         """Return the bot's policy; an empty bindings list if none was written."""
 
-    async def put_policy(self, bot: str, bindings: list[Binding], *,
+    async def put_policy(self, bot: BotRef, bindings: list[Binding], *,
                          expected_etag: str | None, actor: str) -> EvolutionPolicy:
         """Replace the bindings after running the binding checks (§3.2) on every
         new or changed binding. expected_etag None means "create; fail if one exists".
@@ -849,28 +908,28 @@ class EvolutionPolicyService(Protocol):
 
 
 class RunService(Protocol):
-    async def submit(self, bot: str, binding_id: str, *, idempotency_key: str,
+    async def submit(self, bot: BotRef, binding_id: str, *, idempotency_key: str,
                      trigger: TriggerRecord, params: dict | None = None,
                      budget: Budget | None = None) -> str:
         """Create a run of the binding and return its run id, or return the existing
-        run id for (bot, idempotency_key). params are merged over the binding's params;
+        run id for (owner_id, bot_id, idempotency_key). params are merged over the binding's params;
         budget, when given, must not exceed the binding's budget (None: use the binding's).
         Freezes inputs, reserves the budget, records the run as queued.
         Raises BindingCheckFailed, EvolutionFrozen, CeilingExceeded, BindingBusy,
         IdempotencyKeyReused."""
 
-    async def get(self, bot: str, run_id: str) -> Run: ...
+    async def get(self, bot: BotRef, run_id: str) -> Run: ...
 
-    async def list(self, bot: str, *, status: list[RunStatus] | None = None,
+    async def list(self, bot: BotRef, *, status: list[RunStatus] | None = None,
                    binding_id: str | None = None, page: int = 1,
                    page_size: int = 20) -> Page[Run]: ...
 
-    async def cancel(self, bot: str, run_id: str, *, reason: str, actor: str) -> Run:
+    async def cancel(self, bot: BotRef, run_id: str, *, reason: str, actor: str) -> Run:
         """Set the run's cancellation token; cancel its unfinished operations;
         end it as cancelled. Idempotent on an already cancelled run; raises
         RunAlreadyEnded for completed/failed/budget_exhausted runs."""
 
-    async def candidates(self, bot: str, run_id: str) -> list[RunCandidate]:
+    async def candidates(self, bot: BotRef, run_id: str) -> list[RunCandidate]:
         """Candidates the run submitted, in order, with verdict status."""
 
 
@@ -879,7 +938,7 @@ class JobService(Protocol):
 
     async def claim(self, worker_id: str, strategy_ids: list[str]) -> ClaimedJob | None:
         """Lease one queued job of the given strategies; None if there is none.
-        Increments nothing: attempt was set when the job was (re-)queued."""
+        Increments nothing: attempt was set when the run was (re-)queued."""
 
     async def heartbeat(self, job_id: str, fencing_token: str) -> LeaseState:
         """Renew the lease; returns new expiry and whether the run was cancelled.
@@ -892,12 +951,12 @@ class JobService(Protocol):
         """Retryable with attempts left: re-queue (attempt + 1). Otherwise end as failed."""
 
     async def expire_leases(self, now: datetime) -> list[str]:
-        """Called by the service's own timer: re-queue or fail every job whose
-        lease has expired. Returns the affected run ids."""
+        """Called by the service's own timer: for every job whose lease has expired,
+        re-queue its run (a new job, attempt + 1) or fail the run. Returns the affected run ids."""
 
 
 class OperationService(Protocol):
-    async def start(self, run_id: str, kind: Literal["agent", "train_evaluation"], *,
+    async def start(self, run_id: str, kind: Literal["agent_session", "train_evaluation"], *,
                     idempotency_key: str, request: dict) -> str:
         """Record the operation and hand it to its executor; return the operation id.
         Returns the existing id for (run_id, idempotency_key)."""
@@ -911,10 +970,11 @@ class OperationService(Protocol):
 
 
 class BudgetService(Protocol):
-    async def reserve(self, bot: str, tenant: str, budget: Budget) -> None:
+    async def reserve(self, bot: BotRef, tenant: str, budget: Budget) -> None:
         """Raises CeilingExceeded."""
 
-    async def charge(self, run_id: str, usage: BudgetUsage, *, source: str) -> BudgetUsage:
+    async def charge(self, run_id: str, usage: BudgetUsage, *,
+                     source: Literal["model_call", "operation", "explicit"]) -> BudgetUsage:
         """Add to the run's spend and return what remains. Raises BudgetExhausted
         once any dimension is used up (the run is then ended by the caller)."""
 
@@ -923,7 +983,7 @@ class BudgetService(Protocol):
 
 class KillSwitches(Protocol):
     async def is_strategy_disabled(self, strategy: str, version: str) -> bool: ...
-    async def is_bot_frozen(self, bot: str) -> bool: ...
+    async def is_bot_frozen(self, bot: BotRef) -> bool: ...
     async def is_paused(self) -> bool: ...
 ```
 
@@ -950,7 +1010,7 @@ ETag、创建类 POST 上的 `Idempotency-Key` 请求头）。调用方是流水
 Bot 调用方被推迟（DR-3）。下文响应展示的是标准信封中的 `data` 载荷；信封、错误、
 分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
-### GET /bots/{bot}/evolution/policy
+### GET /bots/{bot_id}/evolution/policy
 
 读取 Bot 的进化策略配置（其绑定）。由 UI 后端、`avn evolve policy get` 和流水线
 调用。
@@ -966,7 +1026,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {
       "id": "bind_01",
@@ -987,7 +1047,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 
 错误：`404` 未知 Bot。
 
-### PUT /bots/{bot}/evolution/policy
+### PUT /bots/{bot_id}/evolution/policy
 
 替换 Bot 的绑定。对每个新增或修改的绑定执行绑定检查（§3.2），任一检查失败则拒绝
 整个文档。由 Bot 所有者或租户管理员通过 UI 或 `avn evolve policy set` 调用。
@@ -1027,7 +1087,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "bindings": [
     {"id": "bind_01", "strategy": "clawevolve/bot-evolution@2.0.0", "trigger": {"schedule": "0 2 * * *"},
      "parent": "active", "allowed_genes": ["persona", "skills"], "verification_profile": "default@1",
@@ -1061,7 +1121,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 其他错误：`412` ETag 不匹配（其他人修改了策略配置）；`404` 未知 Bot 或未知策略
 版本。
 
-### POST /bots/{bot}/evolution/runs
+### POST /bots/{bot_id}/evolution/runs
 
 提交 Bot 某个绑定的一次运行。请求体为 `{binding, params?, budget?}`。幂等：
 `Idempotency-Key` 请求头为必填；以相同键重复提交返回相同的运行 id，且不启动任何
@@ -1092,7 +1152,7 @@ GET /openapi/v1/bots/bot_123/evolution/policy
 `binding_check_failed`（自写入策略配置以来 Bot 或策略已变化），或 `budget` 超出
 绑定的预算。
 
-### GET /bots/{bot}/evolution/runs
+### GET /bots/{bot_id}/evolution/runs
 
 列出 Bot 的运行，最新的在前。过滤条件：`status`、`binding`、`since`；以及
 `page` 和 `page_size`。由 UI 后端和 `avn evolve run status` 调用。
@@ -1122,7 +1182,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs?status=running,queued&binding=bind_0
 
 错误：`404` 未知 Bot；`422` 未知的过滤值。
 
-### GET /bots/{bot}/evolution/runs/{run}
+### GET /bots/{bot_id}/evolution/runs/{run}
 
 按 id 读取一次运行：状态、冻结输入、尝试次数、已用预算、摘要。这就是每个调用方
 反复执行直到状态为终态的状态查询。由流水线、UI 后端和 `avn evolve run status
@@ -1140,7 +1200,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "run_7f3",
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "binding_id": "bind_01",
   "idempotency_key": "bind_01/2026-10-08T02:00:00Z",
   "trigger": {"kind": "schedule", "fire_time": "2026-10-08T02:00:00Z", "event_id": null, "requested_by": null},
@@ -1170,7 +1230,7 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
 
 错误：`404` 未知运行，或属于另一个 Bot 的运行。
 
-### POST /bots/{bot}/evolution/runs/{run}:cancel
+### POST /bots/{bot_id}/evolution/runs/{run}:cancel
 
 取消一次运行。置位运行的取消令牌，取消其未完成的操作，并以 `cancelled` 结束运行。
 已提交的候选会被保留并且仍会验证。对已取消的运行是幂等的。由 Bot 所有者（UI、
@@ -1194,11 +1254,11 @@ GET /openapi/v1/bots/bot_123/evolution/runs/run_7f3
 错误：`404` 未知运行；对于处于 `completed`、`failed` 或 `budget_exhausted` 的
 运行返回 `409` `run_already_ended`。
 
-### GET /bots/{bot}/evolution/runs/{run}/candidates
+### GET /bots/{bot_id}/evolution/runs/{run}/candidates
 
 按提交顺序列出一次运行提交的候选及其判定状态。单个候选的完整报告（diff、验证、
 门禁决定）是 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中的
-`GET /bots/{bot}/evolution/candidates/{candidate}`。由 UI 后端、流水线和
+`GET /bots/{bot_id}/evolution/candidates/{candidate}`。由 UI 后端、流水线和
 `avn evolve run report` 调用。
 
 请求：
@@ -1255,7 +1315,7 @@ fencing token 过期；计费调用上的 `402` `budget_exhausted`（提议）�
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "job_id": "job_7f3",
+  "job_id": "job_7f3_2",
   "run_id": "run_7f3",
   "attempt": 2,
   "strategy": "clawevolve/bot-evolution@2.0.0",
@@ -1279,7 +1339,7 @@ fencing token 过期；计费调用上的 `402` `budget_exhausted`（提议）�
 
 ### POST /evolution/v1/jobs/{id}/heartbeat
 
-续期租约。租约过期会使作业重新排队（§7）。响应还会告诉 worker 运行是否已被取消
+续期租约。租约过期会使运行作为新作业重新排队（§7）。响应还会告诉 worker 运行是否已被取消
 （提议）。
 
 请求（请求头 `Evolution-Fencing-Token: ft_7f3_2_b81c`）：
@@ -1412,7 +1472,7 @@ Evolution-Fencing-Token: ft_2c8_1_04aa
      "kind": "correction", "text": "partial refunds are allowed within 30 days",
      "created_at": "2026-10-07T09:20:00Z"},
     {"feedback_id": "fb_302", "episode_id": "ep_95", "revision_id": "sha256:a90b…",
-     "kind": "rating", "value": 2, "created_at": "2026-10-07T14:02:00Z"}
+     "kind": "rating", "score": 0.25, "created_at": "2026-10-07T14:02:00Z"}
   ]
 }
 ```
@@ -1868,15 +1928,15 @@ from avernet_evolution import Client
 
 c = Client.from_env()
 key = "nightly-bot_123-2026-10-08"                     # deterministic: same key on every retry
-run_id = c.runs.start(bot="bot_123", binding="bind_01",
+run_id = c.runs.start(bot_id="bot_123", binding="bind_01",   # caller owns the bot: no entity_id
                       budget={"max_usd": 10, "max_wall_clock_s": 3600},
                       idempotency_key=key)              # safe to repeat: returns the same run_id
 
-while (run := c.runs.get(bot="bot_123", run_id=run_id)).status in ("queued", "running"):
+while (run := c.runs.get(bot_id="bot_123", run_id=run_id)).status in ("queued", "running"):
     time.sleep(30)                                      # short lookups by id; no request held open
 
 print(run.status, run.budget_used.usd)
-for cand in c.runs.candidates(bot="bot_123", run_id=run_id):
+for cand in c.runs.candidates(bot_id="bot_123", run_id=run_id):
     print(cand.candidate_id, cand.verdict.status)       # approval is Promotion's job (08-promotion.md)
 ```
 
@@ -1891,14 +1951,14 @@ avn evolve run status --bot bot_123 run_7f3 --wait --output json
 ### 15.2 所有者添加一个绑定
 
 ```python
-policy = c.policy.get(bot="bot_123")
+policy = c.policy.get(bot_id="bot_123")
 bindings = policy.bindings + [Binding(
     id="bind_02", strategy="platform/consolidate-memory@1.0.0",
     trigger={"schedule": "0 4 * * 0"}, parent="active", allowed_genes=["memory"],
     verification_profile="default@1",
     budget={"max_usd": 5, "max_wall_clock_s": 1800}, params={})]
 try:
-    c.policy.put(bot="bot_123", bindings=bindings, if_match=policy.etag)
+    c.policy.put(bot_id="bot_123", bindings=bindings, if_match=policy.etag)
 except BindingCheckFailed as e:                          # 422: fix the binding, nothing was written
     for d in e.details:
         print(d.binding, d.check, d.detail)
@@ -1909,7 +1969,7 @@ except BindingCheckFailed as e:                          # 422: fix the binding,
 在服务内部，一次定时触发就是一次幂等提交：
 
 ```python
-async def fire_schedule(binding: Binding, bot: str, slot: datetime) -> None:
+async def fire_schedule(binding: Binding, bot: BotRef, slot: datetime) -> None:
     if await kill.is_paused() or await kill.is_bot_frozen(bot):
         await firings.record_skipped(binding.id, slot, reason="paused_or_frozen")
         return
@@ -1987,15 +2047,15 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 | 时间 | 事件 | 运行状态 |
 | --- | --- | --- |
 | 02:00:00 | 定时触发；键 `bind_01/2026-10-08T02:00:00Z`；输入被冻结：父版本 `active` = `r41`（`sha256:a90b…`）、`max_rounds: 3`、`max_usd: 20` | `run_7f3` `queued`，尝试 1 |
-| 02:00:09 | Worker A 认领 `job_7f3`，token `ft_7f3_1_…`；上下文授予 `experience.sessions@1`、`agents@1`、`evaluate.train@1` 以及始终授予的部分 | `running` |
+| 02:00:09 | Worker A 认领 `job_7f3_1`，token `ft_7f3_1_…`；上下文授予 `experience.sessions@1`、`agents@1`、`evaluate.train@1` 以及始终授予的部分 | `running` |
 | 02:01 | 策略读取 7 天的片段，添加训练用例，把状态保存到自己的存储中 | `running` |
 | 02:12 | 以键 `run_7f3/round-1` 调用 `workspaces`；以键 `run_7f3/round-1/tune` 调用 `agents:start` → `op_19a` | `running` |
 | 02:15 | Worker A 的宿主机重启；心跳停止 | `running` |
 | 02:16:10 | 租约到期；尝试次数变为 2；token `ft_7f3_1_…` 现已过期 | `queued`，尝试 2 |
-| 02:16:30 | Worker B 认领；策略按运行 id 重新加载状态；以相同的键重复 `workspaces` 和 `agents:start` → 相同的 `ws_7f3_r1`、相同的 `op_19a`，仍在运行 | `running`，尝试 2 |
+| 02:16:30 | Worker B 认领新作业 `job_7f3_2`；策略按运行 id 重新加载状态；以相同的键重复 `workspaces` 和 `agents:start` → 相同的 `ws_7f3_r1`、相同的 `op_19a`，仍在运行 | `running`，尝试 2 |
 | 02:23 | `op_19a` 成功；训练评估 `op_1b2`；策略提交候选 `sha256:c41e…` → `candidate/run_7f3/1`（`r42`） | `running` |
 | 02:24–02:58 | 在 `default@1` 下验证；策略按 id 查询判定：先是 `pending`，然后是 `accept`；下一轮基于 `r42` 构建 | `running` |
-| 03:26:59 | 第 3 轮结束；带摘要调用 `jobs/job_7f3/complete` | `completed` |
+| 03:26:59 | 第 3 轮结束；带摘要调用 `jobs/job_7f3_2/complete` | `completed` |
 
 随后门禁把 `r42`（风险等级 T2：persona + skill）路由到评审队列
 （[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）；运行本身从不移动 `active`。

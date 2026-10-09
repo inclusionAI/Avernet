@@ -65,7 +65,8 @@ Backend 现有的 OpenAPI v1 适配器已经提供了本文档复用的 envelope
 | `Envelope[T]` | 统一的响应包装：`code`、`message`、`data`、`request_id` | 本文档（复用 OpenAPI v1） | 每个响应 |
 | `ErrorEnvelope` | 失败时的同一包装，`data` 始终为 `null` | 本文档（复用 OpenAPI v1） | 每个响应 |
 | `Page[T]` / `PageParams` | 列表结果的一页（`total`、`items`）及其控制参数（`page`、`page_size`） | 本文档（复用 OpenAPI v1） | 每个请求 |
-| `IdempotencyRecord` | 平台对一个幂等键的记忆：`(bot, key) → resource id`，外加请求的指纹 | 本文档；由各服务存储 | 在首个携带该键的请求时创建；在保留期内保留 |
+| `BotRef` | 一个 bot 的完整标识：`owner_id` 加 `bot_id`，因为单独的 `bot_id` 在不同用户之间并不唯一（[§2.7](#27-botrefbot-标识)） | 本文档；所有进化记录都使用它 | 在 bot 的整个生命周期内固定 |
+| `IdempotencyRecord` | 平台对一个幂等键的记忆：`(owner_id, bot_id, key) → resource id`，外加请求的指纹 | 本文档；由各服务存储 | 在首个携带该键的请求时创建；在保留期内保留 |
 | `Precondition` | 读取可变资源时返回的 `ETag`，以及在写入时将其回传的 `If-Match` 请求头 | 本文档 | 每个资源版本 |
 | `Operation` | 由请求启动、按 id 查询的长时工作单元（`queued`、`running`、`succeeded`、`failed`、`cancelled`） | 概念在 [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 中定义；公开资源及其查询端点由本文档负责（[§13.8](#138-操作--本文档)） | 由 `202` 响应创建；完成后即为终态 |
 | `ExitCode` | `avn` CLI 稳定的进程退出码 | 本文档 | 每个 CLI 主版本内固定 |
@@ -77,7 +78,7 @@ Backend 现有的 OpenAPI v1 适配器已经提供了本文档复用的 envelope
 形态；进化端点原样采用它，从而一个客户端库即可同时处理基因组端点和进化
 端点。`code` 为六位数字：HTTP 状态码（三位）后接业务子码（三位），例如
 `200000`（OK）、`202000`（Accepted）、`404000`（未找到）。二进制内容（例如
-`GET /bots/{bot}/genome/content/{digest}`）绕过 envelope；这是唯一的例外，
+`GET /bots/{bot_id}/genome/content/{digest}`）绕过 envelope；这是唯一的例外，
 与当前 OpenAPI v1 一致。
 
 ```python
@@ -161,14 +162,18 @@ class Page(Generic[T]):
 
 ```python
 from datetime import datetime
+from typing import Literal
+
+# What a key can create or start (one value per row of the §5.3 table).
+IdempotentResourceKind = Literal["run", "operation", "revision", "promotion", "review_decision", "feedback"]
 
 @dataclass(frozen=True)
 class IdempotencyRecord:
-    bot: str               # scope: the bot in the request path
+    bot: BotRef            # scope: the bot addressed by the request (owner + bot id, §2.7)
     key: str               # the client's Idempotency-Key header value
     fingerprint: str       # sha256 of the RFC 8785 canonical form of {method, path, body}
-    resource_kind: str     # "run" | "operation" | "revision" | "promotion" | "review_decision" | "feedback"
-    resource_id: str       # what the first request created or started
+    resource_kind: IdempotentResourceKind
+    resource_id: str       # id of what the first request created or started, e.g. "run_7f3"
     first_status: int      # HTTP status of the first response (201 or 202)
     created_at: datetime
     expires_at: datetime   # end of the retention window (open decision, §16)
@@ -177,7 +182,7 @@ class IdempotencyRecord:
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "bot": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "key": "nightly-bot_123-2026-10-08",
   "fingerprint": "sha256:5d1e…",
   "resource_kind": "run",
@@ -213,7 +218,7 @@ class Precondition:
 **操作**（operation）是可能比一个短 HTTP 请求持续更久的工作：一次评估、
 一次实验记录导出。启动它会立即返回带有 `{operation_id}` 的
 `202 Accepted`；随后调用方通过
-`GET /bots/{bot}/evolution/operations/{operation}` 按 id 查询其状态，这是唯一的
+`GET /bots/{bot_id}/evolution/operations/{operation}` 按 id 查询其状态，这是唯一的
 公开操作资源（[§13.8](#138-操作--本文档)）。同一概念也在进化策略内部使用
 （智能体会话、训练评估）；见
 [03-strategy.zh-CN.md](03-strategy.zh-CN.md)。运行遵循相同的模式，但有其
@@ -223,6 +228,8 @@ class Precondition:
 from typing import Literal
 
 OperationStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+# The public operation kinds: ad-hoc evaluations (07) and ledger exports (05).
+OperationKind = Literal["evaluation", "ledger_export"]
 
 @dataclass(frozen=True)
 class OperationError:
@@ -232,7 +239,7 @@ class OperationError:
 @dataclass(frozen=True)
 class Operation:
     id: str                         # "op_19a"
-    kind: str                       # e.g. "evaluation", "ledger_export"
+    kind: OperationKind             # which kind of work; decides the shape of `result`
     status: OperationStatus
     created_at: datetime
     updated_at: datetime
@@ -273,7 +280,7 @@ class ExitCode(IntEnum):
 class CommandSchema:
     command: list[str]              # e.g. ["evolve", "run", "start"]
     summary: str
-    api: list[str]                  # the API calls it makes, e.g. ["POST /bots/{bot}/evolution/runs"]
+    api: list[str]                  # the API calls it makes, e.g. ["POST /bots/{bot_id}/evolution/runs"]
     arguments: list[dict]           # name, type, required, repeated, description
     flags: list[dict]               # name, type, default, description
     destructive: bool               # True if --yes is required
@@ -286,7 +293,7 @@ class CommandSchema:
 {
   "command": ["evolve", "run", "start"],
   "summary": "Start an evolution run for a bot (idempotent)",
-  "api": ["POST /bots/{bot}/evolution/runs", "GET /bots/{bot}/evolution/runs/{run}"],
+  "api": ["POST /bots/{bot_id}/evolution/runs", "GET /bots/{bot_id}/evolution/runs/{run}"],
   "arguments": [],
   "flags": [
     {"name": "--bot", "type": "string", "required": true, "description": "Bot id"},
@@ -299,6 +306,33 @@ class CommandSchema:
   "output_schema": "avn/run@1"
 }
 ```
+
+### 2.7 BotRef（bot 标识）
+
+`bot_id` 只在同一个所有者内唯一：两个用户可以各自拥有一个名为 `bot_123`
+的 bot。OpenAPI v1 如今已经这样处理：它以 `/openapi/v1/bots/{bot_id}/…`
+寻址 bot，并用 `entity_id` 查询参数指明 bot 的所有者，该参数默认为调用方
+（`apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py`；
+`…/openapi_v1/engine_runtime/params.py` 中的 `resolve_owner_id`）。因此每条
+进化记录都以一个 `BotRef` 存储这一对值，每个内部服务方法都接受 `BotRef`，
+而从不接受单独的 bot id。运行、候选、操作、修订版和实验记录条目的 id 则不同：
+它们本身就是全局唯一的。
+
+```python
+@dataclass(frozen=True)
+class BotRef:
+    owner_id: str          # the user (entity) who owns the bot; the `entity_id` of OpenAPI v1
+    bot_id: str            # the bot's id within that owner, as in /bots/{bot_id}/…; not unique on its own
+```
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+// How a record names its bot (field "bot" of an IdempotencyRecord, Run, LedgerEntry, …)
+{"owner_id": "user_owner_5", "bot_id": "bot_123"}
+```
+
+在线上传输时，这一对值按 OpenAPI v1 的方式拆分：`bot_id` 放在路径中，所有者
+作为 `entity_id`（[§4.1](#41-路径资源与自定义方法））。
 
 ## 3. 调用方
 
@@ -326,9 +360,18 @@ CLI 技能或 MCP 适配器）随 DR-3 一并推迟
 - **前缀。** 每个公开路径都位于 `/openapi/v1` 下。本设计集中的路径都相对于
   它书写。
 - **面向资源。** 集合使用复数名词
-  （`/bots/{bot}/evolution/runs`）；成员即集合加上其 id。
+  （`/bots/{bot_id}/evolution/runs`）；成员即集合加上其 id。
   `GET` 读取，在集合上 `POST` 创建或启动，`PUT` 替换整个
   可变资源。
+- **Bot 寻址。** bot 范围的路径在路径中携带 bot id
+  （`/bots/{bot_id}/…`），在 **`entity_id` 查询参数**中携带 bot 的所有者，
+  该参数默认为调用方，与 OpenAPI v1 如今的做法完全一致（[§2.7](#27-botrefbot-标识））。
+  `bot_id` 在不同用户之间并不唯一，因此服务器总是先解析 `(entity_id 或调用方,
+  bot_id)` 这一对值，再做其他任何事。本设计集中的大多数示例省略了
+  `entity_id`，因为调用方就是所有者；协作者或代表他人 bot 行事的流水线则要
+  加上它，例如
+  `POST /bots/bot_123/evolution/runs?entity_id=user_owner_5`。该调用方是否
+  可以操作这个 bot，由现有的 OpenAPI v1 访问检查决定，而不是由这一层决定。
 - **自定义方法**用于不是单纯创建或替换的动作，在资源上使用冒号后缀：
   `:cancel`、`:approve`、`:reject`、`:export`。它们总是 `POST`。
 - **包含冒号或斜杠的 id。** 修订版和候选的 id 是内容哈希，例如
@@ -413,9 +456,11 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 
 ### 5.2 平台规则
 
-- 平台存储 **`(bot, key) → resource id`**，以及请求的指纹（对规范化
-  `{method, path,
-  body}` 的 `sha256`）。对于 bot 范围的路径，作用域是路径中的 bot。
+- 平台存储 **`(owner_id, bot_id, key) → resource id`**，以及请求的指纹
+  （对规范化 `{method,
+  path, body}` 的 `sha256`）。对于 bot 范围的路径，作用域是被寻址的 bot：
+  路径中的 `bot_id` 及其所有者（`entity_id`，省略时为调用方），因此两个
+  所有者下 `bot_id` 相同的 bot 永远不会共享键。
 - 该记录与其指向的资源**在同一事务中**写入，因此崩溃永远不会留下一个
   没有键的已创建运行，或一个没有运行的键。
 - **相同键、相同请求**（指纹匹配）：平台返回原始结果：相同的状态码
@@ -440,15 +485,15 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 
 | 端点 | 键创建或启动的内容 |
 | --- | --- |
-| `POST /bots/{bot}/evolution/runs` | 一次运行（`202`，运行 id） |
-| `POST /bots/{bot}/evolution/evaluations` | 一个评估操作（`202`，操作 id） |
-| `POST /bots/{bot}/evolution/ledger:export` | 一个导出操作（`202`，操作 id） |
-| `POST /bots/{bot}/genome/revisions` | 一个修订版（同时按内容幂等） |
-| `POST /bots/{bot}/genome/promotions` | 一次晋升（移动 `active`） |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:approve` 和 `:reject` | 一项评审决定 |
-| `POST /bots/{bot}/evolution/runs/{run}:cancel` | 一次取消（同时按状态幂等） |
-| `POST /bots/{bot}/evolution/operations/{operation}:cancel` | 一次操作取消（同时按状态幂等） |
-| `POST /bots/{bot}/experience/feedback` | 一条反馈记录 |
+| `POST /bots/{bot_id}/evolution/runs` | 一次运行（`202`，运行 id） |
+| `POST /bots/{bot_id}/evolution/evaluations` | 一个评估操作（`202`，操作 id） |
+| `POST /bots/{bot_id}/evolution/ledger:export` | 一个导出操作（`202`，操作 id） |
+| `POST /bots/{bot_id}/genome/revisions` | 一个修订版（同时按内容幂等） |
+| `POST /bots/{bot_id}/genome/promotions` | 一次晋升（移动 `active`） |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` 和 `:reject` | 一项评审决定 |
+| `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | 一次取消（同时按状态幂等） |
+| `POST /bots/{bot_id}/evolution/operations/{operation}:cancel` | 一次操作取消（同时按状态幂等） |
+| `POST /bots/{bot_id}/experience/feedback` | 一条反馈记录 |
 | `POST /evolution/strategies` | 一个进化策略版本（同时按内容幂等） |
 
 `PUT` 请求按定义是幂等的（相同的请求体产生相同的状态），使用 `If-Match`
@@ -470,11 +515,11 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
   `428 Precondition Required`（`428000`），因此客户端不会意外跳过这项
   检查。
 - 公开接口面上的第一个可变资源是 bot 的进化策略配置
-  （`GET|PUT /bots/{bot}/evolution/policy`）。
+  （`GET|PUT /bots/{bot_id}/evolution/policy`）。
 
 **请求体中的比较并交换**（compare-and-swap）用于引用（ref）移动。引用更新携带
 `expected_revision`：客户端认为该引用当前指向的修订版。不匹配时返回 `409`
-（`409010`）。这是基因组注册表为 `PUT /bots/{bot}/genome/refs/draft` 定义的
+（`409010`）。这是基因组注册表为 `PUT /bots/{bot_id}/genome/refs/draft` 定义的
 机制（[01-genome.zh-CN.md](01-genome.zh-CN.md)）；晋升在同一规则下移动
 `active`（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
@@ -559,7 +604,7 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 1. **启动立即返回 id。** 启动请求记录该工作，并应答
    `202 Accepted`（`202000`）。对于操作，`data` 为
    `{operation_id}`，`Location` 响应头指向
-   `/bots/{bot}/evolution/operations/{operation}`；对于运行，`data` 是该
+   `/bots/{bot_id}/evolution/operations/{operation}`；对于运行，`data` 是该
    运行的当前状态（status 为 `queued`），`Location` 指向该运行。
 2. **按 id 查询状态。** 调用方对该 URL 反复发起短 `GET`，直到状态为终态。
    每次查询都会立即返回。响应可能带有 `Retry-After`，作为下次查询的提示。
@@ -573,12 +618,12 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 
 | 启动方式 | 返回 | 查询方式 | 状态 |
 | --- | --- | --- | --- |
-| `POST /bots/{bot}/evolution/runs` | 运行 id | `GET /bots/{bot}/evolution/runs/{run}` | `queued \| running \| completed \| failed \| cancelled \| budget_exhausted` |
-| `POST /bots/{bot}/evolution/evaluations` | 操作 id | `GET /bots/{bot}/evolution/operations/{operation}`；其 `result` 携带 `evaluation_id`，通过 `GET /bots/{bot}/evolution/evaluations/{evaluation}` 读取 | `queued \| running \| succeeded \| failed \| cancelled` |
-| `POST /bots/{bot}/evolution/ledger:export` | 操作 id | `GET /bots/{bot}/evolution/operations/{operation}` | `queued \| running \| succeeded \| failed \| cancelled` |
+| `POST /bots/{bot_id}/evolution/runs` | 运行 id | `GET /bots/{bot_id}/evolution/runs/{run}` | `queued \| running \| completed \| failed \| cancelled \| budget_exhausted` |
+| `POST /bots/{bot_id}/evolution/evaluations` | 操作 id | `GET /bots/{bot_id}/evolution/operations/{operation}`；其 `result` 携带 `evaluation_id`，通过 `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` 读取 | `queued \| running \| succeeded \| failed \| cancelled` |
+| `POST /bots/{bot_id}/evolution/ledger:export` | 操作 id | `GET /bots/{bot_id}/evolution/operations/{operation}` | `queued \| running \| succeeded \| failed \| cancelled` |
 
 候选和判定在下一层遵循同样的“按 id”规则：候选的报告按候选 id 查询
-（`GET /bots/{bot}/evolution/candidates/{candidate}`），不存在等待判定的
+（`GET /bots/{bot_id}/evolution/candidates/{candidate}`），不存在等待判定的
 阻塞调用。
 
 ## 10. 生成的 SDK
@@ -660,36 +705,40 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 
 | 命令 | API 调用 | 说明 |
 | --- | --- | --- |
-| `avn genome log --bot B [--status S] [--parent R]` | `GET /bots/{bot}/genome/revisions` | |
-| `avn genome show --bot B [--revision R \| --ref active]` | `GET /bots/{bot}/genome/refs`（用于解析引用或 `r41`）、`GET /bots/{bot}/genome/revisions/{rev}` | |
-| `avn genome diff --bot B R1 --against R2` | `GET /bots/{bot}/genome/revisions/{rev}/diff?against=` | |
-| `avn genome refs --bot B` | `GET /bots/{bot}/genome/refs` | |
-| `avn genome draft set --bot B R --expected R0` | `PUT /bots/{bot}/genome/refs/draft` | 基于 `expected_revision` 的比较并交换 |
-| `avn genome patch apply --bot B patch.json [--dry-run]` | `POST /bots/{bot}/genome/revisions` | 从 `{base, patch}` 记录一个修订版 |
-| `avn genome content get --bot B DIGEST` / `content put --bot B FILE` | `GET /bots/{bot}/genome/content/{digest}` / `PUT /bots/{bot}/genome/content` | 二进制，get 时无 envelope |
-| `avn genome promote --bot B --revision R --reason TEXT --yes` | `POST /bots/{bot}/genome/promotions` | 也用于回到旧版本：晋升一个更早的修订版 |
-| `avn genome export --bot B --format git DIR` | `GET /bots/{bot}/genome/revisions`、`GET /bots/{bot}/genome/content/{digest}` | 写出本地 git 历史；对平台只读（[01-genome.zh-CN.md](01-genome.zh-CN.md)） |
-| `avn experience episodes --bot B [--revision R] [--since T] [--outcome O]` | `GET /bots/{bot}/experience/episodes` | |
-| `avn experience episode show --bot B EPISODE` | `GET /bots/{bot}/experience/episodes/{episode}` | |
-| `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot}/experience/feedback` | |
+| `avn genome log --bot B [--status S] [--parent R]` | `GET /bots/{bot_id}/genome/revisions` | |
+| `avn genome show --bot B [--revision R \| --ref active]` | `GET /bots/{bot_id}/genome/refs`（用于解析引用或 `r41`）、`GET /bots/{bot_id}/genome/revisions/{rev}` | |
+| `avn genome diff --bot B R1 --against R2` | `GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=` | |
+| `avn genome refs --bot B` | `GET /bots/{bot_id}/genome/refs` | |
+| `avn genome draft set --bot B R --expected R0` | `PUT /bots/{bot_id}/genome/refs/draft` | 基于 `expected_revision` 的比较并交换 |
+| `avn genome patch apply --bot B patch.json [--dry-run]` | `POST /bots/{bot_id}/genome/revisions` | 从 `{base, patch}` 记录一个修订版 |
+| `avn genome content get --bot B DIGEST` / `content put --bot B FILE` | `GET /bots/{bot_id}/genome/content/{digest}` / `PUT /bots/{bot_id}/genome/content` | 二进制，get 时无 envelope |
+| `avn genome promote --bot B --revision R --reason TEXT --yes` | `POST /bots/{bot_id}/genome/promotions` | 也用于回到旧版本：晋升一个更早的修订版 |
+| `avn genome export --bot B --format git DIR` | `GET /bots/{bot_id}/genome/revisions`、`GET /bots/{bot_id}/genome/content/{digest}` | 写出本地 git 历史；对平台只读（[01-genome.zh-CN.md](01-genome.zh-CN.md)） |
+| `avn experience episodes --bot B [--revision R] [--since T] [--outcome O]` | `GET /bots/{bot_id}/experience/episodes` | |
+| `avn experience episode show --bot B EPISODE` | `GET /bots/{bot_id}/experience/episodes/{episode}` | |
+| `avn experience feedback add --bot B FILE` / `feedback list --bot B` | `POST` / `GET /bots/{bot_id}/experience/feedback` | |
 | `avn evolve strategies list` / `strategies show ID --version V` | `GET /evolution/strategies` / `GET /evolution/strategies/{id}/versions/{version}` | |
 | `avn evolve capabilities` | `GET /evolution/capabilities` | |
-| `avn evolve policy get --bot B` | `GET /bots/{bot}/evolution/policy` | 将 `ETag` 打印为 `etag` |
-| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot}/evolution/policy` | `--if-match` 为必填 |
-| `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot}/evolution/runs`（使用 `--wait` 时另加 `GET .../runs/{run}`） | |
-| `avn evolve run list --bot B [--status S]` | `GET /bots/{bot}/evolution/runs` | |
-| `avn evolve run status --bot B RUN` | `GET /bots/{bot}/evolution/runs/{run}` | |
-| `avn evolve run candidates --bot B RUN` | `GET /bots/{bot}/evolution/runs/{run}/candidates` | |
-| `avn evolve run cancel --bot B RUN --yes` | `POST /bots/{bot}/evolution/runs/{run}:cancel` | |
-| `avn evolve review list --bot B` | `GET /bots/{bot}/evolution/review-queue` | |
-| `avn evolve review show --bot B CANDIDATE` | `GET /bots/{bot}/evolution/candidates/{candidate}` | diff、验证、门禁决定 |
-| `avn evolve review approve\|reject --bot B CANDIDATE --reason TEXT --yes` | `POST /bots/{bot}/evolution/candidates/{candidate}:approve` / `:reject` | |
+| `avn evolve policy get --bot B` | `GET /bots/{bot_id}/evolution/policy` | 将 `ETag` 打印为 `etag` |
+| `avn evolve policy set --bot B FILE --if-match ETAG --yes` | `PUT /bots/{bot_id}/evolution/policy` | `--if-match` 为必填 |
+| `avn evolve run start --bot B --binding ID [--idempotency-key K] [--wait]` | `POST /bots/{bot_id}/evolution/runs`（使用 `--wait` 时另加 `GET .../runs/{run}`） | |
+| `avn evolve run list --bot B [--status S]` | `GET /bots/{bot_id}/evolution/runs` | |
+| `avn evolve run status --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}` | |
+| `avn evolve run candidates --bot B RUN` | `GET /bots/{bot_id}/evolution/runs/{run}/candidates` | |
+| `avn evolve run cancel --bot B RUN --yes` | `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | |
+| `avn evolve review list --bot B` | `GET /bots/{bot_id}/evolution/review-queue` | |
+| `avn evolve review show --bot B CANDIDATE` | `GET /bots/{bot_id}/evolution/candidates/{candidate}` | diff、验证、门禁决定 |
+| `avn evolve review approve\|reject --bot B CANDIDATE --reason TEXT --yes` | `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` / `:reject` | |
 | `avn evolve suites list` / `suites show SUITE` | `GET /evolution/suites` / `GET /evolution/suites/{suite}` | |
-| `avn evolve evaluate start --bot B --revision R --suite S [--wait]` / `evaluate status --bot B ID` | `POST /bots/{bot}/evolution/evaluations` / `GET /bots/{bot}/evolution/evaluations/{evaluation}` | 仅限操作员的临时评估 |
-| `avn evolve ledger list --bot B [filters]` / `ledger show --bot B ENTRY` | `GET /bots/{bot}/evolution/ledger` / `GET /bots/{bot}/evolution/ledger/{entry}` | |
-| `avn evolve ledger export --bot B [--wait]` | `POST /bots/{bot}/evolution/ledger:export`（另加状态查询） | |
+| `avn evolve evaluate start --bot B --revision R --suite S [--wait]` / `evaluate status --bot B ID` | `POST /bots/{bot_id}/evolution/evaluations` / `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | 仅限操作员的临时评估 |
+| `avn evolve ledger list --bot B [filters]` / `ledger show --bot B ENTRY` | `GET /bots/{bot_id}/evolution/ledger` / `GET /bots/{bot_id}/evolution/ledger/{entry}` | |
+| `avn evolve ledger export --bot B [--wait]` | `POST /bots/{bot_id}/evolution/ledger:export`（另加状态查询） | |
 | `avn strategy dev\|test\|publish` | 进化策略 SDK 测试工具；`publish` 调用 `POST /evolution/strategies` | 由 [03-strategy.zh-CN.md](03-strategy.zh-CN.md) 负责 |
 | `avn job claim\|heartbeat\|input\|upload\|complete\|fail` | 内部作业协议 `/evolution/v1/...` | 用于调试平台作业工作器；由 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 负责 |
+
+`--bot B` 接受 bot id。每个 bot 范围的命令还接受
+`--entity-id OWNER`，作为 `entity_id` 查询参数发送；省略时，
+所有者为调用方（[§4.1](#41-路径资源与自定义方法））。
 
 此前设计中的 `avn evolve inbox` 和 `avn evolve observe` 命令
 属于 bot 调用方，随其一并推迟（[§3](#3-调用方)）。
@@ -719,80 +768,90 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 
 ### 12.1 客户端接口（SDK 提供的内容）
 
+每个 bot 范围的方法都以 `bot_id` 接受 bot id，并且还接受一个仅限关键字的
+`entity_id: str | None = None`：bot 的所有者，作为 `entity_id` 查询参数
+发送；`None` 表示调用方就是所有者，即 OpenAPI v1 的默认行为
+（[§4.1](#41-路径资源与自定义方法））。为保持签名简短，下面的签名中省略了它。过滤参数
+使用负责文档中的封闭取值集合（[01-genome.zh-CN.md](01-genome.zh-CN.md) 中的 `RevisionStatus`、
+[02-experience.zh-CN.md](02-experience.zh-CN.md) 中的 `OutcomeStatus`、
+[03-strategy.zh-CN.md](03-strategy.zh-CN.md) 中的 `Engine` 和 `ConformanceState`、
+[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md) 中的 `RunStatus`）；`None` 表示“不过滤”。
+
 ```python
 from typing import AsyncIterator, Protocol
 
 class GenomeClient(Protocol):
-    async def list_revisions(self, bot: str, *, status: str | None = None,
+    async def list_revisions(self, bot_id: str, *, status: "RevisionStatus | None" = None,
                              parent: str | None = None, page: PageParams = PageParams()) -> Page["GenomeRevision"]: ...
-    async def get_revision(self, bot: str, revision: str) -> "GenomeRevision": ...
-    async def diff(self, bot: str, revision: str, *, against: str) -> dict: ...
-    async def refs(self, bot: str) -> list["GenomeRef"]: ...
-    async def set_draft(self, bot: str, revision: str, *, expected_revision: str) -> "GenomeRef":
+    async def get_revision(self, bot_id: str, revision: str) -> "GenomeRevision": ...
+    async def diff(self, bot_id: str, revision: str, *, against: str) -> dict: ...
+    async def refs(self, bot_id: str) -> list["GenomeRef"]: ...
+    async def set_draft(self, bot_id: str, revision: str, *, expected_revision: str) -> "GenomeRef":
         """Compare-and-swap; raises RefConflict (409010) if the draft moved."""
-    async def record_revision(self, bot: str, *, base: str, patch: "GenomePatch",
+    async def record_revision(self, bot_id: str, *, base: str, patch: "GenomePatch",
                               idempotency_key: str | None = None) -> "GenomeRevision": ...
-    async def promote(self, bot: str, revision: str, *, reason: str,
+    async def promote(self, bot_id: str, revision: str, *, reason: str,
                       idempotency_key: str | None = None) -> "Promotion":
         """Moves `active` (also used to go back to an earlier revision). Owned by 08-promotion."""
-    async def get_content(self, bot: str, digest: str) -> bytes: ...
-    async def put_content(self, bot: str, data: bytes) -> str: ...  # digest
+    async def get_content(self, bot_id: str, digest: str) -> bytes: ...
+    async def put_content(self, bot_id: str, data: bytes) -> str: ...  # digest
 
 class ExperienceClient(Protocol):
-    def iter_episodes(self, bot: str, *, revision: str | None = None, since: str | None = None,
-                      outcome: str | None = None) -> AsyncIterator["Episode"]: ...
-    async def get_episode(self, bot: str, episode: str) -> "Episode": ...
-    async def add_feedback(self, bot: str, feedback: "Feedback", *,
+    def iter_episodes(self, bot_id: str, *, revision: str | None = None, since: str | None = None,
+                      outcome: "OutcomeStatus | None" = None) -> AsyncIterator["Episode"]: ...
+    async def get_episode(self, bot_id: str, episode: str) -> "Episode": ...
+    async def add_feedback(self, bot_id: str, feedback: "Feedback", *,
                            idempotency_key: str | None = None) -> "Feedback": ...
 
 class StrategiesClient(Protocol):
-    async def list(self, *, engine: str | None = None, conformance: str | None = None) -> Page["StrategyRegistration"]: ...
+    async def list(self, *, engine: "Engine | None" = None,
+                   conformance: "ConformanceState | None" = None) -> Page["StrategyRegistration"]: ...
     async def get_version(self, strategy: str, version: str) -> "StrategyRegistration": ...
     async def capabilities(self) -> list["Capability"]: ...
 
 class PolicyClient(Protocol):
-    async def get(self, bot: str) -> tuple["EvolutionPolicy", str]:
+    async def get(self, bot_id: str) -> tuple["EvolutionPolicy", str]:
         """Returns the policy and its ETag."""
-    async def put(self, bot: str, policy: "EvolutionPolicy", *, if_match: str) -> tuple["EvolutionPolicy", str]:
+    async def put(self, bot_id: str, policy: "EvolutionPolicy", *, if_match: str) -> tuple["EvolutionPolicy", str]:
         """Raises PreconditionFailed (412000) if the policy changed since it was read."""
 
 class RunsClient(Protocol):
-    async def start(self, bot: str, *, binding: str, params: dict | None = None,
+    async def start(self, bot_id: str, *, binding: str, params: dict | None = None,
                     budget: dict | None = None, idempotency_key: str | None = None) -> "Run":
         """202: returns the run as it is now (status queued, or its current status on a replay)."""
-    async def get(self, bot: str, run: str) -> "Run": ...
-    def iter(self, bot: str, *, status: str | None = None) -> AsyncIterator["Run"]: ...
-    async def candidates(self, bot: str, run: str) -> list["Candidate"]: ...
-    async def cancel(self, bot: str, run: str, *, idempotency_key: str | None = None) -> "Run": ...
-    async def wait(self, bot: str, run: str, *, timeout_s: int, poll_s: int = 15) -> "Run":
+    async def get(self, bot_id: str, run: str) -> "Run": ...
+    def iter(self, bot_id: str, *, status: "RunStatus | None" = None) -> AsyncIterator["Run"]: ...
+    async def candidates(self, bot_id: str, run: str) -> list["Candidate"]: ...
+    async def cancel(self, bot_id: str, run: str, *, idempotency_key: str | None = None) -> "Run": ...
+    async def wait(self, bot_id: str, run: str, *, timeout_s: int, poll_s: int = 15) -> "Run":
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class VerificationClient(Protocol):
     async def list_suites(self) -> Page["Suite"]: ...
     async def get_suite(self, suite: str) -> "Suite": ...
-    async def start_evaluation(self, bot: str, *, revision: str, suite: str,
+    async def start_evaluation(self, bot_id: str, *, revision: str, suite: str,
                                idempotency_key: str | None = None) -> Operation: ...
-    async def get_evaluation(self, bot: str, evaluation: str) -> "Evaluation": ...
+    async def get_evaluation(self, bot_id: str, evaluation: str) -> "Evaluation": ...
 
 class ReviewClient(Protocol):
-    async def queue(self, bot: str) -> Page["ReviewItem"]: ...
-    async def report(self, bot: str, candidate: str) -> dict:
+    async def queue(self, bot_id: str) -> Page["ReviewItem"]: ...
+    async def report(self, bot_id: str, candidate: str) -> dict:
         """Diff + verification + gate decision for one candidate (08-promotion)."""
-    async def approve(self, bot: str, candidate: str, *, reason: str,
+    async def approve(self, bot_id: str, candidate: str, *, reason: str,
                       idempotency_key: str | None = None) -> "ReviewItem": ...
-    async def reject(self, bot: str, candidate: str, *, reason: str,
+    async def reject(self, bot_id: str, candidate: str, *, reason: str,
                      idempotency_key: str | None = None) -> "ReviewItem": ...
 
 class OperationsClient(Protocol):
-    async def get(self, bot: str, operation: str) -> Operation: ...
-    async def cancel(self, bot: str, operation: str, *, idempotency_key: str | None = None) -> Operation: ...
-    async def wait(self, bot: str, operation: str, *, timeout_s: int = 3600, poll_s: int = 15) -> Operation:
+    async def get(self, bot_id: str, operation: str) -> Operation: ...
+    async def cancel(self, bot_id: str, operation: str, *, idempotency_key: str | None = None) -> Operation: ...
+    async def wait(self, bot_id: str, operation: str, *, timeout_s: int = 3600, poll_s: int = 15) -> Operation:
         """Repeats get() until the status is terminal; raises Transient on timeout."""
 
 class LedgerClient(Protocol):
-    def iter_entries(self, bot: str, **filters: str) -> AsyncIterator["LedgerEntry"]: ...
-    async def get_entry(self, bot: str, entry: str) -> "LedgerEntry": ...
-    async def start_export(self, bot: str, *, idempotency_key: str | None = None) -> Operation: ...
+    def iter_entries(self, bot_id: str, **filters: str) -> AsyncIterator["LedgerEntry"]: ...
+    async def get_entry(self, bot_id: str, entry: str) -> "LedgerEntry": ...
+    async def start_export(self, bot_id: str, *, idempotency_key: str | None = None) -> Operation: ...
 
 class EvolutionClient(Protocol):
     """Entry point of the generated SDK (`avernet_evolution.Client`)."""
@@ -813,15 +872,15 @@ class EvolutionClient(Protocol):
 class IdempotencyStore(Protocol):
     """Implements §5. Writes happen in the caller's transaction."""
 
-    async def lookup(self, bot: str, key: str) -> IdempotencyRecord | None:
-        """The record for (bot, key), or None if the key is new or expired."""
+    async def lookup(self, bot: BotRef, key: str) -> IdempotencyRecord | None:
+        """The record for (owner_id, bot_id, key), or None if the key is new or expired."""
 
     async def record(self, record: IdempotencyRecord) -> None:
-        """Stores (bot, key) -> resource id in the same transaction that creates the resource.
+        """Stores (owner_id, bot_id, key) -> resource id in the same transaction that creates the resource.
         Raises KeyInProgress if another request holds the key and has not committed."""
 
 class IdempotentHandler(Protocol):
-    async def handle(self, *, bot: str, key: str | None, fingerprint: str,
+    async def handle(self, *, bot: BotRef, key: str | None, fingerprint: str,
                      create: "Callable[[], Awaitable[tuple[str, int]]]",
                      current: "Callable[[str], Awaitable[dict]]") -> tuple[int, dict, bool]:
         """Replays (same fingerprint), refuses (409001, different fingerprint),
@@ -851,14 +910,14 @@ class Preconditions(Protocol):
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/genome/revisions` | 列出修订版（`status=`、`parent=`） | Page |
-| `POST /bots/{bot}/genome/revisions` | 从 `{base, patch}` 或 `{manifest}` 记录一个修订版 | key；按内容幂等 |
-| `GET /bots/{bot}/genome/revisions/{rev}` | 单个修订版 | 不可变 ETag |
-| `GET /bots/{bot}/genome/revisions/{rev}/diff?against=` | 比较两个修订版的差异 | |
-| `GET /bots/{bot}/genome/refs` | 具名引用（`active`、`previous`、`canary`、`draft`……） | |
-| `PUT /bots/{bot}/genome/refs/draft` | 移动所有者的 `draft` 引用 | CAS（`expected_revision`） |
-| `GET /bots/{bot}/genome/content/{digest}` | 按摘要获取内容字节 | 二进制，无 envelope |
-| `PUT /bots/{bot}/genome/content` | 上传内容，返回其摘要 | 按内容幂等 |
+| `GET /bots/{bot_id}/genome/revisions` | 列出修订版（`status=`、`parent=`） | Page |
+| `POST /bots/{bot_id}/genome/revisions` | 从 `{base, patch}` 或 `{manifest}` 记录一个修订版 | key；按内容幂等 |
+| `GET /bots/{bot_id}/genome/revisions/{rev}` | 单个修订版 | 不可变 ETag |
+| `GET /bots/{bot_id}/genome/revisions/{rev}/diff?against=` | 比较两个修订版的差异 | |
+| `GET /bots/{bot_id}/genome/refs` | 具名引用（`active`、`previous`、`canary`、`draft`……） | |
+| `PUT /bots/{bot_id}/genome/refs/draft` | 移动所有者的 `draft` 引用 | CAS（`expected_revision`） |
+| `GET /bots/{bot_id}/genome/content/{digest}` | 按摘要获取内容字节 | 二进制，无 envelope |
+| `PUT /bots/{bot_id}/genome/content` | 上传内容，返回其摘要 | 按内容幂等 |
 
 共享约定示例：对引用进行比较并交换。
 
@@ -887,10 +946,10 @@ Content-Type: application/json
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/experience/episodes` | 列出片段（`revision=`、`since=`、`outcome=`） | Page |
-| `GET /bots/{bot}/experience/episodes/{episode}` | 单个片段 | |
-| `POST /bots/{bot}/experience/feedback` | 记录一次评分、纠正或结果 | key |
-| `GET /bots/{bot}/experience/feedback` | 列出反馈 | Page |
+| `GET /bots/{bot_id}/experience/episodes` | 列出片段（`revision=`、`since=`、`outcome=`） | Page |
+| `GET /bots/{bot_id}/experience/episodes/{episode}` | 单个片段 | |
+| `POST /bots/{bot_id}/experience/feedback` | 记录一次评分、纠正或结果 | key |
+| `GET /bots/{bot_id}/experience/feedback` | 列出反馈 | Page |
 
 共享约定示例：分页与过滤器。
 
@@ -959,9 +1018,9 @@ Idempotency-Key: publish-clawevolve-bot-evolution-2.0.0
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/ledger` | 列出条目（过滤器如 `run=`、`strategy=`、`since=`） | Page |
-| `GET /bots/{bot}/evolution/ledger/{entry}` | 单个条目 | 不可变 ETag |
-| `POST /bots/{bot}/evolution/ledger:export` | 导出条目 | key；202 + 操作 id |
+| `GET /bots/{bot_id}/evolution/ledger` | 列出条目（过滤器如 `run=`、`strategy=`、`since=`） | Page |
+| `GET /bots/{bot_id}/evolution/ledger/{entry}` | 单个条目 | 不可变 ETag |
+| `POST /bots/{bot_id}/evolution/ledger:export` | 导出条目 | key；202 + 操作 id |
 
 共享约定示例：一次长时导出。
 
@@ -991,19 +1050,20 @@ Idempotency-Key: ledger-export-bot_123-2026-10-08
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/policy` | bot 的进化策略配置（绑定列表） | 返回 ETag |
-| `PUT /bots/{bot}/evolution/policy` | 替换进化策略配置（在此执行绑定检查） | ETag（必须携带 `If-Match`） |
-| `POST /bots/{bot}/evolution/runs` | 启动某个绑定的一次运行 | key；202 + 运行 id |
-| `GET /bots/{bot}/evolution/runs` | 列出运行（`status=`） | Page |
-| `GET /bots/{bot}/evolution/runs/{run}` | 运行状态、轮次、已用预算 | |
-| `POST /bots/{bot}/evolution/runs/{run}:cancel` | 取消一次运行 | key；按状态幂等 |
-| `GET /bots/{bot}/evolution/runs/{run}/candidates` | 该运行提交的候选 | |
+| `GET /bots/{bot_id}/evolution/policy` | bot 的进化策略配置（绑定列表） | 返回 ETag |
+| `PUT /bots/{bot_id}/evolution/policy` | 替换进化策略配置（在此执行绑定检查） | ETag（必须携带 `If-Match`） |
+| `POST /bots/{bot_id}/evolution/runs` | 启动某个绑定的一次运行 | key；202 + 运行 id |
+| `GET /bots/{bot_id}/evolution/runs` | 列出运行（`status=`） | Page |
+| `GET /bots/{bot_id}/evolution/runs/{run}` | 运行状态、轮次、已用预算 | |
+| `POST /bots/{bot_id}/evolution/runs/{run}:cancel` | 取消一次运行 | key；按状态幂等 |
+| `GET /bots/{bot_id}/evolution/runs/{run}/candidates` | 该运行提交的候选 | |
 
 共享约定示例 1：幂等的运行提交。首次请求与使用相同键的重试得到相同的
-运行 id。
+运行 id。这里的调用方是一条代表它并不拥有的 bot 行事的流水线，因此它用
+`entity_id` 指明所有者（[§4.1](#41-路径资源与自定义方法））。
 
 ```http
-POST /openapi/v1/bots/bot_123/evolution/runs
+POST /openapi/v1/bots/bot_123/evolution/runs?entity_id=user_owner_5
 Content-Type: application/json
 Idempotency-Key: nightly-bot_123-2026-10-08
 ```
@@ -1015,7 +1075,7 @@ Idempotency-Key: nightly-bot_123-2026-10-08
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-// 202 on the first attempt; Location: /openapi/v1/bots/bot_123/evolution/runs/run_7f3
+// 202 on the first attempt; Location: /openapi/v1/bots/bot_123/evolution/runs/run_7f3?entity_id=user_owner_5
 {
   "code": 202000,
   "message": "Accepted",
@@ -1084,8 +1144,8 @@ JSON、使用 `<run_id>/<step>` 形式的键实现幂等启动，以及以 `202`
 | --- | --- | --- |
 | `GET /evolution/suites` | 列出套件 | Page |
 | `GET /evolution/suites/{suite}` | 单个套件；用例内容受划分可见性约束 | |
-| `POST /bots/{bot}/evolution/evaluations` | 仅限操作员：在某个套件上对修订版进行临时评估 | key；202 + 操作 id |
-| `GET /bots/{bot}/evolution/evaluations/{evaluation}` | 评估结果（id 来自操作的 `result`） | |
+| `POST /bots/{bot_id}/evolution/evaluations` | 仅限操作员：在某个套件上对修订版进行临时评估 | key；202 + 操作 id |
+| `GET /bots/{bot_id}/evolution/evaluations/{evaluation}` | 评估结果（id 来自操作的 `result`） | |
 
 共享约定示例：启动，然后按 id 查询操作。
 
@@ -1129,17 +1189,17 @@ GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
 ```
 
 当 `status` 为 `succeeded` 后，`result` 为 `{"evaluation_id": "ev_310"}`，并
-通过 `GET /bots/{bot}/evolution/evaluations/ev_310` 读取该评估。
+通过 `GET /bots/{bot_id}/evolution/evaluations/ev_310` 读取该评估。
 
 ### 13.7 晋升 — [08-promotion.zh-CN.md](08-promotion.zh-CN.md)
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/candidates/{candidate}` | 候选报告：diff、验证、门禁决定 | |
-| `GET /bots/{bot}/evolution/review-queue` | 等待人工评审的候选 | Page |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:approve` | 批准一个候选 | key；检查状态 |
-| `POST /bots/{bot}/evolution/candidates/{candidate}:reject` | 拒绝一个候选 | key；检查状态 |
-| `POST /bots/{bot}/genome/promotions` | 移动 `active`（包括回到旧版本） | key；对 `active` 进行 CAS |
+| `GET /bots/{bot_id}/evolution/candidates/{candidate}` | 候选报告：diff、验证、门禁决定 | |
+| `GET /bots/{bot_id}/evolution/review-queue` | 等待人工评审的候选 | Page |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:approve` | 批准一个候选 | key；检查状态 |
+| `POST /bots/{bot_id}/evolution/candidates/{candidate}:reject` | 拒绝一个候选 | key；检查状态 |
+| `POST /bots/{bot_id}/genome/promotions` | 移动 `active`（包括回到旧版本） | key；对 `active` 进行 CAS |
 
 共享约定示例：在包含冒号的 id 上调用自定义方法。
 
@@ -1178,10 +1238,10 @@ Idempotency-Key: review-bot_123-sha256:c41e…-approve
 
 | 方法与路径 | 用途 | 约定 |
 | --- | --- | --- |
-| `GET /bots/{bot}/evolution/operations/{operation}` | 操作状态，以及完成后的结果或错误 | |
-| `POST /bots/{bot}/evolution/operations/{operation}:cancel` | 取消一个操作 | key；按状态幂等 |
+| `GET /bots/{bot_id}/evolution/operations/{operation}` | 操作状态，以及完成后的结果或错误 | |
+| `POST /bots/{bot_id}/evolution/operations/{operation}:cancel` | 取消一个操作 | key；按状态幂等 |
 
-#### GET /bots/{bot}/evolution/operations/{operation}
+#### GET /bots/{bot_id}/evolution/operations/{operation}
 
 按 id 查询操作：`Operation{id, kind, status, result?, error?,
 created_at, updated_at}`（§2.5）。由流水线、UI 后端、SDK 的 `wait` 辅助方法
@@ -1208,7 +1268,7 @@ GET /openapi/v1/bots/bot_123/evolution/operations/op_19a
 
 错误：`404000` 未知操作，或属于其他 bot 的操作。
 
-#### POST /bots/{bot}/evolution/operations/{operation}:cancel
+#### POST /bots/{bot_id}/evolution/operations/{operation}:cancel
 
 取消一个操作。按状态幂等：取消一个已取消的操作会原样返回它；取消一个已经
 成功或失败的操作返回 `409020`。
@@ -1237,37 +1297,39 @@ Idempotency-Key: cancel-op_19a
 
 ### 14.1 夜间流水线（Python SDK）
 
-一个定时作业启动今晚的运行、等待其完成，并批准所有者的进化策略配置允许
-流水线批准的候选。键是确定性的，因此即使作业本身崩溃并重新运行，它也会
+一个定时作业在 `user_owner_5` 拥有的 bot 上启动今晚的运行、等待其完成，
+并批准所有者的进化策略配置允许流水线批准的候选。由于流水线不是所有者，
+每次调用都传入 `entity_id`。键是确定性的，因此即使作业本身崩溃并重新运行，它也会
 重新关联到同一次运行，而不是启动第二次运行。
 
 ```python
 import asyncio
 from avernet_evolution import Client, PolicyDenied, Transient
 
-async def nightly(bot: str, binding: str, day: str) -> None:
+async def nightly(owner_id: str, bot_id: str, binding: str, day: str) -> None:
     c = Client.from_env()                                   # base URL and client settings from configuration
-    run = await c.runs.start(bot, binding=binding,
-                             idempotency_key=f"nightly-{bot}-{day}")  # same key on every rerun of this job
+    # The pipeline acts on another user's bot, so every call names the owner (entity_id).
+    run = await c.runs.start(bot_id, entity_id=owner_id, binding=binding,
+                             idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}")  # same key on every rerun of this job
     try:
-        run = await c.runs.wait(bot, run.run_id, timeout_s=3 * 3600)  # short lookups by id
+        run = await c.runs.wait(bot_id, run.run_id, entity_id=owner_id, timeout_s=3 * 3600)  # short lookups by id
     except Transient:
         return                                              # still running; the next invocation re-attaches
     print(run.run_id, run.status, f"request_id={run.request_id}")
     if run.status != "completed":
         return                                              # failed / cancelled / budget_exhausted: nothing to approve
 
-    for cand in await c.runs.candidates(bot, run.run_id):
-        report = await c.review.report(bot, cand.candidate_id)
+    for cand in await c.runs.candidates(bot_id, run.run_id, entity_id=owner_id):
+        report = await c.review.report(bot_id, cand.candidate_id, entity_id=owner_id)
         if report["gate"]["decision"] != "needs_review":
             continue
         try:
-            await c.review.approve(bot, cand.candidate_id, reason="nightly auto-policy",
-                                   idempotency_key=f"nightly-{bot}-{day}/approve/{cand.candidate_id}")
+            await c.review.approve(bot_id, cand.candidate_id, entity_id=owner_id, reason="nightly auto-policy",
+                                   idempotency_key=f"nightly-{owner_id}-{bot_id}-{day}/approve/{cand.candidate_id}")
         except PolicyDenied as e:                           # the owner's policy does not let pipelines approve this tier
             print("left for human review:", cand.candidate_id, e.code, e.request_id)
 
-asyncio.run(nightly("bot_123", "bind_01", "2026-10-08"))
+asyncio.run(nightly("user_owner_5", "bot_123", "bind_01", "2026-10-08"))
 ```
 
 ### 14.2 使用 `avn` 的 CI 脚本
@@ -1311,14 +1373,14 @@ esac
 ```python
 from avernet_evolution import Client, PreconditionFailed
 
-async def raise_budget(c: Client, bot: str, binding_id: str, max_usd: int) -> None:
+async def raise_budget(c: Client, bot_id: str, binding_id: str, max_usd: int) -> None:
     for _ in range(3):
-        policy, etag = await c.policy.get(bot)
+        policy, etag = await c.policy.get(bot_id)        # caller is the owner: no entity_id
         for b in policy.bindings:
             if b.id == binding_id:
                 b.budget.max_usd = max_usd
         try:
-            await c.policy.put(bot, policy, if_match=etag)
+            await c.policy.put(bot_id, policy, if_match=etag)
             return
         except PreconditionFailed:
             continue                                         # someone else changed it; read again
@@ -1332,18 +1394,19 @@ import { Client, PolicyDenied } from "@avernet/evolution";
 
 const client = Client.fromEnv();
 
-export async function reviewQueue(bot: string) {
+// entityId: the bot's owner, passed when it is not the signed-in user (omitted = caller)
+export async function reviewQueue(botId: string, entityId?: string) {
   const items = [];
-  for await (const item of client.review.iterQueue(bot)) {        // walks all pages
-    const report = await client.review.report(bot, item.candidateId);
+  for await (const item of client.review.iterQueue(botId, { entityId })) {        // walks all pages
+    const report = await client.review.report(botId, item.candidateId, { entityId });
     items.push({ candidate: item.candidateId, tier: report.riskTier, gate: report.gate, diff: report.diff });
   }
   return items;
 }
 
-export async function approve(bot: string, candidateId: string, reason: string, key: string) {
+export async function approve(botId: string, candidateId: string, reason: string, key: string, entityId?: string) {
   try {
-    return await client.review.approve(bot, candidateId, { reason, idempotencyKey: key });
+    return await client.review.approve(botId, candidateId, { reason, idempotencyKey: key, entityId });
   } catch (e) {
     if (e instanceof PolicyDenied) return { refused: true, code: e.code, requestId: e.requestId };
     throw e;
@@ -1363,9 +1426,9 @@ avn genome promote --bot bot_123 --revision r41 \
   --reason "r42 raised refund escalations" --yes --output json
 ```
 
-`avn` 通过 `GET /bots/{bot}/genome/refs` 和 `GET /bots/{bot}/genome/revisions`
+`avn` 通过 `GET /bots/{bot_id}/genome/refs` 和 `GET /bots/{bot_id}/genome/revisions`
 将 `r41` 解析为其修订版 id，然后调用
-`POST /bots/{bot}/genome/promotions`。对于服务型 bot，该修订版会通过现有的
+`POST /bots/{bot_id}/genome/promotions`。对于服务型 bot，该修订版会通过现有的
 发布流程作为下一个版本发布（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 
 ## 15. 交互

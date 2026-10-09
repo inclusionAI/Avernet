@@ -53,7 +53,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 放在一起（[design.zh-CN.md](design.zh-CN.md)；工作项 RSI-12 将其划分为
 “backend：门禁底线、晋升；evolution：绑定”）。验证与进化运行位于新的
 `apps/evolution` 模块中；它们通过晋升的服务接口调用晋升（§9）。公开端点位于共享的
-`/openapi/v1` 前缀下（§10）：基因组与晋升端点，包括 `/bots/{bot}/evolution/` 下的
+`/openapi/v1` 前缀下（§10）：基因组与晋升端点，包括 `/bots/{bot_id}/evolution/` 下的
 候选报告、评审队列和 approve/reject 路径，由 Backend 提供；其他进化端点由
 `apps/evolution` 提供；[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们
 呈现为一个统一的公开接口面（这遵循 [design.zh-CN.md](design.zh-CN.md) 中 D-1 的
@@ -99,26 +99,36 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 
 ```python
 from enum import IntEnum
+from typing import Literal
 
-class RiskTier(IntEnum):
+class RiskTier(IntEnum):     # ordered, so tiers compare; serialized by name ("T0".."T3") in JSON
     T0 = 0   # annotations only
     T1 = 1   # memory item add/update/retire, skill description tweak, resource content update
     T2 = 2   # persona edits, skill add/update, allowlisted engine_config, any rewrite-flagged edit
     T3 = 3   # tools, script, memory replace mode, permissions, anything in policy: locked by default
 
+# The Genome Patch op names (01-genome.md §6.1; the full set is fixed by RSI-02).
+PatchOpName = Literal["file.edit", "skill.add", "skill.update", "memory.add",
+                      "memory.update", "memory.retire", "engine_config.set"]
+
+@dataclass(frozen=True)
+class TierRaise:                    # one raise applied after the per-op mapping (§5.1)
+    kind: Literal["rewrite", "guardrail_touch"]
+    target: str | None              # the file that triggered it, e.g. "persona/SOUL.md"; None for patch-wide
+
 @dataclass(frozen=True)
 class TierAssessment:
-    tier: RiskTier
+    tier: RiskTier                  # the patch's tier: the maximum over its ops, after raises and overrides
     per_op: list["OpTier"]          # one entry per patch op, in patch order
-    raised_by: list[str]            # e.g. ["rewrite:persona/SOUL.md", "guardrail_touch"]
+    raised_by: list[TierRaise]      # empty when no raise applied
 
 @dataclass(frozen=True)
 class OpTier:
-    op_index: int
-    op: str                         # "file.edit", "skill.add", "memory.add", ...
-    target: str                     # "persona/SOUL.md", "skills/refund-policy", ...
+    op_index: int                   # position of the op in the patch, from 0
+    op: PatchOpName
+    target: str                     # what the op changes, e.g. "persona/SOUL.md", "skills/refund-policy"
     tier: RiskTier
-    reason: str
+    reason: str                     # short human-readable reason for the tier, e.g. "persona edit"
 ```
 
 ```jsonc
@@ -159,13 +169,13 @@ class GateCheck:
 @dataclass(frozen=True)
 class GateDecision:
     id: str                         # "gd_204"
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id, 09-evolution-api.md §2.7)
     candidate_id: str               # content hash of the patch
     revision_id: str                # candidate revision
     parent_revision_id: str         # base the patch was made against
     run_id: str
     binding_id: str
-    verdict: str                    # final verdict: "accept" | "reject" | "inconclusive"
+    verdict: Literal["accept", "reject", "inconclusive"]   # the final verdict the gate decided on
     verification_profile: str       # "default@1"
     verifier_version: str           # recorded so decisions across verifier versions are not mixed
     risk: TierAssessment
@@ -180,7 +190,7 @@ class GateDecision:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "gd_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "candidate_id": "sha256:c41e…",
   "revision_id": "sha256:7c1e…",        // r42
   "parent_revision_id": "sha256:a90b…", // r41
@@ -213,7 +223,7 @@ ReviewStatus = Literal["open", "approved", "rejected", "superseded"]
 @dataclass(frozen=True)
 class ReviewItem:
     candidate_id: str               # the review item is keyed by candidate id
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     revision_id: str
     revision_seq: int               # 42, shown as "r42"
     parent_revision_id: str
@@ -227,7 +237,7 @@ class ReviewItem:
     self_reported_metrics: dict     # shown to reviewers, never used for acceptance
     status: ReviewStatus
     created_at: str
-    decided_by: str | None          # None while open
+    decided_by: str | None          # user or pipeline client id of the decider; None while open
     decided_at: str | None
     decision_reason: str | None
     promotion_id: str | None        # set when an approval promoted the revision
@@ -237,7 +247,7 @@ class ReviewItem:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "parent_revision_id": "sha256:a90b…",
@@ -271,14 +281,14 @@ class Actor:
 
 @dataclass(frozen=True)
 class ApplyResult:
-    kind: Literal["manifest_apply", "service_publish"]
+    kind: Literal["manifest_apply", "service_publish"]   # personal bot: Manifest apply; service bot: publish flow
     reference: str | None           # apply report id or published version, once known
-    detail: str
+    detail: str                     # short human-readable progress or failure text
 
 @dataclass(frozen=True)
 class Promotion:
     id: str                         # "prm_5d2"
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     ref: Literal["active", "canary"]
     revision_id: str                # what the ref now points at
     revision_seq: int
@@ -297,7 +307,7 @@ class Promotion:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "prm_5d2",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "ref": "active",
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
@@ -322,16 +332,16 @@ class Promotion:
 @dataclass(frozen=True)
 class SplitSummary:
     split: Literal["train", "validation", "holdout", "regression", "safety"]
-    mean_delta: str                 # decimal strings: no floats in canonical JSON
-    ci_low: str | None
+    mean_delta: str                 # candidate minus parent, mean score; decimal string (no floats in canonical JSON)
+    ci_low: str | None              # confidence interval of mean_delta; None for must-pass splits
     ci_high: str | None
-    newly_failing: int
+    newly_failing: int              # cases the parent passed and the candidate fails
     detail_visible: bool            # per-case detail is shown per caller role (07-verification.md)
 
 @dataclass(frozen=True)
 class CandidateReport:
     candidate_id: str
-    bot_id: str
+    bot: BotRef                     # the bot (owner + bot id)
     revision_id: str
     revision_seq: int
     parent_revision_id: str
@@ -343,15 +353,15 @@ class CandidateReport:
     diff_path: str                  # relative API path of the genome diff
     rationale: str
     evidence: list[str]
-    verdict: str
+    verdict: Literal["pending", "accept", "reject", "inconclusive"]
     splits: list[SplitSummary]
     cost: dict                      # parent vs candidate cost per case
-    flags: list[str]                # "rewrite", "guardrail_touch", "overfit_suspect", "wins_by_spending"
+    flags: list[Literal["rewrite", "guardrail_touch", "overfit_suspect", "wins_by_spending"]]   # meanings in §6.1
     gate: GateDecision
     review: ReviewItem | None
 ```
 
-其 JSON 形式即 `GET /bots/{bot}/evolution/candidates/{candidate}` 的响应（§10.1）。
+其 JSON 形式即 `GET /bots/{bot_id}/evolution/candidates/{candidate}` 的响应（§10.1）。
 
 ## 3. 权力分立
 
@@ -842,13 +852,13 @@ class PromotionService(Protocol):
     `canary` refs in the Genome Registry.
     """
 
-    def check_floor(self, bot_id: str, candidate_id: str) -> GateCheck:
+    def check_floor(self, bot: BotRef, candidate_id: str) -> GateCheck:
         """Run every FloorCheck on a submitted candidate (§4.2). Called by Evolution
         Run at submission, before verification. On failure, records a GateDecision
         with outcome `not_promotable` and the verdict becomes `reject` without
         running any suite. Idempotent per candidate."""
 
-    def decide(self, bot_id: str, candidate_id: str) -> GateDecision:
+    def decide(self, bot: BotRef, candidate_id: str) -> GateDecision:
         """Evaluate the gate for a candidate whose verdict is final.
 
         Called by Evolution Run when Verification reports a final verdict.
@@ -858,22 +868,22 @@ class PromotionService(Protocol):
         Raises VerdictPending if the verdict is still `pending`.
         """
 
-    def reconsider(self, bot_id: str, reason: str) -> list[GateDecision]:
+    def reconsider(self, bot: BotRef, reason: str) -> list[GateDecision]:
         """Re-evaluate open items of a bot after a bot-level change
         (holdout incident opened or cleared, kill switch, daily limit reset).
         Never turns a decided item back into an open one."""
 
-    def candidate_report(self, bot_id: str, candidate_id: str,
+    def candidate_report(self, bot: BotRef, candidate_id: str,
                          viewer: Actor) -> CandidateReport:
         """Diff + verification summary + gate decision + review state.
         Per-case verification detail is filtered by the viewer's role."""
 
-    def review_queue(self, bot_id: str, status: ReviewStatus | None = "open",
+    def review_queue(self, bot: BotRef, status: ReviewStatus | None = "open",
                      min_tier: RiskTier | None = None,
                      page: int = 1, page_size: int = 20) -> "Page[ReviewItem]":
         """List review items for a bot, newest first."""
 
-    def approve(self, bot_id: str, candidate_id: str, actor: Actor, reason: str,
+    def approve(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
                 idempotency_key: str, override_stale_parent: bool = False) -> Promotion:
         """Approve an open item and promote its revision.
 
@@ -883,11 +893,11 @@ class PromotionService(Protocol):
         override_stale_parent is False), EvolutionFrozen.
         """
 
-    def reject(self, bot_id: str, candidate_id: str, actor: Actor, reason: str,
+    def reject(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
                idempotency_key: str) -> ReviewItem:
         """Reject an open item; the revision's status becomes rejected."""
 
-    def promote(self, bot_id: str, revision_id: str, ref: str, expected_revision: str,
+    def promote(self, bot: BotRef, revision_id: str, ref: Literal["active", "canary"], expected_revision: str,
                 actor: Actor, reason: str, idempotency_key: str) -> Promotion:
         """Move `ref` ("active" or "canary") to `revision_id` with CAS on
         `expected_revision`, then apply. Going back is this call with an
@@ -898,7 +908,8 @@ class FloorCheck(Protocol):
     """One platform-floor rule (§4.2). Floor checks are plugins owned by the
     platform, never by strategies; adding one is a reviewed platform change."""
 
-    name: str
+    name: Literal["schema", "base", "locked_genes_and_pins", "allowed_genes", "secret_pii_scan",
+                  "outbound_endpoints", "permission_escalation", "size_and_rewrite", "budget"]   # one per row of §4.2
 
     def check(self, patch: "GenomePatch", parent: "GenomeRevision",
               policy: "GenomePolicy", allowed_genes: list[str]) -> GateCheck: ...
@@ -931,7 +942,7 @@ Bot 调用方随 DR-3 推迟。
 
 ### 10.1 公开端点
 
-#### GET /bots/{bot}/evolution/candidates/{candidate}
+#### GET /bots/{bot_id}/evolution/candidates/{candidate}
 
 候选报告：diff、验证摘要、门禁决定和评审
 状态。由 UI 评审界面、`avn evolve review show` 以及
@@ -949,7 +960,7 @@ GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "parent_revision_id": "sha256:a90b…",
@@ -988,7 +999,7 @@ GET /openapi/v1/bots/bot_123/evolution/candidates/sha256:c41e…
 读取该 bot）。判定仍为 `pending` 的候选不是
 错误：返回的报告中为 `"verdict": "pending"` 和 `"gate": null`。
 
-#### GET /bots/{bot}/evolution/review-queue
+#### GET /bots/{bot_id}/evolution/review-queue
 
 列出评审条目。由 UI、`avn evolve review list` 以及
 流水线调用。查询参数：`status`（默认 `open`，可选 `approved`、
@@ -1010,7 +1021,7 @@ GET /openapi/v1/bots/bot_123/evolution/review-queue?status=open
   "items": [
     {
       "candidate_id": "sha256:c41e…",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "revision_id": "sha256:7c1e…",
       "revision_seq": 42,
       "parent_revision_id": "sha256:a90b…",
@@ -1036,7 +1047,7 @@ GET /openapi/v1/bots/bot_123/evolution/review-queue?status=open
 值得注意的错误：`404 not_found`；对未知的 `status` 值返回
 `400 invalid_argument`。
 
-#### POST /bots/{bot}/evolution/candidates/{candidate}:approve
+#### POST /bots/{bot_id}/evolution/candidates/{candidate}:approve
 
 批准一个开放的评审条目并晋升其修订版。由所有者和
 评审者（UI、`avn evolve review approve`）调用，也可由流水线在所有者
@@ -1072,7 +1083,7 @@ Idempotency-Key: review-bot_123-sha256:c41e-approve
   },
   "promotion": {
     "id": "prm_5d2",
-    "bot_id": "bot_123",
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
     "ref": "active",
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
@@ -1096,7 +1107,7 @@ Idempotency-Key: review-bot_123-sha256:c41e-approve
 `403 policy_denied`（流水线批准超出其允许等级的条目）；
 `403 evolution_frozen`（按 bot 的紧急停止开关）。
 
-#### POST /bots/{bot}/evolution/candidates/{candidate}:reject
+#### POST /bots/{bot_id}/evolution/candidates/{candidate}:reject
 
 拒绝一个开放的评审条目。修订版的状态变为 `rejected`；它会被保留，永不删除。
 
@@ -1120,7 +1131,7 @@ Idempotency-Key: review-bot_123-sha256:c41e-reject
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "candidate_id": "sha256:c41e…",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "status": "rejected",
@@ -1134,7 +1145,7 @@ Idempotency-Key: review-bot_123-sha256:c41e-reject
 值得注意的错误：`404 not_found`；`409 not_reviewable`；`409 already_decided`；
 `400 invalid_argument`（原因为空）。
 
-#### POST /bots/{bot}/genome/promotions
+#### POST /bots/{bot_id}/genome/promotions
 
 将 `active`（或 `canary`）移动到某个修订版并应用它。用于回到旧版本、
 晋升所有者编写的修订版、canary → active，
@@ -1165,7 +1176,7 @@ Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "id": "prm_6a0",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "ref": "active",
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
@@ -1218,19 +1229,19 @@ Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
 from avernet_evolution import Client, RiskTier
 
 c = Client.from_env()
-run_id = c.runs.start(bot="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
+run_id = c.runs.start(bot_id="bot_123", binding="bind_01",      # bind_01 runs clawevolve/bot-evolution@2.0.0
                       budget={"max_usd": 10},
                       idempotency_key="nightly-bot_123-2026-10-08")   # same key on every retry
 run = c.runs.wait(run_id)                     # repeated short status lookups by id
 
 for cand in run.candidates():
-    report = c.candidates.get(bot="bot_123", candidate=cand.id)
+    report = c.candidates.get(bot_id="bot_123", candidate=cand.id)
     if report.gate is None or report.gate.outcome != "needs_review":
         continue                              # auto-promoted, not promotable, or still pending
     if report.gate.risk.tier <= RiskTier.T1 and not report.flags:
         # Only reached when the owner turned gate auto-promotion off but allowed
         # this pipeline to approve T1; anything higher is left for a human.
-        c.review.approve(bot="bot_123", candidate=cand.id,
+        c.review.approve(bot_id="bot_123", candidate=cand.id,
                          reason="nightly auto-policy",
                          idempotency_key=f"approve-bot_123-{cand.id}")
 ```
@@ -1257,8 +1268,8 @@ $ avn evolve review approve sha256:c41e… --bot bot_123 --reason "escalation fi
 
 ```python
 # Illustrative only
-refs = c.genome.refs(bot="bot_123")           # active = r42, previous = r41
-promo = c.genome.promote(bot="bot_123",
+refs = c.genome.refs(bot_id="bot_123")        # active = r42, previous = r41
+promo = c.genome.promote(bot_id="bot_123",
                          revision=refs.previous,
                          expected_revision=refs.active,
                          reason="r42 mis-routes VIP refunds",
@@ -1331,8 +1342,8 @@ assert promo.going_back
   `regression` 容差为 1，且已用掉的容差
   （`tolerance_used: true`）会将候选转交人工评审（§4.1、§4.3）。
 - **评审队列端点由谁提供。** 基因组与晋升
-  端点（包括 `/bots/{bot}/evolution/candidates/…` 和
-  `/bots/{bot}/evolution/review-queue` 路径）由 Backend 提供；
+  端点（包括 `/bots/{bot_id}/evolution/candidates/…` 和
+  `/bots/{bot_id}/evolution/review-queue` 路径）由 Backend 提供；
   经验、策略注册表、进化运行、验证、实验记录和
   元进化端点由 `apps/evolution` 提供；
   [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md) 将它们呈现在统一的公开

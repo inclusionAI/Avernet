@@ -121,6 +121,11 @@ from typing import Literal
 EntryKind = Literal["experiment", "governance"]
 VerdictStatus = Literal["pending", "accept", "reject", "inconclusive"]
 RiskTier = Literal["T0", "T1", "T2", "T3"]
+# Top-level gene categories of a genome (01-genome.md §2.1).
+GeneCategory = Literal["persona", "skills", "memory", "resources", "tools.mcp",
+                       "tools.cli_tools", "engine_config", "script"]
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
 
 
 @dataclass(frozen=True)
@@ -137,20 +142,20 @@ class MechanismRef:
 class PatchSummary:
     patch_digest: str                            # digest of the stored Genome Patch
     ops: list[str]                               # e.g. "persona/SOUL.md: replace_section"
-    genes: list[str]                             # top-level genes touched
+    genes: list[GeneCategory]                    # top-level genes touched
     risk_tier: RiskTier                          # max over ops, assigned by Promotion
-    size_bytes_changed: int
-    rewrite_flagged: bool
+    size_bytes_changed: int                      # bytes added plus removed across all ops
+    rewrite_flagged: bool                        # some file.edit changed more than the rewrite threshold (01-genome.md §6.2)
 
 
 @dataclass(frozen=True)
 class SplitResult:
     split: Literal["train", "validation", "holdout", "regression", "safety"]
-    cases: int
-    mean_delta: str                              # decimal as string: no floats in hashed records
-    ci_low: str | None                           # None for must-pass splits (no interval)
-    ci_high: str | None
-    newly_failing: int
+    cases: int                                   # number of cases of this split that were run
+    mean_delta: str                              # candidate minus parent, mean score; decimal as string (no floats in hashed records)
+    ci_low: str | None                           # lower end of the confidence interval of mean_delta; None for must-pass splits
+    ci_high: str | None                          # upper end; None for must-pass splits
+    newly_failing: int                           # cases the parent passed and the candidate fails
     evaluation_id: str                           # link into Verification
 
 
@@ -160,16 +165,16 @@ class VerdictRecord:
     verification_profile: str                    # "default@1"
     verifier_version: str                        # every verdict records it
     splits: list[SplitResult]
-    reasons: list[str]
+    reasons: list[str]                           # human-readable reasons, as written by Verification
     gate: dict | None                            # GateDecision summary, see 08-promotion.md
 
 
 @dataclass
 class Cost:
-    tokens: int
-    usd: str                                     # decimal as string
-    wall_clock_s: int
-    rollouts: int
+    tokens: int                                  # model tokens, input plus output, over all calls
+    usd: str                                     # money spent in US dollars; decimal as string
+    wall_clock_s: int                            # elapsed seconds attributed to this candidate
+    rollouts: int                                # evaluation rollouts: one rollout = one evaluation case run once against one bot version
 
 
 @dataclass
@@ -191,10 +196,10 @@ class OnlineOutcome:
 
 @dataclass
 class LedgerEntry:
-    entry_id: str
+    entry_id: str                                # "led_5c2"
     kind: EntryKind
-    bot_id: str
-    created_at: str
+    bot: BotRef                                  # the bot the entry is about (owner + bot id)
+    created_at: str                              # RFC 3339 UTC
     # experiment entries: all set; governance entries: run/candidate fields are None
     run_id: str | None
     binding_id: str | None
@@ -220,7 +225,7 @@ class LedgerEntry:
 {
   "entry_id": "led_5c2",
   "kind": "experiment",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-09T02:41:07Z",
   "run_id": "run_7f3",
   "binding_id": "bind_01",
@@ -283,7 +288,7 @@ class LedgerEntry:
 {
   "entry_id": "led_6a0",
   "kind": "governance",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-20T09:15:00Z",
   "subject": {"type": "promotion", "promotion_id": "prm_93", "revision": "sha256:a90b…"},  // going back to r41
   "run_id": null,
@@ -456,7 +461,7 @@ class MechanismMetrics:                        # same fields as in 10-meta-evolu
 **提交在运行失败后仍然保留。** 在失败、取消或预算停止之前做出的提交会被保留、
 仍然被验证并被记录。崩溃后被重新派发的运行会以相同的内容哈希重新提交，并得到相同的
 候选 id，因此对重复提交实验记录不会追加任何新内容：`submitted` 在
-`(bot, run_id, candidate_id)` 上是幂等的。
+`(owner_id, bot_id, run_id, candidate_id)` 上是幂等的。
 
 **为什么记录每个候选，包括被拒绝的。** 拒绝是正常结果，大多数候选都应该失败。
 只记录胜出者恰恰会隐藏第 3 层所需的证据（哪些算子失败、哪些阈值放过了回归、
@@ -556,11 +561,14 @@ class MechanismMetrics:                        # same fields as in 10-meta-evolu
   `parent_revision`。
 
 ```python
-class ParentSelector(Protocol):
-    name: str                                  # "pareto_per_case"
-    version: str
+# One value per row of the table above; a new selector is a reviewed platform change.
+SelectorName = Literal["active", "latest_best", "pareto_per_case", "map_elites", "clade_metaproductivity"]
 
-    def select(self, bot_id: str, archive: "ArchiveView", seed: int) -> str:
+class ParentSelector(Protocol):
+    name: SelectorName
+    version: str                               # platform version of the selector code, e.g. "1.0.0"
+
+    def select(self, bot: BotRef, archive: "ArchiveView", seed: int) -> str:
         """Return the revision id a new run starts from.
 
         Deterministic for a given archive snapshot and seed, so a
@@ -601,9 +609,9 @@ Bot 类型）以及按验证器版本，从实验条目计算得出。其定义�
 ## 9. 导出
 
 两种导出都是长时操作：`POST
-/bots/{bot}/evolution/ledger:export` 立即返回带 `{operation_id}` 的 `202`，
+/bots/{bot_id}/evolution/ledger:export` 立即返回带 `{operation_id}` 的 `202`，
 启动在其 `Idempotency-Key` 上是幂等的，状态通过 id 用
-`GET /bots/{bot}/evolution/operations/{operation}` 查询
+`GET /bots/{bot_id}/evolution/operations/{operation}` 查询
 （[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）。不会保持任何请求处于打开状态。
 
 ### 9.1 供进化策略使用的文件系统导出
@@ -679,14 +687,14 @@ class ExperimentLedger(Protocol):
     # --- writes (internal only) -------------------------------------------
 
     async def record_submission(
-        self, *, bot_id: str, run_id: str, binding_id: str, iteration: int,
+        self, *, bot: BotRef, run_id: str, binding_id: str, iteration: int,
         candidate_id: str, mechanism: MechanismRef, parent_revision: str,
         candidate_revision: str, evidence: list[str], patch: PatchSummary,
         cost: Cost, actor: Actor,
     ) -> str:
         """Create the experiment entry for a submitted candidate.
 
-        Idempotent on (bot_id, run_id, candidate_id): a repeated call returns
+        Idempotent on (owner_id, bot_id, run_id, candidate_id): a repeated call returns
         the existing entry id and appends nothing.
         """
         ...
@@ -702,7 +710,7 @@ class ExperimentLedger(Protocol):
         ...
 
     async def record_governance(
-        self, *, bot_id: str, subject: dict, event: LedgerEvent,
+        self, *, bot: BotRef, subject: dict, event: LedgerEvent,
     ) -> str:
         """Create a governance entry for an audited event that has no
         experiment entry (going back, a revision recorded outside a run)."""
@@ -710,24 +718,24 @@ class ExperimentLedger(Protocol):
 
     # --- reads -------------------------------------------------------------
 
-    async def get(self, bot_id: str, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
+    async def get(self, bot: BotRef, entry_id: str, *, view: "LedgerView") -> LedgerEntry:
         """Return one entry as the given view sees it (full or strategy)."""
         ...
 
     async def query(
-        self, bot_id: str, flt: LedgerFilter, *, view: "LedgerView",
+        self, bot: BotRef, flt: LedgerFilter, *, view: "LedgerView",
     ) -> "Page[LedgerEntry]":
         """Return one page (`flt.page`, `flt.page_size`) of entries, newest first."""
         ...
 
-    async def archive(self, bot_id: str, *, verifier_version: str) -> "ArchiveView":
+    async def archive(self, bot: BotRef, *, verifier_version: str) -> "ArchiveView":
         """Snapshot of lineage plus per-split scores, for selectors."""
         ...
 
     # --- exports and derived data -----------------------------------------
 
     async def start_export(
-        self, bot_id: str, *, format: Literal["filesystem", "training"],
+        self, bot: BotRef, *, format: Literal["filesystem", "training"],
         flt: LedgerFilter, idempotency_key: str, requested_by: Actor,
     ) -> str:
         """Start an export operation and return its operation id at once.
@@ -756,7 +764,7 @@ LedgerView = Literal["full", "strategy"]
 分页和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。实验记录没有公共写入端点：条目
 只由平台服务写入。
 
-### GET /bots/{bot}/evolution/ledger
+### GET /bots/{bot_id}/evolution/ledger
 
 列出一个 Bot 的实验记录条目，最新的在前，支持过滤。由 UI 后端（谱系、历史、
 审计视图）、`avn` CLI 和流水线调用。
@@ -806,7 +814,7 @@ GET /openapi/v1/bots/bot_123/evolution/ledger?strategy=clawevolve/bot-evolution&
 错误：`400 invalid_filter`（未知字段、时间格式错误、`page_size` 超出范围）；
 `404 bot_not_found`。
 
-### GET /bots/{bot}/evolution/ledger/{entry}
+### GET /bots/{bot_id}/evolution/ledger/{entry}
 
 返回一个条目的全部字段及其完整事件历史。由 UI 后端（候选历史、审计详情）和 CLI
 （`avn evolve ledger show`）调用。
@@ -824,7 +832,7 @@ GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
 {
   "entry_id": "led_5c2",
   "kind": "experiment",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "created_at": "2026-10-09T02:41:07Z",
   "run_id": "run_7f3",
   "binding_id": "bind_01",
@@ -891,12 +899,12 @@ GET /openapi/v1/bots/bot_123/evolution/ledger/led_5c2
 
 错误：`404 entry_not_found`（条目属于另一个 Bot 时也返回此错误）。
 
-### POST /bots/{bot}/evolution/ledger:export
+### POST /bots/{bot_id}/evolution/ledger:export
 
 启动对该 Bot 实验记录的导出。由操作员和流水线调用（例如研究流水线为编码智能体类
 进化策略准备文件系统导出，或租户的训练数据流水线）。立即返回带
 `{operation_id}` 的 `202`；工作以操作的形式运行，其状态和结果（导出归档的下载
-位置）通过 id 用 `GET /bots/{bot}/evolution/operations/{operation}` 查询，该端点定义于
+位置）通过 id 用 `GET /bots/{bot_id}/evolution/operations/{operation}` 查询，该端点定义于
 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
 请求头：`Idempotency-Key`（必填）。使用相同键的重试返回相同的操作 id，
@@ -950,10 +958,10 @@ Content-Type: application/json
 from avernet_evolution import Client
 
 c = Client.from_env()
-page = c.ledger.list(bot="bot_123", strategy="clawevolve/bot-evolution",
+page = c.ledger.list(bot_id="bot_123", strategy="clawevolve/bot-evolution",
                      verdict="accept", since="2026-10-02T00:00:00Z")
 for item in page.items:
-    entry = c.ledger.get(bot="bot_123", entry=item.entry_id)
+    entry = c.ledger.get(bot_id="bot_123", entry=item.entry_id)
     print(item.candidate_revision.seq, entry.verdict.status,
           entry.cost.usd, entry.adoption.promoted)
 ```
@@ -961,11 +969,11 @@ for item in page.items:
 **UI 后端绘制谱系树。** 修订版来自基因组 API；实验记录补充每个候选经历了什么。
 
 ```python
-def lineage_tree(c, bot: str) -> dict[str, dict]:
+def lineage_tree(c, bot_id: str) -> dict[str, dict]:
     nodes: dict[str, dict] = {}
     page_no = 1
     while True:
-        page = c.ledger.list(bot=bot, kind="experiment", page=page_no, page_size=100)
+        page = c.ledger.list(bot_id=bot_id, kind="experiment", page=page_no, page_size=100)
         for e in page.items:
             nodes[e.candidate_revision.id] = {
                 "seq": e.candidate_revision.seq,
@@ -984,9 +992,9 @@ def lineage_tree(c, bot: str) -> dict[str, dict]:
 ```python
 async def submit(self, run: Run, cand: Candidate) -> str:
     candidate_id = content_hash(cand.patch)
-    revision = await self.genome.record_candidate(run.bot_id, base=cand.patch.base, patch=cand.patch)
+    revision = await self.genome.record_candidate(run.bot, base=cand.patch.base, patch=cand.patch)
     await self.ledger.record_submission(
-        bot_id=run.bot_id, run_id=run.run_id, binding_id=run.binding_id,
+        bot=run.bot, run_id=run.run_id, binding_id=run.binding_id,
         iteration=await self.next_iteration(run, candidate_id),
         candidate_id=candidate_id, mechanism=run.mechanism_ref(),
         parent_revision=cand.patch.base, candidate_revision=revision.id,
@@ -1041,7 +1049,7 @@ avn evolve ledger export --bot bot_123 --format filesystem \
 | L-3 | 审计轨迹中的进化策略配置变更和紧急停止开关 | 提议：两者都记录为治理条目。治理审计规则只列出了修订版、门禁决定、批准、晋升以及回到旧版本 |
 | L-4 | 防篡改 | 提议：基于规范 JSON 的每条目哈希链。备选：依赖仅插入权限 |
 | L-5 | 进化策略在运行中如何接收文件系统导出 | 第 3 层能力 `ledger.read@1`（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)）vs 由操作员生成并作为参数传入的导出；其契约尚未确定 |
-| L-6 | 导出操作的状态查询路径 | 已解决：`GET /bots/{bot}/evolution/operations/{operation}`（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）；导出的 `202` 返回 `{operation_id}` |
+| L-6 | 导出操作的状态查询路径 | 已解决：`GET /bots/{bot_id}/evolution/operations/{operation}`（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)）；导出的 `202` 返回 `{operation_id}` |
 | L-7 | 选择器集合以及 `map_elites` 的生态位定义 | 在 RSI-17 中、当真正需要第二个选择器时确定 |
 | L-8 | 经验过期 vs 证据链接 | 提议：保留 id，标记为已过期；绝不因为实验记录引用了某个片段而阻止其过期 |
 | D-1 | 控制平面的模块位置 | 推荐：`apps/evolution`（见 [design.zh-CN.md](design.zh-CN.md)） |

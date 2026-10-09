@@ -23,6 +23,16 @@
 | `clawevolve/bot-evolution` | `2.0.0` | **主要默认策略。** 将现有的 ClawEvolve Bot 进化（诊断 → 规划 → tune/review 轮次 → bench）作为黑盒策略 | P3，RSI-13 |
 | `platform/consolidate-memory` | `1.0.0` | 第二个、刻意不同的默认策略：将反馈和片段（episode）整合为精选的记忆条目（“dream” 作业）。以一组不同的能力证明可插拔性（R19 需要两个示例） | P5，RSI-15 |
 
+这些是**三个独立的策略**，而不是同一个策略的三种模式：每个策略都有
+自己的 id、自己的代码、自己的 params schema 以及自己的已注册版本，
+bot 通过其进化策略配置中各自的绑定来使用每个策略
+（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。各自的用途：
+
+- `platform/manual-patch`：将某人或某条流水线已经写好的一个补丁，
+  完整地走一遍验证—门禁—晋升循环。
+- `clawevolve/bot-evolution`：根据近期会话中出错的地方改进 persona 和技能。
+- `platform/consolidate-memory`：将近期反馈转化为精选的记忆条目。
+
 本文负责：
 
 - 每个默认进化策略的注册记录、params schema 以及 `run(ctx)` 行为；
@@ -134,10 +144,10 @@ class ClawEvolveParams:
 ```python
 @dataclass(frozen=True)
 class Finding:
-    finding_id: str
+    finding_id: str               # "f_12"
     kind: Literal["bad_case", "good_case"]
-    summary: str
-    root_cause: str
+    summary: str                  # one line: what the bot did
+    root_cause: str               # the likely reason, in the genome's terms (e.g. a skill that did not trigger)
     episodes: list[str]           # episode ids, evidence for the candidate
     severity: Literal["low", "medium", "high"]
 ```
@@ -164,9 +174,9 @@ ClawBench 用例是带有 YAML front matter 的 Markdown 文件（`lib_tasks.py`
 @dataclass(frozen=True)
 class TrainCaseProposal:
     case_key: str                 # strategy-chosen, stable per run: "<run>/<finding>/<n>"
-    format: str                   # proposed: "clawbench-md/1"
+    format: Literal["clawbench-md/1"]   # proposed: the ClawBench Markdown case format; new formats need a reviewed verifier change
     content: str                  # the Markdown case, unchanged
-    derived_from: list[str]       # finding / episode ids
+    derived_from: list[str]       # evidence ids it came from, e.g. "finding:f_12", "episode:ep_91"
 ```
 
 ```jsonc
@@ -188,10 +198,10 @@ class TrainCaseProposal:
 ```python
 @dataclass
 class RoundRecord:
-    round: int
+    round: int                    # 0-based round number within the run
     candidate: str | None         # candidate id submitted in this round, if any
-    train_score_pct: int
-    verdict: str | None           # pending | accept | reject | inconclusive
+    train_score_pct: int          # the round's train score, 0..100
+    verdict: Literal["pending", "accept", "reject", "inconclusive"] | None   # None when nothing was submitted
 
 @dataclass
 class ClawEvolveState:
@@ -912,7 +922,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 
 **绑定并启动默认进化策略（公开）。**
 
-### `PUT /bots/{bot}/evolution/policy`
+### `PUT /bots/{bot_id}/evolution/policy`
 
 设置 Bot 的绑定列表。由 Bot 所有者或租户管理员调用
 （UI、`avn evolve policy set`）。定义于
@@ -963,7 +973,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
-{"bot": "bot_123", "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
+{"bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"}, "bindings": ["bind_01", "bind_02", "bind_03"], "etag": "W/\"policy-7\""}
 ```
 
 主要错误（绑定检查，发生在配置时，而不是在付费运行
@@ -973,7 +983,7 @@ schema 使用 JSON Schema draft 2020-12。各项限制（minimum、maximum）为
 时返回 `422`（锁定基因保持
 锁定）；`If-Match` 过期时返回 `412`。
 
-### `POST /bots/{bot}/evolution/runs`
+### `POST /bots/{bot_id}/evolution/runs`
 
 启动一次运行。定义于 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。
 manual-patch 参考策略总是以这种方式启动，补丁放在
@@ -1040,7 +1050,7 @@ ClawEvolve worker 为其策略 id 领取一个作业。
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
-  "job_id": "job_7f3",
+  "job_id": "job_7f3_1",
   "run_id": "run_7f3",
   "attempt": 1,
   "params": {"window_days": 7, "max_rounds": 3, "poll_s": 60, "max_sessions": 500},
@@ -1056,9 +1066,9 @@ ClawEvolve worker 为其策略 id 领取一个作业。
 ### `POST /evolution/v1/jobs/{id}/heartbeat`
 
 在 `run(ctx)` 工作期间续租。租约过期会以相同的运行 id 和
-`attempt + 1` 将作业重新入队。
+`attempt + 1` 将该运行作为一个新作业重新入队。
 
-请求：`POST /evolution/v1/jobs/job_7f3/heartbeat`，带请求头
+请求：`POST /evolution/v1/jobs/job_7f3_1/heartbeat`，带请求头
 `Evolution-Fencing-Token: ft_000231`，请求体 `{}`。
 
 响应（`cancelled: true` 是取消到达 worker 的方式；
@@ -1159,7 +1169,7 @@ SDK 将其转换为 `ctx.cancelled`）：
      "revision_id": "sha256:a90b…", "text": "partial refunds are allowed",
      "created_at": "2026-10-07T09:15:00Z"},
     {"feedback_id": "fb_305", "kind": "rating", "episode_id": "ep_97",
-     "revision_id": "sha256:a90b…", "rating": -1, "created_at": "2026-10-07T14:02:00Z"}
+     "revision_id": "sha256:a90b…", "score": 0.0, "created_at": "2026-10-07T14:02:00Z"}
   ]
 }
 ```
@@ -1293,7 +1303,7 @@ ClawEvolve 自己的训练 bench（`bench-full-opt`）。仅限训练划分。
 ```
 
 成功的智能体操作则返回一个 `AgentResult`，例如
-`{"exit_status": "ok", "transcript_artifact": "art_77"}`；它修改的文件
+`{"exit_status": "completed", "transcript_artifact": "art_77"}`；它修改的文件
 保留在工作区中，直到策略将其转为补丁。
 
 ### `POST /evolution/v1/runs/{run}/models:complete`
@@ -1450,7 +1460,7 @@ class ManualPatchStrategy(EvolutionStrategy):
 from avernet_evolution import Client
 
 c = Client.from_env()
-run_id = c.runs.start(bot="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
+run_id = c.runs.start(bot_id="bot_123", binding="bind_03",            # binding runs platform/manual-patch@1.0.0
                       params={"patch": patch}, idempotency_key="fix-refund-trigger-2026-10-09")
 run = c.runs.get(run_id)                       # repeat until terminal
 cand = run.candidates()[0]

@@ -84,6 +84,9 @@ class RunSummary:
 注册一个策略版本，是在告诉平台它的存在：其代码在哪里运行（`runtime`）以及它需要哪些能力（`needs`）。它是**数据而非方法**，因为平台需要在不运行策略代码的情况下获知这些信息（例如，在作业 worker 容器尚不存在之前）。
 
 ```python
+Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
+ConformanceState = Literal["pending", "passed", "failed"]          # result of the conformance kit (§8.4)
+
 @dataclass(frozen=True)
 class Runtime:
     kind: Literal["in_process", "job_worker"]
@@ -92,7 +95,7 @@ class Runtime:
 
 @dataclass(frozen=True)
 class AgentDefinitionRef:
-    engine: str                                # e.g. "openclaw"
+    engine: Engine                             # the engine this agent runs on
     path: str                                  # directory in the strategy's source (as written by the author)
     digest: str | None = None                  # filled in by the registry after upload
 
@@ -108,14 +111,14 @@ class StrategyRegistration:
 
 @dataclass(frozen=True)
 class ConformanceStatus:                       # proposed shape
-    status: Literal["pending", "passed", "failed"]
-    kit_version: str
+    status: ConformanceState
+    kit_version: str                           # version of the conformance kit that ran, e.g. "1.0.0"
     report_artifact: str | None                # artifact id of the kit's report
 
 @dataclass(frozen=True)
 class RegisteredStrategy:                      # what the registry stores and returns (proposed shape)
     registration: StrategyRegistration         # with agent definition digests filled in
-    engines: list[str]                         # derived: the engine values of the agents@1 definitions
+    engines: list[Engine]                      # derived: the engine values of the agents@1 definitions
     conformance: ConformanceStatus
     enabled: bool                              # false after a per-strategy kill switch
     registered_at: datetime
@@ -153,20 +156,24 @@ class RegisteredStrategy:                      # what the registry stores and re
 **能力**（capability）是上下文中一个具名、带版本的部件，取自一个小型、封闭、由平台拥有的目录。每个条目都是一份契约：方法签名、数据 schema、语义、哪些调用是操作，以及每个引擎 provider 的一致性测试。
 
 ```python
+# The StrategyContext fields a catalog entry can fill (§2.5).
+ContextPart = Literal["candidates", "models", "experience", "agents", "evaluate", "ledger"]
+ProviderEngine = Engine | Literal["*"]         # "*" = one provider serves every engine
+
 @dataclass(frozen=True)
 class CapabilityCall:
-    name: str                                  # e.g. "start_train"
+    name: str                                  # method name on the context part, e.g. "start_train"
     operation: bool                            # true: returns an operation id (§6)
 
 @dataclass(frozen=True)
 class Capability:
-    name: str                                  # "evaluate.train"
-    version: int                               # 1 -> "evaluate.train@1"
-    context_part: str                          # field of StrategyContext, e.g. "evaluate"
-    always_granted: bool
+    name: str                                  # catalog name, e.g. "evaluate.train"
+    version: int                               # contract version: 1 -> "evaluate.train@1" (§4.1)
+    context_part: ContextPart                  # which field of StrategyContext it fills
+    always_granted: bool                       # true: every strategy gets it without declaring it
     calls: list[CapabilityCall]
     arguments_schema: dict | None              # JSON Schema of the needs arguments (agents@1: definitions)
-    providers: dict[str, str]                  # engine -> provider id; "*" for engine-neutral providers
+    providers: dict[ProviderEngine, str]       # engine -> id of the provider that serves it there
     status: Literal["active", "deprecated"]
 ```
 
@@ -191,10 +198,10 @@ class Capability:
 ```python
 @dataclass(frozen=True)
 class AgentDefinition:
-    strategy: str                              # "clawevolve/bot-evolution"
-    strategy_version: str                      # "2.0.0"
-    name: str                                  # "clawevolve-tune"
-    engine: str                                # "openclaw"
+    strategy: str                              # strategy id, e.g. "clawevolve/bot-evolution"
+    strategy_version: str                      # e.g. "2.0.0"
+    name: str                                  # the definition's name in `needs`, e.g. "clawevolve-tune"
+    engine: Engine                             # the engine the agent runs on
     digest: str                                # content digest of the uploaded definition directory
     validated_by: str                          # agents@1 provider that validated it
 ```
@@ -283,7 +290,7 @@ class Verdict:                                 # = StrategyVerdictView in 07-ver
     status: Literal["pending", "accept", "reject", "inconclusive"]
     revision: str | None                       # the candidate revision recorded for this patch, once recorded
     aggregates: dict                           # {"validation": ...}: validation aggregates only; never per-case hidden data
-    reasons: list[str]                         # categories only, e.g. "must_pass_failure"; no case ids
+    reasons: list["VerdictReasonCategory"]     # closed set defined in 07-verification.md; no case ids
 ```
 
 ```jsonc
@@ -319,8 +326,8 @@ class AgentResult:
 
 @dataclass(frozen=True)
 class CaseScore:
-    case_id: str
-    score: float
+    case_id: str                               # a train case
+    score: float                               # 0 = failed, 1 = perfect, by the case's graders
     critique: str                              # graders always return score + critique
 
 @dataclass(frozen=True)
@@ -350,7 +357,7 @@ class TrainResult:
 ### 3.1 原则
 
 1. **一个端口。** 平台只认识一个策略接口，它只有一个方法 `run(ctx)`。ClawEvolve、其他团队的优化器以及平台自带的组合式策略都实现同一个端口。
-2. **一个出口。** 策略只能通过传给它的上下文访问平台。它不能晋升、不能读取留出测试、不能触碰线上 bot，也不能读取平台存储。因此，无论策略是什么，隔离与预算都在同一处强制执行。（**预算**是在 bot 绑定中设置的每次运行的支出上限：以美元计的模型花费、挂钟时间和评估 rollout 次数。每次模型调用、智能体会话和评估都计入 `ctx.budget`，耗尽时运行即停止。）这是一项有意的限制：策略只能使用能力目录（§4）所提供的东西，不能自带模型密钥或智能体运行时。它自身的计算（解析、搜索、排序）不受限制。新的需求应在第二个策略也需要时通过新增目录条目来满足，而不是为单个策略开例外。
+2. **一个出口。** 策略只能通过传给它的上下文访问平台。它不能晋升、不能读取留出测试、不能触碰线上 bot，也不能读取平台存储。因此，无论策略是什么，隔离与预算都在同一处强制执行。（**预算**是在 bot 绑定中设置的每次运行的支出上限：以美元计的模型花费、挂钟时间和评估 rollout 次数，其中一次 rollout 指针对一个 bot 版本运行一个评估用例一次。每次模型调用、智能体会话和评估都计入 `ctx.budget`，耗尽时运行即停止。）这是一项有意的限制：策略只能使用能力目录（§4）所提供的东西，不能自带模型密钥或智能体运行时。它自身的计算（解析、搜索、排序）不受限制。新的需求应在第二个策略也需要时通过新增目录条目来满足，而不是为单个策略开例外。
 3. **策略提议，平台决定。** 策略提交候选。记录、验证、门禁和晋升仍由平台负责（DR-2，[decisions/0002-promotion-is-platform-owned.zh-CN.md](decisions/0002-promotion-is-platform-owned.zh-CN.md)）。
 4. **关于代码的事实通过注册记录；关于 bot 的选择通过配置。** 有些信息对某个策略版本而言无论哪个 bot 使用都成立，例如“ClawEvolve 2.0.0 驱动 OpenClaw 智能体并读取会话历史”。这类信息在注册记录中记录一次。另一些信息是针对某个 bot 的决定，例如“bot_123 每晚运行 ClawEvolve，可以修改 persona 和 skills，预算为 20 美元”。这些信息存放在 bot 的绑定中（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)），所有者可随时修改，而无需触碰策略。
 5. **概念少，且只定义一次。** 每个术语只有一个定义；没有字段重复表达另一个字段（例如，引擎兼容性由 `needs` 推导，而不是单独声明）。
@@ -481,11 +488,11 @@ async def sessions(self, *, days: int, limit: int = 500,
 **`experience.feedback@1`。**
 
 ```python
-async def feedback(self, *, days: int, kinds: list[str] | None = None,
+async def feedback(self, *, days: int, kinds: list[FeedbackKind] | None = None,
                    limit: int = 500) -> list[Feedback]: ...
 ```
 
-`Feedback` schema 定义于 [02-experience.zh-CN.md](02-experience.zh-CN.md)；此处具体的筛选参数是提议的。
+`Feedback` schema 与 `FeedbackKind` 定义于 [02-experience.zh-CN.md](02-experience.zh-CN.md)；此处具体的筛选参数是提议的。
 
 **`agents@1`**（以 `{"agents@1": {"definitions": {...}}}` 注册）。
 
@@ -566,7 +573,7 @@ async def start_train(self, workspace: Workspace, *, idempotency_key: str) -> st
 | **提交什么**：它自己用来判断哪些候选值得提出的过滤器 | **仅训练集评估**：`ctx.evaluate` 添加训练用例，并在训练划分上为工作区打分；验证、留出、回归和安全用例保持隐藏 |
 | **它自己的进度持久化**：轮次编号、搜索状态、历史，保存在它自己的存储中，以运行 id 为键 | **验证、门禁与晋升**：`ctx.candidates.submit` 记录候选；平台对其进行验证、应用门禁和风险等级并执行晋升；策略只按 id 读取判定 |
 
-**进度持久化。** 每次运行都是一个带租约的作业。如果策略进程崩溃，运行会以相同的运行 id 和 `ctx.attempt + 1` 再次派发（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。平台保存运行记录、冻结的输入、已花费的预算、候选和操作。其他任何所需内容由策略持久化在**它自己的存储**中，以运行 id 为键；重新派发时重新加载并继续。平台没有检查点 API，也从不读取这些状态；其结构因策略而异。策略在自己的存储中持久化自己的进度（已达成一致）。待定：沙箱化的作业 worker 如何访问该存储——例如在注册记录中为策略自有存储声明一条出口白名单条目，或由平台提供一个按运行划分、平台从不解读的不透明 blob（待定决策 S-8）。结合幂等提交、幂等的操作启动以及按键区分的工作区，这使得策略可以恢复执行，而不会重复产生候选、操作或花费。
+**进度持久化。** 运行的每次尝试都是一个带租约的作业。如果策略进程崩溃，运行会以相同的运行 id 和 `ctx.attempt + 1` 再次派发（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。平台保存运行记录、冻结的输入、已花费的预算、候选和操作。其他任何所需内容由策略持久化在**它自己的存储**中，以运行 id 为键；重新派发时重新加载并继续。平台没有检查点 API，也从不读取这些状态；其结构因策略而异。策略在自己的存储中持久化自己的进度（已达成一致）。待定：沙箱化的作业 worker 如何访问该存储——例如在注册记录中为策略自有存储声明一条出口白名单条目，或由平台提供一个按运行划分、平台从不解读的不透明 blob（待定决策 S-8）。结合幂等提交、幂等的操作启动以及按键区分的工作区，这使得策略可以恢复执行，而不会重复产生候选、操作或花费。
 
 ## 8. 层级、运行时、SDK 与一致性
 
@@ -640,13 +647,13 @@ class StrategyRegistry(Protocol):
     async def get(self, strategy_id: str, version: str) -> RegisteredStrategy:
         """One registered version. Raises NotFound."""
 
-    async def list(self, *, engine: str | None = None,
-                   conformance: str | None = None) -> list[RegisteredStrategy]:
+    async def list(self, *, engine: Engine | None = None,
+                   conformance: ConformanceState | None = None) -> list[RegisteredStrategy]:
         """Registered versions, optionally only those usable on `engine`
         (every needed capability has a provider for it and, if agents@1 is needed,
         one of its definitions targets it)."""
 
-    async def check_engine(self, strategy_id: str, version: str, engine: str) -> list[str]:
+    async def check_engine(self, strategy_id: str, version: str, engine: Engine) -> list[str]:
         """The registration half of a binding check. Returns problems, empty when
         the version can run on a bot of `engine`. Called by Evolution Run when a
         binding is created or changed."""
@@ -666,7 +673,7 @@ class CapabilityCatalog(Protocol):
 
     def list(self) -> list[Capability]: ...
     def get(self, name: str, version: int) -> Capability: ...
-    def provider(self, name: str, version: int, engine: str) -> "CapabilityProvider | None":
+    def provider(self, name: str, version: int, engine: Engine) -> "CapabilityProvider | None":
         """The provider that serves this capability for bots of `engine`, if any."""
 
 
@@ -675,8 +682,8 @@ class CapabilityProvider(Protocol):
     Each provider passes the capability's contract test
     (docs/arch/protocol-contract-tests.md)."""
 
-    capability: str                    # "agents@1"
-    engine: str                        # "openclaw", or "*" for engine-neutral providers
+    capability: str                    # catalog name@version, e.g. "agents@1"
+    engine: ProviderEngine             # the engine it serves, or "*" for engine-neutral providers
 
     def validate_arguments(self, arguments: dict) -> list[str]:
         """Check the needs arguments at registration; for agents@1 this validates
@@ -1035,16 +1042,16 @@ avn evolve strategies show acme/correction-fixer@1.0.0   # conformance status, d
 
 ```python
 async def test_submits_only_on_train_gain(fake_platform):
-    fake_platform.add_sessions(bot="bot_123", episodes=[corrected_episode("ep_91")])
+    fake_platform.add_sessions(bot_id="bot_123", episodes=[corrected_episode("ep_91")])
     fake_platform.train_scores({"r41": 0.61, "fix": 0.74})            # parent vs edited sandbox
-    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot="bot_123",
+    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot_id="bot_123",
                                   registration="strategy.json", params={"window_days": 7})
     assert len(run.candidates) == 1
     assert run.candidates[0].evidence == ["episode:ep_91"]
 
 
 async def test_redispatch_does_not_duplicate(fake_platform):
-    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot="bot_123",
+    run = await fake_platform.run(CorrectionFixer(MemoryStore()), bot_id="bot_123",
                                   registration="strategy.json", kill_after="agents.start")
     assert run.attempts == 2
     assert fake_platform.operations_started(kind="agent_session") == 1   # re-attached by key

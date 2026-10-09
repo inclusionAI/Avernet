@@ -24,9 +24,16 @@
 - **评估轨迹**（eval trace）——每一次评估推演（rollout），附带评分器分数和
   文字评语。
 
-每条记录都携带产生它的**基因组修订版 id**。这正是当前代码库中处处缺失的那个
-字段，也正是它把日志变成可归因的适应度信号（“修订版 `r42` 在退款上失败的
-次数比 `r41` 少”），并在之后变成训练数据（§8）。
+这些记录由谁产生：**引擎**在 bot 的会话期间产生片段（通过会话导出拉取），
+**用户和产品**产生反馈（发送到反馈端点，或由摄取适配器采集），**验证**则为每次
+评估推演产生一条评估轨迹。每条记录在存储时都带有产生它的 bot 版本的**基因组
+修订版 id**，该 id 在摄取时附加：评估轨迹直接知道自己的修订版，因为验证评估的
+是一个特定的修订版；片段通过 bot 的应用历史归因得到修订版（片段开始时已应用到
+bot 上的修订版；对服务型 bot 而言，是当时正在提供服务的已发布版本所对应的修订版）；
+反馈从其片段继承修订版。在 bot 还没有修订版之前产生的记录以
+`revision_id: null`（未归因）存储。具体规则和示例时间线见 §3。修订版 id 正是
+当前代码库中处处缺失的那个字段，也正是它把日志变成可归因的适应度信号（“修订版
+`r42` 在退款上失败的次数比 `r41` 少”），并在之后变成训练数据（§8）。
 
 **它负责什么**
 
@@ -91,6 +98,12 @@ from typing import Literal
 
 Role = Literal["user", "assistant", "tool", "system"]
 OutcomeStatus = Literal["succeeded", "failed", "user_corrected", "abandoned", "unknown"]
+Engine = Literal["openclaw", "claude-code", "hermes", "teclaw"]   # the engines Avernet runs bots on
+# Personal-data categories the redactor knows. New values are added by a reviewed
+# change to the redactor, together with their rules (defaults: open decision X-4).
+PiiCategory = Literal["email", "phone", "address"]
+# BotRef {owner_id, bot_id}: a bot's full identity (a bot_id alone is not unique
+# across users); defined once in 09-evolution-api.md §2.7.
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -108,27 +121,27 @@ class Turn:
 
 @dataclass(frozen=True)
 class Cost:
-    usd: float
-    input_tokens: int
-    output_tokens: int
+    usd: float                     # model spend in US dollars for this episode or rollout
+    input_tokens: int              # tokens sent to the model, summed over all calls
+    output_tokens: int             # tokens the model produced, summed over all calls
 
 @dataclass(frozen=True)
 class Outcome:
     status: OutcomeStatus
     feedback: str | None = None    # short summary of the deciding feedback, if any
-    feedback_ids: list[str] = field(default_factory=list)
+    feedback_ids: list[str] = field(default_factory=list)   # the feedback records that decided `status`
 
 @dataclass(frozen=True)
 class SourceRef:
-    engine: str                    # "openclaw", "claude-code", "hermes", "teclaw"
+    engine: Engine                 # which engine ran the session
     export_api: str                # contract version that produced it, e.g. "session-export/v2"
     session_id: str                # the engine's own session id
     content_digest: str            # hash of the raw exported session, for re-normalization
 
 @dataclass(frozen=True)
 class Episode:
-    episode_id: str
-    bot_id: str
+    episode_id: str                # "ep_91"
+    bot: BotRef                    # the bot that ran the session (owner + bot id)
     revision_id: str | None        # None = unattributed (ran before revisions existed, §3)
     started_at: datetime
     ended_at: datetime
@@ -136,7 +149,7 @@ class Episode:
     model: str                     # model name reported by the engine
     cost: Cost
     outcome: Outcome
-    redactions: list[str]          # categories removed at ingest, e.g. ["email", "phone"]
+    redactions: list[PiiCategory]  # personal-data categories removed at ingest, e.g. ["email", "phone"]
     source: SourceRef
 ```
 
@@ -144,7 +157,7 @@ class Episode:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "episode_id": "ep_91",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",                 // the genome revision the bot was running (r41)
   "started_at": "2026-10-07T09:12:00Z",
   "ended_at": "2026-10-07T09:14:31Z",
@@ -180,27 +193,34 @@ FeedbackKind = Literal[
     "run_evidence",           # TaskGuard: guard / repair / retry events of a run
     "finding",                # a producer's diagnosis, e.g. ClawInsight plan-source/v2 items
 ]
+FeedbackSource = Literal[
+    "user",                   # a person, through a product UI
+    "pipeline",               # a deterministic pipeline or product backend
+    "bcs",                    # BCS coordination outcomes
+    "taskguard",              # TaskGuard run evidence
+    "clawinsight",            # ClawInsight findings
+]
 
 @dataclass(frozen=True)
 class Feedback:
-    feedback_id: str
-    bot_id: str
+    feedback_id: str                  # "fb_204"
+    bot: BotRef                       # the bot the feedback is about (owner + bot id)
     kind: FeedbackKind
-    source: str                       # producer: "user", "pipeline", "bcs", "taskguard", "clawinsight"
+    source: FeedbackSource            # who produced it
     created_at: datetime
     revision_id: str | None           # copied from the episode, or given by the producer; None = unattributed
     episode_id: str | None            # None for feedback not tied to one episode
     score: float | None               # ratings / outcomes on [0, 1]; None for text-only kinds
     text: str | None                  # correction text, finding summary; redacted at ingest
     data: dict                        # kind-specific structured payload, schema per kind
-    idempotency_key: str              # the producer's key; (bot, key) is unique (§10)
+    idempotency_key: str              # the producer's key; (owner_id, bot_id, key) is unique (§10)
 ```
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "correction",
   "source": "user",
   "created_at": "2026-10-07T09:13:50Z",
@@ -221,7 +241,7 @@ class Feedback:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_311",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "finding",
   "source": "clawinsight",
   "created_at": "2026-10-08T01:00:00Z",
@@ -245,20 +265,20 @@ Split = Literal["train", "validation", "holdout", "regression", "safety"]
 
 @dataclass(frozen=True)
 class GraderResult:
-    grader: str               # e.g. "platform/clawbench"
-    score: float              # [0, 1]
+    grader: str               # id of the grader that scored the rollout, e.g. "platform/clawbench"
+    score: float              # 0 = complete failure, 1 = perfect, by that grader's rubric
     critique: str             # textual critique; reflective strategies need it
 
 @dataclass(frozen=True)
 class EvalTrace:
-    trace_id: str
-    bot_id: str
+    trace_id: str             # "et_5521"
+    bot: BotRef               # the bot whose revision was evaluated (owner + bot id)
     evaluation_id: str        # the Verification evaluation this rollout belongs to
     revision_id: str          # always known: verification evaluates a specific revision
-    suite: str
-    case_id: str
+    suite: str                # suite id, e.g. "bot_123/support"
+    case_id: str              # the case that was run
     split: Split
-    seed: int
+    seed: int                 # which repetition of the case this is (each seed is one rollout)
     transcript: list[Turn]    # the rollout's conversation, same shape as Episode.turns
     grades: list[GraderResult]
     cost: Cost
@@ -270,7 +290,7 @@ class EvalTrace:
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "trace_id": "et_5521",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "evaluation_id": "eval_train_77",
   "revision_id": "sha256:c41e…",
   "suite": "bot_123/support",
@@ -297,11 +317,11 @@ class EvalTrace:
 ```python
 @dataclass(frozen=True)
 class SessionExport:
-    export_id: str
-    bot_id: str
-    engine: str
-    since: datetime
-    until: datetime
+    export_id: str                # "sx_402"
+    bot: BotRef                   # whose sessions are exported (owner + bot id)
+    engine: Engine                # the engine whose provider runs the export
+    since: datetime               # window start (inclusive)
+    until: datetime               # window end (exclusive)
     status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
     package_digest: str | None    # set once succeeded: digest of the exported session package
     error: str | None             # set once failed
@@ -309,9 +329,9 @@ class SessionExport:
 @dataclass(frozen=True)
 class RetentionPolicy:
     tenant_id: str
-    episode_days: int             # episodes and eval traces older than this are deleted
-    feedback_days: int
-    pii_categories: list[str]     # categories redacted at ingest, e.g. ["email", "phone", "address"]
+    episode_days: int             # episodes and eval traces older than this many days are deleted
+    feedback_days: int            # feedback older than this many days is deleted
+    pii_categories: list[PiiCategory]   # categories redacted at ingest, e.g. ["email", "phone", "address"]
     training_export_opt_in: bool  # §7: export for training only with explicit tenant opt-in
 ```
 
@@ -320,7 +340,7 @@ class RetentionPolicy:
 {
   "session_export": {
     "export_id": "sx_402",
-    "bot_id": "bot_123",
+    "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
     "engine": "openclaw",
     "since": "2026-10-07T00:00:00Z",
     "until": "2026-10-08T00:00:00Z",
@@ -352,9 +372,27 @@ class RetentionPolicy:
 - 在 bot 还没有任何修订版之前记录的片段，或无法匹配的片段（例如某次应用正在
   进行中），会得到 `revision_id: null`，并被报告为**未归因**。它们仍可作为
   诊断输入，但会被排除在任何按修订版的比较之外。
+- **服务型 bot。** 服务型 bot 提供的是已发布版本，而不是草稿。每条发布记录都
+  存储它所发布的 `revision_id`（[01-genome.zh-CN.md](01-genome.zh-CN.md)，
+  RSI-04），因此存储会把片段开始时正在提供服务的已发布版本映射到其修订版。
 - 反馈继承其片段的修订版。没有片段的反馈采用生产方提供的修订版，或者 bot 在
   `created_at` 时刻的 `active` 修订版。
 - 评估轨迹总是带有修订版，因为验证评估的是一个特定的修订版。
+
+何时发生：修订版 id 在**摄取时**附加一次，并随记录一起存储；之后永不改写。
+
+`bot_123` 的示例时间线：
+
+| 时间 | 事件 | 产生的记录及其 `revision_id` |
+| --- | --- | --- |
+| 9 月 20 日 | Bot 运行在 Manifest v1 上；尚无任何修订版 | 片段 `ep_12` → `null`（未归因） |
+| 9 月 30 日 02:40 | 记录并应用第一个修订版 `r41` | （应用报告记录 `r41`） |
+| 10 月 7 日 09:12 | 会话开始 | 片段 `ep_91` → `r41`（09:12 时已应用的修订版） |
+| 10 月 7 日 09:13 | 用户在该会话中纠正 bot | 反馈 `fb_204` → `r41`（从 `ep_91` 复制） |
+| 10 月 8 日 02:31 | 验证在沙箱中评估候选 `r42` | 评估轨迹 `et_5521` → `r42`（直接已知） |
+| 10 月 8 日 11:29 | 会话在下一次应用完成前一分钟开始 | 片段 `ep_120` → `r41`（其开始时已应用的修订版） |
+| 10 月 8 日 11:30 | 晋升应用 `r42` | （应用报告记录 `r42`） |
+| 10 月 8 日 14:00 | 会话开始 | 片段 `ep_131` → `r42` |
 
 晋升之后（`active` 从 `r41` 变为 `r42`），新的片段携带 `r42`。正是这一点让
 之后的运行或在线验证能够比较 `r41` 与 `r42` 的线上结果。
@@ -366,7 +404,7 @@ class RetentionPolicy:
 | 来源 | 记录 | 如何到达 | 第一轮迭代？ |
 | --- | --- | --- | --- |
 | 引擎会话（首先是 OpenClaw） | `Episode` | 存储通过引擎的会话导出提供方（§5）按计划拉取，并在需要 `experience.sessions@1` 的运行开始前按需拉取 | 是 |
-| 产品 UI / 管线（评分、纠正、任务结果） | `Feedback`（`rating`、`correction`、`outcome`） | `POST /bots/{bot}/experience/feedback` | 是 |
+| 产品 UI / 管线（评分、纠正、任务结果） | `Feedback`（`rating`、`correction`、`outcome`） | `POST /bots/{bot_id}/experience/feedback` | 是 |
 | ClawInsight 改进条目 | `Feedback`（`finding`） | 读取 `plan-source/v2` 条目的摄取适配器 | 是（默认进化策略需要） |
 | TaskGuard 运行证据 | `Feedback`（`run_evidence`） | 基于 TaskGuard 运行证据的摄取适配器 | 是；TaskGuard 本身仍属于运行时韧性，而非进化 |
 | BCS 协同结果 | `Feedback`（`coordination_outcome`） | 摄取适配器，后续 | 提议，在第一轮迭代之后 |
@@ -391,8 +429,8 @@ engine provider ──export──▶ normalize ──▶ redact ──▶ attri
 5. **建立索引**，按 bot、修订版、时间和结果状态索引，使读取路径（§6、§10）
    能够低成本地过滤。
 
-摄取对 `(bot, source.engine, source.session_id,
-source.content_digest)` 是幂等的：重新导出一个时间窗口不会产生重复片段。
+摄取对 `(owner_id, bot_id, source.engine,
+source.session_id, source.content_digest)` 是幂等的：重新导出一个时间窗口不会产生重复片段。
 自上次导出以来发生变化的会话（有新的轮次）会产生新的摘要，并替换先前具有
 相同 id 的片段。
 
@@ -448,9 +486,9 @@ class SessionExportProvider(Protocol):
     docs/arch/protocol-contract-tests.md.
     """
 
-    engine: str
+    engine: Engine
 
-    async def start_export(self, *, bot_id: str, since: datetime, until: datetime,
+    async def start_export(self, *, bot: BotRef, since: datetime, until: datetime,
                            idempotency_key: str) -> str:
         """Start exporting the bot's sessions in [since, until). Returns an export id at once.
 
@@ -464,8 +502,8 @@ class SessionExportProvider(Protocol):
         """Read a succeeded export's package: raw sessions plus normalized Episode drafts."""
 ```
 
-存储在计划导出中使用的幂等键是 `<bot>/<engine>/<since>/<until>`，因此对同一
-时间窗口重试导出时会返回同一个导出，而不会导出两次。
+存储在计划导出中使用的幂等键是 `<owner_id>/<bot_id>/<engine>/<since>/<until>`，
+因此对同一时间窗口重试导出时会返回同一个导出，而不会导出两次。
 
 与能力目录的关联：只有当 bot 的引擎具有会话导出提供方时，该 bot 才能绑定到
 需要 `experience.sessions@1` 的进化策略。这项检查在创建或修改绑定时进行
@@ -604,17 +642,17 @@ class ExperienceStore(Protocol):
     """Experience Store (apps/evolution). Transport-agnostic core interface."""
 
     # --- ingest -------------------------------------------------------------
-    async def ingest_window(self, *, bot_id: str, since: datetime, until: datetime) -> str:
+    async def ingest_window(self, *, bot: BotRef, since: datetime, until: datetime) -> str:
         """Export and ingest the bot's sessions in [since, until) from its engine provider.
 
         Returns the export id at once (an operation). Idempotent per window (§5).
         """
 
-    async def record_feedback(self, bot_id: str, feedback: "FeedbackInput",
+    async def record_feedback(self, bot: BotRef, feedback: "FeedbackInput",
                               *, idempotency_key: str) -> Feedback:
         """Store one feedback record after redaction and attribution.
 
-        The same (bot, idempotency_key) returns the stored record; a different body
+        The same (owner_id, bot_id, idempotency_key) returns the stored record; a different body
         under a reused key raises IdempotencyConflict.
         """
 
@@ -622,14 +660,14 @@ class ExperienceStore(Protocol):
         """Store one rollout. Called by Verification only. Idempotent per trace_id."""
 
     # --- read ---------------------------------------------------------------
-    async def list_episodes(self, bot_id: str, flt: EpisodeFilter, *,
+    async def list_episodes(self, bot: BotRef, flt: EpisodeFilter, *,
                             page: int, page_size: int) -> Page["EpisodeSummary"]:
         """Episode summaries (no turns), newest first."""
 
-    async def get_episode(self, bot_id: str, episode_id: str) -> Episode:
+    async def get_episode(self, bot: BotRef, episode_id: str) -> Episode:
         """One episode with turns. Raises NotFound if absent or deleted by retention."""
 
-    async def list_feedback(self, bot_id: str, *, kinds: list[FeedbackKind] | None,
+    async def list_feedback(self, bot: BotRef, *, kinds: list[FeedbackKind] | None,
                             episode_id: str | None, since: datetime | None,
                             page: int, page_size: int) -> Page[Feedback]:
         """Feedback records, newest first."""
@@ -642,7 +680,7 @@ class ExperienceStore(Protocol):
         """
 
     # --- capabilities -------------------------------------------------------
-    def query_for_run(self, *, run_id: str, bot_id: str,
+    def query_for_run(self, *, run_id: str, bot: BotRef,
                       granted: set[str]) -> ExperienceQuery:
         """The ctx.experience object for one run: bot-scoped, redacted, only granted parts."""
 
@@ -662,7 +700,7 @@ class ExperienceStore(Protocol):
 （客户端 SDK）。下文的响应展示的是标准信封中的 `data` 负载；信封、错误、分页
 和幂等性见 [09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)。
 
-### `GET /bots/{bot}/experience/episodes`
+### `GET /bots/{bot_id}/experience/episodes`
 
 按从新到旧列出某个 bot 的片段摘要。由 UI、CLI（`avn experience episodes`）以及
 关注某个修订版表现的管线调用。
@@ -716,7 +754,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes?revision=sha256:a90b…&outcome
 错误：`404` 未知 bot；`400` 无效过滤条件（例如 `since` 晚于 `until`、未知的
 `outcome`）。
 
-### `GET /bots/{bot}/experience/episodes/{episode}`
+### `GET /bots/{bot_id}/experience/episodes/{episode}`
 
 返回一个带轮次的片段。由 UI 的片段视图、CLI，以及沿着候选证据 id 查看的评审者
 调用。
@@ -733,7 +771,7 @@ GET /openapi/v1/bots/bot_123/experience/episodes/ep_91
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "episode_id": "ep_91",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "revision_id": "sha256:a90b…",
   "revision_seq": "r41",
   "started_at": "2026-10-07T09:12:00Z",
@@ -757,13 +795,14 @@ GET /openapi/v1/bots/bot_123/experience/episodes/ep_91
 
 错误：`404` 未知 bot，或片段未知或已被保留期清理删除。
 
-### `POST /bots/{bot}/experience/feedback`
+### `POST /bots/{bot_id}/experience/feedback`
 
 记录一条反馈。由产品后端和 UI（评分、纠正）、管线（任务结果）以及平台摄取
 适配器（ClawInsight 发现、TaskGuard 运行证据）调用。
 
 `Idempotency-Key` 请求头是必需的。它是客户端选择的字符串，对同一条逻辑反馈的
-每次重试都相同，对不同反馈则不同；平台保存 `(bot, key) → feedback id`。好的
+每次重试都相同，对不同反馈则不同；平台保存 `(owner_id, bot_id, key) → feedback
+id`。好的
 键从反馈所涉及的对象派生，例如 `support-ui/ep_91/turn-4/correction` 或
 `clawinsight/imp_88`；发送时的时间戳不是有效的键，因为它在重试之间会变化。
 
@@ -791,7 +830,7 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "feedback_id": "fb_204",
-  "bot_id": "bot_123",
+  "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
   "kind": "correction",
   "source": "user",
   "created_at": "2026-10-07T09:13:50Z",
@@ -808,7 +847,7 @@ Idempotency-Key: support-ui/ep_91/turn-4/correction
 `episode_id`；`409` 该幂等键已被用于不同的请求体；`428` 缺少
 `Idempotency-Key`。
 
-### `GET /bots/{bot}/experience/feedback`
+### `GET /bots/{bot_id}/experience/feedback`
 
 按从新到旧列出某个 bot 的反馈。由 UI、CLI（`avn experience feedback`）和管线
 调用。
@@ -831,7 +870,7 @@ GET /openapi/v1/bots/bot_123/experience/feedback?kind=correction&kind=rating&sin
   "items": [
     {
       "feedback_id": "fb_219",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "kind": "rating",
       "source": "user",
       "created_at": "2026-10-07T15:43:10Z",
@@ -844,7 +883,7 @@ GET /openapi/v1/bots/bot_123/experience/feedback?kind=correction&kind=rating&sin
     },
     {
       "feedback_id": "fb_204",
-      "bot_id": "bot_123",
+      "bot": {"owner_id": "user_owner_5", "bot_id": "bot_123"},
       "kind": "correction",
       "source": "user",
       "created_at": "2026-10-07T09:13:50Z",
@@ -909,7 +948,7 @@ GET /evolution/v1/runs/run_7f3/experience/sessions?days=7&limit=200
 **评估轨迹写入（验证 → 存储）。** `record_eval_trace`（§9）是 `apps/evolution`
 内部的进程内调用；它没有公开端点。
 
-**不在第一轮迭代中。** `POST /bots/{bot}/experience/observations`（快循环
+**不在第一轮迭代中。** `POST /bots/{bot_id}/experience/observations`（快循环
 笔记，§1）已推迟。
 
 ## 11. 示例
@@ -925,7 +964,7 @@ c = Client.from_env()
 def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str) -> None:
     # The key names the thing being reported, so every retry sends the same key.
     c.experience.feedback.create(
-        bot=bot_id,
+        bot_id=bot_id,                     # caller owns the bot; otherwise also pass entity_id=<owner>
         kind="correction",
         source="user",
         episode_id=episode_id,
@@ -941,9 +980,9 @@ def on_user_correction(bot_id: str, episode_id: str, turn_index: int, text: str)
 # Illustrative only
 from collections import Counter
 
-def outcome_rates(c, bot: str, revision: str) -> dict[str, float]:
+def outcome_rates(c, bot_id: str, revision: str) -> dict[str, float]:
     counts: Counter[str] = Counter()
-    for ep in c.experience.episodes.list(bot=bot, revision=revision, since="2026-10-01T00:00:00Z"):
+    for ep in c.experience.episodes.list(bot_id=bot_id, revision=revision, since="2026-10-01T00:00:00Z"):
         counts[ep.outcome.status] += 1     # the SDK walks all pages
     total = sum(counts.values()) or 1
     return {status: n / total for status, n in counts.items()}
@@ -986,9 +1025,9 @@ lessons = cluster_into_lessons(items)    # its own logic
 class OpenClawSessionExport(SessionExportProvider):
     engine = "openclaw"
 
-    async def start_export(self, *, bot_id, since, until, idempotency_key):
+    async def start_export(self, *, bot, since, until, idempotency_key):
         return await self.exports.create_or_get(           # same key → same export id
-            key=idempotency_key, bot_id=bot_id, since=since, until=until)
+            key=idempotency_key, owner_id=bot.owner_id, bot_id=bot.bot_id, since=since, until=until)
 
     async def get_export(self, export_id):
         return await self.exports.get(export_id)
