@@ -29,6 +29,7 @@ from src.infra.public.observability.storage_logging import (
     log_storage_event,
 )
 from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
+from src.infra.public.vectorstores.qdrant_keyword_index import QdrantKeywordIndex
 from src.infra.vectorstore_backends.mysql_vector_persistence_backend import MySQLVectorPersistenceBackend
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         self._mysql = self._persistence
         self._last_sync_time = 0.0
         self._index_lock = threading.RLock()
+        self._keywords = QdrantKeywordIndex()
+        self._keywords_ready = True
 
         logger.info(
             "[QdrantMySQLVectorStore] Initialized collection=%s dimension=%d distance=%s",
@@ -265,9 +268,11 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         top_k: int,
         filters: Optional[dict] = None,
     ) -> List[VectorSearchHit]:
-        """Text search remains unsupported, as in the original public backend."""
-        logger.warning("[QdrantMySQLVectorStore] text_search not implemented")
-        return []
+        """Search the derived sparse index with filters applied before top-k."""
+        with self._index_lock:
+            if not self._keywords_ready:
+                raise RuntimeError("keyword index requires rebuild")
+            return self._keywords.search(query, top_k, filters)
 
     def batch_text_search(
         self,
@@ -275,9 +280,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         top_k: int,
         filters: Optional[dict] = None,
     ) -> List[List[VectorSearchHit]]:
-        """Return one empty result per query; do not add a keyword fallback."""
-        logger.warning("[QdrantMySQLVectorStore] batch_text_search not implemented")
-        return [[] for _ in queries]
+        """Use the same keyword and filter semantics for each query."""
+        return [self.text_search(query, top_k, filters) for query in queries]
 
     # ------------------------------------------------------------------
     # Rebuild from MySQL
@@ -310,6 +314,16 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         with self._index_lock:
             self._ensure_client()
             all_points = self._persistence.load_all()
+            keywords = QdrantKeywordIndex()
+            self._keywords_ready = False
+            try:
+                for i in range(0, len(all_points), batch_size):
+                    keywords.upsert(all_points[i:i + batch_size])
+            except Exception:
+                keywords.close()
+                raise
+            self._keywords.close()
+            self._keywords = keywords
             durable_ids = {point.id for point in all_points}
             stale_ids = set(self._qdrant.get_vector_ids()) - durable_ids
             total_loaded = len(all_points)
@@ -333,6 +347,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
                 )
             else:
                 self._last_sync_time = self._persistence.get_last_modified_time()
+            self._keywords_ready = True
 
         duration_ms = (time.time() - start) * 1000
         result = {
@@ -374,6 +389,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
         try:
             self._ensure_client()
             self._qdrant.clear()
+            self._keywords.close()
+            self._keywords = QdrantKeywordIndex()
         except Exception as e:
             logger.warning("[QdrantMySQLVectorStore] Failed to clear Qdrant: %s", e)
         try:
@@ -384,6 +401,7 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
             logger.warning("[QdrantMySQLVectorStore] Failed to clear MySQL: %s", e)
 
     def close(self) -> None:
+        self._keywords.close()
         self._qdrant.close()
         try:
             close = getattr(self._persistence, "close", None)
@@ -395,13 +413,23 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     def _upsert_local(self, points: list[VectorPoint]) -> None:
         with self._index_lock:
             self._ensure_client()
-            self._qdrant.upsert(points)
+            try:
+                self._qdrant.upsert(points)
+                self._keywords.upsert(points)
+            except Exception:
+                self._keywords_ready = False
+                raise
 
     def _delete_local(self, ids: list[str]) -> None:
         with self._index_lock:
             self._ensure_client()
-            for point_id in ids:
-                self._qdrant.delete(point_id)
+            try:
+                self._keywords.delete(ids)
+                for point_id in ids:
+                    self._qdrant.delete(point_id)
+            except Exception:
+                self._keywords_ready = False
+                raise
 
 
 __all__ = ["QdrantMySQLVectorStore"]

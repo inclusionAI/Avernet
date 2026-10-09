@@ -36,7 +36,7 @@ def test_runtime_transitions_preserve_all_profiles_and_exact_owner(isolated_app_
             acceptance.request("PUT", f"/v1/workers/{worker_id}/profiles/release/activate")
             store = registry.require("vector_store")
             original = {key: store.get(key) for key in store.get_vector_ids()}
-            assert {point["metadata"]["profile_id"] for point in original.values()} == {"default", "release"}
+            assert {point.payload["profile_id"] for point in original.values()} == {"default", "release"}
             neighbor = f"{worker_id}:nested:default:skills:1"
             store.upsert([VectorPoint(id=neighbor, vector=[1.0] + [0.0] * 63, payload={
                 "worker_id": f"{worker_id}:nested", "runtime_state": "online",
@@ -50,9 +50,9 @@ def test_runtime_transitions_preserve_all_profiles_and_exact_owner(isolated_app_
                         assert set(store.get_vector_ids()) == set(original) | {neighbor}
                         for key, point in original.items():
                             current = store.get(key)
-                            assert current["metadata"] == {**point["metadata"], "runtime_state": state}
-                            assert current["vector"] == point["vector"]
-                        assert store.get(neighbor)["metadata"]["runtime_state"] == "online"
+                            assert current.payload == {**point.payload, "runtime_state": state}
+                            assert current.vector == point.vector
+                        assert store.get(neighbor).payload["runtime_state"] == "online"
                     found = {item["profile_key"] for item in acceptance.search(worker_id)}
                     assert found == (set() if state == "offline" else {
                         f"{worker_id}:default", f"{worker_id}:release",

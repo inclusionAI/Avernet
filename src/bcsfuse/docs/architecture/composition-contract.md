@@ -84,14 +84,66 @@ score. Deduplicate by complete `profile_key`, then alternate through the max
 and aggregate tails, skipping already selected keys, until N unique profiles
 or all available profiles are selected. Ties use ascending `profile_key`.
 For topK=10 and expand_factor=10, the initial quotas are 50/50, not 100/100.
-This operates only within the initially recalled fragment pool, not the whole
-database, and adds no keyword search, extra vector query or re-embedding.
+This dense selection operates only within the initially recalled fragment pool,
+not the whole database. Keyword recall is a separate route described below.
 
 Selected candidates are supplied in aggregate-score order to preserve existing
-no-provider/error fallback ordering. Explicitly disabling rerank retains the
-existing aggregate-only selection and ranking. This change does not repair
-historical partial-batch/zero-score degradation semantics. Existing API fields,
-storage schemas and durable vector data are unchanged; no reindex is required.
+no-provider/error fallback ordering when there are no keyword matches.
+Explicitly disabling rerank without keyword matches retains aggregate-only
+selection and ranking. Storage schemas and durable vectors are unchanged.
+
+### Keyword recall and score semantics (HTTP v1 compatible)
+
+The durable Qdrant vector-store composition implements the existing
+`VectorStoreAdapter.text_search` / `batch_text_search` plugin methods with a
+derived, in-process Qdrant sparse collection. Rebuild, upsert, payload update,
+deletion and incremental tombstones update this collection with the dense index.
+It is rebuilt from durable payloads on startup; no new database table or historical
+embedding rewrite is required. Other providers may return no keyword matches.
+An unavailable lexical index is explicitly logged and falls back to dense recall;
+persistence write failures continue to propagate rather than returning success.
+
+Text comes from `content`, then `searchable_text`, then `content_preview`, plus
+`worker_id` and available name fields. NFKC/case-folded Latin words, numeric IDs
+and Chinese bigrams form deterministic sparse terms, with logarithmic term
+frequency and Qdrant IDF. This is sparse lexical retrieval, not a native BM25
+claim. Placeholder content such as `无` is not indexed as descriptive text.
+Complete worker-ID equality gets priority, without bypassing any filter. Numeric
+tokens are whole tokens, not arbitrary substring matches. This aids ID/name
+queries but does not guarantee every partial spelling will match.
+
+Runtime-state and visibility payload filters are applied before keyword top-K.
+The application also retains profile exclusions, metadata scope and enabled
+fragment types. Both routes use the existing fragment search limit. Hits are
+deduplicated by complete `profile_key`, consistent with the dense profile contract;
+fragments of one profile never consume multiple rerank slots.
+
+For `N = topK * expand_factor`, take at most N unique dense max/weighted candidates
+and N unique keyword candidates. Dense eligibility uses the original aggregate
+score against `vector_min_score`. Rank the union by equal-weight reciprocal-rank
+fusion: `0.99 * 61/2 * (1/(60+dense_rank) + 1/(60+keyword_rank))`, omitting absent
+ranks. Exact worker-ID matches receive score 1; other scores are at most 0.99.
+Ties use ascending profile key. Only the first N unique profiles enter rerank.
+These are ranking scores, not probabilities, cosine similarities, or model scores.
+
+- Successful rerank: return model scores and apply `rerank_min_score`.
+- Rerank disabled: return the fused order/scores, without cosine/model thresholds.
+- Rerank unavailable or failed (including one failed batch or malformed/partial
+  model output): discard all model scores and use the same fused fallback as
+  disabled rerank. Do not mix raw lexical, dense and model score scales.
+- No keyword matches, or keyword lookup unavailable: preserve dense ordering and
+  scores; failed rerank returns aggregate scores rather than invented model scores.
+- Zero is a valid model score. Missing credentials, HTTP errors and incomplete
+  responses must signal failure, not synthetic zero scores. The HTTP adapter
+  raises errors; the fragment rerank caller owns fallback, including when the
+  historical `empty` failure option is supplied on that matching path.
+
+Existing response fields remain; response metadata adds `keyword_search_used`,
+`rerank_degraded` and `score_source` (`hybrid_rrf`, `vector_weighted`, `reranker`).
+`candidate_source=hybrid` identifies merged recall. INFO `keyword_search`,
+`hybrid_selection`, `hybrid_decisions` and `rerank_fallback` expose counts, ranks
+and selection without logging query/profile text. Contract tests live in
+`tests/contract/test_keyword_retrieval.py` and run in the core acceptance gate.
 
 ## Required providers
 
@@ -248,11 +300,10 @@ descriptive content. The canonical worker ID is the normalized profile's
 profile content are not replaced; identifiers are rendered when constructing
 the index, so LLM-generated text cannot erase them. IDs are not capability tags.
 
-For colon-separated Bot IDs, the existing keyword tokenizer can match the
-complete ID, Bot component, or user component. This is token matching, not
-arbitrary substring matching or an exact-ID ranking guarantee. Existing
-visibility, runtime-state filters, ranking thresholds, and Gateway permissions
-still apply; no special permission bypass or search endpoint is introduced.
+For colon-separated Bot IDs, the keyword tokenizer can match the complete ID,
+Bot component, or user component. Exact-ID priority and threshold handling follow
+the keyword recall contract above. Existing visibility, runtime-state filters
+and Gateway permissions still apply; no permission bypass is introduced.
 
 Existing persisted vectors require profile reindexing to gain this text.
 Reloading Qdrant from unchanged persisted vectors alone is insufficient.
@@ -315,9 +366,9 @@ place. This migration does not introduce a stricter metadata failure policy.
 `test_vector_metadata_filter_contract.py` covers delegation using real local
 Qdrant vectors, including metadata-provider unavailability.
 
-Hybrid retrieval invocation, candidate scope and scoring changes are excluded
-from this migration patch. Existing dense, sparse and fallback behavior remains
-unchanged; this does not certify or repair historical hybrid-retrieval defects.
+The separate legacy `HybridRetrievalService` invocation/scoring changes remain
+excluded. The approved keyword extension operates in fragment matching as
+described above; it does not certify or repair that legacy service's defects.
 
 Fusion HTTP responses project perspectives onto the declared
 `PerspectiveResponse` fields. Domain-only diagnostic `metadata` is not part

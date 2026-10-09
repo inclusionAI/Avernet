@@ -88,7 +88,7 @@ def _store(backend: FakePersistenceBackend, tmp_path) -> QdrantMySQLVectorStore:
     )
 
 
-def test_text_queries_keep_legacy_unsupported_behavior(tmp_path, caplog):
+def test_text_queries_search_existing_payloads_before_and_after_rebuild(tmp_path, caplog):
     backend = FakePersistenceBackend()
     store = _store(backend, tmp_path)
     try:
@@ -97,10 +97,12 @@ def test_text_queries_keep_legacy_unsupported_behavior(tmp_path, caplog):
         for rebuild in (False, True):
             if rebuild:
                 store.rebuild_from_backend()
-            assert store.text_search("python", top_k=5) == []
-            assert store.batch_text_search(["python", "database"], top_k=5) == [[], []]
+            assert [h.id for h in store.text_search("python", top_k=5)] == [point.id]
+            assert [[h.id for h in hits] for hits in store.batch_text_search(
+                ["python", "database"], top_k=5,
+            )] == [[point.id], [point.id]]
             assert [hit.id for hit in store.search(point.vector, top_k=5)] == [point.id]
-        assert "text_search not implemented" in caplog.text
+        assert "text_search not implemented" not in caplog.text
         assert backend.points == {point.id: point}
     finally:
         store.close()
@@ -197,6 +199,7 @@ def test_rebuild_replays_mutation_committed_after_snapshot_checkpoint(tmp_path) 
     assert set(store.get_vector_ids()) == {late.id, original.id}
     hits = store.search(late.vector, top_k=5)
     assert {hit.id for hit in hits} == {late.id, original.id}
+    assert [hit.id for hit in store.text_search("python", 5)] == [late.id]
     store.close()
 
 

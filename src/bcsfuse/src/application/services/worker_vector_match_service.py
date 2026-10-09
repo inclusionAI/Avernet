@@ -423,7 +423,9 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # mode="auto" 或其他值时，保持 use_fragment 的默认值（从环境变量读取）
 
         # 提取运行时配置（并发安全，不修改全局配置）
-        effective_config = runtime_config or {}
+        effective_config = runtime_config if runtime_config is not None else {}
+        effective_config["_retrieval"] = {"score_source": "vector_weighted", "keyword_search_used": False,
+                                           "rerank_degraded": False}
 
         if use_fragment:
             results = self._match_with_fragments(
@@ -434,6 +436,7 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
                 excluded_profile_keys=excluded_profile_keys,
                 runtime_config=effective_config,
                 fragment_type_weights=fragment_type_weights,
+                vector_min_score=vector_min_score,
             )
         else:
             results = self._match_legacy(
@@ -449,6 +452,9 @@ class WorkerVectorMatchService(FragmentMatchingMixin):
         # - 如果启用了 rerank，使用 rerank_min_score 过滤
         # - 如果未启用 rerank，使用 vector_min_score 过滤
         effective_threshold = rerank_min_score if any(r.is_reranked for r in results) else vector_min_score
+        # Dense eligibility was checked before fusion; RRF is not a cosine score.
+        if effective_config["_retrieval"]["score_source"] == "hybrid_rrf":
+            effective_threshold = 0.0
 
         log_candidates(logger, "before_threshold", ((r.profile_key, r.score) for r in results), level=logging.INFO)
 

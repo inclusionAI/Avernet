@@ -180,7 +180,8 @@ def test_pipeline_logs_counts_and_distinct_removed_profile_keys(tmp_path, caplog
     )
     caplog.set_level(logging.DEBUG, logger="src")
     try:
-        results = service.match(query_embedding=[1.0, 0.0], query="private-query-sentinel",
+        # Exercise dense threshold logging without lexical matches rescuing rows.
+        results = service.match(query_embedding=[1.0, 0.0], query="unmatched-query",
                                 top_k=10, mode="fragment", vector_min_score=0.08)
         assert [result.profile_key for result in results] == ["bot:kept:default"]
         stages = {getattr(record, "retrieval_stage", ""): record for record in caplog.records}

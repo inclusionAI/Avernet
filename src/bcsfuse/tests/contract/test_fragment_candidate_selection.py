@@ -69,7 +69,8 @@ def pipeline(tmp_path):
 
 def run(service, top_k=2, expand=2, rerank=True, **kwargs):
     return service.match(
-        query_embedding=[1.0, 0.0], query="private-query-sentinel", mode="fragment",
+        # No lexical overlap: these cases specify dense-only max/weighted recall.
+        query_embedding=[1.0, 0.0], query="unmatched-query", mode="fragment",
         top_k=top_k, vector_min_score=0, rerank_min_score=0,
         runtime_config={"expand_factor": expand, "reranker_model": "controlled" if rerank else None},
         **kwargs,
@@ -135,9 +136,9 @@ def test_no_rerank_or_failure_keeps_weighted_descending_order(pipeline, caplog, 
     if not rerank:
         assert model.inputs == []
     if fail:
-        records = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "reranker_returned"]
+        records = [r for r in caplog.records if getattr(r, "retrieval_stage", "") == "rerank_fallback"]
         assert records
-        assert all(row[-1] == "aggregate_fallback" for r in records for row in r.entries)
+        assert all(r.score_source == "vector_weighted" for r in records)
 
 
 def test_info_logs_explain_ranks_admission_and_elimination_without_content(pipeline, caplog):

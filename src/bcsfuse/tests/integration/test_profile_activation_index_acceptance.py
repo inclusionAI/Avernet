@@ -110,6 +110,6 @@ def test_activation_keeps_offline_worker_undiscoverable(isolated_app_factory):
             _assert_active(registry, worker_id)
             assert not acceptance.search(worker_id)
             store = registry.require("vector_store")
-            payloads = [store.get(vector_id)["metadata"] for vector_id in store.get_vector_ids()]
+            payloads = [store.get(vector_id).payload for vector_id in store.get_vector_ids()]
             assert payloads
             assert all(payload["runtime_state"] == "offline" for payload in payloads)

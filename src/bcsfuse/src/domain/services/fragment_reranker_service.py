@@ -7,6 +7,7 @@ Fragment Reranker Service
 from __future__ import annotations
 
 import logging
+import math
 from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
@@ -197,6 +198,10 @@ Original Score: {score:.3f}
         )
 
         results = self._convert_results(reranker_results, original_candidates)
+        if len(results) != min(top_k, len(original_candidates)) or len({r.profile_key for r in results}) != len(results):
+            raise ValueError("incomplete reranker response")
+        if any(isinstance(r.final_score, bool) or not math.isfinite(r.final_score) for r in results):
+            raise ValueError("non-finite reranker score")
 
         logger.debug(
             "[FragmentReranker] single batch done | input=%d, output=%d",
@@ -271,7 +276,7 @@ Original Score: {score:.3f}
                         score = rr.score
                     elif isinstance(rr, dict):
                         candidate_id = rr.get("candidate_id") or rr.get("id")
-                        score = rr.get("score", 0.0)
+                        score = rr["score"]
                     else:
                         continue
 
@@ -292,6 +297,10 @@ Original Score: {score:.3f}
                         "failed": True,
                     })
 
+            if (len(batch_results) != len(batch)
+                    or {r["profile_key"] for r in batch_results} != {c["id"] for c in batch}
+                    or any(isinstance(r["score"], bool) or not math.isfinite(r["score"]) for r in batch_results)):
+                raise ValueError("incomplete or invalid reranker batch")
             return batch_idx, batch_results
 
         # 使用 ThreadPoolExecutor 并行执行所有批次
@@ -315,7 +324,9 @@ Original Score: {score:.3f}
                 )
 
         # 按分数排序，取 top_k
-        all_results.sort(key=lambda x: x["score"], reverse=True)
+        if any(result.get("failed") for result in all_results):
+            raise RuntimeError("reranker batch failed; discard all partial scores")
+        all_results.sort(key=lambda x: (-x["score"], x["profile_key"]))
         top_results = all_results[:top_k]
 
         # 构建最终 RerankResult 列表
@@ -328,8 +339,8 @@ Original Score: {score:.3f}
             original = candidate_map.get(profile_key)
 
             if original:
-                # 如果 rerank 返回 0 或失败，使用原始聚合分数
-                final_score = original.aggregated_score if score == 0.0 or result.get("failed") else score
+                # A failed batch has already triggered whole-request fallback.
+                final_score = score
 
                 final_results.append(RerankResult(
                     profile_key=profile_key,
@@ -340,7 +351,7 @@ Original Score: {score:.3f}
                         "reranker_model": self._reranker_model or "unknown",
                         "fragment_count": len(original.fragments),
                         "batch": result.get("batch", 0),
-                        "degraded": result.get("failed", False) or score == 0.0,
+                        "degraded": False,
                     },
                 ))
 
@@ -438,14 +449,11 @@ Original Score: {score:.3f}
         # 构建原始 candidate 查找表
         candidate_map = {c.profile_key: c for c in original_candidates}
 
-        # 检测是否为降级结果（所有分数为0）
+        # Zero is a valid model score, not an implicit failure signal.
         all_scores_zero = all(
             (getattr(rr, 'score', 0.0) if hasattr(rr, 'score') else rr.get('score', 0.0)) == 0.0
             for rr in reranker_results
         )
-        if all_scores_zero and reranker_results:
-            logger.warning("[FragmentReranker] Detected all-zero scores, using original aggregated scores")
-
         # DIAGNOSTIC: Log incoming reranker results
         logger.debug(
             "[RERANKER-CONVERT] Incoming reranker_results count=%d | all_scores_zero=%s",
@@ -458,7 +466,7 @@ Original Score: {score:.3f}
                 score = rr.score
             elif isinstance(rr, dict):
                 cid = rr.get("candidate_id") or rr.get("id")
-                score = rr.get("score", 0.0)
+                score = rr["score"]
             else:
                 continue
             logger.debug(
@@ -475,15 +483,15 @@ Original Score: {score:.3f}
                 score = rr.score
             elif isinstance(rr, dict):
                 candidate_id = rr.get("candidate_id") or rr.get("id")
-                score = rr.get("score", 0.0)
+                score = rr["score"]
             else:
                 logger.warning(f"Unknown reranker result format: {type(rr)}")
                 continue
 
             original = candidate_map.get(candidate_id)
             if original:
-                # 如果 Reranker 返回 0，使用原始聚合分数
-                final_score = original.aggregated_score if score == 0.0 else score
+                # Preserve the model score, including zero.
+                final_score = score
 
                 # DIAGNOSTIC: Log conversion for top 3
                 if rank <= 3:
@@ -501,7 +509,7 @@ Original Score: {score:.3f}
                     rerank_metadata={
                         "reranker_model": self._reranker_model or "unknown",
                         "fragment_count": len(original.fragments),
-                        "degraded": score == 0.0,
+                        "degraded": False,
                     },
                 ))
 

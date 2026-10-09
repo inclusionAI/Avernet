@@ -42,6 +42,7 @@ from src.infra.config.feature_flags import FeatureFlags
 from src.application.services.candidate_recommendation_projection import build_recommendation_from_metadata
 
 if TYPE_CHECKING:
+    from src.domain.services.participants_sufficiency_checker import SufficiencyCheckResult
     from src.domain.models.profile_match_score import ProfileMatchScore
     from src.domain.models.worker_profile import WorkerProfile
     from src.domain.services.worker_profile_retrieval_service import (
@@ -320,6 +321,9 @@ class WorkerCandidateRecommendationImpl:
                 "reranker_called": reranker_called_from_vector_match,  # R43: 实际是否调用了 reranker
                 "expand_factor": runtime_config.get("expand_factor", 2) if runtime_config else 2,
             }
+            metadata.update(runtime_config.get("_retrieval", {}) if runtime_config else {})
+            if metadata.get("keyword_search_used"):
+                metadata["candidate_source"] = "hybrid"
 
             return CandidateRecommendationResponse(
                 recommendations=all_recommendations,

@@ -14,6 +14,7 @@ from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecom
 from src.domain.services.retrieval_logging import log_stage, log_candidates, log_rows
 from src.application.services.worker_vector_match_types import MatchResult, FragmentProfileCandidate
 from src.application.services.fragment_candidate_selection import select_rerank_candidates
+from src.application.services.keyword_candidate_selection import keyword_candidates, fuse_candidates
 
 logger = logging.getLogger("src.application.services.worker_vector_match_service")
 
@@ -27,6 +28,7 @@ class FragmentMatchingMixin:
         excluded_profile_keys: list[str] | None,
         runtime_config: dict[str, Any] | None = None,
         fragment_type_weights: dict[str, float] | None = None,
+        vector_min_score: float = 0.0,
     ) -> list[MatchResult]:
         """
         Fragment 模式匹配（V2）
@@ -147,10 +149,6 @@ class FragmentMatchingMixin:
             strategy=effective_aggregation_strategy,
             runtime_weights=effective_weights,
         )
-        if len(aggregated) == 0:
-            log_stage(logger, "candidate_selection", candidate_count=0, reason="no_aggregated_candidates")
-            logger.warning("[FRAGMENT-MATCH] aggregation returned empty")
-            return []
 
         # 应用 metadata filter 和排除列表
         candidates = []
@@ -182,12 +180,25 @@ class FragmentMatchingMixin:
             logger.warning("[FRAGMENT-MATCH] all candidates filtered out! excluded=%d, meta_filtered=%d",
                            excluded_by_set, excluded_by_meta)
 
+        lexical = keyword_candidates(
+            self._vector_store, query, search_k, filters, excluded_set,
+            candidate_keys, enabled_fragment_types,
+        )
+        diagnostics = {"keyword_search_used": bool(lexical), "rerank_degraded": False,
+                       "score_source": "hybrid_rrf" if lexical else "vector_weighted"}
+        if runtime_config is not None:
+            runtime_config["_retrieval"] = diagnostics
+        hybrid = fuse_candidates(candidates, lexical, effective_expand_factor * top_k, vector_min_score) if lexical else None
+
         # Stage 4: Reranker 精排（如果启用）
         rerank_input_count = 0
         if enable_rerank:
-            sorted_candidates, selection_stats = select_rerank_candidates(
-                candidates, effective_expand_factor * top_k,
-            )
+            if hybrid is not None:
+                sorted_candidates, selection_stats = hybrid, {"selection_strategy": "hybrid_rrf"}
+            else:
+                sorted_candidates, selection_stats = select_rerank_candidates(
+                    candidates, effective_expand_factor * top_k,
+                )
             rerank_input_count = len(sorted_candidates)
             log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
                       candidate_count=len(candidates), excluded_count=excluded_by_set,
@@ -200,6 +211,7 @@ class FragmentMatchingMixin:
                 top_k=top_k,
                 reranker_model=effective_reranker_model,
                 reranker_fail_action=effective_reranker_fail_action,
+                diagnostics=diagnostics,
             )
         else:
             log_stage(logger, "candidate_selection", aggregated_count=len(aggregated),
@@ -207,7 +219,7 @@ class FragmentMatchingMixin:
                       metadata_removed_count=excluded_by_meta, rerank_enabled=False,
                       rerank_input_count=0)
             # 按 aggregated_score 降序排序后再截断
-            sorted_candidates = sorted(
+            sorted_candidates = hybrid if hybrid is not None else sorted(
                 candidates,
                 key=lambda x: x.aggregated_score,
                 reverse=True
@@ -284,6 +296,7 @@ class FragmentMatchingMixin:
         top_k: int,
         reranker_model: str | None,
         reranker_fail_action: str,
+        diagnostics: dict | None = None,
     ) -> list[MatchResult]:
         """
         执行 Reranker 精排（支持运行时覆盖 reranker 模型）
@@ -298,6 +311,7 @@ class FragmentMatchingMixin:
         Returns:
             MatchResult 列表
         """
+        diagnostics = diagnostics if diagnostics is not None else {}
         reranker = self._reranker_service
 
         # 如果指定了不同的 reranker_model，需要创建临时 reranker 实例
@@ -318,6 +332,7 @@ class FragmentMatchingMixin:
                 reranker = self._reranker_service
 
         if reranker is None:
+            diagnostics["rerank_degraded"] = True
             logger.warning("[FRAGMENT-MATCH] reranker unavailable, skipping")
             return self._build_results_from_aggregation(candidates[:top_k])
 
@@ -330,6 +345,14 @@ class FragmentMatchingMixin:
                 top_k=top_k,
             )
             rerank_results = reranker.rerank(rerank_request)
+            if not rerank_results or any(
+                (r.rerank_metadata if hasattr(r, "rerank_metadata") else r.get("rerank_metadata", {})).get("degraded")
+                for r in rerank_results
+            ):
+                diagnostics["rerank_degraded"] = True
+                log_stage(logger, "rerank_fallback", reason="model_failed_or_unavailable",
+                          score_source=diagnostics.get("score_source", "vector_weighted"))
+                return self._build_results_from_aggregation(candidates[:top_k])
             returned_rows = []
             for result in rerank_results:
                 if hasattr(result, "profile_key"):
@@ -353,11 +376,11 @@ class FragmentMatchingMixin:
                 (key, score) for key, score in returned_scores if key not in built_keys
             ), level=logging.INFO)
             logger.debug("[FRAGMENT-MATCH] rerank done: %d results", len(results))
+            diagnostics["score_source"] = "reranker"
             return results
         except Exception as e:
+            diagnostics["rerank_degraded"] = True
             logger.error("[FRAGMENT-MATCH] rerank failed: %s", e)
-            if reranker_fail_action == "empty":
-                return []
             return self._build_results_from_aggregation(candidates[:top_k])
 
 

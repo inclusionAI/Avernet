@@ -94,7 +94,8 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
     def open_app():
         from src.bootstrap.application_context import build_application_context
         from src.bootstrap.app_factory import create_bcsfuse_app
-        from src.infra.public.vectorstores.qdrant_local_vector_store import QdrantLocalVectorStore
+        from src.infra.public.vectorstores.qdrant_mysql_vector_store import QdrantMySQLVectorStore
+        from src.infra.vectorstore_backends.sqlite_vector_persistence_backend import SQLiteVectorPersistenceBackend
         from src.interfaces.api.dependencies import fusion_dependencies
 
         fusion_dependencies.reset_fusion_services()
@@ -124,7 +125,12 @@ def isolated_app_factory(request, monkeypatch, tmp_path):
                 else:
                     instance = provider(pool)
                 registry.register(key, instance)
-        vector_store = QdrantLocalVectorStore(path=str(tmp_path / "qdrant"), dimension=64)
+        # Exercise the composed durable store, including its derived keyword index.
+        vector_store = QdrantMySQLVectorStore(
+            qdrant_path=str(tmp_path / "qdrant"), dimension=64,
+            persistence_backend=SQLiteVectorPersistenceBackend(str(tmp_path / "vectors.sqlite")),
+        )
+        vector_store.rebuild_from_backend()
         embedding = DeterministicEmbedding()
         registry.register("vector_store", vector_store)
         registry.register("embedding_provider", embedding)
@@ -197,3 +203,26 @@ def test_cleanup_runs_after_interrupted_http_scenario(isolated_app_factory):
                 raise RuntimeError("scenario interrupted")
         assert registry.require("worker_registry_store").get_by_id(worker_id) is None
         assert registry.require("worker_profile_content_store").get(worker_id, "release") is None
+
+
+def test_keyword_recommendation_http_metadata_and_missing_model_fallback(isolated_app_factory):
+    with isolated_app_factory() as (client, registry, embedding):
+        with acceptance_run(client, TOKEN) as acceptance:
+            worker_id = acceptance.create_worker()
+            acceptance.put_profile(worker_id)
+            acceptance.request("PUT", f"/v1/workers/{worker_id}/online")
+            acceptance.request("PUT", f"/v1/workers/{worker_id}/profiles/release/activate")
+            body = {"question": worker_id, "topK": 3, "min_score": .95,
+                    "enable_rerank": False, "filters": {"runtime_state": ["online"]}}
+            baseline = acceptance.request("POST", "/api/v1/recommend", json=body)
+            assert baseline["recommendations"][0]["worker_id"] == worker_id
+            assert baseline["metadata"]["score_source"] == "hybrid_rrf"
+            assert baseline["metadata"]["candidate_source"] == "hybrid"
+            assert baseline["metadata"]["keyword_search_used"] is True
+            assert baseline["metadata"]["rerank_degraded"] is False
+            fallback = acceptance.request("POST", "/api/v1/recommend", json={**body, "enable_rerank": True})
+            assert [(r["profile_key"], r["score"]) for r in fallback["recommendations"]] == [
+                (r["profile_key"], r["score"]) for r in baseline["recommendations"]
+            ]
+            assert fallback["metadata"]["score_source"] == "hybrid_rrf"
+            assert fallback["metadata"]["rerank_degraded"] is True

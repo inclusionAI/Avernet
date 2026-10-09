@@ -9,6 +9,7 @@ HTTP Reranker 实现
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 import uuid
@@ -113,9 +114,7 @@ class HttpReranker(Reranker):
             return []
 
         if not self.api_key:
-            logger.warning("No API key configured, returning original order")
-            return [RerankResult(candidate_id=c["id"], score=i/len(candidates))
-                    for i, c in enumerate(candidates)]
+            raise RuntimeError("reranker API key is not configured")
 
         # 格式化输入
         raw_docs = [c.get("text", "") for c in candidates]
@@ -128,7 +127,7 @@ class HttpReranker(Reranker):
             # 构建结果
             results = []
             for i, candidate in enumerate(candidates):
-                score = scores[i] if i < len(scores) else 0.0
+                score = scores[i]
                 results.append(RerankResult(
                     candidate_id=candidate.get("id", str(i)),
                     score=score,
@@ -140,10 +139,9 @@ class HttpReranker(Reranker):
             return results[:top_k]
 
         except Exception as e:
-            logger.error(f"Rerank failed: {e}")
-            # 失败时返回原始顺序
-            return [RerankResult(candidate_id=c["id"], score=0.0)
-                    for c in candidates[:top_k]]
+            # The caller owns fallback ordering; do not disguise failures as
+            # valid zero model scores (or log response bodies/credentials).
+            raise RuntimeError(f"reranker request failed ({type(e).__name__})") from e
 
     def _call_api(self, query: str, documents: list[str]) -> list[float]:
         """调用 Reranker API"""
@@ -175,7 +173,9 @@ class HttpReranker(Reranker):
         if "results" in result:
             # 格式: {"results": [{"index": 0, "relevance_score": 0.9}, ...]}
             sorted_results = sorted(result["results"], key=lambda x: x.get("index", 0))
-            scores = [r.get("relevance_score", 0.0) for r in sorted_results]
+            if [r.get("index") for r in sorted_results] != list(range(num_docs)):
+                raise ValueError("reranker response indices are incomplete or duplicated")
+            scores = [r["relevance_score"] for r in sorted_results]
             # DIAGNOSTIC: Log parsed relevance scores
             logger.debug(
                 "[RERANKER-HTTP] Parsed 'results' format | count=%d | "
@@ -205,12 +205,13 @@ class HttpReranker(Reranker):
                 scores[:3] if scores else []
             )
         else:
-            logger.warning(f"Unknown response format: {list(result.keys())}")
-            scores = [0.0] * num_docs
+            raise ValueError("unknown reranker response format")
 
-        # 确保长度匹配
-        while len(scores) < num_docs:
-            scores.append(0.0)
+        if len(scores) != num_docs or any(
+            not isinstance(score, (float, int)) or isinstance(score, bool)
+            or not math.isfinite(score) for score in scores
+        ):
+            raise ValueError("reranker scores are incomplete or non-finite")
 
         logger.debug(
             "[RERANKER-HTTP] Final parsed scores | count=%d | min=%.4f | max=%.4f",
@@ -219,7 +220,7 @@ class HttpReranker(Reranker):
             max(scores) if scores else 0.0,
         )
 
-        return scores[:num_docs]
+        return scores
 
 
 def get_reranker() -> Reranker:

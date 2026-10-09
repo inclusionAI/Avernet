@@ -26,6 +26,7 @@ case "${1:---isolated}" in
       tests/contract/test_retrieval_logging.py \
       tests/contract/test_retrieval_log_noise.py \
       tests/contract/test_fragment_candidate_selection.py \
+      tests/contract/test_keyword_retrieval.py \
       tests/contract/test_composed_log_level.py \
       tests/contract/test_auth_provider_contract.py \
       tests/contract/test_vector_metadata_filter_contract.py \
