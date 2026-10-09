@@ -34,7 +34,7 @@ Bot Config Manifest 保持现有的 YAML 形式；这里引入的所有新增内
 记忆投影契约，并修订当前「apply 从不触碰 `MEMORY.md` 和 `IDENTITY.md`」的规则：
 由引擎而不是 Backend 决定策展条目如何投影。
 
-设计：[`../02-genome.zh-CN.md`](../02-genome.zh-CN.md)。
+设计：[`../01-genome.zh-CN.md`](../01-genome.zh-CN.md)。
 
 ## 影响
 

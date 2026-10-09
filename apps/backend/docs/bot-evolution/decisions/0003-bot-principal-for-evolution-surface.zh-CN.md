@@ -26,7 +26,7 @@ Passport/AgentPass 签发；网关以类型 `bot` 及其作用域签署主体；
 bot 通过 `avn` CLI 和一个随附的 skill 访问该接口面，二者由 Manifest
 `cli_tools` 交付，沿用 `bcs-cli` 的先例。
 
-设计：[`../06-interfaces.zh-CN.md`](../06-interfaces.zh-CN.md)。
+设计：本提议已推迟；原先放在接口文档中的权限范围草案已删除，将与 bot 如何与平台通信一起重新设计。
 
 ## 影响
 
