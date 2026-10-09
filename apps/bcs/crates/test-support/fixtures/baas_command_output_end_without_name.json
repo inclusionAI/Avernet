@@ -1,0 +1,31 @@
+{
+  "engine_type": "aicoding",
+  "engine_frame": {
+    "stream": "command_output",
+    "data": {
+      "phase": "end",
+      "toolCallId": "assign-call",
+      "toolName": "Bash",
+      "output": "{\"__bcs_coordination__\":true,\"v\":2,\"tool\":\"bcs_assign_task\",\"intent_id\":\"bcs_intent_00000000000000000000000000000001\",\"status\":\"stored\"}",
+      "isError": false
+    }
+  },
+  "provider_result": {
+    "stream": "tool",
+    "phase": "result",
+    "toolCallId": "assign-call",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"__bcs_coordination__\":true,\"v\":2,\"tool\":\"bcs_assign_task\",\"intent_id\":\"bcs_intent_00000000000000000000000000000001\",\"status\":\"stored\"}"
+        }
+      ]
+    },
+    "isError": false
+  },
+  "intent_arguments": {
+    "target_bot": "bot-observer",
+    "message": "report current status"
+  }
+}

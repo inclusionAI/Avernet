@@ -263,14 +263,25 @@ pub async fn handle_bot_event(
         match phase {
             "start" => cache_tool_start(flow, &cmd, data).await,
             "result" => {
-                let task_intent_eligible = task_intent_eligible
-                    && tool_result_matches_start(flow, &cmd, data).await;
+                // Authorize with the cached start's name. Result events may
+                // omit or report a different name; identity is bound by the
+                // run, toolCallId, bot and session before persistence clears it.
+                let start_name = if task_intent_eligible {
+                    tool_result_start_name(flow, &cmd, data).await
+                } else {
+                    None
+                };
+                let coordination_data = start_name.map(|name| {
+                    let mut data = data.clone();
+                    data["name"] = Value::String(name);
+                    data
+                });
                 persist_tool_result(flow, &cmd, data).await?;
                 let coordination = maybe_handle_coordination_echo(
                     flow,
                     &cmd,
-                    data,
-                    task_intent_eligible,
+                    coordination_data.as_ref().unwrap_or(data),
+                    coordination_data.is_some(),
                 )
                 .await;
                 if let Err(error) = &coordination {

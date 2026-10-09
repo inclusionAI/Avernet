@@ -286,6 +286,18 @@ data: {"runId":"provider-run-1","seq":5,"ts":1786260001000,"state":"aborted","st
 `start/update/result` 分别映射 BCS 的 `ToolCallStart/Delta/ToolCallEnd`。
 `toolCallId` 关联一次工具调用；它不等于 HITL `interactionId`，也不能替代后者。
 
+协同工具结果通过同一 run 的 `toolCallId` 关联已缓存的 start，并要求 bot、
+session 一致。执行协同操作时以 start 的工具名称做权限判断，不校验 result
+的 `name`；result 可以省略或携带不同名称，均不能改变 start 的工具权限。
+没有匹配 start 或 start 缺少工具名称的结果不会触发协同操作。
+
+固定兼容用例为 `crates/test-support/fixtures/baas_command_output_end_without_name.json`：
+AICoding 的 `command_output/phase=end` 带 `toolName`，BaaS 转换后的 result 不带
+`name`，BCS 仍须执行 `stored` 的 v2 派单意图并生成 worker 投递及 Applied 回执。
+BaaS 的 `test_command_output_end_contract.py` 与 BCS 的
+`baas_command_output_end_without_name_dispatches_stored_intent` 共用此样本；
+后续改动不得通过补 result 名称或删除样本来绕过这一兼容要求。
+
 ### 4.2 thinking
 
 ```json
