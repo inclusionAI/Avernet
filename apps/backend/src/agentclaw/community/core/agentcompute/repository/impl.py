@@ -473,6 +473,48 @@ class MessageRepository(MessageRepositoryProtocol):
         )
 
 
+    def aggregate_usage_by_tenant(self, tenant: dm.TenantId,
+                                  since: datetime | None = None) -> dict[str, dm.TokenUsage]:
+        conditions = [
+            om.AcAgentComputeMessageModel.tenant == tenant,
+            om.AcAgentComputeMessageModel.is_deleted == False,
+        ]
+        if since is not None:
+            conditions.append(om.AcAgentComputeMessageModel.gmt_create >= since)
+        buckets: dict[str, dict[str, int]] = {
+            kind.value: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            for kind in dm.LlmCallKind
+        }
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(
+                    om.AcAgentComputeMessageModel.role,
+                    om.AcAgentComputeMessageModel.token_usage,
+                ).where(*conditions)
+            ).all()
+        for role, usage_json in rows:
+            if role in (dm.MessageRole.USER.value, dm.MessageRole.DECISION.value):
+                kind = dm.LlmCallKind.ORCHESTRATOR
+            elif role == dm.MessageRole.ASSISTANT.value:
+                kind = dm.LlmCallKind.SUBAGENT
+            else:
+                continue
+            usage = _loads(usage_json)
+            if not isinstance(usage, dict):
+                continue
+            bucket = buckets[kind.value]
+            bucket["prompt_tokens"] += int(usage.get("prompt_tokens", 0))
+            bucket["completion_tokens"] += int(usage.get("completion_tokens", 0))
+            bucket["total_tokens"] += int(usage.get("total_tokens", 0))
+        return {
+            dm.LlmCallKind(kind): dm.TokenUsage(
+                prompt_tokens=t["prompt_tokens"],
+                completion_tokens=t["completion_tokens"],
+                total_tokens=t["total_tokens"],
+            )
+            for kind, t in buckets.items()
+        }
+
 class ResultShardRepository(ResultShardRepositoryProtocol):
 
     def __init__(self, db: DatabasePlugin) -> None:

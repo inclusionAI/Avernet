@@ -10,6 +10,8 @@ import time
 import uuid
 from contextlib import contextmanager
 
+from datetime import datetime
+
 import pytest
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker
@@ -425,3 +427,93 @@ class TestRunEvents:
         events = service.run_events(run_id, "tenant-a")
         assert events.run_status is dm.RunStatus.COMPLETED
         assert events.terminal is dm.RunStatus.COMPLETED
+
+
+class TestTenantUsageAttribution:
+
+    def _seed_message(self, db, *, role, usage, agent_id="orch-1", run_id=None):
+        repo = MessageRepository(db)
+        import uuid as _uuid
+        repo.create(dm.Message(
+            id=dm.MessageId(_uuid.uuid4().hex),
+            run_id=dm.RunId(run_id or _uuid.uuid4().hex),
+            tenant=dm.TenantId("tenant-a"),
+            agent_id=dm.AgentId(agent_id), seq=int(_uuid.uuid4().hex[:6], 16),
+            role=role, content="m", token_usage=usage,
+        ))
+
+    def test_usage_folds_per_llm_call_kind(self, db):
+        self._seed_message(db, role=dm.MessageRole.DECISION,
+                           usage=dm.TokenUsage(10, 20, 30))
+        self._seed_message(db, role=dm.MessageRole.USER,
+                           usage=dm.TokenUsage(1, 2, 3))
+        self._seed_message(db, role=dm.MessageRole.ASSISTANT,
+                           usage=dm.TokenUsage(100, 200, 300))
+        self._seed_message(db, role=dm.MessageRole.TOOL,
+                           usage=dm.TokenUsage(999, 999, 999))
+        service = AgentComputeService(
+            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            agent_repo=AgentRepository(db),
+            message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db),
+            guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
+            config=_config(),
+        )
+        usage = service.tenant_usage("tenant-a")
+        assert usage["orchestrator"] == {
+            "prompt_tokens": 11, "completion_tokens": 22, "total_tokens": 33,
+        }
+        assert usage["subagent"] == {
+            "prompt_tokens": 100, "completion_tokens": 200, "total_tokens": 300,
+        }
+
+    def test_usage_is_tenant_scoped(self, db):
+        import uuid as _uuid
+        repo = MessageRepository(db)
+        repo.create(dm.Message(
+            id=dm.MessageId(_uuid.uuid4().hex),
+            run_id=dm.RunId(_uuid.uuid4().hex), tenant=dm.TenantId("tenant-b"),
+            agent_id=dm.AgentId("orch-1"), seq=_uuid.uuid4().int % 9,
+            role=dm.MessageRole.DECISION, content="m",
+            token_usage=dm.TokenUsage(5, 5, 10),
+        ))
+        service = AgentComputeService(
+            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            agent_repo=AgentRepository(db),
+            message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db),
+            guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
+            config=_config(),
+        )
+        empty = service.tenant_usage("tenant-a")
+        assert empty["orchestrator"]["total_tokens"] == 0
+        assert empty["subagent"]["total_tokens"] == 0
+        assert service.tenant_usage("tenant-b")["orchestrator"]["total_tokens"] == 10
+
+    def test_usage_since_window_excludes_old_rows(self, db):
+        import time as _time
+        import uuid as _uuid
+        self._seed_message(db, role=dm.MessageRole.DECISION,
+                           usage=dm.TokenUsage(7, 7, 14))
+        from agentclaw.community.core.agentcompute.repository import models as om_
+        from sqlalchemy import update
+        with db.orm_session() as session:
+            session.execute(update(om_.AcAgentComputeMessageModel).values(
+                gmt_create=datetime(2020, 1, 1),
+            ))
+        service = AgentComputeService(
+            run_repo=RunRepository(db), job_repo=JobRepository(db),
+            agent_repo=AgentRepository(db),
+            message_repo=MessageRepository(db),
+            round_repo=RoundRepository(db),
+            guard_repo=GuardEventRepository(db),
+            shard_repo=ResultShardRepository(db),
+            config=_config(),
+        )
+        since_ms = int(_time.time() * 1000) - 1000
+        fresh = service.tenant_usage("tenant-a", since_ms=since_ms)
+        assert fresh["orchestrator"]["total_tokens"] == 0
+        all_time = service.tenant_usage("tenant-a")
+        assert all_time["orchestrator"]["total_tokens"] == 14
