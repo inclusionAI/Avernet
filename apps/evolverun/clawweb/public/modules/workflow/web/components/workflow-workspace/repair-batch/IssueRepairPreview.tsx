@@ -2,13 +2,24 @@ import type { RepairInboxItem } from '../../../../server/contracts/repair-workbe
 import { changeSummary, sourceRunCount } from './RepairItemDetail'
 import { exclusion, itemTitle, states } from './repair-view'
 
+export function IssueRepairPreviewLoading() {
+  return <div role="status" aria-label="修复建议加载中" className="mt-4 min-h-32 rounded-lg bg-slate-50 p-3">
+    <p className="text-xs text-slate-500">正在加载修复建议…</p>
+    <div aria-hidden="true" className="mt-3 space-y-2 motion-safe:animate-pulse">
+      <div className="h-3 w-2/3 rounded bg-slate-200" />
+      <div className="h-3 w-1/2 rounded bg-slate-200/70" />
+      <div className="h-3 w-1/4 rounded bg-slate-200/50" />
+    </div>
+  </div>
+}
+
 export default function IssueRepairPreview({ items, total, selected, canEdit, limit, onToggle, onDetail, onMore }: {
   items: RepairInboxItem[]; total: number; selected: string[]; canEdit: boolean; limit: number
   onToggle: (id: string) => void; onDetail: (item: RepairInboxItem) => void; onMore: () => void
 }) {
   if (!total) return <p className="mt-3 text-xs text-slate-500">暂无可供选择的修复建议，仍可查看问题原因与证据。</p>
-  return <section aria-label="本问题修复建议" className="mt-3 rounded-lg border border-slate-200 bg-white">
-    <p className="border-b border-slate-100 px-3 py-2 text-xs font-medium text-slate-600">修复建议 · {total} 条</p>
+  return <section aria-label="本问题修复建议" className="mt-4">
+    <p className="mb-2 text-xs font-semibold text-slate-600">修复建议 · {total} 条</p>
     <div className="divide-y divide-slate-100">{items.map(item => {
       const checked = selected.includes(item.itemId)
       const reason = exclusion(item)

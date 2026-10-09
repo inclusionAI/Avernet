@@ -29,7 +29,7 @@ export function useIssueGroups(workflowId: string, query?: IssuePageQuery) {
   }
   return useQuery({ queryKey: ['evolve-issue-groups', workflowId, query],
     queryFn: ({ signal }) => readOnlyJson<IssuePage>(`/api/evolve/issue-groups?${params}`, signal),
-    retry: false,
+    retry: false, staleTime: 30_000, gcTime: 300_000,
     enabled: !!workflowId,
     refetchInterval: query => query.state.data?.groups.some(group => group.aggregationStatus === 'queued') ? 15_000 : 60_000,
   });
