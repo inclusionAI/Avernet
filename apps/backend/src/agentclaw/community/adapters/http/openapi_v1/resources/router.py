@@ -41,6 +41,8 @@ API" is not "files have no record".
 
 from __future__ import annotations
 
+from agentclaw.community.adapters.http.openapi_v1.resources.dependencies import ResourceTargetDep
+
 import os
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -192,6 +194,7 @@ async def _list_dir_or_empty(
     owner_id: str,
     bot_repo: BotRepository,
     path: str,
+    target: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """One directory's entries, treating an absent directory as empty.
 
@@ -208,6 +211,7 @@ async def _list_dir_or_empty(
     )
     try:
         listed = await file_svc.list_dir(
+            **(target or {}),
             entity_type=entity_type,
             entity_id=entity_id,
             bot_id=bot_id,
@@ -267,6 +271,7 @@ async def list_resources(
         ),
     ] = None,
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Page[FileEntry]] | Response:
     """List a directory of the bot's workspace.
@@ -293,7 +298,7 @@ async def list_resources(
     if request.query_params.get("action") == "preview":
         preview = envelope(
             await _preview_resource(
-                file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+                file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path, target=target
             ),
             request,
         )
@@ -301,7 +306,7 @@ async def list_resources(
 
     safe = _safe_path(path)
     listed = await _list_dir_or_empty(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe, target=target
     )
     entries = [_to_file_entry(entry) for entry in listed]
     if type is not None:
@@ -329,6 +334,7 @@ async def stat_resource(
     request: Request,
     bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[FileEntry]:
     """One file or folder's metadata, addressed by path.
@@ -349,7 +355,7 @@ async def stat_resource(
     safe = _require_path(path)
     parent = safe.rsplit("/", 1)[0] if "/" in safe else ""
     listed = await _list_dir_or_empty(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=parent
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=parent, target=target
     )
     for entry in listed:
         if entry.get("path") == safe:
@@ -381,6 +387,7 @@ async def upload_resource(
     ] = False,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[FileEntry]:
     """Upload a file's raw bytes into the bot's workspace.
@@ -417,6 +424,7 @@ async def upload_resource(
     # since ``DeviceFileSystem`` has no conditional-create to make the check and
     # the write one operation; see the spec's known-limitation section.
     occupied = await file_svc.exists(
+        **(target or {}),
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,
@@ -427,6 +435,7 @@ async def upload_resource(
         raise DuplicateResourceError(f"Resource already exists: {safe}")
     try:
         info = await file_svc.upload_file(
+            **(target or {}),
             entity_type=entity_type,
             entity_id=entity_id,
             bot_id=bot_id,
@@ -525,6 +534,7 @@ async def upload_resource(
         # 502 below already tells the caller the upload failed.
         try:
             rolled_back = await file_svc.delete(
+                **(target or {}),
                 entity_type=entity_type,
                 entity_id=entity_id,
                 bot_id=bot_id,
@@ -564,6 +574,7 @@ async def _read_file_or_404(
     owner_id: str,
     bot_repo: BotRepository,
     path: str,
+    target: dict[str, Any] | None = None,
 ) -> bytes:
     """Bytes at ``path``, or 404. Shared by download and preview."""
     safe = _require_path(path)
@@ -573,6 +584,7 @@ async def _read_file_or_404(
     )
     try:
         content = await file_svc.read_file(
+            **(target or {}),
             entity_type=entity_type,
             entity_id=entity_id,
             bot_id=bot_id,
@@ -618,10 +630,11 @@ async def _preview_resource(
     owner_id: str,
     bot_repo: BotRepository,
     path: str,
+    target: dict[str, Any] | None = None,
 ) -> Preview:
     """Build one text preview for either public preview route."""
     content = await _read_file_or_404(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path, target=target
     )
     if len(content) > _PREVIEW_MAX_BYTES:
         raise FileTooLargeError(
@@ -655,6 +668,7 @@ async def download_file(
     request: Request,
     bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Response:
     """Stream a file's bytes from the bot's workspace, addressed by path.
@@ -662,7 +676,7 @@ async def download_file(
     Raw bytes, not an envelope — the body is the file.
     """
     content = await _read_file_or_404(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path, target=target
     )
     return Response(content=content, media_type="application/octet-stream")
 
@@ -682,6 +696,7 @@ async def download_directory(
     bot_id: BotIdPath,
     path: DirPathQuery = "",
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Response:
     """Download a whole directory as a zip archive, addressed by path.
@@ -700,6 +715,7 @@ async def download_directory(
     try:
         zip_path = await build_directory_zip(
             file_svc.iter_directory_files(
+                **(target or {}),
                 entity_type=coords.entity_type,
                 entity_id=coords.entity_id,
                 bot_id=coords.bot_id,
@@ -742,6 +758,7 @@ async def preview_file(
     request: Request,
     bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Preview]:
     """A file's content as text, addressed by path.
@@ -756,6 +773,7 @@ async def preview_file(
             owner_id=owner_id,
             bot_repo=bot_repo,
             path=path,
+            target=target,
         ),
         request,
     )
@@ -775,6 +793,7 @@ async def create_directory(
     request: Request,
     bot_id: BotIdPath,
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[FileEntry]:
     """Create a directory in the bot's workspace, addressed by path.
@@ -792,6 +811,7 @@ async def create_directory(
         coords.entity_type, coords.entity_id, coords.engine_type
     )
     await file_svc.create_directory(
+        **(target or {}),
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,
@@ -822,6 +842,7 @@ async def delete_file(
     bot_id: BotIdPath,
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
+    target: ResourceTargetDep = None,
     file_svc: ResourceFileService = Injected(ResourceFileService),
 ) -> Envelope[Deleted]:
     """Delete a file or directory from the bot's workspace, addressed by path.
@@ -843,6 +864,7 @@ async def delete_file(
         coords.entity_type, coords.entity_id, coords.engine_type
     )
     if not await file_svc.exists(
+        **(target or {}),
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,
@@ -865,6 +887,7 @@ async def delete_file(
     # not that the path was absent. The record is gone by now, which the retry
     # tolerates — a missing record is not an error — while it retries the file.
     if not await file_svc.delete(
+        **(target or {}),
         entity_type=entity_type,
         entity_id=entity_id,
         bot_id=bot_id,

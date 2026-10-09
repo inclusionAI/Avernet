@@ -45,7 +45,7 @@ from agentclaw.community.adapters.http.openapi_v1.identity import (
 from fastapi import APIRouter
 
 from ._relocate import bot_first_to_component_first, relocate
-from ._requery import drop_parameter
+from ._requery import drop_parameter, without_parameter
 from ._shim import legacy_router
 
 #: Keep ``stage`` off identity's retiring addresses.
@@ -76,16 +76,24 @@ _DROP_STAGE = drop_parameter(
     },
 )
 
+def _without_instance(endpoint, _method, _path):
+    shim = without_parameter(endpoint, "device_uuid")
+    shim.__name__ = endpoint.__name__
+    return shim
+
+
 connection: APIRouter = relocate(
     connection_router,
     legacy_router("/openapi/v1/bots/connection", "connection"),
     bot_first_to_component_first("connection"),
+    transform=_without_instance,
 )
 
 engine: APIRouter = relocate(
     engine_router,
     legacy_router("/openapi/v1/bots/engine", "engine"),
     bot_first_to_component_first("engine"),
+    transform=_without_instance,
     # Restarts and default-config reads were added after bot-first addressing.
     # Neither ever had a component-first public address, so manufacturing a
     # deprecated alias would expand rather than preserve the compatibility
@@ -103,12 +111,14 @@ models: APIRouter = relocate(
     models_router,
     legacy_router("/openapi/v1/bots/models", "models"),
     bot_first_to_component_first("models"),
+    transform=_without_instance,
 )
 
 sessions: APIRouter = relocate(
     sessions_router,
     legacy_router("/openapi/v1/bots/sessions", "sessions"),
     bot_first_to_component_first("sessions"),
+    transform=_without_instance,
     # The retiring component-first contract is frozen. Favorite operations
     # were introduced after bot-first addressing and therefore have no legacy
     # address to preserve.

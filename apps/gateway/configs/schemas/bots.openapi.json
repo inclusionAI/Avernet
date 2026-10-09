@@ -57721,6 +57721,27 @@
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -61678,6 +61699,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -61919,6 +61961,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -62579,6 +62642,27 @@
               "description": "Deprecated: the former name of entity_id, read only while entity_id is absent, and refused (422) when both are sent with different values. Migrate to entity_id; this parameter will be removed.",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -62821,6 +62905,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -63062,6 +63167,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -69757,6 +69883,27 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -70009,6 +70156,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -70316,6 +70484,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -71585,6 +71774,38 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -71856,6 +72077,38 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -72067,6 +72320,38 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -72295,6 +72580,38 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -72520,6 +72837,38 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -72748,6 +73097,38 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -72975,6 +73356,38 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -73198,6 +73611,38 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -75325,6 +75770,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -75564,6 +76030,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -75862,6 +76349,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -76115,6 +76623,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -76366,6 +76895,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -76616,6 +77166,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -76880,6 +77451,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -77130,6 +77722,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -77383,6 +77996,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -77634,6 +78268,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -77896,6 +78551,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -78171,6 +78847,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -78450,6 +79147,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -78719,6 +79437,27 @@
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
             }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
+            }
           }
         ],
         "responses": {
@@ -78971,6 +79710,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],
@@ -79249,6 +80009,27 @@
               ],
               "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
               "title": "Owner Id"
+            }
+          },
+          {
+            "description": "Instance id from containers. Omit for automatic instance selection.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9_-]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Instance id from containers. Omit for automatic instance selection.",
+              "title": "Device Uuid"
             }
           }
         ],

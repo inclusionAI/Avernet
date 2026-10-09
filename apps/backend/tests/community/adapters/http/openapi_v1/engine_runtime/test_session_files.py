@@ -204,6 +204,22 @@ def _base() -> str:
     return f"/openapi/v1/bots/{BOT}/sessions/{SESSION_ID}/files"
 
 
+@pytest.mark.parametrize("method,suffix,body,operation", [
+    ("POST", "/upload-intents", {"files": [{"filename": "a.txt"}]}, "intent"),
+    ("POST", "/upload-complete", {"resource_id": "sr_1", "transfer_id": "tr_1"}, "complete"),
+    ("GET", "/sr_1/materialize-status", None, "status"),
+    ("GET", "", None, "list"),
+    ("GET", "/sr_1/content", None, "session_file_content"),
+    ("DELETE", "/sr_1", None, "delete"),
+])
+def test_file_operations_forward_uuid(client, resources, method, suffix, body, operation):
+    response = client.request(method, _base() + suffix,
+        params={"device_uuid": "instance-A"}, json=body)
+    assert response.status_code < 300, response.text
+    assert resources.calls[-1][0] == operation
+    assert resources.calls[-1][1]["device_uuid"] == "instance-A"
+
+
 def test_upload_rejects_all_internal_routing_fields(client, resources):
     response = client.post(
         "/openapi/v1/bots/b1/sessions/s/files/upload-intents",

@@ -43,6 +43,7 @@ class OpenApiSessionFileAdapter:
         stage: str,
         engine_type: str,
         files: list[tuple[str, int | None, str | None]],
+        device_uuid: str | None = None,
     ) -> list[Any]:
         """Resolve one binding before creating legacy resource records."""
         try:
@@ -66,6 +67,7 @@ class OpenApiSessionFileAdapter:
                 engine_type=engine_type,
                 filename=filename,
                 binding_id=binding_id,
+                **({"device_uuid": device_uuid} if device_uuid is not None else {}),
                 size_bytes=size_bytes,
                 content_hash=content_hash,
             )

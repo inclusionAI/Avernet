@@ -55,6 +55,7 @@ class SessionResourceRecord:
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
     binding_id: int | None = None
+    device_uuid: str | None = None
 
 
 @dataclass(frozen=True)

@@ -72,16 +72,19 @@ class SessionResourceMaterializeHandler:
                     task_version,
                 )
                 return Complete()
+            selection = {"device_uuid": record.device_uuid} if record.device_uuid is not None else {}
             if record.binding_id is None:
                 context = self._resolver.resolve_for_bot(
                     record.bot_id,
                     record.owner_id,
+                    **selection,
                 )
             else:
                 context = self._resolver.resolve_for_binding(
                     record.binding_id,
                     record.owner_id,
                     bot_id=record.bot_id,
+                    **selection,
                 )
             session_id = None
             if record.transfer_api_version is TransferApiVersion.SESSION_V2:
