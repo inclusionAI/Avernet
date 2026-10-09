@@ -18,7 +18,7 @@ async fn queued_group_and_system_failures_use_legacy_chat_notice() {
     for flow_kind in [DeliveryFlowKind::System, DeliveryFlowKind::Group] {
         for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker, GroupStrategy::StateMachine] {
             for private in [false, true] {
-                check_notice(flow_kind, strategy, private, DeliveryType::Send, Event::TransportRejected, true, false).await;
+                check_notice(flow_kind, strategy, private, DeliveryType::Send, Event::TransportRejected, true, NoticeMode::Online).await;
             }
         }
     }
@@ -27,18 +27,31 @@ async fn queued_group_and_system_failures_use_legacy_chat_notice() {
 #[tokio::test]
 async fn bot_errors_success_and_inject_do_not_add_delivery_failure_notice() {
     for (kind, event) in [(DeliveryType::Send, Event::Failed), (DeliveryType::Send, Event::Completed), (DeliveryType::Inject, Event::CancelRequested)] {
-        check_notice(DeliveryFlowKind::System, GroupStrategy::Chat, false, kind, event, false, false).await;
+        check_notice(DeliveryFlowKind::System, GroupStrategy::Chat, false, kind, event, false, NoticeMode::Online).await;
     }
 }
 
 #[tokio::test]
 async fn queued_group_failure_preserves_offline_notice() {
-    check_notice(DeliveryFlowKind::Group, GroupStrategy::Chat, false, DeliveryType::Send, Event::TransportRejected, true, true).await;
+    check_notice(DeliveryFlowKind::Group, GroupStrategy::Chat, false, DeliveryType::Send, Event::TransportRejected, true, NoticeMode::Offline).await;
 }
 
-async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, private: bool, kind: DeliveryType, terminal_event: Event, expected: bool, offline: bool) {
+#[tokio::test]
+async fn failures_across_ticks_preserve_later_offline_and_retryable_notices() {
+    for mode in [NoticeMode::OfflineFirst, NoticeMode::RetryableFirst] {
+        check_notice(DeliveryFlowKind::Group, GroupStrategy::Chat, false, DeliveryType::Send, Event::TransportRejected, true, mode).await;
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NoticeMode { Online, Offline, OfflineFirst, RetryableFirst }
+
+async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, private: bool, kind: DeliveryType, terminal_event: Event, expected: bool, mode: NoticeMode) {
     let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
-    let delivery: Arc<dyn BotDeliveryPort> = if offline { Arc::new(OfflineDelivery) } else { fixture.bot_delivery.clone() };
+    let offline = matches!(mode, NoticeMode::Offline);
+    let staggered = matches!(mode, NoticeMode::OfflineFirst | NoticeMode::RetryableFirst);
+    let delivery: Arc<dyn BotDeliveryPort> = if offline { Arc::new(OfflineDelivery) }
+        else if staggered { Arc::new(SelectiveOfflineDelivery) } else { fixture.bot_delivery.clone() };
     let mut group = fixture.group.get("group-1").await.unwrap();
     group.group_strategy = strategy;
     fixture.group.upsert(group.clone()).await.unwrap();
@@ -76,9 +89,26 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: 200, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
     };
-    for queued in &admitted.deliveries {
+    let mut deliveries = admitted.deliveries.iter().collect::<Vec<_>>();
+    deliveries.sort_by_key(|row| &row.target_bot_id);
+    if matches!(mode, NoticeMode::RetryableFirst) { deliveries.reverse(); }
+    for (index, queued) in deliveries.into_iter().enumerate() {
         let active = if kind == DeliveryType::Send { service.transition(command(queued, Event::StartSend)).await.unwrap() } else { queued.clone() };
         service.transition(command(&active, terminal_event)).await.unwrap();
+        if staggered { wait_for_notices(&frontend, index + 1).await; }
+    }
+    if staggered {
+        let texts = frontend.events().await.into_iter().filter_map(|frame| {
+            let event: serde_json::Value = serde_json::from_str(&frame).unwrap();
+            (event["event"] == "chat").then(|| event["payload"]["message"]["content"][0]["text"].as_str().unwrap().to_string())
+        }).collect::<Vec<_>>();
+        let mut expected = vec!["Bot Driver 已离线", "消息投递失败，请稍后重试。"];
+        if matches!(mode, NoticeMode::RetryableFirst) { expected.reverse(); }
+        assert_eq!(texts, expected);
+        assert_eq!(bcs_service_api::port::repo::MessageRepoPort::get_current_seq(repo.as_ref(), "group-1:failure").await.unwrap(), 3);
+        shutdown.send(true).unwrap();
+        notifications.await.unwrap();
+        return;
     }
     if !expected {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -87,15 +117,7 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         notifications.await.unwrap();
         return;
     }
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            if frontend.events().await.iter().any(|event| {
-                let value: serde_json::Value = serde_json::from_str(event).unwrap();
-                value["event"] == "chat"
-            }) { break; }
-            tokio::task::yield_now().await;
-        }
-    }).await.unwrap();
+    wait_for_notices(&frontend, 1).await;
     let frames = frontend.commands().await;
     let failure = frames.iter().find(|cmd| serde_json::from_str::<serde_json::Value>(&cmd.event_json).unwrap()["event"] == "chat").unwrap();
     let event: serde_json::Value = serde_json::from_str(&failure.event_json).unwrap();
@@ -130,6 +152,26 @@ struct OfflineDelivery;
 #[async_trait::async_trait]
 impl BotDeliveryPort for OfflineDelivery {
     async fn is_available(&self, _target: &BotDeliveryTarget) -> bool { false }
+    async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        Err(ServiceError::BotNotConnected(cmd.target_bot_id().to_string()))
+    }
+}
+
+async fn wait_for_notices(frontend: &support::RecordingFrontendDelivery, count: usize) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if frontend.events().await.iter().filter(|frame|
+                serde_json::from_str::<serde_json::Value>(frame).unwrap()["event"] == "chat"
+            ).count() >= count { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+}
+
+struct SelectiveOfflineDelivery;
+#[async_trait::async_trait]
+impl BotDeliveryPort for SelectiveOfflineDelivery {
+    async fn is_available(&self, target: &BotDeliveryTarget) -> bool { target.bot_id() != "bot-driver" }
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
         Err(ServiceError::BotNotConnected(cmd.target_bot_id().to_string()))
     }

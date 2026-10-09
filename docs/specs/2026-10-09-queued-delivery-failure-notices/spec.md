@@ -27,6 +27,9 @@ failed delivery but bypasses the synchronous system-chat error notice.
   synchronous dispatcher. Private initialization text and raw transport errors
   must not appear in that notice.
 - Aggregate failures through the existing source-message notification batch.
+  Track attempted failure notices per delivery ID, so a target failing after
+  an earlier batch is still reported without repeating previously reported
+  targets. Other lifecycle hints retain their existing per-status policy.
   Bot terminal errors already projected as chat errors do not add another
   delivery failure notice. Inject, successful and cancelled rows do not emit
   delivery failure notices. Direct A2A and Task terminal reconciliation retain
@@ -56,12 +59,13 @@ two-second notification attempt timeout and no-replay policy are retained.
 Backend integration tests drive committed delivery transitions and the actual
 notification subscriber. They cover Group/System failures across Chat,
 ManagerWorker and StateMachine strategies, public/private source content,
-multi-target aggregation, and suppression for Bot errors, success and Inject.
+multi-target aggregation, failures in separate ticks (offline first and
+retryable first), and suppression for Bot errors, success and Inject.
 Existing synchronous Provider failure tests and queued conformance tests remain
 applicable. The repair preserves the existing wire contract.
 
 Executed `cargo test -p bcs-message-flow -p bcs-system-message -p bcs-protocol
---offline`: 726 tests passed. `git diff --check` passed; every modified or added
+--offline`: 727 tests passed. `git diff --check` passed; every modified or added
 Rust source file is below 1,000 lines. Frontend has no changes.
 
 The optional full architecture runner reported existing dependency-script,
