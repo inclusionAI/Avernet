@@ -31,7 +31,10 @@ ClawEvolve 通过唯一的策略端口（[05-strategy-sdk.zh-CN.md](05-strategy-
 代码草图见 [05-strategy-sdk.zh-CN.md §10](05-strategy-sdk.zh-CN.md#10-示例)。
 
 注册记录：`needs` = `experience.sessions@1`、
-`agents@1 {engines: [openclaw]}`、`evaluate.train@1`。
+带有定义 `clawevolve-tune` 和 `clawevolve-review` 的 `agents@1`
+（引擎为 `openclaw`，随策略一起交付和上传，见
+[05-strategy-sdk.zh-CN.md §4.2](05-strategy-sdk.zh-CN.md#42-智能体定义从何而来)）、
+`evaluate.train@1`。
 
 | ClawEvolve 组件 | 在新模型中 | 所需变更 |
 | --- | --- | --- |

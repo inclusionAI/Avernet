@@ -14,6 +14,9 @@
    什么，隔离与预算都在同一处强制执行。（**预算**是在 Bot 的绑定中设置的每次
    运行的支出上限：以美元计的模型开销、挂钟时间以及评估 rollout 次数。每一次
    模型调用和评估都通过 `ctx.budget` 计费，预算耗尽时运行即停止。）
+   这是一项有意为之的限制：策略只能使用能力目录（§4）提供的东西，不能自带模型
+   密钥或智能体运行时。它自己的计算（解析、搜索、排序）不受限制。新的需求通过在
+   第二个策略也需要它时新增一个目录条目来满足，而不是为某一个策略开例外。
 3. **策略提议；平台决定。** 策略提交候选。记录、验证、门禁和晋升始终归平台
    所有（DR-2）。
 4. **关于代码的事实被注册；关于 Bot 的选择被配置。** 有些信息对一个策略版本
@@ -61,7 +64,10 @@ class EvolutionStrategy(Protocol):
   "runtime": {"kind": "job_worker", "image": "registry.example/clawevolve@sha256:…"},
   "needs": {                                       // capabilities from the catalog (§4), with arguments
     "experience.sessions@1": {},
-    "agents@1": {"engines": ["openclaw"]},         // also implies which bots it can run on
+    "agents@1": {"definitions": {                  // agent definitions shipped with the strategy (§4.2)
+      "clawevolve-tune":   {"engine": "openclaw", "path": "agents/clawevolve-tune"},
+      "clawevolve-review": {"engine": "openclaw", "path": "agents/clawevolve-review"}
+    }},
     "evaluate.train@1": {}
   }
 }
@@ -82,7 +88,7 @@ class EvolutionStrategy(Protocol):
 | *（始终授予）* | `parent`、`workspace`、`submit`、`budget`、`log`、`artifacts`、`cancelled` | 读取父修订版；将修订版物化到沙箱，并将差异转回补丁；提交候选；预算、日志、产物、取消 | 无需声明 |
 | `experience.sessions@1` | `ctx.experience.sessions()` | Bot 过去的对话，归一化为片段（episode），并经过过滤 | 读取对话历史；向所有者展示 |
 | `experience.feedback@1` | `ctx.experience.feedback()` | 收件箱中的评分、纠正、结果以及被测 Bot 的观察 | |
-| `agents@1` `{engines}` | `ctx.agents.run(engine, …)` | 在沙箱工作区中运行引擎智能体 | 引擎列表必须包含该 Bot 的引擎 |
+| `agents@1` `{definitions}` | `ctx.agents.run(definition, …)` | 在沙箱工作区中运行策略自己的某个智能体定义 | 每个定义都指明其引擎；该 Bot 的引擎必须在其中（§4.2） |
 | `evaluate.train@1` | `ctx.evaluate.train(…)`、`ctx.evaluate.add_train_cases(…)` | 仅在**训练集**上进行平台评估，返回分数与评语；添加训练用例 | 验证集、封存集、回归集和安全集保持隐藏 |
 
 **`@1` 的含义。** `@` 后面的数字是*能力契约*（其方法和数据结构）的版本，而不是
@@ -119,16 +125,43 @@ async def sessions(self, *, days: int, limit: int = 500,
 ```
 
 ```python
-# agents@1 — registered as {"agents@1": {"engines": ["openclaw"]}}
-async def run(self, engine: str, *, agent: str, workspace: Workspace,
+# agents@1 — registered with {"agents@1": {"definitions": {...}}} (§3)
+async def run(self, definition: str, *, workspace: Workspace,
               prompt: str, timeout_s: int = 1800) -> AgentResult: ...
 ```
 
-`engines` 列出该策略可以驱动的引擎。使用任何其他引擎的调用都会被拒绝，绑定到
-引擎不在列表中的 Bot 也会被拒绝（§5）。例如，ClawEvolve 的调优步骤会调用
-`ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws, prompt=…)`。
-平台在沙箱 `ws` 内启动该智能体，而不是在线上 Bot 上，并返回它的对话记录和退出
-状态。它修改的文件留在 `ws` 中，直到策略把它们转成补丁。
+这里的**智能体**指多步骤、会使用工具的智能体会话（一个在多个步骤中读取和编辑
+文件的 LLM），而不是单次模型调用。例如，ClawEvolve 的调优步骤会调用
+`ctx.agents.run("clawevolve-tune", workspace=ws, prompt=…)`。平台在沙箱 `ws`
+内启动该智能体，而不是在线上 Bot 上，并返回它的对话记录和退出状态。它修改的
+文件留在 `ws` 中，直到策略把它们转成补丁。指定了策略未注册的定义的调用会被
+拒绝。
+
+### 4.2 智能体定义从何而来
+
+`ctx.agents.run` 指定了一个智能体，但平台还需要该智能体的**定义**：它的指令、
+技能和工具配置。目前，ClawEvolve 的调优智能体是 `clawevolve-skills` 中的
+`clawevolve-tune` 技能（`SKILL.md` 加参考资料），安装在 ClawEvolve 自己驱动的
+OpenClaw 运行时中，因此指定名称就足够了。来自其他团队的黑盒策略没有这样的共享
+安装：平台的沙箱运行器从未见过它的智能体。机制如下：
+
+1. **随策略一起交付。** 每个智能体定义都是策略源码中的一个目录，采用其引擎的
+   格式（对 OpenClaw 而言：该智能体的技能与配置布局）。注册记录在
+   `agents@1.definitions` 下列出每个定义及其 `engine` 和 `path`（§3）。
+2. **在注册时上传。** `avn strategy publish` 将每个定义目录上传到策略注册表
+   （Strategy Registry，C3），后者按内容寻址存储它（digest 同
+   [02-genome.zh-CN.md §7.1](02-genome.zh-CN.md#71-内容复用-manifest-内容存储)），
+   并在注册记录中记录该 digest。平台永远不需要读取策略的容器镜像或 Python 包来
+   找到这些定义，因此两种运行时（§9）的工作方式相同。
+3. **在注册时校验。** 每个被指定引擎的 `agents@1` 提供方会对照该引擎的定义契约
+   校验定义。若定义所属的引擎没有提供方，或定义未通过校验，则注册失败。
+4. **按调用加载。** `ctx.agents.run("clawevolve-tune", …)` 使提供方按 digest
+   将该定义加载到沙箱中，与工作区 `ws` 并列。定义对智能体只读；只有 `ws` 可写。
+5. **随策略一起版本化。** 定义属于某个策略版本：修改调优提示词意味着注册一个新的
+   策略版本。实验记录 H 在每次运行中记录定义的 digest，因此结果可以归因到所使用
+   的确切提示词。
+
+策略驱动的引擎就是其各个定义的 `engine` 值，因此不存在单独的引擎列表。
 
 ## 5. 绑定：Bot 使用哪些策略
 
@@ -163,8 +196,8 @@ Bot 的进化策略配置（evolution policy）是一个绑定列表。不同 Bo
 ```
 
 绑定被创建或修改时，平台会对照该 Bot 进行检查。`needs` 中的每个能力都必须有
-面向该 Bot 引擎的提供方；`agents@1` 必须列出该 Bot 的引擎；`allowed_genes` 必须
-保持在该 Bot 的 `policy` 范围内（锁定的基因保持锁定）。不匹配会在配置时被拒绝，
+面向该 Bot 引擎的提供方；该 Bot 的引擎必须在策略 `agents@1` 定义的 `engine`
+值之中；`allowed_genes` 必须保持在该 Bot 的 `policy` 范围内（锁定的基因保持锁定）。不匹配会在配置时被拒绝，
 而不是在一次付费运行进行到一半时才暴露。
 
 触发、父版本选择、允许的基因和验证严格程度都是绑定字段，归 Bot 所有者所有。
@@ -304,7 +337,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
         while state.next_round < ctx.params["max_rounds"]:
             if state.pending is None:
                 ws = await ctx.workspace.materialise(state.base)         # sandbox, not the live bot
-                await ctx.agents.run("openclaw", agent="clawevolve-tune", workspace=ws,
+                await ctx.agents.run("clawevolve-tune", workspace=ws,
                                      prompt=build_tune_prompt(state.findings, state.history))
                 train = await ctx.evaluate.train(ws)                     # replaces its own bench step
                 if train.score > state.best_train:                       # its own heuristic
@@ -346,7 +379,7 @@ class ClawEvolveStrategy(EvolutionStrategy):
 | 包 | 面向 | 内容 |
 | --- | --- | --- |
 | `avernet-evolution`（Python）、`@avernet/evolution`（TS） | 调用方：流水线、CI、UI 后端 | 为 Evolution API（绑定、运行、判定）生成的客户端 |
-| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、类型化模型、进程内与作业协议两种 `StrategyContext`、`WorkspaceFactory`（物化 / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、带模拟平台的本地测试工具（`avn strategy dev`），以及一致性测试套件 |
+| `avernet-evolution-strategy`（先 Python，后 TS） | 策略作者 | `EvolutionStrategy` 基类、类型化模型、进程内与作业协议两种 `StrategyContext`、`WorkspaceFactory`（物化 / `to_patch`）、`AgentRunner`（先支持 OpenClaw）、带模拟平台的本地测试工具（`avn strategy dev`）、`avn strategy publish`（注册一个版本并上传其智能体定义，§4.2），以及一致性测试套件 |
 
 一致性测试在端口两侧都要运行：
 
