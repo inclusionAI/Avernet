@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { StrictMode, useState } from 'react'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -12,6 +12,7 @@ const accessState = vi.hoisted(() => ({ ready: true }))
 vi.mock('../../../../api/hooks', () => ({
   useWorkflowAccess: () => ({ data: accessState.ready ? { canEdit: true } : undefined, isPending: !accessState.ready }),
   useEvolveSuggestions: () => ({ data: { suggestions: [] }, isLoading: false }),
+  useEvolveLessons: () => ({ data: { lessons: [] }, isLoading: false }),
   useSuggestionApplyTasks: () => ({ data: { tasks: [] } }),
   useRecordSuggestionAction: () => ({ mutate: vi.fn() }),
   useRunEvolutionAnalysis: () => ({ data: undefined, isLoading: false }),
@@ -45,6 +46,8 @@ beforeEach(() => {
   accessState.ready = true
   result.capabilities.generation = true
   result.capabilities.reason = null
+  result.inputDigest = 'd'.repeat(64)
+  result.tasks = []
   result.items = [item('retry'), item('timeout')]
   vi.stubGlobal('fetch', vi.fn(async (raw: string, init?: RequestInit) => {
     const url = new URL(raw, 'http://localhost'); requests.push(url)
@@ -80,6 +83,122 @@ beforeEach(() => {
   }))
 })
 afterEach(() => vi.unstubAllGlobals())
+
+it('reuses a recently visited issue page without refetching or hiding its suggestions', async () => {
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
+  const pager = screen.getByRole('region', { name: '问题分页' })
+  await user.click(within(pager).getByRole('button', { name: '下一页' }))
+  await screen.findByText('node-20', { selector: 'span' })
+  await waitFor(() => expect(previewScopes).toHaveLength(2))
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
+  expect(await screen.findByRole('checkbox', { name: '选择 retry' })).toBeChecked()
+  expect(previewScopes).toHaveLength(2)
+})
+
+it('preserves other cached issue pages when returning from remedies, including StrictMode remounts', async () => {
+  const user = userEvent.setup()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<StrictMode><QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider></StrictMode>)
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(2))
+  await user.click(screen.getByRole('button', { name: '可复用经验', exact: true }))
+  expect(screen.getByText('还没有可复用经验')).toBeVisible()
+  await user.click(screen.getByRole('button', { name: '问题与优化', exact: true }))
+  await screen.findByText('node-20', { selector: 'span' })
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
+  expect(screen.getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  expect(screen.queryByRole('status', { name: '修复建议加载中' })).not.toBeInTheDocument()
+  expect(previewScopes).toHaveLength(2)
+})
+
+it('still evicts other cached pages after actual history-scope transitions', async () => {
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(2))
+  await user.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(3))
+  await user.click(screen.getByRole('checkbox', { name: '包含历史未复现' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(4))
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
+  await screen.findByText('node-20', { selector: 'span' })
+  await waitFor(() => expect(previewScopes).toHaveLength(5))
+})
+
+it('reserves a named suggestion loading area before the first batch response', async () => {
+  const fetchOther = globalThis.fetch
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith('/candidates/query')) await gate
+    return fetchOther(input, init)
+  }))
+  render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await screen.findByText('node-0', { selector: 'span' })
+  expect(screen.getAllByRole('status', { name: '修复建议加载中' })).toHaveLength(20)
+  await act(async () => { release() })
+  expect(await screen.findByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  expect(screen.queryByRole('status', { name: '修复建议加载中' })).not.toBeInTheDocument()
+})
+
+it('discards another page cache when a refreshed snapshot reports changed sources', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(2))
+  result.inputDigest = 'e'.repeat(64)
+  result.items = [item('updated')]
+  await act(async () => { await client.invalidateQueries({ queryKey: ['repair-issue-previews', 'wf'], predicate: query => query.getObserversCount() > 0 }) })
+  expect(screen.getByText(/建议来源已更新，原选择已清空/)).toBeVisible()
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
+  expect(await screen.findByRole('checkbox', { name: '选择 updated' })).not.toBeChecked()
+  expect(screen.queryByRole('checkbox', { name: '选择 retry' })).not.toBeInTheDocument()
+  expect(previewScopes).toHaveLength(4)
+})
+
+it('does not restore a cached generation action after another page discovers an active task', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await user.click(await screen.findByRole('checkbox', { name: '选择 retry' }))
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '下一页' }))
+  await waitFor(() => expect(previewScopes).toHaveLength(2))
+  result.tasks = [{ taskId: 'FIX-current', revision: 1, phase: 'drafting', updatedAtMs: 2, itemCount: 1 }]
+  await act(async () => { await client.invalidateQueries({ queryKey: ['repair-issue-previews', 'wf'], predicate: query => query.getObserversCount() > 0 }) })
+  await user.click(within(screen.getByRole('region', { name: '问题分页' })).getByRole('button', { name: '上一页' }))
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  expect(screen.getByRole('region', { name: '本次修复操作' })).toHaveTextContent('已有修复任务')
+  expect(screen.getByRole('button', { name: '生成修复草稿（1）' })).toBeDisabled()
+})
+
+it('keeps cached suggestions visible during background validation and removes them on a forbidden response', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>)
+  await screen.findByRole('checkbox', { name: '选择 retry' })
+  const fetchOther = globalThis.fetch
+  let release!: () => void, started = false
+  const gate = new Promise<void>(resolve => { release = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+    if (!input.endsWith('/candidates/query')) return fetchOther(input, init)
+    started = true; await gate
+    return new Response(JSON.stringify({ code: 'FORBIDDEN' }), { status: 403 })
+  }))
+  act(() => { void client.invalidateQueries({ queryKey: ['repair-issue-previews', 'wf'] }) })
+  await waitFor(() => expect(started).toBe(true))
+  expect(screen.getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
+  expect(screen.getByRole('checkbox', { name: '选择 retry' })).toBeDisabled()
+  await act(async () => { release() })
+  expect(await screen.findByRole('alert')).toHaveTextContent('403')
+  expect(screen.queryByRole('checkbox', { name: '选择 retry' })).not.toBeInTheDocument()
+})
 
 it('keeps suggestions reachable when the preview byte budget omits all their items', async () => {
   omitPreviews = true
