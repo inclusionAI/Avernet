@@ -220,6 +220,14 @@ class AcAgentComputeJobModel(_AgentComputeBase, Base):
     )
 
 
+# Append-only audit table (ac_agent_compute_audit). Imported here — not
+# defined inline — so the audit writer can load its ORM without pulling the
+# whole model registry. No cycle: audit_models imports only core.base/utils.
+from agentclaw.community.core.agentcompute.repository.audit_models import (
+    AcAgentComputeAuditModel,
+)
+
+
 ALL_MODELS = (
     AcAgentComputeRunModel,
     AcAgentComputeAgentModel,
@@ -228,4 +236,5 @@ ALL_MODELS = (
     AcAgentComputeRoundModel,
     AcAgentComputeGuardEventModel,
     AcAgentComputeJobModel,
+    AcAgentComputeAuditModel,
 )

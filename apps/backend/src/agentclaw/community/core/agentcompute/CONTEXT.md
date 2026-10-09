@@ -19,6 +19,7 @@ provides:
   - AgentComputeService
   - AgentComputeWorker             # durable job-loop worker (LifecycleBase)
   - SwarmRunHandler                # bounded multi-turn slice execution
+  - AgentComputeObservability      # D39 metric facade over MetricsPlugin (12.4)
   - SliceStore                     # completion/shard/round/message persistence
   - Orchestrator                   # decision cycle incl. D20 repair
   - TerminationEvaluator
@@ -31,10 +32,13 @@ provides:
   - RunEvents / AgentEvent / RoundEvent / GuardEventSummary   # SSE read model
 consumes:
   - DatabasePlugin     # repositories run on orm_session (D19: no await inside)
+  - MetricsPlugin      # operational metrics (D39 surface, never raises)
   - LifecycleBase      # kernel lifecycle for the worker
 internal_dependencies:
   - agentclaw.community.core.base          # ORM Base
   - agentclaw.community.plugin_api.database # DatabasePlugin
+  - agentclaw.community.plugin_api.metrics  # MetricsPlugin seam (D35 ops infra)
+  - agentclaw.community.log               # get_logger structured-log seam
   - agentclaw.community.kernel             # lifecycle
   - agentclaw.community.utils              # env resolution in ORM models
   - agentclaw.community.core.agentcompute  # intra-module

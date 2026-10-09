@@ -1,8 +1,9 @@
 """agentcompute CLI smoke tests: --help parse + submit over the HTTP router.
 
 The CLI's ``main`` takes an injected httpx client, so the tests pass a
-fastapi.testclient.TestClient wired to the router with a stub service —
-no network.
+fastapi.testclient.TestClient wired to the router with a stub service and
+a stub.AuthPlugin carrying no tenant — exercising the CLI's ``--tenant`` /
+``AGENTCOMPUTE_TENANT`` → ``X-Tenant-Id`` fallback path.
 """
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ from agentclaw.community.api.agentcompute_service import (
 from agentclaw.community.adapters.http.agentcompute.router import (
     register_exception_handlers, router,
 )
+from agentclaw.community.core.agentcompute.audit import AgentComputeAuditWriter
+from agentclaw.community.plugin_api.auth import AuthPlugin, AuthenticatedIdentity
 from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.service_protocol import (
     RunEvents, SubmitRunRequest,
@@ -63,7 +66,7 @@ class StubService:
         return dm.RunPage(items=(self.run,), total=1, page=page, page_size=page_size)
 
     def run_events(self, run_id: str, tenant: str, after_agent_id: int = 0,
-                   after_round_id: int = 0, after_event: int = 0) -> RunEvents:
+                    after_round_id: int = 0, after_event: int = 0) -> RunEvents:
         return RunEvents(
             agents=(), rounds=(), guards=(),
             run_status=self.run.status,
@@ -73,6 +76,35 @@ class StubService:
 
     async def cancel(self, run_id: str, tenant: str) -> str:
         return "not_found"
+
+
+class TenantlessAuth:
+    """Principal without a tenant — forces the header fallback path."""
+
+    async def resolve_user_from_request(self, ctx) -> AuthenticatedIdentity:
+        return AuthenticatedIdentity(
+            id="cli-user", operatorName="cli-user", outUserNo="cli-staff",
+        )
+
+    async def get_login_user(self, cookie: str, referer: str | None = None):
+        raise NotImplementedError
+
+    def is_operator_allowed(self, staff_id: str) -> bool:
+        return True
+
+    async def authorize_entity_access(self, ctx, requested_entity_id,
+                                       requested_entity_type):
+        return requested_entity_id, requested_entity_type
+
+
+class RecordingAuditWriter:
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def record(self, *, tenant, actor, action, reason=None, run_id=None,
+               source="http") -> None:
+        self.rows.append({"tenant": tenant, "actor": actor})
 
 
 @pytest.fixture()
@@ -87,6 +119,8 @@ def client(stub) -> TestClient:
     register_exception_handlers(app)
     inj = injector.Injector()
     inj.binder.bind(AgentComputeServiceProtocol, to=stub)
+    inj.binder.bind(AuthPlugin, to=TenantlessAuth())
+    inj.binder.bind(AgentComputeAuditWriter, to=RecordingAuditWriter())
     app.state.injector = inj
     return TestClient(app)
 
@@ -98,10 +132,10 @@ def test_help_exits_zero(capsys):
     assert "agentcompute" in capsys.readouterr().out
 
 
-def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys):
+def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv(agentcompute_cli.TENANT_ENV_VAR, TENANT)
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({
-        "tenant": TENANT,
         "goal": "ship it",
         "agents": [{"name": "a1", "role": "worker"}],
         "idempotency_key": "cli-1",
@@ -121,6 +155,41 @@ def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys):
     assert "Run Report" in out
 
 
+def test_submit_tenant_flag_beats_env(client, stub, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv(agentcompute_cli.TENANT_ENV_VAR, "tenant-env")
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        "goal": "ship it",
+        "agents": [{"name": "a1", "role": "worker"}],
+    }), encoding="utf-8")
+    rc = agentcompute_cli.main(
+        ["submit", "--spec", str(spec_path), "--tenant", TENANT],
+        client=client,
+    )
+    assert rc == 0
+    (req,) = stub.submitted
+    assert req.tenant == TENANT
+
+
+def test_legacy_spec_tenant_warns_and_is_dropped(client, stub, tmp_path, capsys):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        "tenant": TENANT,
+        "goal": "ship it",
+        "agents": [{"name": "a1", "role": "worker"}],
+    }), encoding="utf-8")
+    capsys.readouterr()
+    rc = agentcompute_cli.main(
+        ["submit", "--spec", str(spec_path), "--tenant", TENANT],
+        client=client,
+    )
+    assert rc == 0
+    (req,) = stub.submitted
+    assert req.tenant == TENANT
+    err = capsys.readouterr().err
+    assert "spec 'tenant' is ignored" in err
+
+
 def test_submit_missing_spec_fields_exits_with_message(tmp_path):
     spec_path = tmp_path / "bad.json"
     spec_path.write_text(json.dumps({"tenant": TENANT}), encoding="utf-8")
@@ -128,3 +197,16 @@ def test_submit_missing_spec_fields_exits_with_message(tmp_path):
         agentcompute_cli.main(
             ["submit", "--spec", str(spec_path)], client=TestClient(FastAPI())
         )
+
+
+def test_submit_unresolved_tenant_maps_server_400_to_rc1(
+        client, stub, tmp_path, capsys):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps({
+        "goal": "ship it",
+        "agents": [{"name": "a1", "role": "worker"}],
+    }), encoding="utf-8")
+    rc = agentcompute_cli.main(["submit", "--spec", str(spec_path)], client=client)
+    assert rc == 1
+    assert stub.submitted == []
+    assert "400" in capsys.readouterr().err
