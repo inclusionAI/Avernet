@@ -1,4 +1,5 @@
 pub mod bot_managers;
+pub mod bot_ownership;
 pub mod auth;
 pub mod bot;
 pub mod channel;

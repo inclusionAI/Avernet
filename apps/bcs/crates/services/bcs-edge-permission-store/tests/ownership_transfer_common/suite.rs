@@ -6,7 +6,7 @@
 //! budgets, raw facts, the DB-clock boundary) live in the test entry.
 
 use bcs_domain::{BotAccessRelation, TransferAction, TransferStatus};
-use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::error::{AuthorityError, TransferConflict};
 use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, ListOwnershipTransfers, OwnershipTransfer,
     TransferListDirection,
@@ -44,8 +44,66 @@ pub(crate) fn assert_receipt(
 
 pub(crate) fn expect_conflict<T>(outcome: Result<T, ServiceError>, what: &str) {
     match outcome {
-        Err(ServiceError::Authority(AuthorityError::Conflict(_))) => {}
+        Err(ServiceError::Authority(AuthorityError::Conflict(_)))
+        | Err(ServiceError::Authority(AuthorityError::TransferConflict(_))) => {}
         other => panic!("{what} must be a Conflict, got {:?}", other.map(|_| "()")),
+    }
+}
+
+/// The typed transfer-conflict branch an assertion expects (Task 14
+/// typed the former machine-worded `Conflict(String)` payloads): compared
+/// by KIND, never by message wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransferConflictKind {
+    PendingSlot,
+    VersionSnapshotStale,
+    IdempotencyBody,
+    NotPending,
+    Contended,
+}
+
+fn kind_of(conflict: &AuthorityError) -> Option<TransferConflictKind> {
+    match conflict {
+        AuthorityError::TransferConflict(TransferConflict::PendingSlot { .. }) => {
+            Some(TransferConflictKind::PendingSlot)
+        }
+        AuthorityError::TransferConflict(TransferConflict::VersionSnapshotStale { .. }) => {
+            Some(TransferConflictKind::VersionSnapshotStale)
+        }
+        AuthorityError::TransferConflict(TransferConflict::IdempotencyBody { .. }) => {
+            Some(TransferConflictKind::IdempotencyBody)
+        }
+        AuthorityError::TransferConflict(TransferConflict::NotPending { .. }) => {
+            Some(TransferConflictKind::NotPending)
+        }
+        AuthorityError::TransferConflict(TransferConflict::Contended { .. }) => {
+            Some(TransferConflictKind::Contended)
+        }
+        _ => None,
+    }
+}
+
+/// Assert the typed transfer-conflict branch of the outcome (Task 14:
+/// the create/decide conflict lanes branch on TYPES, never on message
+/// strings).
+pub(crate) fn expect_transfer_conflict<T>(
+    outcome: Result<T, ServiceError>,
+    want: TransferConflictKind,
+    what: &str,
+) {
+    match outcome {
+        Err(ServiceError::Authority(err)) => {
+            let got = kind_of(&err);
+            assert_eq!(
+                got,
+                Some(want),
+                "{what} must be the {want:?} transfer conflict, got {err:?}"
+            );
+        }
+        other => panic!(
+            "{what} must be the {want:?} transfer conflict, got {:?}",
+            other.map(|_| "()")
+        ),
     }
 }
 
@@ -165,14 +223,16 @@ async fn red_snapshot_case(h: &Harness) {
     assert_eq!(replay_after.receipt, receipt_of(&accepted).clone());
 
     // Incompatible actions on the decided row are conflicts.
-    expect_conflict(
+    expect_transfer_conflict(
         repo.decide_transfer("b", &request.transfer_id, TransferAction::Reject)
             .await,
+        TransferConflictKind::NotPending,
         "reject on accepted",
     );
-    expect_conflict(
+    expect_transfer_conflict(
         repo.decide_transfer("a", &request.transfer_id, TransferAction::Cancel)
             .await,
+        TransferConflictKind::NotPending,
         "cancel on accepted",
     );
 
@@ -210,9 +270,10 @@ async fn create_validation_and_slot_case(h: &Harness) {
         .await
         .unwrap();
     assert!(first.created);
-    expect_conflict(
+    expect_transfer_conflict(
         repo.create_transfer(create_with_key("a", "bot-cv", "c", 1, &fresh_key()))
             .await,
+        TransferConflictKind::PendingSlot,
         "second pending on the same bot",
     );
 
@@ -231,7 +292,7 @@ async fn create_validation_and_slot_case(h: &Harness) {
     assert_eq!(replay.receipt, first.receipt);
 
     // Same key, different payload: idempotency conflict (OT05).
-    expect_conflict(
+    expect_transfer_conflict(
         repo.create_transfer(create_with_key(
             "a",
             "bot-cv",
@@ -240,9 +301,10 @@ async fn create_validation_and_slot_case(h: &Harness) {
             &first.receipt.client_request_id,
         ))
         .await,
+        TransferConflictKind::IdempotencyBody,
         "same key different recipient",
     );
-    expect_conflict(
+    expect_transfer_conflict(
         repo.create_transfer(create_with_key(
             "a",
             "bot-cv",
@@ -251,6 +313,7 @@ async fn create_validation_and_slot_case(h: &Harness) {
             &first.receipt.client_request_id,
         ))
         .await,
+        TransferConflictKind::IdempotencyBody,
         "same key different version",
     );
 
@@ -315,9 +378,10 @@ async fn create_validation_and_slot_case(h: &Harness) {
     // The stale-version create is rejected WITHOUT persisting any row and
     // WITHOUT consuming the cleanup lane (§10.1 step 3; 不落单).
     let rows_before = h.driver.row_count("bot-cv").await;
-    expect_conflict(
+    expect_transfer_conflict(
         repo.create_transfer(create_with_key("a", "bot-cv", "b", 99, &fresh_key()))
             .await,
+        TransferConflictKind::VersionSnapshotStale,
         "stale expected_owner_version",
     );
     assert_eq!(

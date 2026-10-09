@@ -1701,7 +1701,8 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
             } => DeliveryErrorCode::Internal,
             bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. }
             | bcs_service_api::types::error::AuthorityError::InvalidSubject(_)
-            | bcs_service_api::types::error::AuthorityError::Conflict(_) => {
+            | bcs_service_api::types::error::AuthorityError::Conflict(_)
+            | bcs_service_api::types::error::AuthorityError::TransferConflict(_) => {
                 DeliveryErrorCode::InvalidOperation
             }
             // A concealed/missing transfer is a business not-found branch;

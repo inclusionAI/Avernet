@@ -725,6 +725,233 @@ BotManagerRevokedEnvelope:
     request_id:
       type: string
 
+# Task 14 ownership view/transfer API models (spec §9-§11, plan Task 14).
+
+BotOwnership:
+  description: >-
+    The current ownership state of one Bot (spec §11.1): the single
+    effective owner user id plus the optimistic-concurrency version an
+    initiate request must snapshot.
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - owner_user_id
+    - ownership_version
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+    owner_user_id:
+      type: string
+      minLength: 1
+    ownership_version:
+      type: integer
+      minimum: 1
+
+BotOwnershipEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotOwnership"
+    request_id:
+      type: string
+
+CreateOwnershipTransferRequest:
+  description: >-
+    The initiate body (spec §11.1): exactly the three mandatory fields.
+    The recipient must be a non-blank exact identity string (the
+    CURRENT owner cannot name themselves), the version snapshot must be
+    >= 1, and the idempotency key must be a UUID — malformed values are
+    rejected 400 before any application call.
+  type: object
+  additionalProperties: false
+  required:
+    - to_user_id
+    - expected_owner_version
+    - client_request_id
+  properties:
+    to_user_id:
+      type: string
+      minLength: 1
+    expected_owner_version:
+      type: integer
+      minimum: 1
+    client_request_id:
+      type: string
+      format: uuid
+      minLength: 1
+
+OwnershipTransfer:
+  description: >-
+    One ownership-transfer receipt — a HISTORY record that never names
+    a current_owner (the live owner goes through the ownership query).
+    Lifecycle (spec §9): pending -- accept/reject/cancel -->
+    accepted/rejected/cancelled; deadline --> expired; resource or
+    ownership invalidation --> invalidated. Terminal states are
+    immutable and a pending past its fixed (7-day) deadline PROJECTS as
+    expired without any write. The status filter is expiry-aware.
+    Parties see only this confirmation-scope projection: bot id, name
+    snapshot, both parties, status, deadline, version facts and the
+    decision records — never summary, prompt, config, files,
+    credentials or manager lists.
+  type: object
+  additionalProperties: false
+  required:
+    - transfer_id
+    - bot_id
+    - from_user_id
+    - to_user_id
+    - status
+    - expected_owner_version
+    - expires_at
+    - bot_name_snapshot
+    - gmt_create
+    - gmt_modified
+  properties:
+    transfer_id:
+      type: string
+      minLength: 1
+    bot_id:
+      type: string
+      minLength: 1
+    from_user_id:
+      type: string
+      minLength: 1
+    to_user_id:
+      type: string
+      minLength: 1
+    status:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - rejected
+        - cancelled
+        - expired
+        - invalidated
+    expected_owner_version:
+      type: integer
+      minimum: 1
+    result_owner_version:
+      description: >-
+        The committed ownership version of THIS acceptance; set only on
+        accepted and never rewritten by later transfers.
+      type: integer
+      minimum: 1
+    expires_at:
+      description: Fixed deadline in epoch milliseconds.
+      type: integer
+      minimum: 0
+    decided_by:
+      description: >-
+        The deciding Human's user id, or the fixed system/service marker
+        on system-decided rows; absent while pending.
+      type: string
+      minLength: 1
+    decided_at:
+      description: Terminal decision time in epoch milliseconds; absent while pending.
+      type: integer
+      minimum: 0
+    terminal_reason:
+      description: >-
+        The fixed machine reason on invalidated rows
+        (owner_changed | bot_deleted | actor_unavailable); the
+        application maps accept retries by THIS persisted fact — an
+        owner_changed retry keeps 409 ownership_changed (OT12).
+      type: string
+      enum:
+        - owner_changed
+        - bot_deleted
+        - actor_unavailable
+    bot_name_snapshot:
+      description: >-
+        Minimal creation-time Bot name snapshot for recipient
+        confirmation; never summary, prompt, config or credentials.
+      type: string
+    gmt_create:
+      description: Database-generated creation time in epoch milliseconds.
+      type: integer
+      minimum: 0
+    gmt_modified:
+      description: Database-generated last-modified time in epoch milliseconds.
+      type: integer
+      minimum: 0
+
+OwnershipTransferEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/OwnershipTransfer"
+    request_id:
+      type: string
+
+OwnershipTransferPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/OwnershipTransfer"
+    total:
+      description: >-
+        The row count of the same filter under the SAME read snapshot as
+        the returned page (count and page can never disagree across an
+        expiry boundary).
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+
+OwnershipTransferPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/OwnershipTransferPage"
+    request_id:
+      type: string
+
 Participant:
   type: object
   additionalProperties: false

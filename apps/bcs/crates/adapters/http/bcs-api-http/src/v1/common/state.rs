@@ -5,8 +5,8 @@ use bcs_service_api::application::v1::{
     AuthService as ApplicationAuthService, BotManagerService, BotService,
     CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService,
     FriendConnectionService, FriendshipService, GroupService, InvitationService,
-    InviteCodeService, RegisterService, SessionFileApplicationService, SessionMessageService,
-    SessionService, TeamManagerSyncService,
+    InviteCodeService, OwnershipTransferService, RegisterService, SessionFileApplicationService,
+    SessionMessageService, SessionService, TeamManagerSyncService,
 };
 use bcs_service_api::application::channel::ChannelService;
 use bcs_service_api::application::CollaborationRuntimeService;
@@ -28,6 +28,9 @@ pub struct ApiState {
     /// Task 13 Human-only manager lane (spec §6). Fail-closed (500) until
     /// mounted by the composition root, like every other optional facade.
     pub bot_manager_service: Option<Arc<dyn BotManagerService>>,
+    /// Task 14 Human-only ownership transfer lane (spec §9-§11).
+    /// Fail-closed (internal) until mounted by the composition root.
+    pub ownership_transfer_service: Option<Arc<dyn OwnershipTransferService>>,
     /// Task 13 trusted team-manager sync facade (spec §6.1). The team
     /// write routes mount ONLY when this is present — an unconfigured
     /// credential boundary never exposes a callable anonymous entry.
@@ -70,6 +73,7 @@ impl ApiState {
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
             bot_manager_service: None,
+            ownership_transfer_service: None,
             team_manager_sync_service: None,
             event_subscription_service: None,
             group_service,
@@ -126,6 +130,18 @@ impl ApiState {
     /// Human Principal stays the only caller identity of this lane.
     pub fn with_bot_manager_service(mut self, service: Arc<dyn BotManagerService>) -> Self {
         self.bot_manager_service = Some(service);
+        self
+    }
+
+    /// Add the Task 14 Human-only ownership transfer facade (spec
+    /// §9-§11). Handlers fail closed (internal) while absent, exactly
+    /// like every other optional facade; the authenticated Human
+    /// Principal stays the only caller identity of the lane.
+    pub fn with_ownership_transfer_service(
+        mut self,
+        service: Arc<dyn OwnershipTransferService>,
+    ) -> Self {
+        self.ownership_transfer_service = Some(service);
         self
     }
 

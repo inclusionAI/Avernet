@@ -29,9 +29,10 @@
 //!    bounded retry).
 //!
 //! A stale `expected_owner_version` (everything else legal) is decided in
-//! the READ phase: `Conflict` (`ownership_changed` semantics documented on
-//! the port), NO row persisted, NO cleanup (the client re-reads ownership
-//! and retries with the fresh version — spec §10.1 step 3 ordering).
+//! the READ phase: the TYPED `TransferConflict::VersionSnapshotStale`
+//! branch (409 `ownership_changed` semantics, plan Task 14 mapping), NO
+//! row persisted, NO cleanup (the client re-reads ownership and retries
+//! with the fresh version — spec §10.1 step 3 ordering).
 //!
 //! `expires_at` is fixed by the DATABASE clock inside the same
 //! transaction: create-time + 7 days (spec §9.1).
@@ -49,7 +50,7 @@ use bcs_db_api::{
     DbRow, DbTransactionStep, DbTransactionStepResult, DbValue,
 };
 use bcs_service_api::port::repo::bot_authority::{human_actor_id, user_id_from_actor};
-use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::error::{AuthorityError, TransferConflict};
 use bcs_service_api::types::ownership_transfer::{CreateOwnershipTransfer, CreateTransferResult};
 use bcs_service_api::{ServiceError, ServiceResult};
 use tracing::warn;
@@ -100,13 +101,14 @@ impl super::reads::DbBotAuthorityStore {
                 CreateAttempt::Service(err) => return Err(err),
             }
         }
-        Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-            "concurrent ownership transfer create on bot '{}'; retry: {}",
-            command.bot_id,
-            last_drift
-                .map(|err| err.to_string())
-                .unwrap_or_else(|| "optimistic window lost repeatedly".to_string())
-        ))))
+        Err(ServiceError::Authority(AuthorityError::TransferConflict(
+            TransferConflict::Contended {
+                resource: command.bot_id.clone(),
+                detail: last_drift
+                    .map(|err| err.to_string())
+                    .unwrap_or_else(|| "optimistic window lost repeatedly".to_string()),
+            },
+        )))
     }
 
     /// One validated-read → guarded-commit attempt.
@@ -157,11 +159,10 @@ impl super::reads::DbBotAuthorityStore {
                 || expected_owner_version != command.expected_owner_version as i64
             {
                 return CreateAttempt::Service(ServiceError::Authority(
-                    AuthorityError::Conflict(format!(
-                        "idempotency conflict: key '{}' on bot '{}' was already used with \
-                         a different payload (to_user_id/expected_owner_version)",
-                        command.client_request_id, command.bot_id
-                    )),
+                    AuthorityError::TransferConflict(TransferConflict::IdempotencyBody {
+                        bot_id: command.bot_id.clone(),
+                        client_request_id: command.client_request_id.clone(),
+                    }),
                 ));
             }
             let receipt = match decode_transfer_row(&row, &self.env) {
@@ -263,17 +264,17 @@ impl super::reads::DbBotAuthorityStore {
             ));
         }
         if command.expected_owner_version != ownership_version {
-            // Stale version snapshot: reject with the `ownership_changed`
-            // conflict semantics and persist NOTHING, clean NOTHING — the
-            // client re-reads ownership and retries with the fresh version
-            // (spec §10.1 step 3; HTTP mapping is Task 14's).
+            // Stale version snapshot: reject with the typed
+            // `ownership_changed` conflict and persist NOTHING, clean
+            // NOTHING — the client re-reads ownership and retries with
+            // the fresh version (spec §10.1 step 3; the application maps
+            // the typed branch to HTTP 409/`ownership_changed`).
             return CreateAttempt::Service(ServiceError::Authority(
-                AuthorityError::Conflict(format!(
-                    "ownership changed on bot '{}': expected version {} but the current \
-                     version is {}; re-read ownership and retry with a fresh snapshot \
-                     (ownership_changed)",
-                    command.bot_id, command.expected_owner_version, ownership_version
-                )),
+                AuthorityError::TransferConflict(TransferConflict::VersionSnapshotStale {
+                    bot_id: command.bot_id.clone(),
+                    expected_owner_version: command.expected_owner_version,
+                    current_owner_version: ownership_version,
+                }),
             ));
         }
 
@@ -310,11 +311,9 @@ impl super::reads::DbBotAuthorityStore {
                 // A still-valid pending of any key blocks the new request
                 // (the cleanups below only release lapsed/mismatched rows).
                 return CreateAttempt::Service(ServiceError::Authority(
-                    AuthorityError::Conflict(format!(
-                        "bot '{}' already has a valid pending ownership transfer \
-                         (ownership_transfer_pending)",
-                        command.bot_id
-                    )),
+                    AuthorityError::TransferConflict(TransferConflict::PendingSlot {
+                        bot_id: command.bot_id.clone(),
+                    }),
                 ));
             }
             // lapsed / mismatched: the WRITE phase cleans them, then the

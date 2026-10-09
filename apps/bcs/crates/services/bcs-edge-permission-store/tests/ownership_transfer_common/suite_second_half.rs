@@ -5,7 +5,7 @@
 //! driver-neutral and are driven through the same aggregator.
 
 use bcs_domain::{BotAccessRelation, TerminalReason, TransferAction, TransferStatus};
-use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::error::{AuthorityError, TransferConflict};
 use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, ListOwnershipTransfers, OwnershipTransfer,
     OwnershipTransferPage, TransferListDirection,
@@ -66,7 +66,10 @@ pub(super) async fn competition_case(h: &Harness) {
                 "{name} must not observe {:?} — only receipts and conflicts",
                 other
             ),
-            Err(ServiceError::Authority(AuthorityError::Conflict(_))) => {}
+            Err(ServiceError::Authority(AuthorityError::Conflict(_)))
+            | Err(ServiceError::Authority(AuthorityError::TransferConflict(
+                TransferConflict::NotPending { .. } | TransferConflict::Contended { .. },
+            ))) => {}
             Err(other_err) => panic!(
                 "{name} lost the race with a broken branch: {other_err:?}"
             ),

@@ -51,7 +51,7 @@
 use bcs_db_api::{DbError, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbValue};
 use bcs_domain::TransferAction;
 use bcs_service_api::port::repo::bot_authority::{human_actor_id, user_id_from_actor};
-use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::error::{AuthorityError, TransferConflict};
 use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, OwnershipTransfer,
 };
@@ -110,12 +110,14 @@ impl super::reads::DbBotAuthorityStore {
                 DecideAttempt::Service(err) => return Err(err),
             }
         }
-        Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-            "concurrent ownership transfer decide on '{transfer_id}'; retry: {}",
-            last_drift
-                .map(|err| err.to_string())
-                .unwrap_or_else(|| "optimistic window lost repeatedly".to_string())
-        ))))
+        Err(ServiceError::Authority(AuthorityError::TransferConflict(
+            TransferConflict::Contended {
+                resource: transfer_id.to_string(),
+                detail: last_drift
+                    .map(|err| err.to_string())
+                    .unwrap_or_else(|| "optimistic window lost repeatedly".to_string()),
+            },
+        )))
     }
 
     /// One validated-read → probe → action attempt.
@@ -213,10 +215,10 @@ impl super::reads::DbBotAuthorityStore {
                     Some(_) | None => DecideAttempt::Done(CommittedTransferOutcome::Invalidated),
                 },
                 _ => DecideAttempt::Service(ServiceError::Authority(
-                    AuthorityError::Conflict(format!(
-                        "transfer '{transfer_id}' is already '{status}' and cannot be \
-                         re-decided with this action (ownership_transfer_not_pending)"
-                    )),
+                    AuthorityError::TransferConflict(TransferConflict::NotPending {
+                        transfer_id: transfer_id.to_string(),
+                        status: status.clone(),
+                    }),
                 )),
             };
         }
@@ -227,11 +229,14 @@ impl super::reads::DbBotAuthorityStore {
         //    the honest branch is BotNotFound (§10.3). ------------------
         let validated = match self.decide_validation(bot_id.as_str(), transfer_id).await {
             Ok(validated) => validated,
-            Err(ServiceError::Authority(AuthorityError::Conflict(message)))
-                if message.contains("no longer pending") =>
-            {
-                // The row was decided while we waited: re-validate from
-                // the top so the terminal dispatch answers the retry.
+            // The typed NotPending marker ONLY means the pending row was
+            // decided while we waited: re-validate from the top so the
+            // terminal dispatch answers the retry (the incompatible-action
+            // branch above produces the same TYPE with the terminal row's
+            // status, but never reaches this match on the validation read).
+            Err(ServiceError::Authority(AuthorityError::TransferConflict(
+                TransferConflict::NotPending { .. },
+            ))) => {
                 return DecideAttempt::Drift(DbError::ConditionFailed { expected: 1, actual: 0 });
             }
             Err(err) => return DecideAttempt::Service(err),
@@ -880,11 +885,16 @@ impl super::reads::DbBotAuthorityStore {
             }
         };
         let Some(pending) = pending_rows.into_iter().next() else {
-            // Decided while we waited (§10.3): surface a marker the caller
-            // maps to a bounded re-validation from the terminal dispatch.
-            return Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-                "transfer '{transfer_id}' is no longer pending"
-            ))));
+            // Decided while we waited (§10.3): surface the typed marker the
+            // caller maps to a bounded re-validation from the terminal
+            // dispatch. The status field is the marker form; it never
+            // escapes to the boundary as a business error.
+            return Err(ServiceError::Authority(AuthorityError::TransferConflict(
+                TransferConflict::NotPending {
+                    transfer_id: transfer_id.to_string(),
+                    status: "decided-while-waiting".to_string(),
+                },
+            )));
         };
         let expected = pending
             .get_i64("expected_owner_version")

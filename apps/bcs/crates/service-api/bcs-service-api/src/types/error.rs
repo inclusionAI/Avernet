@@ -1,5 +1,27 @@
 use strum::AsRefStr;
 
+/// Fixed spec §11.2 error codes of the typed ownership-transfer
+/// conflict branches (plan Task 14). Declared next to
+/// [`TransferConflict`] so the domain error and the application's
+/// fixed-code mapping can never drift apart.
+pub const CODE_OWNERSHIP_TRANSFER_PENDING: &str = "ownership_transfer_pending";
+/// See [`CODE_OWNERSHIP_TRANSFER_PENDING`]; the owner/version-moved code
+/// (spec §11.2 `ownership_changed`).
+pub const CODE_OWNERSHIP_CHANGED: &str = "ownership_changed";
+/// See [`CODE_OWNERSHIP_TRANSFER_PENDING`]; the same-key-different-payload
+/// idempotency code (spec §11.2 `idempotency_conflict`).
+pub const CODE_IDEMPOTENCY_CONFLICT: &str = "idempotency_conflict";
+/// See [`CODE_OWNERSHIP_TRANSFER_PENDING`]; the incompatible-terminal
+/// code (spec §11.2 `ownership_transfer_not_pending`).
+pub const CODE_OWNERSHIP_TRANSFER_NOT_PENDING: &str = "ownership_transfer_not_pending";
+/// See [`CODE_OWNERSHIP_TRANSFER_PENDING`]; the lapsed-deadline code
+/// (spec §11.2 `ownership_transfer_expired`).
+pub const CODE_OWNERSHIP_TRANSFER_EXPIRED: &str = "ownership_transfer_expired";
+/// See [`CODE_OWNERSHIP_TRANSFER_PENDING`]; the unresolvable-recipient
+/// code, only produced for an already-authorized initiator
+/// (spec §11.2 `invalid_transfer_recipient`).
+pub const CODE_INVALID_TRANSFER_RECIPIENT: &str = "invalid_transfer_recipient";
+
 /// Service error type.
 #[derive(Debug, thiserror::Error, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
@@ -210,6 +232,75 @@ pub enum AuthorityError {
     /// ARE a recorded party but whose role forbids the requested action.
     #[error("ownership transfer not found: '{transfer_id}'")]
     OwnershipTransferNotFound { transfer_id: String },
+    /// Typed ownership-transfer conflict (spec §11.2, plan Task 14): the
+    /// store's transfer lanes return this instead of machine-worded
+    /// `Conflict(String)` payloads, so consumers branch on TYPES and
+    /// never parse error message strings for dispatch.
+    #[error(transparent)]
+    TransferConflict(TransferConflict),
+}
+
+/// Typed transfer-lane conflict branches (spec §11.2, plan Tasks 8/14).
+///
+/// Each variant carries its own fixed spec code and replaces one
+/// documented machine wording of the former `Conflict(String)` contract:
+/// `ownership_transfer_pending`, `ownership_changed`,
+/// `idempotency_conflict`, `not_pending` — plus the bounded
+/// optimistic-retry exhaustion outcomes, which stay 409 conflicts of the
+/// `ownership_changed` family (the validated window kept being lost
+/// because ownership/transfer facts kept moving under the request).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TransferConflict {
+    /// The Bot's single pending-transfer slot already holds a valid
+    /// pending (409 [`CODE_OWNERSHIP_TRANSFER_PENDING`]).
+    #[error("bot '{bot_id}' already has a valid pending ownership transfer")]
+    PendingSlot { bot_id: String },
+    /// Only the `expected_owner_version` snapshot is stale: both parties
+    /// are legal and no valid pending exists, but the stored
+    /// ownership/version no longer matches the request. Nothing was
+    /// persisted (409 [`CODE_OWNERSHIP_CHANGED`]; the client re-reads
+    /// ownership and retries with the fresh version).
+    #[error(
+        "ownership changed on bot '{bot_id}': expected version \
+         {expected_owner_version}, current version {current_owner_version}"
+    )]
+    VersionSnapshotStale {
+        bot_id: String,
+        expected_owner_version: u64,
+        current_owner_version: u64,
+    },
+    /// The idempotency key was already committed with a different
+    /// payload (409 [`CODE_IDEMPOTENCY_CONFLICT`]).
+    #[error(
+        "idempotency key '{client_request_id}' on bot '{bot_id}' was \
+         already used with a different payload"
+    )]
+    IdempotencyBody {
+        bot_id: String,
+        client_request_id: String,
+    },
+    /// The transfer row is no longer pending: a terminal row cannot be
+    /// re-decided with the requested action (inclusive-action replays
+    /// answer with the historical receipt BEFORE this branch; 409
+    /// [`CODE_OWNERSHIP_TRANSFER_NOT_PENDING`]). The same type doubles as
+    /// the store-INTERNAL drift marker when a decide attempt found the
+    /// pending row decided while waiting for its window — that marker
+    /// never escapes to the boundary.
+    #[error("transfer '{transfer_id}' is no longer pending (status '{status}')")]
+    NotPending {
+        transfer_id: String,
+        status: String,
+    },
+    /// Bounded optimistic-retry exhaustion under genuine concurrent
+    /// decisions on one resource: each attempt re-validated and lost its
+    /// window to a committed racer. Surface as a 409 of the
+    /// [`CODE_OWNERSHIP_CHANGED`] family — the request's validated
+    /// ownership facts kept being replaced before they could commit.
+    #[error(
+        "concurrent ownership transfer contention on '{resource}': \
+         the validated window was lost repeatedly ({detail})"
+    )]
+    Contended { resource: String, detail: String },
 }
 
 impl AuthorityError {
@@ -223,6 +314,13 @@ impl AuthorityError {
             Self::InvalidSubject(_) => "invalid_subject",
             Self::Conflict(_) => "conflict",
             Self::OwnershipTransferNotFound { .. } => "ownership_transfer_not_found",
+            Self::TransferConflict(conflict) => match conflict {
+                TransferConflict::PendingSlot { .. } => CODE_OWNERSHIP_TRANSFER_PENDING,
+                TransferConflict::VersionSnapshotStale { .. }
+                | TransferConflict::Contended { .. } => CODE_OWNERSHIP_CHANGED,
+                TransferConflict::IdempotencyBody { .. } => CODE_IDEMPOTENCY_CONFLICT,
+                TransferConflict::NotPending { .. } => CODE_OWNERSHIP_TRANSFER_NOT_PENDING,
+            },
         }
     }
 }
@@ -307,8 +405,34 @@ impl ServiceError {
                     AuthorityError::OwnershipTransferNotFound { transfer_id } => {
                         serde_json::json!({ "transfer_id": transfer_id })
                     }
+                    AuthorityError::TransferConflict(conflict) => match conflict {
+                        TransferConflict::PendingSlot { bot_id }
+                        | TransferConflict::Contended { resource: bot_id, .. } => {
+                            serde_json::json!({ "bot_id": bot_id })
+                        }
+                        TransferConflict::VersionSnapshotStale {
+                            bot_id,
+                            expected_owner_version,
+                            current_owner_version,
+                        } => serde_json::json!({
+                            "bot_id": bot_id,
+                            "expected_owner_version": expected_owner_version,
+                            "current_owner_version": current_owner_version,
+                        }),
+                        TransferConflict::IdempotencyBody {
+                            bot_id,
+                            client_request_id,
+                        } => serde_json::json!({
+                            "bot_id": bot_id,
+                            "client_request_id": client_request_id,
+                        }),
+                        TransferConflict::NotPending {
+                            transfer_id, ..
+                        } => serde_json::json!({ "transfer_id": transfer_id }),
+                    },
                 }
-            }            Self::ExistNonPublicBots { bots } => {
+            }
+            Self::ExistNonPublicBots { bots } => {
                 let bot_list: Vec<serde_json::Value> = bots
                     .iter()
                     .map(|(uuid, name)| serde_json::json!({

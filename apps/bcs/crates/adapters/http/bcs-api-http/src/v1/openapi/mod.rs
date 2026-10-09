@@ -20,6 +20,7 @@ pub fn protected_router() -> Router<ApiState> {
         "/openapi/v1/collaboration",
         routes::bot::router()
             .merge(routes::bot_managers::router())
+            .merge(routes::bot_ownership::router())
             .merge(routes::event_subscription::router())
             .merge(routes::group::router())
             .merge(routes::session::router())

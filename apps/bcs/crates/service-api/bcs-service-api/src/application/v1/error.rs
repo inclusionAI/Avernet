@@ -1,4 +1,8 @@
-use crate::types::error::AuthorityError;
+use crate::types::error::{
+    AuthorityError, CODE_IDEMPOTENCY_CONFLICT, CODE_INVALID_TRANSFER_RECIPIENT,
+    CODE_OWNERSHIP_CHANGED, CODE_OWNERSHIP_TRANSFER_EXPIRED, CODE_OWNERSHIP_TRANSFER_NOT_PENDING,
+    CODE_OWNERSHIP_TRANSFER_PENDING,
+};
 
 pub const ERROR_EVENT_SUBSCRIPTION_NOT_FOUND: &str = "event_subscription_not_found";
 pub const ERROR_EVENT_DELIVERY_NOT_FOUND: &str = "event_delivery_not_found";
@@ -37,6 +41,21 @@ pub const ERROR_OWNER_ROLE_REQUIRES_TRANSFER: &str = "owner_role_requires_transf
 pub const ERROR_INVALID_MANAGER_SYNC_SOURCE: &str = "invalid_manager_sync_source";
 pub const ERROR_INVALID_MEMBERSHIP_SNAPSHOT: &str = "invalid_membership_snapshot";
 pub const ERROR_MANAGER_SYNC_CONFLICT: &str = "manager_sync_conflict";
+
+/// Ownership-transfer application use cases (spec §11.2, plan Task 14):
+/// fixed lane codes shared by the typed
+/// [`crate::types::error::TransferConflict`] branches so the domain error
+/// and the HTTP code mapping cannot drift apart. The typed variants own
+/// these exact constants (see `AuthorityError::fixed_code`); the
+/// `ownership_transfer_expired` and `invalid_transfer_recipient` codes
+/// belong to committed-outcome and recipient-validation branches that are
+/// application results, not domain conflicts.
+pub const ERROR_OWNERSHIP_TRANSFER_PENDING: &str = CODE_OWNERSHIP_TRANSFER_PENDING;
+pub const ERROR_OWNERSHIP_CHANGED: &str = CODE_OWNERSHIP_CHANGED;
+pub const ERROR_IDEMPOTENCY_CONFLICT: &str = CODE_IDEMPOTENCY_CONFLICT;
+pub const ERROR_OWNERSHIP_TRANSFER_NOT_PENDING: &str = CODE_OWNERSHIP_TRANSFER_NOT_PENDING;
+pub const ERROR_OWNERSHIP_TRANSFER_EXPIRED: &str = CODE_OWNERSHIP_TRANSFER_EXPIRED;
+pub const ERROR_INVALID_TRANSFER_RECIPIENT: &str = CODE_INVALID_TRANSFER_RECIPIENT;
 
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
@@ -130,6 +149,36 @@ impl ApplicationError {
     /// ownership-transfer flow (409 `owner_role_requires_transfer`).
     pub fn owner_role_requires_transfer(message: impl Into<String>) -> Self {
         Self::conflict(ERROR_OWNER_ROLE_REQUIRES_TRANSFER, message)
+    }
+
+    /// Ownership-transfer committed outcome (spec §9/§11.2, plan Task
+    /// 14): the owner/version snapshot moved, so a pending transfer was
+    /// committed as `invalidated(owner_changed)` — 409
+    /// `ownership_changed`, never rolled back. Retries of the
+    /// invalidated accept keep this exact code (OT12).
+    pub fn ownership_changed(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_OWNERSHIP_CHANGED, message)
+    }
+
+    /// Ownership-transfer committed outcome (spec §9.1/§11.2): the
+    /// pending window already lapsed — 409 `ownership_transfer_expired`.
+    pub fn ownership_transfer_expired(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_OWNERSHIP_TRANSFER_EXPIRED, message)
+    }
+
+    /// Ownership-transfer incompatible-terminal outcome (spec §11.2):
+    /// the row is terminal for an action it cannot answer — 409
+    /// `ownership_transfer_not_pending`.
+    pub fn ownership_transfer_not_pending(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_OWNERSHIP_TRANSFER_NOT_PENDING, message)
+    }
+
+    /// Ownership-transfer recipient failure (spec §11.2): the
+    /// recipient is not a resolvable current-scope Human — 400
+    /// `invalid_transfer_recipient`, only produced for an
+    /// already-authorized initiator.
+    pub fn invalid_transfer_recipient(message: impl Into<String>) -> Self {
+        Self::invalid(ERROR_INVALID_TRANSFER_RECIPIENT, message)
     }
 
     /// Team-sync permission failure (spec §6.1: the credential's
@@ -257,6 +306,12 @@ impl ApplicationError {
                     "ownership transfer '{transfer_id}' not found or not visible to the caller"
                 ),
             ),
+            // Typed transfer conflicts keep their per-branch fixed codes
+            // (spec §11.2); the mapping branches on the TYPE, never on
+            // the wording of a message string.
+            AuthorityError::TransferConflict(_) => {
+                Self::conflict(err.fixed_code(), err.to_string())
+            }
         }
     }
 

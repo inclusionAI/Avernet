@@ -49,6 +49,23 @@ impl PrincipalVerifier for HeaderVerifier {
     }
 }
 
+/// Build the full `ApiState` around a caller-selected verifier: the
+/// ownership route suite (plan Task 14) injects a header-controlled
+/// multi-User verifier while sharing these Noop slots verbatim.
+pub(crate) fn state_with_principal_verifier(
+    verifier: Arc<dyn PrincipalVerifier>,
+) -> ApiState {
+    ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopSessionMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        verifier,
+    )
+}
+
 pub(crate) fn caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
         tenant: Some("tenant-a".into()),
@@ -82,15 +99,7 @@ pub(crate) fn other_caller() -> AuthenticatedCaller {
 }
 
 pub(crate) fn state_caller(caller: AuthenticatedCaller) -> ApiState {
-    ApiState::new(
-        Arc::new(NoopGroupService),
-        Arc::new(NoopSessionService),
-        Arc::new(NoopSessionMessageService),
-        Arc::new(NoopInvitationService),
-        Arc::new(NoopRegisterService),
-        Arc::new(NoopFriendshipService),
-        Arc::new(HeaderVerifier { caller }),
-    )
+    state_with_principal_verifier(Arc::new(HeaderVerifier { caller }))
 }
 
 pub(crate) fn bearer_request(

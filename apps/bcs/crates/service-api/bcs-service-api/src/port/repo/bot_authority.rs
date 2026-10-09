@@ -233,8 +233,10 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     ///   → the ORIGINAL committed receipt returns with `created = false`,
     ///   WITHOUT re-requiring current ownership and without re-executing
     ///   anything (the branch works for terminal historical receipts too);
-    /// - same key + different payload → [`AuthorityError::Conflict`]
-    ///   (`idempotency_conflict` at the application layer).
+    /// - same key + different payload →
+    ///   [`AuthorityError::TransferConflict`] with the typed
+    ///   [`TransferConflict::IdempotencyBody`](crate::types::error::TransferConflict)
+    ///   branch (409 `idempotency_conflict` at the application layer).
     ///
     /// Validation for a FRESH pending (all re-proved inside the write
     /// transaction as conditions of the changing statement): live physical
@@ -245,17 +247,20 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     /// that is not the actor ([`AuthorityError::InvalidSubject`]), and
     /// `expected_owner_version` equals the current
     /// `ownership_version`. A stale version (with everything else legal)
-    /// rejects as [`AuthorityError::Conflict`] WITHOUT persisting any row
-    /// or cleaning anything (`ownership_changed` semantics; the
-    /// application layer maps the documented conflict payload).
+    /// rejects as the TYPED
+    /// [`TransferConflict::VersionSnapshotStale`](crate::types::error::TransferConflict)
+    /// WITHOUT persisting any row or cleaning anything (409
+    /// `ownership_changed`; the application layer branches on the
+    /// TYPE, never on a message string).
     ///
     /// Slot hygiene, inside the SAME transaction and BEFORE the insert:
     /// the Bot's time-lapsed pendings are materialized `expired` and its
     /// owner/version-mismatched pendings are materialized
     /// `invalidated(owner_changed)` (the §10.2 committed-invalidation
     /// statement; system decider), releasing the unique pending slot.
-    /// After cleanup, a still-VALID pending of another key rejects with
-    /// [`AuthorityError::Conflict`] (`ownership_transfer_pending`).
+    /// After cleanup, a still-VALID pending of another key rejects with the
+    /// TYPED [`TransferConflict::PendingSlot`](crate::types::error::TransferConflict)
+    /// (409 `ownership_transfer_pending`).
     ///
     /// The insert fixes `expires_at` as database create-time + 7 days
     /// (inside the transaction, database clock). The statement count is
@@ -282,8 +287,9 @@ pub trait BotAuthorityRepoPort: Send + Sync {
     ///   [`CommittedTransferOutcome::Receipt`] (even when ownership has
     ///   since moved on to a third party);
     /// - `rejected`/`cancelled` + the same action → the original receipt;
-    ///   any incompatible action on a decided row →
-    ///   [`AuthorityError::Conflict`] (`ownership_transfer_not_pending`);
+    ///   any incompatible action on a decided row → the TYPED
+    ///   [`TransferConflict::NotPending`](crate::types::error::TransferConflict)
+    ///   (409 `ownership_transfer_not_pending`);
     /// - `expired` → [`CommittedTransferOutcome::Expired`] (already a
     ///   committed domain result);
     /// - `invalidated` re-derives from `terminal_reason`:

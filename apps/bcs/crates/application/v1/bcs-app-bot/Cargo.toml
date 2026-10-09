@@ -26,5 +26,6 @@ bcs-edge-permission = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-test-support = { workspace = true }
 tempfile = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

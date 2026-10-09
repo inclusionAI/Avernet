@@ -38,6 +38,16 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/managers"),
     ("put", "/openapi/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
     ("delete", "/openapi/v1/collaboration/bots/{bot_id}/managers/{user_id}"),
+    # Task 14 ownership view/transfer API (spec §9-§11): Human principal,
+    # confirmation-based transfer with idempotent create, party-only
+    # reads, and bodyless accept/reject/cancel decisions.
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/ownership"),
+    ("post", "/openapi/v1/collaboration/bots/{bot_id}/ownership-transfers"),
+    ("get", "/openapi/v1/collaboration/ownership-transfers"),
+    ("get", "/openapi/v1/collaboration/ownership-transfers/{transfer_id}"),
+    ("post", "/openapi/v1/collaboration/ownership-transfers/{transfer_id}/accept"),
+    ("post", "/openapi/v1/collaboration/ownership-transfers/{transfer_id}/reject"),
+    ("post", "/openapi/v1/collaboration/ownership-transfers/{transfer_id}/cancel"),
     ("get", "/openapi/v1/collaboration/groups"),
     ("post", "/openapi/v1/collaboration/groups"),
     ("get", "/openapi/v1/collaboration/groups/{group_id}"),

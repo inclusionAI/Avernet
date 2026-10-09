@@ -962,3 +962,615 @@ BotManagerPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+
+# Task 14 ownership view/transfer API (spec §9-§11, plan Task 14): the
+# confirmation-based ownership transfer with an idempotent create, the
+# both-party inbox/outbox reads, and the bodyless accept/reject/cancel
+# decisions. Every operation is behind the Human Gateway Principal.
+
+BotOwnershipPath:
+  get:
+    operationId: get_bot_ownership
+    tags: ["Collaboration / Bots"]
+    summary: Read the current owner and ownership version of one Bot.
+    description: >-
+      Human control-plane read for callers holding a current
+      owner-or-manager role on the Bot (the same read family as the
+      manager list): the single effective owner user id and the
+      optimistic-concurrency ownership version an initiate request must
+      snapshot. Uninitialized ownership returns 409
+      ownership_not_initialized and is never auto-claimed.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+    responses:
+      "200":
+        description: The current ownership state of the Bot.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotOwnershipEnvelope
+      "400":
+        description: Blank or malformed Bot identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The caller holds no current owner/manager role on the Bot, or
+          the Principal carried no trusted User (Bot/App/AccessKey-only
+          principals can never stand in for a User).
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: The Bot's ownership has not been initialized yet.
+        x-error-codes:
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+BotOwnershipTransfersPath:
+  post:
+    operationId: create_bot_ownership_transfer
+    tags: ["Collaboration / Bots"]
+    summary: Initiate one ownership transfer.
+    description: >-
+      The CURRENT owner initiates one confirmation-based transfer: only
+      a pending is created — the target receives NO resource grant
+      until they accept (spec §9). URI-scoped idempotency: the caller
+      carries a UUID client_request_id and the ownership_version
+      snapshot they just read; the FIRST committed creation answers
+      201, a same-payload replay of the same key answers 200 with the
+      ORIGINAL receipt and never re-executes, and a same-key
+      different-payload request is 409 idempotency_conflict. A stale
+      expected_owner_version (both parties legal, no valid pending) is
+      409 ownership_changed and NOTHING is persisted — re-read ownership
+      and retry with the fresh version. The transfer moves BCS
+      ownership ONLY: 原发起人接受后保留 manager(来源
+      ownership_transfer/<transfer_id>), 部署与凭据不迁移
+      (this scope statement belongs on every acceptance UI, spec §11.1).
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../domain-models.yaml#/CreateOwnershipTransferRequest
+    responses:
+      "201":
+        description: >-
+          The FIRST creation committed: the pending receipt (expires in
+          7 days from the database clock).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "200":
+        description: >-
+          The same-key same-payload replay returns the ORIGINAL
+          historical receipt without re-execution (this also serves
+          replayed receipts after the transfer was decided and after
+          the initiator lost the owner role).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "400":
+        description: >-
+          Malformed shape (non-UUID idempotency key, non-positive
+          version, blank recipient), a self-transfer, OR — for an
+          already-authorized initiator — a recipient that is not a
+          resolvable current-scope Human (invalid_transfer_recipient).
+        x-error-codes:
+          - invalid_request
+          - invalid_transfer_recipient
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The authenticated User is not the Bot's current owner (a
+          manager initiating is the canonical case), or the Principal
+          carried no trusted User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          A valid pending already occupies the Bot's single pending
+          slot, the expected_owner_version snapshot was stale (nothing
+          persisted), the idempotency key was replayed with a different
+          payload, or the Bot's ownership is not initialized.
+        x-error-codes:
+          - ownership_transfer_pending
+          - ownership_changed
+          - idempotency_conflict
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransfersPath:
+  get:
+    operationId: list_bot_ownership_transfers
+    tags: ["Collaboration / Bots"]
+    summary: List the caller's transfer inbox or outbox.
+    description: >-
+      The authenticated Human's own inbox (direction=received, the
+      default) or outbox (direction=sent) page; the read NEVER accepts
+      an arbitrary user_id and NEVER materializes anything — the
+      effective-status rule (a physically-pending row past its deadline
+      projects expired) runs in the filter BEFORE paging, and count and
+      page share one read snapshot so they never disagree across an
+      expiry boundary. Ordered gmt_create DESC, transfer_id ASC;
+      positional offset/limit with limit 1..100 (default 20).
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: direction
+        in: query
+        description: >-
+          received lists transfers addressed TO the authenticated User;
+          sent lists those initiated by them. Default received.
+        schema:
+          type: string
+          enum:
+            - received
+            - sent
+          default: received
+      - name: status
+        in: query
+        description: >-
+          Optional effective-status filter; omitted means all states.
+          The filter is expiry-aware: querying expired also surfaces
+          physically-pending rows whose deadline already lapsed.
+        schema:
+          type: string
+          enum:
+            - pending
+            - accepted
+            - rejected
+            - cancelled
+            - expired
+            - invalidated
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: The viewer's page of transfer receipts.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferPageEnvelope
+      "400":
+        description: Out-of-range pagination or an unknown filter value.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The Principal carried no trusted User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransferPath:
+  get:
+    operationId: get_bot_ownership_transfer
+    tags: ["Collaboration / Bots"]
+    summary: Read one transfer receipt as one of its two parties.
+    description: >-
+      Only the recorded initiator and the designated recipient may read
+      the transfer and its receipt — unrelated callers share ONE 404
+      branch with missing ids and can never enumerate transfer records
+      by id (spec §11.1/§11.2). Receipts are HISTORY: they never name a
+      current owner and a pending receipt carries only the
+      confirmation-scope projection (bot id, creation-time name
+      snapshot, both parties, status, deadline, the version facts) —
+      never summary, prompt, groups, sessions, files, credentials or
+      the manager list. The expired projection is read-only: a
+      physically-pending row past its deadline reads expired with the
+      system decider and decided_at = expires_at, and no GET ever
+      writes the database.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: The (possibly projected) transfer receipt.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "400":
+        description: Blank or malformed transfer identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The Principal carried no trusted User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: >-
+          The transfer id does not exist OR the caller is not one of its
+          two recorded parties — one indistinguishable branch.
+        x-error-codes:
+          - ownership_transfer_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransferAcceptPath:
+  post:
+    operationId: accept_bot_ownership_transfer
+    tags: ["Collaboration / Bots"]
+    summary: The recipient confirms the transfer.
+    description: >-
+      The designated recipient accepts: the store commits the
+      all-or-nothing owner switch in ONE transaction (previous owner
+      revoked to the ownership_transfer/manager source, the recipient's
+      non-team sources revoked, version CAS +1, the accepted receipt).
+      The request carries NO business body — an absent or empty JSON
+      object is the contract; unknown fields are rejected. Response-loss
+      retries observe the ALREADY-COMMITTED outcome: the same recipient
+      retrying an accepted transfer receives the ORIGINAL historical
+      receipt even after ownership moved on, an invalidated
+      (owner_changed) accept answers 409 ownership_changed with the
+      SAME code on every retry (OT12), and a lapsed deadline answers
+      409 ownership_transfer_expired. Acceptance moves BCS ownership
+      ONLY: 原发起人保留 manager, BCS 不迁移部署和凭据 — the acceptance UI
+      must present this scope statement (spec §11.1).
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: >-
+          The accept committed (or its historical receipt for the same
+          recipient's retry), status accepted with the committed
+          result_owner_version.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "400":
+        description: >-
+          Any body content on the bodyless action, or a malformed
+          transfer identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Caller is a recorded party whose role forbids the action (the
+          initiator accepting), or the Principal carried no trusted
+          User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: >-
+          The transfer id does not exist OR the caller is not one of its
+          two recorded parties — one indistinguishable branch.
+        x-error-codes:
+          - ownership_transfer_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The owner/version snapshot moved (the pending was committed as
+          invalidated(owner_changed); retries keep the same code), the
+          deadline lapsed, the row is already terminal for this
+          incompatible action, the recipient cannot be resolved, or the
+          Bot's ownership is not initialized.
+        x-error-codes:
+          - ownership_changed
+          - ownership_transfer_expired
+          - ownership_transfer_not_pending
+          - invalid_transfer_recipient
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransferRejectPath:
+  post:
+    operationId: reject_bot_ownership_transfer
+    tags: ["Collaboration / Bots"]
+    summary: The recipient rejects the transfer.
+    description: >-
+      The designated recipient rejects: only the transfer row terminates
+      to rejected — role edges never change. NO business body (an
+      absent or empty JSON object is the contract). Same-action retries
+      return the ORIGINAL rejected receipt.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: The rejected receipt (or the ORIGINAL receipt on retry).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "400":
+        description: Body content on the bodyless action, or a malformed identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Caller is a recorded party whose role forbids the action (the
+          initiator rejecting), or the Principal carried no trusted
+          User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: >-
+          The transfer id does not exist OR the caller is not one of its
+          two recorded parties — one indistinguishable branch.
+        x-error-codes:
+          - ownership_transfer_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The deadline lapsed, the row is already terminal for this
+          incompatible action (an accepted transfer cannot be rejected),
+          the parties moved (invalidated/owner_changed keeps its code on
+          retry), or the ownership is not initialized.
+        x-error-codes:
+          - ownership_changed
+          - ownership_transfer_expired
+          - ownership_transfer_not_pending
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+OwnershipTransferCancelPath:
+  post:
+    operationId: cancel_bot_ownership_transfer
+    tags: ["Collaboration / Bots"]
+    summary: The initiating owner cancels the pending transfer.
+    description: >-
+      The recorded INITIATOR cancels — and only while the initiating
+      owner is STILL the current owner (spec §9: the ownership facts at
+      decision time decide): only the row terminates to cancelled, role
+      edges never change. NO business body. Same-action retries return
+      the ORIGINAL cancelled receipt; if ownership already moved, the
+      pending was committed as invalidated(owner_changed) and the
+      cancel observes 409 ownership_changed instead.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: The cancelled receipt (or the ORIGINAL receipt on retry).
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/OwnershipTransferEnvelope
+      "400":
+        description: Body content on the bodyless action, or a malformed identifier.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Caller is a recorded party whose role forbids the action (the
+          recipient cancelling), or the Principal carried no trusted
+          User.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: >-
+          The transfer id does not exist OR the caller is not one of its
+          two recorded parties — one indistinguishable branch.
+        x-error-codes:
+          - ownership_transfer_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The deadline lapsed, the row is already terminal for this
+          incompatible action, the initiating owner already lost the
+          ownership (invalidated/owner_changed keeps its code on
+          retry), or the ownership is not initialized.
+        x-error-codes:
+          - ownership_changed
+          - ownership_transfer_expired
+          - ownership_transfer_not_pending
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

@@ -25,7 +25,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bcs_service_api::port::repo::bot_authority::{human_actor_id, user_id_from_actor};
-use bcs_service_api::types::error::AuthorityError;
+use bcs_service_api::types::error::{AuthorityError, TransferConflict};
 use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, CreateOwnershipTransfer, CreateTransferResult,
     ListOwnershipTransfers, OwnershipTransfer, OwnershipTransferPage, TransferListDirection,
@@ -328,11 +328,12 @@ pub(crate) async fn memory_create_transfer(
         let payload_matches = existing.to_user_id == command.to_user_id
             && existing.expected_owner_version == command.expected_owner_version;
         if !payload_matches {
-            return Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-                "idempotency conflict: key '{}' on bot '{}' was already used with a \
-                 different payload (to_user_id/expected_owner_version)",
-                command.client_request_id, command.bot_id
-            ))));
+            return Err(ServiceError::Authority(AuthorityError::TransferConflict(
+                TransferConflict::IdempotencyBody {
+                    bot_id: command.bot_id.clone(),
+                    client_request_id: command.client_request_id.clone(),
+                },
+            )));
         }
         return Ok(CreateTransferResult {
             receipt: receipt_of(existing)?,
@@ -398,14 +399,17 @@ pub(crate) async fn memory_create_transfer(
         )));
     }
     if command.expected_owner_version != ownership_version {
-        // Ownership/version changed since the client read it: reject
-        // WITHOUT persisting, WITHOUT cleanup — the client re-reads and
-        // retries with the fresh version (spec §10.1 step 3).
-        return Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-            "ownership changed on bot '{}': expected version {} but the current \
-             version is {}; re-read ownership and retry with a fresh snapshot",
-            command.bot_id, command.expected_owner_version, ownership_version
-        ))));
+        // Ownership/version changed since the client read it: reject with
+        // the TYPED conflict WITHOUT persisting, WITHOUT cleanup — the
+        // client re-reads and retries with the fresh version (spec
+        // §10.1 step 3).
+        return Err(ServiceError::Authority(AuthorityError::TransferConflict(
+            TransferConflict::VersionSnapshotStale {
+                bot_id: command.bot_id.clone(),
+                expected_owner_version: command.expected_owner_version,
+                current_owner_version: ownership_version,
+            },
+        )));
     }
     let recipient_live = match bots.get(&to_id) {
         Some(row) => {
@@ -455,11 +459,11 @@ pub(crate) async fn memory_create_transfer(
         .iter()
         .any(|row| row.env == env && row.bot_id == command.bot_id && row.status == "pending")
     {
-        return Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-            "bot '{}' already has a valid pending ownership transfer \
-             (ownership_transfer_pending)",
-            command.bot_id
-        ))));
+        return Err(ServiceError::Authority(AuthorityError::TransferConflict(
+            TransferConflict::PendingSlot {
+                bot_id: command.bot_id.clone(),
+            },
+        )));
     }
 
     // -- Insert the fresh pending row (final in-section slot check). -----
@@ -604,14 +608,14 @@ pub(crate) async fn memory_decide_transfer(
             },
             _ => {
                 // An accepted/rejected/cancelled row cannot be re-decided
-                // with an incompatible action (409/ownership_transfer_not
-                // _pending at the application layer).
-                return Err(ServiceError::Authority(AuthorityError::Conflict(
-                    format!(
-                        "transfer '{transfer_id}' is already '{}' and cannot be \
-                         re-decided with this action (ownership_transfer_not_pending)",
-                        row.status
-                    ),
+                // with an incompatible action: the TYPED NotPending branch
+                // (409 `ownership_transfer_not_pending` at the application
+                // layer).
+                return Err(ServiceError::Authority(AuthorityError::TransferConflict(
+                    TransferConflict::NotPending {
+                        transfer_id: transfer_id.to_string(),
+                        status: row.status.clone(),
+                    },
                 )));
             }
         };
@@ -875,10 +879,14 @@ pub(crate) async fn memory_decide_transfer(
 
     // The budget is spent only when every attempt lost its window to a
     // concurrent decide: the retry surfaces the committed winner.
-    Err(ServiceError::Authority(AuthorityError::Conflict(format!(
-        "concurrent ownership transfer decide on '{transfer_id}'; retry resolves \
-         the committed outcome"
-    ))))
+    Err(ServiceError::Authority(AuthorityError::TransferConflict(
+        TransferConflict::Contended {
+            resource: transfer_id.to_string(),
+            detail: "the validated window was lost repeatedly; the committed \
+                     winner answers the retry"
+                    .to_string(),
+        },
+    )))
 }
 
 // ---------------------------------------------------------------------------

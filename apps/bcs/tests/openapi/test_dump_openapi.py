@@ -66,8 +66,9 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        # Task 13 added the manager list API's three operations.
-        self.assertEqual(len(operations), 75)
+        # Task 13 added the manager list API's three operations; Task 14
+        # added the ownership view/transfer API's seven operations.
+        self.assertEqual(len(operations), 82)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
