@@ -8,6 +8,9 @@ from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.editor_request_contract import (
+        SkillEditorRequestAdmission,
+    )
     from agentclaw.community.core.work_orders.models import (
         WorkOrderNotificationDraft,
         WorkOrderRecord,
@@ -19,6 +22,27 @@ if TYPE_CHECKING:
 @runtime_checkable
 class SkillEditorRequestRepositoryProtocol(Protocol):
     """Atomic Skill-owned seam spanning editor requests and their Work Orders."""
+
+    @abstractmethod
+    def get_editor_approval_policy(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> bool: ...
+
+    @abstractmethod
+    def update_editor_approval_policy(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        auto_approve_editor_requests: bool,
+        env: str,
+    ) -> bool: ...
+
+    @abstractmethod
+    def inspect_editor_request(
+        self, *, space_id: int, skill_id: int, applicant_user_id: str, env: str
+    ) -> SkillEditorRequestAdmission: ...
 
     @abstractmethod
     def create_skill_editor_request(

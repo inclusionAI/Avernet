@@ -4,6 +4,7 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine
@@ -11,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
+from agentclaw.community.core.skill_center.errors import SpaceSkillGrantForbiddenError
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -23,8 +25,14 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestService,
+)
 from agentclaw.community.core.spaces.models import SpaceRole
-from agentclaw.community.core.spaces.repository.models import SpaceMemberModel
+from agentclaw.community.core.spaces.repository.models import (
+    SpaceMemberModel,
+    SpaceModel,
+)
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyProcessedError,
@@ -44,7 +52,11 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
     WorkOrderNotificationModel,
 )
+from agentclaw.community.core.work_orders.services.work_order_service import (
+    WorkOrderService,
+)
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
+from agentclaw.community.plugins.local.staff_dept import LocalStaffDeptService
 
 
 @pytest.fixture
@@ -176,7 +188,169 @@ def test_policy_column_defaults_to_manual_and_migration_covers_existing_bindings
     assert rows == [(1, 0), (2, 0)]
 
 
-def test_skill_editor_request_fails_closed_before_auto_integration(db) -> None:
+def test_editor_approval_policy_is_owner_only_and_defaults_off(db) -> None:
+    space_id, skill_id = _space_skill(db)
+    repository = _skill_editor_requests(db)
+
+    assert (
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )
+        is False
+    )
+    assert (
+        repository.update_editor_approval_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner-1",
+            auto_approve_editor_requests=True,
+            env="dev",
+        )
+        is True
+    )
+    assert (
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )
+        is True
+    )
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"
+        )
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repository.update_editor_approval_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="applicant-1",
+            auto_approve_editor_requests=False,
+            env="dev",
+        )
+    with db.orm_session() as session:
+        member = (
+            session.query(SpaceMemberModel)
+            .filter_by(space_id=space_id, user_id="applicant-1", env="dev")
+            .one()
+        )
+        member.role = SpaceRole.ADMIN.value
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"
+        )
+
+
+def test_editor_approval_policy_is_independent_per_skill_binding(db) -> None:
+    space_id, skill_id = _space_skill(db)
+    with db.orm_session() as session:
+        other = Skill(
+            name="other-skill",
+            git_path="center://other-skill",
+            skill_uuid="33333333-3333-4333-8333-333333333333",
+            status="PUBLISHED",
+            env="dev",
+        )
+        session.add(other)
+        session.flush()
+        other_id = other.id
+        session.add(
+            SkillSpaceBinding(
+                skill_id=other_id, space_id=space_id, created_by="owner-1", env="dev"
+            )
+        )
+        session.add(
+            SkillGrant(
+                skill_id=other_id,
+                user_id="owner-1",
+                role="OWNER",
+                status="ACTIVE",
+                owner_slot=1,
+                granted_by="owner-1",
+                env="dev",
+            )
+        )
+    repository = _skill_editor_requests(db)
+    repository.update_editor_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    )
+
+    assert (
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )
+        is True
+    )
+    assert (
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=other_id, actor_id="owner-1", env="dev"
+        )
+        is False
+    )
+
+
+def test_enabling_auto_does_not_rewrite_existing_pending_manual_order(db) -> None:
+    space_id, skill_id = _space_skill(db)
+    order = _work_orders(db).create_skill_editor_request(
+        space_id=space_id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="共同维护",
+        env="dev",
+    )
+    _skill_editor_requests(db).update_editor_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        assert session.get(WorkOrderModel, order.id).status == "PENDING"
+        approver = (
+            session.query(WorkOrderApproverModel)
+            .filter_by(work_order_id=order.id, env="dev")
+            .one()
+        )
+        assert (approver.approver_user_id, approver.status) == ("owner-1", "PENDING")
+        notice = (
+            session.query(WorkOrderNotificationModel)
+            .filter_by(work_order_id=order.id, env="dev")
+            .one()
+        )
+        assert (notice.recipient_user_id, notice.notification_category) == (
+            "owner-1",
+            "APPROVAL",
+        )
+
+
+def test_editor_approval_policy_rejects_personal_or_offline_skill(db) -> None:
+    space_id, skill_id = _space_skill(db)
+    repository = _skill_editor_requests(db)
+    with db.orm_session() as session:
+        session.get(SpaceModel, space_id).space_type = "PERSONAL"
+    with pytest.raises(SpaceSkillGrantForbiddenError, match="Team Space"):
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )
+    with db.orm_session() as session:
+        session.get(SpaceModel, space_id).space_type = "TEAM"
+        session.get(Skill, skill_id).offline_at = datetime(2026, 10, 9)
+    with pytest.raises(SpaceSkillGrantForbiddenError, match="live"):
+        repository.update_editor_approval_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner-1",
+            auto_approve_editor_requests=True,
+            env="dev",
+        )
+
+
+def test_manual_skill_editor_request_rejects_when_auto_policy_enabled(db) -> None:
     space_id, skill_id = _space_skill(db)
     with db.orm_session() as session:
         binding = (
@@ -191,7 +365,7 @@ def test_skill_editor_request_fails_closed_before_auto_integration(db) -> None:
         binding.auto_approve_editor_requests = True
     with pytest.raises(
         WorkOrderSkillEditorRequestNotAllowedError,
-        match="trusted WorkOrder integration",
+        match="must use WorkOrder AUTO",
     ):
         _work_orders(db).create_skill_editor_request(
             space_id=space_id,
@@ -203,6 +377,73 @@ def test_skill_editor_request_fails_closed_before_auto_integration(db) -> None:
         )
     with db.orm_session() as session:
         assert session.query(WorkOrderModel).count() == 0
+
+
+def test_skill_application_auto_path_grants_and_notifies_without_owner_todo(db) -> None:
+    space_id, skill_id = _space_skill(db)
+    skill_repository = _skill_editor_requests(db)
+    skill_repository.update_editor_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    )
+    work_orders = _work_orders(db)
+    staff = LocalStaffDeptService()
+    callbacks = MagicMock()
+    callbacks.requires_callback.return_value = False
+    work_order_service = WorkOrderService(
+        work_orders,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        staff,
+        MagicMock(),
+        callbacks,
+    )
+    service = SpaceSkillEditorRequestService(
+        work_orders, skill_repository, work_order_service, staff, lambda: "dev"
+    )
+
+    result = service.create_request(
+        space_id=space_id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        reason="共同维护",
+    )
+
+    assert result.status is WorkOrderStatus.APPROVED
+    with db.orm_session() as session:
+        order = session.get(WorkOrderModel, result.work_order_id)
+        assert (order.status, order.approval_mode, order.reviewer_user_id) == (
+            "APPROVED",
+            "AUTO",
+            "SYSTEM",
+        )
+        grant = (
+            session.query(SkillGrant)
+            .filter_by(skill_id=skill_id, user_id="applicant-1", env="dev")
+            .one()
+        )
+        assert (grant.role, grant.status, grant.granted_by) == (
+            "MANAGER",
+            "ACTIVE",
+            "SYSTEM",
+        )
+        assert session.query(WorkOrderApproverModel).count() == 0
+        notices = (
+            session.query(WorkOrderNotificationModel)
+            .filter_by(work_order_id=result.work_order_id)
+            .all()
+        )
+        assert len(notices) == 1
+        assert notices[0].recipient_user_id == "applicant-1"
+        assert notices[0].notification_category == "NOTICE"
 
 
 def _apply_auto(db, order_id: int) -> None:
@@ -482,6 +723,7 @@ def test_auto_skill_step_rejects_untrusted_order_shape(db, unsafe_case) -> None:
             .count()
             == 0
         )
+
 
 def test_work_order_auto_skill_completion_is_atomic(db) -> None:
     _, skill_id, order_id = _claimed_auto_skill_order(db)

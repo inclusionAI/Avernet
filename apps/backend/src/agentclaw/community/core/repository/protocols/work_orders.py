@@ -74,33 +74,34 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> None: ...
 
     @abstractmethod
-    def finalize_auto_approval(
-        self, *, work_order_id: int, reviewer_user_id: str, env: str
-    ) -> None: ...
+    def complete_auto_approval(
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
+    ) -> list[int]:
+        """Commit the business write, APPROVED state, and result notices together."""
+        ...
 
     @abstractmethod
-    def mark_auto_approval_failed(
-        self, *, work_order_id: int, reviewer_user_id: str,
-        review_remark: str, env: str
-    ) -> None: ...
-
-    @abstractmethod
-    def apply_auto_space_join(self, *, work_order_id: int, env: str) -> None: ...
-
-    @abstractmethod
-    def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None: ...
+    def fail_auto_approval(
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        review_remark: str,
+        env: str,
+    ) -> list[int]:
+        """Commit FAILED state and result notices together."""
+        ...
 
     @abstractmethod
     def apply_auto_skill_editor_request(
         self, *, work_order_id: int, source_event_type: str, env: str
-    ) -> None: ...
-
-    @abstractmethod
-    def create_auto_result_notifications(
-        self, *, work_order_id: int, recipient_user_ids: list[str], biz_type: str,
-        biz_id: str, source_event_type: str, status: WorkOrderStatus,
-        review_remark: str | None, env: str,
-    ) -> None: ...
+    ) -> list[int]: ...
 
     @abstractmethod
     def process_approval(

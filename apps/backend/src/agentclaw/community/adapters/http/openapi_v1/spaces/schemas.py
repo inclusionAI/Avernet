@@ -9,6 +9,9 @@ from fastapi import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, create_model, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
+from agentclaw.community.adapters.http.openapi_v1.spaces.schemas_editor_approval import (
+    SkillEditorRequestCreated,
+)
 
 
 class SpaceListScope(_DocumentedEnum):
@@ -70,7 +73,9 @@ class SkillGrantItem(BaseModel):
     """One active OWNER or MANAGER Grant."""
 
     user_id: str = Field(description="User holding this active Skill Grant.")
-    display_name: str | None = Field(None, description="Current staff-directory display name.")
+    display_name: str | None = Field(
+        None, description="Current staff-directory display name."
+    )
     role: SkillRole = Field(description="Role held by the user for this Skill.")
 
 
@@ -88,7 +93,7 @@ class SkillActorPermissions(BaseModel):
     )
     copy_offline_skill: bool = Field(
         default=False,
-        description="Actor may copy an Offline Skill's exact Published Version."
+        description="Actor may copy an Offline Skill's exact Published Version.",
     )
     manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
     transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
@@ -177,24 +182,6 @@ class TransferSkillOwnerRequest(BaseModel):
         default=False,
         description="Whether to retain the previous OWNER as an active MANAGER.",
     )
-
-
-class CreateSkillEditorRequest(BaseModel):
-    """Request Manager edit access to a Team Space Skill."""
-
-    reason: str = Field(
-        min_length=1,
-        max_length=512,
-        description="Reason for requesting Skill edit access.",
-    )
-
-
-class SkillEditorRequestCreated(BaseModel):
-    """Pending Work Order created for a Skill editor application."""
-
-    work_order_id: int = Field(description="Created Work Order identifier.")
-    work_order_no: str = Field(description="Human-readable Work Order number.")
-    status: Literal["PENDING"] = Field(description="Initial Work Order status.")
 
 
 class SpaceJoinStatus(_DocumentedEnum):
@@ -608,7 +595,9 @@ class SkillOfflineImpact(BaseModel):
     """Complete explicit blockers plus diagnostic warnings for recoverable Offline."""
 
     blocked: bool = Field(description="Whether at least one blocker exists.")
-    total: int = Field(ge=0, description="Total explicit blockers across all categories.")
+    total: int = Field(
+        ge=0, description="Total explicit blockers across all categories."
+    )
     counts: dict[str, int] = Field(
         description="Non-zero explicit blocker totals keyed by blocker category."
     )
@@ -739,6 +728,8 @@ SpaceSkillFolderUpload = create_model(
         ),
     ),
 )
+
+
 class AddSpaceMemberRequest(BaseModel):
     """Request for adding a user to a Space."""
 

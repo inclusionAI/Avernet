@@ -53,10 +53,28 @@ internal_dependencies:
 Event values, statuses, titles, and content templates are persisted public
 semantics. Rename or wording changes require coordinated client and data
 compatibility review. Approval state and result-notification creation are one transaction and
-must not be split across best-effort writes. Registered external decision callbacks run before
-that transaction; a transport error, non-success HTTP response, malformed response, or response
-without an exact `success: true` aborts local processing and leaves the work order pending.
+must not be split across best-effort writes. For AUTO, local Space/Bot/Skill
+business writes join the same approval-and-notice transaction. Registered
+external decision callbacks run before local AUTO completion; callback failure
+records FAILED and a failure notice together. If a callback has already
+succeeded but local persistence fails, the work order remains PROCESSING for
+reconciliation rather than falsely reporting FAILED. An external side effect
+cannot be rolled back by the local database transaction.
 Unregistered event types keep the existing local-only approval behavior.
+
+## Trusted AUTO events
+
+The public `POST /openapi/v1/bots/work-orders/events` route accepts MANUAL and
+NOTICE events but rejects caller-selected `approval_mode=AUTO`. A qualified
+business module may call `WorkOrderService.create_work_order_event` in-process
+with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
+`recipient_user_ids`. AUTO creates no human approver row. WorkOrder claims the
+new order as PROCESSING, then completes the local business effect, APPROVED /
+SYSTEM state, and result notices in one transaction. The response includes the
+created result-notification IDs. The Skill business module validates the
+applicant before requesting AUTO, while the Skill Grant step rechecks the
+binding and membership inside WorkOrder's transaction. Failure cannot be
+reported to the Skill applicant as a successful approval.
 
 ## Bot editor request auto-approval
 

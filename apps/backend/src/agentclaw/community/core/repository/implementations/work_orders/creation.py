@@ -6,8 +6,6 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import select, func
-
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
@@ -19,9 +17,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
-    WorkOrderApproverRecord,
     WorkOrderApproverStatus,
-    WorkOrderApprovalContext,
     WorkOrderBizType,
     WorkOrderEventCreatedResult,
     WorkOrderEventStatus,
@@ -77,25 +73,20 @@ class _WorkOrderCreationRepository:
         callback_source_event_type: str | None = None,
     ) -> WorkOrderEventCreatedResult:
         approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
-        if event_category is NotificationCategory.APPROVAL:
-            recipients = approver_user_ids
-        else:
-            recipients = recipient_user_ids
+        recipients = (
+            approver_user_ids
+            if event_category is NotificationCategory.APPROVAL
+            and approval_mode is WorkOrderApprovalMode.MANUAL
+            else recipient_user_ids
+        )
         if not recipients:
             raise WorkOrderNoReviewerError("no work-order recipient")
-        if (
-            event_category is NotificationCategory.APPROVAL
-            and approval_mode is WorkOrderApprovalMode.AUTO
-            and not approver_user_ids
-        ):
-            raise WorkOrderNoReviewerError("no auto-approval actor")
 
         with self._db.transactional_orm_session() as db:
             work_order_id: int | None = None
             work_order_no: str | None = None
             result_status = WorkOrderEventStatus.CREATED
             if event_category is NotificationCategory.APPROVAL:
-                now = db.execute(select(func.now())).scalar_one()
                 is_auto = approval_mode is WorkOrderApprovalMode.AUTO
                 # AUTO is executed after the creation transaction commits. Keeping
                 # the row pending here lets the service claim/process it without
@@ -103,13 +94,17 @@ class _WorkOrderCreationRepository:
                 # before the business side effect succeeds.
                 result_status = WorkOrderEventStatus.PENDING
                 row = self._WorkOrder(
-                    work_order_no=self._new_no(), biz_type=biz_type, biz_id=biz_id,
-                    biz_data=biz_data, applicant_user_id=applicant_user_id,
+                    work_order_no=self._new_no(),
+                    biz_type=biz_type,
+                    biz_id=biz_id,
+                    biz_data=biz_data,
+                    applicant_user_id=applicant_user_id,
                     apply_reason=apply_reason,
                     status=WorkOrderStatus.PENDING.value,
                     approval_mode=approval_mode.value,
                     reviewer_user_id=None,
-                    reviewed_at=None, env=env,
+                    reviewed_at=None,
+                    env=env,
                 )
                 db.add(row)
                 db.flush()
@@ -127,7 +122,6 @@ class _WorkOrderCreationRepository:
 
                 # AUTO effects are executed by the service after this
                 # transaction commits.
-
 
             notifications = []
             if (
@@ -162,7 +156,8 @@ class _WorkOrderCreationRepository:
                     notifications.append(notification)
             db.flush()
             return WorkOrderEventCreatedResult(
-                event_category=event_category, work_order_id=work_order_id,
+                event_category=event_category,
+                work_order_id=work_order_id,
                 work_order_no=work_order_no,
                 notification_ids=[notification.id for notification in notifications],
                 status=result_status,

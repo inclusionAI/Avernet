@@ -79,8 +79,12 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
-from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderNotificationServiceProtocol
-from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderServiceProtocol
+from agentclaw.community.core.work_orders.work_order_service_protocol import (
+    WorkOrderNotificationServiceProtocol,
+)
+from agentclaw.community.core.work_orders.work_order_service_protocol import (
+    WorkOrderServiceProtocol,
+)
 
 
 logger = get_logger()
@@ -180,16 +184,6 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderInvalidEventError(
                 "approval_mode AUTO is only valid for approval events"
             )
-        if (
-            approval_mode is WorkOrderApprovalMode.MANUAL
-            and (
-                biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
-                or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
-            )
-        ):
-            raise WorkOrderInvalidEventError(
-                "Skill editor requests must use the Skill endpoint"
-            )
         if event_category is NotificationCategory.APPROVAL:
             if approval_mode is WorkOrderApprovalMode.MANUAL and (
                 not approvers or recipients
@@ -198,9 +192,9 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     "manual approval events require approvers and no recipients"
                 )
             if approval_mode is WorkOrderApprovalMode.AUTO:
-                if not approvers or recipients:
+                if approvers or not recipients:
                     raise WorkOrderInvalidEventError(
-                        "auto approval events require approver_user_ids and no recipient_user_ids"
+                        "auto approval events require recipient_user_ids and no approver_user_ids"
                     )
         elif event_category is NotificationCategory.NOTICE:
             if not recipients or approvers or applicant_user_id is not None:
@@ -232,10 +226,17 @@ class WorkOrderService(WorkOrderServiceProtocol):
 
         repository_kwargs = dict(
             event_category=event_category,
-            biz_type=biz_type, biz_id=biz_id, event_type=persisted_event_type,
-            applicant_user_id=applicant or None, approver_user_ids=approvers,
-            recipient_user_ids=recipients, title=title, content=serialized_content,
-            apply_reason=reason, biz_data=serialized_data, env=get_current_env(),
+            biz_type=biz_type,
+            biz_id=biz_id,
+            event_type=persisted_event_type,
+            applicant_user_id=applicant or None,
+            approver_user_ids=approvers,
+            recipient_user_ids=recipients,
+            title=title,
+            content=serialized_content,
+            apply_reason=reason,
+            biz_data=serialized_data,
+            env=get_current_env(),
         )
         if approval_mode is WorkOrderApprovalMode.AUTO:
             repository_kwargs["approval_mode"] = approval_mode
@@ -252,6 +253,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
                 env=get_current_env(),
             )
+            callback_succeeded = False
             try:
                 if (
                     biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
@@ -266,74 +268,70 @@ class WorkOrderService(WorkOrderServiceProtocol):
                         context=context,
                         decision=WorkOrderDecision.APPROVED,
                         review_remark=None,
-                        credential=callback_auth or WorkOrderCallbackCredential(headers={}),
+                        credential=callback_auth
+                        or WorkOrderCallbackCredential(headers={}),
                     )
-                if biz_type == WorkOrderBizType.SPACE_JOIN.value:
-                    self._repository.apply_auto_space_join(
-                        work_order_id=result.work_order_id, env=get_current_env()
-                    )
-                elif biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
-                    detail = self.get_detail(
-                        work_order_id=result.work_order_id, actor_id=applicant
-                    )
-                    data = _business_data(detail.work_order.biz_data)
-                    bot_id = str(data.get("bot_id") or "")
-                    owner_id = str(data.get("owner_id") or "")
-                    self._repository.apply_auto_bot_editor_request(
-                        work_order_id=result.work_order_id, env=get_current_env()
-                    )
-                    if bot_id and owner_id:
-                        self._collaborators.on_collaboration_changed(
-                            bot_id, owner_id, get_current_env()
-                        )
-                elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
-                    self._repository.apply_auto_skill_editor_request(
+                    callback_succeeded = True
+                if biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+                    notification_ids = self._repository.apply_auto_skill_editor_request(
                         work_order_id=result.work_order_id,
                         source_event_type=event_type,
                         env=get_current_env(),
                     )
-                elif biz_type == WorkOrderBizType.BOT_FRIEND.value:
-                    if not self._decision_callbacks.requires_callback(event_type):
+                else:
+                    if (
+                        biz_type == WorkOrderBizType.BOT_FRIEND.value
+                        and not callback_succeeded
+                    ):
                         raise WorkOrderInvalidEventError(
                             "AUTO friend approval requires a registered business callback"
                         )
-                else:
-                    raise WorkOrderInvalidEventError(
-                        f"AUTO callback is not implemented for {biz_type}"
+                    notification_ids = self._repository.complete_auto_approval(
+                        work_order_id=result.work_order_id,
+                        recipient_user_ids=recipients,
+                        source_event_type=event_type,
+                        env=get_current_env(),
                     )
             except Exception as exc:
-                self._repository.mark_auto_approval_failed(
+                if callback_succeeded:
+                    logger.exception(
+                        "AUTO work order remains PROCESSING after external callback succeeded",
+                        extra={"work_order_id": result.work_order_id},
+                    )
+                    raise
+                notification_ids = self._repository.fail_auto_approval(
                     work_order_id=result.work_order_id,
+                    recipient_user_ids=recipients,
+                    source_event_type=event_type,
                     review_remark=f"AUTO approval failed: {str(exc)[:480]}",
                     env=get_current_env(),
                 )
-                self._repository.create_auto_result_notifications(
-                    work_order_id=result.work_order_id,
-                    recipient_user_ids=approvers,
-                    biz_type=biz_type,
-                    biz_id=biz_id,
-                    source_event_type=event_type,
-                    status=WorkOrderStatus.FAILED,
-                    review_remark=f"AUTO approval failed: {str(exc)[:480]}",
-                    env=get_current_env(),
+                return result.model_copy(
+                    update={
+                        "status": WorkOrderEventStatus.FAILED,
+                        "notification_ids": notification_ids,
+                    }
                 )
-                return result.model_copy(update={"status": WorkOrderEventStatus.FAILED})
-            if biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value:
-                self._repository.finalize_auto_approval(
-                    work_order_id=result.work_order_id,
-                    env=get_current_env(),
-                )
-                self._repository.create_auto_result_notifications(
-                    work_order_id=result.work_order_id,
-                    recipient_user_ids=approvers,
-                    biz_type=biz_type,
-                    biz_id=biz_id,
-                    source_event_type=event_type,
-                    status=WorkOrderStatus.APPROVED,
-                    review_remark=None,
-                    env=get_current_env(),
-                )
-            result = result.model_copy(update={"status": WorkOrderEventStatus.APPROVED})
+            if biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
+                data = biz_data or {}
+                bot_id = str(data.get("bot_id") or "")
+                owner_id = str(data.get("owner_id") or "")
+                if bot_id and owner_id:
+                    try:
+                        self._collaborators.on_collaboration_changed(
+                            bot_id, owner_id, get_current_env()
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Bot collaboration changed but downstream callback failed",
+                            extra={"work_order_id": result.work_order_id},
+                        )
+            result = result.model_copy(
+                update={
+                    "status": WorkOrderEventStatus.APPROVED,
+                    "notification_ids": notification_ids,
+                }
+            )
         return result
 
     def create_work_order(
@@ -588,9 +586,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyMemberError(
                 "applicant is already a space member"
             )
-        applicant_name = self._get_applicant_name(
-            applicant_user_id=applicant_user_id
-        )
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
         return self._repository.create_space_join_request(
             space_id=space_id,
             applicant_user_id=applicant_user_id,
