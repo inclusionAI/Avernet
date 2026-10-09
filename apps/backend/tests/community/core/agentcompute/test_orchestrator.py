@@ -4,21 +4,14 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-import uuid
-
-
-def _gen_id():
-    return uuid.uuid4().hex
-
-import pytest
 
 from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeOrchestrationConfig,
 )
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, DecisionKind, EpochMillis, FinishDecision,
+    AgentSpecRaw, EpochMillis, FinishDecision,
     HandoffDecision, ProviderId, RequestMetadata, Run, RunId, RunStatus,
-    SpawnDecision, TaskEnvelope, TenantId, TerminationReason, WaitDecision,
+    SpawnDecision, TenantId, TerminationReason, WaitDecision,
 )
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
     Orchestrator,
@@ -293,7 +286,7 @@ class TestOrchestrator:
         result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
         assert result["wait_refs"] == ("a1",)
 
-    def test_handoff_decision_resolvable(self):
+    def test_handoff_decision_resolvable_applies_persona(self):
         orch = self._mk_orchestrator([
             json.dumps({"kind": "handoff", "target": "writer"}),
         ])
@@ -301,15 +294,129 @@ class TestOrchestrator:
         state = RunState(run=run)
         result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
         assert result["persona"] == "writer"
+        assert state.active_persona is not None
+        assert state.active_persona.name == "writer"
+        assert state.active_persona.role == "write"
 
-    def test_handoff_unresolvable_guard(self):
+    def test_handoff_persona_reflected_in_subsequent_system_prompt(self):
         orch = self._mk_orchestrator([
+            json.dumps({"kind": "handoff", "target": "writer"}),
+        ])
+        run = _mk_run()
+        state = RunState(run=run)
+        asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        assert state.active_persona is not None
+
+        exchanges: list[str] = []
+
+        def on_llm_exchange(system_prompt, user_prompt, response_text,
+                            token_usage, decision_dict):
+            exchanges.append(system_prompt)
+            exchanges.append(user_prompt)
+
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "finish", "answer": "done as writer"}),
+        ])
+        state.total_agents_spawned = 1
+        state.routed_shard_count = 1
+        state.turn_count = 1
+        outcome = asyncio.run(orch.run_slice(
+            run, state, lambda rid: [], on_llm_exchange=on_llm_exchange,
+        ))
+        assert outcome["terminate"] == TerminationReason.FINISH
+        assert any("You now act as writer" in p for p in exchanges)
+        assert any("active_persona=writer" in p for p in exchanges)
+
+    def test_handoff_unresolvable_repairs_then_accepts_valid_decision(self):
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "handoff", "target": "unknown_role"}),
+            json.dumps({
+                "kind": "spawn_agent",
+                "agents": [{"name": "r1", "objective": "repair goal"}],
+            }),
+        ])
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        # D30: an unresolvable handoff is repaired (re-asked), not terminal.
+        assert result["terminate"] is None
+        assert len(result["spawn"]) == 1
+        assert result["spawn"][0].objective == "repair goal"
+        assert any(
+            ge.details.get("reason") == "unresolvable_handoff"
+            for ge in result["guard_events"]
+        )
+
+    def test_handoff_unresolvable_exhausted_repair_terminates_no_decision(self):
+        orch = self._mk_orchestrator([
+            json.dumps({"kind": "handoff", "target": "unknown_role"}),
+            json.dumps({"kind": "handoff", "target": "unknown_role"}),
             json.dumps({"kind": "handoff", "target": "unknown_role"}),
         ])
         run = _mk_run()
         state = RunState(run=run)
         result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
         assert result["terminate"] == TerminationReason.NO_DECISION
+        assert any(
+            ge.details.get("reason") == "unresolvable_handoff"
+            for ge in result["guard_events"]
+        )
+
+    @staticmethod
+    def _orch_with_guards(guards):
+        return Orchestrator(
+            llm=StubLLMProvider(),
+            parser=DecisionParser(),
+            guards=guards,
+            config=AgentComputeConfig(
+                orchestration=AgentComputeOrchestrationConfig(repair_max=2),
+            ),
+        )
+
+    def test_spawn_beyond_width_capped_with_guard_event(self):
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [
+                {"name": "r1", "objective": "o1"},
+                {"name": "r2", "objective": "o2"},
+                {"name": "r3", "objective": "o3"},
+            ],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=2, max_depth=99),
+            config=AgentComputeConfig(
+                orchestration=AgentComputeOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        assert len(result["spawn"]) == 2
+        assert [e.name for e in result["spawn"]] == ["r1", "r2"]
+        assert any(ge.kind.value == "width_exceeded" for ge in result["guard_events"])
+        assert result["terminate"] is None
+
+    def test_spawn_all_envelopes_skipped_terminates_no_progress(self):
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r1", "objective": "o1"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=0, max_depth=99),
+            config=AgentComputeConfig(
+                orchestration=AgentComputeOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        assert result["spawn"] == []
+        assert result["terminate"] == TerminationReason.NO_PROGRESS
+        assert any(ge.kind.value == "width_exceeded" for ge in result["guard_events"])
 
     def test_dedup_rejected_in_spawn(self):
         script = [

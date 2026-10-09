@@ -166,25 +166,34 @@ class TestRunRepository:
         assert run_repo.get(run.run_id, TENANT_B) is None
         assert run_repo.get(run.run_id, TENANT_A) is not None
 
-    def test_update_status(self, run_repo):
+    def test_update_status(self, run_repo, job_repo):
         run = _mk_run()
         run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
         ok = run_repo.update_status(
             run.run_id, TENANT_A,
             dm.RunStatus.COMPLETED,
             termination_reason=dm.TerminationReason.FINISH,
             final_answer="answer",
+            claim_epoch=claimed["claim_epoch"],
         )
         assert ok
         fetched = run_repo.get(run.run_id, TENANT_A)
         assert fetched.status == dm.RunStatus.COMPLETED
+        assert fetched.ended_at is not None
 
-    def test_get_by_idempotency_running_only(self, run_repo):
+    def test_get_by_idempotency_running_only(self, run_repo, job_repo):
         run = _mk_run()
         run.active_idempotency_key = dm.IdempotencyKey("idem-key-1")
         run_repo.create(run)
         assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is not None
-        run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        assert run_repo.update_status(
+            run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+            claim_epoch=claimed["claim_epoch"],
+        )
         assert run_repo.get_by_idempotency("idem-key-1", TENANT_A) is None
 
     def test_idempotency_tenant_isolated(self, run_repo):
@@ -195,6 +204,74 @@ class TestRunRepository:
 
     def test_get_nonexistent(self, run_repo):
         assert run_repo.get("nope", TENANT_A) is None
+
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        epoch = claimed["claim_epoch"]
+        assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=epoch + 100) is False
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.status == dm.RunStatus.RUNNING
+        assert run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=epoch) is True
+
+    def test_terminal_update_sets_ended_at(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        run_repo.update_status(run.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                              termination_reason=dm.TerminationReason.FINISH,
+                              final_answer="done",
+                              claim_epoch=claimed["claim_epoch"])
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        assert fetched.ended_at is not None
+        assert fetched.final_answer == "done"
+
+    def test_list_page_pagination_and_status_filter(self, run_repo, job_repo):
+        for _ in range(5):
+            run = _mk_run()
+            run_repo.create(run)
+            job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        page1 = run_repo.list_page(TENANT_A, page=1, page_size=2)
+        assert page1.total == 5
+        assert len(page1.items) == 2
+        page3 = run_repo.list_page(TENANT_A, page=3, page_size=2)
+        assert len(page3.items) == 1
+        claims = {c["run_id"]: c for c in job_repo.claim_batch("w1", None, 10, 60)}
+        for r in page1.items:
+            c = claims[r.run_id]
+            assert run_repo.update_status(r.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                          claim_epoch=c["claim_epoch"])
+        active_page = run_repo.list_page(TENANT_A, status=dm.RunStatus.RUNNING, page=1, page_size=10)
+        assert active_page.total == 3
+        assert all(r.status == dm.RunStatus.RUNNING for r in active_page.items)
+
+    def test_list_page_tenant_isolated(self, run_repo):
+        run_repo.create(_mk_run(tenant=TENANT_A))
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        for_tenant_a = run_repo.list_page(TENANT_A, page=1, page_size=10)
+        assert for_tenant_a.total == 1
+        assert all(r.tenant == TENANT_A for r in for_tenant_a.items)
+
+    def test_count_active_runs(self, run_repo, job_repo):
+        run_a1 = _mk_run(tenant=TENANT_A)
+        run_a2 = _mk_run(tenant=TENANT_A)
+        run_a3 = _mk_run(tenant=TENANT_A)
+        run_repo.create(run_a1)
+        run_repo.create(run_a2)
+        run_repo.create(run_a3)
+        run_repo.create(_mk_run(tenant=TENANT_B))
+        assert run_repo.count_active_runs(TENANT_A) == 3
+        job_repo.enqueue(run_id=run_a1.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        assert run_repo.update_status(run_a1.run_id, TENANT_A, dm.RunStatus.COMPLETED,
+                                      claim_epoch=claimed["claim_epoch"])
+        assert run_repo.count_active_runs(TENANT_A) == 2
+        assert run_repo.count_active_runs(TENANT_B) == 1
 
 
 class TestAgentRepository:
@@ -365,6 +442,43 @@ class TestMessageRepository:
             content="hello",
         )
         msg_repo.create(msg)
+
+    def test_apply_retention_keeps_tail(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        for i in range(6):
+            msg_repo.create(dm.Message(
+                id=dm.MessageId(uuid.uuid4().hex),
+                run_id=run.run_id,
+                tenant=TENANT_A,
+                agent_id=agent.agent_id,
+                seq=i,
+                role=dm.MessageRole.ASSISTANT,
+                content={"turn": i},
+            ))
+        deleted = msg_repo.apply_retention(run.run_id, agent.agent_id, TENANT_A, tail=2)
+        assert deleted == 4
+        kept = msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)
+        assert [m.seq for m in kept] == [4, 5]
+
+    def test_apply_retention_noop_when_under_tail(self, run_repo, agent_repo, msg_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        msg_repo.create(dm.Message(
+            id=dm.MessageId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            agent_id=agent.agent_id,
+            seq=0,
+            role=dm.MessageRole.USER,
+            content="only",
+        ))
+        assert msg_repo.apply_retention(run.run_id, agent.agent_id, TENANT_A, tail=50) == 0
+        assert len(msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_A)) == 1
         assert msg_repo.list_by_agent(run.run_id, agent.agent_id, TENANT_B) == []
 
 
@@ -484,6 +598,35 @@ class TestJobRepository:
         claimed = job_repo.claim_batch("w1", None, 10, 60)
         assert len(claimed) >= 1
 
+    def test_reclaim_batch_picks_up_expired_leases(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        assert claimed[0]["claim_epoch"] == 1
+        assert job_repo.reclaim_batch("w2", 10, 60) == []
+        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, claimed[0]["claim_epoch"])
+        reclaimed = job_repo.reclaim_batch("w2", 10, 60)
+        assert len(reclaimed) == 1
+        assert reclaimed[0]["claim_epoch"] == 2
+        assert reclaimed[0]["reclaims"] == 1
+        again = job_repo.claim_batch("w3", None, 10, 60)
+        assert again == []
+
+    def test_reclaim_increments_reclaims_per_recovery(self, run_repo, job_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)
+        epoch = claimed[0]["claim_epoch"]
+        job_repo.renew_lease(run.run_id, TENANT_A, "w1", -1, epoch)
+        r1 = job_repo.reclaim_batch("w2", 10, 60)
+        assert r1[0]["reclaims"] == 1
+        job_repo.renew_lease(run.run_id, TENANT_A, "w2", -1, r1[0]["claim_epoch"])
+        r2 = job_repo.reclaim_batch("w3", 10, 60)
+        assert r2[0]["reclaims"] == 2
+        assert r2[0]["claim_epoch"] == r1[0]["claim_epoch"] + 1
+
 
 class TestMandatoryColumns:
     def test_all_tables_have_mandatory_columns(self):
@@ -527,3 +670,28 @@ class TestMandatoryColumns:
         for node in ast.walk(tree):
             assert not isinstance(node, (ast.Await, ast.AsyncFor)), \
                 f"async construct at line {getattr(node, 'lineno', '?')}"
+
+    def test_ddl_orm_column_parity(self):
+        import pathlib, re
+        ddl_path = pathlib.Path(
+            "src/agentclaw/community/core/agentcompute/sql/2026_10_08_agent_compute.sql"
+        )
+        text = ddl_path.read_text()
+        ddl_tables: dict[str, set[str]] = {}
+        for match in re.finditer(
+            r"CREATE TABLE IF NOT EXISTS `(\w+)`\s*\((.*?)\n\) ", text, re.DOTALL
+        ):
+            table_name, body = match.group(1), match.group(2)
+            cols = set(re.findall(r"^\s+`(\w+)`", body, re.MULTILINE))
+            ddl_tables[table_name] = cols
+        assert len(ddl_tables) == 7
+        for model in om.ALL_MODELS:
+            orm_cols = {c.name for c in model.__table__.columns}
+            ddl_cols = ddl_tables[model.__tablename__]
+            missing = orm_cols - (ddl_cols | {"id", "gmt_create", "gmt_modified"})
+            assert not missing, (
+                f"{model.__tablename__}: ORM columns absent from OceanBase DDL: {missing}"
+            )
+        for table_name, cols in ddl_tables.items():
+            for required in ("env", "tenant", "is_deleted"):
+                assert required in cols, f"{table_name}: {required} missing in DDL"

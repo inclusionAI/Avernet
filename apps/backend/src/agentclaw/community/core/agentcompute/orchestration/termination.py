@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentStatus, GuardEvent, Run, RunStatus, TerminationReason, EventId,
-    RunId, AgentId, EpochMillis, GuardKind,
+    AgentSpecRaw, GuardEvent, Run, TerminationReason,
+    EventId, EpochMillis, GuardKind,
 )
 
 import time
@@ -24,6 +24,7 @@ class RunState:
     last_spawn_objectives: list[str] = field(default_factory=list)
     routed_shard_count: int = 0
     recent_decision: Any = None
+    active_persona: AgentSpecRaw | None = None
 
 
 class TerminationEvaluator:

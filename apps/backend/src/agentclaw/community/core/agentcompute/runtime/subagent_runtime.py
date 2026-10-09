@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from typing import Any
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentId, AgentStatus, EpochMillis, IdempotencyKey, RunId, Run,
-    SubagentResult, TaskEnvelope, TenantId, AgentSpecRaw, GuardKind,
-    EventId, GuardEvent, GuardDetails,
+    AgentId, AgentStatus, IdempotencyKey, Run,
+    SubagentResult, TaskEnvelope, TenantId, AgentSpecRaw,
 )
 from dataclasses import dataclass
 
@@ -17,6 +17,10 @@ from agentclaw.community.core.agentcompute.spi.subagent_factory import SubagentF
 from agentclaw.community.core.agentcompute.spi.artifact_store import ArtifactStore
 
 logger = logging.getLogger(__name__)
+
+
+class EnvelopeSchemaInvalid(Exception):
+    """Raised when a spawn envelope's output_schema is itself malformed (D42)."""
 
 
 @dataclass
@@ -32,7 +36,6 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-
 class SubagentRuntime:
 
     def __init__(
@@ -44,8 +47,6 @@ class SubagentRuntime:
         per_task_timeout: float = 120.0,
         artifact_inline_threshold: int = 16384,
     ) -> None:
-        from dataclasses import dataclass
-
         self._factory = factory
         self._artifact_store = artifact_store
         self._max_width = max_width
@@ -58,6 +59,7 @@ class SubagentRuntime:
         self._running: set[asyncio.Task] = set()
         self._slice_lost = asyncio.Event()
         self._shard_handler: Any = None
+        self._validator_cache: dict[str, Any] = {}
 
     def set_shard_handler(self, handler: Any) -> None:
         self._shard_handler = handler
@@ -67,6 +69,27 @@ class SubagentRuntime:
             self._slice_lost.set()
         else:
             self._slice_lost.clear()
+
+    def _validator_for(self, schema: dict[str, Any]) -> Any:
+        from jsonschema import Draft202012Validator
+        from jsonschema.exceptions import SchemaError
+
+        cache_key = json.dumps(schema, sort_keys=True, default=str)
+        cached = self._validator_cache.get(cache_key)
+        if cached is None:
+            try:
+                Draft202012Validator.check_schema(schema)
+            except SchemaError as exc:
+                raise EnvelopeSchemaInvalid(str(exc)) from exc
+            cached = Draft202012Validator(schema)
+            self._validator_cache[cache_key] = cached
+        return cached
+
+    @staticmethod
+    def _first_schema_error(validator: Any, output: Any) -> str | None:
+        for error in validator.iter_errors(output):
+            return error.message
+        return None
 
     async def start(self) -> None:
         for _ in range(self._max_width):
@@ -82,22 +105,42 @@ class SubagentRuntime:
             await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers.clear()
         self._running.clear()
+        # A cancelled slice can leave queued work whose join() would otherwise
+        # block the next slice forever; drop it so a fresh slice starts clean.
+        while not self._work.empty():
+            try:
+                self._work.get_nowait()
+                self._work.task_done()
+            except asyncio.QueueEmpty:
+                break
+        while not self._completions.empty():
+            try:
+                self._completions.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
-    async def spawn(self, run: Run, envelope: TaskEnvelope) -> AgentId:
-        agent_id = AgentId(uuid.uuid4().hex)
-        idem_key = IdempotencyKey(f"{run.run_id}:{agent_id}")
+    async def spawn(self, run: Run, envelope: TaskEnvelope,
+                    agent_id: AgentId | None = None,
+                    idempotency_key: IdempotencyKey | None = None) -> AgentId:
+        minted = agent_id or AgentId(uuid.uuid4().hex)
         item = _WorkItem(
             run=run,
             envelope=envelope,
-            agent_id=agent_id,
-            idempotency_key=idem_key,
+            agent_id=minted,
+            idempotency_key=idempotency_key or IdempotencyKey(f"{run.run_id}:{minted}"),
             tenant=run.tenant,
         )
         await self._work.put(item)
-        return agent_id
+        return minted
 
-    async def wait_for_completions(self) -> list[dict[str, Any]]:
-        await self._work.join()
+    async def wait_for_completions(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        if timeout is None or timeout < 0:
+            await self._work.join()
+        else:
+            try:
+                await asyncio.wait_for(self._work.join(), timeout)
+            except asyncio.TimeoutError:
+                pass
         results = []
         while not self._completions.empty():
             results.append(await self._completions.get())
@@ -115,6 +158,14 @@ class SubagentRuntime:
             try:
                 result = await self._execute_with_retry(item)
                 await self._completions.put(result)
+                if self._shard_handler is not None:
+                    try:
+                        self._shard_handler(result)
+                    except Exception as exc:
+                        logger.warning(
+                            "[agentcompute][runtime] shard handler failed for agent=%s: %s",
+                            item.agent_id, exc,
+                        )
             except asyncio.CancelledError:
                 raise
             finally:
@@ -124,6 +175,20 @@ class SubagentRuntime:
         spec = self._find_spec(item.run, item.envelope)
         if spec is None:
             spec = AgentSpecRaw(name=item.envelope.name, role=item.envelope.objective)
+
+        schema = item.envelope.output_schema
+        validator = None
+        if schema:
+            try:
+                validator = self._validator_for(schema)
+            except EnvelopeSchemaInvalid as exc:
+                logger.error(
+                    "[agentcompute][runtime] agent=%s envelope_schema_invalid: %s",
+                    item.agent_id, exc,
+                )
+                return self._mk_result(
+                    item, AgentStatus.FAILED, None, "envelope_schema_invalid", 1,
+                )
 
         last_error: str | None = None
         for attempt in range(1, self._max_attempts + 1):
@@ -137,6 +202,16 @@ class SubagentRuntime:
                     subagent.run_task(item.envelope),
                     timeout=self._per_task_timeout,
                 )
+                if validator is not None:
+                    schema_error = self._first_schema_error(validator, raw.output)
+                    if schema_error is not None:
+                        # D42: schema-invalid results are retried, never routed.
+                        last_error = f"schema_validation: {schema_error}"
+                        logger.warning(
+                            "[agentcompute][runtime] agent=%s attempt=%d schema_validation=: %s",
+                            item.agent_id, attempt, schema_error,
+                        )
+                        continue
                 return self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
             except asyncio.TimeoutError:
                 last_error = "timeout"
@@ -174,6 +249,10 @@ class SubagentRuntime:
                 key = f"{item.run.run_id}/{item.agent_id}/result"
                 self._artifact_store.put(key, output_str)
                 artifact_key = key
+            else:
+                # No artifact store configured: keep the result inline so the
+                # shard XOR contract (D31) still has exactly one carrier.
+                result_payload = _raw.output
 
         return {
             "agent_id": item.agent_id,

@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.agentcompute.domain import models as dm
@@ -32,6 +32,12 @@ TaskQueueStatus = dm.TaskQueueStatus
 
 def _new_id() -> str:
     return uuid.uuid4().hex
+
+
+def _dumps_valid_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _decode_agent_status(val: str) -> dm.AgentStatus:
@@ -139,24 +145,76 @@ class RunRepository(RunRepositoryProtocol):
             ).scalar_one_or_none()
             return self._to_domain(row) if row else None
 
+    TERMINAL_STATUSES = {
+        dm.RunStatus.COMPLETED, dm.RunStatus.FAILED, dm.RunStatus.CANCELLED,
+        dm.RunStatus.TIMED_OUT, dm.RunStatus.STUCK, dm.RunStatus.GUARD_KILLED,
+    }
+
     def update_status(self, run_id: dm.RunId, tenant: dm.TenantId, status: dm.RunStatus,
                       termination_reason: dm.TerminationReason | None = None,
                       final_answer: Any = None, error: str | None = None,
                       claim_epoch: int = 0) -> bool:
+        values: dict[str, Any] = {
+            "status": status.value,
+            "termination_reason": termination_reason.value if termination_reason else None,
+            "final_answer": _dumps_valid_json(final_answer),
+            "error": error,
+        }
+        if status in self.TERMINAL_STATUSES:
+            values["ended_at"] = _now_ms()
+        job_epoch_current = (
+            select(om.AcAgentComputeJobModel.job_id).where(
+                om.AcAgentComputeJobModel.run_id == run_id,
+                om.AcAgentComputeJobModel.tenant == tenant,
+                om.AcAgentComputeJobModel.claim_epoch == claim_epoch,
+                om.AcAgentComputeJobModel.is_deleted == False,
+            ).exists()
+        )
         with self._db.orm_session() as session:
+            # D28 fencing: state-mutating writes must carry the caller's claim
+            # epoch; a stale worker's write (old epoch) cannot land.
             result = session.execute(
                 update(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.run_id == run_id,
                     om.AcAgentComputeRunModel.tenant == tenant,
                     om.AcAgentComputeRunModel.is_deleted == False,
-                ).values(
-                    status=status.value,
-                    termination_reason=termination_reason.value if termination_reason else None,
-                    final_answer=json.dumps(final_answer) if final_answer is not None else None,
-                    error=error,
-                )
+                    job_epoch_current,
+                ).values(**values)
             )
         return result.rowcount > 0
+
+    def list_page(self, tenant: dm.TenantId, status: dm.RunStatus | None = None,
+                  page: int = 1, page_size: int = 20) -> dm.RunPage:
+        offset = max(0, (page - 1)) * page_size
+        with self._db.orm_session() as session:
+            conditions = [
+                om.AcAgentComputeRunModel.tenant == tenant,
+                om.AcAgentComputeRunModel.is_deleted == False,
+            ]
+            if status is not None:
+                conditions.append(om.AcAgentComputeRunModel.status == status.value)
+            total = session.execute(
+                select(func.count()).select_from(om.AcAgentComputeRunModel).where(*conditions)
+            ).scalar_one()
+            rows = session.execute(
+                select(om.AcAgentComputeRunModel).where(*conditions)
+                .order_by(om.AcAgentComputeRunModel.id.desc())
+                .offset(offset).limit(page_size)
+            ).scalars().all()
+            return dm.RunPage(
+                items=tuple(self._to_domain(r) for r in rows),
+                total=total, page=page, page_size=page_size,
+            )
+
+    def count_active_runs(self, tenant: dm.TenantId) -> int:
+        with self._db.orm_session() as session:
+            return session.execute(
+                select(func.count()).select_from(om.AcAgentComputeRunModel).where(
+                    om.AcAgentComputeRunModel.tenant == tenant,
+                    om.AcAgentComputeRunModel.status == dm.RunStatus.RUNNING.value,
+                    om.AcAgentComputeRunModel.is_deleted == False,
+                )
+            ).scalar_one()
 
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRunModel) -> dm.Run:
@@ -240,6 +298,19 @@ class AgentRepository(AgentRepositoryProtocol):
                 ).order_by(om.AcAgentComputeAgentModel.id)
             ).scalars().all()
             return [self._to_domain(r, tenant) for r in rows]
+
+    def list_by_run_with_rows(self, run_id: dm.RunId,
+                              tenant: dm.TenantId) -> list[tuple[int, dm.Agent]]:
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentComputeAgentModel.id,
+                       om.AcAgentComputeAgentModel).where(
+                    om.AcAgentComputeAgentModel.run_id == run_id,
+                    om.AcAgentComputeAgentModel.tenant == tenant,
+                    om.AcAgentComputeAgentModel.is_deleted == False,
+                ).order_by(om.AcAgentComputeAgentModel.id)
+            ).all()
+            return [(r[0], self._to_domain(r[1], tenant)) for r in rows]
 
     def update_status(self, run_id: dm.RunId, agent_id: dm.AgentId, tenant: dm.TenantId,
                       status: str, attempts: int | None = None,
@@ -343,7 +414,7 @@ class MessageRepository(MessageRepositoryProtocol):
                     om.AcAgentComputeMessageModel.run_id == run_id,
                     om.AcAgentComputeMessageModel.agent_id == agent_id,
                     om.AcAgentComputeMessageModel.tenant == tenant,
-                    om.AcAgentComputeMessageModel.seq < cutoff,
+                    om.AcAgentComputeMessageModel.seq <= cutoff,
                     om.AcAgentComputeMessageModel.is_deleted == False,
                 ).values(is_deleted=True)
             )
@@ -455,6 +526,19 @@ class RoundRepository(RoundRepositoryProtocol):
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
 
+    def list_by_run_with_rows(self, run_id: dm.RunId,
+                              tenant: dm.TenantId) -> list[tuple[int, dm.Round]]:
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentComputeRoundModel.id,
+                       om.AcAgentComputeRoundModel).where(
+                    om.AcAgentComputeRoundModel.run_id == run_id,
+                    om.AcAgentComputeRoundModel.tenant == tenant,
+                    om.AcAgentComputeRoundModel.is_deleted == False,
+                ).order_by(om.AcAgentComputeRoundModel.id)
+            ).all()
+            return [(r[0], self._to_domain(r[1])) for r in rows]
+
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRoundModel) -> dm.Round:
         return dm.Round(
@@ -498,6 +582,19 @@ class GuardEventRepository(GuardEventRepositoryProtocol):
                 ).order_by(om.AcAgentComputeGuardEventModel.id)
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
+
+    def list_by_run_with_rows(self, run_id: dm.RunId,
+                              tenant: dm.TenantId) -> list[tuple[int, dm.GuardEvent]]:
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentComputeGuardEventModel.id,
+                       om.AcAgentComputeGuardEventModel).where(
+                    om.AcAgentComputeGuardEventModel.run_id == run_id,
+                    om.AcAgentComputeGuardEventModel.tenant == tenant,
+                    om.AcAgentComputeGuardEventModel.is_deleted == False,
+                ).order_by(om.AcAgentComputeGuardEventModel.id)
+            ).all()
+            return [(r[0], self._to_domain(r[1])) for r in rows]
 
     @staticmethod
     def _to_domain(row: om.AcAgentComputeGuardEventModel) -> dm.GuardEvent:
@@ -562,6 +659,40 @@ class JobRepository(JobRepositoryProtocol):
                     "deadline_at": row.deadline_at,
                 })
             return claimed
+
+    def reclaim_batch(self, worker_id: str, limit: int, lease_seconds: int) -> list[dict]:
+        """Re-claim RUNNING jobs whose lease expired (crashed pod / lost worker).
+
+        Returns claim dicts extended with `reclaims`; the worker applies the
+        D40 circuit breaker: `reclaims` > reclaim_max -> run terminal STUCK.
+        """
+        now = datetime.utcnow()
+        lease_until = now + timedelta(seconds=lease_seconds)
+        with self._db.orm_session() as session:
+            rows = session.execute(
+                select(om.AcAgentComputeJobModel).where(
+                    om.AcAgentComputeJobModel.status == TaskQueueStatus.RUNNING.value,
+                    om.AcAgentComputeJobModel.lease_expires_at < now,
+                    om.AcAgentComputeJobModel.is_deleted == False,
+                ).limit(limit)
+            ).scalars().all()
+            reclaimed = []
+            for row in rows:
+                row.claimed_by = worker_id
+                row.claim_epoch = (row.claim_epoch or 0) + 1
+                row.lease_expires_at = lease_until
+                row.reclaims = (row.reclaims or 0) + 1
+                row.attempts = (row.attempts or 0) + 1
+                reclaimed.append({
+                    "run_id": dm.RunId(row.run_id),
+                    "tenant": dm.TenantId(row.tenant),
+                    "claim_epoch": row.claim_epoch,
+                    "attempts": row.attempts,
+                    "reclaims": row.reclaims,
+                    "cancel_requested": bool(row.cancel_requested),
+                    "deadline_at": row.deadline_at,
+                })
+            return reclaimed
 
     def renew_lease(self, run_id: dm.RunId, tenant: dm.TenantId,
                     worker_id: str, lease_seconds: int, claim_epoch: int) -> bool:

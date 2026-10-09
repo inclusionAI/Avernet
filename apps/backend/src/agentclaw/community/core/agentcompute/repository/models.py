@@ -208,6 +208,7 @@ class AcAgentComputeJobModel(_AgentComputeBase, Base):
     claim_epoch = Column(BigInteger, nullable=False, default=0)
     lease_expires_at = Column(DateTime, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    reclaims = Column(Integer, nullable=False, default=0)
     deadline_at = Column(DateTime, nullable=False)
     last_error = Column(Text, nullable=True)
     cancel_requested = Column(Boolean, nullable=False, default=False, server_default="0")

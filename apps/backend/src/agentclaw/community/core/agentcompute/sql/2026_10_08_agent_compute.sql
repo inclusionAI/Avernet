@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS `ac_agent_compute_job` (
     `claim_epoch`      bigint(20)  NOT NULL DEFAULT 0     COMMENT 'monotonic fencing token, incremented on every claim',
     `lease_expires_at` timestamp   DEFAULT NULL           COMMENT 'expired => reclaim',
     `attempts`        int         NOT NULL DEFAULT 0      COMMENT 'diagnostic only',
+    `reclaims`        int         NOT NULL DEFAULT 0      COMMENT 'no-progress reclaim count, D40 circuit-breaker input',
     `deadline_at`      timestamp   NOT NULL               COMMENT 'give-up time',
     `last_error`       text        DEFAULT NULL,
     `cancel_requested` tinyint(1)  NOT NULL DEFAULT 0     COMMENT 'durable cancel flag, polled by the slice loop',

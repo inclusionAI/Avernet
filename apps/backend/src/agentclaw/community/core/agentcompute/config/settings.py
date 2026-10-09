@@ -45,6 +45,12 @@ class AgentComputeAvernetConfig:
 
 
 @dataclass(frozen=True)
+class AgentComputeTenantLimits:
+    max_concurrent_runs: int = 8
+    max_fanout_width: int = 8
+
+
+@dataclass(frozen=True)
 class AgentComputeConfig:
     llm: LlmConfig | None = None
     orchestration: AgentComputeOrchestrationConfig = field(
@@ -52,6 +58,9 @@ class AgentComputeConfig:
     )
     avernet: AgentComputeAvernetConfig = field(
         default_factory=AgentComputeAvernetConfig
+    )
+    tenant_limits: AgentComputeTenantLimits = field(
+        default_factory=AgentComputeTenantLimits
     )
     artifact_store_root: str = "/tmp/agentcompute/artifacts"
     artifact_inline_threshold: int = 16384

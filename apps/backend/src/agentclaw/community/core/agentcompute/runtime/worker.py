@@ -41,6 +41,8 @@ class AgentComputeWorker(LifecycleBase):
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def shutdown(self) -> None:
+        # Graceful drain: stop claiming, let the in-flight slice persist its
+        # latest completions, then unwind (§9.3 / D34 crash-clean drain).
         logger.info("[agentcompute][worker] draining worker_id=%s", self._worker_id)
         self._running = False
         self._inflight.clear()
@@ -61,40 +63,61 @@ class AgentComputeWorker(LifecycleBase):
     async def run_once(self) -> int:
         lease = self._config.orchestration.lease_seconds
         batch = self._config.orchestration.batch_size
+        reclaimed = await asyncio.to_thread(
+            self._job_repo.reclaim_batch, self._worker_id, batch * 2, lease
+        )
+        processed = 0
+        for job in reclaimed:
+            await self._run_job(job, reclaimed=True)
+            processed += 1
         claimed = await asyncio.to_thread(
             self._job_repo.claim_batch, self._worker_id, None, batch, lease
         )
         for job in claimed:
-            run_id = job["run_id"]
-            tenant = job["tenant"]
-            epoch = job["claim_epoch"]
-            cancel = job.get("cancel_requested", False)
-            self._inflight[run_id] = job
-            try:
-                outcome = await self._handler.handle_slice(run_id, tenant, epoch, cancel)
-                logger.info(
-                    "[agentcompute][worker] run=%s outcome=%s", run_id, outcome
-                )
-            except Exception as exc:
-                logger.exception("[agentcompute][worker] run=%s error=%s", run_id, exc)
-                await asyncio.to_thread(
-                    self._job_repo.fail, run_id, tenant, str(exc), self._worker_id, epoch
-                )
-            finally:
-                self._inflight.pop(run_id, None)
-        return len(claimed)
+            await self._run_job(job, reclaimed=False)
+            processed += 1
+        return processed
+
+    async def _run_job(self, job: dict, *, reclaimed: bool) -> None:
+        run_id = job["run_id"]
+        tenant = job["tenant"]
+        epoch = job["claim_epoch"]
+        cancel = job.get("cancel_requested", False)
+        if reclaimed and job.get("reclaims", 0) > self._config.orchestration.reclaim_max:
+            # D40 circuit breaker: reclaim_max no-progress reclaims -> STUCK.
+            await asyncio.to_thread(
+                self._handler.force_stuck,
+                run_id, tenant, epoch,
+                f"reclaim circuit breaker: {job['reclaims']} no-progress reclaims",
+                self._worker_id,
+            )
+            return
+        self._inflight[run_id] = job
+        try:
+            outcome = await self._handler.handle_slice(
+                run_id, tenant, epoch, cancel, worker_id=self._worker_id,
+            )
+            logger.info(
+                "[agentcompute][worker] run=%s outcome=%s", run_id, outcome
+            )
+        except Exception as exc:
+            logger.exception("[agentcompute][worker] run=%s error=%s", run_id, exc)
+            await asyncio.to_thread(
+                self._job_repo.fail, run_id, tenant, str(exc), self._worker_id, epoch
+            )
+        finally:
+            self._inflight.pop(run_id, None)
 
     async def _loop(self) -> None:
         poll = self._config.orchestration.poll_interval
         jitter = self._config.orchestration.poll_jitter
         while self._running:
             try:
-                claimed = await self.run_once()
+                await self.run_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("[agentcompute][worker] poll tick failed")
-                claimed = 0
             delay = poll + random.uniform(-jitter, jitter)
             await asyncio.sleep(max(0.0, delay))
 
@@ -114,7 +137,7 @@ class AgentComputeWorker(LifecycleBase):
                         "[agentcompute][worker] lease lost for run=%s (epoch=%d)",
                         run_id, job["claim_epoch"],
                     )
-                    self._handler.set_slice_lost(True)
+                    self._handler.set_slice_lost(True, run_id)
                     lost.append(run_id)
             for run_id in lost:
                 self._inflight.pop(run_id, None)
