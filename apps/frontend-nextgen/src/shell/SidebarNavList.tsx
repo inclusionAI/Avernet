@@ -3,7 +3,6 @@ import { Badge, Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { navSectionLabels, type NavigationItem, type NavigationSection } from './navigation';
 import { SpaceSwitcher } from './SpaceSwitcher';
-import { WorkspaceIdentitySwitcher } from './WorkspaceIdentitySwitcher';
 
 interface SidebarNavListProps {
   activePath: string;
@@ -33,9 +32,6 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
   if (collapsed) {
     return (
       <div className="app-scrollbar flex w-full flex-1 flex-col items-center overflow-y-auto px-1 py-2">
-        <div className="mb-1 flex w-full justify-center border-b border-border pb-3">
-          <WorkspaceIdentitySwitcher collapsed />
-        </div>
         {sections.map((section, index) => {
           const sectionItems = items.filter((item) => item.section === section);
           return (
@@ -66,9 +62,6 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
 
   return (
     <nav aria-label="主导航" className="app-scrollbar flex-1 overflow-y-auto px-3 py-3">
-      <div className="mb-3 border-b border-border pb-3">
-        <WorkspaceIdentitySwitcher />
-      </div>
       {sections.map((section, index) => {
         const sectionItems = items.filter((item) => item.section === section);
         return (

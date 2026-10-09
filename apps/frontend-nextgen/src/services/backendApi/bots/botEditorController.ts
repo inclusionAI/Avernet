@@ -58,6 +58,8 @@ export interface RoutineDto extends BackendUnknownRecord {
   command: string;
   enabled: boolean;
   timezone?: string;
+  model?: string | null;
+  timeout_secs?: number | null;
   gmt_modified?: string;
 }
 export interface RoutineWrite {
@@ -66,6 +68,13 @@ export interface RoutineWrite {
   command: string;
   enabled: boolean;
   timezone?: string;
+  model?: string;
+  timeout_secs: number;
+}
+export interface BotEditorModelDto extends BackendUnknownRecord {
+  model_id: string;
+  name: string;
+  provider: string;
 }
 export interface EngineStatusDto extends BackendUnknownRecord {
   engine: string;
@@ -326,6 +335,12 @@ export const botEditorController = {
       page_size: 100,
       owner_id: ownerId,
     }),
+  listModels: (botId: string, ownerId?: string) =>
+    request<BackendApiPage<BotEditorModelDto>>(path(botId, 'models'), 'GET', {
+      page: 1,
+      page_size: 100,
+      owner_id: ownerId,
+    }),
   createRoutine: (botId: string, body: RoutineWrite, ownerId?: string) =>
     request<RoutineDto>(path(botId, 'routines'), 'POST', { owner_id: ownerId }, body),
   updateRoutine: (botId: string, routineId: string, body: Partial<RoutineWrite>, ownerId?: string) =>
@@ -376,6 +391,8 @@ export const botEditorController = {
     ),
   getEngineConfig: (botId: string, ownerId?: string) =>
     request<BackendUnknownRecord>(path(botId, 'engine/config'), 'GET', { owner_id: ownerId }),
+  getEngineDefaultConfig: (botId: string, ownerId?: string) =>
+    request<{ config: BackendUnknownRecord }>(path(botId, 'engine/default-config'), 'GET', { owner_id: ownerId }),
   getEngineStatus: (botId: string, ownerId?: string) =>
     request<EngineStatusDto>(path(botId, 'engine/status'), 'GET', { owner_id: ownerId }),
   updateEngineConfig: (botId: string, body: BackendUnknownRecord, ownerId?: string) =>

@@ -9,12 +9,14 @@ export function LocalSkillsPanel({
   onToggle,
   onDelete,
   onUpload,
+  embedded = false,
 }: {
   skills: BotEditorSkill[];
   editable: boolean;
   onToggle: (skill: BotEditorSkill) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onUpload: (file: File) => Promise<void>;
+  embedded?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -27,8 +29,8 @@ export function LocalSkillsPanel({
     }
   };
   return (
-    <section className="space-y-3 border-t border-border p-5">
-      <h3 className="text-sm font-semibold">本地 Skill</h3>
+    <section className={`space-y-3 ${embedded ? 'rounded-lg border border-border p-3' : 'border-t border-border p-5'}`}>
+      <h3 className="text-sm font-semibold">本地 Skill 管理</h3>
       <p className="text-xs text-muted-foreground">上传同名 Skill 会替换已有内容。删除前请先停用并移除能力集引用。</p>
       <Input
         ref={input}
@@ -42,8 +44,8 @@ export function LocalSkillsPanel({
           if (file) void run(() => onUpload(file)).catch(() => undefined);
         }}
       />
-      <Button variant="outline" disabled={!editable || busy} onClick={() => input.current?.click()}>
-        上传 / 替换 ZIP
+      <Button variant="outline" size="sm" disabled={!editable || busy} onClick={() => input.current?.click()}>
+        {busy ? '处理中…' : '上传 / 替换 ZIP'}
       </Button>
       {skills.map((skill) => (
         <div key={skill.id} className="flex items-center gap-2 rounded-md border border-border p-2">

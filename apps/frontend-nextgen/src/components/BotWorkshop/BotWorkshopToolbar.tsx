@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotDeployment, BotServiceMode } from '@/services/botWorkshop';
 import { Cloud, Search } from 'lucide-react';
@@ -17,6 +18,7 @@ interface BotWorkshopToolbarProps {
   onServiceModeChange: (value?: BotServiceMode) => void;
   onCreateCloud: () => void;
   onCreateLocal?: () => void;
+  localCreateDisabledReason?: string;
   total?: number;
   onReset: () => void;
 }
@@ -32,6 +34,7 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
   onServiceModeChange,
   onCreateCloud,
   onCreateLocal,
+  localCreateDisabledReason,
   total,
   onReset,
 }) => {
@@ -120,9 +123,24 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
           ) : null}
         </div>
         {onCreateLocal ? (
-          <Button variant="outline" onClick={onCreateLocal}>
-            创建本地 Bot
-          </Button>
+          localCreateDisabledReason ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex" tabIndex={0}>
+                    <Button variant="outline" disabled aria-describedby="local-create-disabled-reason">
+                      创建本地 Bot
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent id="local-create-disabled-reason">{localCreateDisabledReason}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <Button variant="outline" onClick={onCreateLocal}>
+              创建本地 Bot
+            </Button>
+          )
         ) : null}
         <Button leftIcon={<Cloud className="size-4" />} onClick={onCreateCloud} className="w-full sm:w-auto">
           创建云端 Bot

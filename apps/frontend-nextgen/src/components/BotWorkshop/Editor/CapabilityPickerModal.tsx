@@ -1,5 +1,4 @@
 import { getCapabilities } from '@/capabilities';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
@@ -7,9 +6,11 @@ import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalT
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
-import { Check, ExternalLink, FolderUp, Plug, Search, Shapes } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { readDirectoryFiles, type DirectoryHandle } from './capabilityPickerDirectory';
+import { CapabilityPickerItemCard, pickerItemId } from './CapabilityPickerItemCard';
+import { CapabilityPickerLocalSkills } from './CapabilityPickerLocalSkills';
 
 type Source = 'mine' | 'market' | 'workshop';
 type MarketSource = 'skillcenter-market' | 'teamclaw-market';
@@ -27,11 +28,14 @@ interface CapabilityPickerModalProps {
   loading?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (ids: string[], source: Source | MarketSource) => Promise<void>;
+  onViewSkill?: (skill: BotEditorSkill) => void;
   onSearchMcp?: (source: McpMarketSource, keyword: string) => Promise<void>;
   onUploadFolder?: (files: File[]) => Promise<BotEditorSkill>;
+  onLocalToggle?: (skill: BotEditorSkill) => Promise<void>;
+  onLocalDelete?: (id: string) => Promise<void>;
+  onLocalUpload?: (file: File) => Promise<void>;
+  editable?: boolean;
 }
-
-const itemId = (item: PickerItem) => ('serverCode' in item ? item.serverCode : item.id);
 
 export function CapabilityPickerModal({
   kind,
@@ -43,8 +47,13 @@ export function CapabilityPickerModal({
   loading = false,
   onOpenChange,
   onConfirm,
+  onViewSkill,
   onSearchMcp,
   onUploadFolder,
+  onLocalToggle,
+  onLocalDelete,
+  onLocalUpload,
+  editable = true,
 }: CapabilityPickerModalProps) {
   const skillSources = getCapabilities().getBotSkillPickerSources().value;
   const sources: Source[] = kind === 'skill' ? skillSources : ['market'];
@@ -144,7 +153,7 @@ export function CapabilityPickerModal({
             }}
             options={[
               { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
-              ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用工坊 Skill' }] : []),
+              ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用空间 Skill' }] : []),
               ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
             ].filter((option) => sources.includes(option.value as Source))}
             className="w-fit"
@@ -179,21 +188,17 @@ export function CapabilityPickerModal({
               className="w-fit"
             />
           ) : null}
-          {kind === 'skill' && source === 'mine' && onUploadFolder ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
-              <p className="m-0 min-w-0 flex-1 text-xs text-muted-foreground">
-                仅显示当前 Bot 上传的本地 Skill（含已激活和未激活项），勾选并确认后加入当前能力集。
-              </p>
-              <Button
-                variant="secondary"
-                leftIcon={<FolderUp className="size-4" />}
-                disabled={uploading || !canPickDirectory}
-                onClick={() => void uploadFolder()}
-              >
-                {uploading ? '上传中…' : canPickDirectory ? '上传本地目录' : '当前浏览器不支持'}
-              </Button>
-            </div>
-          ) : null}
+          <CapabilityPickerLocalSkills
+            visible={kind === 'skill' && source === 'mine'}
+            skills={myItems as BotEditorSkill[]}
+            editable={editable}
+            canPickDirectory={canPickDirectory}
+            uploading={uploading}
+            onUploadFolder={onUploadFolder ? uploadFolder : undefined}
+            onLocalToggle={onLocalToggle}
+            onLocalDelete={onLocalDelete}
+            onLocalUpload={onLocalUpload}
+          />
           <div className="relative">
             <Search aria-hidden className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -226,41 +231,22 @@ export function CapabilityPickerModal({
               </div>
             ) : visibleItems.length ? (
               visibleItems.map((item) => {
-                const id = itemId(item);
+                const id = pickerItemId(item);
                 const active = selected.includes(id);
                 const alreadyAdded = existingIds.includes(id);
                 return (
-                  <Button
+                  <CapabilityPickerItemCard
                     key={id}
-                    variant="secondary"
-                    className={`h-auto min-h-24 items-start justify-start whitespace-normal p-3 text-left ${
-                      active ? 'border-primary bg-accent' : ''
-                    }`}
-                    disabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
-                    onClick={() =>
+                    item={item}
+                    kind={kind}
+                    active={active}
+                    alreadyAdded={alreadyAdded}
+                    selectionDisabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
+                    onSelect={() =>
                       setSelected((current) => (active ? current.filter((value) => value !== id) : [...current, id]))
                     }
-                  >
-                    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                      {kind === 'skill' ? <Shapes className="size-4" /> : <Plug className="size-4" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="truncate text-xs font-medium">{item.name}</span>
-                        {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
-                        {alreadyAdded ? <Badge tone="primary">已添加</Badge> : null}
-                      </span>
-                      <span className="mt-1 line-clamp-2 text-xs font-normal text-muted-foreground">
-                        {item.description || '暂无描述'}
-                      </span>
-                      {kind === 'skill' ? (
-                        <span className="mt-2 inline-flex items-center gap-1 text-xs text-primary">
-                          <ExternalLink className="size-3" /> 查看 Skill 详情
-                        </span>
-                      ) : null}
-                    </span>
-                    {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
-                  </Button>
+                    onViewSkill={onViewSkill}
+                  />
                 );
               })
             ) : (

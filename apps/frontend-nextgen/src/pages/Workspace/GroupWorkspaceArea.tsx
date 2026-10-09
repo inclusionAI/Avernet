@@ -21,9 +21,6 @@ import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useOpenDefaultGroupSession } from './hooks/useOpenDefaultGroupSession';
 import { useSessionManagement } from './hooks/useSessionManagement';
 export function GroupWorkspaceArea({
-  view,
-  onViewChange,
-  availableViews,
   userAvatarUrl,
   userIdentityId,
   userIdentityName,
@@ -129,11 +126,8 @@ export function GroupWorkspaceArea({
   const handleDissolveGroupFromSidebar = (groupId: string) => void ws.dissolveGroup(groupId);
   // 内流侧栏（≥lg）与 <lg 抽屉共用同一份 props，避免两处分叉。抽屉内选中会话后追加收起。
   const groupSidebarProps: GroupSidebarProps = {
-    view,
-    onViewChange,
     // 身份未加载完成（null）时按 human 兜底展示视角菜单。
     viewerKind: ws.activeIdentity?.kind === 'bot' ? 'bot' : 'user',
-    availableViews,
     groups: ws.groups,
     isLoading: ws.isLoadingGroups,
     groupsError: ws.groupsError,

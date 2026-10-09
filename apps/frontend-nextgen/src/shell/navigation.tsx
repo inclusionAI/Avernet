@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, ListTodo, MessagesSquare, ShieldCheck } from 'lucide-react';
+import { Bot, Compass, ListTodo, MessagesSquare, Users } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 侧栏导航分组成员：协作 / Bot 双固定分组 + legacy 过渡分组（无继任位存量项，待移除）。 */
@@ -34,12 +34,23 @@ export interface NavigationItem {
 // - 无继任位存量项（my-task / collaboration-privacy）沉 legacy 组带 deprecated，由各功能负责人逐项摘除；
 // - 【管理后台】项已由 split-admin-space-ticket-pages 退役（拆分至 /space-admin、/ticket-center
 //   独立路由，入口为空间切换弹层设置 icon / 通知弹层「查看全部」，不占导航位）。
+// - workspace-conversation-navigation-refactor：原「对话协作」（/workspace）拆分为
+//   对话（/workspace/chat）与 协作群（/workspace/collaboration）两个一级导航项；
+//   /workspace 仅重定向到 /workspace/chat，不再占导航位。
 export const navigationItems: NavigationItem[] = [
   {
-    id: 'workspace',
-    label: '对话协作',
-    path: '/workspace',
+    id: 'conversation',
+    label: '对话',
+    path: '/workspace/chat',
     icon: MessagesSquare,
+    section: 'collab',
+    description: '与 Bot 即时对话',
+  },
+  {
+    id: 'collaboration',
+    label: '协作群',
+    path: '/workspace/collaboration',
+    icon: Users,
     section: 'collab',
     description: '与用户和 Bot 即时协作',
   },
@@ -66,15 +77,6 @@ export const navigationItems: NavigationItem[] = [
     icon: ListTodo,
     section: 'legacy',
     description: '查看用户任务与定时任务两个 Tab',
-    deprecated: true,
-  },
-  {
-    id: 'collaboration-privacy',
-    label: '协作权限',
-    path: '/collaboration-privacy',
-    icon: ShieldCheck,
-    section: 'legacy',
-    description: '管理协作关系与申请策略',
     deprecated: true,
   },
 ];

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
+import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 it('服务类型下拉提供可清除条件的默认项', async () => {
@@ -116,4 +117,30 @@ it('筛选器名常驻左侧标题,框内只反映当前选择', async () => {
   for (const label of ['引擎类型', '部署方式', '服务类型']) {
     expect(screen.getAllByText(label)).toHaveLength(1);
   }
+});
+
+it('非个人空间置灰桌面 Bot 创建入口并展示限制原因', async () => {
+  const onCreateLocal = jest.fn();
+  render(
+    <BotWorkshopToolbar
+      keyword=""
+      engine=""
+      onKeywordChange={jest.fn()}
+      onEngineChange={jest.fn()}
+      onDeploymentChange={jest.fn()}
+      onServiceModeChange={jest.fn()}
+      onCreateCloud={jest.fn()}
+      onCreateLocal={onCreateLocal}
+      localCreateDisabledReason="桌面 Bot 仅支持在个人空间创建和运维"
+      onReset={jest.fn()}
+    />,
+  );
+
+  const button = screen.getByRole('button', { name: '创建本地 Bot' });
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(onCreateLocal).not.toHaveBeenCalled();
+
+  fireEvent.focus(button.parentElement as HTMLElement);
+  expect(await screen.findByText('桌面 Bot 仅支持在个人空间创建和运维')).toBeInTheDocument();
 });

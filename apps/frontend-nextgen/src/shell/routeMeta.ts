@@ -20,11 +20,29 @@ export interface RouteMeta {
 // 入口字面量进 Open Core 产物（open-core-export-plan §5.2 / §5.6
 // 「导航中的内部入口」必须物理分隔）。
 export const routeMetaList: RouteMeta[] = [
+  // workspace-conversation-navigation-refactor：/workspace 拆分为两个一级入口；
+  // 对话页以登录用户视角展示管理 Bot / 好友 Bot。
+  {
+    path: '/workspace/chat',
+    title: '对话',
+    section: 'collab',
+    navKey: 'conversation',
+    openCore: true,
+  },
+  {
+    path: '/workspace/collaboration',
+    title: '协作群',
+    section: 'collab',
+    navKey: 'collaboration',
+    openCore: true,
+  },
+  // /workspace 仅重定向到 /workspace/chat（重定向注册在 config/routes.ts，见 plan Task 8），
+  // 不占导航位（无 navKey）；重定向落地前存量 /workspace 子路由（invite / bcn chat detail）
+  // 仍按本条解析标题。
   {
     path: '/workspace',
     title: '对话协作',
     section: 'collab',
-    navKey: 'workspace',
     openCore: true,
   },
   {
@@ -34,6 +52,7 @@ export const routeMetaList: RouteMeta[] = [
     navKey: 'my-task',
     openCore: true,
   },
+  // 发现页自带模块级 SquareIdentityPicker。
   {
     path: '/collaboration-square',
     title: '发现',
@@ -60,13 +79,6 @@ export const routeMetaList: RouteMeta[] = [
     title: '发现任务',
     section: 'collab',
     navKey: 'collaboration-square',
-    openCore: true,
-  },
-  {
-    path: '/collaboration-privacy',
-    title: '协作权限',
-    section: 'legacy',
-    navKey: 'collaboration-privacy',
     openCore: true,
   },
   {

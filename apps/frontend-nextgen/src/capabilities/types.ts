@@ -1,3 +1,4 @@
+import type { BotEditorSkill } from '@/domain/botEditor';
 import type { BotHealthCapability } from '@/domain/botHealthCheck';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
@@ -342,6 +343,8 @@ export interface AppCapabilities {
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
   /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
+  /** 内部市场与工坊 Skill 的详情链接；Open Core 默认不提供。 */
+  getBotSkillPickerDetailUrl: (skill: BotEditorSkill) => CapabilityResult<string | null>;
   /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
   getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
@@ -376,6 +379,12 @@ export interface AppCapabilities {
    * 同步签名，组件不得按部署环境自行判断。
    */
   getPartialFriendApprovalEnabled: () => CapabilityResult<boolean>;
+  /**
+   * BotWorkshop「通用配置」弹窗是否提供「发布审批」分组（共同编辑者发布需 Owner 审批）。
+   * Open Core 默认关闭（不渲染本组）；internal overlay 开启（叠加团队空间 Bot 判定）。
+   * 同步签名，组件不得按部署环境自行判断（collab-permission-entry-migration §10）。
+   */
+  getGeneralConfigPublishApprovalEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`

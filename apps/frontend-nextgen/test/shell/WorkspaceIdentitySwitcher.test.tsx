@@ -47,7 +47,7 @@ describe('WorkspaceIdentitySwitcher', () => {
     expect(screen.queryByText('验收用户')).not.toBeInTheDocument();
     expect(screen.getByText('用户')).toBeInTheDocument();
     fireEvent.click(trigger);
-    expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /进入协作权限/ })).not.toBeInTheDocument();
     expect(await screen.findAllByText('用户')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: /协作 Bot/ }));
     expect(mockSwitchIdentity).toHaveBeenCalledWith('bot-1');

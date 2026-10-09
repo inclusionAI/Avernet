@@ -53,8 +53,7 @@ export function AppSidebar({
 
       <SidebarNavList activePath={activePath} items={items} onNavigate={onNavigate} collapsed={collapsed} />
 
-      {/* 底部用户行：原顶栏账号身份迁入（含身份切换器外置的登录态解析与退出菜单）+ 「更多」浮层
-          （帮助/ReleaseNotes/用户手册/平台指标收编；主题切换为后续功能，本 change 不渲染入口）。 */}
+      {/* 底部用户行：账号身份与「更多」浮层（帮助/ReleaseNotes/用户手册/平台指标）；主题切换留待后续。 */}
       {collapsed ? (
         <div className="flex flex-col items-center gap-1 border-t border-border bg-background/70 px-2 pb-3 pt-2">
           <AccountBadge currentUser={currentUser} collapsed />

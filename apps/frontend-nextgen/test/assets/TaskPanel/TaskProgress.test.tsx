@@ -194,7 +194,7 @@ describe('TaskProgressTab', () => {
 
     const link = screen.getByRole('link', { name: '新开会话 异常检测' });
     expect(link).toHaveAttribute('target', '_blank');
-    expect(link).toHaveAttribute('href', '/workspace?tab=chat&bot=bot-node-1%3Auser-1&session=session-node-1');
+    expect(link).toHaveAttribute('href', '/workspace/chat?bot=bot-node-1%3Auser-1&session=session-node-1');
   });
 
   it('coop_group 节点点击 Bot 名称查看执行会话', () => {

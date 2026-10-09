@@ -7,7 +7,6 @@ export const routes = [
   { path: '/', redirect: '/welcome' },
   { path: '/work', redirect: '/workspace' },
   { path: '/manage', redirect: '/bot-workshop' },
-  { path: '/collaboration-permissions', redirect: '/collaboration-privacy' },
   { path: '/bot-studio', redirect: '/bot-workshop' },
   // /capability-studio → /capability-workshop、/capability-market → /market 的旧深链
   // 别名随 Market / CapabilityWorkshop 路由一同下沉到 routes.internal.ts：
@@ -16,7 +15,13 @@ export const routes = [
     path: '/',
     component: '@/layouts/AppLayout',
     routes: [
-      { path: '/workspace', component: '@/pages/Workspace' },
+      // workspace-conversation-navigation-refactor Task 8:
+      // /workspace 拆为对话(/workspace/chat)与协作群(/workspace/collaboration)两页,
+      // 旧混合 /workspace 页(Task 10 退休)经 redirect 只保深链不达;
+      // 跨模块切换收口到 App Shell 一级导航。
+      { path: '/workspace', redirect: '/workspace/chat' },
+      { path: '/workspace/chat', component: '@/pages/Workspace/Chat' },
+      { path: '/workspace/collaboration', component: '@/pages/Workspace/Collaboration' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
@@ -25,7 +30,6 @@ export const routes = [
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       { path: '/collaboration-square/tasks', component: '@/pages/CollaborationSquare/Tasks' },
-      { path: '/collaboration-privacy', component: '@/pages/CollaborationPrivacy' },
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },

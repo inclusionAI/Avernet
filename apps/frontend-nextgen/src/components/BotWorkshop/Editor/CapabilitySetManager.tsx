@@ -6,9 +6,11 @@ import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotCapabilitySet, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
+import type { PendingSkillSetToggle } from '@/hooks/useSkillSetActivation';
 import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
-import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
@@ -27,9 +29,13 @@ export interface CapabilitySetManagerProps {
   onCreate: (name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onActive: (set: BotCapabilitySet, active: boolean) => Promise<void>;
+  pendingSkillSetToggle?: PendingSkillSetToggle;
   onSkill: (setId: string, skillId: string, active: boolean) => Promise<void>;
   onSkillCenterReferences: (setId: string, skillCodes: string[]) => Promise<void>;
   onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
+  onLocalToggle?: (skill: BotEditorSkill) => Promise<void>;
+  onLocalDelete?: (id: string) => Promise<void>;
+  onLocalUpload?: (file: File) => Promise<void>;
   onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
   onLoadCandidates: (
     kind: 'skill' | 'mcp',
@@ -67,11 +73,22 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [picker, setPicker] = useState<Picker>();
+  const [pickerSuspendedForDetail, setPickerSuspendedForDetail] = useState(false);
   const [detailTarget, setDetailTarget] = useState<CapabilityDetailTarget>();
   const canAddMcp = getCapabilities().getBotMcpPickerEnabled().value;
   const openPicker = (set: BotCapabilitySet, kind: Picker['kind']) => {
+    setPickerSuspendedForDetail(false);
     setPicker({ set, kind });
     if (kind === 'skill') void onLoadCandidates(kind);
+  };
+  const viewPickerSkill = (skill: BotEditorSkill) => {
+    if (skill.source === 'local') {
+      setPickerSuspendedForDetail(true);
+      setDetailTarget({ kind: 'skill', id: skill.id, name: skill.name });
+      return;
+    }
+    const url = getCapabilities().getBotSkillPickerDetailUrl(skill).value;
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
   useEffect(() => {
     if (sets[0]) setExpanded((current) => (current.length ? current : [sets[0].id]));
@@ -101,6 +118,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
         {sets.length ? (
           sets.map((set) => {
             const open = expanded.includes(set.id);
+            const displayName = set.isDefault ? '默认能力集' : set.name;
             return (
               <section key={set.id} className="border-b border-border px-4 py-1">
                 <div className="group flex items-center gap-2 py-2">
@@ -114,7 +132,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                   >
                     <span className="min-w-0">
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-xs font-semibold">{set.name}</span>
+                        <span className="truncate text-xs font-semibold">{displayName}</span>
                         {!set.active ? <Badge>已禁用</Badge> : null}
                         {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
                       </span>
@@ -123,15 +141,40 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       </span>
                     </span>
                   </Button>
-                  <Switch
-                    checked={set.active}
-                    disabled={!editable || set.isDefault}
-                    onCheckedChange={(value) => void onActive(set, value)}
-                  />
+                  {set.isDefault ? (
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span data-testid="default-capability-set-switch" className="inline-flex" tabIndex={0}>
+                            <Switch checked disabled aria-label="默认能力集不可禁用" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>默认能力集不可禁用</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      {props.pendingSkillSetToggle?.id === set.id ? (
+                        <span role="status" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                          {props.pendingSkillSetToggle.slow
+                            ? `${props.pendingSkillSetToggle.active ? '启用' : '停用'}耗时较长，仍在等待结果…`
+                            : `正在${props.pendingSkillSetToggle.active ? '启用' : '停用'}…`}
+                        </span>
+                      ) : null}
+                      <Switch
+                        checked={set.active}
+                        loading={Boolean(props.pendingSkillSetToggle)}
+                        disabled={!editable}
+                        aria-label={`${set.active ? '停用' : '启用'}${displayName}`}
+                        onCheckedChange={(value) => void onActive(set, value)}
+                      />
+                    </div>
+                  )}
                   {!set.isDefault ? (
                     <ConfirmDialog
                       title="确认删除该能力集？"
-                      description={`删除「${set.name}」会移除其中 Skill 与 MCP 的引用，且无法恢复。`}
+                      description={`删除「${displayName}」会移除其中 Skill 与 MCP 的引用，且无法恢复。`}
                       confirmVariant="destructive"
                       disabled={!editable || set.active}
                       onConfirm={() => onDelete(set.id)}
@@ -139,7 +182,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`删除${set.name}`}
+                        aria-label={`删除${displayName}`}
                         leftIcon={<Trash2 className="size-4" />}
                       />
                     </ConfirmDialog>
@@ -179,17 +222,20 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
         )}
       </div>
       <CapabilityDetailDrawer
-        editable={editable}
+        editable={editable && !pickerSuspendedForDetail}
         botId={props.botId}
         ownerId={props.ownerId}
         target={detailTarget}
-        onClose={() => setDetailTarget(undefined)}
+        onClose={() => {
+          setDetailTarget(undefined);
+          setPickerSuspendedForDetail(false);
+        }}
       />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>
         <ModalContent>
           <ModalHeader>
             <ModalTitle>新建能力集</ModalTitle>
-            <ModalDescription>创建后默认为未启用状态。</ModalDescription>
+            <ModalDescription>创建后默认为启用状态。</ModalDescription>
           </ModalHeader>
           <Input
             autoFocus
@@ -211,7 +257,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
       {picker ? (
         <CapabilityPickerModal
           kind={picker.kind}
-          open
+          open={!pickerSuspendedForDetail}
           marketItems={picker.kind === 'skill' ? marketSkills : marketMcps}
           skillCenterItems={picker.kind === 'skill' ? skillCenterSkills : []}
           workshopItems={picker.kind === 'skill' ? workshopSkills : []}
@@ -224,8 +270,12 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           loading={props.candidatesLoading}
           onSearchMcp={(source, keyword) => onLoadCandidates('mcp', { source, keyword })}
           onOpenChange={(open) => {
-            if (!open) setPicker(undefined);
+            if (!open) {
+              setPicker(undefined);
+              setPickerSuspendedForDetail(false);
+            }
           }}
+          onViewSkill={viewPickerSkill}
           onConfirm={async (ids, source) => {
             if (picker.kind === 'skill' && source === 'skillcenter-market') {
               await onSkillCenterReferences(picker.set.id, ids);
@@ -238,6 +288,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
             );
           }}
           onUploadFolder={picker.kind === 'skill' ? onUploadSkillFolder : undefined}
+          onLocalToggle={picker.kind === 'skill' ? props.onLocalToggle : undefined}
+          onLocalDelete={picker.kind === 'skill' ? props.onLocalDelete : undefined}
+          onLocalUpload={picker.kind === 'skill' ? props.onLocalUpload : undefined}
+          editable={editable}
         />
       ) : null}
     </div>

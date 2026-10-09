@@ -94,6 +94,8 @@ export interface BotEditorRoutine {
   command: string;
   enabled: boolean;
   timezone?: string;
+  model?: string;
+  timeoutSecs?: number;
   modifiedAt?: string;
 }
 
@@ -103,6 +105,13 @@ export interface BotEditorRoutineInput {
   command: string;
   enabled: boolean;
   timezone?: string;
+  model?: string;
+  timeoutSecs: number;
+}
+export interface BotEditorModel {
+  id: string;
+  name: string;
+  provider: string;
 }
 export interface BotEditorRoutineRun {
   id: string;

@@ -74,6 +74,8 @@ export const mapRoutine = (item: RoutineDto): BotEditorRoutine => ({
   command: item.command,
   enabled: item.enabled,
   timezone: item.timezone,
+  model: item.model ?? undefined,
+  timeoutSecs: item.timeout_secs ?? undefined,
   modifiedAt: item.gmt_modified,
 });
 
@@ -83,6 +85,8 @@ export const toRoutineWrite = (input: BotEditorRoutineInput) => ({
   command: input.command,
   enabled: input.enabled,
   timezone: input.timezone,
+  model: input.model || undefined,
+  timeout_secs: input.timeoutSecs,
 });
 
 export const dataOr = <T>(data: T | undefined, fallback: T) => data ?? fallback;

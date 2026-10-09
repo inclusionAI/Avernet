@@ -1,20 +1,14 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { Info, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
-import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
-import { WorkspaceSidebarCollapsedRail } from '../WorkspaceSidebarCollapsedRail';
 import { BotListSection } from './BotListSection';
 
 export interface BotSessionSidebarProps {
-  view?: WorkspaceView;
-  onViewChange?: (v: WorkspaceView) => void;
-  availableViews?: WorkspaceView[];
   identities?: Identity[];
   activeIdentityId?: string | null;
   chatBots: ChatBotView[];
@@ -52,9 +46,6 @@ export interface BotSessionSidebarProps {
 /** 二级会话列表内容本体（不含 <aside> 外壳）。由内流 BotSessionSidebar 与 <lg 抽屉复用，保证两处一致。 */
 export function BotSessionList(props: BotSessionSidebarProps) {
   const {
-    view,
-    onViewChange,
-    availableViews,
     identities = [],
     activeIdentityId = null,
     chatBots,
@@ -97,7 +88,6 @@ export function BotSessionList(props: BotSessionSidebarProps) {
   const isUserIdentity = activeIdentity?.kind === 'user';
   const managedBotTitle = activeIdentityName ? `${activeIdentityName}管理的 Bot` : '已管理 Bot';
   const friendBotTitle = activeIdentityName ? `${activeIdentityName}的好友 Bot` : '好友 Bot';
-  const showViewSwitch = availableViews && availableViews.length > 0 && view && onViewChange;
   const sectionProps = {
     expandedBotIds,
     expandedBotSectionKey,
@@ -123,15 +113,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
         <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
-          {showViewSwitch && (
-            <div className="flex h-10 items-center gap-2 px-4">
-              <WorkspacePrimaryTabs
-                value={view as WorkspaceView}
-                options={availableViews ?? []}
-                onChange={onViewChange}
-              />
-            </div>
-          )}
+          {/* 跨模块切换收口到 App Shell 一级导航,二级侧栏不再渲染视图切换 Tab。 */}
           <div className="my-2 px-4">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -232,18 +214,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
 /** 内流会话列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 BotSessionList。 */
 export function BotSessionSidebar(props: BotSessionSidebarProps) {
   return (
-    <ResizableWorkspaceSidebar
-      ariaLabel="Bot 会话侧栏"
-      collapsedContent={
-        props.view && props.onViewChange ? (
-          <WorkspaceSidebarCollapsedRail
-            value={props.view}
-            options={props.availableViews ?? ['chat', 'group']}
-            onChange={props.onViewChange}
-          />
-        ) : undefined
-      }
-    >
+    <ResizableWorkspaceSidebar ariaLabel="Bot 会话侧栏">
       <BotSessionList {...props} />
     </ResizableWorkspaceSidebar>
   );

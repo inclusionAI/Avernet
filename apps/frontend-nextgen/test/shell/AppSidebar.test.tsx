@@ -58,10 +58,26 @@ afterEach(() => {
 it('展开态：顶部品牌区挂通知中心，底部用户行渲染账号身份与「更多」入口', () => {
   renderSidebar();
   expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
-  expect(screen.getByTestId('identity-switcher')).toBeInTheDocument();
+  expect(screen.queryByTestId('identity-switcher')).not.toBeInTheDocument();
   expect(screen.getByTestId('account-badge')).toHaveTextContent('真实用户');
   expect(screen.getByTestId('more-menu')).toBeInTheDocument();
 });
+
+it.each(['/ticket-center', '/work/my-task', '/bot-workshop'])(
+  '路由 %s：展开与折叠侧栏均不展示全局工作身份，导航与账号保留',
+  (activePath) => {
+    const view = renderSidebar({ activePath });
+    expect(view.queryByTestId('identity-switcher')).not.toBeInTheDocument();
+    expect(view.getByTestId('account-badge')).toHaveTextContent('真实用户');
+    expect(view.getByRole('region', { name: '协作' })).toBeInTheDocument();
+    view.unmount();
+
+    renderSidebar({ activePath, collapsed: true });
+    expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
+    expect(screen.getByTestId('account-badge-collapsed')).toHaveTextContent('真实用户');
+    expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();
+  },
+);
 
 it('协作 / Bot 双分组 + 老功能过渡组常驻（不随路由整体换组）', () => {
   const view = renderSidebar({ activePath: '/admin' });
@@ -70,29 +86,32 @@ it('协作 / Bot 双分组 + 老功能过渡组常驻（不随路由整体换组
   expect(view.getByRole('region', { name: '老功能' })).toBeInTheDocument();
 });
 
-it('同路由改名项归组：协作组含「发现」，Bot 组含「Bot管理」，二者无 deprecated 徽标', () => {
+it('同路由改名项归组：协作组含「对话」「协作群」「发现」，Bot 组含「Bot管理」，二者无 deprecated 徽标', () => {
   const view = renderSidebar();
   const collab = view.getByRole('region', { name: '协作' });
   const bot = view.getByRole('region', { name: 'Bot' });
+  expect(view.getByRole('button', { name: /对话/ })).toBeInTheDocument();
+  expect(view.getByRole('button', { name: /协作群/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /发现/ })).toBeInTheDocument();
   expect(view.getByRole('button', { name: /Bot管理/ })).toBeInTheDocument();
-  expect(collab.textContent).toContain('对话协作');
+  expect(collab.textContent).toContain('对话');
+  expect(collab.textContent).toContain('协作群');
   expect(collab.textContent).toContain('发现');
   expect(bot.textContent).toContain('Bot管理');
 });
 
-it('legacy 过渡组：任务列表 / 协作权限 带「待移除」徽标，管理后台项不再占导航位', () => {
+it('legacy 过渡组：任务列表 带「待移除」徽标，协作权限与管理后台入口均不再占导航位', () => {
   const view = renderSidebar();
   const legacy = view.getByRole('region', { name: '老功能' });
-  expect(view.getAllByText('待移除')).toHaveLength(2);
+  expect(view.getAllByText('待移除')).toHaveLength(1);
   expect(legacy.textContent).toContain('任务列表');
-  expect(legacy.textContent).toContain('协作权限');
+  expect(legacy.textContent).not.toContain('协作权限');
   expect(view.queryByRole('button', { name: /管理后台/ })).toBeNull();
 });
 
-it('折叠态：身份切换入口与账号行保持可见（icon 形态），deprecated 项语义入 aria-label', () => {
+it('折叠态：不展示身份切换入口，账号行仍可见，deprecated 项语义入 aria-label', () => {
   renderSidebar({ collapsed: true });
-  expect(screen.getByTestId('identity-switcher-collapsed')).toBeInTheDocument();
+  expect(screen.queryByTestId('identity-switcher-collapsed')).not.toBeInTheDocument();
   expect(screen.getByTestId('account-badge-collapsed')).toBeInTheDocument();
   expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Bot管理' })).toBeInTheDocument();

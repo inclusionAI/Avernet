@@ -170,6 +170,7 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
+  getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
@@ -199,6 +200,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core 不提供组织免审批策略，仅保留无需审批和全部审批。
   getPartialFriendApprovalEnabled: (): CapabilityResult<boolean> => ({
+    status: 'available',
+    value: false,
+  }),
+  // Open Core（外部部署）不提供发布审批分组：通用配置弹窗仅保留协作配置分组（collab-permission-entry-migration）。
+  getGeneralConfigPublishApprovalEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
     value: false,
   }),

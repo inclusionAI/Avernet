@@ -172,7 +172,7 @@ export function useCollaborationSquare(resource: SquareResource) {
             const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext, {
               isOwnedByLoggedInUser: Boolean(bot.isOwnedByLoggedInUser),
             });
-            history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId, humanBotContext.actorId));
+            history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
           },
           bot.id,
         );
@@ -194,7 +194,7 @@ export function useCollaborationSquare(resource: SquareResource) {
             if (activeActor.type === 'human') {
               const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
               notifySuccess('好友关系已建立，正在进入对话');
-              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId, humanBotContext.actorId));
+              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
             } else {
               notifySuccess('好友关系已建立');
             }

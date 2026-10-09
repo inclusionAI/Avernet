@@ -251,7 +251,7 @@ it('点击对话时跳转到用户单聊并展开对应 Bot', () => {
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&current=human_u1&bot=bot-1%3A2088');
+  expect(history.push).toHaveBeenCalledWith('/workspace/chat?section=managed&bot=bot-1%3A2088&origin=mine');
   const state = useWorkspaceStore.getState();
   expect(state.activeIdentityId).toBe('human_u1');
   expect(state.view).toBe('chat');

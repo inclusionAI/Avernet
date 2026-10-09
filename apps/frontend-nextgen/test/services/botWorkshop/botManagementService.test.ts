@@ -12,7 +12,12 @@ jest.mock('@/services/backendApi/admin/spaceController', () => ({
   listSpaceMembers: jest.fn(),
 }));
 jest.mock('@/services/backendApi/bots/botCollaborationController', () => ({
-  botCollaborationController: { add: jest.fn(), update: jest.fn() },
+  botCollaborationController: {
+    add: jest.fn(),
+    update: jest.fn(),
+    getEditorRequestPolicy: jest.fn(),
+    updateEditorRequestPolicy: jest.fn(),
+  },
 }));
 jest.mock('@/services/backendApi/bots/botController', () => ({ changeBotSpace: jest.fn() }));
 
@@ -54,6 +59,19 @@ test('添加协作者时同时提交姓名并使用写接口响应', async () =>
     role: 'member',
   });
   expect(add).toHaveBeenCalledWith('bot-1', '149608', '小明', 'member');
+});
+
+test('读取和更新协作者编辑权限申请自动通过策略', async () => {
+  const getPolicy = botCollaborationController.getEditorRequestPolicy as jest.Mock;
+  const updatePolicy = botCollaborationController.updateEditorRequestPolicy as jest.Mock;
+  getPolicy.mockResolvedValue({ code: 200000, data: { auto_approve: true } });
+  updatePolicy.mockResolvedValue({ code: 200000, data: { auto_approve: false } });
+
+  await expect(botManagementService.getEditorRequestPolicy('bot-1')).resolves.toBe(true);
+  await expect(botManagementService.updateEditorRequestPolicy('bot-1', false)).resolves.toBe(false);
+
+  expect(getPolicy).toHaveBeenCalledWith('bot-1');
+  expect(updatePolicy).toHaveBeenCalledWith('bot-1', false);
 });
 
 test('授权候选仅查询 Bot 所属空间成员并保留姓名', async () => {

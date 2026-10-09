@@ -16,14 +16,26 @@ const baseProps = {
   loading: false,
   collaborators: [{ id: 1, userId: '1001', name: '成员甲', role: 'member' as const }],
   members: [{ userId: '149608', name: '小明' }],
+  autoApproveEditorRequests: false,
+  policyError: undefined,
   onClose: jest.fn(),
   onChangeSpace: jest.fn().mockResolvedValue(undefined),
   onCreateTeamAndChangeSpace: jest.fn().mockResolvedValue(undefined),
   onAddCollaborator: jest.fn().mockResolvedValue(true),
   onUpdateCollaborator: jest.fn().mockResolvedValue(undefined),
   onRemoveCollaborator: jest.fn().mockResolvedValue(undefined),
+  onEditorRequestPolicyChange: jest.fn().mockResolvedValue(undefined),
   onRequestAccess: jest.fn().mockResolvedValue(undefined),
 };
+
+test('授权管理展示编辑权限申请自动通过策略并即时提交', () => {
+  render(<BotAccessModal {...baseProps} mode="authorize" />);
+
+  const policySwitch = screen.getByRole('switch', { name: '开启编辑权限申请自动通过' });
+  fireEvent.click(policySwitch);
+
+  expect(baseProps.onEditorRequestPolicyChange).toHaveBeenCalledWith(true);
+});
 
 test('授权为即时落库语义并在角色更新时展示局部加载', () => {
   render(<BotAccessModal {...baseProps} mode="authorize" operation="update:1" />);

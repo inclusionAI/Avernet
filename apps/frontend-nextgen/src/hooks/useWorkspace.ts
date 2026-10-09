@@ -1,8 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import { getAvailableViews, type WorkspaceView } from '@/domain/collaboration/availableViews';
-import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { useAgentCodingBotSelection } from '@/pages/Workspace/hooks/useAgentCodingBotSelection';
-import { useBotFriendConversation } from '@/pages/Workspace/hooks/useBotFriendConversation';
 import { useHumanBotConversation } from '@/pages/Workspace/hooks/useHumanBotConversation';
 import { isTestUserIdentity, TEST_USER_SUPPORT_TARGET_ID, workspaceService } from '@/services/workspace';
 import { chatBridge } from '@/services/workspace/chatBridge';
@@ -11,7 +9,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge } from '@tc-chat/adapters';
 import type { BridgeInputRef, PanelAction, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
 import { useHumanIdentity } from './useHumanIdentity';
@@ -75,10 +73,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     selectedChatBot,
     botChat,
   } = useHumanBotConversation({ activeIdentityId, isUserIdentity, view, expandedBotIds, panelRef });
-  const botFriendConversation = useBotFriendConversation(
-    activeIdentityView,
-    activeIdentityView?.kind === 'bot' && view === 'chat',
-  );
   const isSupportTarget = isTestUser && activeTargetId === TEST_USER_SUPPORT_TARGET_ID;
   const chat = useChat({
     provider,
@@ -176,19 +170,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     return buildBotChatTarget(selectedChatBot, botSessions.selectedSession);
   }, [isTestUser, selectedChatBot, botSessions.selectedSession]);
 
-  const submitPanelMessage = useCallback(
-    (content: string) => {
-      const activeChat = isSupportTarget ? chat : botChat.chat;
-      activeChat.onRequest(buildSingleChatBridgeRequest(activeTargetId, content));
-    },
-    [isSupportTarget, chat, botChat.chat, activeTargetId],
-  );
-
-  const { appendAssistantMessage, streamAssistantMessage } = useTaskPreflightAssistant({
-    chat: isSupportTarget ? chat : botChat.chat,
-    sessionKey: isSupportTarget ? activeTargetId : botSessions.selectedSession?.sessionId,
-  });
-
   return {
     identities,
     currentUserId: humanIdentity?.userId,
@@ -219,7 +200,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     botSessions,
     botChat,
     botChatTarget,
-    botFriendConversation,
     selectedAgentCodingBot,
     onSelectAgentCodingBot,
     onToggleBotExpanded,
@@ -237,9 +217,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     chatBridge,
     sendMessage,
     stopReply,
-    submitPanelMessage,
-    appendAssistantMessage,
-    streamAssistantMessage,
     handlePanelAction,
     reconnect: () => isSupportTarget && chat.reconnect(),
     openHelp: () => toast.info('帮助中心将由宿主资源能力注入'),

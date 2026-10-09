@@ -1,35 +1,32 @@
 import type { SquareResource } from '@/domain/collaborationSquare/types';
+import type { ConversationRouteState } from '@/domain/conversation';
+import { serializeConversationRoute } from '@/domain/conversation';
 import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 
 export function getCollaborationSquareErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试';
 }
 
-export function getCollaborationBotConversationUrl(
-  botId: string,
-  sessionId: string,
-  currentIdentityId?: string,
-): string {
-  return `/workspace?${serializeWorkspaceRoute({
-    view: 'chat',
-    currentIdentityId,
-    targetBotId: botId,
-    sessionId,
-  })}`;
+/**
+ * 单 Bot 会话跳转 URL（/workspace/chat）。bot= 仅透传 Bot 目标；
+ * section/origin 由对话页按目录归属解析（管理 Bot/好友 Bot 均可命中）。
+ */
+export function getCollaborationBotConversationUrl(botId: string, sessionId: string): string {
+  const route: ConversationRouteState = { botId, sessionId };
+  return `/workspace/chat?${serializeConversationRoute(route)}`;
 }
 
 /**
- * 协作群会话跳转 URL：走协作群视图（tab=group）。
- * - groupId 已知时带上 group= 以便 workspace 直接选中该群；
- * - 仅 session=（无 group=）时 workspace 会异步反查 groupId（邀请链接等场景）。
+ * 协作群会话跳转 URL（/workspace/collaboration）。
+ * - groupId 已知时带上 group= 以便协作群页直接选中该群；
+ * - 仅 session=（无 group=）时协作群页会异步反查 groupId（邀请链接等场景）。
  */
 export function getCollaborationGroupConversationUrl(
   groupId: string | null | undefined,
   sessionId: string,
   currentIdentityId?: string,
 ): string {
-  return `/workspace?${serializeWorkspaceRoute({
-    view: 'group',
+  return `/workspace/collaboration?${serializeWorkspaceRoute({
     currentIdentityId,
     groupId,
     sessionId,

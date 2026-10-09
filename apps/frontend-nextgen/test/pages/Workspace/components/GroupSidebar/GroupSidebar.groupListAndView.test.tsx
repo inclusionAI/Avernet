@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-// 功能域：协作群列表渲染（群行样式/菜单/标签）与顶部视图切换、收起态。
+// 功能域：协作群列表渲染（群行样式/菜单/标签）;视图切换已收口到 App Shell(Task 8)。
 // 从原 GroupSidebar.test.tsx 拆出（断言与渲染逻辑零改动），用于并行模式下多 worker 分摊。
 import { GroupSidebar } from '@/pages/Workspace/components/GroupSidebar';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -36,9 +36,7 @@ describe('GroupSidebar', () => {
     const actionButton = screen.getByRole('button', { name: '发起协作' });
     const searchInput = screen.getByRole('textbox', { name: '搜索协作群' });
     const toolRow = searchInput.parentElement?.parentElement;
-    const tabRow = screen.getByRole('group', { name: '工作区类型' }).parentElement;
     expect(toolRow).toContainElement(actionButton);
-    expect(tabRow).not.toContainElement(actionButton);
     fireEvent.click(actionButton);
     expect(onCreateGroup).toHaveBeenCalled();
   });
@@ -186,23 +184,6 @@ describe('GroupSidebar', () => {
     expect(searchInput.parentElement?.parentElement).toHaveClass('px-4');
   });
 
-  it('顶部视图切换只承担导航，未选中 Tab 保持清晰对比', () => {
-    render(<GroupSidebar {...makeProps()} />);
-    const inactiveTab = screen.getByRole('button', { name: '对话' });
-    const activeTab = screen.getByRole('button', { name: '协作群' });
-    const actionButton = screen.getByRole('button', { name: '发起协作' });
-    const tabRow = screen.getByRole('group', { name: '工作区类型' }).parentElement;
-    expect(inactiveTab).toHaveAttribute('aria-pressed', 'false');
-    expect(activeTab).toHaveAttribute('aria-pressed', 'true');
-    expect(activeTab).toHaveClass('bg-background', 'text-primary', 'shadow-sm');
-    expect(inactiveTab).toHaveClass('text-muted-foreground');
-    expect(tabRow).not.toContainElement(actionButton);
-    expect(actionButton).toHaveClass('h-9', 'w-9', 'rounded-md');
-    expect(actionButton).toHaveClass('border-primary/20', 'bg-primary/5', 'text-primary');
-    expect(actionButton).not.toHaveClass('bg-primary', 'text-primary-foreground');
-    expect(actionButton).not.toHaveClass('lg:hidden');
-  });
-
   it('群名称搜索框、筛选按钮与发起协作按钮等高', () => {
     render(<GroupSidebar {...makeProps()} />);
     expect(screen.getByRole('textbox', { name: '搜索协作群' })).toHaveClass('h-9');
@@ -210,9 +191,19 @@ describe('GroupSidebar', () => {
     expect(screen.getByRole('button', { name: '发起协作' })).toHaveClass('h-9');
   });
 
-  it('协作身份移出二级侧栏，群卡片保留可读间距并降低标题字重', () => {
+  it('协作身份区位于群搜索工具行之前，群卡片保留可读间距并降低标题字重', () => {
     render(<GroupSidebar {...makeProps()} />);
-    expect(screen.queryByRole('button', { name: '当前协作身份：示例用户' })).not.toBeInTheDocument();
+    const identityRegion = screen.getByRole('region', { name: '当前协作身份' });
+    const searchInput = screen.getByRole('textbox', { name: '搜索协作群' });
+    const scrollContainer = searchInput.closest('.app-scrollbar');
+    const identityWrapper = identityRegion.parentElement;
+    const position = identityRegion.compareDocumentPosition(searchInput);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(identityRegion.closest('.app-scrollbar')).toBeNull();
+    expect(identityWrapper).toHaveClass('shrink-0');
+    expect(identityWrapper?.parentElement).toBe(scrollContainer?.parentElement);
+    expect(scrollContainer).toHaveClass('app-scrollbar', 'min-h-0', 'flex-1', 'overflow-y-auto');
+    expect(scrollContainer?.firstElementChild).not.toBe(identityRegion);
     const groupTrigger = screen.getByRole('button', { name: /主站群/ });
     expect(groupTrigger.parentElement).toHaveClass('min-h-16', 'bg-muted', 'px-4', 'py-2.5');
     expect(groupTrigger).toHaveClass('px-0', 'py-1');
@@ -262,23 +253,12 @@ describe('GroupSidebar', () => {
     expect(actionsFavorite).toHaveClass('opacity-100');
   });
 
-  it('协作群列表向下滚动时一级 Tab 吸顶', () => {
+  it('协作群列表头部筛选行保持吸顶(视图切换收口到 App Shell)', () => {
     render(<GroupSidebar {...makeProps()} />);
 
-    const tabGroup = screen.getByRole('group', { name: '工作区类型' });
-    expect(tabGroup.parentElement?.parentElement).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted/20');
-  });
-
-  it('收起态保留对话与协作群快捷切换图标', () => {
-    const onViewChange = jest.fn();
-    render(<GroupSidebar {...makeProps({ onViewChange })} />);
-
-    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
-
-    expect(screen.getByRole('button', { name: '切换到对话' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '切换到协作群' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: '切换到对话' }));
-    expect(onViewChange).toHaveBeenCalledWith('chat');
-    fireEvent.click(screen.getByRole('button', { name: '展开对话协作左栏' }));
+    const toolRow = screen.getByRole('textbox', { name: '搜索协作群' }).parentElement?.parentElement?.parentElement
+      ?.parentElement;
+    expect(toolRow).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted/20');
+    expect(toolRow?.parentElement).toHaveClass('app-scrollbar', 'overflow-y-auto');
   });
 });

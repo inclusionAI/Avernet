@@ -5,17 +5,19 @@ import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton'
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
+import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
-import type { BotDomain } from '@/services/botWorkshop';
+import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
 import React, { useState } from 'react';
 
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
+  const [generalConfigBot, setGeneralConfigBot] = useState<BotDomain>();
   const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   return (
     <main className="app-scrollbar h-full overflow-y-auto">
@@ -33,6 +35,7 @@ const BotWorkshopPage: React.FC = () => {
             onServiceModeChange={workshop.setServiceMode}
             onCreateCloud={workshop.openCreateCloud}
             onCreateLocal={workshop.openCreateLocal}
+            localCreateDisabledReason={workshop.localCreateDisabledReason}
             total={workshop.total}
             onReset={() => {
               workshop.setKeyword('');
@@ -82,6 +85,10 @@ const BotWorkshopPage: React.FC = () => {
                 }}
                 onAuthorize={workshop.openAuthorize}
                 getCollaborationMode={workshop.collaborationModeFor}
+                getGeneralConfigAvailability={(bot) =>
+                  getGeneralConfigAvailability(workshop.canChangeSpace(bot), bot.lock?.status === 'other')
+                }
+                onGeneralConfig={setGeneralConfigBot}
                 onManagePublication={setPublicationBot}
                 onAction={workshop.runAction}
                 onClaimLock={workshop.claimLock}
@@ -125,12 +132,15 @@ const BotWorkshopPage: React.FC = () => {
           operation={workshop.access.operation}
           collaborators={workshop.collaborators}
           members={workshop.access.members}
+          autoApproveEditorRequests={workshop.access.autoApproveEditorRequests}
+          policyError={workshop.access.policyError}
           onClose={workshop.closeAccess}
           onChangeSpace={workshop.changeSpace}
           onCreateTeamAndChangeSpace={workshop.createTeamAndChangeSpace}
           onAddCollaborator={workshop.addCollaborator}
           onUpdateCollaborator={workshop.updateCollaborator}
           onRemoveCollaborator={workshop.removeCollaborator}
+          onEditorRequestPolicyChange={workshop.updateEditorRequestPolicy}
           onRequestAccess={workshop.requestAccess}
         />
         <ServicePublicationDrawer
@@ -141,6 +151,9 @@ const BotWorkshopPage: React.FC = () => {
           }}
           onChanged={workshop.retry}
         />
+        {generalConfigBot ? (
+          <BotGeneralConfigDialog bot={generalConfigBot} onClose={() => setGeneralConfigBot(undefined)} />
+        ) : null}
       </div>
     </main>
   );

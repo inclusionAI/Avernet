@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotEditorCli, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
@@ -156,21 +157,34 @@ export function CapabilityMembers({
                 </TooltipProvider>
               ) : null}
               {kind !== 'cli' ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <ConfirmDialog
+                  title={`确认移除该 ${kind === 'skill' ? 'Skill' : 'MCP'}？`}
+                  description={`移除「${item.name}」后，当前能力集将不再使用该能力。`}
+                  confirmText="确认移除"
+                  confirmVariant="destructive"
                   disabled={!editable || Boolean(removingId)}
-                  aria-label={`移除${item.name}`}
-                  leftIcon={
-                    removingId === id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />
-                  }
-                  onClick={() => {
+                  onConfirm={async () => {
                     setRemovingId(id);
-                    void Promise.resolve(onRemove?.(id))
-                      .catch(() => undefined)
-                      .finally(() => setRemovingId(undefined));
+                    try {
+                      await onRemove?.(id);
+                    } finally {
+                      setRemovingId(undefined);
+                    }
                   }}
-                />
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`移除${item.name}`}
+                    leftIcon={
+                      removingId === id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3.5" />
+                      )
+                    }
+                  />
+                </ConfirmDialog>
               ) : null}
             </div>
           );

@@ -7,6 +7,7 @@ import type {
   BotRenderScreenInput,
 } from '@/domain/botEditor';
 import { botEditorController, type SkillDto, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
 import {
   dataOr,
@@ -52,6 +53,8 @@ async function listAllLocalBotSkills(botId: string, ownerId?: string): Promise<S
   return items;
 }
 
+const routineCreationFlights = new Map<string, ReturnType<typeof botEditorController.createRoutine>>();
+
 export const botEditorService = {
   async getCallerContext(botId: string, ownerId?: string) {
     const response = await botEditorController.getCallerContext(botId, ownerId);
@@ -78,18 +81,15 @@ export const botEditorService = {
       return 0;
     }
   },
-  async load(botId: string, serviceBot = false, ownerId?: string, deployment = 'cloud', engine = '') {
+  async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '') {
     const policy = desktopCapabilityPolicy(deployment, engine);
-    const [skills, skillSetResources, resources, screens, routines, engineStatus, approval] = await Promise.allSettled([
+    const [skills, skillSetResources, resources, screens, routines, engineStatus] = await Promise.allSettled([
       listAllLocalBotSkills(botId, ownerId),
       botEditorController.listSkillSetResources(botId, ownerId),
       botEditorService.listResources(botId, '', ownerId),
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
-      serviceBot
-        ? botEditorController.getApprovalConfig(botId, ownerId)
-        : Promise.resolve({ data: { should_approval: false } }),
     ]);
     const sets: BotCapabilitySet[] = [];
     let skillSetDetailErrors = 0;
@@ -102,7 +102,7 @@ export const botEditorService = {
           skillSetDetailErrors += Number(setSkills.status === 'rejected');
           return {
             id: set.id,
-            name: set.name,
+            name: set.is_default ? '默认能力集' : set.name,
             description: set.description,
             isDefault: set.is_default,
             active: set.is_active,
@@ -145,9 +145,8 @@ export const botEditorService = {
               running: engineStatus.value.data?.running ?? false,
             }
           : undefined,
-      approvalRequired: approval.status === 'fulfilled' ? Boolean(approval.value.data?.should_approval) : false,
       errors:
-        [skills, skillSetResources, resources, screens, routines, engineStatus, approval].filter(
+        [skills, skillSetResources, resources, screens, routines, engineStatus].filter(
           (item) => item.status === 'rejected',
         ).length + skillSetDetailErrors,
     };
@@ -244,11 +243,27 @@ export const botEditorService = {
   },
   setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean) =>
     botEditorController.setMcpActive(botId, mcp.serverCode, active),
-  createSkillSet: (botId: string, name: string) => botEditorController.createSkillSet(botId, { name }),
+  async createSkillSet(botId: string, name: string) {
+    const created = await botEditorController.createSkillSet(botId, { name });
+    const setId = created.data?.id;
+    if (!setId) throw new Error('能力集已创建，但响应缺少能力集标识，无法自动启用');
+    await botEditorController.setSkillSetActive(botId, setId, true);
+    return created;
+  },
   updateSkillSet: (botId: string, id: string, name: string) => botEditorController.updateSkillSet(botId, id, { name }),
   deleteSkillSet: (botId: string, id: string) => botEditorController.deleteSkillSet(botId, id),
-  setSkillSetActive: (botId: string, set: BotCapabilitySet, active: boolean) =>
-    botEditorController.setSkillSetActive(botId, set.id, active),
+  async setSkillSetActive(botId: string, set: BotCapabilitySet, active: boolean) {
+    const response = await botEditorController.setSkillSetActive(botId, set.id, active);
+    if (
+      isEnvelopeFailure(response) ||
+      !response.data ||
+      response.data.id !== set.id ||
+      typeof response.data.is_active !== 'boolean'
+    ) {
+      throw new Error(response.message || '能力集状态未确认，请刷新后查看');
+    }
+    return { id: response.data.id, active: response.data.is_active };
+  },
   setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
     botEditorController.setSkillSetSkill(botId, setId, skillId, active),
   async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[]) {
@@ -326,8 +341,17 @@ export const botEditorService = {
   offlineLifecycle: (botId: string) => botEditorController.offlineLifecycle(botId),
   retryLifecycle: (botId: string) => botEditorController.retryLifecycle(botId),
   deleteLifecycleDraft: (botId: string) => botEditorController.deleteLifecycleDraft(botId),
-  createRoutine: (botId: string, input: BotEditorRoutineInput, ownerId?: string) =>
-    botEditorController.createRoutine(botId, toRoutineWrite(input), ownerId),
+  createRoutine(botId: string, input: BotEditorRoutineInput, ownerId?: string) {
+    const key = `${botId}\u0000${ownerId ?? ''}\u0000${input.name.trim()}\u0000${
+      input.cron
+    }\u0000${input.command.trim()}\u0000${input.model ?? ''}\u0000${input.timeoutSecs}`;
+    const inFlight = routineCreationFlights.get(key);
+    if (inFlight) return inFlight;
+    const request = botEditorController.createRoutine(botId, toRoutineWrite({ ...input, enabled: true }), ownerId);
+    routineCreationFlights.set(key, request);
+    void request.finally(() => routineCreationFlights.delete(key)).catch(() => undefined);
+    return request;
+  },
   updateRoutine: (botId: string, id: string, input: BotEditorRoutineInput, ownerId?: string) =>
     botEditorController.updateRoutine(botId, id, toRoutineWrite(input), ownerId),
   deleteRoutine: (botId: string, id: string, ownerId?: string) => botEditorController.deleteRoutine(botId, id, ownerId),
@@ -341,11 +365,27 @@ export const botEditorService = {
       finishedAt: run.finished_at,
     }));
   },
+  async listRoutineModels(botId: string, ownerId?: string) {
+    const response = await botEditorController.listModels(botId, ownerId);
+    return (response.data?.items ?? []).map((item) => ({
+      id: item.model_id,
+      name: item.name || item.model_id,
+      provider: item.provider,
+    }));
+  },
   saveEngineConfig: (botId: string, config: BotEngineConfig, ownerId?: string) =>
     botEditorController.updateEngineConfig(botId, config, ownerId),
   async loadEngineConfig(botId: string, ownerId?: string) {
     const response = await botEditorController.getEngineConfig(botId, ownerId);
     return dataOr(response.data, {}) as BotEngineConfig;
+  },
+  async loadDefaultEngineConfig(botId: string, ownerId?: string) {
+    const response = await botEditorController.getEngineDefaultConfig(botId, ownerId);
+    return dataOr(response.data?.config, {}) as BotEngineConfig;
+  },
+  async loadApproval(botId: string, ownerId?: string) {
+    const response = await botEditorController.getApprovalConfig(botId, ownerId);
+    return Boolean(response.data?.should_approval);
   },
   saveApproval: (botId: string, enabled: boolean, ownerId?: string) =>
     botEditorController.updateApprovalConfig(botId, enabled, ownerId),

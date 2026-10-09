@@ -145,15 +145,7 @@ const { GroupWorkspaceArea } =
   require('@/pages/Workspace/GroupWorkspaceArea') as typeof import('@/pages/Workspace/GroupWorkspaceArea');
 
 function renderArea() {
-  return render(
-    <GroupWorkspaceArea
-      view="group"
-      onViewChange={jest.fn()}
-      availableViews={['chat', 'group']}
-      mobileListOpen={false}
-      onCloseMobileList={jest.fn()}
-    />,
-  );
+  return render(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
 }
 
 describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => {
@@ -175,15 +167,7 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
 
     // 模拟侧栏切群：选中群变为 g2（真实场景中 onSelectGroup 写 store 后 selectedGroupId 变化）。
     mockState.selectedGroupId = 'g2';
-    view.rerender(
-      <GroupWorkspaceArea
-        view="group"
-        onViewChange={jest.fn()}
-        availableViews={['chat', 'group']}
-        mobileListOpen={false}
-        onCloseMobileList={jest.fn()}
-      />,
-    );
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
 
     expect(mockReloadSelectedGroup).toHaveBeenCalledWith('g2');
   });
@@ -191,15 +175,7 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
   it('面板未打开时切换选中群不拉取详情（保持按需拉取约定）', () => {
     const view = renderArea();
     mockState.selectedGroupId = 'g3';
-    view.rerender(
-      <GroupWorkspaceArea
-        view="group"
-        onViewChange={jest.fn()}
-        availableViews={['chat', 'group']}
-        mobileListOpen={false}
-        onCloseMobileList={jest.fn()}
-      />,
-    );
+    view.rerender(<GroupWorkspaceArea mobileListOpen={false} onCloseMobileList={jest.fn()} />);
     expect(mockReloadSelectedGroup).not.toHaveBeenCalled();
   });
 

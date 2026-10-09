@@ -1,5 +1,5 @@
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
-import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
+import { getBotEntryAvailability, type BotActionAvailability, type BotDomain } from '@/services/botWorkshop';
 import React from 'react';
 import BotDescriptionCell from './BotDescriptionCell';
 import BotInfoCell from './BotInfoCell';
@@ -9,6 +9,7 @@ import BotStatusCell from './BotStatusCell';
 import BotTagsCell from './BotTagsCell';
 import BotVersionCell from './BotVersionCell';
 import type { BotCardManagementAction } from './config';
+import { DesktopStartProgress } from './DesktopStartProgress';
 
 export type BotInventoryActions = Partial<Record<'view' | 'chat' | 'edit', BotActionAvailability>>;
 
@@ -37,6 +38,9 @@ export interface BotTableProps {
   getHealthCheckAvailability?: (bot: BotDomain) => BotActionAvailability | undefined;
   getLogAction?: (bot: BotDomain) => BotActionAvailability | undefined;
   getCollaborationMode?: (bot: BotDomain) => 'authorize' | 'request' | undefined;
+  /** 通用配置菜单项门禁（collab-permission-entry-migration）；与 onGeneralConfig 成对传入。 */
+  getGeneralConfigAvailability?: (bot: BotDomain) => { enabled: boolean; disabledReason?: string } | undefined;
+  onGeneralConfig?: (bot: BotDomain) => void;
 }
 
 const BotTable: React.FC<BotTableProps> = ({
@@ -59,8 +63,19 @@ const BotTable: React.FC<BotTableProps> = ({
   getHealthCheckAvailability,
   getLogAction,
   getCollaborationMode,
+  getGeneralConfigAvailability,
+  onGeneralConfig,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
+  const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
+  const toggleProgress = React.useCallback((botId: string) => {
+    setExpandedProgressIds((current) => {
+      const next = new Set(current);
+      if (next.has(botId)) next.delete(botId);
+      else next.add(botId);
+      return next;
+    });
+  }, []);
   const columns: DataTableColumn<BotDomain>[] = React.useMemo(
     () => [
       {
@@ -78,8 +93,14 @@ const BotTable: React.FC<BotTableProps> = ({
       {
         id: 'status',
         header: '状态',
-        width: 'w-[96px]',
-        cell: (bot) => <BotStatusCell bot={bot} />,
+        width: 'w-[144px]',
+        cell: (bot) => (
+          <BotStatusCell
+            bot={bot}
+            progressExpanded={expandedProgressIds.has(bot.id)}
+            onToggleProgress={() => toggleProgress(bot.id)}
+          />
+        ),
       },
       {
         id: 'version',
@@ -110,20 +131,24 @@ const BotTable: React.FC<BotTableProps> = ({
         header: '主要操作',
         width: 'w-[360px]',
         align: 'end',
-        cell: (bot) => (
-          <BotPrimaryActionsCell
-            bot={bot}
-            onView={onView}
-            onEdit={onEdit}
-            onConversation={onConversation}
-            conversationAllowed={canOpenConversation?.(bot) ?? true}
-            onOpenLogs={onOpenLogs}
-            onHealthCheck={onHealthCheck}
-            inventoryActions={getInventoryActions?.(bot)}
-            healthCheckAvailability={getHealthCheckAvailability?.(bot)}
-            logAction={getLogAction?.(bot)}
-          />
-        ),
+        cell: (bot) => {
+          const entry = getBotEntryAvailability(bot);
+          return (
+            <BotPrimaryActionsCell
+              bot={bot}
+              onView={onView}
+              onEdit={onEdit}
+              onConversation={onConversation}
+              conversationAllowed={(canOpenConversation?.(bot) ?? true) && entry.enabled}
+              conversationDisabledReason={entry.enabled ? undefined : entry.disabledReason}
+              onOpenLogs={onOpenLogs}
+              onHealthCheck={onHealthCheck}
+              inventoryActions={getInventoryActions?.(bot)}
+              healthCheckAvailability={getHealthCheckAvailability?.(bot)}
+              logAction={getLogAction?.(bot)}
+            />
+          );
+        },
       },
       {
         id: 'more-actions',
@@ -133,6 +158,7 @@ const BotTable: React.FC<BotTableProps> = ({
         cell: (bot) => {
           if (!onAction) return null;
           const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+          const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
           return (
             <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
               <BotManagementMenu
@@ -143,6 +169,9 @@ const BotTable: React.FC<BotTableProps> = ({
                 onManagePublication={onManagePublication}
                 onChangeSpace={onChangeSpace}
                 onAuthorize={isAgentCodingBot ? undefined : onAuthorize}
+                canGeneralConfig={generalConfigAvailability?.enabled}
+                generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
+                onGeneralConfig={onGeneralConfig}
               />
             </div>
           );
@@ -167,6 +196,10 @@ const BotTable: React.FC<BotTableProps> = ({
       getHealthCheckAvailability,
       getLogAction,
       getCollaborationMode,
+      expandedProgressIds,
+      toggleProgress,
+      getGeneralConfigAvailability,
+      onGeneralConfig,
     ],
   );
 
@@ -193,6 +226,14 @@ const BotTable: React.FC<BotTableProps> = ({
       rows={bots}
       getRowKey={(bot) => bot.cardId ?? bot.entityKey}
       onRowClick={handleRowClick}
+      isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
+      renderExpandedRow={(bot) =>
+        bot.deployment === 'local' &&
+        ['deploying', 'failed'].includes(bot.lifecycle) &&
+        expandedProgressIds.has(bot.id) ? (
+          <DesktopStartProgress botId={bot.id} />
+        ) : null
+      }
       ariaLabel={ariaLabel}
     />
   );

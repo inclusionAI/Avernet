@@ -14,6 +14,5 @@ export const moreTabs: Array<{ key: MoreConfigTab; label: string; icon: React.Re
   { key: 'md', label: 'MD 文档', icon: <FileText className="size-3.5 shrink-0" /> },
   { key: 'node', label: '节点', icon: <Database className="size-3.5 shrink-0" /> },
   { key: 'channel', label: '渠道', icon: <Network className="size-3.5 shrink-0" /> },
-  { key: 'approval', label: '发布审批', icon: <ShieldCheck className="size-3.5 shrink-0" /> },
   { key: 'screen', label: '副屏', icon: <Smartphone className="size-3.5 shrink-0" /> },
 ];

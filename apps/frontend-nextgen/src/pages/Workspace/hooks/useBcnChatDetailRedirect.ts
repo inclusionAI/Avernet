@@ -30,9 +30,9 @@ async function resolveMembership(groupId: string, botUuid: string | null): Promi
 
 /**
  * useBcnChatDetailRedirect —— BCN 外链落地（/workspace/bcn/chat/detail?id=&bot_uuid=&session=）：
- * 判定参与方式后 history.replace 到 workspace 协作群深链
- * （?tab=group&group=&session=[&current=][&membership=]）。bot_uuid 透传为 current= 参数，
- * 由 workspace 首次外链同步按其定位视角身份（Bot/用户均可，未命中退回用户身份）。
+ * 判定参与方式后 history.replace 到协作群页深链
+ * （/workspace/collaboration?current=&group=&session=[&membership=]）。bot_uuid 透传为 current= 参数，
+ * 由协作群页首次外链同步按其定位视角身份（Bot/用户均可，未命中退回用户身份）。
  * 落地页不进历史栈（replace）。
  */
 export function useBcnChatDetailRedirect(): { status: BcnChatDetailStatus } {
@@ -49,13 +49,12 @@ export function useBcnChatDetailRedirect(): { status: BcnChatDetailStatus } {
       const membership = await resolveMembership(groupId, botUuid);
       if (cancelled) return;
       const search = serializeWorkspaceRoute({
-        view: 'group',
         currentIdentityId: botUuid,
         groupId,
         sessionId,
         membership: membership ?? undefined,
       });
-      history.replace(`/workspace?${search}`);
+      history.replace(`/workspace/collaboration?${search}`);
     })();
     return () => {
       cancelled = true;

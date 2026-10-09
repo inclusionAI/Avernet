@@ -38,6 +38,12 @@ describe('botEditorController', () => {
       'GET',
     ],
     [
+      'routine models',
+      () => botEditorController.listModels('bot-1'),
+      '/openapi/v1/bots/bot-1/models?page=1&page_size=100',
+      'GET',
+    ],
+    [
       'routine runs',
       () => botEditorController.listRoutineRuns('bot-1', 'routine-1'),
       '/openapi/v1/bots/bot-1/routines/routine-1/runs?page=1&page_size=20',
@@ -65,6 +71,12 @@ describe('botEditorController', () => {
       'engine config',
       () => botEditorController.getEngineConfig('bot-1'),
       '/openapi/v1/bots/bot-1/engine/config',
+      'GET',
+    ],
+    [
+      'engine default config',
+      () => botEditorController.getEngineDefaultConfig('bot-1'),
+      '/openapi/v1/bots/bot-1/engine/default-config',
       'GET',
     ],
     [
@@ -144,8 +156,10 @@ describe('botEditorController', () => {
     ['skill set members', () => botEditorController.listSkillSetSkills('bot-1', '7', 'owner-1')],
     ['resources', () => botEditorController.listResources('bot-1', '', 'owner-1')],
     ['routines', () => botEditorController.listRoutines('bot-1', 'owner-1')],
+    ['routine models', () => botEditorController.listModels('bot-1', 'owner-1')],
     ['approval', () => botEditorController.getApprovalConfig('bot-1', 'owner-1')],
     ['engine config', () => botEditorController.getEngineConfig('bot-1', 'owner-1')],
+    ['engine default config', () => botEditorController.getEngineDefaultConfig('bot-1', 'owner-1')],
     ['engine status', () => botEditorController.getEngineStatus('bot-1', 'owner-1')],
     ['caller context', () => botEditorController.getCallerContext('bot-1', 'owner-1')],
   ])('%s passes the addressed Bot owner separately from the current user', async (_label, invoke) => {
