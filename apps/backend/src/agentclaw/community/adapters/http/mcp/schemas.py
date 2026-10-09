@@ -104,11 +104,19 @@ class MCPHeaderGroup(BaseModel):
     bots: List[str] = Field(default_factory=list)
 
 
+class MCPURLRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str
+    bots: List[str] = Field(default_factory=list)
+
+
 class MCPScopedConfigData(BaseModel):
     server_code: str
     endpoint_env: str
     transport_protocol: Optional[str]
     params: List[MCPHeaderGroup]
+    url_rules: List[MCPURLRule]
     sync_results: Optional[List[Dict[str, Any]]] = None
     sync_summary: Optional[Dict[str, int]] = None
 
@@ -125,6 +133,7 @@ class MCPScopedConfigRequest(BaseModel):
     endpoint_env: Literal["PROD", "PRE"]
     transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None
     params: List[MCPHeaderGroup]
+    url_rules: List[MCPURLRule] = Field(default_factory=list)
 
 
 class MCPApplyPermissionRequest(BaseModel):

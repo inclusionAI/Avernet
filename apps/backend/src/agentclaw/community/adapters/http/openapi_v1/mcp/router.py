@@ -69,6 +69,7 @@ from agentclaw.community.core.mcp.config_flow import (
 from agentclaw.community.core.mcp.scoped_config_contract import (
     HeaderGroup,
     ScopedMCPConfig,
+    URLRule,
 )
 from agentclaw.community.core.mcp.errors import McpServerNotFoundError
 from agentclaw.community.core.mcp.presentation import (
@@ -83,6 +84,7 @@ from agentclaw.community.di import Injected
 from .schemas import (
     McpConfig,
     McpHeaderGroup,
+    McpURLRule,
     McpScopedConfig,
     McpScopedConfigWrite,
     McpConfigWrite,
@@ -487,6 +489,10 @@ def _to_scoped_config(config: ScopedMCPConfig) -> McpScopedConfig:
             McpHeaderGroup(key=group.key, value=group.value, bots=list(group.bots))
             for group in config.params
         ],
+        url_rules=[
+            McpURLRule(url=rule.url, bots=list(rule.bots))
+            for rule in config.url_rules
+        ],
         sync_results=list(config.sync_results) if config.sync_results is not None else None,
         sync_summary=config.sync_summary,
     )
@@ -533,6 +539,10 @@ async def update_scoped_mcp_config(
         params=tuple(
             HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
             for group in credential_body.params
+        ),
+        url_rules=(
+            tuple(URLRule(url=rule.url, bots=tuple(rule.bots)) for rule in credential_body.url_rules)
+            if "url_rules" in credential_body.model_fields_set else None
         ),
     )
     return envelope(_to_scoped_config(config), request)

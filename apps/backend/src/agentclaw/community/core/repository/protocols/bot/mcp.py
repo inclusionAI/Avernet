@@ -74,7 +74,7 @@ class BotMCPConfigRepositoryProtocol(Protocol):
 
 @runtime_checkable
 class ScopedMCPConfigRepositoryProtocol(Protocol):
-    """One transaction replacing user defaults and owned Bot Header maps."""
+    """One transaction replacing user defaults and owned Bot rules."""
 
     @abstractmethod
     def replace(
@@ -87,5 +87,8 @@ class ScopedMCPConfigRepositoryProtocol(Protocol):
         owned_bot_ids: set[str],
         endpoint_env: str,
         transport_protocol: str | None,
+        user_url: str | None = None,
+        bot_urls: dict[str, str] | None = None,
     ) -> None:
+        """When bot_urls is None preserve all URLs; otherwise replace them."""
         ...

@@ -21,10 +21,12 @@ provides:
   # Header-group Service API types live in scoped_config_contract; the flow
   # implements this interface without making API consumers import the flow.
   - "HeaderGroup"
+  - "URLRule"
   - "ScopedMCPConfig"
   - "MCPScopedConfigServiceProtocol"
   - "read_scoped_config"
   - "write_scoped_config"
+  - "effective_mcp_url_override"
   - "list_marketplace_servers"
   - "list_marketplace_tenants"
   # Presentation helpers shared by both surfaces.
@@ -97,6 +99,9 @@ returned in `sync_results` and does not roll the row back; `sync_summary`
 reports the affected/synced/offline/failed counts. When a selected Bot lacks the
 MCP at runtime, the result is `RUNTIME_DRIFT` and the Bot is fully reconciled.
 
-A custom Bot URL does not inherit static user/default/managed credentials in the
-server entry. Container-wide mcporter `headerPolicies` remain host-matched runtime
-policy, however; this core module neither emits nor disables them per server.
+A custom user or Bot URL inherits user-explicit Headers by name, independently
+of URL selection, but not Center-bound platform defaults, managed credentials,
+or legacy `api_key` in the server entry. Bot URL wins over user URL, which wins
+over the Center endpoint. See ADR 0016. Container-wide mcporter
+`headerPolicies` remain host-matched runtime policy, however; this core module
+neither emits nor disables them per server.

@@ -1,4 +1,4 @@
-"""Service API contract for scoped MCP Header configuration."""
+"""Service API contract for scoped MCP Header and URL configuration."""
 
 from __future__ import annotations
 
@@ -14,18 +14,25 @@ class HeaderGroup:
 
 
 @dataclass(frozen=True)
+class URLRule:
+    url: str
+    bots: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ScopedMCPConfig:
     server_code: str
     endpoint_env: str
     transport_protocol: str | None
     params: tuple[HeaderGroup, ...]
+    url_rules: tuple[URLRule, ...] = ()
     sync_results: tuple[dict[str, Any], ...] | None = None
     sync_summary: dict[str, int] | None = None
 
 
 @runtime_checkable
 class MCPScopedConfigServiceProtocol(Protocol):
-    """Read and replace a user's complete Header-group snapshot."""
+    """Read and replace a user's scoped MCP connection rules."""
 
     def read(self, *, user_id: str, server_code: str) -> ScopedMCPConfig: ...
 
@@ -37,4 +44,5 @@ class MCPScopedConfigServiceProtocol(Protocol):
         endpoint_env: str,
         transport_protocol: str | None,
         params: tuple[HeaderGroup, ...],
+        url_rules: tuple[URLRule, ...] | None = None,
     ) -> ScopedMCPConfig: ...
