@@ -192,6 +192,16 @@ function mapTransfer(dto: BotOwnershipTransferDto): BotOwnershipTransferView {
   };
 }
 
+/** 模块级状态：单飞 + 每 Bot 幂等 key（按既有 service 模式，无全局写状态）。 */
+/** 幂等 key 与 payload（to_user_id + expected_owner_version）绑定存储。 */
+const botAuthorityState: {
+  inflight: Promise<DomainResult<BotAuthorityView[]>> | null;
+  clientRequestIds: Map<string, { payloadStamp: string; key: string }>;
+} = {
+  inflight: null,
+  clientRequestIds: new Map<string, { payloadStamp: string; key: string }>(),
+};
+
 /**
  * BCS Bot ownership/manager 控制面的唯一服务入口（组件只消费这里的结果；
  * UI 不直接调用内部 team endpoints，也不自行推断当前 owner）。
@@ -513,14 +523,4 @@ export const botAuthorityService = {
       return { ok: false, error: mapped.error };
     }
   },
-};
-
-/** 模块级状态：单飞 + 每 Bot 幂等 key（按既有 service 模式，无全局写状态）。 */
-/** 幂等 key 与 payload（to_user_id + expected_owner_version）绑定存储。 */
-const botAuthorityState: {
-  inflight: Promise<DomainResult<BotAuthorityView[]>> | null;
-  clientRequestIds: Map<string, { payloadStamp: string; key: string }>;
-} = {
-  inflight: null,
-  clientRequestIds: new Map<string, { payloadStamp: string; key: string }>(),
 };

@@ -108,7 +108,8 @@ describe('mine access_relation → 视角身份', () => {
     );
     const res = await botAuthorityService.loadAuthorities();
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe(AUTHORITY_CONTRACT_ERROR);
+    if (res.ok) throw new Error('预期走失败分支');
+    expect(res.error.code).toBe(AUTHORITY_CONTRACT_ERROR);
   });
 });
 
@@ -162,7 +163,8 @@ describe('botAuthorityService 保留角色与 sources 结果', () => {
 
     const res = await botAuthorityService.getOwnership('bot-managed');
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe('OWNERSHIP_FORBIDDEN');
+    if (res.ok) throw new Error('预期走失败分支');
+    expect(res.error.code).toBe('OWNERSHIP_FORBIDDEN');
 
     const store = useWorkspaceStore.getState();
     expect(store.identities.some((i) => i.id === 'bot-managed')).toBe(false);
@@ -197,7 +199,8 @@ describe('转交处理 403 → 刷新并清理失权视角', () => {
       cardMock().mockRejectedValue(forbidden);
       const res = await botAuthorityService[lane as 'acceptTransfer']('transfer-1');
       expect(res.ok).toBe(false);
-      if (!res.ok) expect(res.error.code).toBe('OWNERSHIP_FORBIDDEN');
+      if (res.ok) throw new Error('预期走失败分支');
+      expect(res.error.code).toBe('OWNERSHIP_FORBIDDEN');
 
       const store = useWorkspaceStore.getState();
       expect(store.identities.some((i) => i.id === 'bot-managed')).toBe(false);
@@ -327,7 +330,8 @@ describe('ownership transfer 提交幂等键', () => {
     });
     const res = await botAuthorityService.createOwnershipTransfer('bot-owned', 'user-b', 3);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error.code).toBe('OWNERSHIP_CHANGED');
+    if (res.ok) throw new Error('预期走失败分支');
+    expect(res.error.code).toBe('OWNERSHIP_CHANGED');
   });
 });
 

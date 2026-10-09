@@ -210,3 +210,23 @@ state is the NEW fact: authority comes from owner/manager edges.
 | 0 | inspect printed; apply committed with an empty `failed` lane (conflicted/skipped lanes are governance entries, not failures) |
 | 1 | storage failure or ≥1 `failed` entry — re-run the same `--batch-id` to recover the batch from its committed prefix |
 | 2 | usage error: missing `--maintenance`, over-limit page, blank batch id, unreadable/invalid confirmation file |
+## 附: 2026-10-09 验收演练记录（Task 20 全链路验收）
+
+本节是 release 前对上述 runbook 的实测记录（环境：无 MySQL，SQLite/memory 路径；
+凭证不落日志）。逐条真实输出，未执行的项不在本节声称。
+
+- `bcs-ownership-migrate inspect`（无 `--maintenance`）：真实子进程退出码 **2**
+  （usage 语义，与上表一致）。
+- `bcs-ownership-migrate --maintenance --help`：退出码 **0**。
+- `--maintenance inspect` 缺 `--config-dir`/`BCS_CONFIG_DIR`：**当前实现为
+  config-loader panic（退出码 101）**，而非上表的 usage=2。启动前失败、零写、
+  不会产生半迁移状态，但与 exit-code 表的“2 覆盖全部 usage 错误”存在一道缺口；
+  以此为治理项记录，验收文档（`docs/superpowers/plans/2026-10-08-bot-owner-manager-validation.md`
+  §1.9/§5）同文如实记录，修复需在下一次治理提交中完成，不在验收报告里虚化。
+- dry-run 与回退断言由 `crates/bootstrap/bcs/tests/ownership_migration.rs`
+  以真实二进制子进程覆盖：inspect 前后库指纹断言**零写**；同 `--batch-id` 重放
+  返回原报告（add-safe、不重置已转交 owner/version）；conflict/skip 车道是治理
+  条目、不进 failed 车道；created_by 全程不变（§4 of 验收文档）。
+- live MySQL 双实例/锁时序合同仍是 CI-pending（`#[ignore]` +
+  `BCS_TEST_MYSQL_URL`，6 个套件的具体清单与未验证原因见验收文档 §2.1）；
+  本环境已按“未验证”如实记录，不冒充通过。
