@@ -420,3 +420,19 @@ PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
 GET /api/v1/collaboration/tasks/settings: missing [happy, error]
 POST /api/v1/collaboration/tasks/nodes/update: missing [happy, error]
 POST /api/v1/collaboration/tasks/settings: missing [happy, error]
+
+# 2026-10-09: agentcompute swarm surface (/agentcompute/v1). Router-level happy
+# and error paths are covered by tests/community/core/agentcompute/
+# test_http_adapter.py, but the singlebox endpoint harness has no agentcompute
+# stack (LLM config, durable job queue) to drive these against yet — the module
+# is exempt from singlebox flow coverage the same way (flow_coverage.py). The
+# Stage-B singlebox story backfills these cases; shrink this block then.
+GET /agentcompute/v1/health: missing [happy, error]
+GET /agentcompute/v1/jobs: missing [happy, error]
+GET /agentcompute/v1/jobs/{run_id}: missing [happy, error]
+GET /agentcompute/v1/jobs/{run_id}/report: missing [happy, error]
+GET /agentcompute/v1/jobs/{run_id}/stream: missing [happy, error]
+GET /agentcompute/v1/ready: missing [happy, error]
+POST /agentcompute/v1/jobs: missing [happy, error]
+POST /agentcompute/v1/jobs/{run_id}/cancel: missing [happy, error]
+POST /agentcompute/v1/run: missing [happy, error]
