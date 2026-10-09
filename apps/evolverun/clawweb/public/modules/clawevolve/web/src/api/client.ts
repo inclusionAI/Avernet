@@ -109,6 +109,11 @@ export const api = {
     getSkillAsset(id: string): Promise<EvolveSkillAsset> {
       return sharedApi.evolve.getSkillAsset(id)
     },
+    updateSkillAsset(id: string, input: { spaceId: string | null }): Promise<EvolveSpaceOwnership> {
+      return fetchJson(`/api/evolve/skill-assets/${encodeURIComponent(id)}`, {
+        method: 'PATCH', body: JSON.stringify(input),
+      })
+    },
     listStageDevelopments(): Promise<{ items: EvolveStageDevelopment[] }> {
       return sharedApi.evolve.listStageDevelopments()
     },
