@@ -231,18 +231,10 @@ fail() { echo -e "  ${RED}✗${NC} $1"; }
 info() { echo -e "  ${CYAN}→${NC} $1"; }
 warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
 
-singlebox_mode_option() {
-    if [ "${SINGLEBOX_MODE:-local}" = "standalone" ]; then
-        echo "--standalone"
-    else
-        echo "--local"
-    fi
-}
-
 singlebox_cmd() {
     local action="$1"
     local target="$2"
-    echo "./singlebox/singlebox.sh $(singlebox_mode_option) ${action} ${target}"
+    echo "./singlebox/singlebox.sh ${action} ${target}"
 }
 
 health_ready() {

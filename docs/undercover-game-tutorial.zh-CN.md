@@ -8,6 +8,8 @@
 
 以下使用仓库的本机 singlebox 启动方式，适用于 macOS / Linux。所有命令都在 Avernet 仓库根目录执行。首次安装需要下载依赖并编译，请预留时间和磁盘空间。
 
+当前 singlebox 默认使用本机隔离的运行目录，无需添加 `--local` 或 `--standalone`；`--local` 已移除。本教程使用默认的 `legacy` 前端（`apps/frontend`）。如果之前在 `singlebox/.env.local` 中选择了其他前端，请改为 `FRONTEND_VARIANT=legacy` 后再执行下文的 `bcs_frontend` 命令。
+
 如果还没有源码，先运行：
 
 ```bash
@@ -18,7 +20,7 @@ cd Avernet
 已有源码则进入自己的 Avernet 目录，并确认当前版本包含游戏配置：
 
 ```bash
-test -f scripts/6bots_undercover_game_profile/bots.json && echo "谁是卧底配置已找到"
+test -f singlebox/agents/6bots_undercover_game_profile/bots.json && echo "谁是卧底配置已找到"
 ```
 
 安装工具并检查环境：
@@ -49,7 +51,7 @@ test -f scripts/6bots_undercover_game_profile/bots.json && echo "谁是卧底配
 命令成功结束后，检查游戏 Bot 的启动条件：
 
 ```bash
-./singlebox/singlebox.sh check bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh check bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 检查应识别到 6 个 Bot 的配置。后续管理游戏 Bot 时，都要带上同一个 `--profile-dir` 参数。
@@ -73,10 +75,10 @@ test -f scripts/6bots_undercover_game_profile/bots.json && echo "谁是卧底配
 如果尚无本机环境文件，先复制示例：
 
 ```bash
-test -f .env.local || cp .env.example .env.local
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
 ```
 
-用编辑器打开仓库根目录的 `.env.local`，填写或更新这三项：
+用编辑器打开仓库中的 `singlebox/.env.local`，填写或更新这三项，并删除行首的 `#` 注释符号：
 
 ```dotenv
 OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
@@ -84,34 +86,15 @@ OPENCLAW_OPENAI_API_KEY=your-api-key
 OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ```
 
+启动脚本自动读取的是 `singlebox/.env.local`，不会自动读取仓库根目录的 `.env.local`。如果你已有旧的根目录配置，请将需要的模型配置项复制到 `singlebox/.env.local`。三项均需填写非空值；选择 `manual` 只选择配置来源，不会交互式询问这些参数。
+
 以上均为占位值，请替换为你的服务参数。真实 API Key 只保存在本机，不要提交到 Git 或发到群聊。稍后启动 Bot 时选择 `manual`。
 
 `mock` 模式只能用于检查连接，不能让 Bot 真正发言或主持完整游戏。
 
 ## 4. 启动 Avernet
 
-完成 setup 和模型配置后，也可以使用一键脚本管理整套游戏环境：
-
-```bash
-./scripts/undercover.sh start    # 启动 BCS、前端和游戏 Bot，自动 onboard
-./scripts/undercover.sh stop     # 先停止 Bot，再停止 BCS 和前端
-./scripts/undercover.sh clean    # 停止后重置数据库、Bot 身份/会话/工作区及日志缓存
-./scripts/undercover.sh restart  # stop → clean → start
-```
-
-每次 `start` 会在 Bot 启动前，按 `bots.json` 的角色映射复制游戏技能：
-主持人使用 `referee/skills/undercover-game-referee`，玩家使用各自角色目录的
-`skills/undercover-game-player`。目标是各 Bot profile 配置指向的运行工作区
-`skills/`；游戏技能目录会完整刷新，其他技能（例如 `bcs-coordination`）保留。
-
-`clean` 删除本地 BCS 数据目录（包括整个数据库中的注册、协作群和会话）、
-生成的 BCS 配置，以及这 6 个游戏 Bot 的运行配置、身份、会话和工作区，
-同时清理服务日志、前端 Umi 临时目录和依赖缓存。源码中的角色配置和
-`.env.local` 保留；下次 `start` 会重新创建并 onboard Bot，需重新创建游戏协作群。
-如果服务端口仍在监听，清理会中止。`start` 的模型选择沿用下文的菜单；
-使用一键启动后可直接从第 6 步创建游戏协作群。
-
-启动 BCS 和前端，并指定本次使用的游戏配置目录：
+完成 setup 和模型配置后，先启动 BCS 和前端：
 
 ```bash
 ./singlebox/singlebox.sh start bcs_frontend
@@ -131,23 +114,25 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 运行：
 
 ```bash
-./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 如果出现模型配置菜单，根据第 3 步的准备选择：
 
 | 菜单选项 | 使用场景 |
 | --- | --- |
-| `manual` | 已在 `.env.local` 填好模型服务参数 |
+| `manual` | 已在 `singlebox/.env.local` 填好模型服务参数 |
 | `home` | 复用本机 OpenClaw 模型配置 |
 
 脚本会为游戏角色准备运行环境、启动 Bot、连接 BCS，并自动执行 **onboard（注册 Bot 的名称和能力）**。看到 `Dynamic bots onboarded` 表示这一步成功；不需要逐个手工执行 onboard 命令。
 
+每次 `start bots` 会在 Bot 启动前，按 `bots.json` 的角色映射复制游戏技能：主持人使用 `referee/skills/undercover-game-referee`，玩家使用各自角色目录的 `skills/undercover-game-player`。目标是各 Bot 的隔离运行工作区 `skills/`；游戏技能目录会完整刷新，其他已安装技能保留。
+
 检查进程状态和注册结果：
 
 ```bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_undercover_game_profile
-./src/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 list
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/6bots_undercover_game_profile
+./apps/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 list
 ```
 
 六个 Bot 都应显示 `Running`，注册列表中应能找到以下角色：
@@ -245,6 +230,7 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 
 | 问题 | 处理方法 |
 | --- | --- |
+| 选择 `manual` 后仍提示缺少模型配置 | 确认编辑的是 `singlebox/.env.local`，三项模型参数已取消注释且均为非空值；根目录的 `.env.local` 不会自动加载。 |
 | 创建群时找不到游戏 Bot | 检查 Bot 状态和 `bcs-cli list`，确认使用了游戏的 `--profile-dir` 且 onboard 成功，然后刷新页面。 |
 | Bot 显示运行但没有回复 | 检查是否选择了 `mock`，以及真实模型配置是否可用。修改配置后重启游戏 Bot，再新建会话开局。 |
 | 主持人一直提示加入会话 | 在页面底部点击“加入当前会话”；仅加入 BCN 或进入群页面还不够。 |
@@ -255,13 +241,13 @@ BCS 和 Frontend 应显示 `Running`，健康检查应成功返回。随后可�
 需要重启游戏 Bot 时使用：
 
 ```bash
-./singlebox/singlebox.sh restart bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh restart bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 玩完后停止这套游戏 Bot：
 
 ```bash
-./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_undercover_game_profile
+./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/6bots_undercover_game_profile
 ```
 
 如果也不再使用 Avernet 页面和协作服务，再运行：

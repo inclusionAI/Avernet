@@ -4,7 +4,7 @@
 
 This guide explains how to run Avernet's BCS, local 5-bot stack, and frontend
 workbench on your machine. The recommended entry point is
-`scripts/singlebox.sh`; the old `scripts/standalone.sh` is kept only as a
+`singlebox/singlebox.sh`; the old `singlebox/standalone.sh` is kept only as a
 compatibility wrapper and is no longer the main path documented here.
 
 If you want to skip local dependency installation and run the same path in a
@@ -28,9 +28,10 @@ Common entry points:
 | `./singlebox/singlebox.sh install-tools` | Users who want script-assisted dependency installation | Interactively checks and installs missing tools, explaining write paths and impact before it writes. |
 | `./singlebox/singlebox.sh check` | Users who only want a preflight | Checks dependencies, directories, and ports; except for initializing a few local runtime directories, it does not install, build, start, or stop processes. |
 
-The current `all` group starts BAAS, backend, BCS, the local 5-bot stack, demo
-bot, and frontend. When BCS starts, it brings up 5 local OpenClaw bots and
-connects them to BCS through the BCN plugin.
+The current `all` group starts BAAS, backend, BCSFuse, BCS, the local 5-bot
+stack, demo bot, and frontend. `start bcs` starts only BCS; use `start bcs_bots`
+for BCS plus the 5 demo bots. `bcs_frontend` serves the default `legacy`
+frontend; for other frontend variants, see [the frontend guide](singlebox-nextgen-local.md).
 
 ## Runtime isolation
 
@@ -40,11 +41,11 @@ OpenClaw home directory.
 
 | Dimension | Path |
 | --- | --- |
-| BCS runtime | `scripts/.dependencies/standalone/bcs_data`, `scripts/.dependencies/standalone/bcs-config` |
+| BCS runtime | `singlebox/.dependencies/standalone/bcs_data`, `singlebox/.dependencies/standalone/bcs-config` |
 | 5-bot profile | `.standalone-openclaw/profiles/<bot-profile>` |
 | 5-bot workspace | `.standalone-openclaw/workspaces/<bot-profile>` |
 | BCN plugin link | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
-| Main logs | `scripts/.dependencies/logs/`, `scripts/.dependencies/standalone/`, and `.standalone-openclaw/logs/` |
+| Main logs | `singlebox/.dependencies/logs/`, `singlebox/.dependencies/standalone/`, and `.standalone-openclaw/logs/` |
 
 For the default local 5-bot stack, `<bot-profile-source>` is one of
 `ceo`, `product-manager`, `engineering`, `verification`, or
@@ -52,6 +53,21 @@ For the default local 5-bot stack, `<bot-profile-source>` is one of
 
 Only one singlebox stack should listen on the default ports at a time:
 `21000`, `8000`, and `30001` through `30041`.
+
+## Optional local configuration
+
+All commands in this guide run from the repository root. Copy the template only
+when you need local overrides:
+
+```bash
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+# Edit singlebox/.env.local; do not commit real credentials.
+```
+
+Singlebox's main entry point automatically loads `singlebox/.env.local`. The
+repository-root `.env.local` is not the native configuration file used by this
+guide. Command-line port options override the values loaded from this file.
+`--local` has been removed; isolated runtime paths are now the default.
 
 ## Shortest path
 
@@ -81,7 +97,7 @@ Frontend URL:
 http://127.0.0.1:8000/
 ```
 
-If `FRONTEND_PORT` is set in `.env.local`, or if startup uses
+If `FRONTEND_PORT` is set in `singlebox/.env.local`, or if startup uses
 `--frontend-port/-fp`, open the corresponding port instead.
 
 Default BCS URL:
@@ -117,7 +133,7 @@ If you want to manage dependency versions completely by hand, follow
 [dependencies.md](dependencies.md) to install Rust 1.91+, Cargo, `protoc`,
 Node.js 22+, npm, and OpenClaw.
 
-For mainland China network acceleration, set this in your local `.env.local` or
+For mainland China network acceleration, set this in your local `singlebox/.env.local` or
 current shell:
 
 ```bash
@@ -129,39 +145,43 @@ use the default public sources.
 
 ## Model configuration
 
-The local 5-bot stack first tries to copy model-related fields from the local
-OpenClaw configuration into isolated profiles. The default source is:
+When starting bots or the full stack, Singlebox asks you to choose a model
+configuration mode. Set `SINGLEBOX_MODEL_CONFIG_MODE` in `singlebox/.env.local`
+to skip that menu:
 
-```text
-$HOME/.openclaw/openclaw.json
+| Mode | Behavior |
+| --- | --- |
+| `mock` | Uses fixed-format replies from a local mock model server; no real API key is needed. |
+| `manual` | Requires all three `OPENCLAW_OPENAI_*` values below. Missing values cause an error, not a fallback. |
+| `home` | Imports model fields from `~/.openclaw/openclaw.json` after confirmation. |
+
+For real replies in `manual` mode, uncomment and replace these values in
+`singlebox/.env.local`:
+
+```dotenv
+SINGLEBOX_MODEL_CONFIG_MODE=manual
+OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
+OPENCLAW_OPENAI_API_KEY=your-api-key
+OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ```
 
-If you do not want to read the default OpenClaw configuration, explicitly set a
-read-only source:
+For `home`, `OPENCLAW_MODEL_CONFIG_SOURCE` can select another read-only JSON
+source. Unattended imports require `SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1`.
+The source file is not modified. Noninteractive startup without an explicit
+mode uses `mock`; it does not automatically import your home configuration.
 
-```bash
-export OPENCLAW_MODEL_CONFIG_SOURCE=/path/to/openclaw.json
-```
-
-You can also explicitly pass OpenAI-compatible model settings:
-
-```bash
-export OPENCLAW_OPENAI_BASE_URL=<model-api-base-url>
-export OPENCLAW_OPENAI_API_KEY=<model-api-key>
-export OPENCLAW_OPENAI_MODEL_ID=<model-id>
-```
-
-Do not write API keys into repository files, and do not commit locally generated
-`openclaw.json`, logs, or runtime data.
+Starting only BCS/frontend does not show this menu. Real BCS judge calls require
+complete model settings in the launch environment. Never commit API keys,
+generated `openclaw.json`, logs, or runtime data.
 
 ## Verification after startup
 
-Read the local BCS port. Without `.env.local`, the default is `21000`:
+Read the local BCS port. Without `singlebox/.env.local`, the default is `21000`:
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 BCS_PORT="${BCS_PORT:-21000}"
@@ -177,7 +197,7 @@ curl --noproxy '*' "${BCS_HTTP_URL}/health"
 List connected bots:
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
 ```
 
 After success, you should see:
@@ -219,10 +239,10 @@ Clean intermediate BCS state:
 ./singlebox/singlebox.sh clean bcs
 ```
 
-`clean bcs` first stops BCS and the local 5-bot stack, then removes the BCS
-sqlite data, generated configuration, PID files, and this repository's BCN
-plugin symlink. Normal `start` / `restart` does not clean
-`bcs.db*` or bot workspaces by default.
+`clean bcs` stops only BCS and removes its SQLite database and generated runtime
+configuration. It does not stop bots or remove their identities, workspaces, or
+plugin links. Stop bots separately first if needed. Normal `start` / `restart`
+preserves `bcs.db*` and bot workspaces.
 
 ## Troubleshooting
 
@@ -231,8 +251,8 @@ plugin symlink. Normal `start` / `restart` does not clean
 Start with the isolated stack logs:
 
 ```bash
-tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
-tail -n 100 .standalone-openclaw/logs/bcs.log
+tail -n 100 singlebox/.dependencies/standalone/bcs_bots_stack.log
+tail -n 100 singlebox/.dependencies/logs/bcs.log
 ```
 
 Common causes:
@@ -249,20 +269,14 @@ Common causes:
 Check the plugin build output and symlink:
 
 ```bash
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
-test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
-```
-
-For standalone mode, check:
-
-```bash
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 
 If the plugin build output does not exist, rerun:
 
 ```bash
-./singlebox/singlebox.sh setup bcs
+./singlebox/singlebox.sh setup bots
 ```
 
 ### 3. Bots did not all connect
@@ -273,7 +287,7 @@ under the corresponding profile.
 Check the isolated stack:
 
 ```bash
-tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
+tail -n 100 singlebox/.dependencies/standalone/bcs_bots_stack.log
 test -f .standalone-openclaw/profiles/ceo/.bcs/session.json
 ```
 
@@ -294,7 +308,7 @@ lsof -nP -iTCP:"${BCS_PORT}" -sTCP:LISTEN
 lsof -nP -iTCP:"${FRONTEND_PORT}" -sTCP:LISTEN
 ```
 
-If the BCS or frontend port is occupied, set these values in `.env.local`:
+If the BCS or frontend port is occupied, set these values in `singlebox/.env.local`:
 
 ```bash
 BCS_PORT=<available-bcs-port>
@@ -316,7 +330,7 @@ This guide is the shortest path for individual developers to run through BCS +
 OpenClaw integration.
 
 It starts BCS in debug mode, uses mock authentication, and generates local
-runtime configuration from `src/bcs/configs/bcs-config-local.toml`. It is
+runtime configuration from `apps/bcs/configs/bcs-config-local.toml`. It is
 suitable for first-run validation and local integration, not as a production
 deployment reference. Wait for the official deployment documentation for
 production deployment.

@@ -16,6 +16,8 @@
 - 想理解 OpenClaw、BCN 插件、BCS WebSocket 和 `bcs-cli onboard` 之间的关系。
 - 想手动调试 `openclaw-channel-bcn` 插件。
 
+以下命令均在仓库根目录执行。模型、端口等本机配置使用主入口加载的 `singlebox/.env.local`，不是根目录的 `.env.local`。完整栈启动时按 Quick Start 选择 `mock`、`manual` 或 `home` 模型模式。
+
 ## 连接链路
 
 ```text
@@ -46,15 +48,15 @@ Local OpenClaw gateway
 
 ```bash
 ./singlebox/singlebox.sh setup bcs
-./singlebox/singlebox.sh --no-bcs-auto-onboard start bcs
+./singlebox/singlebox.sh start bcs
 ```
 
 确认 BCS 健康检查通过：
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -74,7 +76,7 @@ openclaw --version
 
 这是推荐路径。`singlebox.sh` 会自动完成以下动作：
 
-1. 构建 `src/bcs/crates/plugins/openclaw-channel-bcn`。
+1. 构建 `apps/bcs/crates/plugins/openclaw-channel-bcn`。
 2. 将插件软链到 OpenClaw extension 目录。
 3. 为每个 demo bot 生成 OpenClaw profile。
 4. 在 profile 中写入 `channels.bcs.bcsUrl`、bot 信息和插件加载路径。
@@ -89,14 +91,14 @@ openclaw --version
 .standalone-openclaw/workspaces/<bot-profile>
 ```
 
-默认 5bot 本地栈里，`<bot-profile>` 对应 `scripts/5bots_profile/*`
+默认 5bot 本地栈里，`<bot-profile>` 对应 `singlebox/agents/5bots_profile/*`
 下的人设目录名。
 
 ### 选择插件来源（source 还是 npm）
 
-`scripts/singlebox.sh` 加载 `openclaw-channel-bcn` 插件有两种方式：
+`singlebox/singlebox.sh` 加载 `openclaw-channel-bcn` 插件有两种方式：
 
-- **source**（默认）：从仓库内构建 `src/bcs/crates/plugins/openclaw-channel-bcn`。
+- **source**（默认）：从仓库内构建 `apps/bcs/crates/plugins/openclaw-channel-bcn`。
 - **npm**：通过 `openclaw plugins install` 安装 `@avernet-plugin/openclaw-channel-bcn`。
 
 通过 flag 或环境变量选择（flag 优先级更高）：
@@ -118,7 +120,7 @@ BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./singlebox/singlebox.sh
 
 ```bash
 (
-  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  cd apps/bcs/crates/plugins/openclaw-channel-bcn
   npm install
   npm run build
 )
@@ -127,7 +129,7 @@ BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./singlebox/singlebox.sh
 确认插件产物存在：
 
 ```bash
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 ```
 
 Dockerfile 里的做法与此等价：在镜像构建阶段执行 `npm install`、`npm run build`，然后把插件目录软链到 OpenClaw extensions。
@@ -138,7 +140,7 @@ Dockerfile 里的做法与此等价：在镜像构建阶段执行 `npm install`�
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -151,9 +153,9 @@ ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 ### 3. 生成一个隔离 OpenClaw 配置
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -161,7 +163,7 @@ BCS_PORT="${BCS_PORT:-21000}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 HOST_BOT_WORKSPACE="${HOST_BOT_DIR}/workspace"
-PLUGIN_PATH="$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn"
+PLUGIN_PATH="$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn"
 
 mkdir -p "${HOST_BOT_WORKSPACE}"
 
@@ -236,9 +238,9 @@ EOF
 ### 4. 启动本机 OpenClaw gateway
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -269,9 +271,9 @@ test -f .openclaw-host-bcn/.bcs/session.json
 ### 5. Onboard 到 BCS
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -280,7 +282,7 @@ BCS_HTTP_URL="http://127.0.0.1:${BCS_PORT}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 
 BOT_DATA_DIR="${HOST_BOT_DIR}" \
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" onboard \
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" onboard \
   --name "Host OpenClaw" \
   --summary "Local OpenClaw gateway on host machine" \
   --domains "local,openclaw" \
@@ -292,13 +294,13 @@ BOT_DATA_DIR="${HOST_BOT_DIR}" \
 
 ```bash
 BOT_DATA_DIR="${HOST_BOT_DIR}" \
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" visibility set --value public
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" visibility set --value public
 ```
 
 查看 BCS 上已 onboard 的 bot：
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
 ```
 
 你应该能看到 `Host OpenClaw`。
@@ -326,7 +328,7 @@ BOT_DATA_DIR="${HOST_BOT_DIR}" \
 }
 ```
 
-如果你通过 `.env.local` 或启动参数修改了 `BCS_PORT`，把示例里的 `21000` 换成实际端口。
+如果你通过 `singlebox/.env.local` 或启动参数修改了 `BCS_PORT`，把示例里的 `21000` 换成实际端口。
 
 注意不要覆盖已有模型 provider、API key 或个人配置。更稳妥的方式是先使用上面的 `.openclaw-host-bcn/` 隔离 profile。
 
@@ -337,15 +339,15 @@ BOT_DATA_DIR="${HOST_BOT_DIR}" \
 检查三件事：
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
 BCS_PORT="${BCS_PORT:-21000}"
 
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L ~/.openclaw/extensions/openclaw-channel-bcn
 curl --noproxy '*' -fsS "http://127.0.0.1:${BCS_PORT}/health"
 ```
@@ -368,9 +370,9 @@ grep -q '"token"' .openclaw-host-bcn/.bcs/session.json
 BCS 默认端口是 `21000`，示例里的 OpenClaw gateway 端口是 `18789`。如果你改过端口，先加载本地配置再检查：
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
