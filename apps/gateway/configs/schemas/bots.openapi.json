@@ -3235,7 +3235,7 @@
         "type": "object"
       },
       "CreateWorkOrderEventRequest": {
-        "description": "Generic request for creating an approval work order or notice.",
+        "description": "Generic approval or notice event; Skill editor approvals use their own endpoint.",
         "properties": {
           "applicant_user_id": {
             "anyOf": [
@@ -3263,8 +3263,13 @@
             "description": "Reason supplied for an approval event, when applicable.",
             "title": "Apply Reason"
           },
+          "approval_mode": {
+            "$ref": "#/components/schemas/WorkOrderApprovalMode",
+            "default": "MANUAL",
+            "description": "Approval workflow; AUTO is reserved for trusted internal business callers and is rejected by this public endpoint."
+          },
           "approver_user_ids": {
-            "description": "User identifiers who may approve the event.",
+            "description": "MANUAL approvers; AUTO uses no human approver rows.",
             "items": {
               "type": "string"
             },
@@ -3323,7 +3328,7 @@
             "type": "string"
           },
           "recipient_user_ids": {
-            "description": "User identifiers who receive the event notice.",
+            "description": "Recipients for notice events and trusted internal AUTO approval results.",
             "items": {
               "type": "string"
             },

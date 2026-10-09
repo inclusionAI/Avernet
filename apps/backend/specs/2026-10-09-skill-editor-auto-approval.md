@@ -25,6 +25,13 @@ the sole result recipient; both user-facing generic events routes reject AUTO.
 The applicant cannot choose the approval mode. An AUTO failure is an error, not
 a successful editor-request response.
 
+Both user-facing generic events routes also reject Skill collaborator APPROVAL
+creation in MANUAL mode, including a mismatched Skill business type or applied
+event type. Otherwise a caller could bypass the Skill preflight and create
+bogus Owner approval tasks. The shared HTTP adapter enforces this ingress rule;
+the in-process WorkOrder Service remains business-agnostic. Skill result NOTICE
+delivery and the dedicated editor-request entry remain available.
+
 ## Transaction and failure contract
 
 WorkOrder persists an AUTO Skill order as PROCESSING in the creation transaction. Its repository

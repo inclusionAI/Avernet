@@ -66,7 +66,12 @@ Unregistered event types keep the existing local-only approval behavior.
 
 Both user-facing `POST /openapi/v1/bots/work-orders/events` and
 `POST /api/v1/work-orders/events` accept MANUAL and NOTICE events but reject
-caller-selected `approval_mode=AUTO`. A qualified
+caller-selected `approval_mode=AUTO`. They also reject Skill collaborator
+APPROVAL events before reaching the WorkOrder Service; applicants must use the
+Skill editor-request endpoint, which owns membership, Grant, and duplicate
+request checks. Skill result NOTICE events remain available through generic
+delivery. This is a user-facing ingress rule, not a Skill qualification rule
+inside the generic WorkOrder Service. A qualified
 business module may call `WorkOrderService.create_work_order_event` in-process
 with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
 `recipient_user_ids`. AUTO creates no human approver row. WorkOrder creates the

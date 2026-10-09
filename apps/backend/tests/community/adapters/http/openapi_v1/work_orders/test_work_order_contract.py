@@ -536,6 +536,38 @@ def test_public_auto_space_join_cannot_bypass_owner_approval(
 
 
 @pytest.mark.parametrize(
+    ("biz_type", "event_type"),
+    [
+        ("SKILL_COLLABORATOR", "SKILL_COLLABORATOR_APPLIED"),
+        ("SKILL_COLLABORATOR", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "SKILL_COLLABORATOR_APPLIED"),
+        (" SKILL_COLLABORATOR ", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "\tSKILL_COLLABORATOR_APPLIED\n"),
+    ],
+)
+def test_public_generic_events_reject_skill_approval_before_service_call(
+    client, work_order_service, biz_type, event_type
+):
+    payload = {
+        "event_category": "APPROVAL",
+        "biz_type": biz_type,
+        "biz_id": "91",
+        "event_type": event_type,
+        "applicant_user_id": "owner-1",
+        "approver_user_ids": ["real-skill-owner"],
+        "recipient_user_ids": [],
+        "title": "Skill editor request",
+        "biz_data": {"space_id": 7, "skill_id": 91},
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400201
+    work_order_service.create_work_order_event.assert_not_called()
+
+
+@pytest.mark.parametrize(
     "content",
     [
         None,

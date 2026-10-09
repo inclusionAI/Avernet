@@ -97,7 +97,7 @@ class WorkOrderEventStatus(_DocumentedEnum):
 
 
 class CreateWorkOrderEventRequest(BaseModel):
-    """Generic request for creating an approval work order or notice."""
+    """Generic approval or notice event; Skill editor approvals use their own endpoint."""
 
     event_category: NotificationCategory = Field(
         description="Whether the event requires approval or is informational."
