@@ -546,7 +546,7 @@ impl ProviderRepoPort for DbProviderStore {
                 ),
             )
             .await?;
-        rows.first().map(|row| parse_provider(row).ok_or_else(|| ServiceError::InternalError("invalid provider record".into()))).transpose()
+        rows.first().map(parse_provider).transpose()
         }).await
     }
 
@@ -559,8 +559,7 @@ impl ProviderRepoPort for DbProviderStore {
         );
         let rows = self.query("get_provider_by_slug", DbStatement::with_params(sql,
             vec![DbValue::from(env.as_str()), DbValue::from(slug)])).await?;
-        rows.first().map(|row| parse_provider(row).ok_or_else(||
-            ServiceError::InternalError("invalid provider record".into()))).transpose()
+        rows.first().map(parse_provider).transpose()
     }
 
     async fn list_providers_by_ids(
@@ -589,7 +588,7 @@ impl ProviderRepoPort for DbProviderStore {
                 DbStatement::with_params(sql, params),
             )
             .await?;
-        Ok(rows.iter().filter_map(parse_provider).collect())
+        rows.iter().map(parse_provider).collect()
     }
 
     async fn list_providers(&self) -> ServiceResult<Vec<ProviderRecord>> {
@@ -605,7 +604,7 @@ impl ProviderRepoPort for DbProviderStore {
                 DbStatement::with_params(sql, vec![DbValue::from(env.as_str())]),
             )
             .await?;
-        Ok(rows.iter().filter_map(parse_provider).collect())
+        rows.iter().map(parse_provider).collect()
     }
 
     async fn update_provider_metadata(
@@ -1144,14 +1143,16 @@ impl OrganizationCandidateReadPort for DbProviderStore {
     }
 }
 
-fn parse_provider(row: &DbRow) -> Option<ProviderRecord> {
-    Some(ProviderRecord {
-        provider_id: optional_string(row, "provider_id")?,
-        slug: optional_string(row, "slug"),
-        name: optional_string(row, "name")?,
-        config: optional_string(row, "config")?,
-        created_by: optional_string(row, "created_by")?,
-        owners: optional_string(row, "owners")?,
+fn parse_provider(row: &DbRow) -> ServiceResult<ProviderRecord> {
+    let required = |column| optional_string(row, column)
+        .ok_or_else(|| ServiceError::InternalError("invalid provider record".into()));
+    Ok(ProviderRecord {
+        provider_id: required("provider_id")?,
+        slug: row.get_string("slug").map_err(|err| service_db_error("read_provider_slug", err))?,
+        name: required("name")?,
+        config: required("config")?,
+        created_by: required("created_by")?,
+        owners: required("owners")?,
         disabled: row_bool(row, "disabled"),
         created_at: row_seconds_to_millis(row, "gmt_create_ts"),
         updated_at: row_seconds_to_millis(row, "gmt_modified_ts"),

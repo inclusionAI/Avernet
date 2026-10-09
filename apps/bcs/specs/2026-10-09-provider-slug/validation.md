@@ -92,3 +92,36 @@ instruction to defer splitting; this does not expand CI's allowlist.
 
 The remaining changed sources are below 1,000 lines. Fixture-only additions in
 the existing oversized tests/server add slug defaults; no unrelated refactor.
+
+## PR #2564 CI repair
+
+The first remote run found two feature defects: the live E2E story never called
+`GET /providers/by-slug/{slug}`, and MySQL `ascii_bin` text was decoded as bytes
+because the adapter treated `BINARY_FLAG` as proof of binary data. MySQL marks
+binary-collation text with that flag too. The adapter now uses character-set ID
+63 for character columns and preserves the existing non-character decoding.
+Regression coverage includes binary-collation VARCHAR/TEXT, real binary payloads,
+and text-protocol temporal values. The real MySQL contract exercises text and
+prepared protocols, including unbound and bound queries.
+
+Provider row parsing now propagates an unexpected slug conversion error instead
+of silently returning a missing slug. The existing live operator story checks
+public fields, missing/invalid slugs, conflicts, rename, and disable/re-enable.
+
+A separate dev notification test assumed both failed targets always reached the
+same notification tick. A controlled reproduction returned the valid first
+notice, `Bot Driver 已离线`, before Observer failed. The test now controls the
+single-batch subscriber start and separately verifies two offline notices across
+ticks; production notification behavior is unchanged.
+
+Focused validation completed before this follow-up commit: MySQL adapter 11
+passed; Provider repository slug contracts 6 passed; notification integration
+suite 4 passed. The byte-decoding, malformed-slug, and temporal regressions were
+observed failing before their fixes. Broader affected-module and live-story
+checks continue while the requested `--no-verify` push starts remote CI.
+
+Real MySQL remains unavailable locally: the Docker CLI is installed, but no
+running daemon or Docker app is available. CI runs the actual MySQL migration
+chain and the extended driver conformance test. No migrations, CI thresholds,
+hooks, or allowlists were weakened. Provider splitting remains deferred per the
+user's instruction; the existing Provider store file remains above 1,000 lines.

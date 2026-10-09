@@ -92,3 +92,18 @@ async fn failed_slug_write_is_an_error() {
     assert!(matches!(store.update_provider_metadata("one", None, None, Some("new"), 1).await,
         Err(ServiceError::InternalError(_))));
 }
+
+#[tokio::test]
+async fn malformed_slug_value_is_an_error_in_provider_reads() {
+    let db = database().await;
+    db.execute(DbStatement::with_params("INSERT INTO bcs_providers
+        (provider_id, env, name, config, created_by, owners, slug)
+        VALUES ('one', ?, 'P', '{}', 'alice', '[]', ?)",
+        vec![bcs_config::resolve_env_str().into(), DbValue::Bytes(b"first".to_vec())]))
+        .await.unwrap();
+    let store = DbProviderStore::sqlite(db);
+    assert!(matches!(store.get_provider("one").await, Err(ServiceError::InternalError(_))));
+    assert!(matches!(store.list_providers_by_ids(&["one".into()]).await,
+        Err(ServiceError::InternalError(_))));
+    assert!(matches!(store.list_providers().await, Err(ServiceError::InternalError(_))));
+}
