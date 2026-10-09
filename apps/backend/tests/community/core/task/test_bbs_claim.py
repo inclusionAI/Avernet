@@ -6,7 +6,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Relation,
     RelationType,
     RuntimeInfo,
@@ -20,10 +19,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 
 def _ti(tid="p1"):
-    return TaskInfo(
+    return TaskInfo(task_id=tid,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -92,8 +91,8 @@ def test_claim_preserves_existing_hung_subtrees():
         task_id="p7",
         status=Status.HUNG,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id="h1", title="hung", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="hung"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         run_info=RuntimeInfo(),

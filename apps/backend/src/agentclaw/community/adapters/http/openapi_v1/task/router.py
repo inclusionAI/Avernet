@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
@@ -29,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -39,16 +41,21 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskOpResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
+    TaskTrajectoryDTO,
     bbs_task_overview_to_dto,
     graph_to_dto,
     op_result_to_dto,
     task_info_record_to_dto,
     task_info_request_from_dto,
+    trajectory_to_dto,
 )
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.task_context_service import (
+    TaskContextServiceProtocol,
+)
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -126,6 +133,49 @@ async def get_task_dashboard(
     else:
         graph = service.get_task_dashboard(task_id, node_id)
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
+
+
+@router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
+@envelope_errors
+async def get_task_trajectory(
+    task_id: Annotated[str, Query(description="任务ID(创建时签发, bots 列表返回的 task_id)")],
+    request: Request,
+    principal: PrincipalDep,
+    do_analysis: Annotated[
+        bool, Query(description="是否触发 bot 总体分析(默认关闭)")
+    ] = False,
+    force_analysis: Annotated[
+        bool,
+        Query(description="强制重跑分析,默认 false:忽略 timeline 版本号幂等判断,"
+                          "即使版本未变也重新调 bot 并回填(do_analysis 的前门旁路)"),
+    ] = False,
+    display: Annotated[
+        str | None,
+        Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
+    ] = None,
+    service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
+) -> Envelope[TaskTrajectoryDTO]:
+    """读取任务轨迹(与 adapters/http/task/router.py 内部副本同一
+    TaskContextServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
+
+    do_analysis=false(默认,纯读):返回组装后的 TaskTrajectory,analysis 取已落库值或 None,
+    不写库、不调 bot;do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、
+    analysis_executor=bot_id,部署级配置非请求参数)→ 覆盖回填两表 analysis+gmt_modified → 返回
+    携新 analysis 的同形态 TaskTrajectory。bot 未配置 → 503;bot 失败/超时 → 504 且不回填
+    (决策 #10/#14,analysis-trigger 失败必须可见)。原独立 /analysis 端点已并入此入口(决策 #10);
+    ?narrative=true 不恢复(随 REQ-P2 裁剪)。task_action_log / NodeAction 完全不触碰(独立旁路)。
+
+    display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
+    序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。
+    """
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
+    trajectory = await service.get_trajectory(
+        task_id, do_analysis=do_analysis, force_analysis=force_analysis
+    )
+    dto = trajectory_to_dto(trajectory)
+    if display == "html":
+        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+    return envelope(dto, request)
 
 
 @router.get(

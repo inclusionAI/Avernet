@@ -15,7 +15,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -34,10 +33,10 @@ def _run(coro):
 
 # ===== helpers =====
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -183,7 +182,7 @@ class TestBuildContext:
         assert ctx["mode"] == "verify"
         assert ctx["child_outputs"] == {"c1a": _node_output(svc, "c1a")}
         assert ctx["goal"] is not None  # node.task_spec.goal
-        assert ctx["node_instruction"] == "do"
+        assert ctx["node_instruction"] == "o\n背景: bg"
 
     def test_execute_mode_when_leaf_with_parent(self, svc, graph):
         runner = TaskRunner(svc)

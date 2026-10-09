@@ -168,6 +168,14 @@ _BOT_APP_GRANT_EXEMPT_REASON = (
     "both."
 )
 
+_FORUM_EXEMPT_REASON = (
+    "BBS Phase 1 has two /openapi/v1 write routes that require the addressed-Bot "
+    "principal seam, which singlebox cannot mint without a gateway. The batch is "
+    "covered by repository transaction/idempotency tests, service validation tests, "
+    "and HTTP response-contract tests. Drain this when a gateway-backed BBS e2e "
+    "flow can create and reply in singlebox."
+)
+
 _SPACES_FAMILY_EXEMPT_REASON = (
     "TEMPORARY, and blocked on the same single thing as "
     "_GATEWAY_PRINCIPAL_EXEMPT_REASON above: the spaces / market-favorites / "
@@ -185,6 +193,7 @@ _SPACES_FAMILY_EXEMPT_REASON = (
 )
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
+    "forum": _FORUM_EXEMPT_REASON,
     "aicoding": _EXEMPT_REASON,
     "spaces": _SPACES_FAMILY_EXEMPT_REASON,
     "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,

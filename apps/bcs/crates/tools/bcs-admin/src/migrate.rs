@@ -15,10 +15,8 @@ use sha2::{Digest, Sha256};
 
 use crate::bcs_root;
 
-mod history;
-mod index;
-use history::*;
-use index::*;
+const MYSQL_UTF8MB4_MAX_INDEX_BYTES: usize = 3072;
+const MYSQL_UTF8MB4_BYTES_PER_CHAR: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct MigrateGlobalArgs {
@@ -513,6 +511,361 @@ fn format_mysql_apply_report(
     output
 }
 
+fn validate_mysql_index_lengths(migrations: &[Migration]) -> Result<()> {
+    for migration in migrations {
+        let mut current_table: Option<(String, Vec<String>)> = None;
+        for line in migration.sql.lines() {
+            if let Some((table_name, body)) = current_table.as_mut() {
+                if line.trim_start().starts_with(") DEFAULT CHARSET = utf8mb4") {
+                    validate_mysql_table_index_lengths(migration, table_name, body)?;
+                    current_table = None;
+                } else {
+                    body.push(line.to_string());
+                }
+                continue;
+            }
+
+            if let Some(table_name) = parse_mysql_create_table_name(line) {
+                current_table = Some((table_name, Vec::new()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_mysql_table_index_lengths(
+    migration: &Migration,
+    table_name: &str,
+    body: &[String],
+) -> Result<()> {
+    let mut column_chars = BTreeMap::new();
+    for line in body {
+        if let Some((name, chars)) = parse_mysql_char_column(line) {
+            column_chars.insert(name, chars);
+        }
+    }
+
+    for line in body {
+        let Some((index_name, parts)) = parse_mysql_named_index(line) else {
+            continue;
+        };
+        let indexed_chars = parts
+            .iter()
+            .map(|part| {
+                part.prefix_chars
+                    .or_else(|| column_chars.get(&part.column).copied())
+                    .unwrap_or(0)
+            })
+            .sum::<usize>();
+        let indexed_bytes = indexed_chars * MYSQL_UTF8MB4_BYTES_PER_CHAR;
+        if indexed_bytes > MYSQL_UTF8MB4_MAX_INDEX_BYTES {
+            bail!(
+                "mysql migration {:03} ({}) index {}.{} is too long for utf8mb4: {} bytes > {} bytes",
+                migration.number,
+                migration.name,
+                table_name,
+                index_name,
+                indexed_bytes,
+                MYSQL_UTF8MB4_MAX_INDEX_BYTES
+            );
+        }
+    }
+    Ok(())
+}
+
+fn parse_mysql_create_table_name(line: &str) -> Option<String> {
+    let rest = line
+        .trim_start()
+        .strip_prefix("CREATE TABLE IF NOT EXISTS `")?;
+    Some(rest.split('`').next()?.to_string())
+}
+
+fn parse_mysql_char_column(line: &str) -> Option<(String, usize)> {
+    let trimmed = line.trim_start();
+    let (name, rest) = parse_backtick_ident(trimmed)?;
+    let rest = rest.trim_start().to_ascii_lowercase();
+    let type_rest = rest
+        .strip_prefix("varchar(")
+        .or_else(|| rest.strip_prefix("char("))?;
+    let length = type_rest.split(')').next()?.parse::<usize>().ok()?;
+    Some((name, length))
+}
+
+fn parse_mysql_named_index(line: &str) -> Option<(String, Vec<MysqlIndexPart>)> {
+    let trimmed = line.trim_start();
+    let rest = trimmed
+        .strip_prefix("UNIQUE KEY `")
+        .or_else(|| trimmed.strip_prefix("KEY `"))?;
+    let index_name = rest.split('`').next()?.to_string();
+    let columns_start = rest.find('(')?;
+    let columns_end = rest.rfind(')')?;
+    if columns_end <= columns_start {
+        return None;
+    }
+    Some((
+        index_name,
+        parse_mysql_index_parts(&rest[columns_start + 1..columns_end]),
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MysqlIndexPart {
+    column: String,
+    prefix_chars: Option<usize>,
+}
+
+fn parse_mysql_index_parts(input: &str) -> Vec<MysqlIndexPart> {
+    let mut parts = Vec::new();
+    let mut rest = input;
+    while let Some(start) = rest.find('`') {
+        rest = &rest[start..];
+        let Some((column, after_column)) = parse_backtick_ident(rest) else {
+            break;
+        };
+        let after_column = after_column.trim_start();
+        let prefix_chars = after_column
+            .strip_prefix('(')
+            .and_then(|value| value.split(')').next())
+            .and_then(|value| value.parse::<usize>().ok());
+        parts.push(MysqlIndexPart {
+            column,
+            prefix_chars,
+        });
+        rest = after_column;
+    }
+    parts
+}
+
+fn parse_backtick_ident(input: &str) -> Option<(String, &str)> {
+    let rest = input.strip_prefix('`')?;
+    let end = rest.find('`')?;
+    Some((rest[..end].to_string(), &rest[end + 1..]))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MysqlMigrationPlan {
+    version: u16,
+    name: String,
+    checksum: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppliedMysqlMigration {
+    version: i64,
+    name: String,
+    dialect: String,
+    checksum: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MysqlMigrationCheckReport {
+    datasource: String,
+    current_version: Option<i64>,
+    target_version: Option<u16>,
+    pending_versions: Vec<MysqlMigrationPlan>,
+    applied_versions: Vec<AppliedMysqlMigration>,
+    ignored_extra_versions: Vec<i64>,
+}
+
+fn mysql_migration_plan(migration: &Migration) -> MysqlMigrationPlan {
+    MysqlMigrationPlan {
+        version: migration.number,
+        name: migration.name.clone(),
+        checksum: mysql_declared_record_checksum(migration)
+            .unwrap_or_else(|| sha256_hex(migration.sql.as_bytes())),
+    }
+}
+
+fn mysql_declared_record_checksum(migration: &Migration) -> Option<String> {
+    let compact = migration.sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = compact.to_ascii_lowercase();
+    let marker = format!("values ({},", migration.number);
+    let start = lower.find(&marker)?;
+    let values = parse_single_quoted_values(&compact[start + marker.len()..]);
+    if values.len() < 3 || values[1] != "mysql" {
+        return None;
+    }
+    Some(values[2].clone())
+}
+
+fn parse_single_quoted_values(input: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\'' {
+            continue;
+        }
+        let mut value = String::new();
+        while let Some(inner) = chars.next() {
+            if inner == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    let _ = chars.next();
+                    value.push('\'');
+                } else {
+                    break;
+                }
+            } else {
+                value.push(inner);
+            }
+        }
+        values.push(value);
+    }
+    values
+}
+
+async fn load_applied_mysql_migrations(
+    db: &dyn DbPlugin,
+) -> Result<Vec<AppliedMysqlMigration>> {
+    if !mysql_schema_migrations_exists(db).await? {
+        return Ok(Vec::new());
+    }
+    let rows = db
+        .query(DbStatement::new(
+            "SELECT version, name, dialect, checksum FROM bcs_schema_migrations ORDER BY version",
+        ))
+        .await
+        .map_err(|err| anyhow!("query mysql bcs_schema_migrations: {}", err))?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(AppliedMysqlMigration {
+                version: db_get_column(&row, "version")?,
+                name: db_get_column(&row, "name")?,
+                dialect: db_get_column(&row, "dialect")?,
+                checksum: db_get_column(&row, "checksum")?,
+            })
+        })
+        .collect::<bcs_db_api::DbResult<Vec<_>>>()
+        .map_err(|err| anyhow!("read mysql bcs_schema_migrations row: {}", err))
+}
+
+async fn mysql_schema_migrations_exists(db: &dyn DbPlugin) -> Result<bool> {
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT COUNT(*) AS table_count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
+            vec![DbValue::from("bcs_schema_migrations")],
+        ))
+        .await
+        .map_err(|err| anyhow!("query mysql information_schema.tables: {}", err))?;
+    let count = rows
+        .first()
+        .map(|row| db_get_column::<i64>(row, "table_count"))
+        .transpose()
+        .map_err(|err| anyhow!("read mysql information_schema.tables count: {}", err))?
+        .unwrap_or(0);
+    Ok(count > 0)
+}
+
+fn build_mysql_migration_report(
+    datasource: String,
+    plans: Vec<MysqlMigrationPlan>,
+    applied_versions: Vec<AppliedMysqlMigration>,
+    fail_on_extra_versions: bool,
+) -> Result<MysqlMigrationCheckReport> {
+    let plans_by_version = plans
+        .iter()
+        .map(|plan| (i64::from(plan.version), plan))
+        .collect::<BTreeMap<_, _>>();
+    let applied_by_version = applied_versions
+        .iter()
+        .map(|applied| (applied.version, applied))
+        .collect::<BTreeMap<_, _>>();
+    let mut extra_versions = Vec::new();
+
+    for applied in &applied_versions {
+        let Some(plan) = plans_by_version.get(&applied.version) else {
+            extra_versions.push(applied.version);
+            continue;
+        };
+        validate_mysql_migration_record(plan, applied)?;
+    }
+
+    if fail_on_extra_versions && !extra_versions.is_empty() {
+        let versions = extra_versions
+            .iter()
+            .map(|version| format!("{version:03}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        bail!("database has migration versions not present locally: {versions}");
+    }
+
+    let pending_versions = plans
+        .iter()
+        .filter(|plan| !applied_by_version.contains_key(&i64::from(plan.version)))
+        .cloned()
+        .collect::<Vec<_>>();
+    Ok(MysqlMigrationCheckReport {
+        datasource,
+        current_version: applied_versions.iter().map(|applied| applied.version).max(),
+        target_version: plans.iter().map(|plan| plan.version).max(),
+        pending_versions,
+        applied_versions,
+        ignored_extra_versions: extra_versions,
+    })
+}
+
+fn validate_mysql_migration_record(
+    plan: &MysqlMigrationPlan,
+    applied: &AppliedMysqlMigration,
+) -> Result<()> {
+    if applied.dialect != "mysql" {
+        bail!(
+            "mysql migration dialect mismatch for version {:03}: applied={}",
+            applied.version,
+            applied.dialect
+        );
+    }
+    if applied.name != plan.name {
+        bail!(
+            "mysql migration name mismatch for version {:03}: applied={}, current={}",
+            applied.version,
+            applied.name,
+            plan.name
+        );
+    }
+    if applied.checksum != plan.checksum {
+        bail!(
+            "mysql migration checksum mismatch for version {:03} ({}): applied={}, current={}",
+            applied.version,
+            applied.name,
+            applied.checksum,
+            plan.checksum
+        );
+    }
+    Ok(())
+}
+
+fn format_mysql_check_report(report: &MysqlMigrationCheckReport) -> String {
+    let mut output = format!(
+        "MySQL/OceanBase migration check ok\ndatasource={}\ncurrent_version={}\ntarget_version={}\napplied_versions={}\npending_versions={}",
+        report.datasource,
+        format_version(report.current_version),
+        report
+            .target_version
+            .map(|version| version.to_string())
+            .unwrap_or_else(|| "<none>".to_string()),
+        report.applied_versions.len(),
+        report.pending_versions.len()
+    );
+    if !report.ignored_extra_versions.is_empty() {
+        output.push_str("\nignored_extra_versions=");
+        output.push_str(
+            &report
+                .ignored_extra_versions
+                .iter()
+                .map(|version| format!("{version:03}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    for plan in &report.pending_versions {
+        output.push_str(&format!(
+            "\n- {:03} {} checksum={}",
+            plan.version, plan.name, plan.checksum
+        ));
+    }
+    output
+}
+
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
@@ -808,7 +1161,7 @@ async fn emit_sqlite_migration_plan(sqlite_path: &Path) -> Result<String> {
             migration.version, migration.name, migration.checksum
         ));
         if migration.statements.is_empty() {
-            output.push_str("-- DDL is code-defined; --apply runs the guarded schema changes before recording this version.\n");
+            output.push_str("-- No ALTER statements are required before recording this version.\n");
         } else {
             for statement in &migration.statements {
                 output.push_str(statement.trim());
@@ -965,24 +1318,427 @@ impl MigrationSelection {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use bcs_config_api::mysql::MysqlConnectionConfig;
+    use bcs_config_api::{MysqlDbConfig, StatementProtocol};
+    use bcs_db_api::{DbPlugin, DbStatement, db_get_column};
+    use mysql_async::Opts;
 
-#[cfg(test)]
-#[path = "migrate_fixed_loop_tests.rs"]
-mod fixed_loop_mysql_tests;
+    fn write_migration(
+        dir: &Path,
+        name: &str,
+        sql: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        fs::write(dir.join(name), sql)?;
+        Ok(())
+    }
 
-#[cfg(test)]
-#[path = "migrate_016_tests.rs"]
-mod merged_016_mysql_tests;
+    fn migrate_args(dir: &Path) -> MigrateArgs {
+        MigrateArgs {
+            dialect: None,
+            migrations_dir: Some(dir.to_path_buf()),
+            sqlite_path: None,
+            emit_sql: true,
+            check_files: false,
+            check_db: false,
+            apply: false,
+            yes: false,
+            only: Vec::new(),
+            from: None,
+            to: None,
+        }
+    }
 
-#[cfg(test)]
-#[path = "migrate_human_input_index_tests.rs"]
-mod human_input_index_mysql_tests;
+    #[test]
+    fn emit_sql_selects_only_requested_migration() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), "001_first.sql", "SELECT 1;")?;
+        write_migration(temp_dir.path(), "016_templates.sql", "SELECT 16;")?;
 
-#[cfg(test)]
-#[path = "migrate_mysql_chain_tests.rs"]
-mod mysql_chain_tests;
+        let mut args = migrate_args(temp_dir.path());
+        args.only = vec![16];
+        let sql = emit_migration_sql(&args)?;
 
-#[cfg(test)]
-#[path = "migrate_history_window_tests.rs"]
-mod history_window_tests;
+        assert!(sql.contains("Migration 016"));
+        assert!(sql.contains("SELECT 16;"));
+        assert!(!sql.contains("SELECT 1;"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_duplicate_numbers_in_selection() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), "012_a.sql", "SELECT 1;")?;
+        write_migration(temp_dir.path(), "012_b.sql", "SELECT 2;")?;
+
+        let mut args = migrate_args(temp_dir.path());
+        args.only = vec![12];
+        let error = load_selected_migrations(&args)
+        .err()
+        .ok_or_else(|| io::Error::other("expected duplicate error"))?;
+
+        assert!(error.to_string().contains("duplicate migration numbers"));
+        Ok(())
+    }
+
+    #[test]
+    fn emit_sql_allows_duplicate_numbers_for_inspection() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(temp_dir.path(), "012_a.sql", "SELECT 1;")?;
+        write_migration(temp_dir.path(), "012_b.sql", "SELECT 2;")?;
+
+        let args = migrate_args(temp_dir.path());
+        let sql = emit_migration_sql(&args)?;
+
+        assert!(sql.contains("012: a"));
+        assert!(sql.contains("012: b"));
+        assert!(sql.contains("SELECT 1;"));
+        assert!(sql.contains("SELECT 2;"));
+        Ok(())
+    }
+
+    #[test]
+    fn migration_mode_requires_exactly_one_mode() {
+        let mut args = migrate_args(Path::new("."));
+        args.emit_sql = false;
+        let error = MigrationMode::from_args(&args).expect_err("missing mode should fail");
+        assert!(error.to_string().contains("choose exactly one"));
+
+        args.emit_sql = true;
+        args.check_files = true;
+        let error = MigrationMode::from_args(&args).expect_err("multiple modes should fail");
+        assert!(error.to_string().contains("choose exactly one"));
+    }
+
+    #[test]
+    fn mysql_check_files_validates_baseline_record() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(
+            temp_dir.path(),
+            "001_init_schema.sql",
+            "CREATE TABLE IF NOT EXISTS `bcs_schema_migrations` (
+                `version` int(11) NOT NULL,
+                PRIMARY KEY (`version`)
+            );
+            INSERT IGNORE INTO `bcs_schema_migrations` (`version`, `name`, `dialect`, `checksum`)
+            VALUES (1, 'init_schema', 'mysql', 'abc');",
+        )?;
+
+        let mut args = migrate_args(temp_dir.path());
+        args.emit_sql = false;
+        args.check_files = true;
+
+        let summary = check_mysql_migration_files(&args)?;
+
+        assert!(summary.contains("MySQL/OceanBase migration files check ok"));
+        assert!(summary.contains("versions=001"));
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_check_files_rejects_overlong_utf8mb4_index() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(
+            temp_dir.path(),
+            "001_init_schema.sql",
+            "CREATE TABLE IF NOT EXISTS `bcs_schema_migrations` (
+                `version` int(11) NOT NULL,
+                PRIMARY KEY (`version`)
+            ) DEFAULT CHARSET = utf8mb4;
+            INSERT IGNORE INTO `bcs_schema_migrations` (`version`, `name`, `dialect`, `checksum`)
+            VALUES (1, 'init_schema', 'mysql', 'abc');
+            CREATE TABLE IF NOT EXISTS `too_wide` (
+                `name` varchar(1024) NOT NULL,
+                KEY `idx_name` (`name`)
+            ) DEFAULT CHARSET = utf8mb4;",
+        )?;
+
+        let mut args = migrate_args(temp_dir.path());
+        args.emit_sql = false;
+        args.check_files = true;
+        let error = check_mysql_migration_files(&args)
+            .expect_err("overlong utf8mb4 index should fail static validation");
+
+        assert!(error.to_string().contains("too_wide.idx_name"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires BCS_TEST_MYSQL_URL; CI runs this test against its MySQL service"]
+    async fn eventing_mysql_migration_applies_to_real_mysql() -> Result<()> {
+        let mysql_url = std::env::var("BCS_TEST_MYSQL_URL")
+            .context("BCS_TEST_MYSQL_URL must be set for the ignored migration test")?;
+        let opts = Opts::from_url(&mysql_url)
+            .map_err(|error| anyhow!("BCS_TEST_MYSQL_URL is invalid: {error}"))?;
+        let database = opts
+            .db_name()
+            .ok_or_else(|| anyhow!("BCS_TEST_MYSQL_URL must include a database name"))?;
+        let db_pass = opts.pass().map(str::to_string);
+        let mut config = MysqlDbConfig::new()
+            .with_database(database)
+            .with_connection(MysqlConnectionConfig {
+                connection_type: "direct".to_string(),
+                host: Some(opts.ip_or_hostname().to_string()),
+                port: Some(opts.tcp_port()),
+                user: opts.user().map(str::to_string),
+                password: db_pass,
+                extra: BTreeMap::new(),
+            })
+            .with_statement_protocol(StatementProtocol::Text);
+        config.pool_size = 2;
+        config.min_pool_size = 1;
+
+        let manager = MysqlDbManager::new(config)
+            .await
+            .map_err(|error| anyhow!("open MySQL migration test datasource: {error}"))?;
+        let plugin = MysqlDbPlugin::new(manager.clone(), "bcs");
+        let result = async {
+            plugin
+                .execute(DbStatement::new(
+                    "CREATE TABLE IF NOT EXISTS bcs_schema_migrations (
+                        version int NOT NULL PRIMARY KEY,
+                        name varchar(255) NOT NULL,
+                        dialect varchar(32) NOT NULL,
+                        checksum varchar(64) NOT NULL,
+                        applied_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )",
+                ))
+                .await?;
+
+            let mut args = migrate_args(&bcs_root().join("migrations").join("mysql"));
+            args.only = vec![9];
+            let migrations = load_selected_migrations(&args)?;
+            let migration = migrations
+                .first()
+                .ok_or_else(|| anyhow!("migration 009 was not loaded"))?;
+            let plan = mysql_migration_plan(migration);
+            apply_mysql_migration(&plugin, migration, &plan).await?;
+            apply_mysql_migration(&plugin, migration, &plan).await?;
+
+            for table in [
+                "bcs_event_subscriptions",
+                "bcs_event_subscription_revisions",
+                "bcs_event_scope_epochs",
+                "bcs_event_streams",
+                "bcs_events",
+                "bcs_event_fanout_targets",
+                "bcs_event_deliveries",
+                "bcs_event_delivery_attempts",
+                "bcs_event_subscription_audits",
+            ] {
+                let rows = plugin
+                    .query(DbStatement::with_params(
+                        "SELECT COUNT(*) AS table_count FROM information_schema.tables \
+                         WHERE table_schema = DATABASE() AND table_name = ?",
+                        vec![DbValue::from(table)],
+                    ))
+                    .await?;
+                let count: i64 = db_get_column(
+                    rows.first()
+                        .ok_or_else(|| anyhow!("missing table count row for {table}"))?,
+                    "table_count",
+                )?;
+                if count != 1 {
+                    bail!("MySQL Eventing migration did not create {table}");
+                }
+            }
+
+            let primary_rows = plugin
+                .query(DbStatement::new(
+                    "SELECT column_name AS column_name FROM information_schema.statistics \
+                     WHERE table_schema = DATABASE() \
+                       AND table_name = 'bcs_event_scope_epochs' \
+                       AND index_name = 'PRIMARY' ORDER BY seq_in_index",
+                ))
+                .await?;
+            let primary_columns = primary_rows
+                .iter()
+                .map(|row| db_get_column::<String>(row, "column_name"))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if primary_columns != ["env", "scope_type", "scope_id"] {
+                bail!("unexpected scope epoch primary key: {primary_columns:?}");
+            }
+            Ok(())
+        }
+        .await;
+        manager.close().await;
+        result
+    }
+
+    #[test]
+    fn mysql_migration_plan_uses_declared_record_checksum() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        write_migration(
+            temp_dir.path(),
+            "001_init_schema.sql",
+            "CREATE TABLE IF NOT EXISTS `bcs_schema_migrations` (
+                `version` int(11) NOT NULL,
+                PRIMARY KEY (`version`)
+            );
+            INSERT IGNORE INTO `bcs_schema_migrations` (`version`, `name`, `dialect`, `checksum`)
+            VALUES (1, 'init_schema', 'mysql', 'declared-checksum');",
+        )?;
+
+        let args = migrate_args(temp_dir.path());
+        let migrations = load_selected_migrations(&args)?;
+        let plan = mysql_migration_plan(&migrations[0]);
+
+        assert_eq!(plan.checksum, "declared-checksum");
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_check_report_lists_pending_when_no_rows() -> Result<(), Box<dyn std::error::Error>> {
+        let plans = vec![MysqlMigrationPlan {
+            version: 1,
+            name: "init_schema".to_string(),
+            checksum: "abc".to_string(),
+        }];
+
+        let report = build_mysql_migration_report("bcs".to_string(), plans, Vec::new(), true)?;
+        let summary = format_mysql_check_report(&report);
+
+        assert!(summary.contains("current_version=<none>"));
+        assert!(summary.contains("target_version=1"));
+        assert!(summary.contains("pending_versions=1"));
+        assert!(summary.contains("- 001 init_schema checksum=abc"));
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_check_report_rejects_checksum_mismatch() {
+        let plans = vec![MysqlMigrationPlan {
+            version: 1,
+            name: "init_schema".to_string(),
+            checksum: "abc".to_string(),
+        }];
+        let applied = vec![AppliedMysqlMigration {
+            version: 1,
+            name: "init_schema".to_string(),
+            dialect: "mysql".to_string(),
+            checksum: "bad".to_string(),
+        }];
+
+        let error = build_mysql_migration_report("bcs".to_string(), plans, applied, true)
+            .expect_err("checksum mismatch should fail");
+
+        assert!(error.to_string().contains("checksum mismatch"));
+    }
+
+    #[test]
+    fn mysql_apply_yes_confirmation_accepts_only_explicit_yes() {
+        assert!(is_yes_confirmation("y"));
+        assert!(is_yes_confirmation("Y\n"));
+        assert!(is_yes_confirmation("yes"));
+        assert!(is_yes_confirmation("YES"));
+        assert!(!is_yes_confirmation(""));
+        assert!(!is_yes_confirmation("n"));
+        assert!(!is_yes_confirmation("sure"));
+    }
+
+    #[test]
+    fn mysql_sql_splitter_ignores_semicolons_inside_literals_and_comments() {
+        let statements = split_sql_statements(
+            "-- comment ;\nCREATE TABLE `a;b` (`c` varchar(10) DEFAULT ';');\n\
+             INSERT INTO t VALUES ('x; y'); /* block ; */\n\
+             # comment ;\n",
+        );
+
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].contains("CREATE TABLE"));
+        assert!(statements[0].contains("DEFAULT ';'"));
+        assert!(statements[1].contains("INSERT INTO t"));
+        assert!(statements[1].contains("'x; y'"));
+    }
+
+    #[test]
+    fn mysql_apply_report_lists_applied_versions() -> Result<(), Box<dyn std::error::Error>> {
+        let plan = MysqlMigrationPlan {
+            version: 1,
+            name: "init_schema".to_string(),
+            checksum: "abc".to_string(),
+        };
+        let report = build_mysql_migration_report(
+            "bcs".to_string(),
+            vec![plan.clone()],
+            vec![AppliedMysqlMigration {
+                version: 1,
+                name: "init_schema".to_string(),
+                dialect: "mysql".to_string(),
+                checksum: "abc".to_string(),
+            }],
+            true,
+        )?;
+
+        let summary = format_mysql_apply_report(&report, &[plan]);
+
+        assert!(summary.contains("MySQL/OceanBase migrations applied"));
+        assert!(summary.contains("current_version=1"));
+        assert!(summary.contains("applied_versions=1"));
+        assert!(summary.contains("pending_versions=0"));
+        assert!(summary.contains("- 001 init_schema checksum=abc"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_check_missing_file_does_not_create_file() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let sqlite_path = temp_dir.path().join("missing.db");
+
+        let summary = check_sqlite_migration_state(&sqlite_path).await?;
+
+        assert!(summary.contains(&format!(
+            "pending_versions={}",
+            bcs::migrations::sqlite_migration_count()
+        )));
+        assert!(!sqlite_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn sqlite_check_files_reports_code_defined_migrations() {
+        let summary = check_sqlite_migration_definitions();
+
+        assert!(summary.contains("SQLite migration definitions check ok"));
+        assert!(summary.contains(&format!(
+            "target_version={}",
+            bcs::migrations::sqlite_target_version()
+        )));
+    }
+
+    #[tokio::test]
+    async fn sqlite_apply_records_code_defined_migrations() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempfile::tempdir()?;
+        let sqlite_path = temp_dir.path().join("bcs.db");
+        let mut args = migrate_args(Path::new("."));
+        args.dialect = Some(MigrationDialect::Sqlite);
+        args.sqlite_path = Some(sqlite_path.clone());
+        args.emit_sql = false;
+        args.apply = true;
+        let global = MigrateGlobalArgs {
+            config_dir: None,
+            config_file: None,
+        };
+
+        run_migrate(&args, &global).await?;
+
+        let db = LocalSqliteDbPlugin::new_file(&sqlite_path)?;
+        let rows = db
+            .query(DbStatement::new(
+                "SELECT version, name, dialect FROM bcs_schema_migrations ORDER BY version",
+            ))
+            .await?;
+        assert_eq!(rows.len(), bcs::migrations::sqlite_migration_count());
+        assert_eq!(db_get_column::<i64>(&rows[0], "version")?, 1);
+        assert_eq!(db_get_column::<String>(&rows[0], "name")?, "init_schema");
+        assert_eq!(db_get_column::<String>(&rows[0], "dialect")?, "sqlite");
+        assert_eq!(db_get_column::<i64>(&rows[1], "version")?, 2);
+        assert_eq!(
+            db_get_column::<String>(&rows[1], "name")?,
+            "channel_binding_audit_timestamps"
+        );
+        assert_eq!(db_get_column::<String>(&rows[1], "dialect")?, "sqlite");
+        Ok(())
+    }
+}

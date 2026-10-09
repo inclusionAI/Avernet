@@ -4,7 +4,7 @@
 - core/ 层通过 Protocol 接口访问外部依赖，不直接 import api/ 层
 - 具体实现由 DI 在 di/modules 注入
 
-task integration 解析 BCS 身份 / singlebox 公开 bot 检索时依赖 BotService /
+task integration 解析 BCS 身份 / 公开 bot 检索时依赖 BotService /
 BotPublicService 的个别方法，通过本地定义的 Protocol 接入，避免直接 import
 agentclaw.community.api.bot_service / api.bot_public_service。
 
@@ -29,7 +29,7 @@ class BotServiceProtocol(Protocol):
 
 @runtime_checkable
 class BotPublicServiceProtocol(Protocol):
-    """公开 Bot 服务接口 —— 供 singlebox 链路按关键字预查公开 bot。
+    """公开 Bot 服务接口 —— 供任务链路按关键字预查公开 bot。
 
     实现类需提供：
       - search_public_bots_by_keyword(...)  按关键字检索公开 bot（DB LIKE）。

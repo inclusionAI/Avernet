@@ -1,6 +1,6 @@
-"""M2 ExecutionEngine on_* 单测(对齐 tasks.md T2.x)。
+"""M2 CentralizedExecutionAdapter on_* 单测(对齐 tasks.md T2.x)。
 
-in-test CaseEngine(ExecutionEngine)子类覆写 _build_* 注入 stub planner/dispatcher/runner(T1=A corp 最简形态);
+in-test CaseEngine(CentralizedExecutionAdapter)子类覆写 _build_* 注入 stub planner/dispatcher/runner(T1=A corp 最简形态);
 真实 TaskGraphService。验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market port)。
 覆盖:on_execute 首帧、on_report PASS 传播/根等回投、on_report FAIL 补救/升 BBS、on_miss 拆细/升 BBS、
 on_harness 复位重投、loop_round 仅升 BBS++、零 case grep。
@@ -20,7 +20,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -29,7 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService, TaskGraphPatch
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
@@ -38,10 +37,10 @@ from agentclaw.community.core.task.task_dispatch.strategies import GroupFormatio
 def _task_info(
     task_id: str = "t1", max_depth: int = 3, task_type: str = "dynamic"
 ) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -132,7 +131,7 @@ class StubRunner:
         return "grp_stub"
 
 
-class _CaseEngine(ExecutionEngine):
+class _CaseEngine(CentralizedExecutionAdapter):
     """测试子类覆写 _build_* 注入 stub(T1=A:corp 最简形态)。"""
 
     def __init__(self, graph, planner=None, dispatcher=None, runner=None):
@@ -361,7 +360,7 @@ class TestExternalManagedIsolation:
                     "t1",
                     "t1",
                     acceptance_result=AcceptanceResult(
-                        verdict=AcceptanceVerdict.FAILED, gaps=["third-party failure"]
+                        verdict=AcceptanceVerdict.FAILED, gap_items=["third-party failure"]
                     ),
                 )
             )
@@ -483,7 +482,7 @@ class TestStructuralParentGapClosedRollup:
         svc.add_task_nodes([_child("m1")], parent_node_id="t1")
         svc.add_task_nodes([_child("lm")], parent_node_id="m1")
         svc.update_task_node_info(_patch("t1", "lm", status=Status.RUNNING, run_mode="single_bot", assignee="worker_bot"))
-        planner = _VerdictPlanner(AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=[{"id": "ac1", "passed": True, "summary": "名册3位齐全"}], gaps=[]))
+        planner = _VerdictPlanner(AcceptanceResult(verdict=AcceptanceVerdict.DONE, done_items=[{"id": "ac1", "passed": True, "summary": "名册3位齐全"}], gap_items=[]))
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "lm",
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
@@ -496,7 +495,7 @@ class TestStructuralParentGapClosedRollup:
         assert m.run_info.output == {"output": "# 架构师名册\n章文嵩/毕玄/唐洪"}
         assert m.run_info.acceptance_result is not None
         assert m.run_info.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert m.run_info.acceptance_result.acceptances_metric == [{"id": "ac1", "passed": True, "summary": "名册3位齐全"}]
+        assert m.run_info.acceptance_result.done_items == [{"id": "ac1", "passed": True, "summary": "名册3位齐全"}]
         # root: 一跳 SUCCESS children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 SUCCESS
         root = svc._get_node(graph, "t1")
         assert root.status == Status.SUCCESS
@@ -515,7 +514,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]))))
         assert svc._get_node(graph, "c1").status == Status.HUNG
         assert planner.plan_calls == 0  # 不 plan 补救(HUNG 冒泡/升 BBS 交既有逻辑)
 
@@ -527,12 +526,12 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
-        r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
+        r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]))))
         assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
-        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert n.run_info.acceptance_result.gap_items == ["缺x"]
         assert graph.loop_round == 1
         assert planner.plan_calls == 0
 
@@ -548,13 +547,13 @@ class TestOnReportFail:
         r = _run(eng.on_report(_patch(
             "t1", "c1",
             status=Status.FAILED,
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]),
         )))
         assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
-        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert n.run_info.acceptance_result.gap_items == ["缺x"]
         assert graph.loop_round == 1
         assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
 
@@ -722,7 +721,7 @@ class TestLoopRound:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["x"]))))
         assert graph.loop_round == before + 1
 
 
@@ -851,7 +850,7 @@ class TestMaxPlanRound:
 # ===== 零 case 知识 =====
 class TestZeroCaseKnowledge:
     def test_no_node_name_literals_in_engine(self):
-        import agentclaw.community.core.task.task_center.engine as m
+        import agentclaw.community.core.task.task_runner.execution_adapters as m
         src = open(m.__file__).read()
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]
@@ -947,167 +946,6 @@ class TestOnPassBbsRecoverableGuard:
         assert svc._get_node(g, "c_new").status == Status.RUNNING
         assert len(runner.run_calls) >= 1
 
-
-# ===== 模式覆盖路由:engine._record_mode_coverage 标记写回 =====
-class _McSettings:
-    """task_settings stub:仅 mode_coverage 可配,供 _record_mode_coverage 测试。"""
-
-    def __init__(self, mode_coverage: bool) -> None:
-        self._mc = mode_coverage
-
-    def is_enabled(self, setting_type: str) -> bool:
-        return self._mc if setting_type == "mode_coverage" else False
-
-
-class TestRecordModeCoverage:
-    """_prepare_into 派发收口后,按 outcome 映射模式 union 写回 graph.extend_props["mode_coverage"]。"""
-
-    def test_no_settings_no_write(self, svc, graph):
-        eng = _engine(svc)  # task_settings 默认 None
-        node = _child("c1")
-        node.run_info.run_mode = "single_bot"
-        eng._record_mode_coverage("t1", [node])
-        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
-
-    def test_mode_coverage_off_no_write(self, svc, graph):
-        eng = _engine(svc)
-        eng._task_settings = _McSettings(False)
-        node = _child("c1")
-        node.run_info.run_mode = "single_bot"
-        eng._record_mode_coverage("t1", [node])
-        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
-
-    def test_maps_single_group_bbs_and_writes(self, svc, graph):
-        eng = _engine(svc)
-        eng._task_settings = _McSettings(True)
-
-        n_single = _child("c1")
-        n_single.run_info.run_mode = "single_bot"
-        n_group = _child("c2")
-        n_group.run_info.run_mode = "coop_group"
-        n_bbs = _child("c3")
-        n_bbs.run_info.extend_props["miss_events"] = ["mode_coverage_bbs"]
-
-        eng._record_mode_coverage("t1", [n_single, n_group, n_bbs])
-
-        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage")) == {
-            "single", "group", "bbs"
-        }
-
-    def test_unions_with_existing(self, svc, graph):
-        eng = _engine(svc)
-        eng._task_settings = _McSettings(True)
-        svc.update_task_graph_info(
-            "t1", TaskGraphPatch(extend_props_patch={"mode_coverage": ["single"]})
-        )
-
-        node = _child("c1")
-        node.run_info.run_mode = "coop_group"
-        eng._record_mode_coverage("t1", [node])
-
-        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage")) == {
-            "single", "group"
-        }
-
-    def test_no_new_modes_skips_write(self, svc, graph):
-        eng = _engine(svc)
-        eng._task_settings = _McSettings(True)
-        # 中性 outcome(run_mode None,无 mode_coverage_bbs miss)→ 无新模式 → 不写
-        node = _child("c1")
-        eng._record_mode_coverage("t1", [node])
-        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
-
-    def test_merged_equals_existing_skips_write(self, svc, graph):
-        eng = _engine(svc)
-        eng._task_settings = _McSettings(True)
-        svc.update_task_graph_info(
-            "t1", TaskGraphPatch(extend_props_patch={"mode_coverage": ["single", "group"]})
-        )
-        node = _child("c1")
-        node.run_info.run_mode = "single_bot"  # 已覆盖 → merged==existing → 不写
-        before = dict(svc.query_task_dashboard("t1").extend_props)
-        eng._record_mode_coverage("t1", [node])
-        after = svc.query_task_dashboard("t1").extend_props
-        assert after.get("mode_coverage") == before.get("mode_coverage") == ["single", "group"]
-
-# ===== 模式覆盖:_prepare_into ON 串行派发 vs OFF 批量并发 =====
-class _CoverAwareDispatcher:
-    """读 svc graph 的 mode_coverage 标记决定 outcome(模拟 strategy._coverage_route):
-    缺 single→single_bot,缺 group→coop_group(pending_group_formation),否则→single 兜底。
-    记录每次 dispatch batch size + 调用时读到的 covered 快照,验证 engine ON per-node 串行
-    + 即时 record 让下节点读到递增 covered vs OFF 并发共享初始快照。"""
-
-    def __init__(self, svc):
-        self.svc = svc
-        self.batch_sizes: list[int] = []
-        self.covered_snapshots: list[list[str]] = []
-
-    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
-        self.batch_sizes.append(len(toDoTaskList))
-        out = []
-        for n in toDoTaskList:
-            covered = set(
-                self.svc.query_task_dashboard(n.task_id).extend_props.get("mode_coverage") or []
-            )
-            self.covered_snapshots.append(sorted(covered))
-            if "single" not in covered:
-                n.run_info.run_mode = "single_bot"
-                n.run_info.assignee = "bot-s:1"
-            elif "group" not in covered:
-                n.run_info.run_mode = "coop_group"
-                n.run_info.extend_props["pending_group_formation"] = GroupFormation(
-                    bot_ids=["bot-s:1", "bot-g:1"],
-                    collab_mode="manager_worker",
-                    group_name="g",
-                    members_info=[
-                        {"bot_id": "bot-s:1", "role": "manager", "responsibility": "m"},
-                        {"bot_id": "bot-g:1", "role": "worker", "responsibility": "w"},
-                    ],
-                )
-            else:
-                # 缺 bbs 或全覆盖 → single 兜底(避免 bbs MISS 触发 _drain 升级,聚焦串行机制验证)
-                n.run_info.run_mode = "single_bot"
-                n.run_info.assignee = "bot-s:1"
-            out.append(n)
-        return out
-
-
-class TestPrepareModeCoverageSerial:
-    """_prepare_into:mode_coverage ON → per-node 串行派发 + 即时 record(批次内轮替);
-    OFF → 批量并发(gather,共享派发前 covered 快照,无轮替)。"""
-
-    def test_on_serial_dispatch_records_covered_between_nodes(self, svc, graph):
-        """ON:3 子节点 → dispatch 调 3 次(每次 1 节点),每次读到递增 covered → single→group→兜底。"""
-        planner = StubPlanner(lambda g: [_child("c1"), _child("c2"), _child("c3")])
-        dispatcher = _CoverAwareDispatcher(svc)
-        runner = StubRunner()
-        eng = _engine(svc, planner=planner, dispatcher=dispatcher, runner=runner)
-        eng._task_settings = _McSettings(True)
-        _run(eng.on_execute("t1"))
-
-        # ON:per-node 串行 → 3 次调用,每次 1 节点
-        assert dispatcher.batch_sizes == [1, 1, 1]
-        # 每节点派发时读到的 covered 递增(即时 record 让下节点读到新 covered → 批次内轮替)
-        assert dispatcher.covered_snapshots == [[], ["single"], ["group", "single"]]
-        # 最终 covered 含 single+group(c3 single 兜底已 covered 不新增;bbs 由 strategy MISS 触发,此 stub 不模拟)
-        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage") or []) == {
-            "single", "group"
-        }
-
-    def test_off_batch_dispatch_shares_initial_covered_snapshot(self, svc, graph):
-        """OFF:3 子节点 → dispatch 调 1 次(3 节点一批),共享派发前空 covered → 全 single,无轮替。"""
-        planner = StubPlanner(lambda g: [_child("c1"), _child("c2"), _child("c3")])
-        dispatcher = _CoverAwareDispatcher(svc)
-        runner = StubRunner()
-        eng = _engine(svc, planner=planner, dispatcher=dispatcher, runner=runner)
-        # task_settings 默认 None(mode_coverage OFF)
-        _run(eng.on_execute("t1"))
-
-        # OFF:批量并发 → 1 次调用,3 节点一批
-        assert dispatcher.batch_sizes == [3]
-        # 并发共享派发前 covered 快照(均空),无批次内轮替;OFF 不写 covered
-        assert dispatcher.covered_snapshots == [[], [], []]
-        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
 
     def test_handle_node_dispatch_fail_branch_marks_error_and_keeps_pending(self, svc, graph):
         """dispatcher 容错吞异常(空 run_mode/assignee + dispatch_error)→ _handle_node dispatch_fail 分支:

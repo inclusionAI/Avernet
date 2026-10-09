@@ -8,7 +8,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     TaskGraphPatch,
     TaskInfo,
     TaskSpec,
@@ -17,10 +16,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 
 def _task_info(task_id: str = "c1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",

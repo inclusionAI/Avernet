@@ -77,6 +77,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.notify_sender
+  - agentclaw.community.plugin_api.task_discovery_notify
   - agentclaw.community.plugin_api.model_api
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage

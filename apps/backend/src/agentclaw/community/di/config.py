@@ -9,6 +9,7 @@ clusters with sub-blocks (e.g. ``arca_sandbox.alt``) that aren't yet
 worth fully typing. The hatch lets us pull the typed extraction work
 forward without blocking on every nested field.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -151,6 +152,7 @@ class MerchantTaskBotBindingsConfig:
     matching ``${...}`` in a plan), so content routing/materialize stays green on a
     bare/CI build (placeholders stay literal) and only a real dispatch degrades.
     """
+
     bot_id_by_role: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -837,6 +839,11 @@ class TaskDispatchConfig:
 
     task_search_skill_enabled: bool = False
     skill_report_enabled: bool = True
+
+
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
 
 @dataclass(frozen=True)

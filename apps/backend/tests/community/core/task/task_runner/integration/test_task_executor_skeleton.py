@@ -2,15 +2,14 @@ import asyncio
 import logging
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _node(node_id="c1", task_id="t1", run_mode="bbs", assignee="b1"):
     return TaskNode(node_id=node_id, task_id=task_id, status=Status.PENDING,
-                    task_spec=TaskSpec(Metadata(task_id, "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
+                    task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
                     run_info=RuntimeInfo(run_mode=run_mode, assignee=assignee),
                     node_run_graph=None)  # type: ignore[arg-type]
 

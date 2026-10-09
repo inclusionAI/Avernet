@@ -1,6 +1,6 @@
 """M5 TaskService facade 单测(对齐 tasks.md T5.2/T5.3)。
 
-零参 facade + CaseTaskService 子类覆写 _build_engine(CaseEngine 注入 stub 策略池/投递)。
+零参 facade + CaseTaskService 子类覆写 _build_centralized_adapter(CaseEngine 注入 stub 策略池/投递)。
 验收 100% 回投(无 verify seam);BBS 投递归 runner(无 bbs market seam);engine 对调用方不可见。
 覆盖:2 API 契约 + callback 回投 + harness 接线 + verify/bbs 已删回归(V1/V2)+ 零 case。
 """
@@ -15,7 +15,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -25,16 +24,16 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_center.task_service import TaskService
 
 
 # ===== domain helpers =====
 def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -47,13 +46,12 @@ def _task_info_request(task_id: str = "t1", max_depth: int = 3):
     """TaskInfoRequest for execute (task_id is supplied by the provider, not the request)."""
     from agentclaw.community.core.task.domain.models import TaskSourceType
     from agentclaw.community.core.task.domain.requests import (
-        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
-        RequestTaskSpec, TaskInfoRequest,
+        RequestAcceptance, RequestContext, RequestGoal, RequestTaskSpec, TaskInfoRequest,
     )
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="T", instruction="do"),
-            context=RequestContext(background="bg"),
+
+            context=RequestContext(background="bg", title="T"),
             goal=RequestGoal(objective="o", acceptances=[RequestAcceptance(id="ac1", acceptance="d")]),
         ),
         source_type=TaskSourceType.BOT,
@@ -129,8 +127,8 @@ class StubRunner:
 
 
 # ===== CaseEngine:覆写 _build_* 注入 stub(T1=A corp 最简形态)=====
-class _CaseEngine(ExecutionEngine):
-    """测试用编排核:继承 ExecutionEngine 覆写 _build_* 注入 stub 策略/投递(T1=A corp 最简形态)。
+class _CaseEngine(CentralizedExecutionAdapter):
+    """测试用编排核:继承 CentralizedExecutionAdapter 覆写 _build_* 注入 stub 策略/投递(T1=A corp 最简形态)。
     不手动委托 on_*/_dispatch_and_run——直接继承 async 编排逻辑(collect/drain 模式)。"""
     def __init__(self, graph, planner_factory, discover_bot="bot1", runner=None):
         self._case_planner_factory = planner_factory
@@ -155,7 +153,7 @@ class _CaseEngine(ExecutionEngine):
 
 
 class _CaseTaskService(TaskService):
-    """测试用 facade:覆写 _build_engine 返回 _CaseEngine(注入 stub 策略/投递;模拟 corp)。"""
+    """测试用 facade:覆写 _build_centralized_adapter 返回 _CaseEngine(注入 stub 策略/投递;模拟 corp)。"""
     def __init__(self, graph, planner_factory=None, discover_bot="bot1", runner=None, harness=None,
                  task_id_provider=None):
         self._case_planner_factory = planner_factory or (lambda g: [])
@@ -163,7 +161,7 @@ class _CaseTaskService(TaskService):
         self._case_runner = runner
         super().__init__(graph, harness=harness, task_id_provider=task_id_provider)
 
-    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+    def _build_centralized_adapter(self, *, bot=None, bcs=None, discover=None) -> CentralizedExecutionAdapter:
         # case 测试覆写:注入 stub 策略/投递的 _CaseEngine(忽略传入端口)
         return _CaseEngine(
             self._graph,
@@ -191,7 +189,7 @@ def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
         runner=runner, harness=harness,
         task_id_provider=task_id_provider or (lambda: "t1"),
     )
-    return facade, svc, None, None, discover, facade._engine._runner
+    return facade, svc, None, None, discover, facade._centralized_adapter._runner
 
 
 def _run(coro):
@@ -301,7 +299,7 @@ class TestHarnessWiring:
                               task_id_provider=lambda: "t1")
         _exec(facade, _task_info_request())
         assert "t1" in harness._registered
-        assert harness._on_harness_fn == facade._engine.on_harness
+        assert harness._on_harness_fn == facade._centralized_adapter.on_harness
 
     def test_dashboard_registers_task_for_harness_on_this_worker(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness

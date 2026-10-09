@@ -6,7 +6,7 @@ Covers lines not exercised by test_task_discovery_unit.py:
   - DiscoveryService._send_work_order_event (success/None/exception)
   - DiscoveryService.discover_all_bots lock integration
   - DiscoveredTask.to_discovery_prompt with empty acceptances
-  - CronRelaySessionInitiator._build_discovery_prompt empty acceptances
+  - OpenApiBotSessionInitiator._build_discovery_prompt empty acceptances
   - _row_to_task with invalid JSON acceptances
   - CommunityNotifyModule DI binding (both branches)
 """
@@ -34,7 +34,7 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
@@ -96,14 +96,6 @@ class TestDingTalkNotifySender:
         monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_AK_SECRET", "sk")
         monkeypatch.setenv("TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "rc")
         monkeypatch.setenv("TASK_DISCOVERY_CARD_TEMPLATE_ID", "tpl")
-        assert DingTalkNotifySender._configured() is True
-
-    def test_configured_true_with_singlebox_fallback(self, monkeypatch):
-        monkeypatch.delenv("TASK_DISCOVERY_DINGTALK_AK_ID", raising=False)
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_AK_ID", "ak")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_AK_SECRET", "sk")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_ROBOT_CODE", "rc")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", "tpl")
         assert DingTalkNotifySender._configured() is True
 
     def test_env_helper_falls_back_to_singlebox(self, monkeypatch):
@@ -430,13 +422,13 @@ def test_to_discovery_prompt_empty_acceptances():
 
 
 # ===========================================================================
-# CronRelaySessionInitiator._build_discovery_prompt empty acceptances
+# OpenApiBotSessionInitiator._build_discovery_prompt empty acceptances
 # ===========================================================================
 
 def test_build_discovery_prompt_empty_acceptances():
     """_build_discovery_prompt covers the empty-acceptances branch (multi-task)."""
-    initiator = CronRelaySessionInitiator(
-        cron_relay=MagicMock(),
+    initiator = OpenApiBotSessionInitiator(
+        openapi_bot=MagicMock(),
         frontend_url="http://localhost:8000",
         backend_url="http://localhost:8888",
     )

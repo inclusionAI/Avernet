@@ -64,7 +64,7 @@ def _make_graph_service(db):
 
 class _MinimalEngine:
     """Drives only the graph mutation `update_task_node_info`, mirroring the
-    first persist that the real ExecutionEngine performs for a callback."""
+    first persist that the real CentralizedExecutionAdapter performs for a callback."""
 
     def __init__(self, graph: TaskGraphService):
         self._graph = graph

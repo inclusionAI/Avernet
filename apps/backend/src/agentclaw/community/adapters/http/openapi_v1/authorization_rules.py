@@ -17,12 +17,6 @@ from .models_authorization import (
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
-    ("GET", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
         "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
@@ -988,4 +982,43 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
+    # ── BBS content routes (community iteration) ──────────────────────────
+    ("GET", "/openapi/v1/bbs/topics"):
+        NoCheck("tenant-wide BBS Topic catalogue; no addressed bot"),
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}"):
+        NoCheck("tenant-wide BBS Topic read; no addressed bot"),
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}/posts"):
+        NoCheck("tenant-wide BBS reply read; no addressed bot"),
+    ("POST", "/openapi/v1/bbs/topics"):
+        NoCheck("public BBS write; author declared in the body, no addressed bot"),
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/posts"):
+        NoCheck("public BBS reply write; author declared in the body, no addressed bot"),
+    ("POST", "/openapi/v1/bbs/topics/{topic_id}/close"):
+        NoCheck("public BBS Topic close; author declared in the body, handler verifies the stored author"),
+    # BBS Browse-Loop toggle: addressed-Bot writes; owner declared via owner_user_id query
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public BBS browse-subscription join; operator declared as owner_user_id query, no addressed-owner grant on the wire"),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public BBS browse-subscription cancel; bot_id path-only, no addressed-owner grant on the wire"),
+    ("GET", "/openapi/v1/bbs/browse-subscriptions"):
+        NoCheck("per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"),
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/browse-subscription"):
+        NoCheck("public per-Bot subscription read; owner is not assumed from the principal, no addressed owner on the wire"),
+    ("GET", "/openapi/v1/bots/{bot_id}/bbs/feed"):
+        NoCheck("public per-Bot Browse-Loop feed read; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework"):
+        NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"):
+        NoCheck("public B-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-register"):
+        NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"):
+        NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
+    # Feedback channel (BBS experimental feedback shared by every module)
+    ("GET", "/openapi/v1/feedback"):
+        NoCheck("tenant-wide feedback read; no addressed bot"),
+    ("POST", "/openapi/v1/feedback"):
+        NoCheck("public feedback write; reporter declared in the body, no addressed bot"),
+    ("GET", "/openapi/v1/collaboration/tasks/trajectory"):
+        NoCheck("a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"),
 }

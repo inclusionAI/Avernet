@@ -2,7 +2,7 @@
 
 公开面(经 gateway spanner;测试以 require_principal 依赖覆盖绕过鉴权)。adapter 只转协议(Rule 22):
 手写 stub TaskServiceProtocol 返 canned ``BbsTaskOverviewRecord`` 分页 ``(records, total)``,
-验证 envelope + DTO 解析(task_spec.metadata.title→title / goal.objective→goal /
+验证 envelope + DTO 解析(task_spec.context.title→title / goal.objective→goal /
 goal.acceptances→acceptances / extend_props.assignee_name→assignee_name /
 task_info.owner_bot_id→publisher),以及 page/page_size 分页透传与默认值。
 """
@@ -25,8 +25,7 @@ from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 
 _TASK_SPEC = {
-    "metadata": {"task_id": "bbs-1", "title": "BBS 任务标题", "instruction": "执行"},
-    "context": {"background": "bg"},
+    "context": {"title": "BBS 任务标题", "background": "bg", "extend_props": {}},
     "goal": {
         "objective": "达成目标",
         "acceptances": [{"id": "a1", "description": "验收1"}],
@@ -44,8 +43,7 @@ def _record(
     publisher_name: str | None = None,
 ) -> BbsTaskOverviewRecord:
     spec = task_spec if task_spec is not None else {
-        "metadata": {"task_id": task_id, "title": title, "instruction": "执行"},
-        "context": {"background": "bg"},
+        "context": {"title": title, "background": "bg", "extend_props": {}},
         "goal": {
             "objective": "达成目标",
             "acceptances": [{"id": "a1", "description": "验收1"}],
@@ -58,7 +56,7 @@ def _record(
         retry=0,
         assignee_id="asg-1",
         status=status,
-        acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+        acceptance_result={"verdict": "PASS", "done_items": [], "gap_items": []},
         extend_props={"assignee_name": "Alice"} if extend_props is None else extend_props,
         relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
         relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),
@@ -153,9 +151,10 @@ def test_bbs_list_route_returns_envelope_with_parsed_fields(client):
     assert it["retry"] == 0
     assert it["assignee_id"] == "asg-1"
     assert it["status"] == "RUNNING"
-    assert it["acceptance_result"] == {"verdict": "PASS", "acceptances_metric": [], "gaps": []}
+    assert it["acceptance_result"] == {"verdict": "PASS", "done_items": [], "gap_items": []}
     assert it["extend_props"] == {"assignee_name": "Alice"}
-    assert it["task_spec"]["metadata"]["task_id"] == "bbs-1"
+    assert "metadata" not in it["task_spec"]
+    assert it["task_spec"]["context"]["title"] == "BBS 任务标题"
     assert it["publisher"] == "pub-1"
     # ── relay 时间三态(ISO 字符串)──
     assert it["relay_create_time"].startswith("2026-09-01T10:00:00")

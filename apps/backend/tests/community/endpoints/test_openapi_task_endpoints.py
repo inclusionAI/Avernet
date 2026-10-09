@@ -262,7 +262,7 @@ def _bbs_record() -> BbsTaskOverviewRecord:
         retry=0,
         assignee_id="asg-1",
         status=Status.RUNNING,
-        acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+        acceptance_result={"verdict": "PASS", "done": [], "gaps": []},
         extend_props={"assignee_name": "Alice"},
         relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
         relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),

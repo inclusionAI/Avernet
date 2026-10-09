@@ -14,6 +14,9 @@
 app_name: "agentclaw"
 
 user_config:
+  task_discovery:
+    frontend_url: "${FRONTEND_URL:-http://localhost:8000}"
+
   # ── Neutral application policy ────────────────────────────────────────────
 
   # Bot workspace filesystem layout (consumed by WorkspaceConfig). Neutral

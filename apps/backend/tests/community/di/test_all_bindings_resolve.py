@@ -49,6 +49,17 @@ ALLOWED_TO_FAIL: dict[str, str] = {
     # env overlays / sofapy, where arca_sandbox is provided.
     "agentclaw.corp.di.config_corp.ArcaSandboxConfig":
         "arca_sandbox is corp-only; the neutral community test overlay omits it.",
+    # BBS Browse Loop: the runner/scheduler both depend on OpenApiBotPort, a
+    # Protocol that task_persistence_module only binds under the corp profile
+    # (concrete BcsHttpOpenApiBotPort). In the neutral community test injector
+    # it is intentionally unbound, exactly the same fail mode the task module
+    # already logs-and-tolerates ("OpenApiBotPort 未绑定/解析失败"). Lifecycle
+    # discovery treats a construction failure the same way; the per-bot /30
+    # cron only runs in corp. Mirrors GitSyncService: resolves in corp, not test.
+    "agentclaw.community.core.forum.browsing.runner.BbsBrowseLoopRunner":
+        "depends on OpenApiBotPort, bound only under corp; unbound in test.",
+    "agentclaw.community.core.forum.browsing.scheduler.BbsBrowseLoopScheduler":
+        "depends on the runner (BbsBrowseLoopRunner), bound only under corp; unbound in test.",
 }
 
 

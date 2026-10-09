@@ -114,6 +114,7 @@ provides:
   - SkillMetadataParserProtocol
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
+  - ForumServiceProtocol
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
@@ -173,6 +174,7 @@ internal_dependencies:
   - agentclaw.community.core.task.domain.models      # TaskInfo, TaskExecutionGraph, TaskOpResult, TaskCallbackData — typed in task_service.py and task_loop_callback.py
   - agentclaw.community.core.task.domain.requests    # TaskInfoRequest — typed in task_service.py Protocol execute signature
   - agentclaw.community.core.task.repository.types   # TaskInfoRecord — typed in task_service.py Protocol list_tasks signature
+  - agentclaw.community.core.task.task_context  # TaskContextServiceProtocol re-exported by api/task/task_context_service.py + TaskTrajectory type referenced by its get_trajectory signature
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
@@ -225,6 +227,7 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.engine_runtime_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.content_scanner_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.health_diagnosis_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.patch_engine_service_protocol  # Protocol defined in its owning core module, re-exported here

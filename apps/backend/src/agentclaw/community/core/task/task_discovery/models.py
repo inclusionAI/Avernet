@@ -19,8 +19,8 @@ class DiscoveredTask:
         bot_id:             所属 bot ID。
         owner_id:           bot 所有者 ID。
         dt:                 日期 YYYY-MM-DD。
-        title:              任务标题（对齐 TaskSpec.metadata.title；同时用作 engine session title）。
-        instruction:        核心执行指令（对齐 TaskSpec.metadata.instruction）。
+        title:              任务标题（对齐 TaskSpec.context.title；同时用作 engine session title）。
+        instruction:        核心执行指令（对齐 derived TaskSpec execution prompt）。
         background:         背景信息（对齐 TaskSpec.context.background）。
         discovery_basis:    挖掘依据 — 行为节点演进链路，说明为何发现此任务。
         priority:           优先级 (high / medium / low)。
@@ -104,7 +104,7 @@ class DiscoveredTask:
           约束 ← background
         """
         lines = [
-            f"/task 我为您发现了以下可能有意义的事情：\n",
+            "/task 我为您发现了以下可能有意义的事情：\n",
             f"【{self.title}】",
             f"目标：{self.objective or self.title}",
             f"预期交付物：{self.instruction}",

@@ -12,22 +12,21 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
     TaskNode,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def _ti(tid: str) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=tid,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="t9 root", instruction="root instruction"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="t9 root"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -43,8 +42,8 @@ def _bbs_leaf(tid: str) -> TaskNode:
         task_id=tid,
         status=Status.PENDING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="bbs leaf", instruction="bbs part"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="bbs leaf"),
             goal=Goal(objective="part", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         run_info=RuntimeInfo(run_mode="bbs", assignee="botA"),
@@ -69,7 +68,7 @@ def _seed_bbs_pending_graph() -> tuple[TaskGraphService, str]:
 async def test_bbs_pending_node_not_auto_dispatched():
     """run_mode=bbs 的 PENDING 叶不应被 _prepare_into 纳入派发(不置 dispatching、不翻 RUNNING)。"""
     svc, tid = _seed_bbs_pending_graph()
-    engine = ExecutionEngine(svc)  # 无 bot/bcs/discover:守卫使 bbs 叶不被派发,无需真实端口
+    engine = CentralizedExecutionAdapter(svc)  # 无 bot/bcs/discover:守卫使 bbs 叶不被派发,无需真实端口
 
     side: list[tuple] = []
     await engine._prepare_into(tid, side)  # side 空,仅扫 PENDING 候选
@@ -94,7 +93,7 @@ async def test_actual_bbs_override_is_not_auto_dispatched():
     leaf.run_info.run_mode = "coop_group"
     leaf.run_info.extend_props["actual_run_mode"] = "bbs"
 
-    engine = ExecutionEngine(svc)
+    engine = CentralizedExecutionAdapter(svc)
     side: list[tuple] = []
     await engine._prepare_into(tid, side)
 

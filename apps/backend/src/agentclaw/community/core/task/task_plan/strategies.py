@@ -11,6 +11,7 @@ children 非空→add+dispatch;空+has_gap=F→gap 闭终验通过;空+has_gap=T
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Protocol
 
@@ -21,7 +22,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RelationType,
     RuntimeInfo,
@@ -29,6 +29,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskNode,
     TaskSpec,
+    task_spec_instruction,
+    task_spec_title,
 )
 from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
@@ -71,7 +73,10 @@ class WorkflowPlanningStrategy:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         wf = cfg.get("workflow")
         if not wf:
-            return PlanResult(children=[], has_gap=False, gap_detail="done")
+            return PlanResult(
+                children=[], has_gap=False, gap_detail="done",
+                strategy_name="workflow",
+            )
         task_spec = target.task_spec  # workflow 子节点复用目标 task_spec(stub)
         if isinstance(wf, list):
             children = [_wf_node(nid, target.task_id, task_spec) for nid in wf]
@@ -80,7 +85,11 @@ class WorkflowPlanningStrategy:
             children = [_wf_node(nid, target.task_id, task_spec) for nid in kids]
         else:
             children = []
-        return PlanResult(children=children, has_gap=bool(children), gap_detail="workflow" if children else "done")
+        return PlanResult(
+            children=children, has_gap=bool(children),
+            gap_detail="workflow" if children else "done",
+            strategy_name="workflow",
+        )
 
 
 class GapBasedPlanningStrategy:
@@ -105,19 +114,51 @@ class GapBasedPlanningStrategy:
     async def apply(self, graph: TaskExecutionGraph, target: TaskNode) -> PlanResult:
         if self._bot is None:
             # 无规划端口:无法计算 gap / 产子 → 有 gap 拆不出(编排核走深度闸门 HUNG,不假 done)
-            return PlanResult(children=[], has_gap=True, gap_detail="no_planning_port")
+            return PlanResult(
+                children=[], has_gap=True, gap_detail="no_planning_port",
+                strategy_name="gap_based",
+            )
         owner = compose_bot_identity(
             str(graph.extend_props.get("owner_bot_id") or ""),
             graph.extend_props.get("owner_user_id"),
         )
         if not owner:
             # 有端口但无 owner bot(owner_bot_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
-            return PlanResult(children=[], has_gap=True, gap_detail="no_owner_bot")
+            return PlanResult(
+                children=[], has_gap=True, gap_detail="no_owner_bot",
+                strategy_name="gap_based",
+            )
         prompt = _compose_planning_prompt(graph, target)
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "planning"},
         )
         pr = _parse_plan_result(run, target, graph)
+        # REQ-3 PLAN 轨迹溯源:在 prompt/response 都在作用域的策略层计算 SHA-256
+        # digest(plan 截断 500 字响应 → action_input=prompt_digest,ext_info 存
+        # raw_response_digest),不在 engine 算。**失败 mid-row 也带 digest**:用
+        # 该次尝试实际发出的 prompt + 收到的(无法解析的)响应,供轨迹回溯定位。
+        # try/except → None:任一字段缺失不影响规划完成(决策 #14 swallow at emitter)。
+        try:
+            response_text = ""
+            if isinstance(run.get("result"), dict):
+                response_text = str((run.get("result") or {}).get("content") or "")
+            else:
+                response_text = str(run.get("result") or "")
+            response_slice = response_text[:500]
+            # ``prompt`` (from _compose_planning_prompt) is already typed ``-> str``;
+            # concat directly (no redundant ``str()`` wrapping).
+            prompt_digest = hashlib.sha256(
+                (prompt + response_slice).encode("utf-8")
+            ).hexdigest()
+            raw_response_digest = hashlib.sha256(
+                response_slice.encode("utf-8")
+            ).hexdigest()
+        except Exception:  # noqa: BLE001  digest 缺失 → None,规划继续(轨迹旁路)
+            prompt_digest = None
+            raw_response_digest = None
+        pr.strategy_name = "gap_based"
+        pr.prompt_digest = prompt_digest
+        pr.raw_response_digest = raw_response_digest
         logger.info("[plan] owner=%s target=%s → children=%d has_gap=%s gap_detail=%s",
                     owner, target.node_id, len(pr.children), pr.has_gap, pr.gap_detail)
         return pr
@@ -150,7 +191,7 @@ def _done_children(graph: TaskExecutionGraph, target: TaskNode) -> list[dict]:
         if n.node_id in child_ids and n.status == Status.SUCCESS:
             out.append({
                 "node_id": n.node_id,
-                "title": n.task_spec.metadata.title,
+                "title": task_spec_title(n.task_spec),
                 "output": (n.run_info.output if n.run_info else None),
             })
     return out
@@ -167,18 +208,18 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
     goal = target.task_spec.goal
     ctx = target.task_spec.context
     acc_result = target.run_info.acceptance_result
-    gaps = acc_result.gaps if acc_result else []
+    gap_items = acc_result.gap_items if acc_result else []
     snapshot = {
         "node_id": target.node_id,
         "status": str(target.status),
         "goal": goal.objective,
-        "instruction": target.task_spec.metadata.instruction,
+        "instruction": task_spec_instruction(target.task_spec),
         "background": ctx.background if ctx else None,
         "acceptances": [
             {"id": a.id, "description": a.description} for a in goal.acceptances
         ],
         "done_children": _done_children(graph, target),
-        "gaps": gaps,
+        "gaps": gap_items,
         "loop_round": graph.loop_round,
     }
 
@@ -193,22 +234,22 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
         '| tasks | Array<TaskSpec> | 是 | 下一批可执行子任务;gap 已闭(验收通过)时为空数组 ``[]`` |\n'
         '| has_gap | bool | 是 | 目标 - 已完成产出是否仍有差距;gap 闭(验收通过)=false |\n'
         '| gap_detail | string | 是 | gap 闭填 ``"done"``;有 gap 拆不出填原因;正常产子填 ``""`` |\n'
-        '| acceptance_result | object{verdict,acceptances_metric,gaps} | 否 | owner 自评本节点 acceptance(对齐验收 common_task 协议);gap 闭→verdict=DONE/gaps=[];未闭→verdict=FAILED/gaps=[gap_detail] |\n\n'
+        '| acceptance_result | object{verdict,done_items,gap_items} | 否 | owner 自评本节点 acceptance(对齐验收 common_task 协议);done_items=已完成项,gap_items=未完成项;gap 闭→verdict=DONE/gap_items=[];未闭→verdict=FAILED/gap_items=[未完成项] |\n\n'
         '## 子任务 TaskSpec 字段格式\n'
         '| 字段路径 | 类型 | 必需 | 缺失处理 |\n'
         '| --- | --- | --- | --- |\n'
-        '| metadata.task_id | string | 是 | 用作子节点 node_id,必须唯一,不可与已有节点重复 |\n'
-        '| metadata.title | string | 是 | 子任务标题(缺失继承父节点) |\n'
-        '| metadata.instruction | string | 是 | 子任务执行指令(缺失继承父节点) |\n'
+        '| node_id | string | 是 | 子节点 ID,必须唯一,不可与已有节点重复 |\n'
+        '| context.title | string | 否 | 子任务标题(缺失继承父节点) |\n'
+        '| goal.objective | string | 是 | 子任务执行目标(缺失继承父节点) |\n'
         '| context.background | string | 否 | 缺失继承父节点 |\n'
         '| context.extend_props | object | 否 | 默认 ``{}`` |\n'
         '| goal.objective | string | 否 | 缺失继承父节点 |\n'
         '| goal.acceptances | Array<{id,description}> | 否 | 缺失继承父节点 |\n\n'
         '## 协议示例(严格按此 JSON 结构输出,禁止围栏/散文)\n'
         '示例1(gap 未闭,产 1 个子任务):\n'
-        '{"tasks": [{"metadata": {"task_id": "N_market", "title": "市场规模分析", "instruction": "分析存储行业过去5年市场规模与增速"}, "context": {"background": "存储行业尽调·市场维度", "extend_props": {}}, "goal": {"objective": "产出市场规模模型与周期判断", "acceptances": [{"id": "ac_scale", "description": "提供过去5年市场规模/增速/出货量/价格变化"}]}}], "has_gap": true, "gap_detail": "", "acceptance_result": {"verdict": "FAILED", "acceptances_metric": [{"id": "ac_scale", "passed": false, "summary": "市场规模未产出"}], "gaps": ["市场规模未产出"]}}\n\n'
+        '{"tasks": [{"node_id": "N_market", "context": {"title": "市场规模分析", "background": "存储行业尽调·市场维度", "extend_props": {"deliverables": ["市场规模模型与周期判断"]}}, "goal": {"objective": "分析存储行业过去5年市场规模与增速并产出市场规模模型与周期判断", "acceptances": [{"id": "ac_scale", "description": "提供过去5年市场规模/增速/出货量/价格变化"}]}}], "has_gap": true, "gap_detail": "", "acceptance_result": {"verdict": "FAILED", "done_items": [], "gap_items": [{"id": "ac_scale", "passed": false, "summary": "市场规模未产出"}]}}\n\n'
         '示例2(gap 已闭,验收通过):\n'
-        '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "acceptances_metric": [{"id": "<acceptance的id>", "passed": true, "summary": "已由已 DONE 子节点交付达成"}], "gaps": []}}'
+        '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "done_items": [{"id": "<acceptance的id>", "passed": true, "summary": "已由已 DONE 子节点交付达成"}], "gap_items": []}}'
     )
     return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务。**最终只输出一个符合下方协议的合法 JSON 对象,禁止任何 JSON 之外的文字。**gap 已闭返回 has_gap=false。单次最多产出 3 个子任务,禁止超过 3 个。\n"
             f"目标节点 node_id={target.node_id}\n"
@@ -220,10 +261,10 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
     """解析 owner bot round-trip 结果 run{status,result,error} → PlanResult。
 
     约定 result.content 为 JSON(裸或被散文/```json 包裹,经 ``extract_json`` 提取),结构:
-    ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str, "acceptance_result": {verdict,acceptances_metric,gaps}}``。
+    ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str, "acceptance_result": {verdict,done_items,gap_items}}``。
     裸 ``List[TaskSpec]`` 数组按 tasks 解析(has_gap=len>0)。
     非终态/空 content/解析失败 → PlanResult([], has_gap=True, gap_detail=plan_*);编排核据 gap 闭语义处理。
-    node_id 取自 metadata.task_id;与已存 nodes 去重;task_id(根任务)取自 target.task_id。
+    node_id 优先取任务元素顶层 node_id；兼容旧 metadata.task_id；与已存 nodes 去重。
     """
     status = str(run.get("status") or "").upper()
     if status != "COMPLETED":
@@ -268,7 +309,12 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
         spec = _build_child_task_spec(ch, target)
         if spec is None:
             continue
-        nid = spec.metadata.task_id
+        legacy = ch.get("metadata") if isinstance(ch, dict) else None
+        nid = str(
+            ch.get("node_id")
+            or (legacy.get("task_id") if isinstance(legacy, dict) else "")
+            or f"plan-{len(children) + 1}"
+        )
         if not nid or nid in existing or any(c.node_id == nid for c in children):
             continue
         children.append(TaskNode(
@@ -284,49 +330,48 @@ def _acceptance_result_from_plan(
 ) -> AcceptanceResult | None:
     """从 plan 返回 dict 解析 owner 自评 acceptance_result(对齐 common_task 协议)。
 
-    读 ``data["acceptance_result"]``({verdict,acceptances_metric,gaps});缺失/非法 → None(编排核回退合成)。"""
+    读 ``data["acceptance_result"]``({verdict,done_items,gap_items});done_items=已完成项,gap_items=未完成项;缺失/非法 → None(编排核回退合成)。"""
     ar = data.get("acceptance_result")
     if not isinstance(ar, dict):
         return None
     try:
         return AcceptanceResult(
             verdict=AcceptanceVerdict(str(ar.get("verdict") or ("DONE" if not has_gap else "FAILED"))),
-            acceptances_metric=list(ar.get("acceptances_metric") or []),
-            gaps=list(ar.get("gaps") or []),
+            done_items=list(ar.get("done_items") or []),
+            gap_items=list(ar.get("gap_items") or []),
         )
     except (ValueError, TypeError):
         return None
 
 
 def _build_child_task_spec(data: dict, parent: TaskNode) -> TaskSpec | None:
-    """从返回的 dict 构造子 TaskSpec(对齐领域模型)。缺失字段宽松继承 parent,保证下游可执行/验收。
-
-    输入约定 ``List[TaskSpec]`` 元素:{"metadata":{task_id,title,instruction},"context":{background,...},"goal":{objective,acceptances}}。
-    metadata.task_id(=node_id)、instruction 为必需;title/context/background/goal/acceptances 缺失则继承 parent。
-    """
+    """Normalize new context+goal and legacy metadata planner output."""
     if not isinstance(data, dict):
         return None
-    md = data.get("metadata") or {}
-    nid = md.get("task_id")
-    if not nid:
-        return None
-    parent_meta = parent.task_spec.metadata
-    instr = md.get("instruction") or parent_meta.instruction
-    title = md.get("title") or parent_meta.title
+    legacy = data.get("metadata") or {}
     ctx_d = data.get("context") or {}
-    ctx = Context(
-        background=ctx_d.get("background") or parent.task_spec.context.background,
-        extend_props=dict(ctx_d.get("extend_props") or {}),
-    )
     goal_d = data.get("goal") or {}
+    title = str(ctx_d.get("title") or legacy.get("title") or parent.task_spec.context.title)
+    background = str(ctx_d.get("background") or parent.task_spec.context.background)
+    objective = str(
+        goal_d.get("objective")
+        or legacy.get("instruction")
+        or parent.task_spec.goal.objective
+    )
     accs_in = goal_d.get("acceptances") or parent.task_spec.goal.acceptances
     accs = [
-        AcceptanceCriteria(id=a.get("id", f"ac_{i}"), description=a.get("description", ""))
+        AcceptanceCriteria(
+            id=str(a.get("id", f"ac_{i}")),
+            description=str(a.get("description", "")),
+        )
         if isinstance(a, dict) else a
         for i, a in enumerate(accs_in)
     ]
-    goal = Goal(
-        objective=goal_d.get("objective") or parent.task_spec.goal.objective,
-        acceptances=accs,
+    return TaskSpec(
+        context=Context(
+            title=title,
+            background=background,
+            extend_props=dict(ctx_d.get("extend_props") or {}),
+        ),
+        goal=Goal(objective=objective, acceptances=accs),
     )
-    return TaskSpec(metadata=Metadata(task_id=nid, title=title, instruction=instr), context=ctx, goal=goal)

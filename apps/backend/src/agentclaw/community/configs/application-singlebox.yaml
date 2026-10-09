@@ -29,6 +29,23 @@ module_config:
 
 # ─────────────────── user_config 覆盖 ───────────────────
 user_config:
+  # The same production adapter/port contract as every other deployment. The
+  # local BaaS OpenAPI key is injected by the deployment just like api_key_secret
+  # is injected in production.
+  openapi_bot:
+    base_url: "http://localhost:8890"
+    base_url_pre: "http://localhost:8890"
+    api_key_secret: "${api_key_secret:-}"
+    api_key_prefix: "${api_key_prefix:-}"
+
+  bcs_client:
+    base_url: "http://localhost:21000"
+    base_url_pre: "http://localhost:21000"
+    token_secret: "local-noop"
+    secret_secret: "local-noop"
+    task_callback_url: "http://localhost:8888"
+    task_callback_url_pre: "http://localhost:8888"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests/ci only.
   # Real employee ids never ship in community source. Acceptance tests authorize
   # with "100000" (the doc-example placeholder).

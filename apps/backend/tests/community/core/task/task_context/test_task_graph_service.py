@@ -21,7 +21,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -29,6 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
     TaskSpec,
+    TaskCallbackData,
     TaskGraphPatch,
     effective_run_mode,
 )
@@ -37,10 +37,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 # ===== fixtures / helpers =====
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do it"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -64,6 +64,24 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 
+
+
+def test_report_routes_node_and_graph_facts_through_single_gateway(svc: TaskGraphService):
+    graph = svc.initialize_graph(_task_info("report-task"))
+    node_result = svc.report(TaskCallbackData(data={
+        "report_type": "NODE_PATCH",
+        "payload": {"patch": _patch("report-task", "report-task", status=Status.RUNNING)},
+    }))
+    assert node_result.new_status == Status.RUNNING
+
+    svc.report(TaskCallbackData(data={
+        "report_type": "GRAPH_PATCH",
+        "payload": {
+            "task_id": "report-task",
+            "patch": TaskGraphPatch(extend_props_patch={"relay_mode": True}),
+        },
+    }))
+    assert graph.extend_props["relay_mode"] is True
 
 def test_effective_run_mode_prefers_non_empty_actual_override():
     node = _node("mode")
@@ -117,6 +135,55 @@ class TestInitializeGraph:
         with pytest.raises(GraphAlreadyInitializedError):
             svc.initialize_graph(_task_info("t1"))
 
+    def test_main_session_seeds_root_session(self, svc: TaskGraphService):
+        info = _task_info("t-session")
+        info.execution_config["main_session_id"] = "session-initial"
+
+        graph = svc.initialize_graph(info)
+
+        assert graph.tasks[0].run_info.extend_props["session_id"] == "session-initial"
+
+    def test_missing_main_session_does_not_create_root_session(
+        self, svc: TaskGraphService
+    ):
+        graph = svc.initialize_graph(_task_info("t-no-session"))
+
+        assert "session_id" not in graph.tasks[0].run_info.extend_props
+
+    def test_report_can_override_initial_root_session(self, svc: TaskGraphService):
+        info = _task_info("t-session-override")
+        info.execution_config["main_session_id"] = "session-initial"
+        graph = svc.initialize_graph(info)
+
+        svc.update_task_node_info(
+            _patch(
+                "t-session-override",
+                "t-session-override",
+                extend_props_patch={"session_id": "session-reported"},
+            )
+        )
+
+        node = svc._get_node(graph, "t-session-override")
+        assert node.run_info.extend_props["session_id"] == "session-reported"
+
+    def test_report_without_session_keeps_initial_root_session(
+        self, svc: TaskGraphService
+    ):
+        info = _task_info("t-session-keep")
+        info.execution_config["main_session_id"] = "session-initial"
+        graph = svc.initialize_graph(info)
+
+        svc.update_task_node_info(
+            _patch(
+                "t-session-keep",
+                "t-session-keep",
+                extend_props_patch={"execution_decision": "ACCEPTED"},
+            )
+        )
+
+        node = svc._get_node(graph, "t-session-keep")
+        assert node.run_info.extend_props["session_id"] == "session-initial"
+
 
 # ===== add_task_nodes 触发条件 + 护栏 =====
 class TestAddTaskNodes:
@@ -136,7 +203,7 @@ class TestAddTaskNodes:
         svc.add_task_nodes([_node("leaf")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "leaf", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "leaf", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺深度"]))
+            _patch("t1", "leaf", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺深度"]))
         )
         # 验收未通过仍是执行完成,节点为 DONE,不进入 FAILED 补救分支。
         assert svc._get_node(graph, "leaf").status == Status.DONE
@@ -170,7 +237,7 @@ class TestAddTaskNodes:
                     node_id,
                     acceptance_result=AcceptanceResult(
                         verdict=AcceptanceVerdict.DONE,
-                        acceptances_metric=[node_id],
+                        done_items=[node_id],
                     ),
                 )
             )
@@ -200,7 +267,7 @@ class TestAddTaskNodes:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(_patch("t1", "c2", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["x"]))
         )
         # c1 FAILED+gaps → 条件 b 成立;parent=c2 RUNNING 不可委托
         with pytest.raises(GraphIntegrityError, match="不可委托"):
@@ -221,7 +288,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         r = svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, done_items=["ac1"]))
         )
         assert r.prev_status == Status.RUNNING
         assert r.new_status == Status.SUCCESS
@@ -232,7 +299,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         r = svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=[]))
         )
         assert r.new_status == Status.DONE
         assert svc._get_node(graph, "c1").status == Status.DONE
@@ -244,7 +311,7 @@ class TestUpdateTaskNodeInfo:
         r = svc.update_task_node_info(
             _patch(
                 "t1", "c1",
-                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]),
+                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=[]),
                 status=Status.HUNG,
             )
         )
@@ -255,7 +322,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]))
         )
         assert svc._get_node(graph, "c1").status == Status.DONE
 
@@ -333,7 +400,7 @@ class TestUpdateTaskNodeInfo:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         t0 = svc._get_node(graph, "c1").run_info.start_time
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, done_items=["ac1"]))
         )
         node = svc._get_node(graph, "c1")
         assert node.status == Status.SUCCESS
@@ -344,7 +411,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["x"]))
         )
         assert svc._get_node(graph, "c1").run_info.end_time is not None
 
@@ -357,6 +424,34 @@ class TestUpdateTaskNodeInfo:
         assert node.status == Status.PENDING
         assert node.run_info.start_time is not None
         assert node.run_info.end_time is None
+
+    def test_relay_successor_node_rejects_later_status_writes(self, svc, graph):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b")
+        )
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1", mark_parent_planning=False)
+
+        with pytest.raises(TaskStateError, match="relay successor node is immutable"):
+            svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
+
+        assert svc._get_node(graph, "t1").status == Status.DONE
+        # Status-free lease/runtime maintenance remains a fold operation.
+        svc.update_task_node_info(
+            _patch("t1", "t1", extend_props_patch={"bbs_owner": None})
+        )
+        assert svc._get_node(graph, "t1").status == Status.DONE
+
+    def test_relay_terminal_node_rejects_direct_status_writes(self, svc, graph):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING))
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))
+
+        with pytest.raises(TaskStateError, match="relay terminal node status is immutable"):
+            svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
+
+        assert svc._get_node(graph, "t1").status == Status.DONE
 
     def test_planning_to_hung_writes_end_time_only(self, svc, graph):
         # 根在 init_graph 时已开始计时,即使纯规划节点未进入 RUNNING。
@@ -536,7 +631,7 @@ class TestAcceptanceFailStatus:
         r = svc.update_task_node_info(
             _patch(
                 "t1", "c1",
-                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
+                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]),
                 status=Status.HUNG,
             )
         )
@@ -544,13 +639,13 @@ class TestAcceptanceFailStatus:
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
         assert n.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert n.run_info.acceptance_result.gap_items == ["缺x"]
 
     def test_fail_without_status_is_done(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         r = svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["x"]))
         )
         assert r.new_status == Status.DONE
 
@@ -593,3 +688,74 @@ class TestEffectiveStatus:
         before = g.status
         _ = g.effective_status  # 读派生不写存储
         assert g.status == before
+
+    @staticmethod
+    def _relay_graph(svc: TaskGraphService, task_id: str):
+        info = _task_info(task_id)
+        info.execution_config["orchestration_mode"] = "relay"
+        return svc.initialize_graph(info)
+
+    def test_relay_effective_status_does_not_mirror_handed_off_root(self, svc):
+        graph = self._relay_graph(svc, "tr")
+        svc.add_task_nodes(
+            [_node("baton", "tr")], parent_node_id="tr", mark_parent_planning=False
+        )
+        root = next(node for node in graph.tasks if node.node_id == "tr")
+        baton = next(node for node in graph.tasks if node.node_id == "baton")
+        root.status = Status.DONE
+        graph.extend_props["gaps"] = ["补齐研究缺口"]
+
+        for baton_status in (Status.PENDING, Status.RUNNING):
+            baton.status = baton_status
+            # Simulate an older persisted root-mirrored value to ensure it cannot
+            # make the dashboard show a Relay task as completed.
+            graph.status = Status.DONE
+            assert graph.effective_status is Status.RUNNING
+
+        baton.status = Status.DONE
+        graph.extend_props["gaps"] = []
+        assert graph.effective_status is Status.RUNNING
+
+        graph.status = Status.DONE
+        assert svc.list_task_summaries()[0].status is Status.RUNNING
+        assert svc.list_task_summaries(Status.DONE) == []
+
+        baton.status = Status.SUCCESS
+        assert graph.effective_status is Status.DONE
+        assert svc.list_task_summaries(Status.RUNNING) == []
+        assert svc.list_task_summaries()[0].status is Status.DONE
+
+    def test_relay_effective_status_requires_explicit_empty_gaps(self, svc):
+        graph = self._relay_graph(svc, "tg")
+        root = graph.tasks[0]
+        root.status = Status.SUCCESS
+        del graph.extend_props["gaps"]
+
+        assert graph.effective_status is Status.RUNNING
+
+        graph.extend_props["gaps"] = []
+        assert graph.effective_status is Status.DONE
+
+    def test_relay_effective_status_keeps_explicit_hard_stop_authoritative(self, svc):
+        graph = self._relay_graph(svc, "th-r")
+        graph.tasks[0].status = Status.RUNNING
+        graph.status = Status.HUNG
+
+        assert graph.effective_status is Status.HUNG
+
+
+def test_runtime_profile_is_frozen_at_graph_creation(svc: TaskGraphService):
+    info = _task_info("profile-task")
+    info.execution_config["runtime_profile"] = {
+        "planner_strategy": "gap_based",
+        "dispatcher_strategy": "search",
+        "runner_strategy": "default",
+        "allowed_run_modes": ["single_bot"],
+    }
+    graph = svc.initialize_graph(info)
+    info.execution_config["runtime_profile"]["allowed_run_modes"].append("bbs")
+    assert graph.extend_props["runtime_profile"]["allowed_run_modes"] == ["single_bot"]
+    with pytest.raises(TaskStateError, match="not allowed"):
+        svc.update_task_node_info(
+            _patch("profile-task", "profile-task", run_mode="bbs")
+        )

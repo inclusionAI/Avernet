@@ -9,6 +9,7 @@ singlebox. Keeping the mapping here makes that installation order explicit.
 Imports are function-local per branch so a profile only imports its own
 column — the ``corp`` and ``community`` columns are import-disjoint.
 """
+
 from __future__ import annotations
 
 from injector import Module
@@ -26,13 +27,21 @@ def _common_test_doubles() -> list[Module]:
     ``corp_test``. Imports are function-local so this helper stays corp-free.
     """
     from agentclaw.community.di.modules.infrastructure.test.cache import TestCacheModule
-    from agentclaw.community.di.modules.infrastructure.test.health import TestHealthModule
-    from agentclaw.community.di.modules.infrastructure.test.identity import TestIdentityModule
-    from agentclaw.community.di.modules.infrastructure.test.secret import TestSecretModule
+    from agentclaw.community.di.modules.infrastructure.test.health import (
+        TestHealthModule,
+    )
+    from agentclaw.community.di.modules.infrastructure.test.identity import (
+        TestIdentityModule,
+    )
+    from agentclaw.community.di.modules.infrastructure.test.secret import (
+        TestSecretModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.skill_center import (
         TestSkillCenterClientModule,
     )
-    from agentclaw.community.di.modules.infrastructure.test.tracer import TestTracerModule
+    from agentclaw.community.di.modules.infrastructure.test.tracer import (
+        TestTracerModule,
+    )
     from agentclaw.community.di.modules.infrastructure.test.drm import TestDRMModule
     from agentclaw.community.di.modules.infrastructure.test.sandbox_runtime import (
         TestSandboxRuntimeModule,
@@ -49,8 +58,16 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.eval_env import (
         TestEvalEnvModule,
     )
-    from agentclaw.community.di.modules.testing_aicoding_module import TestingAicodingModule
-    from agentclaw.community.di.modules.testing_database_module import TestingDatabaseModule
+    from agentclaw.community.di.modules.infrastructure.test.task_discovery_ports import (
+        TestFrontendUrlProviderModule,
+        TestNotifyMessagesProviderModule,
+    )
+    from agentclaw.community.di.modules.testing_aicoding_module import (
+        TestingAicodingModule,
+    )
+    from agentclaw.community.di.modules.testing_database_module import (
+        TestingDatabaseModule,
+    )
     from agentclaw.community.di.modules.testing_mcp_module import TestingMcpModule
     from agentclaw.community.di.modules.testing_skill_center_module import (
         TestingSkillCenterModule,
@@ -79,6 +96,9 @@ def _common_test_doubles() -> list[Module]:
         TestSkillCenterClientModule(),
         # 评测环境 Noop 绑定（评测功能关闭）。
         TestEvalEnvModule(),
+        # task_discovery plugin ports (FrontendUrl / NotifyMessages) — Null impls.
+        TestFrontendUrlProviderModule(),
+        TestNotifyMessagesProviderModule(),
     ]
 
 
@@ -143,6 +163,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.notify import (
             CommunityNotifyModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+            TaskRunnerIntegrationModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
         )
@@ -151,8 +174,8 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # Token vault — empty-key (encrypt = passthrough); no SecretResolver dep.
             TestTokenVaultModule(),
             # The reuse column's concerns, now community:
-            CommunityAICodingModule(),      # empty workflow catalog (no AntCode)
-            CommunityNotifyModule(),    # no-op notify sender (no DingTalk)
+            CommunityAICodingModule(),  # empty workflow catalog (no AntCode)
+            CommunityNotifyModule(),  # no-op notify sender (no DingTalk)
             # Outbound rules are shared by test and singlebox. DeviceSync is
             # selected per profile below.
             CommunityOutboundRulesModule(),
@@ -166,11 +189,13 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 TestHttpClientModule,
             )
 
-            column.extend([
-                CommunityDeviceSyncModule(),
-                TestDevicesModule(),
-                TestHttpClientModule(),
-            ])
+            column.extend(
+                [
+                    CommunityDeviceSyncModule(),
+                    TestDevicesModule(),
+                    TestHttpClientModule(),
+                ]
+            )
         else:
             from agentclaw.community.di.modules.singlebox_access_module import (
                 SingleboxAccessModule,
@@ -185,14 +210,19 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 SingleboxDeviceSyncService,
             )
 
-            column.extend([
-                SingleboxDevicesModule(),
-                CommunityDeviceSyncModule(
-                    device_sync_wrapper=SingleboxDeviceSyncService,
-                ),
-                SingleboxAccessModule(),
-                SingleboxCallerIdentityModule(),
-            ])
+            column.extend(
+                [
+                    # Task transport ports are configuration-driven and shared with the
+                    # community/public column. There is no task-specific profile branch.
+                    TaskRunnerIntegrationModule(),
+                    SingleboxDevicesModule(),
+                    CommunityDeviceSyncModule(
+                        device_sync_wrapper=SingleboxDeviceSyncService,
+                    ),
+                    SingleboxAccessModule(),
+                    SingleboxCallerIdentityModule(),
+                ]
+            )
 
         return column
 
@@ -312,6 +342,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.eval_env import (
             CommunityEvalEnvModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task_discovery_ports import (
+            CommunityTaskDiscoveryPortsModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
             TaskRunnerIntegrationModule,
         )
@@ -356,6 +389,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # the openapi_bot / bcs_client user_config blocks. Registered after
             # base TaskModule so its bcs_token_provider callback override wins.
             TaskRunnerIntegrationModule(),
+            # task_discovery plugin ports (FrontendUrl / NotifyMessages) — Null
+            # impls (community ships no DingTalk channel / env-aware YAML
+            # frontend block; the corp column overrides both via
+            # CorpTaskIntegrationModule, last-binding-wins).
+            CommunityTaskDiscoveryPortsModule(),
         ]
         return column
 

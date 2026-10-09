@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest, _normalize_execution_config,
     execution_graph_to_product_status, op_result_to_dto,
-    runtime_status_to_product_status,
+    runtime_status_to_product_status, TaskSettingRequestDTO, TaskSettingStateDTO,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
 
@@ -48,6 +48,25 @@ def test_op_result_to_dto_returns_extend_props():
     ))
 
     assert dto.extend_props == {"group_id": "bcs_grp_1"}
+
+
+def test_task_settings_dtos_accept_relay_execution() -> None:
+    request = TaskSettingRequestDTO(
+        setting_type="relay_execution", enabled=True,
+    )
+    state = TaskSettingStateDTO(
+        setting_type="relay_execution", enabled=True, env="dev",
+    )
+
+    assert request.setting_type == "relay_execution"
+    assert state.setting_type == "relay_execution"
+
+
+def test_task_settings_dtos_reject_unknown_setting_type() -> None:
+    with pytest.raises(ValidationError):
+        TaskSettingRequestDTO(setting_type="unknown", enabled=True)
+    with pytest.raises(ValidationError):
+        TaskSettingStateDTO(setting_type="unknown", enabled=True, env="dev")
 
 
 @pytest.mark.parametrize(
@@ -130,7 +149,15 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
     execution_graph = {
         "status": "PENDING",
         "tasks": [
-            {"node_id": "n1", "status": "RUNNING"},
+            {
+                "node_id": "n1",
+                "status": "RUNNING",
+                "task_spec": {
+                    "metadata": {"task_id": "n1", "title": "旧标题", "instruction": "旧目标"},
+                    "context": {"background": "背景", "extend_props": {}},
+                    "goal": {"objective": "", "acceptances": []},
+                },
+            },
             {"node_id": "n2", "status": "HUNG"},
             {"node_id": "n3", "status": "DONE", "run_info": {"status": "completed"}},
         ],
@@ -145,8 +172,11 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
         "REVIEWING",
         "DONE",
     ]
-    # Only the graph and direct task statuses are projected; nested metadata is untouched.
     assert normalized["extend_props"]["status"] == "completed"
+    normalized_spec = normalized["tasks"][0]["task_spec"]
+    assert "metadata" not in normalized_spec
+    assert normalized_spec["context"]["title"] == "旧标题"
+    assert normalized_spec["goal"]["objective"] == "旧目标"
     assert execution_graph["status"] == "PENDING"
     assert execution_graph["tasks"][0]["status"] == "RUNNING"
 
@@ -166,16 +196,46 @@ def test_acceptance_verdict_backward_compat_pass_fail():
 
 
 def test_acceptance_result_dto_accepts_object_arrays():
-    """新协议 acceptances_metric/gaps 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
+    """新协议 done_items/gap_items 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
     from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
     dto = AcceptanceResultDTO(
         verdict="DONE",
-        acceptances_metric=[{"ac_1": "exec_ok"}],
-        gaps=[{"sddss": "xxsdd"}],
+        done_items=[{"ac_1": "exec_ok"}],
+        gap_items=[{"sddss": "xxsdd"}],
     )
     assert dto.verdict == "DONE"
-    assert dto.acceptances_metric == [{"ac_1": "exec_ok"}]
-    assert dto.gaps == [{"sddss": "xxsdd"}]
+    assert dto.done_items == [{"ac_1": "exec_ok"}]
+    assert dto.gap_items == [{"sddss": "xxsdd"}]
+
+def test_acceptance_result_dto_rejects_legacy_verdict():
+    """新外部协议只接受 verdict=DONE/FAILED;历史 PASS/FAIL 仅由领域反序列化兼容。"""
+    from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
+
+    with pytest.raises(ValidationError):
+        AcceptanceResultDTO(verdict="PASS", done_items=[], gap_items=[])
+
+
+def test_bbs_acceptance_result_is_canonicalized_before_external_dto():
+    """BBS 历史持久化数据出口统一为 verdict/done_items/gap_items。"""
+    from agentclaw.community.adapters.http.task.schemas import (
+        _canonical_bbs_acceptance_result,
+    )
+
+    canonical = _canonical_bbs_acceptance_result(
+        {
+            "verdict": "PASS",
+            "acceptances_metric": [
+                {"id": "ac1", "passed": True, "summary": "已完成"},
+                {"id": "ac2", "passed": False, "summary": "未完成"},
+            ],
+            "gaps": ["缺交付物"],
+        }
+    )
+    assert canonical == {
+        "verdict": "DONE",
+        "done_items": [{"id": "ac1", "passed": True, "summary": "已完成"}],
+        "gap_items": ["缺交付物"],
+    }
 
 
 def test_unwrap_node_output_collapses_single_output_key():

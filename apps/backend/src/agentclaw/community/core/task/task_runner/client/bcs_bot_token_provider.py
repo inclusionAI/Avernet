@@ -24,7 +24,7 @@ class BcsBotTokenProvider(Protocol):
 
 
 class NullBcsBotTokenProvider:
-    """无 token 实现(本地/singlebox/double/未配置):恒返回 None。
+    """无 token 实现(本地测试/未配置):恒返回 None。
 
     搭配建群不挂订阅/无 token 时走 no-sub 分支,无需 token;本实现下 ``caller_bot_token`` 不发,
     行为同未配置 provider(向后兼容)。

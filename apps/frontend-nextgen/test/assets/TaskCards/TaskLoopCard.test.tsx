@@ -9,7 +9,7 @@ jest.mock('@/services/tasks/taskCardBridge', () => ({
 
 const mockedSubmit = submitTaskCardAction as jest.MockedFunction<typeof submitTaskCardAction>;
 
-function cardProps(content: Record<string, unknown>) {
+function cardProps(content: unknown) {
   return {
     params: { content },
     payload: {},
@@ -43,6 +43,66 @@ describe('TaskLoopCard', () => {
     expect(screen.getByText('修复 PR #1243 的命名问题')).toBeTruthy();
     expect(screen.getByText('代码 PR（命名修正）')).toBeTruthy();
     expect(document.body.innerHTML).not.toContain('cardId');
+  });
+
+  it('renders a JSON-string AixUI body for a task_ready confirmation card', () => {
+    const payload = {
+      type: 'task_ready',
+      task: {
+        task_type: 'dynamic',
+        goal: '修复 PR #1243 的命名问题',
+        deliverables: ['代码 PR（命名修正）'],
+        acceptance_criteria: ['CI 通过'],
+        constraints: ['不动接口逻辑'],
+        resources: [],
+      },
+    };
+
+    render(<TaskLoopCard {...cardProps(JSON.stringify(payload))} />);
+
+    expect(screen.getByText('任务已就绪')).toBeTruthy();
+    expect(screen.getByText('修复 PR #1243 的命名问题')).toBeTruthy();
+    expect(screen.queryByText('暂无数据')).toBeNull();
+  });
+
+  it('falls back to top-level task fields when a malformed confirmation payload has an empty task object', () => {
+    render(
+      <TaskLoopCard
+        {...cardProps({
+          type: 'task_ready',
+          task: {},
+          goal: '修复 PR #1243 的命名问题',
+          deliverables: ['代码 PR（命名修正）'],
+          acceptance_criteria: ['CI 通过'],
+          constraints: ['不动接口逻辑'],
+          resources: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByText('修复 PR #1243 的命名问题')).toBeTruthy();
+    expect(screen.getByText('代码 PR（命名修正）')).toBeTruthy();
+    expect(screen.queryByText('未设定')).toBeNull();
+  });
+
+  it('fills missing nested confirmation fields from the legacy top-level payload', () => {
+    render(
+      <TaskLoopCard
+        {...cardProps({
+          type: 'task_ready',
+          task: { task_type: 'dynamic', goal: '修复 PR #1243 的命名问题' },
+          deliverables: ['代码 PR（命名修正）'],
+          acceptance_criteria: ['CI 通过'],
+          constraints: ['不动接口逻辑'],
+          resources: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByText('修复 PR #1243 的命名问题')).toBeTruthy();
+    expect(screen.getByText('代码 PR（命名修正）')).toBeTruthy();
+    expect(screen.getByText('CI 通过')).toBeTruthy();
+    expect(screen.getByText('不动接口逻辑')).toBeTruthy();
   });
 
   it('dispatches the task action through the public bridge service', () => {

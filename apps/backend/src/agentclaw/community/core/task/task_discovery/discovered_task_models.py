@@ -3,7 +3,7 @@
 将原 SqliteTaskReader 的 discovered_tasks 表迁移为 SQLAlchemy ORM，
 通过 DatabasePlugin.orm_session() 访问：
   - corp 环境走 OceanBase
-  - local/singlebox 环境走 SQLite 内存库
+  - 本地配置环境走 SQLite 内存库
 
 与 lock_models.py 同构，遵循 task_discovery 域的 ORM 约定。
 """

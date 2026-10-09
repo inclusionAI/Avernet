@@ -20,7 +20,7 @@ from agentclaw.community.core.task.task_runner.client.translators import (
 logger = logging.getLogger("task.poller")
 
 _DEFAULT_INTERVAL = 3.0
-_DEFAULT_SLA = 600.0  # 真实 LLM execute round-trip(单 bot 产出)可达 10 分钟;double 立即终态不受影响
+_DEFAULT_SLA = 600.0  # 真实 LLM execute round-trip(单 bot 产出)可达 10 分钟;测试桩可立即终态，不受此 SLA 影响
 _MAX_CONSEC_FAIL = 5
 
 _TERMINAL_SINGLE = {"COMPLETED", "FAILED"}

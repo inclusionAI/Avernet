@@ -23,7 +23,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 
 
 # api_key_prefix 未设置时,回落取 api_key 前多少位作 URL 路径段。
-# 取 8 位，与 IntegrationDouble/_Key 的约定一致。
+# 默认取 8 位，与历史 API-key 前缀约定保持兼容。
 # 不同环境可在 ApiKeyProvider.api_key_prefix 显式提供真实前缀(优先),此处仅兜底。
 _DEFAULT_KEY_PREFIX_LEN = 8
 
@@ -80,7 +80,7 @@ def _map_status(resp: httpx.Response) -> None:
 
 class OpenApiBotAdapter(
     OpenApiBotPort
-):  # pragma: no cover — live BaaS OpenApi HTTP client; exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
+):  # pragma: no cover — live BaaS OpenApi HTTP client; exercised by live acceptance / 联调, not CI LOCAL line coverage
     def __init__(
         self,
         keys: ApiKeyProvider,
@@ -136,7 +136,7 @@ class OpenApiBotAdapter(
 
         真实 ACE 网关后的 host(``agentclaw-*`` / ``secbaas-*``)除 Bearer 外还需登录 Cookie(+ Referer)
         才能过 ACE;否则 ACE 回 HTTP 200 的 USER_NOT_LOGIN 登录门(无业务 data),被误当成功而 run_id=None。
-        本地 singlebox 与 service-to-service(``CorpApiKeyProvider`` cookie/referer 空)不加 → 行为不变。
+        本地安全联调与 service-to-service(``CorpApiKeyProvider`` cookie/referer 空)不加 → 行为不变。
         """
         h: dict[str, str] = {"Authorization": f"Bearer {self._k.api_key}"}
         if self._k.cookie:
@@ -326,7 +326,7 @@ class OpenApiBotAdapter(
         """Best-effort stop tracking hook.
 
         当前 BaaS Open API 未暴露任务模块可用的 cancel endpoint；Poller 注销 handle 后不再消费晚到结果。
-        Singlebox 实现会真实取消本地 WebSocket collector。
+        当前生产 OpenAPI 未提供任务模块可用的取消端点。
         """
         return None
 

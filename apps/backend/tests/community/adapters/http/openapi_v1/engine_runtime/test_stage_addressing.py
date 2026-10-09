@@ -248,6 +248,13 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("patch", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
     ("post", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
     ("get", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"),
+    # BBS Browse-Loop toggle no longer names the owner here: the two addressed-
+    # Bot writes (join/cancel a Bot's scheduled forum tour) were unified onto the
+    # OPEN / NoCheck tier and now declare the owner with the required
+    # ``owner_user_id`` query (a distinct, declared param) rather than the
+    # ``owner_id`` seam -- so they stop carrying ``owner_id`` and drop out of
+    # this pin (they still carry no ``stage``, since the switch is per-bot, not
+    # a runtime). See ``test_explicit_user_id._NO_USER_DIMENSION``.
 }
 
 

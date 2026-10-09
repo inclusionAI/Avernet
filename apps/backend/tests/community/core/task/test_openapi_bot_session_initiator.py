@@ -1,5 +1,10 @@
 """Unit tests for OpenApiBotSessionInitiator — corp/pre/prod session creation via BaaS Open API.
 
+Migrated from community (``tests/community/core/task/``) alongside the class move
+to ``corp/plugins/prod/session_initiator.py`` (task_discovery plugin-ication):
+the PROD impl now lives corp-side; local impl (``CronRelaySessionInitiator``)
+stays in community core.
+
 Covers initiate_session (happy/error/fallback), _build_discovery_prompt, _build_session_url.
 """
 from __future__ import annotations
@@ -7,17 +12,16 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock
 
-import pytest
 
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
-from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
-    OpenApiBotSessionInitiator,
-)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BotSendResult,
+)
+from agentclaw.community.core.task.task_discovery.session_initiator import (
+    OpenApiBotSessionInitiator,
 )
 
 
@@ -338,7 +342,7 @@ class TestUpdateSessionTitle:
             text = "{}"
 
         with patch(
-            "agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator.httpx.AsyncClient"
+            "agentclaw.community.core.task.task_discovery.session_initiator.httpx.AsyncClient"
         ) as mock_cls:
             cli = MagicMock()
             cli.__aenter__ = AsyncMock(return_value=cli)
