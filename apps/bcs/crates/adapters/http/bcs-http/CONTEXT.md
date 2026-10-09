@@ -17,10 +17,17 @@ GET/PUT /admin/message-delivery/policy allow authenticated Human identities from
   `/openapi/v1/collaboration` prefix; no unprefixed write aliases are mounted.
 - Authenticated Bot endpoints for querying current-session state-machine
   permission and submitting one-shot YAML, transient role bindings, and input.
+- Legacy `GET /register/token` and anonymous `POST /register` retain v1 behavior
+  and bare HTTP 200 responses, while accepting Provider-scoped v2 tokens through
+  the shared injected `RegisterService`. Scoped parameters are parsed only for
+  v2 redemption; the facade owns authorization, scope and persistence. Successful
+  issuance/redemption responses use `Cache-Control: no-store`.
 
 ## Consumes
 
 - `bcs-service-api` traits and DTOs.
+- `application::v1::RegisterService` for scoped issuance and registration;
+  adapter construction without it retains v1 and fails scoped calls closed.
 - `bcs-http-auth` extractors.
 - `bcs-protocol` wire DTOs when an HTTP endpoint exposes protocol-shaped payloads.
 

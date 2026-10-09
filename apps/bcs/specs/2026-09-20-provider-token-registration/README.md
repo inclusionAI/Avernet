@@ -2,7 +2,8 @@
 
 ## Calls
 
-The public prefix is `/openapi/v1/collaboration`.
+The OpenAPI prefix is `/openapi/v1/collaboration`. The legacy routes
+`GET /register/token` and `POST /register` also support the same v1/v2 tokens.
 
 1. An authenticated Human requests `GET /register/token?provider_id=<id>`.
    Provider ID is an existing Provider identifier, not its display name. The
@@ -42,8 +43,38 @@ registration_self_service_provider_ids = ["poolab-provider-id"]
 
 The default is empty, not all Providers. Existence, disabled state and authorization
 are checked at issuance and redemption. Owner and Provider on POST come only from
-verified claims. The v2 purpose is `provider_bot_registration`; legacy token
-verification rejects this version. Token mode scope cannot be expanded by a request.
+verified claims. The v2 purpose is `provider_bot_registration`; its verifier is
+separate from the v1 codec. Both HTTP surfaces try v1 verification first and
+dispatch to scoped registration only on `UnsupportedVersion`; an invalid v2
+token never falls back to ordinary registration. Token mode scope cannot be
+expanded by a request.
+
+## Legacy HTTP compatibility
+
+- `GET /register/token` keeps the configured legacy Human authentication boundary.
+  Without `provider_id`, it returns the original v1 token, six-hour expiry and
+  bare `{token, expires_at, note}` object. With `provider_id`, the shared
+  registration application service checks Provider authorization and issues v2;
+  the bare object additionally includes `registration` scope metadata.
+- `POST /register` remains anonymous, authenticating only through `token`.
+  Both `bot-name` and `bot_name` remain accepted. V1 retains ordinary registration,
+  its original validation/errors and ignored unknown query parameters. V2 parses
+  `mode`, `provider_bot_ref` and `webhook_url`, then uses the same application/core
+  authorization and persistence path as OpenAPI. Owner and Provider identities
+  come exclusively from the verified token.
+- Both legacy successes remain HTTP 200 with bare JSON; OpenAPI keeps its HTTP
+  200/201 envelopes. V1 responses omit `registration`; V2 registration adds it
+  alongside `bot_name`, `bot_uuid` and `bot_token`. Both legacy successes set
+  `Cache-Control: no-store`. Scoped errors use the legacy `{error, message}` shape
+  with HTTP 400/401/403/404/409/500 for the corresponding application failure.
+- Tokens issued by either surface can be redeemed by either surface. Duplicate
+  Provider/ref registration still returns 409 and never replays credentials.
+  The bare legacy routes need no Gateway Principal; the existing configured
+  Human authentication is sufficient for issuance.
+- Bootstrap injects the existing `RegisterService` into legacy HTTP state for
+  scoped calls. Standalone adapter construction without that service retains v1
+  behavior and fails scoped calls closed with HTTP 500. There is no new runtime
+  setting, database migration, Plugin API or legacy frontend change.
 
 ## Membership versus delivery
 
@@ -128,9 +159,10 @@ does not change membership or write policy.
   facade, HTTP adapter, memory/SQL stores, bootstrap/config and OpenAPI schemas.
   No new Plugin API or bridge/CLI changes are included.
 
-Tests cover legacy token rejection, scope/auth failures, wire compatibility,
+Tests cover invalid token rejection, scope/auth failures, wire compatibility,
 memory/SQLite metadata and dual-write conformance, endpoint precedence, real owner
 edges, duplicate rejection and prevention of token rotation/deleted-Bot resurrection.
-The OpenAPI registration matrix covers all three Provider auth modes and both
-delivery read sources, including persisted AgentPass codes for plugin and gateway.
+The registration matrix covers both legacy and OpenAPI surfaces, all three
+Provider auth modes and both delivery read sources, including persisted AgentPass
+codes for plugin and gateway, cross-surface token redemption and v1 wire compatibility.
 MySQL query/schema checks do not substitute for a live MySQL deployment test.

@@ -171,14 +171,7 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
     assert_ne!(gateway["bot_token"], provider["provider_admin_token"]);
     assert_ne!(gateway["bot_token"], provider["bcs_to_provider_token"]);
     assert_agent_code(&db, &gateway, "codex-gateway", auth_mode).await;
-    // The unchanged legacy handler must reject scoped tokens, not create an ordinary Bot.
-    let legacy_reject = client
-        .post(format!("{base}/register"))
-        .query(&upstream_query)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(legacy_reject.status(), StatusCode::UNAUTHORIZED);
+    exercise_legacy_registration(&client, &base, &db, id, auth_mode, token_value).await;
 
     let legacy_token = data(
         client
@@ -197,6 +190,182 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
     )
     .await;
     assert_eq!(legacy.as_object().unwrap().len(), 3);
+    let from_openapi_v1 = legacy_data(client.post(format!("{base}/register")).query(&[
+        ("token", legacy_token["token"].as_str().unwrap()),
+        ("bot-name", "OpenAPI v1 legacy POST"),
+    ])).await;
+    assert_eq!(from_openapi_v1.as_object().unwrap().len(), 3);
+}
+
+async fn legacy_data(request: reqwest::RequestBuilder) -> Value {
+    let response = request.send().await
+        .unwrap_or_else(|error| panic!("legacy request failed: {}", error.without_url()));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("cache-control").and_then(|value| value.to_str().ok()), Some("no-store"));
+    let body = response.json::<Value>().await.unwrap();
+    assert!(body.get("data").is_none(), "legacy responses must remain bare JSON");
+    body
+}
+
+async fn exercise_legacy_registration(
+    client: &reqwest::Client,
+    base: &str,
+    db: &LocalSqliteDbPlugin,
+    provider_id: &str,
+    auth_mode: &str,
+    openapi_token: &str,
+) {
+    let api = format!("{base}/openapi/v1/collaboration/register");
+    let legacy = format!("{base}/register");
+    let token = legacy_data(client.get(format!("{legacy}/token"))
+        .header("X-Mock-User-Id", "11111111")
+        .query(&[("provider_id", provider_id)])).await;
+    assert_eq!(token["registration"]["token_version"], 2);
+    assert_eq!(token["registration"]["provider_id"], provider_id);
+    assert_eq!(token["registration"]["allowed_modes"], json!(["plugin", "gateway"]));
+    let token_value = token["token"].as_str().unwrap();
+
+    let anonymous = client.get(format!("{legacy}/token"))
+        .query(&[("provider_id", provider_id)]).send().await.unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    for (requested_provider, expected) in [
+        (provider_id, StatusCode::FORBIDDEN),
+        ("unknown-provider", StatusCode::NOT_FOUND),
+        ("", StatusCode::BAD_REQUEST),
+    ] {
+        let denied = client.get(format!("{legacy}/token"))
+            .header("X-Mock-User-Id", "another-human")
+            .query(&[("provider_id", requested_provider)])
+            .send().await.unwrap();
+        assert_eq!(denied.status(), expected);
+        let body = denied.json::<Value>().await.unwrap();
+        assert!(body["error"].is_string());
+        assert!(body["message"].is_string());
+    }
+
+    // Legacy-issued v2 token redeemed by legacy POST; caller-supplied owner/Provider are ignored.
+    let plugin_query = [
+        ("token", token_value), ("bot-name", "Legacy upstream"),
+        ("provider_bot_ref", "legacy-upstream"),
+        ("owner", "attacker"), ("provider_id", "other-provider"),
+    ];
+    let upstream = legacy_data(client.post(&legacy).query(&plugin_query)).await;
+    assert_eq!(upstream["registration"]["mode"], "plugin");
+    assert_eq!(upstream["registration"]["provider_id"], provider_id);
+    assert_agent_code(db, &upstream, "legacy-upstream", auth_mode).await;
+    let rows = db.query(DbStatement::with_params(
+        "SELECT created_by FROM bcs_bots WHERE bot_uuid = ?",
+        vec![upstream["bot_uuid"].as_str().unwrap().into()],
+    )).await.unwrap();
+    assert_eq!(rows[0].get_string("created_by").unwrap().as_deref(), Some("11111111"));
+    let duplicate = client.post(&legacy).query(&plugin_query).send().await.unwrap();
+    assert_eq!(duplicate.status(), StatusCode::CONFLICT);
+
+    let gateway_query = [
+        ("token", token_value), ("bot_name", "Legacy gateway"),
+        ("provider_bot_ref", "legacy-gateway"), ("mode", "gateway"),
+    ];
+    let missing_endpoint = client.post(&legacy).query(&gateway_query).send().await.unwrap();
+    assert_eq!(missing_endpoint.status(), StatusCode::BAD_REQUEST);
+    let gateway = legacy_data(client.post(&legacy).query(&gateway_query)
+        .query(&[("webhook_url", "https://bridge.example.com/legacy-hook")])).await;
+    assert_eq!(gateway["registration"]["mode"], "gateway");
+    assert_eq!(gateway["registration"]["webhook_url"], "https://bridge.example.com/legacy-hook");
+    assert!(gateway.get("provider_admin_token").is_none());
+    assert!(gateway.get("bcs_to_provider_token").is_none());
+    assert_agent_code(db, &gateway, "legacy-gateway", auth_mode).await;
+
+    // Both HTTP surfaces accept the same signed v2 capability.
+    let from_openapi = legacy_data(client.post(&legacy).query(&[
+        ("token", openapi_token), ("bot_name", "OpenAPI token legacy POST"),
+        ("provider_bot_ref", "openapi-to-legacy"),
+    ])).await;
+    assert_eq!(from_openapi["registration"]["provider_id"], provider_id);
+    let from_legacy = data(client.post(&api).query(&[
+        ("token", token_value), ("bot_name", "Legacy token OpenAPI POST"),
+        ("provider_bot_ref", "legacy-to-openapi"),
+    ]), StatusCode::CREATED).await;
+    assert_eq!(from_legacy["registration"]["provider_id"], provider_id);
+
+    for mode in ["unknown", ""] {
+        let invalid = client.post(&legacy).query(&[
+            ("token", token_value), ("bot_name", "Invalid mode"),
+            ("provider_bot_ref", "invalid-mode"), ("mode", mode),
+        ]).send().await.unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
+    let missing_ref = client.post(&legacy).query(&[
+        ("token", token_value), ("bot-name", "Missing reference"),
+    ]).send().await.unwrap();
+    assert_eq!(missing_ref.status(), StatusCode::BAD_REQUEST);
+
+    // Signed mode scope cannot be widened, and invalid v2 capabilities never fall back to v1.
+    let mut claims = bcs_domain::provider_registration_token::decode_and_verify(
+        token_value, b"test-invite-secret-32-bytes!!!!",
+    ).unwrap();
+    claims.allowed_modes = vec![bcs_domain::provider_registration_token::ProviderRegistrationMode::Plugin];
+    let restricted = bcs_domain::provider_registration_token::encode(
+        &claims, b"test-invite-secret-32-bytes!!!!",
+    );
+    let denied_mode = client.post(&legacy).query(&[
+        ("token", restricted.as_str()), ("bot_name", "Restricted gateway"),
+        ("provider_bot_ref", "restricted"), ("mode", "gateway"),
+        ("webhook_url", "https://bridge.example.com/hook"),
+    ]).send().await.unwrap();
+    assert_eq!(denied_mode.status(), StatusCode::FORBIDDEN);
+    let wrong_signature = bcs_domain::provider_registration_token::encode(&claims, b"wrong-test-secret");
+    claims.exp = 0;
+    let expired = bcs_domain::provider_registration_token::encode(&claims, b"test-invite-secret-32-bytes!!!!");
+    for invalid_token in [wrong_signature.as_str(), expired.as_str(), "invalid-token"] {
+        let rejected = client.post(&legacy).query(&[
+            ("token", invalid_token), ("bot_name", "Invalid token"),
+            ("provider_bot_ref", "invalid-token"),
+        ]).send().await.unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+        let body = rejected.json::<Value>().await.unwrap();
+        assert_eq!(body["error"], "unauthorized");
+    }
+
+    // Ordinary legacy issuance still yields exactly the original three fields and six-hour TTL.
+    let v1 = legacy_data(client.get(format!("{legacy}/token"))
+        .header("X-Mock-User-Id", "11111111")).await;
+    assert_eq!(v1.as_object().unwrap().len(), 3);
+    assert_eq!(v1["note"], "Use this token for bot registration within 6 hours");
+    let claims = bcs_domain::register_token_decode_and_verify(
+        v1["token"].as_str().unwrap(), b"test-invite-secret-32-bytes!!!!",
+    ).unwrap();
+    assert_eq!(claims.v, 1);
+    assert_eq!(claims.id, "human_11111111");
+    assert_eq!(v1["expires_at"], claims.exp * 1000);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert!((now + 21595..=now + 21600).contains(&claims.exp));
+    let unsupported = bcs_domain::register_token_encode(
+        &bcs_domain::RegisterTokenPayload { v: 3, id: "human_11111111".into(), exp: now + 21600 },
+        b"test-invite-secret-32-bytes!!!!",
+    );
+    let rejected = client.post(&legacy).query(&[
+        ("token", unsupported.as_str()), ("bot-name", "Unsupported token"),
+    ]).send().await.unwrap();
+    assert_eq!(rejected.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(rejected.json::<Value>().await.unwrap(), json!({
+        "error": "unauthorized", "message": "unsupported register token version",
+    }));
+    // V1 keeps ignoring previously unknown Provider options, including invalid mode strings.
+    for name_key in ["bot-name", "bot_name"] {
+        let ordinary = legacy_data(client.post(&legacy).query(&[
+            ("token", v1["token"].as_str().unwrap()), (name_key, "Legacy ordinary Bot"),
+            ("mode", "ignored"), ("provider_bot_ref", "ignored"),
+        ])).await;
+        assert_eq!(ordinary.as_object().unwrap().len(), 3);
+        assert_eq!(ordinary["bot_name"], "Legacy ordinary Bot");
+        assert!(ordinary["bot_uuid"].is_string());
+        assert!(ordinary["bot_token"].is_string());
+    }
+    let ordinary = data(client.post(&api).query(&[
+        ("token", v1["token"].as_str().unwrap()), ("bot-name", "Legacy v1 OpenAPI POST"),
+    ]), StatusCode::CREATED).await;
+    assert_eq!(ordinary.as_object().unwrap().len(), 3);
 }
 
 async fn assert_agent_code(db: &dyn DbPlugin, result: &Value, bot_ref: &str, auth_mode: &str) {

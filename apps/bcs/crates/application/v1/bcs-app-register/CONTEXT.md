@@ -42,8 +42,10 @@ The facade validates names, verifies v1 first, and only tries v2 after
 Scoped owner and Provider identities come only from the signed token; the selected
 mode must be in its allowlist and `provider_bot_ref` must be nonblank.
 
-Only v1 tokens are interchangeable with legacy registration. V2 tokens are
-purpose-bound Provider capabilities and legacy registration rejects them.
+Both v1 and v2 tokens are interchangeable between legacy and OpenAPI HTTP
+surfaces. V2 tokens remain purpose-bound Provider capabilities. Legacy HTTP
+verifies v2 before delegation to preserve unsupported-version errors; the shared
+application facade revalidates the capability and routes it to Provider registration.
 The core owns persistence, Provider/ref uniqueness, owner edges and delivery binding.
 Duplicate scoped refs conflict; no runtime credential is replayed. A valid token
 can create different refs. Owner-edge failures can require operator reconciliation.
@@ -52,7 +54,7 @@ The HTTP adapter owns query parsing, status codes, envelopes and no-store header
 ## Change impact
 
 Bootstrap injects the scoped core while legacy constructors retain their behavior.
-The OpenAPI adapter consumes optional metadata; v1 responses omit it entirely.
+Both HTTP adapters consume optional metadata; v1 responses omit it entirely.
 Changes to signed scope, error codes or response projection require matching
 registration contract and compatibility tests.
 

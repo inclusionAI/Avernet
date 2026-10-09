@@ -83,8 +83,11 @@ RegisterTokenPath:
       Without provider_id this preserves the legacy v1 token and response.
       With provider_id, the caller must own the enabled Provider or the Provider
       must be explicitly approved for self-service registration by server config.
-      A v2 token fixes Provider and Human ownership and allowed modes; it cannot
-      be consumed by legacy /register. Neither a webhook nor downlink credential
+      A v2 token fixes Provider and Human ownership and allowed modes; it can
+      also be consumed by legacy POST /register, which preserves HTTP 200 and
+      bare JSON. Legacy GET /register/token supports the same optional
+      provider_id through its configured Human authentication boundary.
+      Neither a webhook nor downlink credential
       readiness is required at token issuance.
     x-avernet-security:
       user: required

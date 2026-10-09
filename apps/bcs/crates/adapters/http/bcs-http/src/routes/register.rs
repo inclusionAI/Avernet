@@ -1,5 +1,6 @@
 use axum::{
     Json,
+    extract::rejection::QueryRejection,
     extract::{Query, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
@@ -12,16 +13,24 @@ use serde::Deserialize;
 
 use crate::state::HttpAppState;
 
+mod scoped;
+
 const REGISTER_TOKEN_TTL_SECONDS: u64 = 21600; // 6 hours
 
 // ---------------------------------------------------------------
 // GET /register/token
 // ---------------------------------------------------------------
 
+#[derive(Debug, Deserialize)]
+pub struct RegisterTokenQuery {
+    pub provider_id: Option<String>,
+}
+
 pub async fn get_register_token(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
+    query: Result<Query<RegisterTokenQuery>, QueryRejection>,
 ) -> Response {
     let identity = match state.user_identity.extract(&headers, &uri).await {
         Some(id) => id,
@@ -43,6 +52,18 @@ pub async fn get_register_token(
         }
     };
 
+    let Query(query) = match query {
+        Ok(query) => query,
+        Err(_) => return scoped::error_response(
+            bcs_service_api::application::v1::ApplicationError::invalid(
+                "invalid_request", "invalid registration query",
+            ),
+        ),
+    };
+    if let Some(provider_id) = query.provider_id {
+        return scoped::issue_token(&state, staff_no, identity.nick_name, provider_id).await;
+    }
+
     let human_id = format!("human_{}", staff_no);
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -53,11 +74,11 @@ pub async fn get_register_token(
     let payload = RegisterTokenPayload { v: 1, id: human_id, exp };
     let token = register_token_encode(&payload, &state.invite_token_secret);
 
-    Json(serde_json::json!({
+    scoped::success_response(serde_json::json!({
         "token": token,
         "expires_at": exp * 1000,
         "note": "Use this token for bot registration within 6 hours"
-    })).into_response()
+    }))
 }
 
 // ---------------------------------------------------------------
@@ -73,6 +94,7 @@ pub struct RegisterQuery {
 
 pub async fn register_bot(
     State(state): State<HttpAppState>,
+    uri: Uri,
     Query(query): Query<RegisterQuery>,
 ) -> Response {
     // 1. Validate required params
@@ -111,6 +133,13 @@ pub async fn register_bot(
     // 3. Decode and verify token
     let payload = match register_token_decode_and_verify(token_str, &state.invite_token_secret) {
         Ok(p) => p,
+        Err(RegisterTokenError::UnsupportedVersion)
+            if bcs_domain::provider_registration_token::decode_and_verify(
+                token_str, &state.invite_token_secret,
+            ).is_ok() =>
+        {
+            return scoped::register_bot(&state, &uri, token_str.to_string(), bot_name).await;
+        }
         Err(e) => {
             let message = match &e {
                 RegisterTokenError::Expired => "register token has expired",
@@ -180,9 +209,9 @@ pub async fn register_bot(
     }
 
     // 7. Return credentials
-    Json(serde_json::json!({
+    scoped::success_response(serde_json::json!({
         "bot_name": bot_name,
         "bot_uuid": connect_result.bot_uuid,
         "bot_token": connect_result.token,
-    })).into_response()
+    }))
 }
