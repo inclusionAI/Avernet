@@ -157,6 +157,8 @@ provides:
   # platform
   - QualityTaskRepository
   - ResourceRepositoryProtocol
+  - ResourceWithdrawalRepositoryProtocol
+  - ResourceWithdrawalRepository
   - SessionResourceRepositoryProtocol
   - TaskQueueRepositoryProtocol
   # task

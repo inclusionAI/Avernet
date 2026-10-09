@@ -65,6 +65,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.task.task_discovery.discovered_task_models  # noqa: F401  ac_discovered_tasks
     import agentclaw.community.core.task.task_discovery.lock_models  # noqa: F401  ac_task_discovery_lock
     import agentclaw.community.core.skills_pool.repository.models  # noqa: F401  ac_bot_skill_layout_state
+    import agentclaw.community.core.session_resources.withdrawal_models  # noqa: F401  ac_tc_resource_withdrawal
     import agentclaw.community.core.session_resources.repository.models  # noqa: F401  ac_session_resource
     import agentclaw.community.core.economy.governance.orm  # noqa: F401  governance_*
     import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables

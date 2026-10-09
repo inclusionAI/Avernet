@@ -27,6 +27,12 @@ from agentclaw.community.di.config import (
     TaskQueueConfig,
 )
 
+from agentclaw.community.core.session_resources.withdrawal_worker import (
+    ResourceWithdrawalWorker,
+)
+from agentclaw.community.di.modules.tc_resource_withdrawal_module import (
+    ResourceWithdrawalModule,
+)
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
@@ -172,6 +178,9 @@ def build_injector(
         AccessModule(),
         ResourcesModule(),
         SessionResourcesModule(),
+        ResourceWithdrawalModule(
+            local=profile in {DeployProfile.TEST, DeployProfile.CORP_TEST}
+        ),
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
         WorkOrdersModule(),
@@ -225,6 +234,8 @@ def build_injector(
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
     _app_injector.get(McpRuntimeCredentialsConfig)
+    # Do not let lifecycle discovery silently skip invalid delivery configuration.
+    _app_injector.get(ResourceWithdrawalWorker)
 
     return _app_injector
 

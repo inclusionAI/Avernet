@@ -13,6 +13,7 @@ from abc import abstractmethod
 from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.session_resources.withdrawal_types import ResourceWithdrawal
     from agentclaw.community.core.quality.models import QualityTaskRecord
     from agentclaw.community.core.session_resources.types import SessionResourceRecord
     from agentclaw.community.core.task_queue.types import (
@@ -492,4 +493,41 @@ class SessionResourceRepositoryProtocol(Protocol):
         owner_id: str,
         bot_id: str,
         session_key_hash: str,
+        *,
+        withdrawal_scope_types: tuple[str, ...] = (),
     ) -> SessionResourceRecord | None: ...
+
+
+@runtime_checkable
+class ResourceWithdrawalRepositoryProtocol(Protocol):
+    """Fenced outbox operations; all updates use real transactions."""
+
+    @abstractmethod
+    def get(self, event_id: str) -> ResourceWithdrawal | None: ...
+
+    @abstractmethod
+    def claim(self, *, tenant: str, lease_seconds: int) -> ResourceWithdrawal | None: ...
+
+    @abstractmethod
+    def finish(
+        self,
+        record: ResourceWithdrawal,
+        *,
+        status: str,
+        delay_seconds: int,
+        error_code: str,
+    ) -> bool: ...
+
+    @abstractmethod
+    def replay(
+        self,
+        *,
+        event_id: str,
+        tenant: str,
+        expected_attempts: int,
+        actor: str,
+        reason: str,
+    ) -> bool: ...
+
+    @abstractmethod
+    def stats(self, *, tenant: str) -> dict: ...
