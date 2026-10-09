@@ -69,8 +69,8 @@ Both user-facing `POST /openapi/v1/bots/work-orders/events` and
 caller-selected `approval_mode=AUTO`. A qualified
 business module may call `WorkOrderService.create_work_order_event` in-process
 with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
-`recipient_user_ids`. AUTO creates no human approver row. WorkOrder claims the
-new order as PROCESSING, then completes the local business effect, APPROVED /
+`recipient_user_ids`. AUTO creates no human approver row. WorkOrder creates the
+order as PROCESSING in the creation transaction, then completes the local business effect, APPROVED /
 SYSTEM state, and result notices in one transaction. The response includes the
 created result-notification IDs. The Skill business module validates the
 applicant before requesting AUTO, while the Skill Grant step rechecks the

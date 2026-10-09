@@ -27,7 +27,7 @@ a successful editor-request response.
 
 ## Transaction and failure contract
 
-WorkOrder persists and claims an AUTO Skill order as PROCESSING. Its repository
+WorkOrder persists an AUTO Skill order as PROCESSING in the creation transaction. Its repository
 opens one database transaction, verifies the persisted AUTO Skill identity,
 calls `SkillEditorRequestRepositoryProtocol.apply_auto_skill_editor_request`
 with the same SQLAlchemy Session, then writes APPROVED/SYSTEM and one applicant
@@ -39,7 +39,7 @@ its original audit, a revoked Manager is reactivated, and an active Owner is
 never downgraded. Existing PENDING manual orders are not rewritten when the
 policy changes.
 
-The PROCESSING claim is committed before completion; it cannot be rolled back
+The PROCESSING creation is committed before completion; it cannot be rolled back
 by that later transaction. For callback-backed non-Skill AUTO types, external
 callback success cannot participate in the local database transaction. If
 local persistence then fails, the work order stays PROCESSING for explicit

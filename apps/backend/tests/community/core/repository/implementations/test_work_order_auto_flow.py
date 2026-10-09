@@ -120,7 +120,6 @@ def test_auto_space_join_commits_membership_status_and_notice_together(setup):
     result = _auto_order(
         repo, WorkOrderBizType.SPACE_JOIN.value, space_id, {}, applicant="bob"
     )
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     notice_ids = repo.complete_auto_approval(
         work_order_id=result.work_order_id,
@@ -151,7 +150,6 @@ def test_auto_space_join_notice_failure_rolls_back_membership_and_approval(setup
     result = _auto_order(
         repo, WorkOrderBizType.SPACE_JOIN.value, space_id, {}, applicant="bob"
     )
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     def reject_notice(session, _flush_context, _instances):
         if any(isinstance(row, WorkOrderNotificationModel) for row in session.new):
@@ -197,7 +195,6 @@ def test_auto_bot_completion_requires_policy_and_commits_result(setup):
             "space_id": space_id,
         },
     )
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     notice_ids = repo.complete_auto_approval(
         work_order_id=result.work_order_id,
@@ -238,7 +235,6 @@ def test_auto_bot_notice_failure_rolls_back_collaborator_grant(setup):
             "space_id": space_id,
         },
     )
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     def reject_notice(session, _flush_context, _instances):
         if any(isinstance(row, WorkOrderNotificationModel) for row in session.new):
@@ -275,7 +271,6 @@ def test_auto_bot_completion_rejects_disabled_owner_policy(setup):
             "space_id": space_id,
         },
     )
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     with pytest.raises(WorkOrderBotEditorRequestNotAllowedError, match="disabled"):
         repo.complete_auto_approval(
@@ -293,7 +288,6 @@ def test_auto_bot_completion_rejects_disabled_owner_policy(setup):
 def test_auto_failure_commits_terminal_state_and_notice_together(setup):
     db, repo, _, _, _ = setup
     result = _auto_order(repo, WorkOrderBizType.BOT_FRIEND.value, "friend-1", {})
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     notice_ids = repo.fail_auto_approval(
         work_order_id=result.work_order_id,
@@ -324,7 +318,6 @@ def test_auto_failure_commits_terminal_state_and_notice_together(setup):
 def test_auto_context_requires_system_and_processing_state(setup):
     _, repo, _, _, _ = setup
     result = _auto_order(repo, WorkOrderBizType.BOT_FRIEND.value, "friend-2", {})
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
 
     context = repo.get_approval_context(
         work_order_id=result.work_order_id, reviewer_user_id="SYSTEM", env="dev"
@@ -342,7 +335,6 @@ def test_auto_result_notice_is_deduplicated_per_recipient(setup):
     db, repo, _, _, _ = setup
     result = _auto_order(repo, WorkOrderBizType.BOT_FRIEND.value, "friend-3", {})
 
-    repo.claim_auto_approval(work_order_id=result.work_order_id, env="dev")
     notice_ids = repo.complete_auto_approval(
         work_order_id=result.work_order_id,
         recipient_user_ids=["alice", "alice", "bob"],

@@ -16,7 +16,6 @@ from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderDecisionCallbackDispatcher,
 )
 from agentclaw.community.core.work_orders.errors import WorkOrderCallbackError
-from agentclaw.community.core.work_orders.models import SYSTEM_REVIEWER_USER_ID
 from tests.community.core.work_orders.test_work_order_service import _service
 
 
@@ -59,9 +58,7 @@ def test_auto_space_join_service_finalizes_and_notifies_after_callback():
     )
 
     assert result.status is WorkOrderEventStatus.APPROVED
-    repo.claim_auto_approval.assert_called_once_with(
-        work_order_id=17, reviewer_user_id=SYSTEM_REVIEWER_USER_ID, env="dev"
-    )
+    repo.claim_auto_approval.assert_not_called()
     repo.complete_auto_approval.assert_called_once_with(
         work_order_id=17,
         recipient_user_ids=["notify-user"],

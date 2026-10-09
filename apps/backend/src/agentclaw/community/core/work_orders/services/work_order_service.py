@@ -248,11 +248,6 @@ class WorkOrderService(WorkOrderServiceProtocol):
             and event_category is NotificationCategory.APPROVAL
             and result.work_order_id is not None
         ):
-            self._repository.claim_auto_approval(
-                work_order_id=result.work_order_id,
-                reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
-                env=get_current_env(),
-            )
             callback_succeeded = False
             try:
                 if (

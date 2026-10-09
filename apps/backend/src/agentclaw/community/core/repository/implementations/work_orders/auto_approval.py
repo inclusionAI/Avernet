@@ -38,6 +38,7 @@ class _AutoApprovalWorkOrderRepository:
         reviewer_user_id: str = SYSTEM_REVIEWER_USER_ID,
         env: str,
     ) -> None:
+        """Claim a legacy AUTO row created PENDING before atomic claiming."""
         with self._db.transactional_orm_session() as db:
             updated = (
                 db.query(self._WorkOrder)

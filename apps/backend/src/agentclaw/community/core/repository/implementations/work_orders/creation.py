@@ -88,10 +88,8 @@ class _WorkOrderCreationRepository:
             result_status = WorkOrderEventStatus.CREATED
             if event_category is NotificationCategory.APPROVAL:
                 is_auto = approval_mode is WorkOrderApprovalMode.AUTO
-                # AUTO is executed after the creation transaction commits. Keeping
-                # the row pending here lets the service claim/process it without
-                # nesting repository transactions or publishing a result notice
-                # before the business side effect succeeds.
+                # AUTO is claimed in this creation transaction. Its business
+                # effect and result notice are completed by the service later.
                 result_status = WorkOrderEventStatus.PENDING
                 row = self._WorkOrder(
                     work_order_no=self._new_no(),
@@ -100,7 +98,11 @@ class _WorkOrderCreationRepository:
                     biz_data=biz_data,
                     applicant_user_id=applicant_user_id,
                     apply_reason=apply_reason,
-                    status=WorkOrderStatus.PENDING.value,
+                    status=(
+                        WorkOrderStatus.PROCESSING.value
+                        if is_auto
+                        else WorkOrderStatus.PENDING.value
+                    ),
                     approval_mode=approval_mode.value,
                     reviewer_user_id=None,
                     reviewed_at=None,
