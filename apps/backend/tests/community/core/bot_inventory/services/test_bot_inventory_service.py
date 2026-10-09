@@ -521,6 +521,9 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         11: PermissionLevel.MEMBER,
         12: PermissionLevel.NONE,
     }
+    # The editor's MEMBER rests on an explicit collaborator row — the space
+    # synthesis has no voice in this answer.
+    access.has_explicit_membership.return_value = frozenset({10, 11})
     business_space = MagicMock(spec=BusinessSpaceContextProtocol)
     business_space.bot_space.return_value = team_space
     lifecycle_port = MagicMock()
@@ -657,6 +660,142 @@ def test_actions_for_level_keeps_edit_for_non_service_editors() -> None:
         "restart": "Bot editor permission required",
         "delete": "Bot editor permission required",
     }
+
+
+@pytest.mark.unit
+def test_space_member_without_explicit_row_edits_nothing() -> None:
+    """A Space-synthesized MEMBER edits nothing (迭代11 编辑权限申请审批策略).
+
+    The card answers reads — view, and the chat a service card offers — but
+    EDIT and every operational action carry the editor-permission reason, the
+    same bars that refuse the route side (Check …explicit=True) forbidding a
+    disabled entry from being a stale hint.
+    """
+    # PERSONAL_CLOUD: the edit granted to an explicit MEMBER is withheld.
+    personal_actions = (BotAction.VIEW, BotAction.CHAT, BotAction.EDIT)
+    space_actions, space_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=personal_actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+        explicit=False,
+    )
+    assert space_actions == (BotAction.VIEW,)
+    assert space_disabled == {
+        "chat": "Bot editor permission required",
+        "edit": "Bot editor permission required",
+    }
+
+    # SERVICE: a MEMBER's operational tail is withheld the same way — a space
+    # member keeps what the product promises, the reads.
+    service_actions = (
+        BotAction.VIEW,
+        BotAction.CHAT,
+        BotAction.EDIT,
+        BotAction.RESTART_PUBLISH,
+        BotAction.OFFLINE,
+    )
+    space_service, space_service_disabled = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=service_actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+        explicit=False,
+    )
+    assert space_service == (BotAction.VIEW, BotAction.CHAT)
+    assert space_service_disabled == {
+        "edit": "Bot editor permission required",
+        "restart_publish": "Bot editor permission required",
+        "offline": "Bot editor permission required",
+    }
+
+    # NONE and OWNER never depended on the flag: NONE was already view-only,
+    # and OWNER is explicit standing by definition.
+    assert BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=personal_actions,
+        disabled={},
+        level=PermissionLevel.NONE,
+        explicit=False,
+    )[1]["edit"] == "Bot editor permission required"
+    assert BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.PERSONAL_CLOUD,
+        actions=personal_actions,
+        disabled={},
+        level=PermissionLevel.OWNER,
+        explicit=False,
+    ) == (personal_actions, {})
+
+
+@pytest.mark.unit
+def test_inventory_page_splits_space_member_from_explicit_editor() -> None:
+    """list_items tells the two MEMBER origins apart on the same page.
+
+    Same cloud rows, same resolved MEMBER — one from an explicit collaborator
+    row, one synthesized from Space membership — and only the explicit one
+    keeps the edit action on the card the frontend renders.
+    """
+    team_space = BusinessSpaceRef(space_id="22", name="Alpha", kind="team")
+    explicit_editor = {
+        **CLOUD,
+        "id": 21,
+        "bot_id": "explicit-editor",
+        "bot_name": "Explicit Editor",
+        "owner_id": "other-owner",
+        "space_id": "22",
+    }
+    space_member_bot = {
+        **CLOUD,
+        "id": 22,
+        "bot_id": "space-member",
+        "bot_name": "Space Member",
+        "owner_id": "third-owner",
+        "space_id": "22",
+    }
+    rows = [explicit_editor, space_member_bot]
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {"total": 2, "items": rows}
+    desktop = MagicMock()
+    access = MagicMock()
+    access.get_operable_permission_levels.return_value = {
+        21: PermissionLevel.MEMBER,
+        22: PermissionLevel.MEMBER,
+    }
+    access.has_explicit_membership.return_value = frozenset({21})
+    business_space = MagicMock(spec=BusinessSpaceContextProtocol)
+    business_space.bot_space.return_value = team_space
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {}
+
+    inventory = BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=business_space,
+        lifecycle_view=BotLifecycleView(MagicMock()),
+        edit_lock_view=edit_lock_view,
+        template_port=_StubTemplatePort(),
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=team_space,
+        keyword=None,
+        engine=None,
+        deploy_mode=None,
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 2
+    by_id = {item.bot_id: item for item in items}
+    assert by_id["explicit-editor"].actions == (BotAction.VIEW, BotAction.EDIT)
+    explicit_disabled = by_id["explicit-editor"].disabled_actions or {}
+    assert "edit" not in explicit_disabled
+    space_card = by_id["space-member"]
+    assert BotAction.EDIT not in space_card.actions
+    assert space_card.disabled_actions is not None
+    assert space_card.disabled_actions.get("edit") == "Bot editor permission required"
 
 
 def test_service_upgrade_action_requires_admin() -> None:

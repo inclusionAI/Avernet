@@ -178,6 +178,7 @@ def _surface(
     bar=None,
     edit_lock=False,
     write_raises=None,
+    explicit=False,
 ):
     """A one-operation app whose route really carries the seam.
 
@@ -195,6 +196,7 @@ def _surface(
     row = Check(
         bar or PermissionLevel.MEMBER,
         EDIT_LOCK if edit_lock else None,
+        explicit=explicit,
     )
     authz.AUTHORIZATION[("GET", PATH)] = row
     authz.AUTHORIZATION[("POST", PATH)] = row
@@ -254,6 +256,73 @@ def _get(client, *, caller=CALLER, owner=OWNER):
 
 def _post(client, *, caller=CALLER, owner=OWNER):
     return client.post(URL, params={"user_id": caller, "owner_id": owner})
+
+
+# ── the explicit-source check (迭代11 编辑权限申请审批策略) ────────────────
+
+
+def test_an_explicit_bar_refuses_a_space_synthesized_member():
+    """A MEMBER the Space synthesis granted, no collaborator row: refused.
+
+    The whole split: rows of the edit/operations domain stop the Space-
+    synthesized level from carrying, because their product rule keeps those
+    surfaces for the Owner and the editors the Owner granted or approved.
+    The refusal is the same masked 404 as every other, so a Space member
+    cannot tell "this bot does not exist" from "it is not yours to edit".
+    """
+
+    class _SpaceMember:
+        """:meth:`get_operable_permission_level` synthesizes, the raw does not."""
+
+        def has_explicit_standing(self, *, bot, user_id, env=None):
+            return False  # no collaborator row: the MEMBER is Space-synthesized
+
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            return PermissionLevel.MEMBER
+
+        def get_permission_level(self, *a, **k):
+            return PermissionLevel.NONE
+
+    client, audit = _surface(
+        level=PermissionLevel.MEMBER,
+        collaborators=_SpaceMember(),
+        bar=PermissionLevel.MEMBER,
+        explicit=True,
+    )
+    assert _post(client).status_code == 404
+    # The harness carries one row for both methods, so the GET refuses here
+    # too; real reads answer on their own plain row, which the case below
+    # proves stays open — this pins that the split rides on the row's flag,
+    # not on the HTTP method.
+    assert _get(client).status_code == 404
+    assert audit.rows == []
+
+
+def test_an_explicit_bar_admits_an_explicit_member():
+    """A MEMBER resting on a real collaborator row passes the same bar."""
+
+    client, audit = _surface(
+        level=PermissionLevel.MEMBER,
+        bar=PermissionLevel.MEMBER,
+        explicit=True,
+    )
+    assert _post(client).status_code == 200
+
+    # The audit contract is unchanged for the explicit member: a non-owner
+    # mutation leaves its row.
+    assert len(audit.rows) == 1
+
+
+def test_a_plain_bar_keeps_admitting_the_space_synthesized_member():
+    """Reads and everything outside the edit domain keep the synthetic level —
+    the default is untouched, so a forgotten flag cannot silently revoke the
+    view and chat Space members hold by default."""
+    client, _ = _surface(
+        level=PermissionLevel.MEMBER,
+        bar=PermissionLevel.MEMBER,
+        explicit=False,
+    )
+    assert _post(client).status_code == 200
 
 
 # ── the level check ──────────────────────────────────────────────────────────
