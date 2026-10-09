@@ -171,6 +171,11 @@ class _Collaborators:
             return PermissionLevel.OWNER
         return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
+    def get_explicit_permission_level(self, *, bot, user_id, env=None):
+        # The configured rows ARE explicit rows: the operator gate adjudicates
+        # on the explicit ladder now, and both ladders read the same table.
+        return self.get_operable_permission_level(bot=bot, user_id=user_id, env=env)
+
 
 class _PublishRepo:
     """Stands in for the publish repository (published-stage sockets)."""
@@ -722,7 +727,7 @@ def test_an_unreadable_collaborator_lookup_refuses_rather_than_publishes():
     """The gate fails closed: a database blip must not admit a stranger."""
 
     class _Broken:
-        def get_operable_permission_level(self, *, bot, user_id, env=None):
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
             raise RuntimeError("collaborator service unavailable")
 
     bindings = _Bindings(raises=AssertionError("must not be reached"))

@@ -1138,3 +1138,32 @@ def test_the_twin_guard_catches_an_abandoned_twin():
         test_a_retiring_twin_migrates_with_its_replacement()
     finally:
         AUTHORIZATION[replacement], AUTHORIZATION[twin] = saved
+
+
+def test_the_boot_audit_fires_on_an_unmarked_member_write_row():
+    """Prove the table's boot audit can still fire, not just pass.
+
+    A rule-shaped guard is only as good as its ability to fail: the audit
+    the table runs while it imports is staged here against a crafted table,
+    because the real table is all-marked and reading the import-time pass
+    as the guard working would be precisely the false pass this file
+    exists to rule out.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.rule_shape_audit import (
+        assert_member_writes_name_explicit_origin,
+    )
+
+    marked = {
+        # Reads stay plain: the synthesized MEMBER is exactly what a read
+        # row means to admit.
+        ("GET", "/openapi/v1/bots/{bot_id}"): Check(PermissionLevel.MEMBER),
+        ("PUT", "/openapi/v1/bots/{bot_id}"): Check(
+            PermissionLevel.MEMBER, explicit=True
+        ),
+    }
+    assert_member_writes_name_explicit_origin(marked)
+
+    with pytest.raises(ValueError, match="explicit origin"):
+        assert_member_writes_name_explicit_origin(
+            {("PUT", "/openapi/v1/bots/{bot_id}"): Check(PermissionLevel.MEMBER)}
+        )
