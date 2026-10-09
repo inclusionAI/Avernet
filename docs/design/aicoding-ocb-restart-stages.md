@@ -121,10 +121,12 @@ BaaS, frontend or `/status` changes are required.
   tenant/owner/Bot/**Caller**-scoped namespaced key. HTTP never waits on this lock:
   a busy lock returns the existing pending result without another upgrade.
 - The worker invokes the original `_upgrade_container`: original configuration,
-  backup precondition, then upgrade. Its optional engine-supplied `before_submit`
-  callback validates operation ownership/target/deadline and records submission.
-  This callback is generic; no engine names or backup policy enter the shared
-  Caller service. BaaS still only manages devices.
+  backup precondition, then upgrade. The aicoding `prepare_restart_async` override validates operation
+  ownership/target/deadline and records submission after the backup verifier
+  returns. The original upgrade signature/body has no new callback. A typed,
+  invocation-local execution context is installed/reset by the coding worker;
+  strategy dispatch pins that policy while passing the freshly resolved Bot
+  context, so changing the engine cannot bypass the submission checks. BaaS still only manages devices.
 - After the new publish ID is persisted, the original polling/identity/connection
   logic resumes. It is serialized with admission, so a stale polling write cannot
   overwrite another operation. Identity exchange uses the deployed publish ID,
@@ -144,7 +146,7 @@ BaaS, frontend or `/status` changes are required.
   exceptions are surfaced and persisted as failure.
 
 Shared changes are limited to a default engine-policy dispatch, typed internal
-lifecycle ports/dependency passthrough, the optional pre-submit callback, and DI
+lifecycle ports/dependency passthrough, invocation-scoped strategy dispatch, and DI
 registration. The original Caller body is extracted without changing its logic.
 `ExpertChatInstanceServiceProtocol` documents the existing response shape's
 asynchronous semantics. Published-service and ordinary tasks remain distinct.
@@ -159,3 +161,10 @@ Local validation (2026-10-09): **3007 passed** across bot-management,
 service-bot services, expert-chat, Caller/lock repositories, Service API
 conformance, protocol ordering, lifecycle discovery and module-boundary tests.
 Ruff, the new strategy's local SAST block scan and `git diff --check` passed.
+
+Boundary convergence validation (2026-10-09): **3014 passed** in the same
+regression suites. The additional tests cover context cleanup on success/failure,
+concurrent default-engine dispatch, engine changes inside the reused upgrade,
+the unchanged shared upgrade signature, and real not_mounted parsing/verification
+before submission. Ruff, the local blocking flake8 rules, source-size checks and
+`git diff --check` passed. No deployed-runtime validation was performed.

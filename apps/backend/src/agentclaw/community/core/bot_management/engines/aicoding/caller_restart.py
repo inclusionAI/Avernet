@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from copy import deepcopy
 import hashlib
 import json
@@ -18,7 +20,9 @@ from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope, get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.bot_management.engines.provisioning import CallerConnectionLifecycle
+from agentclaw.community.core.bot_management.engines.provisioning import (
+    BotProvisioningContext, CallerConnectionLifecycle, instance_restart_policy,
+)
 from agentclaw.community.log import get_logger
 from .restart_task import _failure_message
 from .restart_state import BACKUP_TIMEOUT, BUSINESS_TIMEOUT, TASK_DEADLINE, supports
@@ -32,6 +36,27 @@ logger = get_logger()
 KEY = 'coding_caller_restart'
 TASK_TYPE = 'aicoding.caller.restart'
 ACTIVE = {'QUEUED', 'EXECUTING', 'SUBMITTING', 'WAITING_READY'}
+
+
+@dataclass(frozen=True)
+class CallerRestartSubmission:
+    """One worker invocation's validation, never mutable strategy-singleton state."""
+
+    bot_id: str
+    owner_id: str
+    engine: str
+    device_id: str
+    validate_and_mark: Callable[[], None]
+
+    def check_context(self, ctx: BotProvisioningContext, device_id: str | None) -> None:
+        if (ctx.bot_id != self.bot_id or ctx.owner_id != self.owner_id
+                or ctx.active_engine != self.engine or device_id != self.device_id):
+            raise RuntimeError('Caller restart engine or target changed')
+
+
+current_caller_submission: ContextVar[CallerRestartSubmission | None] = ContextVar(
+    'current_caller_submission', default=None,
+)
 
 
 def _key(ids: dict) -> str:
@@ -93,6 +118,16 @@ class CallerRestartState:
 
 
 class AicodingCallerRestartMixin:
+    async def prepare_restart_async(self, ctx: BotProvisioningContext, **kwargs):
+        submission = current_caller_submission.get()
+        if submission is not None:
+            submission.check_context(ctx, kwargs.get('device_id'))
+        await super().prepare_restart_async(ctx, **kwargs)
+        if submission is not None:
+            # Includes legacy/not_mounted: skipping backup is not permission to
+            # skip task ownership, target, deadline or submission-state checks.
+            submission.validate_and_mark()
+
     async def execute_caller_connection(self, ctx, *, service: CallerConnectionLifecycle, **kwargs):
         ids = {key: kwargs[key] for key in ('user_id', 'bot_id', 'owner_id')}
         state = CallerRestartState(service, ids)
@@ -235,16 +270,28 @@ class AicodingCallerRestartHandler:
                         raise RuntimeError('Caller target changed')
                     state.save(current, phase='SUBMITTING')
 
+                # Pin the original policy, not the mutable source Bot's engine.
+                # The registry only dispatches; all validation stays in this mixin.
+                from ..registry import resolve_restart_strategy
+
+                _, policy = resolve_restart_strategy(bot)
+                policy_reset = instance_restart_policy.set(policy)
+                submission_reset = current_caller_submission.set(CallerRestartSubmission(
+                    bot_id=payload['bot_id'], owner_id=payload['owner_id'],
+                    engine=payload['engine'], device_id=payload['bot_uuid'],
+                    validate_and_mark=before_submit,
+                ))
                 reset = caller_backup_deadline.set(payload['started_at'] + BACKUP_TIMEOUT)
                 try:
                     result = await service._upgrade_container(
                         bot_uuid=payload['bot_uuid'], bot_id=payload['bot_id'], owner_id=payload['owner_id'],
                         migration_path=migration, version=publish.version or 1,
                         docker_image=image.docker_image, publish_ext=publish.ext or {},
-                        before_submit=before_submit,
                     )
                 finally:
                     caller_backup_deadline.reset(reset)
+                    current_caller_submission.reset(submission_reset)
+                    instance_restart_policy.reset(policy_reset)
                 if not state.owns(lock, operation):
                     return Complete()
                 if not result.get('publish_id'):

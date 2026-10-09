@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Dict, Optional, Protocol, TYPE_CHECKING
@@ -63,7 +64,6 @@ class CallerConnectionLifecycle(Protocol):
         self, bot_uuid: str, bot_id: str, owner_id: str,
         migration_path: str | None, version: int = 1,
         docker_image: str | None = None, publish_ext: dict | None = None,
-        before_submit: Callable[[], None] | None = None,
     ) -> dict: ...
 
 
@@ -403,3 +403,12 @@ class EngineProvisioningStrategy(ABC):
         service layer translates it uniformly (coding engines override).
         """
         raise hosted_workspace_not_eligible_error(ctx)
+
+
+# A deferred operation may pin its admission policy for the reused lifecycle.
+# Dispatch still supplies the freshly resolved context: the pinned policy can
+# reject an engine/target change instead of silently falling into a no-op policy.
+# Default None preserves direct callers and every other engine's resolution.
+instance_restart_policy: ContextVar[EngineProvisioningStrategy | None] = ContextVar(
+    'instance_restart_policy', default=None,
+)

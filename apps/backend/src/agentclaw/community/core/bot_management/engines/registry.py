@@ -15,7 +15,7 @@ from .aicoding.cli_defaults import AicodingCliDefaultsResolver
 from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
 from .aicoding.default_skill_set_selection import AicodingDefaultSkillSetSelectionResolver
 from .default import DefaultProvisioningStrategy
-from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from .provisioning import BotProvisioningContext, EngineProvisioningStrategy, instance_restart_policy
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelectionPolicy,
     DefaultSkillSetSelectionResolver,
@@ -583,6 +583,7 @@ async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime:
     adapter runs the returned verifier inline (coding offloads both phases).
     """
     ctx, strategy = resolve_restart_strategy(bot)
+    strategy = instance_restart_policy.get() or strategy
     await strategy.prepare_restart_async(
         ctx, device_id=device_id, target_runtime=target_runtime,
         operation_id=operation_id, restart_key=restart_key

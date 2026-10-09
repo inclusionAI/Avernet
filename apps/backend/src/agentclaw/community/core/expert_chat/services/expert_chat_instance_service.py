@@ -31,7 +31,7 @@ from agentclaw.community.core.bot_management.engines.registry import prepare_ins
 
 import asyncio
 import traceback
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, Optional
 
 from injector import inject
 
@@ -667,7 +667,6 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         version: int = 1,
         docker_image: str | None = None,
         publish_ext: Optional[Dict[str, Any]] = None,
-        before_submit: Callable[[], None] | None = None,
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
@@ -695,8 +694,6 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         )
         try:
             await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
-            if before_submit is not None:
-                before_submit()
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,

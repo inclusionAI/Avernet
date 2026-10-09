@@ -475,3 +475,106 @@ async def test_transient_progress_read_retries_observation_not_upgrade(world):
     world.baas.get_publish_progress.side_effect = None
     assert isinstance(await deliver(world), Reschedule)
     world.build.upgrade_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['success', 'backup_failure', 'submit_failure'])
+async def test_submission_context_is_restored_on_all_exits(world, outcome):
+    from agentclaw.community.core.bot_management.engines.aicoding.caller_restart import current_caller_submission
+    from agentclaw.community.core.bot_management.engines.provisioning import instance_restart_policy
+    await request(world)
+    if outcome == 'submit_failure':
+        world.build.upgrade_async.side_effect = RuntimeError('submit failed')
+    with patch(GUARD, new_callable=AsyncMock) as guard:
+        if outcome == 'backup_failure':
+            guard.side_effect = RestartBackupError('backup_failed', 'failed')
+        await deliver(world)
+    assert current_caller_submission.get() is None
+    assert instance_restart_policy.get() is None
+
+
+@pytest.mark.asyncio
+async def test_engine_switch_during_original_upgrade_cannot_bypass_fence(world):
+    await request(world)
+    original = world.service._upgrade_container
+
+    async def change_engine_then_upgrade(**kwargs):
+        world.bots.get_by_id_and_owner.return_value['active_engine'] = 'openclaw'
+        return await original(**kwargs)
+
+    world.service._upgrade_container = change_engine_then_upgrade
+    with patch(GUARD, new_callable=AsyncMock) as guard:
+        assert isinstance(await deliver(world), Fail)
+    guard.assert_not_awaited()
+    world.build.upgrade_async.assert_not_awaited()
+    assert world.repo.row['status'] == 'failed'
+
+
+@pytest.mark.asyncio
+async def test_unrelated_task_keeps_default_strategy_while_caller_is_backing_up(world):
+    from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+    from agentclaw.community.core.bot_management.engines.provisioning import instance_restart_policy
+    started, release = asyncio.Event(), asyncio.Event()
+    await request(world)
+
+    async def guard(*args, **kwargs):
+        assert instance_restart_policy.get() is not None
+        started.set()
+        await release.wait()
+
+    with patch(GUARD, side_effect=guard) as backup:
+        task = asyncio.create_task(deliver(world))
+        try:
+            await asyncio.wait_for(started.wait(), 5)
+            assert instance_restart_policy.get() is None
+            await prepare_instance_restart(
+                bot={'bot_id': 'other', 'owner_id': 'other', 'active_engine': 'openclaw'},
+                device_id='other-device', target_runtime=MagicMock(),
+            )
+            assert backup.await_count == 1
+        finally:
+            release.set()
+            await task
+    world.build.upgrade_async.assert_awaited_once()
+
+
+def test_shared_upgrade_has_original_signature_and_body():
+    import inspect
+    from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import ExpertChatInstanceService
+    method = ExpertChatInstanceService._upgrade_container
+    assert 'before_submit' not in inspect.signature(method).parameters
+    source = inspect.getsource(method)
+    assert 'current_caller_submission' not in source
+    assert 'SUBMITTING' not in source
+    assert 'instance_restart_policy' not in source
+
+
+@pytest.mark.asyncio
+async def test_real_not_mounted_helper_still_skips_backup_and_submits(world):
+    import json
+    import shlex
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
+    await request(world)
+    world.baas.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical-caller'},
+    ]
+    actions = []
+
+    def execute(runtime, target, cmd):
+        # Exercise the actual parser/verifier rather than replacing prepare.
+        code = shlex.split(cmd)[-1]
+        import ast
+        tree = ast.parse(code)
+        args = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == 'args' for t in n.targets))
+        action, operation = [ast.literal_eval(n) for n in args.value.elts[1:]]
+        actions.append(action)
+        return {'exit_code': 0, 'stdout': json.dumps({
+            'version': 1, 'operation_id': operation, 'status': 'not_mounted', 'boot_id': 'boot',
+        })}
+
+    with patch.object(restart_backup, '_execute_physical', side_effect=execute):
+        assert isinstance(await deliver(world), Reschedule)
+    assert actions == ['start', 'start']
+    world.build.upgrade_async.assert_awaited_once()
+    assert world.repo.row['ext'][KEY]['phase'] == 'WAITING_READY'
