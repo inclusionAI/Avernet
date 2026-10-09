@@ -96,6 +96,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
     HttpAppState::new(services_with_secret)
         .with_group_application(group_application)
         .with_session_application(session_application)
+        .with_register_application(state.openapi_v1.register_service.clone())
         .with_session_file_application(session_file_application)
         .with_bot_runtime_token_resolver(runtime_token_resolver)
         .with_health(Arc::new(BootstrapHealthPort {
