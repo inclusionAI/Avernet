@@ -32,6 +32,8 @@ const result: RepairCandidatesResponse = {
   page: { page: 1, pageSize: 20, total: 2, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 }
 const requests: URL[] = []
+const previewScopes: string[][] = []
+let omitPreviews = false
 const choices = () => within(screen.queryByRole('dialog', { name: '问题详情' }) ?? document.body)
 const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, inputDigest: String(i),
   flowIds: [`run-${i}`], aggregationStatus: 'not_generated', aggregationId: null, summary: null, stale: false,
@@ -39,12 +41,12 @@ const group = (i: number) => ({ workflowId: 'wf', signature: `issue-${i}`, input
     nodeId: `node-${i}`, failureSignature: `issue-${i}`, failureMode: i === 20 ? 'error' : 'timeout', reasoning: 'slow', completedAtMs: i + 1, evidenceEventIds: [] }],
 })
 beforeEach(() => {
-  sessionStorage.clear(); requests.length = 0
+  sessionStorage.clear(); requests.length = 0; previewScopes.length = 0; omitPreviews = false
   accessState.ready = true
   result.capabilities.generation = true
   result.capabilities.reason = null
   result.items = [item('retry'), item('timeout')]
-  vi.stubGlobal('fetch', vi.fn(async (raw: string) => {
+  vi.stubGlobal('fetch', vi.fn(async (raw: string, init?: RequestInit) => {
     const url = new URL(raw, 'http://localhost'); requests.push(url)
     let body: unknown
     if (url.pathname.endsWith('/issue-groups')) {
@@ -57,13 +59,18 @@ beforeEach(() => {
       body = { groups: filtered.slice((page - 1) * pageSize, page * pageSize),
         facets: { nodes: all.map(g => g.sources[0].nodeId), modes: ['timeout', 'error'] },
         page: { page, pageSize, total: filtered.length, totalPages: Math.ceil(filtered.length / pageSize) } }
-    } else if (url.pathname.endsWith('/candidates')) {
-      const page = Number(url.searchParams.get('page') ?? 1)
-      const pageSize = Number(url.searchParams.get('pageSize') ?? 20)
+    } else if (url.pathname.includes('/candidates')) {
+      const query = url.pathname.endsWith('/query') ? JSON.parse(init?.body as string) : Object.fromEntries(url.searchParams)
+      if (url.pathname.endsWith('/query')) {
+        expect(init?.method).toBe('POST')
+        previewScopes.push(query.previewSignatures)
+      }
+      const page = Number(query.page ?? 1)
+      const pageSize = Number(query.pageSize ?? 20)
       body = { ...result, items: result.items.slice((page - 1) * pageSize, page * pageSize),
-        issuePreviews: url.searchParams.getAll('previewSignature').map(signature => {
+        issuePreviews: (query.previewSignatures ?? []).map((signature: string) => {
           const items = result.items.filter(item => item.context?.signature === signature)
-          return { signature, total: items.length, items: items.slice(0, 3) }
+          return { signature, total: items.length, items: omitPreviews ? [] : items.slice(0, 3) }
         }),
         page: { page, pageSize, total: result.items.length, totalPages: Math.ceil(result.items.length / pageSize) } }
     }
@@ -74,17 +81,31 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps suggestions reachable when the preview byte budget omits all their items', async () => {
+  omitPreviews = true
+  const user = userEvent.setup()
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter>
+  </QueryClientProvider>)
+  await user.click(await screen.findByRole('button', { name: '查看全部 2 条建议（已展示 0 条）' }))
+  const dialog = await screen.findByRole('dialog', { name: '问题详情' })
+  const checkbox = await within(dialog).findByRole('checkbox', { name: '选择 retry' })
+  expect(checkbox).toBeEnabled()
+  await user.click(checkbox)
+  expect(within(dialog).getByRole('button', { name: '生成修复草稿（1）' })).toBeEnabled()
+})
+
 it('does not scan suggestions twice when initial workflow permission finishes loading', async () => {
   accessState.ready = false
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui = () => <QueryClientProvider client={client}><MemoryRouter><EvolutionTab workflowId="wf" /></MemoryRouter></QueryClientProvider>
   const view = render(ui())
   await screen.findByText('node-0', { selector: 'span' })
-  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(0)
+  expect(requests.filter(url => url.pathname.includes('/candidates'))).toHaveLength(0)
   accessState.ready = true
   view.rerender(ui())
   await screen.findByRole('checkbox', { name: '选择 retry' })
-  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(1)
+  expect(requests.filter(url => url.pathname.includes('/candidates'))).toHaveLength(1)
 })
 
 it('keeps repair context usable when the issue endpoint fails before returning any data', async () => {
@@ -117,7 +138,7 @@ it('turns and filters issue pages while batching suggestion previews for the vis
   await user.selectOptions(screen.getByRole('combobox', { name: '问题节点' }), 'node-3')
   expect(await screen.findByText('node-3', { selector: 'span' })).toBeVisible()
   expect(requests.some(url => url.searchParams.get('page') === '1' && url.searchParams.get('nodeId') === 'node-3')).toBe(true)
-  expect(requests.some(url => url.searchParams.getAll('previewSignature').includes('issue-3'))).toBe(true)
+  expect(previewScopes.some(signatures => signatures.includes('issue-3'))).toBe(true)
   await user.selectOptions(screen.getByRole('combobox', { name: '问题模式' }), 'error')
   expect(await screen.findByText('没有符合当前筛选条件的问题')).toBeVisible()
   await user.selectOptions(screen.getByRole('combobox', { name: '问题模式' }), 'all')
@@ -136,7 +157,7 @@ it('selects directly in the issue list and shows unavailable generation beside t
   expect(within(bar).getByText(/已选 1 条建议/)).toBeVisible()
   expect(within(bar).getByText(/生成服务尚未接入/)).toBeVisible()
   expect(within(bar).getByRole('button', { name: '生成修复草稿（1）' })).toBeDisabled()
-  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(1)
+  expect(requests.filter(url => url.pathname.includes('/candidates'))).toHaveLength(1)
   expect(requests.filter(url => url.pathname.includes('/items/'))).toHaveLength(0)
   await user.click(within(screen.getByText('node-0', { selector: 'span' }).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
@@ -154,7 +175,7 @@ it('reuses loaded suggestions on a tab revisit and after closing and reopening t
   await user.click(within((await screen.findByText('node-0', { selector: 'span' })).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
   await within(screen.getByRole('dialog', { name: '问题详情' })).findByRole('checkbox', { name: '选择 retry' })
-  const count = requests.filter(url => url.pathname.endsWith('/candidates')).length
+  const count = requests.filter(url => url.pathname.includes('/candidates')).length
   await user.click(screen.getByRole('button', { name: '问题原因' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
   expect(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
@@ -162,7 +183,7 @@ it('reuses loaded suggestions on a tab revisit and after closing and reopening t
   await user.click(within(screen.getByText('node-0', { selector: 'span' }).closest('article')!).getByRole('button', { name: '问题详情' }))
   await user.click(screen.getByRole('button', { name: '修复建议' }))
   expect(within(screen.getByRole('dialog', { name: '问题详情' })).getByRole('checkbox', { name: '选择 retry' })).toBeVisible()
-  expect(requests.filter(url => url.pathname.endsWith('/candidates'))).toHaveLength(count)
+  expect(requests.filter(url => url.pathname.includes('/candidates'))).toHaveLength(count)
 })
 
 it('presents suggestions together for multi-selection and does not hydrate evidence until requested', async () => {

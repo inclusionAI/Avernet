@@ -8,6 +8,8 @@ const segment = encodeURIComponent
 const post = <T,>(url: string, body: unknown) => fetchJson<T>(url, { method: 'POST', body: JSON.stringify(body) })
 export const repairBatches = {
   candidates: (workflowId: string, query: RepairCandidatesQuery = {}) => {
+    if (query.previewSignatures !== undefined) return readOnlyJson<RepairCandidatesResponse>(
+      `${base}/candidates/query`, undefined, { ...query, workflowId })
     const params = new URLSearchParams({ workflowId })
     if (query.state) params.set('state', query.state)
     if (query.page) params.set('page', String(query.page))
@@ -16,7 +18,6 @@ export const repairBatches = {
     if (query.nodeId) params.set('nodeId', query.nodeId)
     if (query.failureMode) params.set('failureMode', query.failureMode)
     if (query.signature) params.set('signature', query.signature)
-    for (const signature of query.previewSignatures ?? []) params.append('previewSignature', signature)
     return readOnlyJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => readOnlyJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),

@@ -20,7 +20,7 @@ export type RepairTaskSummary = { taskId: string; revision: number; phase: Repai
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
-  /** Up to 3 suggestion summaries per visible issue, independent of the global item page. */
+  /** Up to 3 intact summaries per issue within the shared response byte budget. Total is never truncated. */
   issuePreviews?: Array<{ signature: string; total: number; items: RepairInboxItem[] }>;
   includeHistorical: boolean; activeLookbackDays: number;
   repairSignatureKeys: string[];
