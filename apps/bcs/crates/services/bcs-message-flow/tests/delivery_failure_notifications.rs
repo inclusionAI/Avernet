@@ -37,24 +37,19 @@ async fn queued_group_failure_preserves_offline_notice() {
 }
 
 #[tokio::test]
-async fn offline_failures_across_ticks_notify_both_bots() {
-    check_notice(DeliveryFlowKind::Group, GroupStrategy::Chat, false, DeliveryType::Send, Event::TransportRejected, true, NoticeMode::OfflineAcrossTicks).await;
-}
-
-#[tokio::test]
 async fn failures_across_ticks_preserve_later_offline_and_retryable_notices() {
-    for mode in [NoticeMode::OfflineFirst, NoticeMode::RetryableFirst] {
+    for mode in [NoticeMode::OfflineFirst, NoticeMode::RetryableFirst, NoticeMode::OfflineAcrossTicks] {
         check_notice(DeliveryFlowKind::Group, GroupStrategy::Chat, false, DeliveryType::Send, Event::TransportRejected, true, mode).await;
     }
 }
 
 #[derive(Clone, Copy)]
-enum NoticeMode { Online, Offline, OfflineAcrossTicks, OfflineFirst, RetryableFirst }
+enum NoticeMode { Online, Offline, OfflineFirst, RetryableFirst, OfflineAcrossTicks }
 
 async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, private: bool, kind: DeliveryType, terminal_event: Event, expected: bool, mode: NoticeMode) {
     let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let offline = matches!(mode, NoticeMode::Offline | NoticeMode::OfflineAcrossTicks);
-    let staggered = matches!(mode, NoticeMode::OfflineAcrossTicks | NoticeMode::OfflineFirst | NoticeMode::RetryableFirst);
+    let staggered = matches!(mode, NoticeMode::OfflineFirst | NoticeMode::RetryableFirst | NoticeMode::OfflineAcrossTicks);
     let delivery: Arc<dyn BotDeliveryPort> = if offline { Arc::new(OfflineDelivery) }
         else if staggered { Arc::new(SelectiveOfflineDelivery) } else { fixture.bot_delivery.clone() };
     let mut group = fixture.group.get("group-1").await.unwrap();
@@ -74,11 +69,18 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session)))
         .with_managed_deliveries(service.clone()));
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
-    let mut notification_loop = Some(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
-    // Batch cases enqueue both transitions before polling the consumer. Otherwise
-    // its first timer tick can legitimately report only the first failed Bot.
-    // Cross-tick cases intentionally run the consumer before the transitions.
-    let notifications = if staggered { Some(tokio::spawn(notification_loop.take().unwrap())) } else { None };
+    // Subscribe before admission, but drain a single-batch scenario only after
+    // all transitions commit. The notification loop's first tick is immediate;
+    // persistence awaits may otherwise split the expected aggregate into two.
+    let changes = service.subscribe();
+    let weak_flow = Arc::downgrade(&flow);
+    let (start, ready) = tokio::sync::oneshot::channel();
+    let mut start = Some(start);
+    let notifications = tokio::spawn(async move {
+        ready.await.unwrap();
+        bcs_message_flow::delivery_notifications::run(weak_flow, changes, receiver).await;
+    });
+    if staggered { start.take().unwrap().send(()).unwrap(); }
     let admitted = service.admit(AdmitMessageDeliveries {
         display_message: None, message_id: "initial-context".into(), flow_kind,
         now_ms: 100, expire_at_ms: None, event: None,
@@ -106,15 +108,14 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
         service.transition(command(&active, terminal_event)).await.unwrap();
         if staggered { wait_for_notices(&frontend, index + 1).await; }
     }
-    let notifications = notifications.unwrap_or_else(|| tokio::spawn(notification_loop.take().unwrap()));
+    if let Some(start) = start { start.send(()).unwrap(); }
     if staggered {
         let texts = frontend.events().await.into_iter().filter_map(|frame| {
             let event: serde_json::Value = serde_json::from_str(&frame).unwrap();
             (event["event"] == "chat").then(|| event["payload"]["message"]["content"][0]["text"].as_str().unwrap().to_string())
         }).collect::<Vec<_>>();
-        let mut expected = if matches!(mode, NoticeMode::OfflineAcrossTicks) {
-            vec!["Bot Driver 已离线", "Bot Observer 已离线"]
-        } else { vec!["Bot Driver 已离线", "消息投递失败，请稍后重试。"] };
+        let mut expected = if offline { vec!["Bot Driver 已离线", "Bot Observer 已离线"] }
+            else { vec!["Bot Driver 已离线", "消息投递失败，请稍后重试。"] };
         if matches!(mode, NoticeMode::RetryableFirst) { expected.reverse(); }
         assert_eq!(texts, expected);
         assert_eq!(bcs_service_api::port::repo::MessageRepoPort::get_current_seq(repo.as_ref(), "group-1:failure").await.unwrap(), 3);
@@ -139,7 +140,7 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
     assert_eq!(event["payload"]["message"]["role"], "system");
     if offline {
         let text = event["payload"]["message"]["content"][0]["text"].as_str().unwrap();
-        assert!(matches!(text, "Bot Driver、Observer 已离线" | "Bot Observer、Driver 已离线"));
+        assert!(matches!(text, "Bot Driver、Observer 已离线" | "Bot Observer、Driver 已离线"), "actual notice: {text}");
     } else {
         assert_eq!(event["payload"]["message"]["content"], json!([{ "type": "text", "text": "消息投递失败，请稍后重试。" }]));
     }
