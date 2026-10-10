@@ -25,6 +25,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
@@ -82,6 +83,7 @@ async def list_models(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(
@@ -115,6 +117,7 @@ async def list_models(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path="/api/models",
     )
@@ -141,6 +144,7 @@ async def get_model(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(
@@ -185,6 +189,7 @@ async def get_model(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path=f"/api/models/{model_id}",
     )

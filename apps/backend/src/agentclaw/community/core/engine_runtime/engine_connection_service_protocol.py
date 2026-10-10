@@ -12,9 +12,12 @@ class EngineConnectionServiceProtocol(Protocol):
     """Compose the sockets a caller may open against their bot."""
 
     def build(
-        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str
+        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str,
+        device_uuid: str | None = None,
     ) -> ConnectionResult:
         """Return the addressed bot's usable sockets for one stage.
+
+        ``device_uuid`` optionally pins an instance of that runtime binding.
 
         ``owner_id`` names the bot's owner (the caller's own id for their own
         bot); ``caller_id`` is the verified caller, adjudicated as the bot's

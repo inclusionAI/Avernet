@@ -301,6 +301,7 @@ def resolve_stage_device_context(
     bot_id: str,
     owner_id: str,
     stage: str,
+    device_uuid: str | None = None,
 ) -> DeviceContext:
     """The device context of the runtime ``stage`` names.
 
@@ -366,8 +367,9 @@ def resolve_stage_device_context(
     inconsistency than the one it would fix.
     """
     require_known_stage(stage)
+    selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
     if stage == STAGE_DRAFT:
-        return resolver.resolve_for_bot(bot_id, owner_id)
+        return resolver.resolve_for_bot(bot_id, owner_id, **selection)
 
     record = bot_repo.get_by_id_and_owner(bot_id, owner_id) or {}
     facts = BotFacts.from_record(record, bot_id=bot_id, owner_id=owner_id)
@@ -385,7 +387,7 @@ def resolve_stage_device_context(
         stage=stage,
         env=get_current_env(),
     )
-    return resolver.resolve_for_binding(bind_id, facts.owner_id, bot_id=facts.bot_id)
+    return resolver.resolve_for_binding(bind_id, facts.owner_id, bot_id=facts.bot_id, **selection)
 
 
 __all__ = [

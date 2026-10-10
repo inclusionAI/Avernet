@@ -60,8 +60,12 @@ class EngineRuntimeRelayProtocol(Protocol):
         enveloped: bool = True,
         facts: BotFacts | None = None,
         stage: str,
+        device_uuid: str | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
+
+        ``device_uuid`` pins an instance within the resolved runtime binding;
+        omission preserves provider selection. It is not an engine query filter.
 
         ``enveloped=False`` for the one engine route that answers with a raw
         payload instead of the standard envelope (``GET /api/engine/status``).

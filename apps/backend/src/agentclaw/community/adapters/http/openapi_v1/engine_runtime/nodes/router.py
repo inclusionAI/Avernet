@@ -23,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.nodes.schemas i
     Node,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
@@ -99,6 +100,7 @@ async def list_nodes(
     limit: NodeLimitQuery = 20,
     offset: NodeOffsetQuery = 0,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[Node]]:
     """List nodes visible to the addressed bot runtime."""
@@ -117,6 +119,7 @@ async def list_nodes(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path="/api/nodes",
         params={
