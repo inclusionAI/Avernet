@@ -78,21 +78,53 @@ impl CoreEventSubscriptionAuthorizer {
     ) -> Result<EventActor, ApplicationError> {
         let candidates = actor_ids.iter().cloned().collect::<HashSet<_>>();
         if let Some(bot) = caller.bot.as_ref() {
-            if caller
-                .user
-                .as_ref()
-                .is_some_and(|user| user.id != bot.owner_id)
-            {
-                return Err(ApplicationError::event_subscription_forbidden(
-                    "The authenticated Bot is not owned by the authenticated User",
-                ));
-            }
-            if candidates.contains(&bot.bot_uuid) {
-                return Ok(EventActor {
-                    actor_type: EventActorType::Bot,
-                    id: bot.bot_uuid.clone(),
-                    display_name: None,
-                });
+            let bot_is_candidate = candidates.contains(&bot.bot_uuid);
+            match caller.user.as_ref() {
+                // Live-authority cutover for MIXED Human+Bot callers (spec
+                // §12.2/§12.4, review finding F7): the signed `owner_id`
+                // claim NEVER decides here — neither to reject nor to
+                // grant. The Bot may act for its own candidate slot only
+                // while the LIVE authority hook confirms the verified Human
+                // CURRENTLY manages it (`can_manage`, exactly like the
+                // per-candidate loop below); `Ok(false)`
+                // and hook failures deny that slot fail-closed (warn on
+                // failure) and fall through so the Human candidate branch
+                // and the live-authority loop below stay reachable — e.g. a
+                // current owner behind a stale claim, or another Bot under
+                // the caller's live control.
+                Some(user) => {
+                    if bot_is_candidate {
+                        match self.authority.can_manage(&user.id, &bot.bot_uuid).await {
+                            Ok(true) => {
+                                return Ok(EventActor {
+                                    actor_type: EventActorType::Bot,
+                                    id: bot.bot_uuid.clone(),
+                                    display_name: None,
+                                });
+                            }
+                            Ok(false) => {}
+                            Err(error) => {
+                                tracing::warn!(
+                                    user_id = %user.id,
+                                    bot_id = %bot.bot_uuid,
+                                    error = %error,
+                                    "event subscription authorization: live control lookup failed; denying the caller Bot candidate"
+                                );
+                            }
+                        }
+                    }
+                }
+                // Bot-only callers keep the established behaviour: the
+                // authenticated Bot may act for its own candidate slot.
+                None => {
+                    if bot_is_candidate {
+                        return Ok(EventActor {
+                            actor_type: EventActorType::Bot,
+                            id: bot.bot_uuid.clone(),
+                            display_name: None,
+                        });
+                    }
+                }
             }
         }
 
@@ -307,6 +339,68 @@ impl BotAuthorityHook for SeededAuthority {
     }
 }
 
+/// Hook double whose live control lookups always FAIL (corrupt or
+/// unavailable authority) — never a plain deny — exercising the
+/// fail-closed `Err` branch of the mixed-caller path.
+struct FailingAuthority;
+
+#[async_trait]
+impl BotAuthorityHook for FailingAuthority {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Err(bcs_service_api::ServiceError::InternalError(format!(
+            "authority lookup failed for user '{user_id}' and bot '{bot_id}'"
+        )))
+    }
+
+    async fn require_owner(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::InternalError(format!(
+            "authority lookup failed for user '{user_id}' and bot '{bot_id}'"
+        )))
+    }
+}
+
+#[tokio::test]
+async fn mixed_caller_hook_failure_denies_the_bot_slot_fail_closed() {
+    // The live control lookup itself FAILS (corrupt/unavailable authority):
+    // the Bot candidate slot is denied fail-closed (warn + fall-through)
+    // and, with no other reachable candidate, authorize denies.
+    let groups = Arc::new(GroupCore::memory());
+    groups
+        .upsert(Group::new("group-f7-hook-error", "bot-x", Vec::new()))
+        .await
+        .expect("store group");
+    let bots = Arc::new(BotCore::memory());
+    register_driver_bot(&bots, "bot-x", "alice").await;
+
+    let authorizer = CoreEventSubscriptionAuthorizer::new(groups, bots, Arc::new(FailingAuthority));
+    let error = authorizer
+        .authorize(
+            &mixed_caller("alice", "bot-x", "alice"),
+            &EventSubscriptionScope {
+                scope_type: EventSubscriptionScopeType::Group,
+                id: "group-f7-hook-error".to_string(),
+            },
+            EventSubscriptionAuthorizationAction::Create,
+        )
+        .await
+        .expect_err("a hook failure denies the Bot candidate slot fail-closed");
+    assert!(
+        matches!(
+            error,
+            ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. }
+        ),
+        "expected a forbidden branch, got {error:?}"
+    );
+}
+
 async fn register_driver_bot(bots: &BotCore, bot_id: &str, staff_no: &str) {
     use bcs_service_api::{BotCapabilities, BotRegistryCoreService};
     bots.register(
@@ -359,6 +453,135 @@ async fn former_creator_of_driver_cannot_manage_event_scope() {
         ),
         "expected a forbidden branch, got {error:?}"
     );
+}
+
+fn mixed_caller(user_id: &str, bot_uuid: &str, owner_id: &str) -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: Some("tenant-a".to_string()),
+            user: Some(bcs_service_api::application::v1::AuthenticatedUserIdentity {
+                id: user_id.to_string(),
+                username: user_id.to_string(),
+                display_name: None,
+                full_name: None,
+            }),
+            bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
+                bot_uuid: bot_uuid.to_string(),
+                owner_id: owner_id.to_string(),
+                app_id: 7,
+                agent_code: format!("agent-{bot_uuid}"),
+            }),
+            app: None,
+            access_key: None,
+        }
+    }
+
+#[tokio::test]
+async fn mixed_caller_with_revoked_live_control_cannot_reclaim_the_bot_slot() {
+    // Reviewer F7 repro: after the Bot was transferred away from the caller,
+    // the SIGNED `owner_id` claim still happens to match the user id, but
+    // the LIVE authority revoked the caller's control. The stale claim must
+    // never grant the Bot actor (full payload) on its own — the live
+    // authority decides.
+    let groups = Arc::new(GroupCore::memory());
+    groups
+        .upsert(Group::new("group-f7-revoked", "bot-x", Vec::new()))
+        .await
+        .expect("store group");
+    let bots = Arc::new(BotCore::memory());
+    register_driver_bot(&bots, "bot-x", "alice").await;
+    let authority = Arc::new(SeededAuthority {
+        grants: Mutex::new(HashSet::new()),
+    });
+    // `alice` holds NO live control over `bot-x` (manager role revoked).
+
+    let authorizer = CoreEventSubscriptionAuthorizer::new(groups, bots, authority);
+    let error = authorizer
+        .authorize(
+            &mixed_caller("alice", "bot-x", "alice"),
+            &EventSubscriptionScope {
+                scope_type: EventSubscriptionScopeType::Group,
+                id: "group-f7-revoked".to_string(),
+            },
+            EventSubscriptionAuthorizationAction::Create,
+        )
+        .await
+        .expect_err("the stale matching claim without live control is denied");
+    assert!(
+        matches!(
+            error,
+            ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. }
+        ),
+        "expected a forbidden branch, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn mixed_current_owner_with_stale_claim_acts_for_the_bot_via_live_control() {
+    // Mirror of the F8 parity requirement: a CURRENT owner whose SIGNED claim
+    // is STALE (mismatched `owner_id`) must still authorize — the live
+    // authority, never the claim, decides. No early stale-claim rejection.
+    let groups = Arc::new(GroupCore::memory());
+    groups
+        .upsert(Group::new("group-f7-stale-claim", "bot-x", Vec::new()))
+        .await
+        .expect("store group");
+    let bots = Arc::new(BotCore::memory());
+    register_driver_bot(&bots, "bot-x", "somebody-else").await;
+    let authority = Arc::new(SeededAuthority {
+        grants: Mutex::new(HashSet::new()),
+    });
+    authority.control("alice", "bot-x");
+
+    let authorizer = CoreEventSubscriptionAuthorizer::new(groups, bots, authority);
+    let grant = authorizer
+        .authorize(
+            &mixed_caller("alice", "bot-x", "bob"),
+            &EventSubscriptionScope {
+                scope_type: EventSubscriptionScopeType::Group,
+                id: "group-f7-stale-claim".to_string(),
+            },
+            EventSubscriptionAuthorizationAction::Create,
+        )
+        .await
+        .expect("a current live owner with a stale claim may manage the scope");
+    assert_eq!(grant.actor.actor_type, EventActorType::Bot);
+    assert_eq!(grant.actor.id, "bot-x");
+    assert!(grant.full_payload_allowed);
+}
+
+#[tokio::test]
+async fn mixed_caller_with_stale_claim_still_reaches_the_human_candidate_slot() {
+    // No early stale-claim rejection (F7): when the caller's `human_` id is
+    // a candidate — even while the caller's Bot slot is live-denied — the
+    // Human actor branch must stay reachable.
+    let groups = Arc::new(GroupCore::memory());
+    let mut group = Group::new("group-f7-human-slot", "bot-x", Vec::new());
+    group.originator = Some("human_alice".to_string());
+    groups
+        .upsert(group)
+        .await
+        .expect("store group");
+    let bots = Arc::new(BotCore::memory());
+    register_driver_bot(&bots, "bot-x", "somebody-else").await;
+    let authority = Arc::new(SeededAuthority {
+        grants: Mutex::new(HashSet::new()),
+    });
+    // No live control anywhere: the caller's Bot slot is denied fall-through.
+
+    let authorizer = CoreEventSubscriptionAuthorizer::new(groups, bots, authority);
+    let grant = authorizer
+        .authorize(
+            &mixed_caller("alice", "bot-x", "bob"),
+            &EventSubscriptionScope {
+                scope_type: EventSubscriptionScopeType::Group,
+                id: "group-f7-human-slot".to_string(),
+            },
+            EventSubscriptionAuthorizationAction::Create,
+        )
+        .await
+        .expect("the Human candidate slot stays reachable behind a stale Bot claim");
+    assert_eq!(grant.actor.actor_type, EventActorType::Human);
+    assert_eq!(grant.actor.id, "human_alice");
 }
 
 #[tokio::test]

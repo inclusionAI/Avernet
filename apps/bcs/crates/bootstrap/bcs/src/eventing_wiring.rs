@@ -115,13 +115,14 @@ pub(crate) async fn build_eventing_runtime(
     // Final-review cutover: the Human side of scope management resolves
     // through the live authority hook, never the created_by listing.
     let authorizer: Arc<dyn EventSubscriptionAuthorizer> = Arc::new(
-        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry, authority),
+        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry, authority.clone()),
     );
     let service_impl = Arc::new(
         EventSubscriptionApplicationService::new(
             repo.clone(),
             delivery.clone(),
             authorizer,
+            authority,
             catalog.clone(),
             EventSubscriptionPolicy::from(&config.eventing),
             env.clone(),

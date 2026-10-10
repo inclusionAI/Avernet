@@ -11,10 +11,10 @@ use bcs_eventing::{
     subscription_scope_matches, validate_event_filter,
 };
 use bcs_service_api::application::v1::{
-    EventSinkInput, EventSinkView, EventSubscriptionDesiredStatus, EventSubscriptionService,
-    GetEventSubscription, GroupEventSubscriptionProvisioner, InlineGroupEventSubscriptionRequest,
-    PatchEventSinkInput, PatchEventSubscription, PatchEventSubscriptionRequest,
-    ReplayEventDelivery, SkipEventDelivery, TestEventSubscription,
+    ApplicationError, EventSinkInput, EventSinkView, EventSubscriptionDesiredStatus,
+    EventSubscriptionService, GetEventSubscription, GroupEventSubscriptionProvisioner,
+    InlineGroupEventSubscriptionRequest, PatchEventSinkInput, PatchEventSubscription,
+    PatchEventSubscriptionRequest, ReplayEventDelivery, SkipEventDelivery, TestEventSubscription,
 };
 use bcs_service_api::port::NewEvent;
 use bcs_service_api::port::repo::{
@@ -33,9 +33,11 @@ use bcs_service_api::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use std::sync::Arc;
+
 use support::{
-    NOW_MS, bot_caller, caller, create_command, group_scope, harness,
-    harness_with_eventing_config,
+    NOW_MS, FailingAuthority, SeededAuthority, bot_caller, caller, create_command, group_scope,
+    harness, harness_with_authority, harness_with_eventing_config, mixed_caller,
 };
 
 fn inline_subscription(name: &str, filters: Vec<&str>) -> InlineGroupEventSubscriptionRequest {
@@ -113,6 +115,85 @@ async fn inline_group_prepare_projects_a_bot_caller_as_the_event_actor() {
         .expect("load pending subscription")
         .expect("pending subscription");
     assert_eq!(record.created_by, prepared.actor);
+}
+
+#[tokio::test]
+async fn inline_group_prepare_resolves_mixed_callers_through_live_authority() {
+    // Reviewer F8 repro: after the Group create flow's live authorization
+    // already succeeded, a CURRENT owner whose SIGNED `owner_id` claim is
+    // STALE (mismatches the caller's user id) must still prepare — even an
+    // EMPTY subscription list — because the live authority, never the
+    // claim, decides the effective Principal.
+    let authority = Arc::new(SeededAuthority::default());
+    authority.control("owner", "bot-owner");
+    let harness = harness_with_authority(true, authority);
+
+    let prepared = harness
+        .service
+        .prepare(
+            &mixed_caller("owner", "bot-owner", "former-owner"),
+            "server-group-id",
+            Vec::new(),
+        )
+        .await
+        .expect("a current live owner with a stale claim may prepare");
+
+    assert_eq!(prepared.group_id, "server-group-id");
+    assert_eq!(prepared.actor.actor_type, EventActorType::Bot);
+    assert_eq!(prepared.actor.id, "bot-owner");
+    assert!(prepared.subscription_ids.is_empty());
+}
+
+#[tokio::test]
+async fn inline_group_prepare_denies_revoked_former_creator_despite_matching_claim() {
+    // Reviewer F8 repro (mirror direction): the SIGNED claim still names
+    // the caller as owner, but the LIVE authority revoked that control —
+    // prepare must deny fail-closed instead of trusting the claim.
+    let authority = Arc::new(SeededAuthority::default());
+    // `owner` holds NO live control over `bot-owner`.
+    let harness = harness_with_authority(true, authority);
+
+    let error = harness
+        .service
+        .prepare(
+            &mixed_caller("owner", "bot-owner", "owner"),
+            "server-group-id",
+            Vec::new(),
+        )
+        .await
+        .expect_err("a revoked former creator is denied by the live check");
+    assert!(
+        matches!(
+            error,
+            ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. }
+        ),
+        "expected a forbidden branch, got {error:?}"
+    );
+}
+
+#[tokio::test]
+async fn inline_group_prepare_denies_fail_closed_when_the_authority_hook_fails() {
+    // The live control lookup itself FAILS (corrupt/unavailable authority):
+    // a mixed caller is denied fail-closed rather than falling back to the
+    // signed claim.
+    let harness = harness_with_authority(true, Arc::new(FailingAuthority));
+
+    let error = harness
+        .service
+        .prepare(
+            &mixed_caller("owner", "bot-owner", "owner"),
+            "server-group-id",
+            Vec::new(),
+        )
+        .await
+        .expect_err("a hook failure denies provisioning fail-closed");
+    assert!(
+        matches!(
+            error,
+            ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. }
+        ),
+        "expected a typed forbidden branch, got {error:?}"
+    );
 }
 
 #[tokio::test]
