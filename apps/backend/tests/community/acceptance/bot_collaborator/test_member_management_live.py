@@ -83,6 +83,55 @@ def _seed_member_managed_bot(
     )
 
 
+def assert_template_member_management(
+    client: httpx.Client, *, owner_id: str, active_engine: str, allowed: bool,
+) -> None:
+    """Exercise the same real HTTP requests with a caller-owned client."""
+    bot_id = _fresh_id("collab_member_mgmt")
+    member_id = _fresh_id("collab_member")
+    _seed_member_managed_bot(
+        client, owner_id=owner_id, bot_id=bot_id, active_engine=active_engine,
+    )
+
+    add_response = client.post(
+        "/api/bot/collaborator/add",
+        json={
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "user_id": member_id,
+            "user_name": "Singlebox Member",
+            "role": "member",
+        },
+    )
+    assert add_response.status_code == 200, add_response.text
+    add_body = add_response.json()
+    if not allowed:
+        assert add_body["success"] is False, add_body
+        assert add_body["error_code"] == 400, add_body
+        assert "未开启成员管理" in add_body["message"], add_body
+    else:
+        assert add_body["success"] is True, add_body
+        assert add_body["data"]["bot_id"] == bot_id
+        assert add_body["data"]["user_id"] == member_id
+        assert add_body["data"]["role"] == "member"
+
+    permission = client.post(
+        "/api/bot/collaborator/check_permission",
+        json={
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "user_id": member_id,
+            "required_level": "MEMBER",
+        },
+    )
+    assert permission.status_code == 200, permission.text
+    permission_body = permission.json()
+    assert permission_body["success"] is True, permission_body
+    assert permission_body["data"]["has_permission"] is allowed
+    if allowed:
+        assert permission_body["data"]["level"] == "MEMBER"
+
+
 @pytest.mark.acceptance
 @pytest.mark.parametrize(
     ("active_engine", "allowed"),
@@ -93,52 +142,11 @@ def test_template_ext_member_management_allows_live_collaborator_add(
 ):
     """Only template-readable engines can enable members via persisted ext."""
     owner_id = _fresh_id("collab_owner")
-    bot_id = _fresh_id("collab_member_mgmt")
-    member_id = _fresh_id("collab_member")
-
     with httpx.Client(
         base_url=live_backend,
         headers={"x-user-id": owner_id},
         timeout=60.0,
     ) as client:
-        _seed_member_managed_bot(
-            client, owner_id=owner_id, bot_id=bot_id, active_engine=active_engine,
+        assert_template_member_management(
+            client, owner_id=owner_id, active_engine=active_engine, allowed=allowed,
         )
-
-        add_response = client.post(
-            "/api/bot/collaborator/add",
-            json={
-                "bot_id": bot_id,
-                "owner_id": owner_id,
-                "user_id": member_id,
-                "user_name": "Singlebox Member",
-                "role": "member",
-            },
-        )
-        assert add_response.status_code == 200, add_response.text
-        add_body = add_response.json()
-        if not allowed:
-            assert add_body["success"] is False, add_body
-            assert add_body["error_code"] == 400, add_body
-            assert "未开启成员管理" in add_body["message"], add_body
-        else:
-            assert add_body["success"] is True, add_body
-            assert add_body["data"]["bot_id"] == bot_id
-            assert add_body["data"]["user_id"] == member_id
-            assert add_body["data"]["role"] == "member"
-
-        permission = client.post(
-            "/api/bot/collaborator/check_permission",
-            json={
-                "bot_id": bot_id,
-                "owner_id": owner_id,
-                "user_id": member_id,
-                "required_level": "MEMBER",
-            },
-        )
-        assert permission.status_code == 200, permission.text
-        permission_body = permission.json()
-        assert permission_body["success"] is True, permission_body
-        assert permission_body["data"]["has_permission"] is allowed
-        if allowed:
-            assert permission_body["data"]["level"] == "MEMBER"
