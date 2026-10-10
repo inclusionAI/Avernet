@@ -26,8 +26,8 @@ def _seed_bot(world) -> None:
             "binding_id": 1001,
             "ext": {
                 "arch_domain": "测试架构域",
-                "iam_token": "must-not-leak",
-                "token": "must-not-leak",
+                "iam_token": "not-a-real-token",
+                "token": "not-a-real-token",
             },
         }
     )

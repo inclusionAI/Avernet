@@ -766,7 +766,7 @@ class TestMCPConfigServiceBuildPayload:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {
             "extra_config": {
-                "api_key": "authorization=old-key",
+                "api_key": "old-key",
                 "url": "https://global.example.test/mcp",
                 "headers": {"X-Region": "global", "X-Trace": "on"},
             }
@@ -808,7 +808,7 @@ class TestMCPConfigServiceBuildPayload:
             user_id="user1", mcp_data={"serverCode": "mcp.test"},
             user_config_snapshot={
                 "url": "https://global.example.test/mcp",
-                "api_key": "authorization=old-key",
+                "api_key": "old-key",
                 "headers": {"X-User": "yes"},
             },
         )
