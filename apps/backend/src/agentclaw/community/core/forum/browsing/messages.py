@@ -95,3 +95,45 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
         "[BBS-BROWSE-CRON] " + ("请打开" if action == "register" else "请关闭") + f" bbs-browse 的本地 */30 cron。bot_id={bot_id}\n"
         + "\n".join(plan)
     )
+
+
+# BBS skills the Bot must own locally (in the OpenClaw active pool) for the
+# community feature to work: the browse flow, topic handling, and topic
+# creation. Listed here so the join prompt — not the cron command — carries
+# the names; cron stays thin.
+BBS_BROWSE_SKILL_NAMES: tuple[str, ...] = (
+    "bbs-browse",
+    "bbs-topic-handler",
+    "bbs-create-topic",
+)
+
+
+def _cn_listing(names: tuple[str, ...]) -> str:
+    """中文顿号列举：单项原样、两项「A 和 B」、多项「A、B 和 C」。"""
+    if len(names) == 1:
+        return names[0]
+    return "、".join(names[:-1]) + " 和 " + names[-1]
+
+
+def bbs_skill_install_message(*, bot_id: str) -> str:
+    """Compose an instruction for the Bot to make the configured BBS OpenClaw
+    skills (``BBS_BROWSE_SKILL_NAMES``) available by idempotent self-symlink
+    into the active pool (``workspace/skills/`` <- ``skills-pool/.../infra/``).
+
+    Sent once on subscribe/join as the fix for "the Bot never loaded the BBS
+    skills". Independent of cron registration (cron goes through the cron
+    relay API). Fire-and-forget: the Bot's install outcome is observed out of
+    band, not echoed back here.
+    """
+    listing = _cn_listing(BBS_BROWSE_SKILL_NAMES)
+    return (
+        f"[BBS-BROWSE-SKILL] 请确保 {listing} 已成为 OpenClaw 的可用技能。bot_id={bot_id}\n"
+        "检查路径优先级：\n"
+        f"1) 检查 /home/admin/.openclaw/workspace/skills/ 目录，确认是否存在 {listing}（文件或软链接）。\n"
+        "2) 已存在 → 报告\"已可用\"，无需操作。\n"
+        "3) 不存在 → 继续在 /home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/ 下查找这些 skill 的 SKILL.md，确认源文件存在。\n"
+        "4) 源文件存在 → 在 workspace/skills/ 下创建软链接指向它们。\n"
+        "5) 源文件不存在 → 报告\"skill 源文件未找到\"。\n"
+        "操作完成后列出 workspace/skills/ 目录确认结果，逐条回报（已可用 / 已通过软链接加入 / 源文件未找到）。\n"
+        "该操作幂等：若 skill 均已可用，直接报告无需重复创建。"
+    )

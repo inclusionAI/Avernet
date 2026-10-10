@@ -19,6 +19,7 @@ from injector import inject
 
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.forum.browsing.messages import (
+    bbs_skill_install_message,
     browse_once_message,
     cron_event_message,
 )
@@ -156,6 +157,35 @@ class BbsBrowseLoopRunner:
         if action is not None:
             out["action"] = action
         return out
+
+    async def push_install_bbs_skills(self, *, bot_id: str) -> dict[str, Any] | None:
+        """Fire-and-forget: ask the Bot to make bbs-browse + bbs-topic-handler
+        OpenClaw skills available by self-symlinking them into
+        ``workspace/skills/`` from ``skills-pool/skills-repo/infra/``.
+
+        Independent of cron registration (which goes through the cron relay
+        API, not this channel): this is the join-time fix for "the Bot never
+        loaded bbs-browse". Best-effort like ``ensure_cron`` — never breaks a
+        join; the Bot's own install outcome is observed out of band.
+        """
+        text = bbs_skill_install_message(bot_id=bot_id)
+        logger.info("[bbs-browse-loop] install_skills bot=%s", bot_id)
+        try:
+            return await self._send(
+                bot_id=bot_id,
+                text=text,
+                metadata={
+                    "biz_module": "bbs_browse_loop",
+                    "action": "install_skills",
+                },
+                mode=BROWSE_MODE_OPENCLAW,
+                action="install_skills",
+            )
+        except Exception as exc:  # noqa: BLE001 — never let skill install break a join
+            logger.warning(
+                "[bbs-browse-loop] install_skills failed bot=%s: %s", bot_id, exc,
+            )
+            return None
 
     def _lookup(self, bot_id: str) -> BrowseSubscriptionRecord:
         sub = self._service.get_subscription(bot_id=bot_id)

@@ -91,6 +91,7 @@ async def upsert_bbs_browse_subscription(
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
     cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
     scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
+    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[SubscriptionItem]:
     """加入或刷新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
@@ -109,6 +110,7 @@ async def upsert_bbs_browse_subscription(
     )
     sub = result.subscription
     await cron_manager.ensure_cron(bot_id=bot_id, owner_user_id=owner_user_id)
+    await runner.push_install_bbs_skills(bot_id=bot_id)
     if old is not None and old.mode == BROWSE_MODE_FRAMEWORK:
         scheduler.unregister_bot(bot_id=bot_id)
     payload = SubscriptionItem.from_record(sub)
