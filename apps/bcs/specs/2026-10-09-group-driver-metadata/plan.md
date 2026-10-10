@@ -52,3 +52,24 @@ metadata through existing registry contracts; HTTP adapters serialize results.
   DB access-cost estimates come from store inspection, not a load benchmark.
 - No global formatting or remote publication. Explicit formatting was
   limited to the three new test files, with no recursive/module-wide formatting.
+
+## PR #2565 CI follow-up
+
+The initial Unit Tests run (37922798346) failed in the pre-existing
+`queued_group_failure_preserves_offline_notice` test, not in the new metadata
+contracts. The notification loop's immediate first tick could observe the first
+committed failure before the second persistence await completed. The test
+incorrectly assumed both failures always landed in the same notification batch.
+A temporary 120 ms delay between transitions reproduced the exact failure
+(`Bot Driver 已离线` instead of the aggregate); the diagnostic delay was removed.
+
+The fixture now subscribes before admission and uses a oneshot start signal to
+hold single-batch consumption until both transitions commit. Cross-tick cases
+start consumption immediately and explicitly wait for each notice. Added the
+both-offline cross-tick case, retaining exact notice text/count and history
+sequence assertions. No production logic, retry policy, or CI thresholds changed.
+
+Validation: all 575 bcs-message-flow tests passed; nextest stress ran all four
+notification tests 100 times with retries disabled (400 passes). The fixed
+fixture also passed with the temporary diagnostic inter-transition delay.
+The changed source is 191 lines; `git diff --check` passed.
