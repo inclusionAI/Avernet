@@ -292,12 +292,12 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         target_user_id: str,
         message: str,
         session_id: str | None = None,
-        caller_bot_token: str | None = None,
+        caller_bearer: str | None = None,
     ) -> BotSendResult:
         """BCS A2A 单 bot 异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
 
         目标按 ``bot_id:owner_id`` 寻址(BCS A2A 原生路径形态);发送方身份由
-        ``caller_bot_token``(发起 bot 的 session_token,直读 bcs_bots)作
+        ``caller_bearer``(发起 bot 的 session_token,直读 bcs_bots)作
         ``Authorization: Bearer`` 表达——chat-async 把 caller 严格解析为该 token 的 bot
         (run 只有发起 bot 可读),HMAC 服务签名不足以过该口。与 ``create_group`` 的
         ``caller_bot_token`` / ``get_session_messages`` 的 ``caller_bearer`` 同一手法,
@@ -316,11 +316,11 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             body["sessionId"] = session_id
         # 参考 create_group:Bearer 叠加在 X-ECB-* 服务签名之上做 caller 身份。
         extra_headers: dict[str, str] | None = None
-        if caller_bot_token:
-            extra_headers = {"Authorization": f"Bearer {caller_bot_token}"}
+        if caller_bearer:
+            extra_headers = {"Authorization": f"Bearer {caller_bearer}"}
         else:
             logger.warning(
-                "[task][bcs_http] send_message_a2a 无 caller_bot_token(仅 HMAC 匿名)— "
+                "[task][bcs_http] send_message_a2a 无 caller_bearer(仅 HMAC 匿名)— "
                 "chat-async 把 caller 解析为 bot,预计 401 target=%s",
                 f"{target_bot_id}:{target_user_id}",
             )

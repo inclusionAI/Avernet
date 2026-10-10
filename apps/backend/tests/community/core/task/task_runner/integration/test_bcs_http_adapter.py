@@ -227,7 +227,7 @@ def test_send_message_a2a_posts_chat_async_with_colon_addressing():
         target_user_id="35983",
         message="hi",
         session_id="bcs-cli:task-20261009190011123-198568",
-        caller_bot_token="drv-session-token",
+        caller_bearer="drv-session-token",
     ))
     assert rid.run_id == "run_a2a_1"
     assert rid.session_id == "bcs-cli:task-20261009190011123-198568"
@@ -246,7 +246,7 @@ def test_send_message_a2a_omits_session_id_when_unset():
 
     rid = _run(_adapter(h).send_message_a2a(
         target_bot_id="bot-a", target_user_id="u1", message="hi",
-        caller_bot_token="drv-session-token",
+        caller_bearer="drv-session-token",
     ))
     assert rid.run_id == "run_a2a_2"
     assert rid.session_id is None
@@ -274,7 +274,7 @@ def test_send_message_a2a_rejects_payload_without_run_id():
     with pytest.raises(BcsClientError, match="run_id"):
         _run(_adapter(h).send_message_a2a(
             target_bot_id="bot-a", target_user_id="u1", message="hi",
-            caller_bot_token="drv-session-token",
+            caller_bearer="drv-session-token",
         ))
 
 
@@ -285,5 +285,5 @@ def test_send_message_a2a_maps_4xx_to_request_error():
     with pytest.raises(BcsClientRequestError):
         _run(_adapter(h).send_message_a2a(
             target_bot_id="bot-a", target_user_id="u1", message="hi",
-            caller_bot_token="drv-session-token",
+            caller_bearer="drv-session-token",
         ))

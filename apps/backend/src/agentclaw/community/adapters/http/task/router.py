@@ -143,7 +143,7 @@ async def benchmark_execute_task_internal(
                     target_user_id=a2a_target_user,
                     message=prompt,
                     session_id=session_id,
-                    caller_bot_token=caller_token,
+                    caller_bearer=caller_token,
                 )
                 extend_props["benchmark_run_id"] = sent.run_id
                 extend_props["benchmark_send"] = "ok"

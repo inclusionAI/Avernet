@@ -95,11 +95,11 @@ class BcsClientPort(Protocol):
         target_user_id: str,
         message: str,
         session_id: str | None = None,
-        caller_bot_token: str | None = None,
+        caller_bearer: str | None = None,
     ) -> BotSendResult:
         """BCS A2A(bot↔bot 1:1)异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
 
-        发送方身份由 ``caller_bot_token``(发起 bot 的 BCS session_token,作
+        发送方身份由 ``caller_bearer``(发起 bot 的 BCS session_token,作
         ``Authorization: Bearer``,BCS 据此把 caller 解析成该 bot)表达——与
         ``create_group.caller_bot_token`` / ``get_session_messages.caller_bearer`` 同一手法;
         目标用 ``bot_id:owner_id`` 寻址。``session_id`` 原样作 BCS session_key(多轮复用)。
