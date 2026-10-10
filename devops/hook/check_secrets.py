@@ -10,10 +10,13 @@ echoing a complete credential into the terminal or CI log.
 from __future__ import annotations
 
 import argparse
+import ast
+import io
 import math
 import re
 import subprocess
 import sys
+import tokenize
 from dataclasses import dataclass
 
 
@@ -124,6 +127,24 @@ def _redact_content(content: str) -> str:
     for pattern in (PRIVATE_KEY_RE, *(pattern for _, pattern in KNOWN_SECRET_RES)):
         spans.extend((match.start(), match.end()) for match in pattern.finditer(content))
 
+    # A constructor may contain a literal in a nested mapping rather than a
+    # credential-named assignment. Redact those literals before printing it.
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(content.strip()).readline):
+            if token.type != tokenize.STRING:
+                continue
+            try:
+                value = ast.literal_eval(token.string)
+            except (SyntaxError, ValueError):
+                continue
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            if isinstance(value, str) and _looks_like_plaintext_value(value):
+                indent = len(content) - len(content.lstrip())
+                spans.append((indent + token.start[1], indent + token.end[1]))
+    except (tokenize.TokenError, IndentationError):
+        pass  # Partial diff lines still use the assignment/known-token rules.
+
     for assignment_pattern in (ALIYUN_ASSIGNMENT_RE, ASSIGNMENT_RE):
         for assignment in assignment_pattern.finditer(content):
             value = assignment.group("quoted") or assignment.group("bare") or ""
@@ -178,6 +199,45 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
     return added
 
 
+def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
+    """Recognize expressions, not secrets, without evaluating Python source.
+
+    Calls are exempt only when their argument values contain no suspicious
+    literals. Dictionary keys describe fields; values carry credentials.
+    Unparseable diff fragments retain the conservative regex behavior.
+    """
+    if assignment.group("quoted") is not None:
+        return False
+    expression = content[assignment.start("bare"):].strip().rstrip(",")
+    try:
+        node = ast.parse(expression, mode="eval").body
+    except (SyntaxError, ValueError):
+        return False
+
+    def safe(value: ast.AST) -> bool:
+        if isinstance(value, ast.Name):
+            return True
+        if isinstance(value, ast.Attribute):
+            return safe(value.value)
+        if isinstance(value, ast.Call):
+            return (safe(value.func) and all(safe(arg) for arg in value.args)
+                    and all(safe(arg.value) for arg in value.keywords))
+        if isinstance(value, ast.Dict):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, (ast.List, ast.Tuple)):
+            return all(safe(item) for item in value.elts)
+        if isinstance(value, ast.Constant):
+            return not isinstance(value.value, (str, bytes)) or not (
+                _looks_like_plaintext_value(
+                    value.value.decode("utf-8", errors="replace")
+                    if isinstance(value.value, bytes) else value.value
+                )
+            )
+        return False
+
+    return isinstance(node, (ast.Name, ast.Attribute, ast.Call)) and safe(node)
+
+
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
     for path, line, content in _added_lines(diff):
@@ -191,15 +251,20 @@ def _findings(diff: str) -> list[Finding]:
                 ("credential-like assignment", ASSIGNMENT_RE),
             )
             for rule, assignment_pattern in assignment_rules:
-                assignment = assignment_pattern.search(content)
-                if assignment is None:
-                    continue
-                value = assignment.group("quoted") or assignment.group("bare") or ""
-                if (path.endswith(".py") and assignment.group("quoted") is None
-                        and PYTHON_ATTRIBUTE_RE.fullmatch(value)):
-                    continue
-                if _looks_like_plaintext_value(value):
-                    findings.append(Finding(path, line, rule, _redact_content(content)))
+                detected = False
+                for assignment in assignment_pattern.finditer(content):
+                    value = assignment.group("quoted") or assignment.group("bare") or ""
+                    if path.endswith(".py") and (
+                        _python_reference_is_safe(content, assignment)
+                        or (assignment.group("quoted") is None
+                            and PYTHON_ATTRIBUTE_RE.fullmatch(value))
+                    ):
+                        continue
+                    if _looks_like_plaintext_value(value):
+                        findings.append(Finding(path, line, rule, _redact_content(content)))
+                        detected = True
+                        break
+                if detected:
                     break
     return findings
 
