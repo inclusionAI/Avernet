@@ -100,7 +100,9 @@ export function SpaceSwitcher({ compact = false, collapsed = false }: { compact?
     <div className="flex items-center justify-between px-3 pb-2 pt-2 text-xs font-semibold text-muted-foreground">
       <span>空间切换</span>
       {spacesManageable && (
-        <IconButton size="sm" label="空间管理" icon={<Settings className="h-3.5 w-3.5" />} onClick={goSpaceAdmin} />
+        <Button variant="ghost" aria-label="空间管理" className="h-7 w-7" onClick={goSpaceAdmin}>
+          <Settings className="h-3.5 w-3.5" aria-hidden />
+        </Button>
       )}
     </div>
   );

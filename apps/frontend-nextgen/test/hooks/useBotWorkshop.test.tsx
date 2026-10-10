@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
@@ -35,6 +36,23 @@ jest.mock('@/services/botWorkshop', () => ({
     restartPublish: jest.fn(),
   },
   getBotActionAvailability: jest.fn(() => []),
+}));
+jest.mock('@/services/botWorkshop/botManagementActionService', () => ({
+  botManagementActionService: {
+    run: jest.fn((action: string, bot: BotDomain) => {
+      const { botWorkshopService: service } = jest.requireMock('@/services/botWorkshop') as {
+        botWorkshopService: { remove: jest.Mock; restartPublish: jest.Mock };
+      };
+      if (action === 'delete') return service.remove(bot);
+      if (action === 'restart_publish') return service.restartPublish(bot);
+      return Promise.resolve();
+    }),
+    successMessage: jest.fn((action: string) => {
+      if (action === 'delete') return 'Bot 已删除';
+      if (action === 'restart_publish') return '重启发布已提交';
+      return '操作已提交';
+    }),
+  },
 }));
 jest.mock('@/services/botHealthCheck', () => ({
   botHealthCheckService: {
@@ -79,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.clearAllMocks();
+  extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
   useBotWorkshopStore.getState().reset();
   useWorkspaceStore.getState().resetWorkspace();
 });
@@ -100,6 +119,33 @@ it('首次进入时等待用户身份就绪后再加载 Bot 列表', async () =>
 });
 
 it('Open Core 打开云端创建弹窗时不加载 AgentCoding 模板', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  agentCodingTemplateService.list.mockResolvedValue([]);
+
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  act(() => {
+    result.current.openCreateCloud();
+  });
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(agentCodingTemplateService.list).not.toHaveBeenCalled();
+});
+
+it('内部能力打开云端创建弹窗时不预取 AgentCoding 模板', async () => {
+  extendCapabilities({
+    getBotEngineOptions: () => ({
+      status: 'available',
+      value: [
+        { value: 'openclaw', label: 'OpenClaw' },
+        { value: 'aicoding', label: 'AgentCoding', createPanel: 'agent-coding' },
+      ],
+    }),
+  });
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   agentCodingTemplateService.list.mockResolvedValue([]);

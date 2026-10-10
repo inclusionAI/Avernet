@@ -210,3 +210,9 @@ describe('GroupWorkspaceArea responsive off-canvas list (二级・协作群)', (
     expect(onCloseMobileList).toHaveBeenCalled();
   });
 });
+
+it('session-only mode never renders a desktop sidebar or mobile drawer, even when open is requested', () => {
+  render(<GroupWorkspaceArea mobileListOpen onCloseMobileList={jest.fn()} sessionOnly />);
+  expect(screen.queryByTestId('in-flow-group-sidebar')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('drawer')).not.toBeInTheDocument();
+});

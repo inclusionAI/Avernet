@@ -3,14 +3,12 @@ import { SquarePageShell } from '@/components/CollaborationSquare/SquarePageShel
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen } from '@testing-library/react';
-import { history } from '@umijs/max';
+import { render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AnchorHTMLAttributes, ReactNode } from 'react';
 
 jest.mock('@umijs/max', () => ({
-  history: { push: jest.fn() },
   Link: ({ to, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { to: string; children: ReactNode }) => (
     <a href={to} {...props}>
       {children}
@@ -74,19 +72,14 @@ function makeSquare() {
 describe('SquarePageShell three-way dispatch', () => {
   beforeEach(() => {
     mockedUseCollaborationSquare.mockReturnValue(makeSquare());
-    (history.push as jest.Mock).mockClear();
     useWorkspaceStore.getState().reset();
   });
 
-  test('resource=task 渲染任务面板、第三导航高亮、任务描述', () => {
+  test('legacy resource=task 仍渲染旧任务面板（任务已重定向，路径不可达，仅保留组件渲染兜底）', () => {
     render(<SquarePageShell resource="task" />);
     expect(screen.getByText('task panel')).toBeInTheDocument();
     expect(screen.queryByText('bot panel')).not.toBeInTheDocument();
     expect(screen.queryByText('group section')).not.toBeInTheDocument();
-    const taskNav = screen.getByRole('link', { name: /任务广场/ });
-    expect(taskNav).toBeInTheDocument();
-    expect(taskNav.className).toMatch(/text-foreground/);
-    expect(taskNav).toHaveAttribute('aria-current', 'page');
     const description = screen.getByText(/发现公开 BBS 求助任务/);
     const resourceRegion = screen.getByRole('region', { name: '任务广场内容' });
     expect(screen.getByRole('banner')).toContainElement(description);
@@ -94,21 +87,9 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(resourceRegion).toContainElement(screen.getByText('task panel'));
   });
 
-  test('路由 Tab 切换先播放下划线动效，再进入目标页面', () => {
-    jest.useFakeTimers();
+  test('导航使用标准链接直接进入目标页面', () => {
     render(<SquarePageShell resource="bot" />);
-
-    fireEvent.click(screen.getByRole('link', { name: /公开协作群/ }));
-
-    expect(history.push).not.toHaveBeenCalled();
-    expect(screen.getByRole('link', { name: /公开协作群/ }).className).toMatch(/text-foreground/);
-    expect(screen.getByRole('link', { name: /公开 Bot/ }).className).toMatch(/text-muted-foreground/);
-
-    act(() => {
-      jest.advanceTimersByTime(200);
-    });
-    expect(history.push).toHaveBeenCalledWith('/collaboration-square/groups');
-    jest.useRealTimers();
+    expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
   });
 
   test('resource=bot 渲染 Bot 面板且资源说明归属当前内容区', () => {
@@ -119,12 +100,9 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.getByRole('banner')).toContainElement(description);
     expect(resourceRegion).toContainElement(description);
     expect(resourceRegion).toContainElement(screen.getByText('bot panel'));
-    const botNav = screen.getByRole('link', { name: /公开 Bot/ });
+    const botNav = screen.getByRole('link', { name: '公开 Bot' });
     expect(botNav.className).toMatch(/text-foreground/);
     expect(botNav).toHaveAttribute('aria-current', 'page');
-    const taskNav = screen.getByRole('link', { name: /任务广场/ });
-    expect(taskNav.className).toMatch(/text-muted-foreground/);
-    expect(taskNav).not.toHaveAttribute('aria-current');
   });
 
   test('resource=group 渲染群块且资源说明归属当前内容区', () => {
@@ -135,21 +113,20 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(screen.getByRole('banner')).toContainElement(description);
     expect(resourceRegion).toContainElement(description);
     expect(resourceRegion).toContainElement(screen.getByText('group section'));
-    const groupNav = screen.getByRole('link', { name: /公开协作群/ });
+    const groupNav = screen.getByRole('link', { name: '公开协作群' });
     expect(groupNav.className).toMatch(/text-foreground/);
     expect(groupNav).toHaveAttribute('aria-current', 'page');
   });
 
-  test('三个资源导航始终以命名导航链接呈现', () => {
+  test('两个资源导航始终以命名导航链接呈现（社区已迁至实验室一级导航）', () => {
     render(<SquarePageShell resource="bot" />);
-    const navigation = screen.getByRole('navigation', { name: '协作广场资源导航' });
-    expect(screen.getByRole('link', { name: /公开 Bot/ })).toHaveAttribute('href', '/collaboration-square/bots');
-    expect(screen.getByRole('link', { name: /公开协作群/ })).toHaveAttribute('href', '/collaboration-square/groups');
-    expect(screen.getByRole('link', { name: /任务广场/ })).toHaveAttribute('href', '/collaboration-square/tasks');
-    expect(navigation).toContainElement(screen.getByRole('link', { name: /公开 Bot/ }));
+    const navigation = screen.getByRole('navigation');
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toHaveAttribute('href', '/collaboration-square/bots');
+    expect(screen.getByRole('link', { name: '公开协作群' })).toHaveAttribute('href', '/collaboration-square/groups');
+    expect(navigation).toContainElement(screen.getByRole('link', { name: '公开 Bot' }));
   });
 
-  test('Bot 工作身份下三 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
+  test('Bot 工作身份下两 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
     useWorkspaceStore.setState({
       activeIdentityId: 'bot-1:900004',
       identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
@@ -157,12 +134,11 @@ describe('SquarePageShell three-way dispatch', () => {
 
     render(<SquarePageShell resource="bot" />);
 
-    expect(screen.getByRole('link', { name: /公开 Bot/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /公开协作群/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /任务广场/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '公开 Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '公开协作群' })).toBeInTheDocument();
   });
 
-  test('Shell 源码保持 UI 与分层约束且含任务描述', () => {
+  test('Shell 与共享导航源码保持 UI、分层和社区迁移约束', () => {
     const source = readFileSync(
       path.join(process.cwd(), 'src/components/CollaborationSquare/SquarePageShell/index.tsx'),
       'utf8',
@@ -176,6 +152,13 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(source).not.toContain('src/internal');
     expect(source).toContain('可按 Bot 名称或 Owner 用户名称搜索公开 Bot');
     expect(source).toContain('发现协作群，支持基于公开协作群快速创建新会话。');
-    expect(source).toContain('发现公开 BBS 求助任务');
+
+    const navigationSource = readFileSync(
+      path.join(process.cwd(), 'src/components/CollaborationSquare/SquareNavigation/index.tsx'),
+      'utf8',
+    );
+    expect(navigationSource).not.toContain("label: '社区'");
+    expect(navigationSource).not.toContain('/collaboration-square/community');
+    expect(navigationSource).not.toContain('任务广场');
   });
 });

@@ -15,6 +15,7 @@ import type {
   PublicBotSearchQuery,
   PublicGroup,
   PublicGroupMember,
+  PublicGroupMembersDetail,
   PublicGroupSearchQuery,
   PublicTask,
   PublicTaskPage,
@@ -235,22 +236,20 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         },
         signal,
       );
+      const unnamedGroups: PublicGroup[] = [];
       const groups = response.data.items.flatMap((item) => {
         const group = mapPublicGroupCatalogDto(item);
+        if (group && !item.driver_bot_name?.trim()) unnamedGroups.push(group);
         return group ? [group] : [];
       });
-      // 公开群目录响应无 participants，群主名无法从列表直接得出；收集本页 driver_bot_uuid 经
-      // bots/query 批量反查 name 回填 ownerBotName。查不到的（如 driver bot 已删除）保持兜底“未公开”。
+      // 优先使用目录中的名称；仅旧响应缺名称时才批量反查，不能覆盖新字段。
       const driverIds = [
-        ...new Set(groups.map((g) => g.driverBotUuid).filter((id): id is string => !!id && id.trim() !== '')),
+        ...new Set(unnamedGroups.map((group) => group.driverBotUuid).filter((id): id is string => Boolean(id?.trim()))),
       ];
       if (driverIds.length > 0) {
         const nameMap = await resolveBotNames(driverIds);
-        for (const group of groups) {
-          if (!group.driverBotUuid) continue;
-          // 查到则展示名称；查不到（如 driver bot 已删除）则展示 uuid，不回退"未公开"。
-          const name = nameMap[group.driverBotUuid];
-          group.ownerBotName = name ?? group.driverBotUuid;
+        for (const group of unnamedGroups) {
+          if (group.driverBotUuid) group.ownerBotName = nameMap[group.driverBotUuid]?.trim() || group.driverBotUuid;
         }
       }
       return { items: groups, total: response.data.total };
@@ -263,18 +262,22 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     return (await this.listGroupPage(query, signal)).items;
   }
 
-  async listGroupMembers(groupId: string): Promise<PublicGroupMember[]> {
+  async listGroupMembers(groupId: string): Promise<PublicGroupMembersDetail> {
     // 公开群成员通过群详情 GET /openapi/v1/collaboration/groups/{id} 的 participants 取得
     //（公开群目录无 participants，也无独立成员接口）。失败按列表错误映射抛 CollaborationSquareError。
     try {
       const resp = await getGroup(groupId);
       const participants = resp.data?.participants ?? [];
-      return participants.map((p) => ({
+      const members = participants.map((p) => ({
         id: p.actor_id,
         displayName: p.name?.trim() || p.actor_id,
         type: (p.actor_kind === 'human' ? 'human' : 'bot') as PublicGroupMember['type'],
         role: p.role,
       }));
+      return {
+        members,
+        ownerUserName: resp.data?.driver_bot_owner_name?.trim() || resp.data?.driver_bot_owner?.trim() || '未公开',
+      };
     } catch (error) {
       return mapListError(error, '协作群');
     }

@@ -1,4 +1,4 @@
-import type { GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
+import type { DeliveryStatusView, GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
@@ -11,6 +11,7 @@ import type { RefObject } from 'react';
 import type { GroupPanelKind } from '../GroupHeader';
 
 export interface GroupChatPaneProps {
+  identityLocked?: boolean;
   group: GroupView | null;
   session: SessionView | null;
   /** 当前浏览身份（决定是否渲染底部协作面板：bot 视角恒显，human absent 时显示加入条）。 */
@@ -35,6 +36,14 @@ export interface GroupChatPaneProps {
   streamAssistantMessage?: (content: string) => Promise<void>;
   abortBot: (botId: string) => Promise<void>;
   abortingBotIds: ReadonlySet<string>;
+  /** 排队中的投递列表（拥塞控制）。 */
+  queuedDeliveries?: DeliveryStatusView[];
+  /** 处理中的投递列表（拥塞控制）。 */
+  processingDeliveries?: DeliveryStatusView[];
+  /** 正在取消的投递 ID 集合。 */
+  cancellingDeliveryIds?: ReadonlySet<string>;
+  /** 取消单个投递。 */
+  cancelDelivery?: (messageId: string, deliveryId: string) => Promise<void>;
   reconnect: () => Promise<void> | void;
   /** <lg 打开协作群会话列表。 */
   onOpenSessionList?: () => void;

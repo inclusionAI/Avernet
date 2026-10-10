@@ -116,6 +116,7 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
         open={Boolean(square.selectedGroupId)}
         group={square.selectedGroup}
         members={square.groupMembers}
+        ownerUserName={square.groupOwnerUserName}
         loading={square.detailLoading}
         onClose={square.closeGroupMembers}
       />

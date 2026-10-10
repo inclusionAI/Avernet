@@ -45,11 +45,12 @@ export function useBotChat(
   session: BotChatSessionView | null,
   panelRef?: RefObject<PanelHandle | null>,
   loadBotLibraryCdn: BotLibraryCdnLoader = queryAndRegisterBotLibraryCdn,
+  authenticatedUserId?: string | null,
 ) {
-  const identityId = useWorkspaceStore((s) => s.activeIdentityId);
+  const workspaceIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
+  const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
-
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
   // 进入流程信号（连接 / 历史双完成才就绪，任一失败即 failed）：useSessionDisplayStatus 的输入。

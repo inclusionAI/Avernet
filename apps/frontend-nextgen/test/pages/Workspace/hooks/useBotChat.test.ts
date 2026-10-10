@@ -272,3 +272,18 @@ it('useBotChat 不自行调用 useChatBridge（集中注册由编排层 useWorks
   renderHook(() => useBotChat(bot, session, { current: null }));
   expect(mockUseChatBridgeCalls.length).toBe(0);
 });
+
+it('对话页显式登录用户覆盖 workspace 工作身份，登出不创建连接', async () => {
+  useWorkspaceStore.setState({ activeIdentityId: 'unrelated-bot:other-user' });
+  const { rerender } = renderHook(
+    ({ userId }: { userId: string | null }) => useBotChat(bot, session, undefined, undefined, userId),
+    {
+      initialProps: { userId: 'login-viewer' as string | null },
+    },
+  );
+  expect(mockedFactory).toHaveBeenCalledWith({ bot, userId: 'login-viewer', sessionId: 's1' });
+  await waitFor(() => expect(mockProvider.connect).toHaveBeenCalled());
+  mockedFactory.mockClear();
+  rerender({ userId: null });
+  expect(mockedFactory).not.toHaveBeenCalled();
+});

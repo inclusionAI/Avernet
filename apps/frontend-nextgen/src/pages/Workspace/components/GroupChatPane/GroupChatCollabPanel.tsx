@@ -1,4 +1,4 @@
-import type { SessionView } from '@/domain/collaboration';
+import type { DeliveryStatusView, SessionView } from '@/domain/collaboration';
 import type { CollabPanelState } from '@/pages/Workspace/hooks/useCollabPanel';
 import type { ChatMessage } from '@tc-chat/core';
 import { CollabPanel } from './CollabPanel';
@@ -10,12 +10,20 @@ export function GroupChatCollabPanel({
   messages,
   abortingBotIds,
   abortBot,
+  queuedDeliveries,
+  processingDeliveries,
+  cancellingDeliveryIds,
+  onCancelDelivery,
 }: {
   panel: CollabPanelState;
   session: SessionView | null;
   messages: ChatMessage[];
   abortingBotIds: ReadonlySet<string>;
   abortBot: (botId: string) => Promise<void>;
+  queuedDeliveries?: DeliveryStatusView[];
+  processingDeliveries?: DeliveryStatusView[];
+  cancellingDeliveryIds?: ReadonlySet<string>;
+  onCancelDelivery?: (messageId: string, deliveryId: string) => Promise<void>;
 }) {
   return (
     <CollabPanel
@@ -27,6 +35,10 @@ export function GroupChatCollabPanel({
             participants={session.participants}
             abortingBotIds={abortingBotIds}
             onAbortBot={abortBot}
+            queuedDeliveries={queuedDeliveries}
+            processingDeliveries={processingDeliveries}
+            cancellingDeliveryIds={cancellingDeliveryIds}
+            onCancelDelivery={onCancelDelivery}
           />
         ) : undefined
       }

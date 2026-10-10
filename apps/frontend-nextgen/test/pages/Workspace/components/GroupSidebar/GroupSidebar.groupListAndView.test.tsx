@@ -262,3 +262,13 @@ describe('GroupSidebar', () => {
     expect(toolRow?.parentElement).toHaveClass('app-scrollbar', 'overflow-y-auto');
   });
 });
+
+it('restricted group list retains group sessions without cross-group search, filters or create entry', () => {
+  render(<GroupSidebar {...makeProps({ restricted: true })} />);
+  expect(screen.getByText('主站群')).toBeInTheDocument();
+  expect(screen.getByText('会话一')).toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '搜索协作群' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '筛选' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '发起协作' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '切换工作身份' })).not.toBeInTheDocument();
+});

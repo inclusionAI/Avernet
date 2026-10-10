@@ -9,7 +9,13 @@ import {
 } from '@tc-chat/adapters';
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
-import { buildGroupChatPayload, buildGroupWsUrl, isViewScopeChangedFrame } from './groupChatProviderHelpers';
+import {
+  buildGroupChatPayload,
+  buildGroupWsUrl,
+  isDeliveryUpdatedFrame,
+  isViewScopeChangedFrame,
+  parseDeliveryStatusView,
+} from './groupChatProviderHelpers';
 
 /** 透出 WS URL 构造器，保持既有 import 路径稳定（历史分页等纯函数已下沉到独立模块）。 */
 export { buildGroupWsUrl } from './groupChatProviderHelpers';
@@ -100,6 +106,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: GroupChatState) => void>();
   private viewScopeListeners = new Set<() => void>();
+  private deliveryListeners = new Set<(delivery: import('@/domain/collaboration/types').DeliveryStatusView) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: GroupChatState = { phase: 'idle', error: null };
   private bufferLiveEvents = true;
@@ -159,8 +166,22 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     };
   }
 
+  /** 订阅服务端 message.delivery.updated 投递状态变更事件。 */
+  subscribeToDeliveryUpdates(
+    listener: (delivery: import('@/domain/collaboration/types').DeliveryStatusView) => void,
+  ): () => void {
+    this.deliveryListeners.add(listener);
+    return () => {
+      this.deliveryListeners.delete(listener);
+    };
+  }
+
   private emitViewScopeChanged(): void {
     this.viewScopeListeners.forEach((listener) => listener());
+  }
+
+  private emitDeliveryUpdate(delivery: import('@/domain/collaboration/types').DeliveryStatusView): void {
+    this.deliveryListeners.forEach((listener) => listener(delivery));
   }
 
   /**
@@ -257,8 +278,8 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   /**
-   * 拦截入站帧识别 view_scope_changed 关闭事件：通知订阅者并整体重连
-   * （重连会重拉一次性 token；旧 inner 被 disconnect 后其内部重连尝试自然失效）。
+   * 拦截入站帧识别 view_scope_changed 关闭事件与 message.delivery.updated 投递状态变更事件：
+   * view_scope_changed 通知订阅者并整体重连；delivery.updated 通知订阅者。
    * 事件帧不透传给 SDK parser。
    */
   private patchIncomingFrames(inner: SdkGroupChatProvider): void {
@@ -269,6 +290,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (isViewScopeChangedFrame(msg)) {
         this.emitViewScopeChanged();
         void this.reconnect();
+        return;
+      }
+      if (isDeliveryUpdatedFrame(msg)) {
+        const delivery = parseDeliveryStatusView(msg);
+        if (delivery) this.emitDeliveryUpdate(delivery);
         return;
       }
       return originalOnMessage(msg);

@@ -442,3 +442,77 @@ describe('useConversationSelection 视图数据推导', () => {
     expect(store.selectedSessionId).toBe('os1');
   });
 });
+
+it('URL selections and readonly session selections expand only their target Bot', () => {
+  const { result } = renderHook(() =>
+    useConversationSelection({ managedBots: [managedView], friendBots: [friendView], hydrated: true }),
+  );
+  act(() => useConversationStore.getState().setExpandedBot(managedBot.botId, true));
+  act(() =>
+    result.current.onRouteSelection({ section: 'friend', botId: friendBot.botId, sessionId: 'friend-session' }),
+  );
+  expect(useConversationStore.getState().expandedBotIds).toEqual({ [friendBot.botId]: true });
+  act(() => result.current.selectReadonlySession(managedBot.botId, 'other-session', 'another-user'));
+  expect(useConversationStore.getState().expandedBotIds).toEqual({ [managedBot.botId]: true });
+});
+
+describe('团队 Bot 路由和只读选择', () => {
+  const teamView: ConversationBotView = { bot: managedBot, section: 'team' };
+  it('无 section 深链解析 team，保留 session；只读选中与 URL 不降级 managed', () => {
+    const { result } = renderHook(() =>
+      useConversationSelection({ managedBots: [teamView], friendBots: [], hydrated: true }),
+    );
+    act(() => result.current.onRouteSelection({ botId: managedBot.botId, sessionId: 'explicit' }));
+    expect(result.current.selection).toMatchObject({ section: 'team', sessionId: 'explicit' });
+    act(() => result.current.selectReadonlySession(managedBot.botId, 'other-session', 'reader'));
+    expect(result.current.selection).toMatchObject({
+      section: 'team',
+      origin: 'others',
+      friendUserId: 'reader',
+      sessionId: 'other-session',
+    });
+    expect(result.current.origin).toBe('others');
+    expect(result.current.interactive).toEqual({ bot: null, session: null });
+  });
+});
+
+it('团队 others 深链覆盖之前 favorite 范围，强制 all', () => {
+  const teamView: ConversationBotView = { bot: managedBot, section: 'team' };
+  useConversationStore.getState().setManagedBotScope(managedBot.botId, 'favorite');
+  const { result } = renderHook(() =>
+    useConversationSelection({ managedBots: [teamView], friendBots: [], hydrated: true }),
+  );
+  act(() =>
+    result.current.onRouteSelection({
+      section: 'team',
+      botId: managedBot.botId,
+      origin: 'others',
+      friendUserId: 'reader',
+      sessionId: 's1',
+    }),
+  );
+  expect(useConversationStore.getState().selectedScope).toBe('all');
+  expect(useConversationStore.getState().effectiveScopeByManagedBotId[managedBot.botId]).toBe('all');
+});
+
+it('团队目录晚到覆盖重复好友归类时，切到 team 请求上下文而不复用好友缓存', () => {
+  const bot = { ...friendBot, isFriendBot: false, isTeamBot: true };
+  const teamView: ConversationBotView = { bot, section: 'team' };
+  const { result, rerender } = renderHook((props: SelectionHookProps) => useConversationSelection(props), {
+    initialProps: { managedBots: [] as ConversationBotView[], friendBots: [friendView], hydrated: false },
+  });
+  act(() => result.current.onRouteSelection({ section: 'friend', botId: bot.botId, sessionId: 'old' }));
+  act(() =>
+    useConversationStore.getState().setFriendBotSessions(bot.botId, {
+      ...emptyList,
+      items: [
+        { botId: bot.botId, sessionId: 'old', title: '好友缓存', messageCount: 1, gmtCreate: '', gmtModified: '' },
+      ],
+    }),
+  );
+  expect(result.current.interactive.bot?.isFriendBot).toBe(true);
+  rerender({ managedBots: [teamView], friendBots: [], hydrated: true });
+  expect(result.current.selection).toMatchObject({ section: 'team', botId: bot.botId, sessionId: 'old' });
+  expect(result.current.interactive).toEqual({ bot: null, session: null });
+  expect(useConversationStore.getState().originByManagedBotId[bot.botId] ?? 'mine').toBe('mine');
+});

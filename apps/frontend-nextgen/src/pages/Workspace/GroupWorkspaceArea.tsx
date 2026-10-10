@@ -1,5 +1,4 @@
 import { getCapabilities } from '@/capabilities';
-import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { sessionService } from '@/services/workspace/sessionService';
@@ -9,8 +8,10 @@ import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsu
 import { GroupChatPane } from './components/GroupChatPane';
 import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
-import { GroupSidebar, GroupSidebarList, type GroupSidebarProps } from './components/GroupSidebar';
+import type { GroupSidebarProps } from './components/GroupSidebar';
+import { GroupWorkspaceSidebar } from './components/GroupWorkspaceSidebar';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
+import { ScopedWorkspaceUnavailable } from './components/ScopedWorkspaceUnavailable';
 import { WorkspaceManagePanels } from './components/WorkspaceManagePanels';
 import type { GroupWorkspaceAreaProps } from './GroupWorkspaceArea.types';
 import { useGroupChat } from './hooks/useGroupChat';
@@ -21,6 +22,8 @@ import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useOpenDefaultGroupSession } from './hooks/useOpenDefaultGroupSession';
 import { useSessionManagement } from './hooks/useSessionManagement';
 export function GroupWorkspaceArea({
+  scope,
+  sessionOnly = false,
   userAvatarUrl,
   userIdentityId,
   userIdentityName,
@@ -28,13 +31,17 @@ export function GroupWorkspaceArea({
   onCloseMobileList,
   onOpenMobileList,
 }: GroupWorkspaceAreaProps) {
-  const ws = useGroupWorkspace();
+  const ws = useGroupWorkspace(scope?.group);
   const expandedGroupIds = React.useMemo(
     () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
     [ws.groups, ws.expandedGroupIds],
   );
-  const sessions = useGroupSessions(ws.selectedGroupId, expandedGroupIds);
-  const chat = useGroupChat(sessions.selectedSession);
+  const sessions = useGroupSessions(
+    scope && ws.selectedGroupId !== scope.group.groupId ? null : ws.selectedGroupId,
+    expandedGroupIds,
+    sessionOnly ? scope?.session ?? undefined : undefined,
+  );
+  const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
   const groupAdvancedConfigEnabled = getCapabilities().getGroupAdvancedConfigEnabled().value;
   const groupManage = useGroupManagement(
@@ -108,7 +115,6 @@ export function GroupWorkspaceArea({
     ws.onSelectGroup(groupId);
     setActivePanel('manage');
   };
-  // 头部齿轮切面板：打开群管理时详情由上方 effect 按需补拉。
   const handleTogglePanel = (panel: GroupPanelKind) => setActivePanel(panel);
   const handleManageSession = (groupId: string, sessionId: string) => {
     void ws.onSelectGroup(groupId);
@@ -126,6 +132,7 @@ export function GroupWorkspaceArea({
   const handleDissolveGroupFromSidebar = (groupId: string) => void ws.dissolveGroup(groupId);
   // 内流侧栏（≥lg）与 <lg 抽屉共用同一份 props，避免两处分叉。抽屉内选中会话后追加收起。
   const groupSidebarProps: GroupSidebarProps = {
+    restricted: Boolean(scope),
     // 身份未加载完成（null）时按 human 兜底展示视角菜单。
     viewerKind: ws.activeIdentity?.kind === 'bot' ? 'bot' : 'user',
     groups: ws.groups,
@@ -172,28 +179,22 @@ export function GroupWorkspaceArea({
     onShareGroup: handleShareGroupFromSidebar,
     onDissolveGroup: handleDissolveGroupFromSidebar,
   };
+  if (scope && (!selectedGroup || (sessionOnly && !sessions.selectedSession))) {
+    return (
+      <ScopedWorkspaceUnavailable
+        error={ws.groupsError}
+        loading={ws.isLoadingGroups}
+        onRetry={() => void ws.retryGroups()}
+      />
+    );
+  }
   return (
     <>
-      <GroupSidebar {...groupSidebarProps} />
-      {/* <lg 二级协作群列表抽屉：≥lg 内流侧栏可见，<lg 由移动端顶部的「打开会话列表」按钮触发。 */}
-      <Drawer
-        open={mobileListOpen}
-        onOpenChange={(open) => {
-          if (!open) onCloseMobileList();
-        }}
-      >
-        <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
-          <DrawerTitle className="sr-only">协作群列表</DrawerTitle>
-          <GroupSidebarList
-            {...groupSidebarProps}
-            onSelectSession={(gid, id) => {
-              sessions.openSession(gid, id);
-              onCloseMobileList();
-            }}
-          />
-        </DrawerContent>
-      </Drawer>
+      {!sessionOnly && (
+        <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
+      )}
       <GroupChatPane
+        identityLocked={Boolean(scope)}
         group={selectedGroup}
         session={sessions.selectedSession}
         activeIdentity={ws.activeIdentity}
@@ -212,8 +213,12 @@ export function GroupWorkspaceArea({
         streamAssistantMessage={chat.streamAssistantMessage}
         abortBot={chat.abortBot}
         abortingBotIds={chat.abortingBotIds}
+        queuedDeliveries={chat.queuedDeliveries}
+        processingDeliveries={chat.processingDeliveries}
+        cancellingDeliveryIds={chat.cancellingDeliveryIds}
+        cancelDelivery={chat.cancelDelivery}
         reconnect={chat.reconnect}
-        onOpenSessionList={onOpenMobileList}
+        onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
         reloadHistory={chat.reloadHistory}
         hasMoreHistory={chat.hasMoreHistory}
         isLoadingMoreHistory={chat.isLoadingMoreHistory}

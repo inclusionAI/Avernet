@@ -90,6 +90,26 @@ describe('BotTable 表格结构', () => {
     expect(onView).toHaveBeenCalledWith(bot);
   });
 
+  test('无详情权限时行点击只触发基础查看，即使 Coding Bot 也不进入对话', () => {
+    const restrictedBot = mapBotDto({
+      bot_id: 'restricted-coding',
+      bot_name: '受限 Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      display_state: 'running',
+    }).item;
+    const onView = jest.fn();
+    const onConversation = jest.fn();
+    render(
+      <BotTable bots={[restrictedBot]} onView={onView} onConversation={onConversation} canEnterDetail={() => false} />,
+    );
+
+    fireEvent.click(dataRow());
+
+    expect(onView).toHaveBeenCalledWith(restrictedBot);
+    expect(onConversation).not.toHaveBeenCalled();
+  });
+
   test('部署中的桌面 Bot 通过折叠行展示初始化步骤，且整行不可进入详情', () => {
     const deployingBot = mapBotDto({
       bot_id: 'desktop-deploying',

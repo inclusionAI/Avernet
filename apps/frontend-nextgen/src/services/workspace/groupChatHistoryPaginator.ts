@@ -1,6 +1,7 @@
+import { querySessionDeliveries } from '@/services/backendApi/collaboration/deliveryController';
 import { listSessionMessages } from '@/services/backendApi/collaboration/sessionController';
 import type { ChatMessage } from '@tc-chat/core';
-import { mapGroupHistoryMessages } from './groupMessageMapper';
+import { annotateAbortedRunsFromDeliveries, mapGroupHistoryMessages } from './groupMessageMapper';
 
 /** 协作群历史消息分页大小：与旧「我的协作」一致（open-claw MESSAGE_PAGE_SIZE=50）。 */
 const GROUP_MESSAGE_PAGE_SIZE = 50;
@@ -110,6 +111,23 @@ export class GroupChatHistoryPaginator {
     const rawCount = resp?.data?.length ?? 0;
     const items = [...(resp?.data ?? [])].reverse();
     const mapped = mapGroupHistoryMessages(items, this.sessionId);
-    return { mapped, rawCount };
+    return { mapped: await this.annotateAbortedRuns(mapped), rawCount };
+  }
+
+  /**
+   * 按投递终态补标历史中的「已终止」消息：历史 DTO 不含 run 终止字段，
+   * 但后端投递状态机持久化了 cancelled 终态（按源消息 ID 可查）。
+   * delivery 查询接口裸返回数组（无信封），失败经 HTTP 非 2xx 抛出；
+   * 任何查询失败降级为原样返回，不阻塞历史加载。
+   */
+  private async annotateAbortedRuns(messages: ChatMessage[]): Promise<ChatMessage[]> {
+    const userMessageIds = messages.filter((m) => m.role === 'user').map((m) => m.id);
+    if (userMessageIds.length === 0) return messages;
+    try {
+      const deliveries = await querySessionDeliveries(this.sessionId, userMessageIds);
+      return annotateAbortedRunsFromDeliveries(messages, deliveries);
+    } catch {
+      return messages;
+    }
   }
 }
