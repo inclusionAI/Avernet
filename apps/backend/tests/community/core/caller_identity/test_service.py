@@ -1244,3 +1244,29 @@ async def test_mcp_update_rejects_irreversible_owner_downgrade_before_sync() -> 
 
     deps.mcp_sync_service.sync_mcp_identity_to_agent_principal.assert_not_awaited()
     deps.repository.compensate_draft_call_type.assert_not_called()
+
+
+def test_direct_caller_exchange_validates_and_preserves_original_session_context():
+    service, _ = _service(bot=_bot(call_type="caller"))
+    caller_token = CallerToken(access_token="caller-token", subject_user_id="caller-1",
+                              expires_at=datetime.now(), fingerprint="fingerprint")
+    token_provider = MagicMock()
+    runtime_updater = MagicMock()
+    session_key = "agent:中文 original/&+?%"
+
+    service.exchange_caller_identity(
+        iam_token="iam-token", caller_user_id="caller-1", bot_id="bot-1",
+        owner_user_id="owner-1", token_provider=token_provider,
+        runtime_updater=runtime_updater, stage="verify", publish_id=42,
+        entity_id="entity-1", binding_id=19, caller_token=caller_token,
+        session_key=session_key,
+    )
+
+    service._session_authorizer.authorize.assert_called_once_with(
+        bot_id="bot-1", owner_id="owner-1", caller_user_id="caller-1",
+        binding_id=19, stage="verify", session_key=session_key,
+    )
+    token_provider.exchange.assert_not_called()
+    assert runtime_updater.update_caller_identity.call_args.kwargs["session_key"] == session_key
+    assert runtime_updater.update_caller_identity.call_args.kwargs["binding_id"] == 19
+    assert runtime_updater.update_caller_identity.call_args.kwargs["caller_token"] is caller_token

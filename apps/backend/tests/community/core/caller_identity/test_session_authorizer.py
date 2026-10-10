@@ -156,3 +156,26 @@ def test_session_failed_json_preserves_business_error_and_hides_token(caplog):
         authorizer.authorize(**_request())
     assert "unavailable" in caplog.text
     assert "sensitive-error-token" not in caplog.text
+
+
+def test_direct_session_authorization_resolves_missing_binding_before_runtime_read():
+    from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
+
+    authorizer, resolver, transport = _authorizer(items=[{
+        "id": "private-session", "user_id": "caller-1", "agent_id": "bot-1",
+    }])
+    authorizer._runtime_bindings.resolve.return_value = SimpleNamespace(binding_id=19)
+    request = _request()
+    request["binding_id"] = None
+
+    assert authorizer.authorize(**request) is True
+
+    resolution = authorizer._runtime_bindings.resolve.call_args.args[0]
+    assert resolution.bot_id == "bot-1"
+    assert resolution.owner_id == "owner-1"
+    assert resolution.actor_user_id == "caller-1"
+    assert resolution.stage == "draft"
+    assert resolution.target is RuntimeBindingTarget.CALLER_SERVICE
+    authorizer._bindings.get_by_id.assert_called_once_with(19)
+    resolver.resolve_for_binding.assert_called_once_with(19, "caller-1", bot_id="bot-1")
+    assert transport.invoke.call_args.kwargs["params"]["session_key"] == "private-session"
