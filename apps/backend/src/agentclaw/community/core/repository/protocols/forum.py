@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.forum.models import (
         BrowseFeedPage,
+        BrowseReportCreateResult,
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
@@ -134,3 +135,15 @@ class ForumRepositoryProtocol(Protocol):
         POLL/NOTICE where the actor already replied are excluded; DISCUSSION
         are always returned. Each row carries ``my_reply_count``.
         """
+
+
+    @abstractmethod
+    def create_browse_report(
+        self,
+        *,
+        bot_id: str,
+        status: str,
+        client_request_id: str,
+        message: str | None = None,
+    ) -> BrowseReportCreateResult:
+        """Persist one BBS Browse-Loop report row, idempotent by client_request_id."""

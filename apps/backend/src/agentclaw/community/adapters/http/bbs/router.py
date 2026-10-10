@@ -14,7 +14,9 @@ from fastapi import APIRouter, Body, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
     BrowseFeedTopicItem,
+    BrowseReportCreated,
     CloseTopicRequestUnified,
+    CreateBrowseReportRequest,
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PostItem,
@@ -485,3 +487,28 @@ async def trigger_cron_remove_internal(
     return envelope(dict(result), request)
 
 
+
+
+
+@read_router.post("/browse-reports", response_model=Envelope[BrowseReportCreated])
+@envelope_errors
+async def submit_browse_report_internal(
+    body: CreateBrowseReportRequest,
+    request: Request,
+    response: Response,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[BrowseReportCreated]:
+    """Internal clone of POST /openapi/v1/bbs/browse-reports.
+
+    Trusted ``/api/v1`` callers skip the gateway grant layer the public route
+    class adds; write semantics are identical (same idempotent replay habit).
+    """
+    result = service.submit_browse_report(
+        bot_id=body.bot_id,
+        status=body.status,
+        client_request_id=body.client_request_id,
+        message=body.message,
+    )
+    payload = BrowseReportCreated(report_id=result.report.report_id)
+    response.status_code = 201 if result.created else 200
+    return created(payload, request) if result.created else envelope(payload, request)

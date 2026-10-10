@@ -19,9 +19,11 @@ from agentclaw.community.core.forum.models import (
     TOPIC_TYPE_POLL,
     BrowseFeedPage,
     BrowseFeedTopicRecord,
+    BrowseReportCreateResult,
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
+    BrowseReportRecord,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -29,6 +31,7 @@ from agentclaw.community.core.forum.models import (
     ForumTopicRecord,
 )
 from agentclaw.community.core.forum.repository.models import (
+    ForumBrowseReportModel,
     ForumBrowseSubscriptionModel,
     ForumPostModel,
     ForumTopicModel,
@@ -42,6 +45,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 _TOPIC_REQUEST_INDEX = "uk_forum_topic_request"
 _POST_REQUEST_INDEX = "uk_forum_post_request"
+_BROWSE_REPORT_REQUEST_INDEX = "uk_forum_browse_report_request"
 
 
 def _is_unique_conflict(
@@ -82,6 +86,15 @@ def _is_post_request_idempotency_conflict(exc: IntegrityError) -> bool:
             "author_id",
             "client_request_id",
         ),
+    )
+
+
+def _is_browse_report_request_idempotency_conflict(exc: IntegrityError) -> bool:
+    return _is_unique_conflict(
+        exc,
+        index_name=_BROWSE_REPORT_REQUEST_INDEX,
+        table_name="ac_forum_browse_report",
+        required_columns=("client_request_id",),
     )
 
 
@@ -604,3 +617,60 @@ class ForumRepository(ForumRepositoryProtocol):
             updated_at=topic.gmt_modified,
             my_reply_count=int(my_reply_count or 0),
         )
+
+
+    def create_browse_report(
+        self,
+        *,
+        bot_id: str,
+        status: str,
+        client_request_id: str,
+        message: str | None = None,
+    ) -> BrowseReportCreateResult:
+        existing = self._find_request_browse_report(client_request_id)
+        if existing is not None:
+            return BrowseReportCreateResult(report=existing, created=False)
+
+        now = datetime.now(timezone.utc)
+        try:
+            with self._transaction() as db:
+                report = ForumBrowseReportModel(
+                    report_id=f"br_{uuid.uuid4().hex}",
+                    bot_id=bot_id,
+                    status=status,
+                    message=message,
+                    client_request_id=client_request_id,
+                    env=get_current_env(),
+                    avernet_tenant=get_current_avernet_tenant(),
+                    gmt_create=now,
+                    gmt_modified=now,
+                )
+                db.add(report)
+                db.flush()
+                return BrowseReportCreateResult(
+                    report=report.to_record(), created=True
+                )
+        except IntegrityError as exc:
+            if not _is_browse_report_request_idempotency_conflict(exc):
+                raise
+            replay = self._find_request_browse_report(client_request_id)
+            if replay is None:
+                raise
+            return BrowseReportCreateResult(report=replay, created=False)
+
+    def _find_request_browse_report(
+        self, client_request_id: str
+    ) -> BrowseReportRecord | None:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(ForumBrowseReportModel)
+                .filter(
+                    ForumBrowseReportModel.client_request_id
+                    == client_request_id,
+                    ForumBrowseReportModel.env == get_current_env(),
+                    ForumBrowseReportModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            return None if row is None else row.to_record()

@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.forum.models import (
     BrowseFeedPage,
+    BrowseReportCreateResult,
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
@@ -128,3 +129,15 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
     ) -> BrowseFeedPage:
         """Actor-aware pending Topics for one Bot."""
+
+
+    @abstractmethod
+    def submit_browse_report(
+        self,
+        *,
+        bot_id: str,
+        status: str,
+        client_request_id: str,
+        message: str | None = None,
+    ) -> BrowseReportCreateResult:
+        """Submit one BBS Browse-Loop run outcome, or replay the same idempotency key."""

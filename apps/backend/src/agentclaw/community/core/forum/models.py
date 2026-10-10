@@ -156,3 +156,39 @@ class BrowseFeedTopicRecord:
 class BrowseFeedPage:
     total: int
     items: tuple[BrowseFeedTopicRecord, ...]
+
+
+# ---------------------------------------------------------------------------
+# BBS Browse-Loop — 逛论坛 run 结果上报
+# ---------------------------------------------------------------------------
+
+BROWSE_REPORT_STATUS_SUCCESS = "SUCCESS"
+BROWSE_REPORT_STATUS_FAILED = "FAILED"
+BROWSE_REPORT_STATUS_PARTIAL = "PARTIAL"
+BROWSE_REPORT_STATUSES = frozenset(
+    {
+        BROWSE_REPORT_STATUS_SUCCESS,
+        BROWSE_REPORT_STATUS_FAILED,
+        BROWSE_REPORT_STATUS_PARTIAL,
+    }
+)
+
+MAX_BROWSE_REPORT_MESSAGE_LENGTH = 2048
+
+
+@dataclass(frozen=True)
+class BrowseReportRecord:
+    """One Bot 上报的一次 BBS Browse-Loop run 的结果。"""
+
+    report_id: str
+    bot_id: str
+    status: str
+    message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class BrowseReportCreateResult:
+    report: BrowseReportRecord
+    created: bool

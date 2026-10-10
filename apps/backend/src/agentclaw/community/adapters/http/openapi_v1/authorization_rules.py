@@ -1014,6 +1014,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
     ("POST", "/openapi/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"):
         NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/bbs/browse-reports"):
+        NoCheck("public BBS browse-run outcome report; bot_id declared in the body, no addressed bot"),
     # Feedback channel (BBS experimental feedback shared by every module)
     ("GET", "/openapi/v1/feedback"):
         NoCheck("tenant-wide feedback read; no addressed bot"),

@@ -12,6 +12,7 @@ from agentclaw.community.core.forum.models import (
     MAX_AUTHOR_AVATAR_URL_LENGTH,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
+    MAX_BROWSE_REPORT_MESSAGE_LENGTH,
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_ID_LENGTH,
@@ -499,3 +500,52 @@ def author_display_fields(body: "AuthorRefRequest") -> dict[str, str]:
     if body.author_avatar_url is not None:
         fields["author_avatar_url"] = body.author_avatar_url
     return fields
+
+
+
+class CreateBrowseReportRequest(BaseModel):
+    """Body for ``POST /openapi/v1/bbs/browse-reports``: 上报一次逛论坛 run 的结果。
+
+    幂等键 ``client_request_id`` scoped 到 ``(avernet_tenant, env,
+    client_request_id)``：同 key 重发命中已有记录，``created=False``，
+    返回原 ``report_id``，不重写。这是后端 API，作者身份（``bot_id``）由
+    调用方显式声明而非从登录态推导。
+    """
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description=(
+            "Idempotency key scoped to this report (bot-supplied). Same key "
+            "replay returns the existing report_id; the engine does NOT rewrite."
+        ),
+    )
+    bot_id: str = Field(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Bot identifier of the reporting run, declared in body.",
+    )
+    status: str = Field(
+        min_length=1,
+        max_length=MAX_AUTHOR_TYPE_LENGTH,
+        description=(
+            "Run outcome: SUCCESS (逛完), FAILED (失败退出), PARTIAL (部分完成)."
+        ),
+    )
+    message: str | None = Field(
+        default=None,
+        max_length=MAX_BROWSE_REPORT_MESSAGE_LENGTH,
+        description=(
+            "Free-form text the Bot composes itself; the engine stores it "
+            "verbatim and never parses structure (e.g. 'skill not found: "
+            "bbs-browse', 'browse timeout')."
+        ),
+    )
+
+
+class BrowseReportCreated(BaseModel):
+    """Server-generated report id for a BBS Browse-Loop outcome report."""
+
+    report_id: str = Field(
+        description="Server-generated report id; returned unchanged on idempotent replay."
+    )

@@ -31,7 +31,9 @@ from agentclaw.community.adapters.http.bbs.author_enricher import (
 )
 
 from .schemas import (
+    BrowseReportCreated,
     CloseTopicRequestUnified,
+    CreateBrowseReportRequest,
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
     PostItem,
@@ -284,3 +286,34 @@ async def list_bbs_browse_subscriptions(
         [SubscriptionItem.from_record(sub) for sub in result.items],
         request,
     )
+
+
+
+@read_router.post(
+    "/browse-reports",
+    response_model=Envelope[BrowseReportCreated],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def submit_browse_report_unified(
+    body: CreateBrowseReportRequest,
+    request: Request,
+    response: Response,
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[BrowseReportCreated]:
+    """Report one BBS Browse-Loop run outcome.
+
+    ``client_request_id`` is the bot-supplied idempotency key. HTTP 201 means
+    the engine recorded the report; HTTP 200 means an earlier request with the
+    same idempotency key already did and the existing ``report_id`` is returned
+    unchanged (no rewrite).
+    """
+    result = service.submit_browse_report(
+        bot_id=body.bot_id,
+        status=body.status,
+        client_request_id=body.client_request_id,
+        message=body.message,
+    )
+    payload = BrowseReportCreated(report_id=result.report.report_id)
+    response.status_code = 201 if result.created else 200
+    return created(payload, request) if result.created else envelope(payload, request)

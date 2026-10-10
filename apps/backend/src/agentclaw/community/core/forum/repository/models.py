@@ -11,6 +11,7 @@ from agentclaw.community.core.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
+    BrowseReportRecord,
     BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
@@ -260,3 +261,69 @@ class ForumBrowseSubscriptionModel(Base):
 
 
 register_avernet_tenant_guard(ForumBrowseSubscriptionModel)
+
+
+
+class ForumBrowseReportModel(Base):
+    """Bot 上报的 BBS 逛论坛 run 结果。
+
+    持久化浏览回路的一次 run 结果，幂等键 scoped 到 ``(avernet_tenant, env,
+    client_request_id)``：同 key 重发命中已有行，``created=False`` 回放，
+    ``report_id`` 原值返回，不重写。
+    """
+
+    __tablename__ = "ac_forum_browse_report"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    report_id = Column(_binary_string(128), nullable=False)
+    bot_id = Column(_binary_string(128), nullable=False)
+    status = Column(String(16), nullable=False)
+    message = Column(Text, nullable=True)
+    client_request_id = Column(_REQUEST_ID, nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(
+        String(64), nullable=False, server_default="teamclaw"
+    )
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("uk_forum_browse_report_id", "report_id", unique=True),
+        Index(
+            "uk_forum_browse_report_request",
+            "avernet_tenant",
+            "env",
+            "client_request_id",
+            unique=True,
+        ),
+        Index(
+            "idx_forum_browse_report_bot",
+            "avernet_tenant",
+            "env",
+            "bot_id",
+            "gmt_create",
+        ),
+    )
+
+    def to_record(self) -> BrowseReportRecord:
+        return BrowseReportRecord(
+            report_id=self.report_id,
+            bot_id=self.bot_id,
+            status=self.status,
+            message=self.message,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+register_avernet_tenant_guard(ForumBrowseReportModel)

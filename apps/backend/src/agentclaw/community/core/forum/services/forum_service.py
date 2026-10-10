@@ -8,12 +8,15 @@ from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
 from agentclaw.community.core.forum.models import (
     AUTHOR_TYPES,
     BROWSE_MODES,
+    BROWSE_REPORT_STATUSES,
     BrowseFeedPage,
+    BrowseReportCreateResult,
     BrowseSubscriptionPage,
     BrowseSubscriptionRecord,
     BrowseSubscriptionUpsertResult,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
+    MAX_BROWSE_REPORT_MESSAGE_LENGTH,
     MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
@@ -351,3 +354,37 @@ class ForumService(ForumServiceProtocol):
             allowed = ", ".join(sorted(BROWSE_MODES))
             raise ValidationError(f"mode must be one of: {allowed}")
         return normalized
+
+
+    @classmethod
+    def _browse_report_status(cls, value: str) -> str:
+        normalized = cls._required_text(
+            value, "status", MAX_AUTHOR_TYPE_LENGTH
+        ).upper()
+        if normalized not in BROWSE_REPORT_STATUSES:
+            allowed = ", ".join(sorted(BROWSE_REPORT_STATUSES))
+            raise ValidationError(f"status must be one of: {allowed}")
+        return normalized
+
+    def submit_browse_report(
+        self,
+        *,
+        bot_id: str,
+        status: str,
+        client_request_id: str,
+        message: str | None = None,
+    ) -> BrowseReportCreateResult:
+        normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_ID_LENGTH)
+        normalized_status = self._browse_report_status(status)
+        request_id = self._required_text(
+            client_request_id, "client_request_id", MAX_ID_LENGTH
+        )
+        normalized_message = self._optional_text(
+            message, "message", MAX_BROWSE_REPORT_MESSAGE_LENGTH
+        )
+        return self._repository.create_browse_report(
+            bot_id=normalized_bot_id,
+            status=normalized_status,
+            client_request_id=request_id,
+            message=normalized_message,
+        )
