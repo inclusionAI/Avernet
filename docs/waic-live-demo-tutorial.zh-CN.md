@@ -2,9 +2,11 @@
 
 这是一份面向第一次接触 Avernet、甚至不熟悉命令行的 macOS 教程。完成后，你会在自己的电脑上启动 Avernet、接入 6 个世界杯内容 Bot，从前端选择内置的“世界杯比赛前瞻内容生产”模板，绑定角色，提交一次自定义协作，并看到多 Bot 按固定流程完成内容生产。
 
+> 部分截图来自旧版本；启动命令、配置文件和目录路径以本页正文及代码框为准。
+
 本教程使用的模板源码是：
 
-- [世界杯比赛前瞻内容生产 YAML](../src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml)
+- [世界杯比赛前瞻内容生产 YAML](../apps/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml)
 - [世界杯 6 Bot 配置](../singlebox/agents/6bots_world_cup_creator_profile/bots.json)
 
 > 产品文案统一使用“自定义协作”。代码中的 state machine 是它的实现方式；旧资料里的“结构化协同”或“自定义协同”在本教程中都按“自定义协作”理解。
@@ -63,7 +65,7 @@ flowchart LR
 
 如果只选择 mock 模式，Bot 可以接入协作网络，但不会产生真实模型回复，因此不能完整复现这次演示。
 
-请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库根目录的 .env.local；该文件用于本机配置，不应提交。
+请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库中的 singlebox/.env.local；该文件用于本机配置，不应提交。
 
 ### 2.3 本机端口
 
@@ -122,7 +124,7 @@ git clone https://github.com/inclusionAI/Avernet.git
 cd Avernet
 ~~~
 
-第二行非常重要：它会让终端进入刚下载的项目目录。后续所有以 ./scripts 开头的命令，都必须在这个目录中运行。
+第二行非常重要：它会让终端进入刚下载的项目目录。后续所有以 ./singlebox 开头的命令，都必须在这个目录中运行。
 
 可以用下面两条命令确认当前位置和当前分支：
 
@@ -136,11 +138,13 @@ pwd 输出的最后一段应是 Avernet。仓库默认分支是 dev；如果功�
 确认模板文件确实存在：
 
 ~~~bash
-test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml && echo "世界杯模板已找到"
-test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot 配置已找到"
+test -f apps/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml && echo "世界杯模板已找到"
+test -f singlebox/agents/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot 配置已找到"
 ~~~
 
 两行都应显示“已找到”。
+
+当前 singlebox 默认使用本机隔离的运行目录，无需添加 `--local` 或 `--standalone`；`--local` 已移除。本教程使用默认的 `legacy` 前端（`apps/frontend`）。如果之前在 `singlebox/.env.local` 中选择了其他前端，请改为 `FRONTEND_VARIANT=legacy` 后再执行下文的 `bcs_frontend` 命令。
 
 ## 5. 第三步：安装开发工具
 
@@ -193,7 +197,7 @@ test -f scripts/6bots_world_cup_creator_profile/bots.json && echo "世界杯 Bot
 现在再检查世界杯 Bot 的启动条件：
 
 ~~~bash
-./singlebox/singlebox.sh check bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh check bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ~~~
 
 预检应识别到 6 Bot manifest，并检查 30401 至 30451 这 6 个端口。
@@ -218,22 +222,24 @@ test -f ~/.openclaw/openclaw.json && echo "OpenClaw 配置已找到"
 
 脚本会明确显示它准备读取的文件路径，并提示该文件可能包含本地模型地址和 API Key。确认路径正确后输入 y。脚本只抽取模型相关字段到 singlebox 的本地运行配置中。
 
-### 方式 B：在 .env.local 中手工填写
+### 方式 B：在 singlebox/.env.local 中手工填写
 
 从示例文件生成本机配置：
 
 ~~~bash
-test -f .env.local || cp .env.example .env.local
-open -e .env.local
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+open -e singlebox/.env.local
 ~~~
 
-TextEdit 打开后，找到或加入下面三项，并将等号右边替换成自己的真实值：
+TextEdit 打开后，找到或加入下面三项，删除行首的 `#` 注释符号，并将等号右边替换成自己的真实值：
 
 ~~~dotenv
 OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
 OPENCLAW_OPENAI_API_KEY=your-api-key
 OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ~~~
+
+启动脚本自动读取的是 `singlebox/.env.local`，不会自动读取仓库根目录的 `.env.local`。如果你已有旧的根目录配置，请将需要的模型配置项复制到 `singlebox/.env.local`。三项均需填写非空值；选择 `manual` 只选择配置来源，不会交互式询问这些参数。
 
 保存并关闭文件。稍后启动 Bot 时选择：
 
@@ -273,15 +279,15 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 保持 BCS 正在运行，然后执行：
 
 ~~~bash
-./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ~~~
 
 终端会出现：
 
 ~~~text
 Choose model config mode:
-  1) mock     Start without real model replies
-  2) manual   Use values from .env.local
+  1) mock     Use fixed-format local model replies
+  2) manual   Use values from singlebox/.env.local
   3) home     Import model fields from ~/.openclaw/openclaw.json
 ~~~
 
@@ -292,7 +298,7 @@ Choose model config mode:
 脚本随后会准备 6 份隔离的 OpenClaw profile、连接 BCS、注册 Bot，并把它们设为可发现。等待命令成功结束后检查状态：
 
 ~~~bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ~~~
 
 6 个 Bot 都应显示 Running，并各自带有端口和 bot_uuid。
@@ -499,14 +505,14 @@ Choose model config mode:
 演示结束后，先停止 6 个 Bot，再停止前端和 BCS：
 
 ~~~bash
-./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ./singlebox/singlebox.sh stop bcs_frontend
 ~~~
 
 检查是否都已停止：
 
 ~~~bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
@@ -516,7 +522,7 @@ stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方�
 
 ~~~bash
 ./singlebox/singlebox.sh start bcs_frontend
-./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ~~~
 
 ## 17. 常见问题
@@ -526,7 +532,7 @@ stop 只停止进程，保留本地 Bot 身份、协作群和会话数据，方�
 确认你位于仓库根目录，然后执行：
 
 ~~~bash
-chmod +x scripts/singlebox.sh
+chmod +x singlebox/singlebox.sh
 ./singlebox/singlebox.sh --help
 ~~~
 
@@ -558,8 +564,8 @@ node --version
 先停止 Bot，再使用真实配置重新启动：
 
 ~~~bash
-./singlebox/singlebox.sh stop bots --profile-dir scripts/6bots_world_cup_creator_profile
-./singlebox/singlebox.sh start bots --profile-dir scripts/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/6bots_world_cup_creator_profile
 ~~~
 
 选择 2 或 3，并确认模型服务本身可用。
@@ -577,7 +583,7 @@ node --version
 依次确认：
 
 ~~~bash
-test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml && echo "模板文件存在"
+test -f apps/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml && echo "模板文件存在"
 ./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
@@ -586,7 +592,7 @@ test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-pr
 1. 确认 BCS 来自当前仓库，而不是另一个 checkout。
 2. 停止并重新启动 bcs_frontend。
 3. 强制刷新浏览器页面，再重新打开“拉起协作”。
-4. 查看 BCS 日志 scripts/.dependencies/logs/bcs.log。
+4. 查看 BCS 日志 singlebox/.dependencies/logs/bcs.log。
 
 ### 17.7 角色搜索不到对应 Bot
 
@@ -594,8 +600,8 @@ test -f src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-pr
 
 如果 Bot 状态异常，查看：
 
-- 汇总日志：scripts/.dependencies/logs/bots_*.log
-- 单 Bot 日志：scripts/.dependencies/logs/world-cup-*.log
+- 汇总日志：singlebox/.dependencies/logs/bots_*.log
+- 单 Bot 日志：singlebox/.dependencies/logs/world-cup-*.log
 
 ### 17.8 端口被占用
 
@@ -606,7 +612,7 @@ lsof -nP -iTCP:8000 -sTCP:LISTEN
 lsof -nP -iTCP:21000 -sTCP:LISTEN
 ~~~
 
-先识别进程是否属于当前 Avernet checkout。如果是本教程之前启动的服务，使用 singlebox stop；如果属于其他应用，关闭那个应用，或者在 .env.local 中配置其他 FRONTEND_PORT 和 BCS_PORT。
+先识别进程是否属于当前 Avernet checkout。如果是本教程之前启动的服务，使用 singlebox stop；如果属于其他应用，关闭那个应用，或者在 singlebox/.env.local 中配置其他 FRONTEND_PORT 和 BCS_PORT。
 
 Bot profile 的 30401 至 30451 端口目前来自 bots.json。修改它们属于进阶操作，并且需要保持 port_start 和 port_step 不与本机其他服务冲突。
 
@@ -622,14 +628,14 @@ Bot profile 的 30401 至 30451 端口目前来自 bots.json。修改它们属�
 
 | 服务 | 日志 |
 | --- | --- |
-| BCS | scripts/.dependencies/logs/bcs.log |
-| 前端 | scripts/.dependencies/logs/frontend.log |
-| 世界杯 Bot 汇总 | scripts/.dependencies/logs/bots_*.log |
-| 单个世界杯 Bot | scripts/.dependencies/logs/world-cup-*.log |
+| BCS | singlebox/.dependencies/logs/bcs.log |
+| 前端 | singlebox/.dependencies/logs/frontend.log |
+| 世界杯 Bot 汇总 | singlebox/.dependencies/logs/bots_*.log |
+| 单个世界杯 Bot | singlebox/.dependencies/logs/world-cup-*.log |
 
 查看日志不会修改运行状态。例如：
 
 ~~~bash
-tail -n 100 scripts/.dependencies/logs/bcs.log
-tail -n 100 scripts/.dependencies/logs/frontend.log
+tail -n 100 singlebox/.dependencies/logs/bcs.log
+tail -n 100 singlebox/.dependencies/logs/frontend.log
 ~~~

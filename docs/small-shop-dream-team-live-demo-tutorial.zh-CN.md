@@ -2,6 +2,8 @@
 
 这是一份面向第一次接触 Avernet、甚至不熟悉命令行的 macOS 教程。完成后，你会在自己的电脑上启动 Avernet，接入店长日常运营、平台营销方案、平台数据分析和平台供应链 4 个 Bot，并以一家理发店店主的身份准备 18 周年店庆。
 
+> 部分截图来自旧版本；启动命令、配置文件和目录路径以本页正文及代码框为准。
+
 演示从店主与店长的私聊开始。店主只需要说清经营目标、底线和授权，店长会主动找到三个平台 Agent，创建任务协作群，分别取得营销、数据和供应证据，再动态发起一次性自定义协作，让各方在同一流程内复核方案并交给店主验收。
 
 本教程使用的 Bot profile 是：
@@ -69,7 +71,7 @@ flowchart LR
 
 如果只选择 mock 模式，Bot 可以接入协作网络，但不会产生真实模型回复，因此不能完整复现这次演示。
 
-请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库根目录的 `.env.local`；该文件用于本机配置，不应提交。
+请不要把 API Key 发到群聊、截图中或提交到 Git。手工配置时，只把它写入仓库中的 `singlebox/.env.local`；该文件用于本机配置，不应提交。
 
 ### 2.3 本机端口
 
@@ -126,7 +128,7 @@ git clone https://github.com/inclusionAI/Avernet.git
 cd Avernet
 ~~~
 
-第二行非常重要：它会让终端进入刚下载的项目目录。后续所有以 `./scripts` 开头的命令，都必须在这个目录中运行。
+第二行非常重要：它会让终端进入刚下载的项目目录。后续所有以 `./singlebox` 开头的命令，都必须在这个目录中运行。
 
 可以用下面两条命令确认当前位置和当前分支：
 
@@ -140,11 +142,13 @@ git branch --show-current
 确认经营协作 Bot 配置确实存在：
 
 ~~~bash
-test -f scripts/4bots_merchant_operations_profile/bots.json && echo "经营协作 Bot 配置已找到"
-test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.md && echo "门店经营事实包已找到"
+test -f singlebox/agents/4bots_merchant_operations_profile/bots.json && echo "经营协作 Bot 配置已找到"
+test -f singlebox/agents/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.md && echo "门店经营事实包已找到"
 ~~~
 
 两行都应显示“已找到”。
+
+当前 singlebox 默认使用本机隔离的运行目录，无需添加 `--local` 或 `--standalone`；`--local` 已移除。本教程使用默认的 `legacy` 前端（`apps/frontend`）。如果之前在 `singlebox/.env.local` 中选择了其他前端，请改为 `FRONTEND_VARIANT=legacy` 后再执行下文的 `bcs_frontend` 命令。
 
 ## 5. 第三步：安装开发工具
 
@@ -198,7 +202,7 @@ test -f scripts/4bots_merchant_operations_profile/merchant-operations/KNOWLEDGE.
 现在再检查经营协作 Bot 的启动条件：
 
 ~~~bash
-./singlebox/singlebox.sh check bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh check bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
 预检应识别到 4 Bot manifest，并检查 30601 至 30631 这 4 个端口。
@@ -223,22 +227,24 @@ test -f ~/.openclaw/openclaw.json && echo "OpenClaw 配置已找到"
 
 脚本会明确显示它准备读取的文件路径，并提示该文件可能包含本地模型地址和 API Key。确认路径正确后输入 `y`。脚本只抽取模型相关字段到 singlebox 的本地运行配置中。
 
-### 方式 B：在 `.env.local` 中手工填写
+### 方式 B：在 `singlebox/.env.local` 中手工填写
 
 从示例文件生成本机配置：
 
 ~~~bash
-test -f .env.local || cp .env.example .env.local
-open -e .env.local
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+open -e singlebox/.env.local
 ~~~
 
-TextEdit 打开后，找到或加入下面三项，并将等号右边替换成自己的真实值：
+TextEdit 打开后，找到或加入下面三项，删除行首的 `#` 注释符号，并将等号右边替换成自己的真实值：
 
 ~~~dotenv
 OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
 OPENCLAW_OPENAI_API_KEY=your-api-key
 OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ~~~
+
+启动脚本自动读取的是 `singlebox/.env.local`，不会自动读取仓库根目录的 `.env.local`。如果你已有旧的根目录配置，请将需要的模型配置项复制到 `singlebox/.env.local`。三项均需填写非空值；选择 `manual` 只选择配置来源，不会交互式询问这些参数。
 
 保存并关闭文件。稍后启动 Bot 时选择：
 
@@ -278,15 +284,15 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 保持 BCS 正在运行，然后执行：
 
 ~~~bash
-./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
 终端会出现：
 
 ~~~text
 Choose model config mode:
-  1) mock     Start without real model replies
-  2) manual   Use values from .env.local
+  1) mock     Use fixed-format local model replies
+  2) manual   Use values from singlebox/.env.local
   3) home     Import model fields from ~/.openclaw/openclaw.json
 ~~~
 
@@ -297,7 +303,7 @@ Choose model config mode:
 脚本随后会准备 4 份隔离的 OpenClaw profile、连接 BCS、注册 Bot，并把它们设为可发现。等待命令成功结束后检查状态：
 
 ~~~bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
 4 个 Bot 都应显示 `Running`，并各自带有端口和 `bot_uuid`。
@@ -509,14 +515,14 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 演示结束后，先停止 4 个 Bot，再停止前端和 BCS：
 
 ~~~bash
-./singlebox/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ./singlebox/singlebox.sh stop bcs_frontend
 ~~~
 
 检查是否都已停止：
 
 ~~~bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ./singlebox/singlebox.sh status bcs_frontend
 ~~~
 
@@ -526,7 +532,7 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 
 ~~~bash
 ./singlebox/singlebox.sh start bcs_frontend
-./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
 ## 18. 常见问题
@@ -536,7 +542,7 @@ SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION
 确认你位于仓库根目录，然后执行：
 
 ~~~bash
-chmod +x scripts/singlebox.sh
+chmod +x singlebox/singlebox.sh
 ./singlebox/singlebox.sh --help
 ~~~
 
@@ -568,8 +574,8 @@ node --version
 先停止 Bot，再使用真实配置重新启动：
 
 ~~~bash
-./singlebox/singlebox.sh stop bots --profile-dir scripts/4bots_merchant_operations_profile
-./singlebox/singlebox.sh start bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh stop bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
+./singlebox/singlebox.sh start bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
 选择 `2` 或 `3`，并确认模型服务本身可用。
@@ -579,10 +585,10 @@ node --version
 先确认状态：
 
 ~~~bash
-./singlebox/singlebox.sh status bots --profile-dir scripts/4bots_merchant_operations_profile
+./singlebox/singlebox.sh status bots --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ~~~
 
-如果状态正常，等待 10 至 20 秒后刷新 `/bcn/chat/list`。还看不到时，确认 BCS 和 Bot 来自同一个 Avernet checkout，并查看汇总日志 `scripts/.dependencies/logs/bots_*.log`。
+如果状态正常，等待 10 至 20 秒后刷新 `/bcn/chat/list`。还看不到时，确认 BCS 和 Bot 来自同一个 Avernet checkout，并查看汇总日志 `singlebox/.dependencies/logs/bots_*.log`。
 
 ### 18.6 初始会话里出现了三个平台 Agent
 
@@ -668,13 +674,13 @@ lsof -nP -iTCP:30631 -sTCP:LISTEN
 
 | 服务 | 日志 |
 | --- | --- |
-| BCS | `scripts/.dependencies/logs/bcs.log` |
-| 前端 | `scripts/.dependencies/logs/frontend.log` |
-| 经营协作 Bot 汇总 | `scripts/.dependencies/logs/bots_*.log` |
+| BCS | `singlebox/.dependencies/logs/bcs.log` |
+| 前端 | `singlebox/.dependencies/logs/frontend.log` |
+| 经营协作 Bot 汇总 | `singlebox/.dependencies/logs/bots_*.log` |
 
 查看日志不会修改运行状态。例如：
 
 ~~~bash
-tail -n 100 scripts/.dependencies/logs/bcs.log
-tail -n 100 scripts/.dependencies/logs/frontend.log
+tail -n 100 singlebox/.dependencies/logs/bcs.log
+tail -n 100 singlebox/.dependencies/logs/frontend.log
 ~~~

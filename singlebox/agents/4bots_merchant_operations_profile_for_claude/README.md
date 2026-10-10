@@ -1,7 +1,7 @@
 # 平台数据分析 Claude Code Profile
 
-此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。默认从仓库根目录
-`.env.local` 读取独立的 Anthropic-compatible 模型配置，不复用 OpenClaw 的
+此 profile 用于 `hybrid` 的 Claude Code 数据分析 Bot。从仓库中的
+`singlebox/.env.local` 读取独立的 Anthropic-compatible 模型配置，不复用 OpenClaw 的
 OpenAI-compatible endpoint。Claude Code 的本机认证配置不会写入该目录。
 `CLAUDE.md` 是受控角色 prompt 的入口。
 
@@ -13,32 +13,23 @@ OpenAI-compatible endpoint。Claude Code 的本机认证配置不会写入该目
 ./singlebox/singlebox.sh install-tools
 ```
 
-然后直接启动；不加 profile 参数时，`hybrid` 和兼容别名
-`merchant_hybrid` 会先询问是否使用 Claude Code。选择使用时启动
-3 个 OpenClaw Bot + 1 个 Claude Code Bot；选择不使用时，4 个 Bot
-全部使用 OpenClaw：
-
-```bash
-./singlebox/singlebox.sh start hybrid
-```
-
-只传 `--profile-dir` 时，该 profile 中的 Bot 全部按 OpenClaw 启动：
+当前默认 hybrid profile 路径尚未同步目录迁移，下面的命令显式指定路径，不依赖默认值。只传 `--profile-dir` 时，4 个 Bot 全部按 OpenClaw 启动：
 
 ```bash
 ./singlebox/singlebox.sh start hybrid \
-  --profile-dir scripts/4bots_merchant_operations_profile
+  --profile-dir singlebox/agents/4bots_merchant_operations_profile
 ```
 
 三个 profile 参数全部传入时，OpenClaw profile 中被排除的一个 source
 由 Claude profile 中同 source 的唯一一个 Bot 替代。此时不再询问是否使用
 Claude Code，但仍会检测本机安装。Claude Code 的模型配置默认直接读取
-`.env.local`：
+`singlebox/.env.local`：
 
 ```bash
 ./singlebox/singlebox.sh start hybrid \
-  --profile-dir scripts/4bots_merchant_operations_profile \
+  --profile-dir singlebox/agents/4bots_merchant_operations_profile \
   --exclusive-profile-dir platform-data \
-  --claude-profile-dir scripts/4bots_merchant_operations_profile_for_claude
+  --claude-profile-dir singlebox/agents/4bots_merchant_operations_profile_for_claude
 ```
 
 如果本机没有 `claude` 命令，启动流程会询问是否通过 npm 安装；拒绝安装会取消
@@ -47,7 +38,7 @@ Claude Code，但仍会检测本机安装。Claude Code 的模型配置默认直
 和 API key；已有 `ANTHROPIC_API_KEY` 时不会被覆盖。`ANTHROPIC_BASE_URL` 未配置时，
 交互式启动会展示当前 OpenAI URL，并允许输入一次 Anthropic-compatible URL；直接
 回车则沿用展示值。该 URL 必须支持 Anthropic Messages API，输入仅对本次启动有效，
-不会写回 `.env.local`。非交互启动必须显式配置 `ANTHROPIC_BASE_URL`。
+不会写回 `singlebox/.env.local`。非交互启动必须显式配置 `ANTHROPIC_BASE_URL`。
 
 如需显式使用用户自己的 Claude Code 配置，可设置
 `HYBRID_CLAUDE_CONFIG_MODE=user`；脚本不会改写 `~/.claude/settings.json`。
@@ -61,7 +52,10 @@ Claude Code，但仍会检测本机安装。Claude Code 的模型配置默认直
 ```bash
 HYBRID_USE_CLAUDE_CODE=yes \
 HYBRID_INSTALL_CLAUDE_CODE=yes \
-./singlebox/singlebox.sh start hybrid
+./singlebox/singlebox.sh start hybrid \
+  --profile-dir singlebox/agents/4bots_merchant_operations_profile \
+  --exclusive-profile-dir platform-data \
+  --claude-profile-dir singlebox/agents/4bots_merchant_operations_profile_for_claude
 ```
 
 其中 `HYBRID_CLAUDE_CONFIG_MODE` 可选 `env-local` 或 `user`。

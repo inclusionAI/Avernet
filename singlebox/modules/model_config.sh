@@ -160,7 +160,7 @@ singlebox_model_config_prompt() {
         {
             echo "Choose model config mode:"
             echo "  1) mock     Use fixed-format local model replies"
-            echo "  2) manual   Use values from .env.local"
+            echo "  2) manual   Use values from singlebox/.env.local"
             echo "  3) home     Import model fields from ~/.openclaw/openclaw.json"
             echo ""
             printf "Select [1-3]: "
@@ -216,7 +216,7 @@ singlebox_model_config_require_manual_env() {
     if [ "${OPENCLAW_OPENAI_API_KEY:-}" = "OPENAI_API_KEY" ]; then
         if [ -z "${OPENAI_API_KEY:-}" ]; then
             log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
-            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+            log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/singlebox/.env.local."
             return 1
         fi
         OPENCLAW_OPENAI_API_KEY="$OPENAI_API_KEY"
@@ -235,7 +235,7 @@ singlebox_model_config_require_manual_env() {
         for name in "${missing[@]}"; do
             log_error "  ${name}"
         done
-        log_error "Set them in ${PROJECT_ROOT}/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
+        log_error "Set them in ${PROJECT_ROOT}/singlebox/.env.local or choose SINGLEBOX_MODEL_CONFIG_MODE=mock."
         return 1
     fi
 }

@@ -4,7 +4,7 @@
 
 这份文档说明如何在本机控制 Avernet local stack（BCS、本地 5 个 OpenClaw demo bot 和前端），辅助开发和联调。以下命令默认都在仓库根目录执行。
 
-当前主入口是 `./singlebox/singlebox.sh`；`./scripts/standalone.sh` 只作为兼容 wrapper 保留，不作为主入口讲解。
+当前主入口是 `./singlebox/singlebox.sh`；`./singlebox/standalone.sh` 只作为兼容 wrapper 保留，不作为主入口讲解。
 
 如果这是你第一次看 Avernet，建议先读 [README.zh-CN.md](../README.zh-CN.md)。
 如果只想看工具依赖，请看 [dependencies.zh-CN.md](dependencies.zh-CN.md)。
@@ -19,7 +19,7 @@
 | `./singlebox/singlebox.sh check` | 只想先做预检的用户 | 检查所需工具、源码目录和端口；不安装、不构建、不启动、不停止进程。 |
 | `./singlebox/singlebox.sh install-tools` | 希望脚本辅助安装依赖的用户 | 检查并安装缺失工具。可能写入用户目录或调用本机包管理器，执行前请确认可以接受。 |
 
-当前 `all` 组会启动 BAAS、backend、BCS、5 个本地 OpenClaw demo bot、demo bot 和 frontend。默认配置下，BCS 启动时会拉起 5 个本地 OpenClaw demo bot，并通过 BCN 插件接入 BCS。
+当前 `all` 组会启动 BAAS、backend、BCSFuse、BCS、5 个本地 OpenClaw demo bot、demo bot 和 frontend。`start bcs` 只启动 BCS；需要 BCS 和 5 个 demo bot 时使用 `start bcs_bots`。`bcs_frontend` 使用默认的 `legacy` 前端，其他前端请参考 [前端启动说明](singlebox-nextgen-local.md)。
 
 ## 2. 运行目录隔离
 
@@ -27,11 +27,11 @@
 
 | 维度 | 路径 |
 | --- | --- |
-| BCS runtime | `scripts/.dependencies/standalone/bcs_data`、`scripts/.dependencies/standalone/bcs-config` |
+| BCS runtime | `singlebox/.dependencies/standalone/bcs_data`、`singlebox/.dependencies/standalone/bcs-config` |
 | 5bot profile | `.standalone-openclaw/profiles/<bot-profile>` |
 | 5bot workspace | `.standalone-openclaw/workspaces/<bot-profile>` |
 | BCN plugin link | `.standalone-openclaw/extensions/openclaw-channel-bcn` |
-| 主要日志 | `scripts/.dependencies/logs/`、`scripts/.dependencies/standalone/`、`.standalone-openclaw/logs/` |
+| 主要日志 | `singlebox/.dependencies/logs/`、`singlebox/.dependencies/standalone/`、`.standalone-openclaw/logs/` |
 
 默认 5bot 本地栈里，`<bot-profile-source>` 是 `ceo`、`product-manager`、
 `engineering`、`verification` 或 `customer-service`。
@@ -40,14 +40,14 @@
 
 ## 3. 可选：本地配置
 
-默认不需要创建 `.env.local`。只有需要改端口、mock 用户、模型配置或镜像源时，再复制模板：
+默认不需要创建 `singlebox/.env.local`。只有需要改端口、mock 用户、模型配置或镜像源时，再复制模板：
 
 ```bash
-test -f .env.local || cp .env.example .env.local
-# 编辑 .env.local
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+# 编辑 singlebox/.env.local
 ```
 
-`.env.local` 只在本机生效，已被 git 忽略，不要提交。`singlebox.sh` 启动时会自动读取它；如果同一次命令里传入 `--bcs-port` 或 `--frontend-port`，以命令行参数为准。
+`singlebox/.env.local` 只在本机生效，已被 git 忽略，不要提交。`singlebox.sh` 主入口会自动读取它；仓库根目录的 `.env.local` 不是本教程使用的本机配置文件。如果同一次命令里传入 `--bcs-port` 或 `--frontend-port`，以命令行参数为准。`--local` 已移除，隔离运行目录已是默认行为。
 
 常见可改项：
 
@@ -66,7 +66,7 @@ USE_CN_MIRROR=1
 ./singlebox/singlebox.sh check
 ```
 
-`check` 当前检查 BCS / frontend 预检项：Cargo / `protoc`、Node.js 主版本、npm、源码目录和端口。它不会安装依赖、构建代码、启动服务、停止进程，也不会提前检查 5bot 启动脚本里的 OpenClaw / `jq`。
+`check` 默认检查当前 `all` 组的服务预检项，也可以指定 `check bcs_frontend` 或 `check bots`。它不会安装依赖、构建代码、启动服务或停止进程，但会初始化部分本机运行目录。
 
 如果预检失败，可以按 [dependencies.zh-CN.md](dependencies.zh-CN.md) 手动安装缺失项。
 
@@ -107,38 +107,35 @@ BCS runtime、OpenClaw profile、workspace 和插件 link 默认都放在仓库�
 
 ## 6. 可选：模型配置
 
-Avernet 基础功能不需要模型 API key。只有结构化协同里的 LLM as a judge 节点属于可选能力，需要额外配置 API endpoint 和 key。
+启动 Bot 或完整栈时，脚本会询问模型配置模式。可以在 `singlebox/.env.local` 中设置 `SINGLEBOX_MODEL_CONFIG_MODE`，跳过菜单：
 
-如果希望 demo bot 真实回复，请配置完整的 OpenAI-compatible 模型环境变量。三项必须同时存在；只配其中一部分会被忽略：
+| 模式 | 行为 |
+| --- | --- |
+| `mock` | 使用本地 mock 模型服务的固定格式回复，不需要真实 API key。 |
+| `manual` | 要求下面三项 `OPENCLAW_OPENAI_*` 均为非空值，缺项直接报错，不会自动回退。 |
+| `home` | 经确认后从 `~/.openclaw/openclaw.json` 导入模型字段。 |
 
-```bash
-OPENCLAW_OPENAI_BASE_URL=<model-api-base-url>
-OPENCLAW_OPENAI_API_KEY=<model-api-key>
-OPENCLAW_OPENAI_MODEL_ID=<model-id>
+希望 Bot 真实回复时，可以在 `singlebox/.env.local` 中取消注释并填写：
+
+```dotenv
+SINGLEBOX_MODEL_CONFIG_MODE=manual
+OPENCLAW_OPENAI_BASE_URL=https://your-model-service.example/v1
+OPENCLAW_OPENAI_API_KEY=your-api-key
+OPENCLAW_OPENAI_MODEL_ID=your-model-id
 ```
 
-可以把这些变量写入本机 `.env.local`，也可以在当前 shell 中 `export`。不要把 API key 写进仓库文件，也不要提交本地生成的 `openclaw.json`、日志或 runtime 数据。
+使用 `home` 时，可通过 `OPENCLAW_MODEL_CONFIG_SOURCE` 指定其他只读 JSON 来源；非交互导入需要显式设置 `SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED=1`。脚本不会修改来源文件。未设置模式的非交互启动使用 `mock`，不会自动读取 home 配置。
 
-模型配置优先级：
-
-1. 完整的 `OPENCLAW_OPENAI_*` 环境变量优先。
-2. 未配置完整环境变量时，读取 `OPENCLAW_MODEL_CONFIG_SOURCE` 指向的 OpenClaw JSON。
-3. `OPENCLAW_MODEL_CONFIG_SOURCE` 未设置时，默认读取 `$HOME/.openclaw/openclaw.json`。
-
-脚本只复制模型相关字段到 5bot profile，不会改写来源文件。你也可以显式指定只读来源：
-
-```bash
-export OPENCLAW_MODEL_CONFIG_SOURCE=/path/to/openclaw.json
-```
+仅启动 BCS / frontend 不会显示此菜单；真实 BCS Judge 调用需要启动环境中有完整模型参数。不要提交 API key、本地生成的 `openclaw.json`、日志或 runtime 数据。
 
 ## 7. 启动后验证
 
-先读取当前端口。没有 `.env.local` 时，BCS 默认是 `21000`，前端默认是 `8000`。如果启动时通过命令行传了端口，请在下面手动设成同样的值。
+先读取当前端口。没有 `singlebox/.env.local` 时，BCS 默认是 `21000`，前端默认是 `8000`。如果启动时通过命令行传了端口，请在下面手动设成同样的值。
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -156,7 +153,7 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 查看已 onboard 的 bot：
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
 ```
 
 成功后你应该看到：
@@ -198,7 +195,7 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 ./singlebox/singlebox.sh clean bcs
 ```
 
-`clean bcs` 会先停止 BCS 和本地 5bot stack，然后清理 BCS SQLite 数据、生成配置、PID 文件和本仓库 BCN plugin symlink。普通 `start` / `restart` 不会默认清理 `bcs.db*` 或 bot workspace。
+`clean bcs` 只停止 BCS，并删除其 SQLite 数据库和生成的运行配置；不会停止 Bot，也不会删除 Bot 身份、工作区或插件链接。如需停止 Bot，请先单独执行 `stop bots`。普通 `start` / `restart` 保留 `bcs.db*` 和 Bot 工作区。
 
 ## 9. 常见问题
 
@@ -207,8 +204,8 @@ curl --noproxy '*' -fsS "${BCS_HTTP_URL}/health"
 先看隔离 stack 日志：
 
 ```bash
-tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
-tail -n 100 .standalone-openclaw/logs/bcs.log
+tail -n 100 singlebox/.dependencies/standalone/bcs_bots_stack.log
+tail -n 100 singlebox/.dependencies/logs/bcs.log
 ```
 
 常见原因：
@@ -223,20 +220,14 @@ tail -n 100 .standalone-openclaw/logs/bcs.log
 确认插件构建产物和 symlink：
 
 ```bash
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
-test -L "$HOME/.openclaw/extensions/openclaw-channel-bcn"
-```
-
-standalone 模式确认：
-
-```bash
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 ```
 
 如果插件产物不存在，重新执行：
 
 ```bash
-./singlebox/singlebox.sh setup bcs
+./singlebox/singlebox.sh setup bots
 ```
 
 ### Bot 没有全部接入
@@ -246,11 +237,11 @@ test -L .standalone-openclaw/extensions/openclaw-channel-bcn
 隔离路径：
 
 ```bash
-tail -n 100 scripts/.dependencies/standalone/bcs_bots_stack.log
+tail -n 100 singlebox/.dependencies/standalone/bcs_bots_stack.log
 test -f .standalone-openclaw/profiles/ceo/.bcs/session.json
 ```
 
-如果只是希望验证连接和 onboard，不需要模型配置；如果希望 bot 真实回复，再按上面的“模型配置”补齐 API 配置。
+如果只是希望验证连接和 onboard，选择 `mock` 即可；如果希望 Bot 真实回复，请按上面的“模型配置”选择 `manual` 或 `home`。
 
 ### 端口被占用
 
@@ -269,7 +260,7 @@ lsof -nP -iTCP:"${BCS_PORT}" -sTCP:LISTEN
 lsof -nP -iTCP:"${FRONTEND_PORT}" -sTCP:LISTEN
 ```
 
-如果 BCS 或前端端口被占用，可以在 `.env.local` 中设置：
+如果 BCS 或前端端口被占用，可以在 `singlebox/.env.local` 中设置：
 
 ```bash
 BCS_PORT=<可用的 BCS 端口>
@@ -282,7 +273,7 @@ FRONTEND_PORT=<可用的前端端口>
 ./singlebox/singlebox.sh --bcs-port <可用的 BCS 端口> --frontend-port <可用的前端端口>
 ```
 
-如果是 5bot 端口被占用，可以在当前 shell 或 `.env.local` 中启用自动选择：
+如果是 5bot 端口被占用，可以在当前 shell 或 `singlebox/.env.local` 中启用自动选择：
 
 ```bash
 BCS_BOT_PORT_AUTO=1
@@ -292,4 +283,4 @@ BCS_BOT_PORT_AUTO=1
 
 本指南是给个人开发者跑通 BCS + OpenClaw 接入的本地路径。
 
-它以 debug 模式启动 BCS，鉴权走 mock，并基于 `src/bcs/configs/bcs-config-local.toml` 生成本地运行配置，适合第一次跑通和本地联调，不适合作为生产部署参考。
+它以 debug 模式启动 BCS，鉴权走 mock，并基于 `apps/bcs/configs/bcs-config-local.toml` 生成本地运行配置，适合第一次跑通和本地联调，不适合作为生产部署参考。
