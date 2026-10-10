@@ -1,7 +1,9 @@
 """Coding-engine restart precondition; platform exec, never Relay HTTP.
 
-The script is the runtime's v1 lifecycle contract. Only pre-rollout containers
-may omit it. The runtime installs it before enabling canonical data bind mounts.
+Direct ARCA bindings keep their original stop/start flow without runtime backup
+probes. For BaaS, the script is the runtime's v1 lifecycle contract; only
+pre-rollout containers may omit it. The runtime installs it before enabling
+canonical data bind mounts.
 """
 from __future__ import annotations
 
@@ -397,20 +399,23 @@ class AicodingRestartBackupMixin:
                 check = self._prepare_restart(
                     ctx, device_id=target, target_runtime=target_runtime_provider(),
                     operation_id=operation_id)
+            elif provider == 'arca':
+                # Direct ARCA restart does not participate in the BaaS backup
+                # protocol. In particular, recovery must not require an exec
+                # into an already destroyed sandbox. Keep the binding verifier
+                # and the caller's mutation fence before the original stop/start.
+                logger.info(
+                    "event=aicoding_restart_backup phase=skip reason=arca_provider "
+                    "bot_id=%s binding_id=%s", ctx.bot_id, binding_id,
+                )
+                def check():
+                    return None
             else:
                 if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
-                    # Legacy ARCA's physical sandbox ID is already persisted.
-                    # PaaS accepts it independently of OCB's binding status.
-                    props = _field(binding, 'device_props') or {}
-                    physical = props.get('sandbox_id')
-                    if provider != 'arca' or not isinstance(physical, str) or not physical.startswith('ARCA-SANDBOX-'):
-                        raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
-                    runtime = target_runtime_provider()
-                    def execute(cmd):
-                        return _execute_physical(runtime, physical, cmd)
-                else:
-                    def execute(cmd):
-                        return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
+                    raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
+
+                def execute(cmd):
+                    return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
                 check = prepare_backup(
                     execute=execute,
                     operation_id=operation_id,

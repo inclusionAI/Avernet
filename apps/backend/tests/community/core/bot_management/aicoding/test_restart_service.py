@@ -203,9 +203,11 @@ async def test_real_lost_baas_response_uses_existing_recovery_intent(lifecycle):
     s.platform.post_bots_api.assert_called_once()
 
 
+@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
 @pytest.mark.asyncio
-async def test_real_stop_start_path_records_handoff_and_keeps_backup_first(lifecycle):
+async def test_real_arca_stop_start_skips_backup_and_records_handoff(lifecycle, engine):
     s = lifecycle
+    s.repo.bot["active_engine"] = engine
     s.binding["device_provider"] = "arca"
     events = []
     s.service._resolve_restart_target_provider = Mock(return_value="arca")
@@ -222,17 +224,18 @@ async def test_real_stop_start_path_records_handoff_and_keeps_backup_first(lifec
 
     s.service.start_bot = Mock(side_effect=start)
 
-    def backup(*args, **kwargs):
-        events.append("backup")
-        return lambda: events.append("verify")
+    device.exec_shell_new.side_effect = RuntimeError("sandbox destroyed")
 
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
-    with patch.object(
-        AicodingRestartBackupMixin, "_prepare_restart", side_effect=backup
-    ):
+    with patch(
+        "agentclaw.community.core.bot_management.engines.aicoding.restart_backup.prepare_backup",
+        side_effect=AssertionError("ARCA must not probe or back up"),
+    ) as backup:
         assert isinstance(s.handler.handle(task.payload), Reschedule)
-    assert events == ["backup", "verify", "release", "allocate"]
+    backup.assert_not_called()
+    device.exec_shell_new.assert_not_called()
+    assert events == ["release", "allocate"]
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     s.repo.bot["status"] = "ACTIVE"
     assert isinstance(s.handler.handle(task.payload), Complete)
