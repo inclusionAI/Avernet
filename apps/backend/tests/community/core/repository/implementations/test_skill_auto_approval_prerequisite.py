@@ -556,8 +556,8 @@ def test_auto_order_creation_rechecks_skill_policy_before_inserting(db) -> None:
             biz_id=str(skill_id),
             event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
             applicant_user_id="applicant-1",
-            approver_user_ids=[],
-            recipient_user_ids=["applicant-1"],
+            approver_user_ids=['applicant-1'],
+            recipient_user_ids=[],
             title="Skill editor request",
             content=None,
             apply_reason="共同维护",
@@ -855,6 +855,7 @@ def test_work_order_auto_skill_completion_is_atomic(db) -> None:
 
     repository.apply_auto_skill_editor_request(
         work_order_id=order_id,
+        recipient_user_ids=["applicant-1"],
         source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         env="dev",
     )
@@ -903,6 +904,7 @@ def test_work_order_auto_skill_completion_rejects_non_auto_order(db) -> None:
     with pytest.raises(WorkOrderAccessDeniedError, match="not an AUTO Skill"):
         _work_orders(db).apply_auto_skill_editor_request(
             work_order_id=order_id,
+            recipient_user_ids=["applicant-1"],
             source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
             env="dev",
         )
@@ -930,6 +932,7 @@ def test_work_order_auto_skill_completion_rolls_back_grant_and_status_if_notice_
         with pytest.raises(RuntimeError, match="notice insert failed"):
             _work_orders(db).apply_auto_skill_editor_request(
                 work_order_id=order_id,
+                recipient_user_ids=["applicant-1"],
                 source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
                 env="dev",
             )
@@ -956,6 +959,7 @@ def test_work_order_auto_skill_completion_rejects_missing_order(db) -> None:
     with pytest.raises(WorkOrderNotFoundError, match="not found"):
         _work_orders(db).apply_auto_skill_editor_request(
             work_order_id=9999,
+            recipient_user_ids=["applicant-1"],
             source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
             env="dev",
         )
@@ -969,6 +973,7 @@ def test_work_order_auto_skill_completion_rejects_non_processing_order(db) -> No
     with pytest.raises(WorkOrderAlreadyProcessedError, match="not processing"):
         _work_orders(db).apply_auto_skill_editor_request(
             work_order_id=order_id,
+            recipient_user_ids=["applicant-1"],
             source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
             env="dev",
         )

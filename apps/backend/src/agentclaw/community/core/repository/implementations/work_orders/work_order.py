@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from injector import inject
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.implementations.work_orders.auto_approval import (
@@ -19,6 +19,9 @@ from agentclaw.community.core.repository.implementations.work_orders.creation im
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.work_orders.listing import (
+    _WorkOrderListingRepository,
 )
 from agentclaw.community.core.repository.implementations.work_orders.notification import (
     _WorkOrderNotificationRepository,
@@ -40,12 +43,9 @@ from agentclaw.community.core.work_orders.errors import (
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderApprovalMode,
-    WorkOrderApprovalContext,
-    WorkOrderApproverRecord,
     WorkOrderBizType,
     WorkOrderDetail,
     WorkOrderItemType,
-    WorkOrderListItem,
     WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
@@ -53,7 +53,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderDecision,
     WorkOrderApproverStatus,
-    SYSTEM_REVIEWER_USER_ID,
     WorkOrderEventCreatedResult,
     WorkOrderEventType,
     WorkOrderMessageContent,
@@ -91,6 +90,7 @@ class WorkOrderRepository(
         self._skill_editor = skill_editor_requests
         self._creation = _WorkOrderCreationRepository(db, skill_editor_requests)
         self._notifications = _WorkOrderNotificationRepository(db)
+        self._listing = _WorkOrderListingRepository(db)
 
     @staticmethod
     def _new_no() -> str:
@@ -492,149 +492,16 @@ class WorkOrderRepository(
         offset: int,
         limit: int,
     ):
-        with self._db.orm_session() as db:
-            query = db.query(self._WorkOrder, self._Notification)
-            if query_type is WorkOrderQueryType.INITIATED_BY_ME:
-                query = query.outerjoin(
-                    self._Notification,
-                    and_(
-                        self._Notification.work_order_id == self._WorkOrder.id,
-                        self._Notification.recipient_user_id == actor_id,
-                        self._Notification.env == env,
-                    ),
-                ).filter(
-                    self._WorkOrder.env == env,
-                    or_(
-                        self._WorkOrder.applicant_user_id == actor_id,
-                        and_(
-                            self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
-                            self._WorkOrder.reviewer_user_id == actor_id,
-                        ),
-                    ),
-                )
-            else:
-                query = (
-                    db.query(self._WorkOrder, self._Notification)
-                    .select_from(self._Notification)
-                    .outerjoin(
-                        self._WorkOrder,
-                        self._Notification.work_order_id == self._WorkOrder.id,
-                    )
-                    .filter(
-                        self._Notification.recipient_user_id == actor_id,
-                        self._Notification.env == env,
-                        or_(self._WorkOrder.env == env, self._WorkOrder.id.is_(None)),
-                    )
-                )
-                if query_type is WorkOrderQueryType.PENDING_FOR_ME:
-                    query = query.filter(
-                        or_(
-                            and_(
-                                self._Notification.notification_category
-                                == NotificationCategory.APPROVAL.value,
-                                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
-                            ),
-                            and_(
-                                self._Notification.notification_category
-                                == NotificationCategory.NOTICE.value,
-                                self._Notification.is_read.is_(False),
-                            ),
-                        )
-                    )
-                else:
-                    query = query.filter(
-                        or_(
-                            and_(
-                                self._Notification.notification_category
-                                == NotificationCategory.APPROVAL.value,
-                                self._WorkOrder.status.in_(
-                                    [
-                                        WorkOrderStatus.APPROVED.value,
-                                        WorkOrderStatus.REJECTED.value,
-                                        WorkOrderStatus.FAILED.value,
-                                    ]
-                                ),
-                            ),
-                            and_(
-                                self._Notification.notification_category
-                                == NotificationCategory.NOTICE.value,
-                                self._Notification.is_read.is_(True),
-                            ),
-                        ),
-                    )
-
-            if item_type is not WorkOrderItemType.ALL:
-                if query_type is WorkOrderQueryType.INITIATED_BY_ME:
-                    if item_type is WorkOrderItemType.NOTICE:
-                        query = query.filter(
-                            self._Notification.notification_category
-                            == NotificationCategory.NOTICE.value
-                        )
-                    else:
-                        query = query.filter(
-                            or_(
-                                self._Notification.id.is_(None),
-                                self._Notification.notification_category
-                                == NotificationCategory.APPROVAL.value,
-                            )
-                        )
-                else:
-                    query = query.filter(
-                        self._Notification.notification_category == item_type.value
-                    )
-
-            if biz_type is not None:
-                query = query.filter(self._WorkOrder.biz_type == biz_type)
-            if biz_id is not None:
-                query = query.filter(self._WorkOrder.biz_id == biz_id)
-
-            total = query.count()
-            rows = (
-                query.order_by(
-                    func.coalesce(
-                        self._Notification.gmt_modified,
-                        self._WorkOrder.gmt_modified,
-                    ).desc(),
-                    self._WorkOrder.id.desc(),
-                )
-                .offset(offset)
-                .limit(limit)
-                .all()
-            )
-            items = []
-            for work_order, notification in rows:
-                is_approver = (
-                    work_order is not None
-                    and db.query(self._Approver.id)
-                    .filter(
-                        self._Approver.work_order_id == work_order.id,
-                        self._Approver.approver_user_id == actor_id,
-                        self._Approver.status == WorkOrderApproverStatus.PENDING.value,
-                        self._Approver.env == env,
-                    )
-                    .first()
-                    is not None
-                )
-                items.append(
-                    WorkOrderListItem(
-                        work_order=work_order.to_record()
-                        if work_order is not None
-                        else None,
-                        notification=notification.to_record()
-                        if notification is not None
-                        else None,
-                        can_approve=(
-                            query_type is not WorkOrderQueryType.INITIATED_BY_ME
-                            and work_order is not None
-                            and work_order.status == WorkOrderStatus.PENDING.value
-                            and notification is not None
-                            and notification.notification_category
-                            == NotificationCategory.APPROVAL.value
-                            and is_approver
-                        ),
-                    )
-                )
-            return total, items
+        return self._listing.list_items(
+            actor_id=actor_id,
+            env=env,
+            query_type=query_type,
+            item_type=item_type,
+            biz_type=biz_type,
+            biz_id=biz_id,
+            offset=offset,
+            limit=limit,
+        )
 
     def get_detail(self, *, work_order_id: int, actor_id: str, env: str):
         with self._db.orm_session() as db:

@@ -26,6 +26,7 @@ class WorkOrderStatus(StrEnum):
 
 
 class WorkOrderEventStatus(StrEnum):
+    PROCESSING = "PROCESSING"
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     FAILED = "FAILED"

@@ -47,7 +47,13 @@ class WorkOrderRepositoryProtocol(Protocol):
         biz_data: str | None,
         env: str,
         callback_source_event_type: str | None = None,
-    ) -> WorkOrderEventCreatedResult: ...
+    ) -> WorkOrderEventCreatedResult:
+        """Persist normalized service input; AUTO requires approver_user_ids.
+
+        AUTO is created PROCESSING without approver rows or initial notices.
+        Completion receives the same approver-derived recipients separately.
+        """
+        ...
 
     @abstractmethod
     def create_work_order(
@@ -100,8 +106,15 @@ class WorkOrderRepositoryProtocol(Protocol):
 
     @abstractmethod
     def apply_auto_skill_editor_request(
-        self, *, work_order_id: int, source_event_type: str, env: str
-    ) -> list[int]: ...
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
+    ) -> list[int]:
+        """Atomically grant Skill access and notify approver-derived recipients."""
+        ...
 
     @abstractmethod
     def process_approval(
@@ -189,7 +202,14 @@ class WorkOrderRepositoryProtocol(Protocol):
         biz_id: str | None = None,
         offset: int,
         limit: int,
-    ) -> tuple[int, list[WorkOrderListItem]]: ...
+    ) -> tuple[int, list[WorkOrderListItem]]:
+        """List inbox entries or unique initiated orders.
+
+        Terminal order notices are processed regardless of read state. Initiated
+        ALL/APPROVAL returns orders without notifications; NOTICE stays a
+        recipient-scoped notification view. Badge counts remain read-sensitive.
+        """
+        ...
 
     @abstractmethod
     def get_detail(

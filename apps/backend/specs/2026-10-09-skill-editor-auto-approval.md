@@ -20,8 +20,9 @@ unchanged; status is PENDING for manual review or APPROVED after AUTO succeeds.
 The Skill module checks the applicant, Team binding, live Skill, Owner, active
 membership, existing Grant, and pending request before selecting the mode.
 The MANUAL path retains the Owner's approval task and notification. AUTO calls
-the WorkOrder Service in-process with no human approver and the applicant as
-the sole result recipient; both user-facing generic events routes reject AUTO.
+the WorkOrder Service in-process with `approver_user_ids=[applicant_user_id]`
+and `recipient_user_ids=[]`. AUTO interprets the required, normalized approver
+list only as result recipients, creating no human approver rows; both user-facing generic events routes reject AUTO.
 The applicant cannot choose the approval mode. An AUTO failure is an error, not
 a successful editor-request response.
 
