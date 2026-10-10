@@ -183,7 +183,7 @@ setup_profile() {
     },
     "list": [{ "id": "main" }]
   },
-  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"] },
+  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_send_task_message"] },
   "messages": { "ackReactionScope": "group-mentions" },
   "commands": { "native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw" },
   "session": { "dmScope": "per-channel-peer" },
@@ -233,11 +233,11 @@ setup_profile "Coordinator" "$COORDINATOR_PROFILE" "$COORD_PORT" \
     "协调者，负责协调各专家协作" \
     "coordination,management" \
     "coordination,task-dispatch" \
-    "你是 master bot (Coordinator)。你的职责是使用 bcs_assign_task 工具将任务分配给子 bot，收到回复后综合分析，最后调用 bcs_task_complete 提交总结。" \
+    "你是 master bot (Coordinator)。你的职责是使用 bcs_assign_task 工具将任务分配给子 bot，收到回复后综合分析，最后在回复中给出总结。" \
     "## 核心规则
 1. 收到任务后，使用 bcs_assign_task 分配给合适的子 bot。
 2. 收到子 bot 回复后，综合分析并给出结论。
-3. 任务完成后，调用 bcs_task_complete 提交最终总结。
+3. 任务完成后，在回复中给出最终总结。
 4. 不要自己回答专业问题，交给子 bot 处理。"
 
 # DBA (slave)

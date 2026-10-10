@@ -305,7 +305,7 @@ coordination profile 由 BCS 服务端管理，至少包含：
 所有生产/本地服务组装路径将该配置注入 Bot 连接用例，不依赖测试写入元数据。
 
 `native_mcp` 固定 server `bcs` 及 `mcp__bcs__bcs_assign_task`、
-`mcp__bcs__bcs_send_task_message`、`mcp__bcs__bcs_task_complete` 精确映射。
+`mcp__bcs__bcs_send_task_message` 精确映射。
 `mcporter_mcp` 固定 command `mcporter`、server `bcs`，复用命令输出适配：
 `exec`/`bash`/`shell`/`mcporter` 的成功结果保留完整 coordination envelope，
 不复用 native MCP 映射。既有配对、上下文、授权、claim、幂等检查不变。

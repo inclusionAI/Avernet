@@ -270,7 +270,7 @@ setup_profile() {
     },
     "list": [{ "id": "main" }]
   },
-  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"] },
+  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_send_task_message"] },
   "messages": { "ackReactionScope": "group-mentions" },
   "commands": { "native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw" },
   "session": { "dmScope": "per-channel-peer" },

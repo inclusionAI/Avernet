@@ -384,7 +384,7 @@ export interface ResolvedBcsAccount {
 }
 
 // ---------------------------------------------------------------------------
-// Task group types (task.dispatch / task.complete)
+// Task group types (task.dispatch / task.message)
 // ---------------------------------------------------------------------------
 
 /** Parameters for the bcs_assign_task tool (sent as task.dispatch to BCS). */
@@ -410,12 +410,6 @@ export interface TaskMessageParams {
 /** Response payload from task.message. */
 export interface TaskMessageResponse {
   status: 'sent';
-}
-
-/** Parameters for the bcs_task_complete tool (sent as task.complete to BCS). */
-export interface TaskCompleteParams {
-  group_id: string;
-  summary: string;
 }
 
 /** Info cached per session for task group tool activation. */

@@ -117,7 +117,7 @@ class PromptContractsTest(unittest.TestCase):
         text, _ = undercover.render_vote_yaml(self.fixtures[0]["state"])
         tally = text.split("      tally:\n", 1)[1]
         for required in ("NODE_TASK/tally，不是 ECHO", "verdict=continue", "verdict=finished",
-                         "终局唯一允许公开全员词语和身份", "uc finish --session", "不能使用 bcs_task_complete",
+                         "终局唯一允许公开全员词语和身份", "uc finish --session", "本节点的上下文是 state_machine",
                          "禁止 bcs_route", "命令失败须如实报告", "human 的结构化票面"):
             self.assertIn(required, tally)
         self.assertNotIn("不要输出任何未出局玩家的词语或身份", tally)

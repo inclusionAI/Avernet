@@ -3,7 +3,6 @@ import type { BcnBridge } from './bridge.js';
 
 export const BCS_ASSIGN_TASK_TOOL_NAME = 'bcs_assign_task';
 export const BCS_SEND_TASK_MESSAGE_TOOL_NAME = 'bcs_send_task_message';
-export const BCS_TASK_COMPLETE_TOOL_NAME = 'bcs_task_complete';
 
 export function createBcsAssignTaskTool(bridge: BcnBridge): ToolDefinition {
   return defineTool({
@@ -68,29 +67,6 @@ export function createBcsSendTaskMessageTool(bridge: BcnBridge): ToolDefinition 
     },
     async execute(args, exec) {
       return bridge.sendTaskMessage(exec.agent, args.message, exec.signal);
-    },
-  });
-}
-
-export function createBcsTaskCompleteTool(bridge: BcnBridge): ToolDefinition {
-  return defineTool({
-    name: BCS_TASK_COMPLETE_TOOL_NAME,
-    description:
-      "Signal that the task group's work is fully done. Only call this after receiving replies " +
-      'from all sub bots and completing the final analysis. Provide a comprehensive summary of all results.',
-    parameters: {
-      summary: {
-        type: 'string',
-        required: true,
-        description: "Final summary of the task group's work and results.",
-      },
-    },
-    output: {
-      schema: { type: 'json' },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
-    },
-    async execute(args, exec) {
-      return bridge.completeTask(exec.agent, args.summary, exec.signal);
     },
   });
 }

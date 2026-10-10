@@ -9,7 +9,6 @@ pub const CONTRACT_VERSION: u64 = 1;
 
 pub const TOOL_ASSIGN_TASK: &str = "bcs_assign_task";
 pub const TOOL_SEND_TASK_MESSAGE: &str = "bcs_send_task_message";
-pub const TOOL_TASK_COMPLETE: &str = "bcs_task_complete";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CoordinationCall {
@@ -82,10 +81,11 @@ impl CoordinationCall {
     }
 
     fn validate(call: Self) -> Option<Self> {
-        let valid = call.magic && match call.v {
+        let valid = call.magic
+            && matches!(call.tool.as_str(), TOOL_ASSIGN_TASK | TOOL_SEND_TASK_MESSAGE)
+            && match call.v {
             1 => call.intent_id.is_none(),
             2 => call.status == "stored" && call.arguments.is_empty()
-                && matches!(call.tool.as_str(), TOOL_ASSIGN_TASK | TOOL_SEND_TASK_MESSAGE | TOOL_TASK_COMPLETE)
                 && call.intent_id.as_deref().is_some_and(|id| {
                     id.strip_prefix("bcs_intent_").is_some_and(|suffix|
                         suffix.len() == 32 && suffix.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
@@ -110,9 +110,9 @@ mod tests {
 
     #[test]
     fn extracts_echo_from_noisy_stdout() {
-        let s = "some mcporter log line\n{\"__bcs_coordination__\":true,\"v\":1,\"tool\":\"bcs_task_complete\",\"arguments\":{\"summary\":\"done\"},\"status\":\"received\"}\ntrailing log";
+        let s = "some mcporter log line\n{\"__bcs_coordination__\":true,\"v\":1,\"tool\":\"bcs_send_task_message\",\"arguments\":{\"message\":\"done\"},\"status\":\"received\"}\ntrailing log";
         let call = CoordinationCall::from_stdout(s).expect("should locate echo in noise");
-        assert_eq!(call.tool, "bcs_task_complete");
+        assert_eq!(call.tool, "bcs_send_task_message");
     }
 
     #[test]
@@ -159,15 +159,27 @@ mod tests {
     #[test]
     fn legacy_provider_v1_keeps_lenient_metadata_and_tool_normalization() {
         let value = serde_json::json!({"__bcs_coordination__": true, "v": 1,
-            "tool": " bcs_task_complete ", "arguments": {"summary": "done"},
+            "tool": " bcs_send_task_message ", "arguments": {"message": "done"},
             "status": {"legacy": true}, "intent_id": 123});
         let call = CoordinationCall::from_provider_stdout(&value.to_string()).unwrap();
-        assert_eq!(call.tool, "bcs_task_complete");
-        assert_eq!(call.arguments["summary"], "done");
+        assert_eq!(call.tool, "bcs_send_task_message");
+        assert_eq!(call.arguments["message"], "done");
         assert!(call.intent_id.is_none());
         let stream = serde_json::json!({"__bcs_coordination__": true, "v": 1,
-            "tool": "bcs_task_complete", "arguments": {"summary": "done"}, "intent_id": 123});
+            "tool": "bcs_send_task_message", "arguments": {"message": "done"}, "intent_id": 123});
         assert!(CoordinationCall::from_stdout(&stream.to_string()).unwrap().intent_id.is_none());
+    }
+
+    #[test]
+    fn removed_task_complete_tool_is_rejected_on_all_echo_paths() {
+        for v in [1, 2] {
+            let value = serde_json::json!({"__bcs_coordination__": true, "v": v,
+                "tool": "bcs_task_complete",
+                "arguments": if v == 1 { serde_json::json!({"summary": "done"}) } else { serde_json::json!({}) },
+                "intent_id": "bcs_intent_0123456789abcdef0123456789abcdef", "status": "stored"});
+            assert!(CoordinationCall::from_stdout(&value.to_string()).is_none());
+            assert!(CoordinationCall::from_provider_stdout(&value.to_string()).is_none());
+        }
     }
 
     #[test]

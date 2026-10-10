@@ -2,14 +2,13 @@
 """
 Master-Slave Service Group E2E Test
 
-Tests the full lifecycle:
+Tests the manager-worker round trip:
 1. Create service group template (master + slave)
 2. Publish template
 3. Create instance → master gets chat.send, slave gets chat.inject
 4. Master dispatches task to slave via bcs_assign_task
 5. Slave processes and replies
-6. Master receives reply, calls bcs_task_complete
-7. Instance marked as completed
+6. Master receives reply and summarizes the result
 """
 
 import os
@@ -276,7 +275,7 @@ def main():
     # ── Step 6: Verify master received slave reply ────────────────────────
 
     print(f"\n{CYAN}Step 6: Verify master received slave reply and completed task{NC}")
-    info("Waiting for master to receive DBA reply and call bcs_task_complete...")
+    info("Waiting for master to receive DBA reply...")
 
     coord_messages = poll_until(
         client, group_id, COORD_UUID,
@@ -292,58 +291,6 @@ def main():
     else:
         fail_msg("Master did NOT receive DBA reply")
         failures.append("Step 6: master did not receive DBA reply")
-
-    # Check if master called bcs_task_complete
-    # Give extra time — master needs another LLM turn after receiving the reply
-    if not has_tool_call(coord_messages, "bcs_task_complete"):
-        info("Waiting for master to call bcs_task_complete...")
-        coord_messages = poll_until(
-            client, group_id, COORD_UUID,
-            condition=lambda msgs: has_tool_call(msgs, "bcs_task_complete"),
-            desc="master calls bcs_task_complete",
-            timeout=180,
-        )
-
-    if has_tool_call(coord_messages, "bcs_task_complete"):
-        pass_msg("Master called bcs_task_complete")
-    else:
-        warn_msg("Master did NOT call bcs_task_complete (may need manual trigger)")
-
-    # ── Step 7: Verify instance completion ────────────────────────────────
-
-    print(f"\n{CYAN}Step 7: Verify instance status{NC}")
-
-    # Poll for group status
-    deadline = time.time() + 60
-    group_status = None
-    while time.time() < deadline:
-        resp = client.get(f"{BCS_URL}/groups/{group_id}")
-        if resp.status_code == 200:
-            group_data = resp.json()
-            group_status = group_data.get("status")
-            if group_status in ("completed", "Completed"):
-                break
-        time.sleep(3)
-
-    if group_status in ("completed", "Completed"):
-        pass_msg(f"Group status: {group_status}")
-    else:
-        warn_msg(f"Group status: {group_status} (expected: completed)")
-
-    # Check instance
-    resp = client.get(f"{BCS_URL}/service-groups/{template_uuid}/instances/{group_id}")
-    if resp.status_code == 200:
-        instance = resp.json()
-        result = instance.get("instance_result")
-        callback = instance.get("callback_status")
-        info(f"Instance result: {str(result)[:100] if result else '(empty)'}")
-        info(f"Callback status: {callback}")
-        if result:
-            pass_msg("Instance has result")
-        else:
-            warn_msg("Instance result is empty")
-    else:
-        warn_msg(f"Could not fetch instance: {resp.status_code}")
 
     # ── Result ────────────────────────────────────────────────────────────
 

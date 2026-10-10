@@ -2582,68 +2582,6 @@ async fn coordination_echo_worker_send_task_message_without_real_session_does_no
 
 #[tokio::test]
 #[ignore = "coordination echo handling moved from ws dispatcher to bcs-message-flow"]
-async fn coordination_echo_manager_task_complete_dispatches_via_echo() {
-    let state = new_state();
-    state.group.insert(manager_worker_group()).await;
-    let (tx, _rx) = mpsc::channel(8);
-    let mut registered_bot_id = Some("bot-manager".to_string());
-    let echo = coordination_echo(
-        "bcs_task_complete",
-        serde_json::json!({
-            "summary": "all done"
-        }),
-    );
-    let frame = coordination_echo_frame("mcporter", "result", "fc-complete", &echo, false);
-
-    dispatch_frame(
-        &state.dispatch_state,
-        &serde_json::to_string(&frame).unwrap(),
-        &tx,
-        &mut registered_bot_id,
-    )
-    .await
-    .unwrap();
-
-    let commands = state.message_flow.task_completes.lock().await;
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0].task_id, "group-1");
-    assert_eq!(commands[0].bot_id, "bot-manager");
-    assert!(commands[0].via_echo);
-    assert_eq!(commands[0].payload["group_id"], "group-1");
-    assert_eq!(commands[0].payload["summary"], "all done");
-    assert_eq!(commands[0].payload["status"], "completed");
-    assert_eq!(commands[0].payload["bcs_session_id"], "group-1:abcdef12");
-}
-
-#[tokio::test]
-#[ignore = "coordination echo handling moved from ws dispatcher to bcs-message-flow"]
-async fn coordination_echo_manager_task_complete_whitespace_summary_does_not_dispatch() {
-    let state = new_state();
-    state.group.insert(manager_worker_group()).await;
-    let (tx, _rx) = mpsc::channel(8);
-    let mut registered_bot_id = Some("bot-manager".to_string());
-    let echo = coordination_echo(
-        "bcs_task_complete",
-        serde_json::json!({
-            "summary": "   "
-        }),
-    );
-    let frame = coordination_echo_frame("mcporter", "result", "fc-blank-complete", &echo, false);
-
-    dispatch_frame(
-        &state.dispatch_state,
-        &serde_json::to_string(&frame).unwrap(),
-        &tx,
-        &mut registered_bot_id,
-    )
-    .await
-    .unwrap();
-
-    assert!(state.message_flow.task_completes.lock().await.is_empty());
-}
-
-#[tokio::test]
-#[ignore = "coordination echo handling moved from ws dispatcher to bcs-message-flow"]
 async fn coordination_echo_error_result_does_not_dispatch() {
     let state = new_state();
     state.group.insert(manager_worker_group()).await;

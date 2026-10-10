@@ -526,7 +526,7 @@ fn validate_provider_coordination_config(
         }
         if !matches!(
             canonical_tool_name.as_str(),
-            "bcs_assign_task" | "bcs_send_task_message" | "bcs_task_complete"
+            "bcs_assign_task" | "bcs_send_task_message"
         ) {
             return Err(ServiceError::InvalidOperation {
                 message: format!(

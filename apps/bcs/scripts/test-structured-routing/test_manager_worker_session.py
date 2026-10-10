@@ -15,7 +15,7 @@ Walks the full chain:
  10. GET /bots/{human}/groups + /groups/{id}/sessions → Human 视角 union 命中
 
 Note: In manager_worker mode, the BCN plugin hides bcs_route and only
-exposes bcs_assign_task / bcs_task_complete. The test focuses on task
+exposes bcs_assign_task for the manager. The test focuses on task
 dispatch (bcs_assign_task) which exercises the handle_manager_worker_event
 code path in BCS's WS dispatcher.
 

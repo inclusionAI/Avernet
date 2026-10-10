@@ -28,7 +28,6 @@ import { dshSessionIdForV2, resolveBcnSessionIdentity } from './session-identity
 import {
   createBcsAssignTaskTool,
   createBcsSendTaskMessageTool,
-  createBcsTaskCompleteTool,
 } from './task-tools.js';
 import type { BcnWsClient } from './ws-client.js';
 
@@ -256,24 +255,6 @@ export class BcnBridge {
     if (!response.ok) return taskRequestFailure(response, 'TASK_MESSAGE_FAILED');
     const payload = asRecord(response.payload);
     return { ok: true, status: asNonEmptyString(payload?.status) ?? 'sent' };
-  }
-
-  async completeTask(
-    agent: Agent | undefined,
-    summary: string,
-    signal: AbortSignal,
-  ): Promise<JsonValue> {
-    const run = this.activeRunForTaskTool(agent, 'manager');
-    if (!run) return taskToolUnavailable();
-    const normalizedSummary = summary.trim();
-    if (!normalizedSummary) return taskToolInvalid("'summary' must be a non-empty string.");
-
-    const response = await this.sendTaskRequest('task.complete', {
-      group_id: run.groupId,
-      summary: normalizedSummary,
-    }, signal);
-    if (!response.ok) return taskRequestFailure(response, 'TASK_COMPLETE_FAILED');
-    return { ok: true };
   }
 
   private async handleChatSend(frame: RequestFrame): Promise<void> {
@@ -602,7 +583,6 @@ export class BcnBridge {
         agentCtx.tools.register(createBcsRouteTool(this));
       } else if (toolProfile === 'manager') {
         agentCtx.tools.register(createBcsAssignTaskTool(this));
-        agentCtx.tools.register(createBcsTaskCompleteTool(this));
       } else if (toolProfile === 'worker') {
         agentCtx.tools.register(createBcsSendTaskMessageTool(this));
       }
@@ -636,7 +616,7 @@ export class BcnBridge {
   }
 
   private async sendTaskRequest(
-    method: 'task.dispatch' | 'task.message' | 'task.complete',
+    method: 'task.dispatch' | 'task.message',
     params: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<ResponseFrame> {

@@ -24,7 +24,7 @@
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 非空**（有 Bot 出局，要念遗言） | 其余（`ECHO` / `HUMAN_MSG`） | [S4b 派遗言任务](#s4b-派遗言任务) |
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 为空**（PK 无人出局、常规零有效票或出局的是人类） | 其余（`ECHO` / `HUMAN_MSG`） | [S4c 直接开下一轮](#s4c-直接开下一轮) |
 | `AWAIT_NEXT_ROUND` | `HUMAN_MSG` 说"继续" | 跳过遗言，直接做 S5 的第 2 步 |
-| `FINISHED` | 任意 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
+| `FINISHED` | 任意 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不调任何脚本**——终局稿在 S4 里已经说过了 |
 
 任何格子里没写的组合：说清当前进行到哪、人类可以做什么，**不推进**。
 
@@ -168,7 +168,7 @@ uc open-vote
    - `continue` → 说"开票结果"那段（逐条报票向、报票数、宣布出局、身份暂不公布、报剩下谁）。
      **玩家只交了票号，没有理由，不许替他们编。**
      此分支 `tie` 为真表示 PK 仍平票或零有效票：本轮无人出局，不追加 PK。
-   - `finished` → 先 `uc reveal --session "$session_id"`，再说"终局"那段，然后执行 `uc finish --session "$session_id"` 结束会话，失败如实报告。当前 tally 是 state_machine 上下文，不提供 `bcs_task_complete`；禁止 `bcs_route` 或路由给自己寻找工具。
+   - `finished` → 先 `uc reveal --session "$session_id"`，再说"终局"那段，然后执行 `uc finish --session "$session_id"` 结束会话，失败如实报告。当前 tally 是 state_machine 上下文；禁止 `bcs_route` 或路由给自己寻找工具。
      **这是全局唯一一处可以 `reveal` 和结束会话的地方**：只有在我自己刚跑完 `votes-set`、
      它返回 `finished` 的这次激活里才做。被唤醒时看到 `FINISHED` 而这次激活里我一轮都没
      主持过，那不是终局，是认错局。

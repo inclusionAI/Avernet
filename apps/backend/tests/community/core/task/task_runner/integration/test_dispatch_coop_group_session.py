@@ -156,7 +156,7 @@ def test_form_coop_group_relay_appends_closure_for_raw_instruction():
     assert "human 仅为观察者" in ctx
     assert "视为已提供全部所需上下文" in ctx and "严禁以“缺详情/需完整方案”为由" in ctx
     assert "交接只描述,不路由群外" in ctx and "正文不重复输出" in ctx
-    assert "bcs_task_complete" in ctx and "bcs_fuse" in ctx
+    assert "bcs_task_complete" not in ctx and "bcs_fuse" in ctx
     assert "按问题智能匹配能力" not in ctx
     assert "必须使用中文" in ctx
     # 仍只补 driver/reporter 定位脚注(协作群分工),不注入上报协议/mock

@@ -3,7 +3,6 @@ pub mod protocol;
 
 pub use coordination::{
     CONTRACT_VERSION, CoordinationCall, MAGIC_KEY, TOOL_ASSIGN_TASK, TOOL_SEND_TASK_MESSAGE,
-    TOOL_TASK_COMPLETE,
 };
 pub use protocol::{
     AgentEventPayload, AgentStream, BCS_DEFAULT_PROTOCOL_VERSION, BCS_MIN_SUPPORTED_VERSION,

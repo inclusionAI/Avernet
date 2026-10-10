@@ -83,7 +83,7 @@ Provider 的 `config` 增加 `coordination` 节点：
 - `mcporter_command`：mcporter 执行入口，只对 `mcporter_mcp` 有意义。
 - `tool_name_mapping`：Provider 原生 MCP tool result 中的精确工具名到 BCS canonical coordination tool
   的映射，只对 `native_mcp` 有意义。canonical tool 仅允许 `bcs_assign_task`、
-  `bcs_send_task_message`、`bcs_task_complete`。
+  `bcs_send_task_message`。
 - `worker_send_task_message_enabled`：是否在 manager-worker 群的 worker 上下文中说明可调用
   `bcs_send_task_message`。缺省为 `true`，用于保持已有 Provider 的行为；设置为 `false` 时仅隐藏这段
   worker 提示文案，不注销工具、不改变权限校验、不改变事件回传，也不改变 `task.message` 协议。
@@ -136,8 +136,7 @@ Manager：
 你当前平台通过 mcporter 调用 BCS MCP 工具。
 需要派发子任务时，使用：
 `<mcporter_command> call <mcp_server>.bcs_assign_task target_bot="<目标Bot名称或ID>" message="<任务内容>"`
-任务可以结束时，使用：
-`<mcporter_command> call <mcp_server>.bcs_task_complete summary="<最终总结>"`
+子任务处理完毕后，在普通回复中汇总结果。
 
 执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。
 不要直接调用原生发送工具来派发子任务。
@@ -167,7 +166,7 @@ Manager：
 ```text
 你当前平台原生提供 BCS MCP 工具。
 需要派发子任务时，直接调用 MCP server `<mcp_server>` 上的 `bcs_assign_task`。
-任务可以结束时，直接调用 MCP server `<mcp_server>` 上的 `bcs_task_complete`。
+子任务处理完毕后，在普通回复中汇总结果。
 
 不要使用 mcporter、exec、bash。
 不要在普通回复中伪造工具结果。
@@ -194,7 +193,7 @@ Manager：
 ```text
 你当前平台原生提供 BCS 协同工具。这些工具是当前运行环境中的原生 tools，不是 MCP server 工具。
 需要派发子任务时，直接调用原生工具 `bcs_assign_task`。
-任务可以结束时，直接调用原生工具 `bcs_task_complete`。
+子任务处理完毕后，在普通回复中汇总结果。
 
 不要使用 mcporter、exec、bash。
 不要写 MCP server 名称。
@@ -370,7 +369,7 @@ Provider coordination callback 拒绝时返回 `400 invalid_coordination_mode`�
 5. 安全回归：
    - `run_id + tool_call_id` 去重仍生效。
    - session guard 仍生效。
-   - 非 manager 调 `bcs_assign_task` / `bcs_task_complete` 被拒绝。
+   - 非 manager 调 `bcs_assign_task` 被拒绝。
    - 非 worker 调 `bcs_send_task_message` 被拒绝。
 
 ## 10. 非目标

@@ -373,8 +373,7 @@ test_dynamic_config_refreshes_plugin_path() {
     "alsoAllow": [
       "bcs_route",
       "bcs_assign_task",
-      "bcs_send_task_message",
-      "bcs_task_complete"
+      "bcs_send_task_message"
     ]
   },
   "gateway": {

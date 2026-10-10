@@ -24,7 +24,7 @@ use bcs_service_api::port::{CoordinationContext, CoordinationClaim, Coordination
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
-    TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE, build_recipient_group_context, build_session_key,
+    TOOL_SEND_TASK_MESSAGE, build_recipient_group_context, build_session_key,
 };
 use bcs_protocol::stream::TASK_INTENT_ELIGIBLE_KEY;
 use bcs_service_api::application::channel::OutboundMessage;

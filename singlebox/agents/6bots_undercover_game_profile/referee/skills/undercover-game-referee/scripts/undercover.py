@@ -65,7 +65,7 @@ NEXT_ACTION = {
     "pending_ping 为空（平票，或出局的是人类）：**不要派任何任务**，直接 open-round——"
     "开票稿的回灌就是这一步的唤醒源，bcs_assign_task 会打断你自己这次激活。",
     "FINISHED": "本局已经结束、真相也公布过了。只说一句「本局已结束，新建会话再来一局」，"
-    "**不要再 reveal、不要 bcs_task_complete**。仅维护者确认故障已修复并明确要求重试关闭当前会话时，调用 finish --session；其余情况不调脚本。"
+    "**不要再 reveal**。仅维护者确认故障已修复并明确要求重试关闭当前会话时，调用 finish --session；其余情况不调脚本。"
     "如果你是刚被一个新会话叫醒的，那说明 --session 传错了：新会话应该看到 NO_GAME。",
 }
 
@@ -974,7 +974,7 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         "undercover.py reveal --session '<当前会话ID>'，以 finale_header 开头，公布词对、"
         "全员身份词、胜负转折；执行 uc finish --session '<当前会话ID>'。"
         "这是终局唯一允许公开全员词语和身份的分支；命令失败须如实报告。\n"
-        "本节点的上下文是 state_machine，不能使用 bcs_task_complete；"
+        "本节点的上下文是 state_machine；"
         "禁止 bcs_route（包括路由给自己）、查工具用法、派任务、open-round、open-vote 或提交运行。"
         "终局在本节点收尾，不等 ECHO。\n"
         "只输出主持稿，不输出内部状态、节点名、命令或运行 ID。"
@@ -1793,7 +1793,7 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
             "next_action": (
                 "本次刚判胜，真相尚未公布。保持在当前计票节点：先 reveal --session '<当前会话ID>'，"
                 "公布终局稿，再执行 uc finish --session '<当前会话ID>'。"
-                "不要等待 ECHO，不调用 bcs_task_complete 或 bcs_route。"
+                "不要等待 ECHO，不调用 bcs_route。"
                 if verdict == "finished"
                 else "报 PK 名单和开票稿后结束当前节点。回灌后 open-round 开始本轮 PK 发言。"
                 if verdict == "pk"

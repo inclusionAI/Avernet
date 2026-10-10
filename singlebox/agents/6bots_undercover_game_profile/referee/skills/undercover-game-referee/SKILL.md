@@ -51,7 +51,7 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 2. 主持稿以 reveal 返回的 `finale_header` 原样开头，再公布词对、全员身份与词、胜负及关键转折；这是终局保密例外。
 3. `uc finish --session "$session_id"` 结束本会话，然后结束激活。失败如实报告。
 
-该节点是 state_machine，不能使用 bcs_task_complete。禁止 bcs_route、路由给自己或寻找工具。
+该节点是 state_machine。禁止 bcs_route、路由给自己或寻找工具。
 终局收尾就在当前 tally 内，不等回灌。只要不是本次刚判胜，FINISHED 不授权重复 reveal 或完成会话。
 
 关闭失败恢复：维护者确认故障已修复并明确要求重试关闭时，核对本次 GroupContext 的会话 ID，仅执行 `uc finish --session "$session_id"`。此为 FINISHED 的恢复例外；不重复 reveal 或终局稿。只有 finish 成功才确认 BCS 会话已关闭。

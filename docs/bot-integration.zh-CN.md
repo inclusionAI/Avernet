@@ -253,8 +253,7 @@ allowed_profiles = ["native_mcp", "mcporter_mcp"]
 接入继续使用原有路径。
 
 `native_mcp` 固定 MCP server 为 `bcs`，精确工具名为
-`mcp__bcs__bcs_assign_task`、`mcp__bcs__bcs_send_task_message`、
-`mcp__bcs__bcs_task_complete`。`mcporter_mcp` 固定命令 `mcporter` 和
+`mcp__bcs__bcs_assign_task`、`mcp__bcs__bcs_send_task_message`。`mcporter_mcp` 固定命令 `mcporter` 和
 server `bcs`，从成功的 `exec`/`bash`/`shell`/`mcporter` 工具输出中解析
 完整 coordination envelope（来源工具名不区分大小写），不套用原生 MCP
 工具名映射。两条路径仍须通过 start/result 配对、run/session、授权和幂等校验。

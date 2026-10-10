@@ -54,9 +54,6 @@ class FakeClient {
     if (method === 'task.message') {
       return { type: 'res', id: 'task-message-response', ok: true, payload: { status: 'sent' } };
     }
-    if (method === 'task.complete') {
-      return { type: 'res', id: 'task-complete-response', ok: true, payload: {} };
-    }
     return {
       type: 'res',
       id: 'route-response',
@@ -624,13 +621,11 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     taskGroupParams('manager-session', 'manager-run', 'manager'),
   );
   const state = harness.state('bcs_grp_test:manager-session');
-  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task', 'bcs_task_complete']);
+  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task']);
   emitClaim(harness, state, state.followups[0] as UserMessage);
 
   const assign = state.tools.find(tool => tool.name === 'bcs_assign_task');
-  const complete = state.tools.find(tool => tool.name === 'bcs_task_complete');
   assert.ok(assign);
-  assert.ok(complete);
   assert.deepEqual(await assign.execute({
     target_bot: ' Worker ',
     message: ' Investigate the database ',
@@ -639,9 +634,6 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     ok: true,
     task_id: 'task-1',
     status: 'dispatched',
-  });
-  assert.deepEqual(await complete.execute({ summary: ' All work is done. ' }, toolRunContext(state.agent)), {
-    ok: true,
   });
   assert.deepEqual(client.requests, [
     {
@@ -652,10 +644,6 @@ test('registers manager task tools instead of bcs_route and forwards task reques
         message: 'Investigate the database',
         response_mode: 'after-last-tool-call',
       },
-    },
-    {
-      method: 'task.complete',
-      params: { group_id: 'bcs_grp_test', summary: 'All work is done.' },
     },
   ]);
   await bridge.dispose();
