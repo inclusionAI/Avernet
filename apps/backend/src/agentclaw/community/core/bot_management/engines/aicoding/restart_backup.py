@@ -6,6 +6,7 @@ may omit it. The runtime installs it before enabling canonical data bind mounts.
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 import json
 import re
 import shlex
@@ -22,6 +23,9 @@ ENTRY = '/opt/agentclaw/bin/restart_backup'
 POLL_SECONDS = 2
 # Covers runtime termination (330s) plus archive budget (900s) and exec overhead.
 DEADLINE_SECONDS = 1500
+# A deferred Caller shares the original backup budget across queue waiting and
+# execution. None preserves ordinary/published and direct-call defaults.
+caller_backup_deadline: ContextVar[float | None] = ContextVar('caller_backup_deadline', default=None)
 
 
 class RestartBackupError(RuntimeError):
@@ -83,7 +87,16 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
     started = time.monotonic()
-    deadline = started + DEADLINE_SECONDS
+    # Ordinary durable operations share one budget across task redeliveries and
+    # all physical targets. Published/Caller paths retain their existing budget.
+    from .restart_state import BACKUP_TIMEOUT, current_restart
+    execution = current_restart.get()
+    remaining = (BACKUP_TIMEOUT - (time.time() - execution.payload["started_at"])
+                 if execution is not None else DEADLINE_SECONDS)
+    caller_deadline = caller_backup_deadline.get()
+    if caller_deadline is not None:
+        remaining = min(remaining, caller_deadline - time.time())
+    deadline = started + remaining
     action, boot, last_status = 'start', None, None
     last_log = started
 
@@ -105,7 +118,11 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     log('probe', 'started')
     try:
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             value = parse_result(execute(command(action, operation_id)), operation_id)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             status = value['status']
             if status == 'legacy':
                 if action != 'start':
@@ -140,10 +157,14 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
 
     def verify():
         try:
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             # An absent helper is re-probed read-only; never start work on a
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             if current['status'] != status or (boot and current.get('boot_id') != boot):
                 raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化，禁止使用旧凭据重启')
             if status == 'committed' and receipt(current) != generation:
@@ -287,7 +308,11 @@ class AicodingRestartBackupMixin:
 
         def verify_and_fence():
             verify()
-            execution.fence_mutation()
+            execution.verify_backup = verify
+            # BaaS request preparation is not a remote mutation. Its fence is
+            # installed by before_restart_submission, immediately before POST.
+            if execution.payload["provider"] != "baas":
+                execution.fence_mutation()
         return verify_and_fence
 
     async def prepare_restart_async(self, ctx, **kwargs):

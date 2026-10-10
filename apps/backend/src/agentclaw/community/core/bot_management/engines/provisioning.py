@@ -13,13 +13,59 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Protocol, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+if TYPE_CHECKING:
+    from agentclaw.community.api.baas_service import BaasServiceProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+    from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
+    from agentclaw.community.core.service_bot.services.arca_image_pin import ServiceBotImagePin
+    from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+
+
+class CallerConnectionLifecycle(Protocol):
+    """Internal ports supplied to Caller engine policy, not an HTTP Service API.
+
+    The existing lifecycle owns artifact resolution, upgrade, identity exchange
+    and connection construction. Strategies own admission/execution policy.
+    """
+
+    _instance_repo: ExpertChatInstanceRepository
+    _publish_repo: BotPublishRepositoryProtocol
+    _restart_locks: BotRestartLockRepositoryProtocol
+    _task_queue: TaskQueueService
+    _baas: BaasServiceProtocol
+
+    def _load_service_bot(self, bot_id: str, owner_id: str) -> dict: ...
+
+    def _resolve_build_artifact(self, bot_id: str, owner_id: str) -> tuple[BotPublishRecord, str | None]: ...
+
+    def _resolve_publish_image_pin(
+        self, publish_record: BotPublishRecord, *, bot_id: str, owner_id: str,
+    ) -> ServiceBotImagePin: ...
+
+    async def _continue_caller_connection(
+        self, *, instance: dict, publish_record: BotPublishRecord,
+        migration_path: str | None, image_pin: ServiceBotImagePin,
+        user_id: str, bot_id: str, owner_id: str,
+        force_upgrade: bool, iam_token: str | None,
+    ) -> dict: ...
+
+    async def _upgrade_container(
+        self, bot_uuid: str, bot_id: str, owner_id: str,
+        migration_path: str | None, version: int = 1,
+        docker_image: str | None = None, publish_ext: dict | None = None,
+    ) -> dict: ...
+
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -262,6 +308,17 @@ class EngineProvisioningStrategy(ABC):
         """
         return restart(**kwargs)
 
+    async def execute_caller_connection(
+        self, ctx: BotProvisioningContext, *, service: CallerConnectionLifecycle, **kwargs,
+    ) -> dict:
+        """Default: unchanged Caller lifecycle. Strategies may defer upgrades.
+
+        The service supplies the resolved instance/artifact and original lifecycle
+        callback. Deferred strategies must preserve the existing result shape,
+        identity exchange, and failure contract; no credentials may enter tasks.
+        """
+        return await service._continue_caller_connection(**kwargs)
+
     @abstractmethod
     def apply_restart_extra_configs(
         self,
@@ -346,3 +403,12 @@ class EngineProvisioningStrategy(ABC):
         service layer translates it uniformly (coding engines override).
         """
         raise hosted_workspace_not_eligible_error(ctx)
+
+
+# A deferred operation may pin its admission policy for the reused lifecycle.
+# Dispatch still supplies the freshly resolved context: the pinned policy can
+# reject an engine/target change instead of silently falling into a no-op policy.
+# Default None preserves direct callers and every other engine's resolution.
+instance_restart_policy: ContextVar[EngineProvisioningStrategy | None] = ContextVar(
+    'instance_restart_policy', default=None,
+)

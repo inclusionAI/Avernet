@@ -4629,6 +4629,7 @@ class BotService(BotServiceProtocol):
                 task_queue=self._task_queue_service,
                 get_bot=self.get_bot,
                 template_service=self._template_service,
+                lifecycle=self,
             ),
             **kwargs,
         )

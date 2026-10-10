@@ -133,6 +133,8 @@ def _make_service(
         token_provider=token_provider,
         runtime_updater=runtime_updater,
         common_config_service=common_config_service,
+        task_queue=MagicMock(),
+        restart_locks=MagicMock(),
     )
     return svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater
 
