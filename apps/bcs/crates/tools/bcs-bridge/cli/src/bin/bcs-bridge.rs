@@ -1,5 +1,5 @@
 //! Open-source `bcs-bridge` binary: the application with its default plugins
-//! (built-in `claude-code` and `codex` engines, explicit endpoints,
+//! (`claude-code`, `codex` and native `qwenwork` engines, explicit endpoints,
 //! `BCS_BRIDGE_PROVIDER_TOKENS` webhook credentials, static-bearer identity).
 //!
 //! Loads config from `--config` / `BRIDGE_CONFIG` (default `~/.bcn-bridge/bridge.toml`), initializes tracing
@@ -51,5 +51,5 @@ use std::process::ExitCode;
 use bcs_bridge_app::BridgeApp;
 
 fn main() -> ExitCode {
-    BridgeApp::builder().build().main()
+    BridgeApp::builder().engine(bcs_bridge_qwenwork::QwenWorkFactory).build().main()
 }
