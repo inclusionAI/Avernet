@@ -75,7 +75,12 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     identity.preflight()?;
     let factory = app.engines().get(&args.engine).with_context(|| format!(
         "Unknown engine '{}'; available engines: {}", args.engine, app.engines().ids().collect::<Vec<_>>().join(", ")))?;
-    let engine_bin = utils::resolve_engine_bin(args.engine_bin.as_deref(), factory.default_bin())?;
+    let engine_bin = if factory.requires_bin() {
+        Some(utils::resolve_engine_bin(args.engine_bin.as_deref(), factory.default_bin())?)
+    } else {
+        if args.engine_bin.is_some() { bail!("--engine-bin does not apply to engine '{}'", args.engine); }
+        None
+    };
     if args.token.trim().is_empty() || args.bot_name.trim().is_empty() { bail!("Registration token and Bot name must be nonempty"); }
     if args.provider_bot_ref.as_deref().is_some_and(|value| !valid_provider_bot_ref(value)) {
         bail!("--provider-bot-ref must be 1-128 characters of letters, digits, '_', '.', ':' or '-'");
@@ -124,7 +129,9 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     bot.insert("engine".into(), args.engine.clone().into());
     bot.insert("cwd".into(), cwd.to_str().context("Engine working directory must be UTF-8")?.into());
     if let Some(model) = args.model { bot.insert("model".into(), model.into()); }
-    bot.insert("engine_bin".into(), engine_bin.to_str().context("Engine executable path must be UTF-8")?.into());
+    if let Some(engine_bin) = engine_bin {
+        bot.insert("engine_bin".into(), engine_bin.to_str().context("Engine executable path must be UTF-8")?.into());
+    }
     let mut document = toml::Table::new();
     document.insert("provider_id".into(), provider_id.clone().into());
     document.insert("mode".into(), args.mode.name().into());

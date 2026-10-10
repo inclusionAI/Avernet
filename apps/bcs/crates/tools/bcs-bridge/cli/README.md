@@ -1,6 +1,6 @@
 # BCS Bridge
 
-`bcs-bridge` connects a local coding-agent engine (Claude Code or Codex) to BCS as
+`bcs-bridge` connects a local engine (Claude Code, Codex or QwenWork) to BCS as
 a Bot. All three are members of the BCS workspace (`apps/bcs`) and follow its shared
 version and lint configuration. They live under `apps/bcs/crates/tools/bcs-bridge/`:
 
@@ -12,7 +12,7 @@ bcs-bridge/        # grouping directory
 ``` It registers the Bot with a Provider-scoped registration token, then serves
 BCS work either as a **gateway** (BCS delivers Provider 2.0 webhooks to the
 bridge's `/webhook`) or as a **plugin** (the bridge dials the BCS Bot WebSocket
-`/ws/bot`). Each turn runs the engine as a local subprocess and streams its
+`/ws/bot`). Each turn invokes an engine adapter and streams its
 output back to BCS as chat, thinking, tool and interaction (HITL) events.
 
 ## Crates
@@ -20,6 +20,7 @@ output back to BCS as chat, thinking, tool and interaction (HITL) events.
 | Crate | Kind | Responsibility |
 | --- | --- | --- |
 | `bcs-bridge-core` | library | Runtime: Provider 2.0 webhook and Bot WebSocket adapters, runs, durable sessions (SQLite), HITL interactions, the engine plugin interface and the built-in engine drivers |
+| `bcs-bridge-qwenwork` | library | Native desktop adapter: local WeCom-compatible WS, HTTP Hooks and text/tool translation; registered by the CLI composition root |
 | `bcs-bridge-app` | library | CLI application: `register`/`start`/`status`/`stop`, configuration, instance management, registration and the application plugin interfaces |
 | `bcs-bridge-cli` | binary | The open-source distribution: `bcs-bridge-app` with its default plugins; installs the `bcs-bridge` command |
 
@@ -78,13 +79,19 @@ engine_bin = "/usr/local/bin/claude"
 cwd = "/home/me/workspace"
 # model = "..."
 # permission_mode = "..."      # engine-specific
-# engine_options = { ... }     # engine-specific; the built-in engines accept none
+# engine_options = { ... }     # engine-specific; claude-code/codex accept none
 
 [registration]
 api_url = "https://bcs.example.com/prefix"
 ```
 
 ## Extending: plugins
+
+For `--engine qwenwork`, no executable or Python service is needed. Configure
+the running desktop's channel and Hooks and add its `engine_options` as shown
+in [the QwenWork engine guide](../qwenwork/README.md). Workspace, model and
+permissions are owned by QwenWork; its desktop protocol/schema must be verified
+before switching an existing Bot.
 
 A distribution is a small binary that assembles the application with its own
 plugins. Registering an id that already exists replaces the default.
@@ -133,6 +140,11 @@ arguments.
 
 `engine::cli::CliSession` (subprocess with line-oriented stdio) and
 `engine::trace` are available to engine implementations.
+
+`EngineFactory::requires_bin()` defaults to true. Adapters to an already-running
+app return false: registration skips PATH lookup and omits `engine_bin`, and
+the registry passes an empty build path. Explicit `engine_bin` is rejected for
+such engines. Existing factories and configurations keep their behavior.
 
 ### Known limitations
 

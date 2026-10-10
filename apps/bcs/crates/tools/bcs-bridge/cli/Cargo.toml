@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 bcs-bridge-app = { workspace = true }
+bcs-bridge-qwenwork = { path = "../qwenwork" }
 
 [dev-dependencies]
 axum = { workspace = true }
