@@ -1,7 +1,8 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 
 export type RunReadScope = { botId: string; ownerId: string };
-export type RunListQuery = RunReadScope & { limit?: number; beforeId?: number; workflowId?: string; status?: string; identityKey?: string; includeHidden?: boolean };
+export type RunListQuery = RunReadScope & { scope?: "bot" | "session" | "all"; userId?: string; sessionKey?: string; sessionId?: string; limit?: number; beforeId?: number; workflowId?: string; status?: string; identityKey?: string; includeHidden?: boolean };
 export type RunLogQuery = RunReadScope & { flowId: string; limit?: number; afterId?: number; nodeId?: string; level?: string };
 export type ReadPage = { items: Record<string, unknown>[]; nextCursor: number | null };
 
@@ -23,18 +24,53 @@ function page(rows: Record<string, unknown>[], limit: number): ReadPage {
 /** Internal service callers supply bot scope from runtime configuration, never tool arguments.
  * Exact origin ownership deliberately excludes legacy rows without provable ownership. */
 export class RunReadRepository {
-  constructor(private db: IDatabase) {}
+  constructor(private db: IDatabase,
+    private permissions: Pick<BotWorkflowPermissionRepository, "getViewByIdsForOwner" | "resolveViewScope"> = new BotWorkflowPermissionRepository(db)) {}
 
   async listRuns(q: RunListQuery): Promise<ReadPage> {
     const key = scopeKey(q); const limit = pageLimit(q.limit); cursor(q.beforeId);
-    const where = ["origin_bot_id = ?"]; const args: unknown[] = [key];
+    const scope = q.scope ?? "bot";
+    if (!["bot", "session", "all"].includes(scope)) throw new Error("Invalid run scope");
+    const where: string[] = []; const args: unknown[] = [];
+    if (scope === "all") {
+      if (!q.userId?.trim()) throw new Error("Missing userId for all scope");
+      const view = await this.permissions.getViewByIdsForOwner(q.userId);
+      // Missing permissions never authorize a cross-Bot query.
+      const allowed = [...(view?.viewableIds ?? [])].filter(id => !q.workflowId || id === q.workflowId);
+      const grants: string[] = [];
+      for (const workflowId of allowed) {
+        const viewScope = await this.permissions.resolveViewScope(workflowId, q.userId);
+        if (viewScope === "deny") continue;
+        if (viewScope === "all") {
+          grants.push("workflow_id = ?"); args.push(workflowId);
+        } else if (viewScope.botIds.length) {
+          grants.push(`(workflow_id = ? AND (${viewScope.botIds.map(() => "origin_bot_id LIKE ? ESCAPE '!'").join(" OR ")}))`);
+          args.push(workflowId, ...viewScope.botIds.map(id => `${id.replace(/[!%_]/g, "!$&")}:%`));
+        }
+      }
+      if (!grants.length) return { items: [], nextCursor: null };
+      where.push(`(${grants.join(" OR ")})`);
+    } else {
+      where.push("origin_bot_id = ?"); args.push(key);
+    }
+    if (scope === "session") {
+      if (!q.sessionId?.trim() && !q.sessionKey?.trim()) throw new Error("Missing session identity for session scope");
+      if (q.sessionId && q.sessionKey) {
+        where.push("(origin_session_id = ? OR ((origin_session_id IS NULL OR origin_session_id = '') AND origin_session_key = ?))");
+        args.push(q.sessionId, q.sessionKey);
+      } else if (q.sessionId) {
+        where.push("origin_session_id = ?"); args.push(q.sessionId);
+      } else {
+        where.push("origin_session_key = ?"); args.push(q.sessionKey);
+      }
+    }
     for (const [col, val] of [["workflow_id", q.workflowId], ["status", q.status], ["identity_key", q.identityKey]]) {
       if (val) { where.push(`${col} = ?`); args.push(val); }
     }
     if (q.beforeId !== undefined) { where.push("id < ?"); args.push(q.beforeId); }
     if (!q.includeHidden) where.push("COALESCE(CAST(JSON_EXTRACT(state_json, '$.workflowData.flowHidden') AS CHAR), 'false') NOT IN ('true', '1')");
     const rows = await this.db.query<Record<string, unknown>>(
-      `SELECT id, flow_id, workflow_id, status, origin_bot_id, identity_key, started_at, gmt_modified
+      `SELECT id, flow_id, workflow_id, status, origin_bot_id, origin_session_key, origin_session_id, identity_key, started_at, gmt_modified
        FROM flow_runs WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`, [...args, limit + 1]);
     return page(rows, limit);
   }
