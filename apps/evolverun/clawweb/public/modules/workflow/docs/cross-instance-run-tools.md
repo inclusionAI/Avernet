@@ -1,6 +1,6 @@
 # 运行查询范围、分页与跨实例重试
 
-API 模式下，运行查询统一从 ClawWeb 读取：
+API 模式下，运行查询优先从 ClawWeb 读取；当前 session 查询保留原有本地查询作为兜底：
 
 | 命令 | 范围 |
 | --- | --- |
@@ -41,8 +41,10 @@ runs --all --workflowId "tech-research-v2" --status "failed" --limit 20 --before
 「当前 session」先核对 Bot，再优先比较来源 session ID；无法比较 ID 时比较 session key。
 相同 key 但 session ID 已变化的旧运行不标记为当前 session，不同 Bot 使用相同 key 也不算同一 session。
 旧服务或记录缺少来源字段时，只针对当前页逐条尝试 session 绑定的查询来确认匹配；无法确认标记「未知」，不读取全部本地历史。
-本地查询失败不影响 API 列表；API 失败会报错，不降级成本地空列表，也不混入未上报记录。
-`--session` / `--all` 要求服务端回传生效的范围；旧服务忽略新参数时客户端明确要求升级。
+本地归属标记查询失败不影响 API 列表。当前 Bot 和 `--all` 查询在 API 失败时报错。
+`--session` 在 API 失败、API 配置或 session 查询身份缺失、旧服务不支持范围，或首屏返回空记录时，调用原有 `boundTaskFlow.list()` 查询本地 session，保留 workflow、状态、identity、隐藏记录和条数筛选。结果明确标注「本地 session 兜底」和原因；本地查询也失败时报告错误。
+正常翻页到空页表示查询结束，不触发本地兜底。翻页请求失败时，本地结果从头展示并提示可能重复，不沿用 API 的 `beforeId`；本地兜底沿用原有条数限制，不提供 API 游标分页。
+`--session` / `--all` 要求服务端回传生效的范围；旧服务忽略新参数时，`--session` 使用本地兜底，`--all` 明确要求升级。
 
 单条日志显示前 2000 字符并提示截断。`state/debug` 共用 inspect。
 默认 Bot 范围及日志仍按运行环境 bot/owner 查询，无归属旧记录不包含在内；`--all` 按 workflow 查看权限查询；只有该 workflow 的所有 Bot 查看权限才包含来源 Bot 缺失的旧记录。
@@ -62,7 +64,7 @@ CREATE INDEX idx_flow_runs_origin_id ON flow_runs (origin_bot_id, id);
 ```
 
 新增内部接口为 `POST /api/internal/run-reads/runs`、`POST /api/internal/run-reads/logs`。
-新客户端遇到旧查询服务会明确报错，不降级成误导性的空列表。
+新客户端遇到旧查询服务时，当前 session 按上述规则使用本地兜底；其他范围明确报错。
 
 重试邮箱完整保存 `useCurrentDef`、`debug`、`inputOverrides`。
 带选项的请求发布前会检查服务能力，旧执行实例不能领取带选项的请求。
