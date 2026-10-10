@@ -33,6 +33,7 @@ def _seed_member_managed_bot(
     *,
     owner_id: str,
     bot_id: str,
+    active_engine: str,
 ) -> None:
     """Seed a non-service, non-applicationCoding bot with ac_templates.ext enabled."""
     _execute_local_sql(
@@ -47,7 +48,7 @@ def _seed_member_managed_bot(
                     "call_type, caller_config_revision"
                     ") VALUES ("
                     ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
-                    ":owner_id, :engine_types, 'openclaw', 'ACTIVE', NULL, NULL, "
+                    ":owner_id, :engine_types, :active_engine, 'ACTIVE', NULL, NULL, "
                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :bot_ext, 'dev', 'personal', 'chat', "
                     "'owner', 0"
                     ")"
@@ -57,7 +58,8 @@ def _seed_member_managed_bot(
                     "bot_name": f"Member managed {bot_id}",
                     "bot_desc": "singlebox member-management template-ext seed",
                     "owner_id": owner_id,
-                    "engine_types": json.dumps(["openclaw"]),
+                    "engine_types": json.dumps([active_engine]),
+                    "active_engine": active_engine,
                     "bot_ext": json.dumps({"member_management": False}),
                 },
             },
@@ -82,8 +84,14 @@ def _seed_member_managed_bot(
 
 
 @pytest.mark.acceptance
-def test_template_ext_member_management_allows_live_collaborator_add(live_backend):
-    """A live API add uses ac_templates.ext to allow Bot member management."""
+@pytest.mark.parametrize(
+    ("active_engine", "allowed"),
+    [("claude_code", True), ("aicoding", True), ("openclaw", False)],
+)
+def test_template_ext_member_management_allows_live_collaborator_add(
+    live_backend, active_engine, allowed,
+):
+    """Only template-readable engines can enable members via persisted ext."""
     owner_id = _fresh_id("collab_owner")
     bot_id = _fresh_id("collab_member_mgmt")
     member_id = _fresh_id("collab_member")
@@ -93,7 +101,9 @@ def test_template_ext_member_management_allows_live_collaborator_add(live_backen
         headers={"x-user-id": owner_id},
         timeout=60.0,
     ) as client:
-        _seed_member_managed_bot(client, owner_id=owner_id, bot_id=bot_id)
+        _seed_member_managed_bot(
+            client, owner_id=owner_id, bot_id=bot_id, active_engine=active_engine,
+        )
 
         add_response = client.post(
             "/api/bot/collaborator/add",
@@ -107,10 +117,15 @@ def test_template_ext_member_management_allows_live_collaborator_add(live_backen
         )
         assert add_response.status_code == 200, add_response.text
         add_body = add_response.json()
-        assert add_body["success"] is True, add_body
-        assert add_body["data"]["bot_id"] == bot_id
-        assert add_body["data"]["user_id"] == member_id
-        assert add_body["data"]["role"] == "member"
+        if not allowed:
+            assert add_body["success"] is False, add_body
+            assert add_body["error_code"] == 400, add_body
+            assert "未开启成员管理" in add_body["message"], add_body
+        else:
+            assert add_body["success"] is True, add_body
+            assert add_body["data"]["bot_id"] == bot_id
+            assert add_body["data"]["user_id"] == member_id
+            assert add_body["data"]["role"] == "member"
 
         permission = client.post(
             "/api/bot/collaborator/check_permission",
@@ -124,5 +139,6 @@ def test_template_ext_member_management_allows_live_collaborator_add(live_backen
         assert permission.status_code == 200, permission.text
         permission_body = permission.json()
         assert permission_body["success"] is True, permission_body
-        assert permission_body["data"]["has_permission"] is True
-        assert permission_body["data"]["level"] == "MEMBER"
+        assert permission_body["data"]["has_permission"] is allowed
+        if allowed:
+            assert permission_body["data"]["level"] == "MEMBER"
