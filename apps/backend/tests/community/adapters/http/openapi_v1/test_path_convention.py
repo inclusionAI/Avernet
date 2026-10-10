@@ -101,6 +101,8 @@ _BOT_FREE = frozenset(
         "ceiling",
         "check-name",
         "catalog",
+        # User-level relationship collection across multiple Bots.
+        "collaborations",
         "loadtest",
         "local",
         "logs",

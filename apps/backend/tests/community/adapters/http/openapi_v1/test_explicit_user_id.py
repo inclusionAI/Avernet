@@ -479,8 +479,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Bot, so ``none`` 109 → 111.
 #:
 #: The engine default-config read (#2525) is bot-path-addressed like the rest of
-#: its group: ``path`` 169 → 170.
-_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 111}
+#: its group: ``path`` 169 → 170. The collaborating-Bot collection adds one
+#: account-level operation, so ``none`` 111 → 112.
+_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 112}
 
 
 def _schema() -> dict:
@@ -640,8 +641,9 @@ def test_the_pinned_number_of_operations_take_it():
     # Scoped MCP Header-group GET/PUT add two more user-scoped operations:
     # 246 → 248. The engine default-config read (#2525) is user-scoped with
     # its bot on the path, like every other operation in its group:
-    # 248 → 249.
-    assert len(taking) == 249
+    # 248 → 249. The collaborating-Bot collection adds one user-scoped
+    # account-level read: 249 → 250.
+    assert len(taking) == 250
 
 
 def test_the_exempt_operations_take_none():
