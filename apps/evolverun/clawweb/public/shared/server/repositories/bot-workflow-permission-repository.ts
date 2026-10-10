@@ -6,6 +6,7 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
 import type { BotDirectory, DirectoryBot } from "../services/bot-directory.js";
+import type { RunViewBot, RunViewPermissions, RunViewScope } from "../services/run-view-permissions.js";
 
 export type BotWorkflowPermissionRow = {
   id: number;
@@ -37,7 +38,7 @@ export type WorkflowViewScope =
 
 const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified" as const;
 
-export class BotWorkflowPermissionRepository {
+export class BotWorkflowPermissionRepository implements RunViewPermissions {
   constructor(private db: IDatabase, private botDirectory?: Pick<BotDirectory, "listBots">) {}
 
   /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
@@ -204,6 +205,12 @@ export class BotWorkflowPermissionRepository {
    *   - { botIds: string[] }: user can only view runs from these specific bot_ids
    */
   async resolveViewScope(workflowId: string, userId: string): Promise<WorkflowViewScope> {
+    const scope = await this.resolveRunViewScope(workflowId, userId);
+    return typeof scope === "string" ? scope : { botIds: [...new Set(scope.bots.map(bot => bot.botId))] };
+  }
+
+  /** Run reads must preserve owner identity; the legacy botIds-only scope cannot authorize them. */
+  async resolveRunViewScope(workflowId: string, userId: string): Promise<RunViewScope> {
     // Rule 1: all users, all bots
     const globalRows = await this.db.query<{ cnt: number }>(
       `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
@@ -224,19 +231,21 @@ export class BotWorkflowPermissionRepository {
     // Rule 3 & 4: specific bot permissions
     // - bot_owner_id='*' AND bot_id=<specific>  → all users, specific bot
     // - bot_owner_id=userId AND bot_id=<specific> → specific user, specific bot
-    const botRows = await this.db.query<{ bot_id: string | null }>(
-      `SELECT DISTINCT bot_id FROM bot_workflow_permissions
+    const botRows = await this.db.query<{ bot_id: string | null; bot_owner_id: string }>(
+      `SELECT DISTINCT bot_id, bot_owner_id FROM bot_workflow_permissions
        WHERE workflow_id = ? AND can_view = 1
          AND bot_id IS NOT NULL AND bot_id != '' AND bot_id != '*'
          AND (bot_owner_id = ? OR bot_owner_id = '*')`,
       [workflowId, userId],
     );
     const inherited = await this.inheritedGrants(userId, workflowId);
-    const botIds = [...new Set([
-      ...botRows.map((r) => r.bot_id!).filter(Boolean),
-      ...inherited.filter(r => r.can_view === 1 || r.can_edit === 1).map(r => r.bot_id!),
-    ])];
-    if (botIds.length > 0) return { botIds };
+    const identities = new Map<string, RunViewBot>();
+    for (const row of [...botRows, ...inherited.filter(r => r.can_view === 1 || r.can_edit === 1)]) {
+      if (!row.bot_id || !row.bot_owner_id) continue;
+      const bot = { botId: row.bot_id, ownerId: row.bot_owner_id };
+      identities.set(JSON.stringify([bot.botId, bot.ownerId]), bot);
+    }
+    if (identities.size > 0) return { bots: [...identities.values()] };
 
     return "deny";
   }
