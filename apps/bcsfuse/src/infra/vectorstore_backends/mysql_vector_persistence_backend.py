@@ -34,8 +34,8 @@ from src.domain.services.vector_persistence_backend import (
     VectorPersistenceBackend,
 )
 from src.infra.public.observability.storage_logging import (
-    log_storage_event,
     log_storage_error,
+    log_storage_event,
     mask_host,
     mask_user,
 )
@@ -235,6 +235,55 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    def iter_batches(self, batch_size: int):
+        """Page active rows by primary key so a rebuild never buffers all vectors."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        last_id = None
+        while True:
+            self._ensure_connection()
+            cursor = self._conn.cursor()
+            try:
+                if last_id is None:
+                    cursor.execute(
+                        f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
+                        "WHERE `is_deleted` = 0 ORDER BY `id` LIMIT %s",
+                        (batch_size,),
+                    )
+                else:
+                    cursor.execute(
+                        f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
+                        "WHERE `is_deleted` = 0 AND `id` > %s "
+                        "ORDER BY `id` LIMIT %s",
+                        (last_id, batch_size),
+                    )
+                rows = cursor.fetchall()
+                points = []
+                for row in rows:
+                    try:
+                        points.append(VectorPoint(
+                            id=row[0],
+                            vector=self._deserialize_vector(row[1]),
+                            payload=json.loads(row[2]) if row[2] else {},
+                        ))
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+                page_length = len(rows)
+                if rows:
+                    last_id = rows[-1][0]
+                del rows
+            except Error as e:
+                raise RuntimeError(f"Failed to load vector page from MySQL: {e}") from e
+            finally:
+                self._finish_read(cursor)
+
+            if not points:
+                return
+            yield points
+            if page_length < batch_size:
+                return
+
     def load_changes_since(self, last_sync_time: float) -> VectorChangeSet:
         self._ensure_connection()
         cursor = self._conn.cursor()
@@ -272,6 +321,67 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
             raise RuntimeError(f"Failed to load changes from MySQL: {e}") from e
         finally:
             self._finish_read(cursor)
+
+    def iter_change_batches_since(self, checkpoint: float, batch_size: int):
+        """Page durable changes by (modification time, ID) without buffering all."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        floor = max(0.0, checkpoint - 1.0)
+        last_key = None
+        while True:
+            self._ensure_connection()
+            cursor = self._conn.cursor()
+            try:
+                sql = (
+                    f"SELECT `id`, `vector`, `payload`, `is_deleted`, "
+                    f"UNIX_TIMESTAMP(`gmt_modify`) FROM {TABLE_NAME} "
+                    "WHERE `gmt_modify` >= FROM_UNIXTIME(%s) "
+                )
+                if last_key is None:
+                    params = (floor, batch_size)
+                else:
+                    sql += (
+                        "AND (`gmt_modify` > FROM_UNIXTIME(%s) OR "
+                        "(`gmt_modify` = FROM_UNIXTIME(%s) AND `id` > %s)) "
+                    )
+                    params = (floor, last_key[0], last_key[0], last_key[1], batch_size)
+                cursor.execute(sql + "ORDER BY `gmt_modify`, `id` LIMIT %s", params)
+                rows = cursor.fetchall()
+                upserts = []
+                deleted_ids = []
+                next_checkpoint = checkpoint
+                for row in rows:
+                    next_checkpoint = max(next_checkpoint, float(row[4] or 0.0))
+                    if bool(row[3]):
+                        deleted_ids.append(row[0])
+                        continue
+                    try:
+                        upserts.append(VectorPoint(
+                            id=row[0],
+                            vector=self._deserialize_vector(row[1]),
+                            payload=json.loads(row[2]) if row[2] else {},
+                        ))
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+                page_length = len(rows)
+                if rows:
+                    last_key = (float(rows[-1][4] or 0.0), rows[-1][0])
+                del rows
+            except Error as e:
+                raise RuntimeError(f"Failed to load vector changes from MySQL: {e}") from e
+            finally:
+                self._finish_read(cursor)
+
+            if page_length == 0:
+                return
+            yield VectorChangeSet(
+                upserts=upserts,
+                deleted_ids=deleted_ids,
+                checkpoint=next_checkpoint,
+            )
+            if page_length < batch_size:
+                return
 
     def delete(self, id: str) -> bool:
         self._ensure_connection()

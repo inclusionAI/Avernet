@@ -3,7 +3,6 @@
 import pickle
 
 import pytest
-
 from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
@@ -67,7 +66,7 @@ def test_failed_decode_keeps_sync_checkpoint_and_retries_complete_batch(
         assert connection.closed_reads == connection.rollbacks == 1
         connection.rows[1] = ("target", valid, '{"content":"target"}', 0, 102.0)
         assert store.sync_incremental() == {"upserted": 2, "deleted": 1}
-        assert connection.parameters == [(99.0,), (99.0,)]
+        assert connection.parameters == [(99.0, 100), (99.0, 100)]
         assert store._last_sync_time == 110.0
         assert set(store.get_vector_ids()) == {"target", "later"}
         assert [hit.id for hit in store.text_search("target", top_k=5)] == ["target"]

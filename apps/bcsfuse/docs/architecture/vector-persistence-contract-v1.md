@@ -13,8 +13,31 @@ IncrementalVectorPersistenceBackend.load_changes_since(
 
 `IncrementalVectorPersistenceBackend` extends the baseline
 `VectorPersistenceBackend`. Providers that implement only the baseline
-contract remain compatible with full index rebuilds, but do not support
-incremental synchronization.
+contract do not support incremental synchronization.
+
+## Bounded rebuild reads
+
+`QdrantMySQLVectorStore.rebuild_from_backend()` requires the optional
+`BatchedVectorPersistenceBackend.iter_batches(batch_size)` contract. It yields
+non-empty pages of at most `batch_size` active `VectorPoint` values in ascending
+primary-key order. `batch_size` must be positive. Providers must bound the SQL
+result itself, not query the full table and split the result in Python.
+
+The consumer takes an incremental checkpoint before scanning pages, applies
+each page to the local dense and keyword indexes, removes stale local IDs, and
+replays changes since that checkpoint. Incremental providers used by this
+store must also implement
+`BatchedIncrementalVectorPersistenceBackend.iter_change_batches_since(checkpoint,
+batch_size)`, which yields at most `batch_size` mutations per page in
+`(gmt_modify, id)` order, including tombstones. Rebuild catch-up and periodic
+incremental sync use this bounded feed; the local checkpoint advances only
+after a page is applied. A failed page is retried from the last checkpoint,
+with timestamp overlap making replay idempotent. The existing `load_all()` method remains
+available for other callers, but the Qdrant rebuild no longer calls it. A
+provider without the required paging methods fails before the rebuild changes the index.
+Decode or storage failures must propagate rather than yield a partial page.
+Internal ZDAS and public MySQL providers exclude `is_deleted = 1` rows; SQLite
+has no soft-deletion column.
 
 ## Change-set semantics
 
@@ -66,7 +89,8 @@ tombstones need only their ID and timestamp and do not decode deleted content.
   `SparseRetriever` does not remove this current keyword capability or change
   dense search, durable persistence, or incremental replay semantics.
 - Existing providers may continue to implement only
-  `VectorPersistenceBackend`; callers must use a full rebuild for them.
+  `VectorPersistenceBackend`, but the Qdrant rebuild also requires the bounded
+  page contract.
 - Incremental providers must satisfy both protocols and return
   `VectorChangeSet` exactly as defined above.
 - Adding optional metadata to a `VectorPoint.payload` is compatible.
