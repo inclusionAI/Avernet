@@ -1,24 +1,52 @@
-# 跨实例运行查询与重试参数
+# 运行查询范围、分页与跨实例重试
 
-API 模式下，多个实例使用同一个 ClawWeb、同一组 BOT_ID / OWNER_ID。
+API 模式下，运行查询统一从 ClawWeb 读取：
+
+| 命令 | 范围 |
+| --- | --- |
+| `runs [workflowId]` | 当前 Bot 发起的运行记录，包含它的所有 session。 |
+| `runs [workflowId] --session` | 仅当前 Bot、当前 session 发起的运行记录。 |
+| `runs [workflowId] --all` | 跨 Bot、跨 session，查询当前用户有权查看的所有 workflow 的运行记录；权限由服务端判断。 |
+
+默认用 `runs`；用户限定“本次对话”时用 `--session`；要求“跨 Bot”“所有 Bot”或“我能查看的全部运行记录”时用 `--all`。
+`flows` 是 `runs` 的兼容别名。`runs <workflowId>` 与 `--workflowId <workflowId>` 均可用，显式参数优先。
+`--global` 仅保留旧语义：API 模式等同当前 Bot，不能理解为跨 Bot，也不能与新范围参数混用。
+本地模式保留原行为：默认与 `--session` 查本地当前会话，`--global` 查本实例 registry；`--all` 和游标分页需要 API。
 
 ```text
-/workflow runs --global --status failed --limit 20
-/workflow runs --global --status failed --limit 20 --beforeId <上一页游标>
+/workflow runs tech-research-v2
+/workflow runs tech-research-v2 --session
+/workflow runs --all --status failed --limit 20
 /workflow inspect <flowId>
 /workflow logs <flowId> --nodeId <nodeId> --level error --limit 20
-/workflow logs <flowId> --nodeId <nodeId> --level error --limit 20 --afterId <上一页游标>
 ```
 
-MCP 对应 `workflow_runs(global=true, beforeId=...)`、`workflow_inspect`、`workflow_logs(afterId=...)`。
-`workflow_runs` 默认仍查当前会话。`state/debug` 入口共用 inspect。
+MCP 使用 `workflow_runs(scope="bot" | "session" | "all", workflowId=..., beforeId=...)`，默认 `scope="bot"`。
+用户身份来自运行时请求上下文，不接受工具参数指定其他用户。workflow 固定用户和 Bot ID 不用于 `--all` 授权；无法确认当前用户时明确报错。
+服务端在排序和分页前应用 session 或 workflow 查看权限（包括仅能查看指定 Bot 运行的授权），不从取到的一页中再做权限过滤。`--all` 的权限信息缺失时不会放开查询。
 
-共享列表按入库 ID 倒序、日志按 ID 正序分页，翻页时保留筛选条件。
-日志序号 seq 可能随进程重启重复，不能用作分页游标。
-每页最多 50 条；单条日志显示前 2000 字符并提示截断，完整归档仍可通过 inspect 获取。
-列表和日志使用运行环境的 bot/owner 范围，MCP 不提供任意 owner 切换。
-无归属的旧记录不包含在共享查询中；空日志只表示尚无匹配的已上报日志。
-内部接口沿用服务级 Ed25519 签名信任，查询 scope 位于签名的 POST body 中；不构成独立的每 bot 身份认证。
+## 分页和列表标记
+
+CLI 与 MCP 都默认每页 20 条，最多 50 条。运行记录按入库 ID 倒序，用 `beforeId` 游标继续查询。
+每次返回本页数量、来源 Bot、当前 session 标记，以及是否还有更多记录。
+有下一页时返回完整命令，自动保留范围、workflow、状态、identity、隐藏记录选项和每页条数，例如：
+
+```text
+runs --all --workflowId "tech-research-v2" --status "failed" --limit 20 --beforeId 123
+```
+
+用户说“下一页”时，Agent 执行上次返回的命令；无需用户记忆游标或重填筛选条件。这里不新增 `runs next` 命令，也不依赖进程内分页状态。
+新增记录不会推移后续页；权限与状态变化会在每次查询时重新生效。日志按 ID 正序，用 `afterId` 翻页；seq 可能随重启重复，不能作游标。
+
+「当前 session」先核对 Bot，再优先比较来源 session ID；无法比较 ID 时比较 session key。
+相同 key 但 session ID 已变化的旧运行不标记为当前 session，不同 Bot 使用相同 key 也不算同一 session。
+旧服务或记录缺少来源字段时，只针对当前页逐条尝试 session 绑定的查询来确认匹配；无法确认标记「未知」，不读取全部本地历史。
+本地查询失败不影响 API 列表；API 失败会报错，不降级成本地空列表，也不混入未上报记录。
+`--session` / `--all` 要求服务端回传生效的范围；旧服务忽略新参数时客户端明确要求升级。
+
+单条日志显示前 2000 字符并提示截断。`state/debug` 共用 inspect。
+默认 Bot 范围及日志仍按运行环境 bot/owner 查询，无归属旧记录不包含在内；`--all` 按 workflow 查看权限查询；只有该 workflow 的所有 Bot 查看权限才包含来源 Bot 缺失的旧记录。
+内部接口沿用服务级 Ed25519 签名信任，身份和范围位于签名 POST body 中，不构成独立的终端用户登录认证。
 
 ## 发布顺序
 
@@ -52,7 +80,7 @@ Read requests use POST so their scope and filters are covered by the existing bo
 
 | Endpoint | Request body | Response `data` |
 |---|---|---|
-| `POST /run-reads/runs` | Required `botId`, `ownerId`; optional `workflowId`, `status`, `identityKey`, `includeHidden`, `beforeId`, `limit` | `{ items: RunSummary[], nextCursor: number \| null }` |
+| `POST /run-reads/runs` | Required `botId`, `ownerId`; optional `scope` (bot/session/all, default bot), `workflowId`, `status`, `identityKey`, `includeHidden`, `beforeId`, `limit`; session scope requires `sessionId` or `sessionKey`; all scope requires runtime `userId` | `{ items: RunSummary[], nextCursor: number \| null, scope: "bot" \| "session" \| "all" }` |
 | `POST /run-reads/logs` | Required `botId`, `ownerId`, `flowId`; optional `nodeId`, `level`, `afterId`, `limit` | `{ items: RunLog[], nextCursor: number \| null }` |
 | `GET /retry-requests/capabilities` | None | `{ executionOptionsVersion: 1 }` |
 | `POST /retry-requests` | Existing fields plus optional `options: { useCurrentDef?: boolean, debug?: boolean, inputOverrides?: Record<string,string> }` | Existing retry row, including nullable `options_json` |
@@ -66,9 +94,15 @@ Missing/invalid signatures are rejected by the host before querying repositories
 `limit` defaults to 20 and is restricted to integers 1–50. Cursors are nonnegative safe integers.
 Runs are ordered by descending database ID and use an exclusive `beforeId`; logs use ascending
 ID and an exclusive `afterId`. `nextCursor: null` ends the current filtered result set.
+Run summaries include nullable `origin_session_key` and `origin_session_id` alongside
+`id`, `flow_id`, `workflow_id`, `status`, `origin_bot_id`, `identity_key`, `started_at`, and `gmt_modified`.
+These identify the originating session; the client compares them with its current session context.
 Run summaries omit state/credentials payloads. Logs contain `id`, `node_id`, `level`, `source`,
 `message`, `message_length`, and `timestamp`; the message is capped at 2000 characters.
-Ownership matches the exact persisted `origin_bot_id = botId + ':' + ownerId`.
+Bot/session ownership matches the exact persisted `origin_bot_id = botId + ':' + ownerId`.
+All scope uses `getViewByIdsForOwner(userId)` and `resolveViewScope(workflowId, userId)` to apply both workflow and per-Bot grants before pagination; empty or absent grants return no records. Bot-specific grants exclude records without a known originating Bot. The host may inject its configured permission repository into `RunReadRepository`; the backwards-compatible default uses the shared permission repository against the same database.
+Session scope prefers exact session ID; rows without an ID can match the session key. No session identity is an error. The runtime requester ID excludes workflow defaults and Bot identity fallbacks.
+New clients require an echoed matching scope for session/all, so old servers cannot silently serve a different range. Bot queries remain compatible with old responses.
 
 Retry options are optional so existing rows remain readable. Consumers without
 `options_version: 1` can claim only requests with no execution options. The ClawMind client
