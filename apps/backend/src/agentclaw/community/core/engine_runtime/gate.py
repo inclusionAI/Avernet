@@ -55,7 +55,7 @@ from typing import Any
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
-    resolve_operable_permission_level,
+    resolve_explicit_permission_level,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -92,15 +92,16 @@ def resolve_operator_level(
 ) -> PermissionLevel:
     """The caller's effective level on this bot: OWNER, collaborator, space, NONE.
 
-    Delegates through the repository's own migration seam —
-    ``resolve_operable_permission_level`` — to the platform's one *effective*
-    policy (row, then the space-derived MEMBER grant, then the COSEC space
-    revocation recheck), rather than keeping a second copy of it here. The
-    seam matters beyond style: it probes the *effective* method first and
-    falls back to the legacy ``get_permission_level`` shape while in-place
-    test doubles migrate, so a legacy-shaped double answers instead of
-    crashing into a silent AttributeError→NONE→masked-404. This wrapper adds
-    only the fail-closed direction.
+    Delegates through the explicit ladder of the collaboration seam —
+    ``resolve_explicit_permission_level`` — because OPERATOR is the running
+    operations domain: a WS connection credential, an authorized-app grant,
+    and the sessions those ride on grant a caller live control of the
+    engine, and 迭代11's rule keeps operations for the Owner and the editors
+    the Owner granted or approved. The effective (Space synthesizing) ladder
+    had to stop answering here: it made every Team Space member an
+    operator. The COSEC revocation still applies on the explicit ladder, so
+    an editor removed from the Space loses operations on the next request —
+    the refusal direction the fail-closed wrapper keeps.
 
     ``owner_id`` must be the *resolved* owner — the record's, not the
     request's — and ``bot`` the row ownership was proven against: the
@@ -110,21 +111,21 @@ def resolve_operator_level(
     ``NONE`` (fail closed) and logs: this feeds a refusal, so the direction
     of the guess decides what a database blip does.
 
-    Synchronous — an indexed row read for every caller, plus a live Space
-    membership read (and the COSEC recheck's) wherever the row alone cannot
-    place the caller. Callers on an event loop run it in a worker thread with
+    Synchronous — one collaborator row read for every non-owner caller, plus
+    the COSEC membership recheck for row answers; owners short-circuit without
+    a read. Callers on an event loop run it in a worker thread with
     the rest of their resolution.
     """
     bot_pk = bot.get("id")
     try:
         return PermissionLevel(
-            resolve_operable_permission_level(
+            resolve_explicit_permission_level(
                 collaborators, bot=bot, user_id=caller_id, owner_id=owner_id
             )
         )
     except Exception:
         logger.warning(
-            "[engine_runtime] effective-level lookup failed for bot_pk=%r "
+            "[engine_runtime] explicit-level lookup failed for bot_pk=%r "
             "(row/space services unavailable); refusing the caller",
             bot_pk,
         )

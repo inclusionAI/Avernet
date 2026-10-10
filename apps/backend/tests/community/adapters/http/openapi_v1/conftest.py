@@ -209,6 +209,10 @@ class SeamCollaborators:
 
         self.level = PermissionLevel.NONE if level is None else level
 
+    def get_explicit_permission_level(self, *, bot, user_id, env=None):
+        # These doubles' members own real rows; the explicit ladder agrees.
+        return self.level
+
     def get_operable_permission_level(self, *, bot, user_id, env=None):
         return self.level
 

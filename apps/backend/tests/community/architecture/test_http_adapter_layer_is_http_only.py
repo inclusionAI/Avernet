@@ -51,6 +51,16 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     "dependencies.py",
     # Pure table split from enforcement; concrete-service imports remain checked.
     "authorization_rules.py",
+    # The retiring-address half of that table, split from authorization_rules
+    # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_retiring.py",
+    # The table's boot-time shape audit, split out of authorization_rules
+    # at the 1000-line module cap. Import-light by design — the table must
+    # assert its own shape at import without standing up the HTTP stack.
+    # Named in full rather than as a short pattern so this entry cannot
+    # exempt anything else.
+    "rule_shape_audit.py",
     "__init__.py",
 })
 

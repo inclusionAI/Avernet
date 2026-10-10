@@ -306,6 +306,8 @@ class DimaWorkspaceResponse(BaseModel):
     bot_id="$bot_id",
     owner_id="$user_id",
     skip_lock_check=True,
+    # 创建 DIMA 工作空间是编辑/操作域:走显式阶梯,空间合成的 MEMBER 不算
+    explicit=True,
 ))
 async def create_bot_dima_workspace(
     bot_id: str,

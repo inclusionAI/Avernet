@@ -356,6 +356,18 @@ class McpHeaderGroup(BaseModel):
     )
 
 
+class McpURLRule(BaseModel):
+    """One explicit custom MCP URL and its Bot scope."""
+
+    model_config = _STRICT
+
+    url: str = Field(description="HTTP(S) MCP endpoint override.")
+    bots: list[str] = Field(
+        default_factory=list,
+        description="Owned Bot IDs receiving this URL; empty means user default.",
+    )
+
+
 class McpScopedConfig(BaseModel):
     """Editable user-default and owned-Bot Header groups for one MCP."""
 
@@ -365,6 +377,7 @@ class McpScopedConfig(BaseModel):
         description="User-default transport preference; null selects the Center default."
     )
     params: list[McpHeaderGroup] = Field(description="Explicit user and Bot Header groups, without inherited copies.")
+    url_rules: list[McpURLRule] = Field(description="Explicit custom URL rules, without inherited Bot copies.")
     sync_results: list[dict[str, Any]] | None = Field(
         default=None, description="Best-effort per-Bot delivery results after a write."
     )
@@ -383,6 +396,10 @@ class McpScopedConfigWrite(BaseModel):
         description="Required nullable user-default transport preference."
     )
     params: list[McpHeaderGroup] = Field(description="Complete Header-group snapshot; empty clears all explicit Header rules.")
+    url_rules: list[McpURLRule] = Field(
+        default_factory=list,
+        description="Omit to preserve custom URLs; empty clears all; nonempty replaces the complete URL snapshot.",
+    )
 
 
 class McpConfigWrite(BaseModel):

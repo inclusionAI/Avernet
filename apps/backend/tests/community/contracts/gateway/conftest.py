@@ -17,7 +17,11 @@ import pytest
 from fastapi.testclient import TestClient
 from injector import Module, singleton
 
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
+from agentclaw.community.adapters.http.auth.dependencies import (
+    get_current_user,
+    get_device_connection_user,
+    require_operator,
+)
 from agentclaw.community.adapters.http.dependencies import get_request_context, RequestContext
 from agentclaw.community.core.auth import AuthenticatedIdentity
 from tests.community.contracts.gateway.schema_utils import (
@@ -76,6 +80,7 @@ def gw_client(app_with_testing_modules):
     """
     app = app_with_testing_modules
     app.dependency_overrides[get_current_user] = _mock_get_current_user
+    app.dependency_overrides[get_device_connection_user] = _mock_get_current_user
     app.dependency_overrides[require_operator] = _mock_require_operator
     app.dependency_overrides[get_request_context] = _mock_get_request_context
     client = TestClient(app)
