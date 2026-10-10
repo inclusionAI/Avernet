@@ -220,6 +220,7 @@ def _live_targets(state):
     # is a safe no-op: BaaS has confirmed that there is no live container to
     # enter.  Keep an actually empty inventory fail-closed because it may be a
     # stale or incomplete BaaS projection while the Bot is still present.
+    # _query_inventory handles empty terminal Bots only after extra confirmation.
     if not devices:
         raise RuntimeError("目标容器清单为空，禁止跳过重启备份")
     return targets
@@ -235,6 +236,40 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     )
     try:
         state = {'devices': runtime.list_devices_by_bot_uuid(bot_uuid=target_id)}
+        if state['devices'] == []:
+            # An empty projection alone is not proof that replacement is safe.
+            # Consult BaaS, not the local Bot status (durable admission already
+            # changed that to PENDING). Never skip backup for a FAILED Bot that
+            # still has devices. get_bot's devices field is not an inventory
+            # without health_check, so re-read the dedicated devices endpoint.
+            detail = runtime.get_bot(bot_uuid=target_id)
+            if isinstance(detail, dict) and (
+                (detail.get('status') == 'RELEASED'
+                 and detail.get('bot_uuid', target_id) == target_id)
+                or (detail.get('status') == 'FAILED'
+                    and detail.get('bot_uuid') == target_id)
+            ):
+                state['devices'] = runtime.list_devices_by_bot_uuid(bot_uuid=target_id)
+                if state['devices'] == []:
+                    _log_inventory(
+                        bot_id=bot_id, target_id=target_id, state=state, phase=phase,
+                        operation_id=operation_id,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    logger.info(
+                        "event=aicoding_restart_backup phase=%s inventory=resolved "
+                        "reason=confirmed_empty_terminal_bot bot_id=%s target_id=%s "
+                        "operation_id=%s baas_status=%s target_count=0",
+                        phase, bot_id, target_id, operation_id, detail['status'],
+                    )
+                    return {}
+                if isinstance(state['devices'], list) and state['devices']:
+                    # The initial observation had no devices. A newly visible
+                    # target may belong to another in-flight reconstruction;
+                    # never start a backup on it under this recovery attempt.
+                    raise RestartBackupError(
+                        'target_changed', '确认期间目标容器清单变化，禁止替换'
+                    )
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
         logger.error(

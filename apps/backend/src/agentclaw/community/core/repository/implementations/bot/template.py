@@ -55,7 +55,7 @@ class TemplateRepository(
             return template.to_dict()
 
     def get_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
-        """Get template by bot_id.
+        """Get template by bot_id; the shared default Bot has no template.
 
         Args:
             bot_id: Bot ID
@@ -63,6 +63,9 @@ class TemplateRepository(
         Returns:
             Template record as dictionary, or None if not found
         """
+        if bot_id == "default":
+            return None
+
         with self._db.orm_session() as db:
             template = db.query(TemplateModel).filter(
                 TemplateModel.bot_id == bot_id
