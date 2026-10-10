@@ -3,6 +3,7 @@
 from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
 from src.domain.services.profile_fragment_decomposer import ProfileFragmentDecomposer
 from src.infra.config.feature_flags import FeatureFlags
+from src.infra.worker_profiles.sources.api_profile_source import APIProfileSource
 
 
 class _CheckedEmbedding:
@@ -35,16 +36,18 @@ def refresh_activated_profile_index(registry, worker, profile_id: str) -> None:
     from src.interfaces.api.dependencies.fusion_dependencies import (
         _get_embedding_generator,
         _get_profile_embedding_store,
-        _get_profile_source,
     )
 
     embedding = _get_embedding_generator()
     profile_store = _get_profile_embedding_store()
-    source = _get_profile_source()
+    content_store = registry.get("worker_profile_content_store")
     runtime_store = registry.get("worker_runtime_state_store")
-    if any(provider is None for provider in (embedding, profile_store, source, runtime_store)):
+    if any(provider is None for provider in (embedding, profile_store, content_store, runtime_store)):
         raise RuntimeError("activation index providers unavailable")
 
+    # Explicit activation owns its semantic content. The composite source can
+    # prefer longer registry text or more skills, restoring fields the user removed.
+    source = APIProfileSource(content_store=content_store)
     profile = source.get_profile(worker.id, profile_id)
     profile_key = f"{worker.id}:{profile_id}"
     if (
@@ -52,7 +55,7 @@ def refresh_activated_profile_index(registry, worker, profile_id: str) -> None:
         or profile.profile_key != profile_key
         or profile.staff_id != worker.id
     ):
-        raise RuntimeError("activated profile is unavailable from the composed source")
+        raise RuntimeError("activated profile is unavailable from the content store")
 
     runtime = runtime_store.get_runtime_state(worker.id)
     if isinstance(runtime, dict):
