@@ -2,6 +2,8 @@ import express from "express";
 import { createInternalRunReadsRouter } from "../../routes/internal/run-reads.js";
 import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import type { DirectoryBot } from "@avernet/clawweb-shared/server/services/bot-directory";
 import { RunReadRepository } from "../run-read-repository.js";
 import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -15,10 +17,12 @@ function fixture() {
   raw.exec(`ALTER TABLE flow_runs ADD COLUMN origin_session_key TEXT;
   ALTER TABLE flow_runs ADD COLUMN origin_session_id TEXT;
   UPDATE flow_runs SET origin_session_key='session-a', origin_session_id='session-id-a' WHERE flow_id='f2';`);
-  raw.exec(`CREATE TABLE bot_workflow_permissions (workflow_id TEXT, bot_id TEXT, bot_owner_id TEXT, can_view INTEGER, can_edit INTEGER);
-  INSERT INTO bot_workflow_permissions VALUES ('wf', NULL, 'viewer', 1, 0);`);
+  raw.exec(`CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, workflow_id TEXT, bot_id TEXT, bot_owner_id TEXT, can_view INTEGER, can_edit INTEGER, can_execute INTEGER DEFAULT 0, env TEXT DEFAULT 'test', gmt_create INTEGER DEFAULT 0, gmt_modified INTEGER DEFAULT 0);
+  INSERT INTO bot_workflow_permissions (workflow_id,bot_id,bot_owner_id,can_view,can_edit) VALUES ('wf', NULL, 'viewer', 1, 0);`);
   const db = { dbType: "sqlite", dialect: sqliteDialect, query: async (sql: string, args: any[] = []) => raw.prepare(sql).all(...args) } as unknown as IDatabase;
-  return { raw, repo: new RunReadRepository(db), close: () => raw.close() };
+  const bots: DirectoryBot[] = [];
+  const permissions = new BotWorkflowPermissionRepository(db, { listBots: async () => bots });
+  return { raw, db, bots, permissions, repo: new RunReadRepository(db, permissions), close: () => raw.close() };
 }
 const scope = { botId: "bot", ownerId: "owner" };
 describe("scoped shared run reads", () => {
@@ -141,7 +145,7 @@ it("all scope applies per-Bot workflow grants before pagination without treating
  const f = fixture();
  try {
   f.raw.exec("UPDATE bot_workflow_permissions SET bot_id='bot_%'");
-  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot_%:owner' WHERE flow_id IN ('f1','f2')");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot_%:viewer' WHERE flow_id IN ('f1','f2')");
   f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot_X:other' WHERE flow_id='other'");
   const q = {...scope, scope:"all" as const, userId:"viewer", limit:1};
   const first = await f.repo.listRuns(q);
@@ -150,5 +154,54 @@ it("all scope applies per-Bot workflow grants before pagination without treating
   const second = await f.repo.listRuns({...q,beforeId:first.nextCursor!});
   expect(second.items.map(r=>r.flow_id)).toEqual(["f1"]);
   expect(second.nextCursor).toBeNull();
+ } finally { f.close(); }
+});
+
+
+it("keeps exact owner identity when different owners use the same Bot ID", async () => {
+ const f = fixture();
+ try {
+  f.raw.exec("UPDATE bot_workflow_permissions SET bot_id='default'");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='default:viewer' WHERE flow_id IN ('f1','f2')");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='default:other-owner' WHERE flow_id='other'");
+  const q = {...scope,scope:"all" as const,userId:"viewer",limit:1};
+  const first = await f.repo.listRuns(q);
+  expect(first.items.map(r=>r.flow_id)).toEqual(["f2"]);
+  expect(first.nextCursor).toBe(2);
+  const second = await f.repo.listRuns({...q,beforeId:2});
+  expect(second.items.map(r=>r.flow_id)).toEqual(["f1"]);
+  expect(second.nextCursor).toBeNull();
+ } finally { f.close(); }
+});
+
+it("uses the injected collaborator directory and revokes exact-owner access on membership removal", async () => {
+ const f = fixture();
+ try {
+  f.raw.exec("UPDATE bot_workflow_permissions SET bot_id='default',bot_owner_id='owner',can_view=0,can_edit=1");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='default:owner' WHERE flow_id IN ('f1','f2')");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='default:other-owner' WHERE flow_id='other'");
+  f.bots.push({botId:"default",ownerId:"owner",displayBotId:"default",accessType:"collaborator",status:"all",source:"test"});
+  const q = {...scope,scope:"all" as const,userId:"member",limit:1};
+  const first = await f.repo.listRuns(q);
+  expect(first.items.map(r=>r.flow_id)).toEqual(["f2"]);
+  expect(first.nextCursor).toBe(2);
+  expect((await f.repo.listRuns({...q,beforeId:2})).items.map(r=>r.flow_id)).toEqual(["f1"]);
+  f.bots.splice(0);
+  expect((await f.repo.listRuns(q)).items).toEqual([]);
+ } finally { f.close(); }
+});
+
+
+it("allows all owners only for explicit wildcard-owner grants and escapes literal Bot IDs", async () => {
+ const f = fixture();
+ try {
+  f.raw.exec("UPDATE bot_workflow_permissions SET bot_id='bot_%'");
+  f.raw.exec("INSERT INTO bot_workflow_permissions (workflow_id,bot_id,bot_owner_id,can_view,can_edit) VALUES ('wf','shared_%','*',1,0)");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot_%:viewer' WHERE flow_id='f1'");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot_%:other' WHERE flow_id='f2'");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='shared_X:other' WHERE flow_id='other'");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='shared_%:other' WHERE flow_id='legacy'");
+  const page = await f.repo.listRuns({...scope,scope:"all",userId:"viewer"});
+  expect(page.items.map(r=>r.flow_id)).toEqual(["legacy","f1"]);
  } finally { f.close(); }
 });

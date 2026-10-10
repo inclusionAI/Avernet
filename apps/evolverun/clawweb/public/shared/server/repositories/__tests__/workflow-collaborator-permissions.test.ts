@@ -36,6 +36,7 @@ describe("workflow collaborator permission union", () => {
     expect((await repo.getViewByIdsForOwner("member"))?.viewableIds.has("shared")).toBe(true);
     expect(await repo.hasEditPermission("shared", "member")).toBe(true);
     expect(await repo.resolveViewScope("shared", "member")).toEqual({ botIds: ["shared-bot"] });
+    expect(await repo.resolveRunViewScope("shared", "member")).toEqual({ bots: [{ botId: "shared-bot", ownerId: "owner" }] });
     expect(await repo.hasEditPermission("shared", "stranger")).toBe(false);
   });
 

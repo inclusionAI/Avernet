@@ -1,5 +1,5 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
+import type { RunViewPermissions } from "@avernet/clawweb-shared/server/services/run-view-permissions";
 
 export type RunReadScope = { botId: string; ownerId: string };
 export type RunListQuery = RunReadScope & { scope?: "bot" | "session" | "all"; userId?: string; sessionKey?: string; sessionId?: string; limit?: number; beforeId?: number; workflowId?: string; status?: string; identityKey?: string; includeHidden?: boolean };
@@ -25,7 +25,7 @@ function page(rows: Record<string, unknown>[], limit: number): ReadPage {
  * Exact origin ownership deliberately excludes legacy rows without provable ownership. */
 export class RunReadRepository {
   constructor(private db: IDatabase,
-    private permissions: Pick<BotWorkflowPermissionRepository, "getViewByIdsForOwner" | "resolveViewScope"> = new BotWorkflowPermissionRepository(db)) {}
+    private permissions: RunViewPermissions) {}
 
   async listRuns(q: RunListQuery): Promise<ReadPage> {
     const key = scopeKey(q); const limit = pageLimit(q.limit); cursor(q.beforeId);
@@ -39,13 +39,15 @@ export class RunReadRepository {
       const allowed = [...(view?.viewableIds ?? [])].filter(id => !q.workflowId || id === q.workflowId);
       const grants: string[] = [];
       for (const workflowId of allowed) {
-        const viewScope = await this.permissions.resolveViewScope(workflowId, q.userId);
+        const viewScope = await this.permissions.resolveRunViewScope(workflowId, q.userId);
         if (viewScope === "deny") continue;
         if (viewScope === "all") {
           grants.push("workflow_id = ?"); args.push(workflowId);
-        } else if (viewScope.botIds.length) {
-          grants.push(`(workflow_id = ? AND (${viewScope.botIds.map(() => "origin_bot_id LIKE ? ESCAPE '!'").join(" OR ")}))`);
-          args.push(workflowId, ...viewScope.botIds.map(id => `${id.replace(/[!%_]/g, "!$&")}:%`));
+        } else if (viewScope.bots.length) {
+          grants.push(`(workflow_id = ? AND (${viewScope.bots.map(bot => bot.ownerId === "*"
+            ? "origin_bot_id LIKE ? ESCAPE '!'" : "origin_bot_id = ?").join(" OR ")}))`);
+          args.push(workflowId, ...viewScope.bots.map(bot => bot.ownerId === "*"
+            ? `${bot.botId.replace(/[!%_]/g, "!$&")}:%` : `${bot.botId}:${bot.ownerId}`));
         }
       }
       if (!grants.length) return { items: [], nextCursor: null };
