@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use bcs_domain::{ActorKind, ActorStatus, Skill};
+use bcs_domain::{ActorKind, ActorStatus, BotAccessRelation, Skill};
 
 use crate::application::v1::{BotInternalAttributes, FriendCheckInStrategy, UserVisibility};
 use serde_json::{Map, Value};
@@ -91,6 +91,35 @@ pub struct BotControlPlaneOwnedQuery {
     pub kind: Option<ActorKind>,
     pub name: Option<String>,
     pub status: Option<ActorStatus>,
+}
+
+/// Controllable-Bot query (spec §7.2): the physical owner ∪ manager
+/// projection of one User in one env, plus the unified kind / name /
+/// status filters. `user_id` is ALWAYS the authenticated caller's trusted
+/// User ID, never a request-body value; `env` is the assembly-bound
+/// environment.
+///
+/// Pure shared value (no repo -> core dependency): the persistence port
+/// returns [`ControllableBotRecord`]s for it and the Core returns its own
+/// hydrated view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotControllableQuery {
+    pub user_id: String,
+    pub env: String,
+    pub kind: Option<ActorKind>,
+    pub name: Option<String>,
+    pub status: Option<ActorStatus>,
+}
+
+/// One controllable Bot as persisted: the control-plane record plus the
+/// User's highest effective relation on it (owner takes priority over
+/// manager when both edges exist; the same Bot is returned exactly once).
+/// The User's own Human self row is an explicit compatibility projection
+/// labeled `Owner` — it carries no transferrable authority edge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllableBotRecord {
+    pub record: BotControlPlaneRecord,
+    pub access_relation: BotAccessRelation,
 }
 
 /// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.

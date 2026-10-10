@@ -5,6 +5,7 @@
 //! shared test-support harnesses.
 use super::*;
 use bcs_db_api::{DbExecuteResult, DbHealth};
+use bcs_service_api::types::{BotOperationActor, BotOperationContext};
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex as StdMutex;
 
@@ -342,6 +343,7 @@ async fn eventful_mutable_patch_reports_a_missing_routing_lock_as_a_conflict() {
                 ..Default::default()
             }),
             event: None,
+            operation: BotOperationContext { operation_id: format!("op-group-store-tests"), actor: BotOperationActor::System { system_id: "group-store-tests".to_string(), effective_actor_id: "group-store-tests".to_string() } },
         })
         .await
         .expect_err("a missing guarded lock row must be reported as a conflict");
@@ -553,7 +555,7 @@ async fn workspace_update_is_visible_until_restart() {
         ..Workspace::default()
     };
 
-    repo.update_workspace("group-1", workspace.clone())
+    repo.update_workspace("group-1", workspace.clone(), BotOperationContext { operation_id: "test-group-operation".to_string(), actor: BotOperationActor::Bot { bot_id: "driver".to_string() } })
         .await
         .expect("update workspace");
 

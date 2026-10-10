@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 bcs-service-api = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 bcs-db-api = { workspace = true }
@@ -21,8 +22,11 @@ bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-config = { workspace = true }
+bcs-edge-permission = { workspace = true }
 bcs-friend = { workspace = true }
+bcs-jwt = { workspace = true }
 bcs-test-support = { workspace = true }
 tempfile = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

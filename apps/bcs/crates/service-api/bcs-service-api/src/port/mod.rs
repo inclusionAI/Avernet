@@ -105,6 +105,7 @@ pub use repo::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
+    BotAuthorityRepoPort,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
@@ -127,4 +128,8 @@ pub use session_channel_outbound::{
     StateMachineTerminalEvent, StateMachineTerminalStatus,
 };
 pub use state_machine_result::{StateMachineResultPublishCommand, StateMachineResultPublisherPort};
+pub mod team_manager_credential;
+pub use team_manager_credential::{
+    NoopTeamManagerCredentialVerifierPort, TeamManagerCredentialVerifierPort,
+};
 pub mod agent_identity;

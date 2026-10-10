@@ -1,3 +1,5 @@
+pub mod bot_management;
+pub mod bot_ownership;
 pub mod bot;
 pub mod collaboration_template;
 pub mod collaboration_definition;

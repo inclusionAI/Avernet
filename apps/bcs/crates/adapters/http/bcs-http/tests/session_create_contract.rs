@@ -78,11 +78,12 @@ async fn create_session_rejects_human_who_does_not_own_any_participant() {
     services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store,
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -149,11 +150,12 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
     services.session_management = sessions.clone();
     services.system_message = Arc::new(InitialRunSystemMessage);
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store,
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -218,11 +220,12 @@ async fn legacy_session_id_reactivates_through_the_shared_service() {
     services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store,
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -310,11 +313,12 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     services.session_management = sessions.clone();
     services.collaboration_runtime = collaboration.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store,
         sessions.clone(),
         collaboration.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -434,11 +438,12 @@ async fn legacy_private_human_creator_membership_matches_the_pre_pr_contract() {
     services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store.clone(),
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     let identity_port: Arc<dyn UserIdentityPort + Send + Sync> = Arc::new(StaticHumanIdentity {
@@ -716,6 +721,7 @@ impl SessionManagementService for MockSessions {
         _session_id: &str,
         _output: Option<Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -724,6 +730,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -732,6 +739,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -741,6 +749,7 @@ impl SessionManagementService for MockSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -749,6 +758,7 @@ impl SessionManagementService for MockSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -905,11 +915,12 @@ async fn public_group_session_includes_non_member_human_in_participants() {
     services.group = group_store.clone();
     services.session_management = sessions.clone();
     services.session_launch = Arc::new(SessionLaunchApplication::new(
-        registry,
+        registry.clone(),
         group_store,
         sessions.clone(),
         services.collaboration_runtime.clone(),
         services.system_message.clone(),
+        Arc::new(FailClosedLaunchAuthorityHook { bots: registry }),
     ));
 
     // Human "bob" is NOT a member of the group and does NOT own driver-bot
@@ -948,4 +959,33 @@ async fn public_group_session_includes_non_member_human_in_participants() {
             .map(|p| p["bot_uuid"].as_str())
             .collect::<Vec<_>>()
     );
+}
+
+struct FailClosedLaunchAuthorityHook {
+    bots: Arc<BotCore>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for FailClosedLaunchAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        use bcs_service_api::BotRegistryCoreService;
+        match self.bots.get(bot_id).await {
+            Some(bot) => Ok(bot.created_by.as_deref() == Some(user_id)),
+            None => Err(bcs_service_api::ServiceError::BotNotFound(bot_id.to_string())),
+        }
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        if self
+            .can_manage(user_id, bot_id)
+            .await
+            .unwrap_or(false)
+        {
+            Ok(())
+        } else {
+            Err(bcs_service_api::ServiceError::Unauthorized(
+                "test authority: not the fixture owner".to_string(),
+            ))
+        }
+    }
 }

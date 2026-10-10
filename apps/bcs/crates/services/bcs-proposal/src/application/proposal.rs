@@ -313,6 +313,30 @@ impl GroupProposalService for GroupProposalUseCases {
                     participants: group.participants.clone(),
                     group_version: Some(group.version),
                     session_title: Some("新会话".to_string()),
+                    // Task 11 carry (fixed here, plan Task 12): the auto-create
+                    // lane is driven by the VERIFIED confirm caller (the
+                    // `authorize_driver` gate proved this Human controls the
+                    // driver Bot or is the Bot itself) — their identity threads
+                    // into the §12.5 audit context instead of the generic
+                    // System default.
+                    operation: match cmd.caller_actor_id.as_deref() {
+                        Some(caller) if caller.starts_with("human_") => {
+                            bcs_service_api::types::BotOperationContext {
+                                operation_id: format!("proposal-confirm-session:{}", uuid::Uuid::new_v4()),
+                                actor: bcs_service_api::types::BotOperationActor::Human {
+                                    user_id: caller.strip_prefix("human_").unwrap_or(caller).to_string(),
+                                    effective_actor_id: proposal.driver_bot.clone(),
+                                },
+                            }
+                        }
+                        Some(bot) => bcs_service_api::types::BotOperationContext {
+                            operation_id: format!("proposal-confirm-session:{}", uuid::Uuid::new_v4()),
+                            actor: bcs_service_api::types::BotOperationActor::Bot {
+                                bot_id: bot.to_string(),
+                            },
+                        },
+                        None => bcs_service_api::types::system_lane_operation("proposal-auto-create-session"),
+                    },
                     ..Default::default()
                 },
             })

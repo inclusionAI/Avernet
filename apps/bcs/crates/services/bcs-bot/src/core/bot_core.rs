@@ -192,6 +192,24 @@ impl BotRegistryCoreService for BotCore {
         self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
     }
 
+    async fn initialize_existing_ownership(
+        &self,
+        bot_id: &str,
+        initialization: bcs_service_api::types::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::OwnershipState> {
+        self.repo
+            .initialize_existing_ownership(bot_id, initialization)
+            .await
+    }
+
+    async fn retire_bot_lifecycle(
+        &self,
+        bot_id: &str,
+        operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<bool> {
+        self.repo.retire_bot_lifecycle(bot_id, operation).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.repo.register(bot_id, capabilities).await
     }

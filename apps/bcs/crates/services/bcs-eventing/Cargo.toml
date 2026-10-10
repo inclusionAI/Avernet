@@ -30,6 +30,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-bot = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-group = { workspace = true }
 bcs-test-support = { workspace = true }

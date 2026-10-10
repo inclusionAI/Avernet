@@ -40,6 +40,10 @@ fn build_invite_service(
         group: state.services.group.clone(),
         session: state.services.session_management.clone(),
         system_message: state.services.system_message.clone(),
+        // Live mine union (spec §12.4, final-review cutover): the invite
+        // lanes resolve Human control through `list_my_bots`, never through
+        // the retired `created_by` creation listing.
+        bot_query: state.services.bot_query.clone(),
         token_secret: state.invite_token_secret.clone(),
         default_ttl_seconds: state.invite_default_ttl_seconds,
         base_url: host,

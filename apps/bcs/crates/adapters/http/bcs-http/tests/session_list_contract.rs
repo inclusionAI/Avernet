@@ -12,7 +12,11 @@ use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Request, StatusCode},
 };
-use bcs_bot::BotCore;
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
+use bcs_bot_store::provider::{
+    MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection,
+};
+use bcs_bot_store::MemoryBotRepo;
 use bcs_group::GroupStore;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
 use bcs_http::{
@@ -259,9 +263,11 @@ async fn list_sessions_treats_human_owner_of_participant_bot_as_formal_member() 
 
 async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Arc<BotCore>) {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(bot_repo.clone()));
 
-    // Register driver-bot owned by alice (staff_no).
+    // Register driver-bot and seed the CURRENT owner edge for alice (the
+    // mine-union member gate reads live roles, not the creation fact).
     registry
         .register(
             "driver-bot".to_string(),
@@ -274,10 +280,31 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
         )
         .await
         .unwrap();
+    bot_repo.seed_authority_owned("driver-bot", "alice").await.unwrap();
     registry
         .save_created_by("driver-bot", "alice", true)
         .await
         .unwrap();
+
+    // Control-plane wiring for the mine-union lane (plan Task 12 fix round).
+    let provider_store = Arc::new(MemoryProviderStore::new());
+    let bot_providers = Arc::new(MemoryBotProviderStore::new(
+        bot_repo.clone(),
+        provider_store.clone(),
+    ));
+    let bindings = Arc::new(ProviderBindingProjection::new(
+        provider_store.clone(),
+        bot_providers.clone(),
+        bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+    ));
+    let control_plane: Arc<dyn bcs_service_api::BotControlPlaneCoreService> = Arc::new(
+        BotControlPlaneCore::new(
+            bot_repo.clone() as Arc<dyn bcs_service_api::port::repo::BotControlPlaneRepoPort>,
+            provider_store,
+            bindings,
+        )
+        .with_bot_provider_repo(bot_providers),
+    );
 
     let group_store = Arc::new(GroupStore::new());
     group_store
@@ -302,6 +329,10 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
 
     let mut services = Services::noop();
     services.registry = registry.clone();
+    // Mine-union lane: human formality/membership resolve through bot_query.
+    services.bot_query = Arc::new(
+        Bot::new(registry.clone()).with_control_plane(control_plane),
+    );
     services.group = group_store;
     services.session_management = sessions.clone();
 
@@ -616,6 +647,7 @@ impl SessionManagementService for RecordingSessions {
         _session_id: &str,
         _output: Option<Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -624,6 +656,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -632,6 +665,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -641,6 +675,7 @@ impl SessionManagementService for RecordingSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -649,6 +684,7 @@ impl SessionManagementService for RecordingSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }

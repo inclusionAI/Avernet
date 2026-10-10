@@ -8,12 +8,22 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use bcs_db_api::{DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue, db_get_column, db_get_column_opt};
+use bcs_db_api::{
+    DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep, DbTransactionStepResult,
+    DbValue, db_get_column, db_get_column_opt,
+};
 use bcs_domain::{ActorKind, ActorRef, FileStatus, SessionFile};
 use bcs_service_api::port::repo::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,
 };
+use bcs_service_api::types::{BotActionAuditPhase, BotActionAuditRecord, BotOperationContext};
 use bcs_service_api::{ServiceError, ServiceResult};
+
+use crate::action_audit::{
+    action_audit_row_matches, audit_slot_retry_classified, audit_slot_select,
+    create_file_audit_record, delete_file_audit_record, file_action_audit_insert,
+    update_file_audit_record,
+};
 
 // ---------------------------------------------------------------------------
 // SQL constants
@@ -205,10 +215,31 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
             ],
         );
 
-        self.db
-            .execute(stmt)
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session file insert: {e}")))?;
+        // Same-transaction ordinary-business audit (spec \u00a712.5, plan Task 11):
+        // the `create/session_file/applied` audit row joins the metadata INSERT
+        // in ONE DbPlugin transaction, so an audit INSERT failure rolls the
+        // INSERT back leaving no residue. A same-slot byte-identical record is
+        // an idempotent replay of a fully committed prepare; different content
+        // under the slot is a conflict.
+        let audit_record = create_file_audit_record(&params.operation, &self.env, &params.file_id);
+        let steps = vec![
+            DbTransactionStep::Execute(stmt),
+            DbTransactionStep::Execute(file_action_audit_insert(&audit_record)),
+        ];
+        if let Err(error) = self.db.transaction(steps).await {
+            let probe = self
+                .db
+                .query(audit_slot_select(&audit_record))
+                .await
+                .map_err(|e| ServiceError::InternalError(format!("session file insert: {e}")))?;
+            audit_slot_retry_classified(
+                &audit_record,
+                probe,
+                &format!("session file insert: {error}"),
+            )?;
+            // Identical slot: a previous attempt of the same operation fully
+            // committed the SAME metadata row — surface the returned row.
+        }
 
         Ok(SessionFile {
             file_id: params.file_id,
@@ -270,28 +301,49 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         object_handle: &str,
         status: FileStatus,
         size: u64,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Option<SessionFile>> {
         let status_str = serde_json::to_string(&status)
             .map_err(|e| ServiceError::InternalError(format!("serialize status: {e}")))?;
         // The serialized form has surrounding quotes; strip them for the DB TEXT column.
         let status_str = status_str.trim_matches('"');
 
+        // Conditional, genuinely-changing UPDATE (spec \u00a712.5, plan Task 11):
+        // the WHERE excludes a row already carrying the target triple, and
+        // `with_transaction_stop_on_no_rows` ends the transaction BEFORE the
+        // audit step for an idempotent no-change update — so a no-op writes NO
+        // audit row on EITHER dialect (no affected_rows counting reliance).
+        // object_handle/status/size columns are NOT NULL in this table, so
+        // plain = / <> comparisons are null-safe here.
         let update_sql = "UPDATE bcs_session_files \
             SET object_handle = ?, status = ?, size = ? \
-            WHERE env = ? AND session_id = ? AND file_id = ?";
+            WHERE env = ? AND session_id = ? AND file_id = ? \
+              AND NOT (object_handle = ? AND status = ? AND size = ?)";
 
+        // Same-transaction `update/session_file/applied` audit row.
+        let audit_record = update_file_audit_record(operation, &self.env, file_id);
+        let steps = vec![
+            DbTransactionStep::Execute(
+                DbStatement::with_params(
+                    update_sql,
+                    vec![
+                        DbValue::from(object_handle),
+                        DbValue::from(status_str),
+                        DbValue::from(size),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(file_id),
+                        DbValue::from(object_handle),
+                        DbValue::from(status_str),
+                        DbValue::from(size),
+                    ],
+                )
+                .with_transaction_stop_on_no_rows(),
+            ),
+            DbTransactionStep::Execute(file_action_audit_insert(&audit_record)),
+        ];
         self.db
-            .execute(DbStatement::with_params(
-                update_sql,
-                vec![
-                    DbValue::from(object_handle),
-                    DbValue::from(status_str),
-                    DbValue::from(size),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(file_id),
-                ],
-            ))
+            .transaction(steps)
             .await
             .map_err(|e| ServiceError::InternalError(format!("session file update: {e}")))?;
 
@@ -304,45 +356,139 @@ impl SessionFileRepoPort for MySqlSessionFileStore {
         session_id: &str,
         file_id: &str,
         status: FileStatus,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Option<SessionFile>> {
         let status_str = serde_json::to_string(&status)
             .map_err(|e| ServiceError::InternalError(format!("serialize status: {e}")))?;
         let status_str = status_str.trim_matches('"');
 
+        // Conditional no-op exclusion + `stop_on_no_rows` (see
+        // update_object_handle_and_status); the `update/session_file/applied`
+        // audit row joins the status change in ONE transaction.
         let update_sql = "UPDATE bcs_session_files \
             SET status = ? \
-            WHERE env = ? AND session_id = ? AND file_id = ?";
+            WHERE env = ? AND session_id = ? AND file_id = ? AND status <> ?";
 
+        let audit_record = update_file_audit_record(operation, &self.env, file_id);
+        let steps = vec![
+            DbTransactionStep::Execute(
+                DbStatement::with_params(
+                    update_sql,
+                    vec![
+                        DbValue::from(status_str),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(file_id),
+                        DbValue::from(status_str),
+                    ],
+                )
+                .with_transaction_stop_on_no_rows(),
+            ),
+            DbTransactionStep::Execute(file_action_audit_insert(&audit_record)),
+        ];
         self.db
-            .execute(DbStatement::with_params(
-                update_sql,
-                vec![
-                    DbValue::from(status_str),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(file_id),
-                ],
-            ))
+            .transaction(steps)
             .await
             .map_err(|e| ServiceError::InternalError(format!("session file update_status: {e}")))?;
 
         self.get(session_id, file_id).await
     }
 
-    async fn delete(&self, session_id: &str, file_id: &str) -> ServiceResult<bool> {
-        let result = self
+    async fn delete(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<bool> {
+        // The FINAL metadata DELETE commits in ONE transaction with the
+        // `delete/session_file/completed` audit row (spec \u00a712.5): the
+        // external object removal already happened under the persisted
+        // `delete/session_file/admitted` phase, so a metadata/audit failure
+        // leaves the row IN PLACE (retained-for-retry) and the caller
+        // surfaces the error — never a false completion.
+        //
+        // A missing row is an idempotent no-op: `stop_on_no_rows` ends the
+        // transaction before the audit step, so no phantom `completed` row
+        // appears for an already-deleted file. Both dialects count exactly 1
+        // affected row for a real DELETE and 0 for a miss, so the
+        // returned-existence flag does not rely on no-op affected_rows
+        // differences.
+        // The completed record joins the metadata DELETE in this same
+        // transaction; `admitted` was persisted earlier via
+        // record_operation_phase.
+        let audit_record = delete_file_audit_record(
+            operation,
+            &self.env,
+            file_id,
+            BotActionAuditPhase::Completed,
+            None,
+        );
+        let steps = vec![
+            DbTransactionStep::Execute(
+                DbStatement::with_params(
+                    "DELETE FROM bcs_session_files WHERE env = ? AND session_id = ? AND file_id = ?",
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(file_id),
+                    ],
+                )
+                .with_transaction_stop_on_no_rows(),
+            ),
+            DbTransactionStep::Execute(file_action_audit_insert(&audit_record)),
+        ];
+        let results = self
             .db
-            .execute(DbStatement::with_params(
-                "DELETE FROM bcs_session_files WHERE env = ? AND session_id = ? AND file_id = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(file_id),
-                ],
-            ))
+            .transaction(steps)
             .await
             .map_err(|e| ServiceError::InternalError(format!("session file delete: {e}")))?;
-        Ok(result.affected_rows > 0)
+        let deleted = match results.first() {
+            Some(DbTransactionStepResult::Executed(result)) => result.affected_rows > 0,
+            _ => false,
+        };
+        Ok(deleted)
+    }
+
+    /// Standalone phase recorder (spec §12.5, plan Task 11): the ONLY audit
+    /// lane outside the atomic mutations, used by the file service to
+    /// persist `admitted` (before external backend I/O) and explicit
+    /// `failed`/`unknown` outcomes. A slot already carrying this
+    /// byte-identical record is an idempotent no-op; a same-slot row with
+    /// different content is a Conflict. A genuine INSERT failure propagates
+    /// so the caller can refuse to start the external side effect.
+    async fn record_operation_phase(&self, audit: BotActionAuditRecord) -> ServiceResult<()> {
+        let existing = self
+            .db
+            .query(audit_slot_select(&audit))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("file audit slot probe: {e}")))?;
+        if let Some(row) = existing.first() {
+            if action_audit_row_matches(&audit, row)? {
+                // Byte-identical replay of a previously recorded phase.
+                return Ok(());
+            }
+            return Err(ServiceError::Conflict(format!(
+                "file action audit slot '{}' already carries different content",
+                audit.step_key
+            )));
+        }
+        if let Err(error) = self
+            .db
+            .execute(file_action_audit_insert(&audit))
+            .await
+        {
+            // The unique slot may have been taken concurrently between probe
+            // and insert: re-probe and classify (identical = replay; anything
+            // else = genuine failure).
+            let probe = self
+                .db
+                .query(audit_slot_select(&audit))
+                .await
+                .map_err(|e| ServiceError::InternalError(format!("file audit insert: {e}")))?;
+            audit_slot_retry_classified(&audit, probe, &format!("file audit insert: {error}"))?;
+            return Ok(());
+        }
+        Ok(())
     }
 
     async fn list(

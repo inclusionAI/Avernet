@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::collections::HashSet;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -15,7 +16,8 @@ use bcs_eventing::{
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity,
-    CreateEventSubscription, CreateEventSubscriptionRequest, EventPayload, EventSinkInput,
+    BotAuthorityHook, CreateEventSubscription, CreateEventSubscriptionRequest, EventPayload,
+    EventSinkInput, NoopBotAuthorityHook,
 };
 use bcs_service_api::port::{
     EventDeliveryAttemptMetric, EventDeliveryDisposition, EventDeliveryError, EventDeliveryPort,
@@ -155,6 +157,34 @@ pub fn harness_with_eventing_config(
     full_payload_allowed: bool,
     eventing_config: EventingConfig,
 ) -> Harness {
+    harness_with(
+        full_payload_allowed,
+        eventing_config,
+        // Noop hook denies live control — fail-closed for mixed callers,
+        // exactly as an unwired test assembly must.
+        Arc::new(NoopBotAuthorityHook),
+    )
+}
+
+pub fn harness_with_authority(
+    full_payload_allowed: bool,
+    authority: Arc<dyn BotAuthorityHook>,
+) -> Harness {
+    harness_with(
+        full_payload_allowed,
+        EventingConfig {
+            enabled: true,
+            ..EventingConfig::default()
+        },
+        authority,
+    )
+}
+
+fn harness_with(
+    full_payload_allowed: bool,
+    eventing_config: EventingConfig,
+    authority: Arc<dyn BotAuthorityHook>,
+) -> Harness {
     let repo = Arc::new(MemoryEventStore::new());
     let groups = Arc::new(GroupCore::with_repo(Arc::new(
         MemoryGroupRepo::new().with_event_store(repo.clone(), "test"),
@@ -166,6 +196,7 @@ pub fn harness_with_eventing_config(
         repo.clone(),
         delivery.clone(),
         authorizer.clone(),
+        authority,
         Arc::new(EventCatalog::load_embedded().expect("embedded Event Catalog")),
         EventSubscriptionPolicy::from(&eventing_config),
         "test",
@@ -214,6 +245,94 @@ pub fn bot_caller() -> AuthenticatedCaller {
         }),
         app: None,
         access_key: None,
+    }
+}
+
+/// Mixed Human+Bot caller with an explicitly controllable SIGNED
+/// `owner_id` claim (`mixed_caller(user, bot, claim)`).
+pub fn mixed_caller(user_id: &str, bot_uuid: &str, owner_id: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-1".to_string()),
+        user: Some(AuthenticatedUserIdentity {
+            id: user_id.to_string(),
+            username: user_id.to_string(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: bot_uuid.to_string(),
+            owner_id: owner_id.to_string(),
+            app_id: 7,
+            agent_code: format!("agent-{bot_uuid}"),
+        }),
+        app: None,
+        access_key: None,
+    }
+}
+
+/// Map-backed LIVE authority double: answers ONLY from seeded control
+/// facts — never from any signed `owner_id` claim — mirroring the
+/// resource-authorizer cutover fixtures (`SeededAuthority`).
+#[derive(Default)]
+pub struct SeededAuthority {
+    grants: Mutex<HashSet<(String, String)>>,
+}
+
+impl SeededAuthority {
+    pub fn control(&self, user_id: &str, bot_id: &str) {
+        self.grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert((user_id.to_string(), bot_id.to_string()));
+    }
+}
+
+#[async_trait]
+impl BotAuthorityHook for SeededAuthority {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Ok(self
+            .grants
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&(user_id.to_string(), bot_id.to_string())))
+    }
+
+    async fn require_owner(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Forbidden(format!(
+            "user '{user_id}' is not the owner of bot '{bot_id}'"
+        )))
+    }
+}
+
+/// Hook double whose live control lookups always FAIL (corrupt or
+/// unavailable authority) — never a plain deny — exercising the
+/// fail-closed `Err` branches.
+pub struct FailingAuthority;
+
+#[async_trait]
+impl BotAuthorityHook for FailingAuthority {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Err(bcs_service_api::ServiceError::InternalError(format!(
+            "authority lookup failed for user '{user_id}' and bot '{bot_id}'"
+        )))
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::InternalError(format!(
+            "authority lookup failed for user '{user_id}' and bot '{bot_id}'"
+        )))
     }
 }
 

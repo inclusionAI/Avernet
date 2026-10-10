@@ -261,8 +261,22 @@ impl ChannelService for BcsChannelService {
             let mut participant = Participant::human(actor_id.clone(), ParticipantRole::Consultant);
             participant.mode = Some(ParticipantMode::Present);
             participant.bot_name = msg.im_user_nick.clone();
+            // Honest System identity (spec §12.5): the IM inbound lane has no
+            // verified Human operator for the audited membership write, so the
+            // recording names the system actor itself and never forges a
+            // Human.
+            let operation = bcs_service_api::types::BotOperationContext {
+                operation_id: format!(
+                    "bcs-channel-inbound-add-participant:{}",
+                    uuid::Uuid::new_v4()
+                ),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "bcs-channel-inbound".to_string(),
+                    effective_actor_id: "bcs-channel-inbound".to_string(),
+                },
+            };
             self.sessions
-                .add_participant(&session_id, participant)
+                .add_participant(&session_id, participant, &operation)
                 .await
                 .map_err(|error| {
                     inbound_failure(

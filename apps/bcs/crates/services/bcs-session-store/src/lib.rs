@@ -1,6 +1,7 @@
 //! Session repository implementations: memory + mysql.
 
 pub mod registry;
+mod action_audit;
 pub mod memory;
 pub mod mysql;
 

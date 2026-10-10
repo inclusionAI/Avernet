@@ -5,6 +5,18 @@ use bcs_message_store::MySqlMessageStore;
 use bcs_service_api::port::repo::{MessageRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_session_store::MySqlSessionStore;
 
+/// Honest System identity for the migration-lane membership writes (spec
+/// §12.5): the migration harness has no verified Human operator.
+fn window_test_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("window-test-join:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "bcs-admin-window-test".to_string(),
+            effective_actor_id: "bcs-admin-window-test".to_string(),
+        },
+    }
+}
+
 fn message(session: &str, id: &str, history: bool) -> NewMessage {
     NewMessage { group_id: "window-group".into(), session_id: session.into(), sender_id: "bot".into(),
         sender_type: SenderType::Bot, message_type: if history { "state_machine_output" } else { "chat" }.into(),
@@ -37,7 +49,13 @@ async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
     }
     for task in tasks { assert_eq!(task.await??.session_seq, 11); }
     assert_eq!(messages.resolve_history_window_start(&session.id, 11, 5).await?, 6);
-    let joined = sessions.add_participant(&session.id, Participant::human("human_viewer", ParticipantRole::Observer)).await?;
+    let joined = sessions
+        .add_participant(
+            &session.id,
+            Participant::human("human_viewer", ParticipantRole::Observer),
+            &window_test_operation(),
+        )
+        .await?;
     assert_eq!(joined.participant_join_seq.unwrap()["human_viewer"], 11);
     let page = messages.list_session_history(&session.id, MessageOwnerFilter::Any, Some(6), None, None, 100).await?;
     assert_eq!(page.messages.iter().filter(|m| m.message_type == "chat").count(), 5);
@@ -48,7 +66,7 @@ async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
     let (ordinary, history, joined) = tokio::join!(
         async move { append_repo.append_message(message(&append_session, "racing-chat", false)).await },
         async move { history_repo.append_message_with_id("racing-history".into(), message(&history_session, "racing-history", true)).await },
-        async move { join_repo.add_participant(&join_session, Participant::human("human_race", ParticipantRole::Observer)).await },
+        async move { join_repo.add_participant(&join_session, Participant::human("human_race", ParticipantRole::Observer), &window_test_operation()).await },
     );
     ordinary?; history?;
     let join_seq = joined?.participant_join_seq.unwrap()["human_race"].as_i64().unwrap();

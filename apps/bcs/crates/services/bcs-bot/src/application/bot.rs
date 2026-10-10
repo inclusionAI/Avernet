@@ -28,16 +28,20 @@ use crate::core::BotCore;
 /// Bot query and management application service backed by the registry port.
 #[derive(Clone)]
 pub struct Bot {
-    registry: Arc<dyn BotRegistryCoreService>,
-    friend: Arc<dyn FriendCoreService>,
-    edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
-    bot_core: Option<Arc<BotCore>>,
-    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
-    relation: Option<Arc<dyn RelationCoreService>>,
-    user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
-    connection_control: Option<Arc<dyn BotConnectionControlPort>>,
-    organization: Option<Arc<dyn OrganizationCoreService>>,
-    uplink: bcs_config_api::UplinkConfig,
+    pub(crate) registry: Arc<dyn BotRegistryCoreService>,
+    pub(crate) friend: Arc<dyn FriendCoreService>,
+    pub(crate) edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
+    pub(crate) bot_core: Option<Arc<BotCore>>,
+    pub(crate) control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
+    pub(crate) relation: Option<Arc<dyn RelationCoreService>>,
+    pub(crate) user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
+    pub(crate) connection_control: Option<Arc<dyn BotConnectionControlPort>>,
+    pub(crate) organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// Live Human→Bot authority hook (spec §12.4): the manage-permission
+    /// lanes (delete/status/visibility) resolve the CURRENT owner/manager
+    /// facts through it. Unwired = fail closed, never a `created_by` fallback.
+    pub(crate) authority: Option<Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>>,
+    pub(crate) uplink: bcs_config_api::UplinkConfig,
 }
 
 impl Bot {
@@ -59,6 +63,7 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            authority: None,
             uplink: Default::default(),
         }
     }
@@ -123,6 +128,74 @@ impl Bot {
         self
     }
 
+    /// Wire the live Human→Bot authority hook that answers the
+    /// manage-permission lanes (delete/status/visibility, spec §12.2/§12.4).
+    /// Without it those lanes fail closed — the historical `created_by`
+    /// creation fact is NOT a fallback authority anymore.
+    pub fn with_authority(
+        mut self,
+        authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
+    ) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
+    /// Authorize a manage-permission lane caller (status/visibility).
+    ///
+    /// The Bot's own self lane keeps its full allow; every Human caller
+    /// resolves the CURRENT owner/manager fact live through the authority
+    /// hook (spec §12.2: the creation-source fact never authorizes). Any
+    /// other caller (a Bot for another Bot) is denied.
+    pub(crate) async fn authorize_management_caller(
+        &self,
+        caller_actor_id: Option<&str>,
+        bot_id: &str,
+        bot: &RegisteredBot,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(caller) = caller_actor_id else {
+            return Err(BotUseCaseError::Unauthorized(format!(
+                "caller identity is required to modify bot '{bot_id}'"
+            )));
+        };
+
+        if caller == bot.bot_uuid {
+            return Ok(());
+        }
+
+        let Some(staff_no) = caller.strip_prefix("human_") else {
+            return Err(BotUseCaseError::Forbidden(format!(
+                "caller '{caller}' is not the bot itself and holds no current \
+                 owner/manager role for bot '{bot_id}'"
+            )));
+        };
+
+        self.authorize_can_manage(staff_no, bot_id).await
+    }
+
+    /// Fail-closed live can_manage for a human staff caller (the Task-12
+    /// cutover's error shape: an unwired hook denies, and the hook's typed
+    /// validation errors propagate — never flatten to a silent deny).
+    pub(crate) async fn authorize_can_manage(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(authority) = self.authority.as_ref() else {
+            return Err(BotUseCaseError::Forbidden(format!(
+                "managing bot '{bot_id}' requires the bot authority service; \
+                 the live owner/manager check is unavailable (authority not wired)"
+            )));
+        };
+
+        match authority.can_manage(staff_no, bot_id).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(BotUseCaseError::Forbidden(format!(
+                "caller 'human_{staff_no}' holds no current owner/manager role for bot '{bot_id}'"
+            ))),
+            Err(error) => Err(BotUseCaseError::Service(error)),
+        }
+    }
+
     async fn ensure_provider_switch_bot_onboarded(
         &self,
         bot_id: &str,
@@ -170,8 +243,13 @@ impl Bot {
             ))
         })?;
 
+        // Plan Task 6 (spec 13.3): a delivery switch is NOT a trusted
+        // first-registration context — it never claims ownership and never
+        // rewrites owner/manager/version/`created_by` of an initialized Bot.
+        // `created_by` is only filled when empty (first-writer-wins); the
+        // former unconditional overwrite reset the creator on every switch.
         self.registry
-            .save_created_by(bot_id, owner_staff_no, true)
+            .save_created_by(bot_id, owner_staff_no, false)
             .await?;
         let nick_name = self.resolve_owner_nick_name(owner_staff_no).await;
         self.registry
@@ -351,14 +429,78 @@ impl BotQueryService for Bot {
         &self,
         command: bcs_service_api::MyBotsCommand,
     ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let bots = self.registry.list_bots_by_creator(&command.staff_no).await;
-        self.my_bot_page_from_registered(
-            bots,
-            command.offset,
-            command.limit,
-            command.active_only,
-        )
+        // Plan Task 12 (spec §7 mine projection + §12.4 cutover): the legacy
+        // `/bots/my` lane serves the SAME mine union the v1 facade serves —
+        // physical owner ∪ manager edges (deduplicated, `owner` label wins)
+        // plus the caller's own Human self row — while keeping ITS legacy
+        // client contract: the `active_only` filter and the active-first,
+        // id-ascending sort and the exact `/bots/my` item shape (now with
+        // the `access_relation` label). `list_bots_by_creator` stays a
+        // literal creation-source query and is no longer the permission
+        // source: a bot the user merely CREATED (and later lost) does not
+        // appear; a bot they currently MANAGE does.
+        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InvalidOperation {
+                message: "Bot is missing BotControlPlaneCoreService wiring; \
+                 list_my_bots requires .with_control_plane(...)"
+                    .to_string(),
+                request_id: None,
+            })
+        })?;
+        let views = control_plane
+            .list_controllable(bcs_service_api::BotControllableQuery {
+                user_id: command.staff_no.clone(),
+                env: bcs_config::resolve_env_str(),
+                kind: None,
+                name: None,
+                status: None,
+            })
             .await
+            .map_err(|error| BotUseCaseError::Service(error))?;
+
+        // Same legacy reachability semantics: one batched runtime-activity
+        // read, then filter/sort/paginate like the old lane.
+        let bot_ids = views.iter().map(|view| view.bot.record.bot_id.clone()).collect::<Vec<_>>();
+        let active_bot_ids = self
+            .registry
+            .list_runtime_active_bot_ids(&bot_ids)
+            .await
+            .into_iter()
+            .collect::<HashSet<String>>();
+        let mut entries: Vec<(bool, String, BotQueryEntry)> = Vec::with_capacity(views.len());
+        for view in views {
+            let access_relation = match view.access_relation {
+                bcs_service_api::types::BotAccessRelation::Owner => "owner".to_string(),
+                bcs_service_api::types::BotAccessRelation::Manager => "manager".to_string(),
+            };
+            let record = &view.bot.record;
+            let bot_uuid = record.bot_id.clone();
+            let is_active = active_bot_ids.contains(&record.bot_id);
+            if command.active_only && !is_active {
+                continue;
+            }
+            entries.push((
+                is_active,
+                bot_uuid,
+                Self::record_to_my_query_entry(record.clone(), is_active, access_relation),
+            ));
+        }
+        // Preserve the legacy ordering exactly: active entries first, then
+        // ascending bot uuid.
+        entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let total = entries.len() as u64;
+        let items = entries
+            .into_iter()
+            .skip(to_usize(command.offset))
+            .take(to_usize(command.limit))
+            .map(|(_, _, entry)| entry)
+            .collect();
+        Ok(BotPagedListResult {
+            items,
+            total,
+            offset: command.offset,
+            limit: command.limit,
+        })
     }
 
     async fn query_bots_by_ids(
@@ -399,170 +541,8 @@ impl BotQueryService for Bot {
 }
 
 impl Bot {
-    async fn search_bots_via_control_plane(
-        &self,
-        control_plane: &dyn BotControlPlaneCoreService,
-        command: SearchBotsCommand,
-    ) -> Result<BotSearchResult, BotUseCaseError> {
-        let viewer_actor_id = command.viewer_actor_id.as_deref();
-        let friend_ids = if let Some(viewer_actor_id) = viewer_actor_id {
-            if let Some(edge_grants) = self.edge_grants.as_ref() {
-                edge_grants
-                    .list_friends(viewer_actor_id, &bcs_config::resolve_env_str())
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            } else {
-                self.friend
-                    .list_friends(viewer_actor_id)
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            }
-        } else {
-            HashSet::new()
-        };
-        let friendship = command.friendship.unwrap_or(BotSearchFriendshipFilter::All);
-        if !matches!(friendship, BotSearchFriendshipFilter::All) && viewer_actor_id.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "friendship filter requires viewer_actor_id".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-
-        let query = BotSearchCandidateQuery {
-            acting_bot_id: command.requester_actor_id.clone().unwrap_or_default(),
-            env: bcs_config::resolve_env_str(),
-            visibility: bcs_service_api::BotCandidateVisibility::Discovery,
-            friend_ids,
-            bot_uuids: command.bot_uuids.clone(),
-            name: command.q.clone(),
-            q: command.q.clone(),
-            visibility_filter: command.visibility.clone(),
-            user_visibility: command.user_visibility.clone(),
-            status: command.status,
-            friendship: Some(friendship),
-            tc_bot: command.tc_bot,
-            offset: command.offset,
-            limit: command.limit,
-        };
-        let (candidates, total) = control_plane.search_candidates(query).await?;
-        let candidate_bot_ids = candidates
-            .iter()
-            .map(|candidate| candidate.bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
-        let active_bot_ids = self
-            .registry
-            .list_runtime_active_bot_ids(&candidate_bot_ids)
-            .await
-            .into_iter()
-            .collect::<HashSet<_>>();
-
-        let mut items = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
-            let record = candidate.bot.record;
-            let capabilities = bot_capabilities_from_record(&record);
-            let bot_uuid = record.bot_id;
-            let dynamic_status = if record.status == ActorStatus::Online
-                && active_bot_ids.contains(&bot_uuid)
-            {
-                DynamicStatusResponse {
-                    status: "active".to_string(),
-                }
-            } else {
-                DynamicStatusResponse {
-                    status: "offline".to_string(),
-                }
-            };
-            items.push(BotQueryEntry {
-                bot_uuid,
-                capabilities,
-                visibility: record.visibility,
-                status: record.status,
-                actor_kind: record.kind,
-                env: Some(record.env),
-                dynamic_status,
-                created_by: record.created_by,
-                user_visibility: user_visibility_to_wire(record.user_visibility).to_string(),
-                friend_ext: record.friend_ext,
-                friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                    record.friend_check_in_strategy,
-                )
-                .to_string(),
-                is_friend: viewer_actor_id.map(|_| candidate.is_friend),
-            });
-        }
-
-        Ok(BotSearchResult { items, total })
-    }
 
 
-}
-
-#[async_trait]
-impl BotDiscoveryService for Bot {
-    async fn discover_bots(
-        &self,
-        command: BotDiscoveryCommand,
-    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
-        if command.role.is_some() && command.organization_code.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "role_requires_organization_code".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-        if command.organization_code.is_some() {
-            let code = command.organization_code.clone().unwrap_or_default();
-            return self.discover_organization_bots(&code, command).await;
-        }
-
-        let bots = self.discover_candidates(&command).await;
-
-        if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            let collaborate_bot_is_private = self
-                .registry
-                .get(collaborate_bot)
-                .await
-                .map(|bot| !is_discover_visible(&bot.capabilities.visibility))
-                .unwrap_or(false);
-            if collaborate_bot_is_private {
-                return Ok(BotDiscoveryResult {
-                    bots: Vec::new(),
-                    count: 0,
-                });
-            }
-        }
-
-        let friend_uuids = if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            Some(self.friend.list_friends(collaborate_bot).await)
-        } else {
-            None
-        };
-
-        let entries = bots
-            .into_iter()
-            .filter(|candidate| {
-                command.requester_bot_id.as_deref() != Some(candidate.bot.bot_uuid.as_str())
-            })
-            .filter(|candidate| matches_discovery_selector(&candidate.bot, &command))
-            .filter_map(|candidate| discover_entry(candidate, &command, friend_uuids.as_ref()))
-            .collect::<Vec<_>>();
-        let mut entries_with_agent_code = Vec::with_capacity(entries.len());
-        for mut entry in entries {
-            entry.agent_code = self
-                .registry
-                .get_agent_credentials(&entry.bot_uuid)
-                .await
-                .and_then(|credentials| credentials.agent_code);
-            entries_with_agent_code.push(entry);
-        }
-        Ok(BotDiscoveryResult {
-            count: entries_with_agent_code.len(),
-            bots: entries_with_agent_code,
-        })
-    }
 }
 
 #[async_trait]
@@ -598,7 +578,11 @@ impl BotManagementService for Bot {
             status,
         } = command;
         match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
+            Some(bot) => {
+                let bot_id = bot.bot_uuid.clone();
+                self.authorize_management_caller(caller_actor_id.as_deref(), &bot_id, &bot)
+                    .await?
+            }
             None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
@@ -631,7 +615,8 @@ impl BotManagementService for Bot {
             .get(&bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-        authorize_bot_management(caller_actor_id.as_deref(), &bot)?;
+        self.authorize_management_caller(caller_actor_id.as_deref(), &bot_id, &bot)
+            .await?;
 
         self.registry
             .update_visibility(&bot_id, &visibility)
@@ -663,7 +648,6 @@ impl BotManagementService for Bot {
             .get(&command.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_human_creator_required(staff_no, &bot)?;
 
         if is_owner_suffixed_bot_id_for_staff(&command.bot_id, staff_no) {
             return Err(BotUseCaseError::Forbidden(
@@ -677,7 +661,38 @@ impl BotManagementService for Bot {
             ));
         }
 
-        let left = self.registry.soft_delete(&command.bot_id).await;
+        // Cutover plan (spec §12.2/§12.4): a Bot delete is CURRENT control,
+        // resolved through the live authority hook. The historical
+        // `created_by` creation fact no longer grants it: the CURRENT owner
+        // — and any live manager, at the §8.2 business parity the §1.3
+        // defaults set (managers may perform destructive business actions,
+        // still subject to the TC/provider business conditions above) —
+        // may retire the Bot. A former creator with no live role is denied.
+        self.authorize_can_manage(staff_no, &command.bot_id).await?;
+
+        // The owner-delete lane is an authority lifecycle act, not a plain
+        // cache tombstone: the Bot retires through the governed single-
+        // transaction deletion boundary (plan Task 5), which withdraws the
+        // Bot's approved owner/manager edges, terminates its PENDING
+        // transfers and appends the lifecycle audit in the SAME commit. The
+        // former plain soft delete left dangling role edges behind the
+        // tombstone, and the strict Task 3 authority reads fail the WHOLE
+        // mine union on them — one deleted agent poisoned its former
+        // owner's mine (500) and every fail-closed guard lane (403s).
+        let left = self
+            .registry
+            .retire_bot_lifecycle(
+                &command.bot_id,
+                bcs_service_api::types::BotOperationContext {
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    actor: bcs_service_api::types::BotOperationActor::Human {
+                        user_id: staff_no.to_string(),
+                        effective_actor_id: caller.to_string(),
+                    },
+                },
+            )
+            .await
+            .map_err(BotUseCaseError::Service)?;
         Ok(BotLeaveResult {
             left,
             bot_uuid: command.bot_id,
@@ -829,459 +844,11 @@ impl BotManagementService for Bot {
     }
 }
 
-#[async_trait]
-impl BotRuntimeConnectionService for Bot {
-    async fn connect_streaming(
-        &self,
-        command: BotRuntimeConnectCommand,
-    ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
-        let BotRuntimeConnectCommand {
-            caller_actor_id: _,
-            token,
-            bot_id,
-            protocol_version,
-            client_kind,
-        } = command;
-
-        if let Some(bot_id) = bot_id.as_deref() {
-            self.validate_connect_bot_id(bot_id).await?;
-        }
-
-        let requested_client_kind = client_kind
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase());
-
-        let params = BotConnectParams {
-            token,
-            bot_id,
-            protocol_version,
-            client_kind: None,
-        };
-        let result = self
-            .registry
-            .connect_bot(params, ConnectionKind::Streaming)
-            .await
-            .map_err(BotUseCaseError::Connect)?;
-
-        if let Some(version) = protocol_version {
-            self.registry
-                .set_protocol_version(&result.bot_uuid, version)
-                .await;
-        }
-        let negotiated_client_kind = self.uplink.negotiate(protocol_version, requested_client_kind);
-        self.registry
-            .set_bot_info(
-                &result.bot_uuid,
-                "client_kind",
-                negotiated_client_kind.clone(),
-            )
-            .await;
-
-        let mut outcome = BotRuntimeConnectOutcome::from_connect_result(result);
-        outcome.negotiated_client_kind = negotiated_client_kind;
-        Ok(outcome)
-    }
-
-    async fn update_runtime_status(
-        &self,
-        command: BotRuntimeStatusCommand,
-    ) -> Result<BotRuntimeStatusOutcome, BotUseCaseError> {
-        let BotRuntimeStatusCommand {
-            caller_actor_id,
-            bot_id,
-            status,
-        } = command;
-
-        match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
-            None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
-            None => return Err(ServiceError::BotNotFound(bot_id).into()),
-        }
-
-        let updated = self.registry.update_status(&bot_id).await;
-
-        Ok(BotRuntimeStatusOutcome {
-            updated,
-            bot_uuid: bot_id,
-            status,
-        })
-    }
-
-    async fn disconnect_streaming(
-        &self,
-        command: BotRuntimeDisconnectCommand,
-    ) -> Result<(), BotUseCaseError> {
-        // Clear the active profile before releasing the streaming slot. Once
-        // the slot is released a reconnect may negotiate a new profile, which
-        // an older connection's cleanup must never erase.
-        self.registry
-            .set_bot_info(&command.bot_id, "client_kind", None)
-            .await;
-        self.registry.disconnect_streaming(&command.bot_id).await;
-        Ok(())
-    }
-
-    async fn is_provider_downlink_bot(&self, bot_id: &str) -> ServiceResult<bool> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Ok(false);
-        };
-        let Some(bindings) = bot_core.provider_bindings_repo() else {
-            return Ok(false);
-        };
-        let binding = bindings.get_binding_by_bot_uuid(bot_id).await?;
-        Ok(binding.is_some_and(|binding| !binding.disabled))
-    }
-
-    async fn resolve_delivery_target(&self, bot_id: &str) -> ServiceResult<BotDeliveryTarget> {
-        self.registry.resolve_delivery_target(bot_id).await
-    }
-}
-
 impl Bot {
-    async fn discover_organization_bots(
-        &self,
-        organization_code: &str,
-        command: BotDiscoveryCommand,
-    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
-        let requester = command.requester_bot_id.as_deref().ok_or_else(|| {
-            BotUseCaseError::Forbidden("organization discovery requires a bot caller".to_string())
-        })?;
-        let organization = self.organization.as_ref().ok_or_else(|| {
-            ServiceError::InvalidOperation {
-                message: "organization service is not configured".to_string(),
-                request_id: None,
-            }
-        })?;
-        organization
-            .require_runtime_member(organization_code, requester)
-            .await?;
-        let (member_by_bot, bots) = match organization
-            .list_runtime_discovery_bots(organization_code, command.role.as_deref())
-            .await?
-        {
-            Some(discovery_bots) => {
-                let member_by_bot = discovery_bots
-                    .iter()
-                    .map(|bot| (bot.bot_uuid.clone(), bot.role.clone()))
-                    .collect::<BTreeMap<_, _>>();
-                let bots = discovery_bots
-                    .into_iter()
-                    .map(|bot| RegisteredBot {
-                        bot_uuid: bot.bot_uuid,
-                        capabilities: bot.capabilities,
-                        env: None,
-                        created_by: None,
-                        actor_kind: bot.actor_kind,
-                        status: ActorStatus::Online,
-                    })
-                    .collect();
-                (member_by_bot, bots)
-            }
-            None => {
-                let members = organization
-                    .list_runtime_members(organization_code, command.role.as_deref())
-                    .await?;
-                let member_by_bot = members
-                    .iter()
-                    .map(|member| (member.bot_uuid.clone(), member.role.clone()))
-                    .collect::<BTreeMap<_, _>>();
-                let bot_ids = members.into_iter().map(|member| member.bot_uuid).collect::<Vec<_>>();
-                (member_by_bot, self.registry.get_by_ids(&bot_ids).await)
-            }
-        };
-        let friend_ids = self.friend.list_friends(requester).await;
-        let friend_ids = friend_ids.into_iter().collect::<std::collections::HashSet<_>>();
-        let mut entries = Vec::new();
-        for bot in bots {
-            if bot.actor_kind != ActorKind::Bot || bot.capabilities.name.is_none() {
-                continue;
-            }
-            if bot.bot_uuid.as_str() == requester {
-                continue;
-            }
-            if !matches_discovery_selector(&bot, &command) {
-                continue;
-            }
-            let visibility = bot.capabilities.visibility.clone();
-            if let Some(visibility_filter) = command.visibility.as_deref() {
-                if visibility != visibility_filter {
-                    continue;
-                }
-            }
-            let is_friend = friend_ids.contains(&bot.bot_uuid);
-            if !is_organization_discover_visible(&visibility) && !is_friend {
-                continue;
-            }
-            let Some(role) = member_by_bot.get(&bot.bot_uuid) else {
-                continue;
-            };
-            let agent_code = bot.capabilities.agent_code.clone();
-            entries.push(BotDiscoveryEntry {
-                bot_uuid: bot.bot_uuid,
-                capabilities: bot.capabilities,
-                visibility,
-                is_friend: Some(is_friend),
-                agent_code,
-                provider_info: None,
-                organization_member: Some(OrganizationMemberSummary {
-                    organization_code: organization_code.to_string(),
-                    role: role.clone(),
-                }),
-            });
-        }
-        Ok(BotDiscoveryResult {
-            count: entries.len(),
-            bots: entries,
-        })
-    }
 
-    async fn validate_connect_bot_id(&self, bot_id: &str) -> Result<(), BotUseCaseError> {
-        if !bot_id.starts_with("human_") {
-            return Ok(());
-        }
-
-        match self.registry.get(bot_id).await {
-            Some(existing) if existing.actor_kind == ActorKind::Human => Ok(()),
-            _ => Err(BotUseCaseError::InvalidBotId(
-                "human_ 前缀仅用于 Human Actor".to_string(),
-            )),
-        }
-    }
-
-    async fn is_provider_managed_bot(&self, bot_id: &str) -> Result<bool, BotUseCaseError> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Ok(false);
-        };
-        let Some(bindings) = bot_core.provider_bindings_repo() else {
-            return Ok(false);
-        };
-        Ok(bindings.get_binding_by_bot_uuid(bot_id).await?.is_some())
-    }
-
-    async fn bot_to_detail(&self, bot: RegisteredBot) -> BotDetailResult {
-        let visibility = bot.capabilities.visibility.clone();
-        let created_by = bot.created_by.clone();
-        let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
-
-        BotDetailResult {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
-            status: bot.status,
-            visibility,
-            owner_actor_id: owner_actor_id(created_by.clone()),
-            created_by,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
-            dynamic_status,
-        }
-    }
-
-    async fn bot_page_from_registered(
-        &self,
-        bots: Vec<RegisteredBot>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let total = bots.len() as u64;
-        let page = bots
-            .into_iter()
-            .skip(to_usize(offset))
-            .take(to_usize(limit))
-            .collect::<Vec<_>>();
-        let mut items = Vec::with_capacity(page.len());
-        for bot in page {
-            items.push(self.bot_to_query_entry(bot).await);
-        }
-        Ok(BotPagedListResult {
-            items,
-            total,
-            offset,
-            limit,
-        })
-    }
-
-    async fn my_bot_page_from_registered(
-        &self,
-        bots: Vec<RegisteredBot>,
-        offset: u64,
-        limit: u64,
-        active_only: bool,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let mut entries = Vec::with_capacity(bots.len());
-        let bot_uuids = bots
-            .iter()
-            .map(|bot| bot.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let active_bot_ids = self
-            .registry
-            .list_runtime_active_bot_ids(&bot_uuids)
-            .await
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        for bot in bots {
-            let is_active = active_bot_ids.contains(&bot.bot_uuid);
-            if active_only && !is_active {
-                continue;
-            }
-            let bot_uuid = bot.bot_uuid.clone();
-            entries.push((is_active, bot_uuid, Self::bot_to_my_query_entry(bot, is_active)));
-        }
-        entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-        let total = entries.len() as u64;
-        let items = entries
-            .into_iter()
-            .skip(to_usize(offset))
-            .take(to_usize(limit))
-            .map(|(_, _, entry)| entry)
-            .collect();
-
-        Ok(BotPagedListResult {
-            items,
-            total,
-            offset,
-            limit,
-        })
-    }
-
-    fn bot_to_my_query_entry(bot: RegisteredBot, is_active: bool) -> BotQueryEntry {
-        let visibility = bot.capabilities.visibility.clone();
-        BotQueryEntry {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
-            visibility,
-            status: bot.status,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
-            dynamic_status: DynamicStatusResponse {
-                status: if is_active { "active" } else { "offline" }.to_string(),
-            },
-            created_by: bot.created_by,
-            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-            friend_ext: serde_json::Map::new(),
-            friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                FriendCheckInStrategy::Approval,
-            )
-            .to_string(),
-            is_friend: None,
-        }
-    }
-
-    async fn bot_to_query_entry(&self, bot: RegisteredBot) -> BotQueryEntry {
-        let visibility = bot.capabilities.visibility.clone();
-        let dynamic_status = effective_dynamic_status(self.registry.as_ref(), &bot).await;
-        BotQueryEntry {
-            bot_uuid: bot.bot_uuid,
-            capabilities: bot.capabilities,
-            visibility,
-            status: bot.status,
-            actor_kind: bot.actor_kind,
-            env: bot.env,
-            dynamic_status,
-            created_by: bot.created_by,
-            user_visibility: user_visibility_to_wire(UserVisibility::Protected).to_string(),
-            friend_ext: serde_json::Map::new(),
-            friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                FriendCheckInStrategy::Approval,
-            )
-            .to_string(),
-            is_friend: None,
-        }
-    }
-
-    async fn discover_candidates(&self, command: &BotDiscoveryCommand) -> Vec<DiscoveryCandidate> {
-        let mut merged = BTreeMap::new();
-        for bot in self.registry.list_active().await {
-            merged.insert(
-                bot.bot_uuid.clone(),
-                DiscoveryCandidate {
-                    bot,
-                    provider_info: None,
-                },
-            );
-        }
-
-        for candidate in self.discover_provider_bots(command).await {
-            merged.insert(candidate.bot.bot_uuid.clone(), candidate);
-        }
-
-        merged.into_values().collect()
-    }
-
-    async fn discover_provider_bots(&self, command: &BotDiscoveryCommand) -> Vec<DiscoveryCandidate> {
-        let Some(bot_core) = self.bot_core.as_ref() else {
-            return Vec::new();
-        };
-        let Some(provider_bindings) = bot_core.provider_bindings_repo() else {
-            return Vec::new();
-        };
-        let selector = provider_discovery_selector(command);
-        let query_started_at = std::time::Instant::now();
-        let records_result = provider_bindings
-            .list_discoverable_provider_bot_records(&selector)
-            .await;
-        let elapsed_ms = query_started_at.elapsed().as_millis();
-        let records = match records_result {
-            Ok(records) => {
-                tracing::info!(
-                    elapsed_ms = %elapsed_ms,
-                    record_count = records.len(),
-                    selector = ?selector,
-                    "discover_provider_bots: listed provider bot records"
-                );
-                records
-            }
-            Err(error) => {
-                tracing::warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    elapsed_ms = %elapsed_ms,
-                    selector = ?selector,
-                    error = %error,
-                    "discover_provider_bots: failed to list provider bot records"
-                );
-                return Vec::new();
-            }
-        };
-        if records.is_empty() {
-            return Vec::new();
-        }
-
-        let bot_ids = records
-            .iter()
-            .map(|record| record.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let mut provider_info_by_bot = records
-            .into_iter()
-            .map(|record| {
-                (
-                    record.bot_uuid,
-                    BotDiscoveryProviderInfo {
-                        provider_id: record.provider_id,
-                        provider_name: record.provider_name,
-                    },
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-
-        self.registry
-            .get_by_ids(&bot_ids)
-            .await
-            .into_iter()
-            .filter(|bot| bot.actor_kind == ActorKind::Bot)
-            .filter_map(|bot| {
-                provider_info_by_bot
-                    .remove(&bot.bot_uuid)
-                    .map(|provider_info| DiscoveryCandidate {
-                        bot,
-                        provider_info: Some(provider_info),
-                    })
-            })
-            .collect()
-    }
 }
 
-fn is_in_list_bots_scope(bot: &RegisteredBot, onboarded: Option<bool>) -> bool {
+pub(crate) fn is_in_list_bots_scope(bot: &RegisteredBot, onboarded: Option<bool>) -> bool {
     match onboarded {
         Some(false) => bot.capabilities.name.is_none(),
         _ => {
@@ -1315,116 +882,11 @@ fn bot_to_list_entry(bot: RegisteredBot) -> BotListEntry {
     }
 }
 
-struct DiscoveryCandidate {
-    bot: RegisteredBot,
-    provider_info: Option<BotDiscoveryProviderInfo>,
-}
-
-fn discover_entry(
-    candidate: DiscoveryCandidate,
-    command: &BotDiscoveryCommand,
-    friend_uuids: Option<&Vec<String>>,
-) -> Option<BotDiscoveryEntry> {
-    let DiscoveryCandidate { bot, provider_info } = candidate;
-    let visibility = bot.capabilities.visibility.clone();
-    if !is_discover_visible(&visibility) {
-        return None;
-    }
-
-    if let Some(visibility_filter) = command.visibility.as_deref() {
-        if visibility != visibility_filter {
-            return None;
-        }
-    }
-
-    let is_friend = if let Some(friends) = friend_uuids {
-        let is_friend = friends.contains(&bot.bot_uuid);
-        if command.visibility.is_none() && visibility != "public" && !is_friend {
-            return None;
-        }
-        Some(is_friend)
-    } else {
-        None
-    };
-
-    Some(BotDiscoveryEntry {
-        bot_uuid: bot.bot_uuid,
-        capabilities: bot.capabilities,
-        visibility,
-        is_friend,
-        agent_code: None,
-        provider_info,
-        organization_member: None,
-    })
-}
-
-fn is_discover_visible(visibility: &str) -> bool {
-    matches!(visibility, "public" | "protected")
-}
-
-fn is_organization_discover_visible(visibility: &str) -> bool {
-    matches!(visibility, "public" | "protected")
-}
-
-fn provider_discovery_selector(command: &BotDiscoveryCommand) -> ProviderBotDiscoverySelector {
-    if let Some(q) = command.q.as_deref() {
-        ProviderBotDiscoverySelector::Query(q.to_string())
-    } else if !command.skills.is_empty() {
-        ProviderBotDiscoverySelector::RequiredSkills(command.skills.clone())
-    } else {
-        ProviderBotDiscoverySelector::All
-    }
-}
-
-fn matches_discovery_selector(bot: &RegisteredBot, command: &BotDiscoveryCommand) -> bool {
-    let matches_q = command
-        .q
-        .as_deref()
-        .is_none_or(|query| matches_query(bot, query));
-    let matches_skills = command.skills.iter().all(|skill| {
-        bot
-            .capabilities
-            .skills
-            .iter()
-            .any(|candidate| candidate.name.eq_ignore_ascii_case(skill))
-    });
-
-    matches_q && matches_skills
-}
-
-fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
-    bot.capabilities
-        .name
-        .as_deref()
-        .is_some_and(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .summary
-            .as_deref()
-            .is_some_and(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .domains
-            .iter()
-            .any(|value| contains_ignore_case(value, query))
-        || bot
-            .capabilities
-            .skills
-            .iter()
-            .any(|skill| contains_ignore_case(&skill.name, query))
-        || bot
-            .capabilities
-            .scopes
-            .iter()
-            .any(|value| contains_ignore_case(value, query))
-        || contains_ignore_case(&bot.bot_uuid, query)
-}
-
-fn contains_ignore_case(value: &str, query: &str) -> bool {
+pub(crate) fn contains_ignore_case(value: &str, query: &str) -> bool {
     value.to_lowercase().contains(&query.to_lowercase())
 }
 
-fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabilities {
+pub(crate) fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabilities {
     BotCapabilities {
         name: non_empty_text(Some(record.name.as_str())),
         summary: non_empty_text(Some(record.descriptor.summary.as_str())),
@@ -1436,7 +898,7 @@ fn bot_capabilities_from_record(record: &BotControlPlaneRecord) -> BotCapabiliti
     }
 }
 
-fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
+pub(crate) fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
     match value {
         UserVisibility::Public => "public",
         UserVisibility::Protected => "protected",
@@ -1444,7 +906,7 @@ fn user_visibility_to_wire(value: UserVisibility) -> &'static str {
     }
 }
 
-fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
+pub(crate) fn friend_check_in_strategy_to_wire(value: FriendCheckInStrategy) -> &'static str {
     match value {
         FriendCheckInStrategy::Open => "OPEN",
         FriendCheckInStrategy::Approval => "APPROVAL",
@@ -1475,7 +937,7 @@ fn owner_from_provider_bot_ref(provider_bot_ref: &str) -> Result<String, BotUseC
     })
 }
 
-async fn effective_dynamic_status(
+pub(crate) async fn effective_dynamic_status(
     registry: &dyn BotRegistryCoreService,
     bot: &RegisteredBot,
 ) -> DynamicStatusResponse {
@@ -1486,7 +948,7 @@ async fn effective_dynamic_status(
     }
 }
 
-fn owner_actor_id(created_by: Option<String>) -> Option<String> {
+pub(crate) fn owner_actor_id(created_by: Option<String>) -> Option<String> {
     created_by.map(|owner| {
         if owner.starts_with("human_") {
             owner
@@ -1540,62 +1002,20 @@ fn authorize_visibility_read(
     }
 }
 
-fn authorize_human_creator_required(
-    staff_no: &str,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    match bot.created_by.as_deref() {
-        Some(owner) if owner == staff_no => Ok(()),
-        _ => Err(BotUseCaseError::Forbidden(format!(
-            "User {} is not the creator of bot {}",
-            staff_no, bot.bot_uuid
-        ))),
-    }
-}
-
 fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
     bot_uuid
         .rsplit_once(':')
         .is_some_and(|(_, suffix)| suffix == staff_no)
 }
 
+// `authorize_human_creator_required` / `authorize_bot_management` were the
+// legacy `created_by` owner checks retired by the §12.2/§12.4 cutover: the
+// creation-source fact is history/audit only and never authorizes current
+// control. The delete/status/visibility lanes resolve the live owner/manager
+// facts through `Bot::authorize_can_manage` (the wired
+// `bcs_service_api::application::v1::BotAuthorityHook`) instead.
 
-
-fn authorize_bot_management(
-    caller_actor_id: Option<&str>,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    let Some(caller_actor_id) = caller_actor_id else {
-        return Err(BotUseCaseError::Unauthorized(format!(
-            "caller identity is required to modify bot '{}'",
-            bot.bot_uuid
-        )));
-    };
-
-    if caller_actor_id == bot.bot_uuid {
-        return Ok(());
-    }
-
-    let Some(owner_staff_no) = bot.created_by.as_deref() else {
-        return Err(BotUseCaseError::Forbidden(format!(
-            "caller '{}' is not the owner of bot '{}'",
-            caller_actor_id, bot.bot_uuid
-        )));
-    };
-
-    if caller_actor_id == owner_staff_no
-        || caller_actor_id.strip_prefix("human_") == Some(owner_staff_no)
-    {
-        return Ok(());
-    }
-
-    Err(BotUseCaseError::Forbidden(format!(
-        "caller '{}' is not the owner of bot '{}'",
-        caller_actor_id, bot.bot_uuid
-    )))
-}
-
-fn to_usize(value: u64) -> usize {
+pub(crate) fn to_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
 

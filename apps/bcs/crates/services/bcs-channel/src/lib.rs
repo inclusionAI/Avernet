@@ -370,6 +370,10 @@ impl BcsChannelService {
                 &ctx.group_id,
                 &msg.channel_type,
                 NewSessionParams {
+                    // Task 11 carry re-check (plan Task 12): group-projection
+                    // lane likewise creates from an inbound IM event with no
+                    // BCS-verified Human — the System audit context is the
+                    // honest operator (never a forged Human).
                     session_kind: SessionKind::Chat,
                     caller_principal: Some(ctx.caller_principal.clone()),
                     session_title: if msg.conversation_type == "1" {

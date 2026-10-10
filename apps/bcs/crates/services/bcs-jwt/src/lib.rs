@@ -5,8 +5,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod group_session;
+pub mod team_manager_credential;
 
 pub use group_session::{GroupSessionJwtBuildError, GroupSessionJwtService};
+pub use team_manager_credential::{
+    TEAM_MANAGER_CREDENTIAL_PURPOSE, TeamManagerCredentialSignError, TeamManagerJwtVerifier,
+    TeamManagerServiceScopes,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 

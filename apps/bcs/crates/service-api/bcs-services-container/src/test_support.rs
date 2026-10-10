@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use bcs_test_support::{
     NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService, NoopBotDeliveryPort,
-    NoopBotDiscoveryService, NoopBotManagementService, NoopBotOnboardingService,
-    NoopBotQueryService, NoopBotRegistryCoreService, NoopBotRunContextPort,
+    NoopBotDiscoveryService, NoopBotManagementService, NoopBotManagerService,
+    NoopBotOnboardingService, NoopBotOwnershipTransferService, NoopBotQueryService,
+    NoopBotRegistryCoreService, NoopBotRunContextPort,
     NoopBotRuntimeConnectionService, NoopCollaborationRuntimeService,
     NoopCollaborationTemplateService, NoopFriendCoreService,
     NoopFriendService, NoopFrontendDeliveryPort,
@@ -63,6 +64,12 @@ pub fn with_all_noop() -> ServicesBuilder {
         .system_message(Arc::new(NoopSystemMessageService))
         .session_management(Arc::new(NoopSessionManagementService))
         .session_launch(Arc::new(NoopSessionLaunchService))
+        // Plan Task 18: the authority-lane Noops fail closed (Forbidden /
+        // fixed-code deny, never an empty allowance) and the credential-
+        // bound team slice stays unmounted.
+        .bot_manager(Arc::new(NoopBotManagerService))
+        .ownership_transfer(Arc::new(NoopBotOwnershipTransferService))
+        .team_manager_sync(None)
 }
 
 impl Services {

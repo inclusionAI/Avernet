@@ -34,6 +34,7 @@ async fn interaction_resolve_uses_current_exact_session_relationships() {
         .with_bot("alice-bot", "Alice Bot", "public", Some("alice"))
         .with_bot("bob-bot", "Bob Bot", "public", Some("bob"))
         .with_human("human_carol", "Carol");
+    fixture.authority.grant("alice", "alice-bot");
     let session = test_session(
         "group-under-test:session-1",
         "group-under-test",
@@ -522,6 +523,7 @@ async fn query_methods_list_detail_bot_groups_and_workspace() {
                 decisions: vec!["ship it".to_string()],
                 ..Workspace::default()
             },
+            operation: test_operation_context(),
         })
         .await
         .unwrap();
@@ -882,6 +884,7 @@ async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
             group_id: group.group_id,
             bot_id: "provider-worker".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("provider downlink bot can be added to manager_worker group");
@@ -917,6 +920,7 @@ async fn add_member_assigns_worker_in_manager_worker_group() {
             group_id: group.group_id,
             bot_id: "new-worker".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("member should be added with the strategy-owned role");
@@ -1322,6 +1326,9 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
         .with_bot("stranger", "Stranger", "protected", None)
         .with_friendship("driver", "friend")
         .with_friendship("driver", "private-friend");
+    // LIVE authority (production shape): alice controls the driver Bot she
+    // acts as; the historical created_by value is not consulted.
+    fixture.authority.grant("alice", "driver");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -1339,13 +1346,13 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
-    assert!(matches!(
-        non_coordinator,
-        Err(GroupUseCaseError::Forbidden(message))
-            if message.contains("group coordinator")
-    ));
+    // With the live authority wired (production shape), a Human labeled as
+    // another Bot she does not control is denied at the act-as check before
+    // the coordinator question — either Forbidden shape is the correct deny.
+    assert!(matches!(non_coordinator, Err(GroupUseCaseError::Forbidden(_))));
 
     let protected_stranger = service
         .add_member(GroupAddMemberCommand {
@@ -1354,6 +1361,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "stranger".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert!(matches!(
@@ -1368,6 +1376,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "private-friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("private friend target is reachable");
@@ -1380,6 +1389,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await;
     assert!(matches!(
@@ -1395,6 +1405,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("friend target is reachable");
@@ -1419,6 +1430,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
         .with_bot("public-helper", "Public Helper", "public", None)
         .with_bot("protected-helper", "Protected Helper", "protected", None)
         .with_friendship("driver", "protected-helper");
+    fixture.authority.grant("alice", "originator");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -1440,6 +1452,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             group_id: "group-under-test".to_string(),
             bot_id: "public-helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("originator can add public helper");
@@ -1450,6 +1463,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             group_id: "group-under-test".to_string(),
             bot_id: "protected-helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("originator can add protected friend of driver");
@@ -1898,6 +1912,110 @@ async fn create_dm_rejects_mismatched_driver_bot_for_human_caller() {
     ));
 }
 
+/// Review F6 (spec §12.2/§8.2): the DM lane authorizes CURRENT control, so
+/// the HISTORICAL creation source never grants a channel. A protected Bot
+/// recorded as created by alice — with NO live owner/manager edge and no
+/// friendship (the post-transfer + manager-revoke state) must refuse the
+/// DM. Pre-fix, the `created_by` arm granted this lane outright.
+#[tokio::test]
+async fn create_dm_denies_the_former_creator_without_friendship() {
+    let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(
+        "assistant",
+        "Assistant",
+        "protected",
+        Some("alice"),
+    );
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let err = service
+        .create_dm(DmCreateCommand {
+            group_id: None,
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect_err("the former creator cannot DM the protected Bot");
+    assert!(matches!(err, GroupUseCaseError::Forbidden(_)));
+
+    // The formal reuse lane refuses the retired creator too (opening_message
+    // reuses the DM through the same guard).
+    let reuse = service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-reuse-probe".to_string()),
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect_err("the retired creator cannot reuse the channel either");
+    assert!(matches!(reuse, GroupUseCaseError::Forbidden(_)));
+}
+
+/// Review F6 counterpart: the CURRENT arms of the same lane stay open — a
+/// live manager (or owner) DNs the protected Bot without friendship, and
+/// the friendship arm keeps serving its own reachability path.
+#[tokio::test]
+async fn create_dm_keeps_owner_manager_and_friend_lanes_open() {
+    // Manager arm: the CONTROL authority lives, the friendship is absent.
+    let managed = Fixture::new().with_human("human_bob", "Bob").with_bot(
+        "managed-assistant",
+        "Managed Assistant",
+        "protected",
+        Some("someone-else"),
+    );
+    managed.authority.grant("bob", "managed-assistant");
+    let service = managed.service_with_limits(5, 10, 10);
+    let allowed = service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-manager".to_string()),
+            caller_actor_id: Some("human_bob".to_string()),
+            driver_bot: None,
+            target_actor_id: "managed-assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect("a current manager DMs the protected Bot without friendship");
+    assert!(allowed.created);
+
+    // Friendship arm: no authority fact, but the friendship exists.
+    let friended = Fixture::new()
+        .with_human("human_carol", "Carol")
+        .with_bot(
+            "friendly-assistant",
+            "Friendly Assistant",
+            "protected",
+            Some("someone-else"),
+        )
+        .with_friendship("human_carol", "friendly-assistant");
+    let friended_service = friended.service_with_limits(5, 10, 10);
+    let via_friendship = friended_service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-friend".to_string()),
+            caller_actor_id: Some("human_carol".to_string()),
+            driver_bot: None,
+            target_actor_id: "friendly-assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect("the friendship arm keeps serving its own reachability path");
+    assert!(via_friendship.created);
+}
+
 #[tokio::test]
 async fn workbench_human_bot_dm_rejects_owner_bot_proxy_sender_by_default() {
     let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(
@@ -2120,6 +2238,7 @@ async fn group_secondary_mutations_run_through_management_service() {
                 decisions: vec!["ship".to_string()],
                 ..Default::default()
             },
+            operation: test_operation_context(),
         })
         .await
         .unwrap();
@@ -2288,6 +2407,8 @@ async fn workbench_session_service_connects_for_owner_and_authorizes_owned_sende
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_bot("helper", "Helper", "public", Some("alice"));
+    fixture.authority.grant("alice", "driver");
+    fixture.authority.grant("alice", "helper");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -2430,6 +2551,9 @@ async fn workbench_session_service_rejects_invalid_sender_states() {
         .with_bot("helper", "Helper", "public", Some("alice"))
         .with_bot("outside", "Outside", "public", Some("alice"))
         .with_bot("bob-bot", "Bob Bot", "public", Some("bob"));
+    fixture.authority.grant("alice", "driver");
+    fixture.authority.grant("alice", "helper");
+    fixture.authority.grant("alice", "outside");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -2683,6 +2807,7 @@ impl SessionManagementService for StaticSessionManagement {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -2691,6 +2816,7 @@ impl SessionManagementService for StaticSessionManagement {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -2699,6 +2825,7 @@ impl SessionManagementService for StaticSessionManagement {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -2708,6 +2835,7 @@ impl SessionManagementService for StaticSessionManagement {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -2716,6 +2844,7 @@ impl SessionManagementService for StaticSessionManagement {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -2761,12 +2890,54 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
     }
 }
 
+/// Map-backed LIVE authority double for the legacy group lanes: can_manage
+/// answers ONLY from the seeded control facts (owner or manager — both are
+/// "control"), never from the fixture registry's `created_by` values (the
+/// shape the final-review cutover tests need).
+#[derive(Default)]
+struct ControlAuthorityHook {
+    grants: std::sync::Mutex<HashMap<(String, String), bool>>,
+}
+
+impl ControlAuthorityHook {
+    fn grant(&self, user_id: &str, bot_id: &str) {
+        self.grants
+            .lock()
+            .unwrap()
+            .insert((user_id.to_string(), bot_id.to_string()), true);
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for ControlAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        Ok(self
+            .grants
+            .lock()
+            .unwrap()
+            .get(&(user_id.to_string(), bot_id.to_string()))
+            .copied()
+            .unwrap_or(false))
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        Err(ServiceError::Forbidden(format!(
+            "user '{user_id}' is not the owner of bot '{bot_id}'"
+        )))
+    }
+}
+
 struct Fixture {
     group: Arc<GroupStore>,
     registry: Arc<FakeRegistry>,
     friend: Arc<FakeFriendCoreService>,
     relation: Arc<FakeRelationCoreService>,
     provider_downlink_bots: Arc<RwLock<HashSet<String>>>,
+    /// Map-backed LIVE authority double (final-review cutover tests):
+    /// can_manage answers ONLY from the seeded control facts, never from
+    /// the registry's historical `created_by` values, so the legacy
+    /// caller lanes are provably hook-driven.
+    authority: Arc<ControlAuthorityHook>,
 }
 
 impl Fixture {
@@ -2777,8 +2948,10 @@ impl Fixture {
             friend: Arc::new(FakeFriendCoreService::default()),
             relation: Arc::new(FakeRelationCoreService::default()),
             provider_downlink_bots: Arc::new(RwLock::new(HashSet::new())),
+            authority: Arc::new(ControlAuthorityHook::default()),
         }
     }
+
 
     fn service_with_limits(
         &self,
@@ -2822,6 +2995,7 @@ impl Fixture {
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_authority(self.authority.clone())
     }
 
     fn service_with_system_message(
@@ -2849,6 +3023,7 @@ impl Fixture {
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),
         }))
+        .with_authority(self.authority.clone())
     }
 
     fn with_bot(
@@ -2955,6 +3130,16 @@ fn create_cmd(
         group_strategy: None,
         visibility: None,
         provisioning: false,
+        human_sponsorship: None,
+    }
+}
+
+fn test_operation_context() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: "test-group-operation".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "driver".to_string(),
+        },
     }
 }
 
@@ -3579,6 +3764,7 @@ async fn add_member_human_consultant_ok() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_human("human_bob", "Bob");
+    fixture.authority.grant("alice", "driver");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -3596,6 +3782,7 @@ async fn add_member_human_consultant_ok() {
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("adding human consultant should succeed");
@@ -3609,6 +3796,7 @@ async fn add_member_human_worker_in_manager_worker_ok() {
     let fixture = Fixture::new()
         .with_bot("mgr", "Manager", "public", Some("alice"))
         .with_human("human_bob", "Bob");
+    fixture.authority.grant("alice", "mgr");
     let service = fixture.service_with_limits(5, 10, 10);
 
     let mut cmd = create_cmd(
@@ -3626,6 +3814,7 @@ async fn add_member_human_worker_in_manager_worker_ok() {
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("adding human worker to mw group should succeed");
@@ -3683,6 +3872,7 @@ async fn originator_human_can_add_member() {
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("human originator should be able to add member");
@@ -3746,6 +3936,7 @@ async fn originator_bot_self_driver_can_manage() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_bot("helper", "Helper", "public", None);
+    fixture.authority.grant("alice", "driver");
     let service = fixture.service_with_limits(5, 10, 10);
     service
         .create_group(create_cmd(
@@ -3764,6 +3955,7 @@ async fn originator_bot_self_driver_can_manage() {
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
             message_view_scope: None,
+            human_sponsorship: None,
         })
         .await
         .expect("driver should still be able to add member");
@@ -4015,6 +4207,7 @@ async fn add_non_public_bot_to_public_group_rejected() {
         group_id: "group-under-test".to_string(),
         bot_id: "bot_private".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     }).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Cannot add non-public bot"));
@@ -4039,6 +4232,7 @@ async fn add_human_to_public_group_succeeds() {
         group_id: "group-under-test".to_string(),
         bot_id: "human_123".to_string(),
         message_view_scope: None,
+        human_sponsorship: None,
     }).await;
     assert!(result.is_ok(), "error: {:?}", result.unwrap_err());
 }
@@ -4075,6 +4269,7 @@ async fn list_groups_filters_by_visibility() {
         group_strategy: None,
         visibility: Some("public".to_string()),
         provisioning: false,
+        human_sponsorship: None,
     };
     service.create_group(cmd2).await.unwrap();
 
@@ -4130,6 +4325,10 @@ async fn human_owner_can_remove_their_bot_from_group() {
     let fixture = Fixture::new()
         .with_bot("bot_a", "Bot A", "public", None)
         .with_bot("bot_b", "Bot B", "public", Some("alice"));
+    // The remove-member lane resolved through the live authority hook in
+    // the final-review cutover: the CURRENT control fact is the grant, the
+    // historical `created_by` value alone is not.
+    fixture.authority.grant("alice", "bot_b");
     let service = fixture.service_with_limits(5, 10, 10);
 
     let cmd = create_cmd(Some("bot_a"), "bot_a", vec![
@@ -4191,6 +4390,128 @@ async fn non_owner_cannot_remove_others_bot_from_group() {
     assert!(result.unwrap_err().to_string().contains("not authorized"));
 }
 
+/// Final-review cutover (spec §12.2/§12.4): remove-member's "owner of the
+/// target" lane resolves through the LIVE authority facts. The FORMER owner
+/// — still the historical `created_by` after a completed transfer — is
+/// DENIED.
+#[tokio::test]
+async fn remove_member_denies_former_owner_without_live_control() {
+    let fixture = Fixture::new()
+        .with_bot("bot_a", "Bot A", "public", None)
+        .with_bot("bot_b", "Bot B", "public", Some("alice"));
+    // `alice` is only the historical creator: the live control moved to
+    // `bob` (no grant seeded for alice).
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let cmd = create_cmd(Some("bot_a"), "bot_a", vec![
+        participant("bot_a", Some("driver")),
+        participant("bot_b", Some("consultant")),
+    ]);
+    service.create_group(cmd).await.unwrap();
+
+    let result = service.remove_member(GroupRemoveMemberCommand {
+        caller_actor_id: Some("human_alice".to_string()),
+        group_id: "group-under-test".to_string(),
+        bot_id: "bot_b".to_string(),
+    }).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("not authorized"),
+        "a former owner (created_by only) must not remove the member"
+    );
+}
+
+/// Under-grant fix (AC08): a legitimate MANAGER of the target Bot — with no
+/// historical creation fact at all — may remove it.
+#[tokio::test]
+async fn remove_member_allows_live_manager_of_target_bot() {
+    let fixture = Fixture::new()
+        .with_bot("bot_a", "Bot A", "public", None)
+        .with_bot("bot_b", "Bot B", "public", None);
+    fixture.authority.grant("manager-1", "bot_b");
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let cmd = create_cmd(Some("bot_a"), "bot_a", vec![
+        participant("bot_a", Some("driver")),
+        participant("bot_b", Some("consultant")),
+    ]);
+    service.create_group(cmd).await.unwrap();
+
+    let result = service.remove_member(GroupRemoveMemberCommand {
+        caller_actor_id: Some("human_manager-1".to_string()),
+        group_id: "group-under-test".to_string(),
+        bot_id: "bot_b".to_string(),
+    }).await;
+    assert!(result.is_ok(), "a live manager may remove the target: {:?}", result.err());
+}
+
+/// The coordinator eligibility lane cuts over the same way: a Human who
+/// CURRENTLY controls the driver Bot may kick other members; the former
+/// driver-owner may not (visibility change parity below).
+#[tokio::test]
+async fn remove_member_denies_former_driver_owner_as_coordinator() {
+    let fixture = Fixture::new()
+        .with_bot("bot_a", "Bot A", "public", Some("alice"))
+        .with_bot("bot_b", "Bot B", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let cmd = create_cmd(Some("bot_a"), "bot_a", vec![
+        participant("bot_a", Some("driver")),
+        participant("bot_b", Some("consultant")),
+    ]);
+    service.create_group(cmd).await.unwrap();
+
+    let result = service.remove_member(GroupRemoveMemberCommand {
+        caller_actor_id: Some("human_alice".to_string()),
+        group_id: "group-under-test".to_string(),
+        bot_id: "bot_b".to_string(),
+    }).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().to_string().contains("not authorized"),
+        "the historical driver owner without live control is not a coordinator"
+    );
+}
+
+/// Visibility change (the "driver's owner" lane): the live controller of
+/// the driver Bot may change visibility; the historical creator alone
+/// may not.
+#[tokio::test]
+async fn update_visibility_through_live_driver_control_only() {
+    let fixture = Fixture::new()
+        .with_bot("bot_a", "Bot A", "public", Some("alice"))
+        .with_bot("bot_b", "Bot B", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let cmd = create_cmd(Some("bot_a"), "bot_a", vec![
+        participant("bot_a", Some("driver")),
+        participant("bot_b", Some("consultant")),
+    ]);
+    service.create_group(cmd).await.unwrap();
+
+    // Former owner (created_by only): denied.
+    let denied = service.update_visibility(GroupUpdateVisibilityCommand {
+        caller_actor_id: "human_alice".to_string(),
+        group_id: "group-under-test".to_string(),
+        visibility: "private".to_string(),
+    }).await;
+    assert!(denied.is_err());
+    assert!(
+        denied.unwrap_err().to_string().contains("coordinator"),
+        "the historical driver owner without live control cannot change visibility"
+    );
+
+    // A live CONTROLLER (manager) of the driver: allowed.
+    fixture.authority.grant("manager-1", "bot_a");
+    let result = service.update_visibility(GroupUpdateVisibilityCommand {
+        caller_actor_id: "human_manager-1".to_string(),
+        group_id: "group-under-test".to_string(),
+        visibility: "public".to_string(),
+    }).await;
+    assert!(result.is_ok(), "a live controller of the driver may change visibility: {:?}", result.err());
+    assert_eq!(result.unwrap().visibility, "public");
+}
+
 #[tokio::test]
 async fn coordinator_can_still_kick_members() {
     let fixture = Fixture::new()
@@ -4217,6 +4538,7 @@ async fn workbench_chat_abort_allows_session_bot_owner_and_absent_target() {
     let fixture = Fixture::new()
         .with_bot("driver", "Driver", "public", Some("alice"))
         .with_bot("target", "Target", "public", Some("bob"));
+    fixture.authority.grant("alice", "driver");
     let mut target = Participant::bot("target", ParticipantRole::Consultant);
     target.mode = Some(ParticipantMode::Absent);
     let session = test_session(

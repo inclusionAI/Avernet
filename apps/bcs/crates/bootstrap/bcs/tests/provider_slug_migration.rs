@@ -15,7 +15,7 @@ async fn provider_slug_upgrade_preserves_legacy_rows_and_migration_history() {
     bcs::migrations::run_sqlite_migrations(&db).await.unwrap();
     let history = db.query(DbStatement::new("SELECT version, name, checksum FROM bcs_schema_migrations ORDER BY version"))
         .await.unwrap();
-    assert_eq!(history.len(), 33);
+    assert_eq!(history.len(), 34);
     bcs::migrations::run_sqlite_migrations(&db).await.unwrap();
     assert_eq!(db.query(DbStatement::new("SELECT version, name, checksum FROM bcs_schema_migrations ORDER BY version"))
         .await.unwrap(), history);

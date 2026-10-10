@@ -369,6 +369,7 @@ dependencies = [
  "jsonwebtoken",
  "metrics",
  "metrics-exporter-prometheus",
+ "mysql_async",
  "native-tls",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -425,6 +426,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -454,6 +456,7 @@ dependencies = [
  "ulid",
  "url",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -467,12 +470,16 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
+ "bcs-jwt",
  "bcs-service-api",
  "bcs-test-support",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -501,6 +508,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-db-api",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -511,9 +519,11 @@ dependencies = [
  "bcs-test-support",
  "secrecy",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -532,6 +542,7 @@ dependencies = [
  "bcs-test-support",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -555,12 +566,21 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-api-http",
+ "bcs-bot",
+ "bcs-bot-store",
+ "bcs-config",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
+ "bcs-relation",
+ "bcs-route-security",
  "bcs-service-api",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -572,6 +592,7 @@ dependencies = [
  "bcs-bot-store",
  "bcs-db-api",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -585,9 +606,11 @@ dependencies = [
  "bcs-test-support",
  "bytes",
  "serde_json",
+ "tempfile",
  "time",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -750,13 +773,17 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-observability",
  "bcs-service-api",
  "bcs-test-support",
+ "mysql_async",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-test",
@@ -896,6 +923,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1144,14 +1172,19 @@ name = "bcs-edge-permission"
 version = "0.1.3"
 dependencies = [
  "async-trait",
+ "bcs-chat-run-store",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
  "bcs-edge-permission-store",
+ "bcs-message-flow",
+ "bcs-message-store",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-user-directory-api",
+ "hex",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
  "uuid",
@@ -1162,15 +1195,24 @@ name = "bcs-edge-permission-store"
 version = "0.1.3"
 dependencies = [
  "async-trait",
+ "bcs-bot-store",
+ "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-service-api",
  "bcs-test-support",
+ "hex",
+ "mysql_async",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1199,6 +1241,7 @@ name = "bcs-eventing"
 version = "0.1.3"
 dependencies = [
  "async-trait",
+ "bcs-bot",
  "bcs-config-api",
  "bcs-event-store",
  "bcs-group",
@@ -1294,6 +1337,7 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",
@@ -1355,6 +1399,7 @@ dependencies = [
  "bcs-config",
  "bcs-config-api",
  "bcs-domain",
+ "bcs-edge-permission",
  "bcs-friend",
  "bcs-group",
  "bcs-group-store",
@@ -1494,6 +1539,7 @@ version = "0.1.3"
 dependencies = [
  "base64 0.22.1",
  "bcs-service-api",
+ "bcs-test-support",
  "hmac",
  "serde",
  "serde_json",
@@ -1574,6 +1620,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1909,6 +1956,8 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-event-store",
  "bcs-group",
@@ -1918,7 +1967,9 @@ dependencies = [
  "bcs-session-store",
  "bcs-test-support",
  "chrono",
+ "hex",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-test",
  "tracing",
@@ -1943,6 +1994,7 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -1951,6 +2003,7 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-service-api",
  "bcs-test-support",
@@ -1960,6 +2013,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1980,6 +2034,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2077,9 +2132,11 @@ dependencies = [
  "bcs-session-file",
  "serde_json",
  "sha2",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -2129,6 +2186,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-callback",
+ "bcs-config",
  "bcs-domain",
  "bcs-interaction",
  "bcs-observability",

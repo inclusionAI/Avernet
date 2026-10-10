@@ -1,7 +1,15 @@
 #[test]
 fn ws_handlers_use_hooks_without_metrics_context_in_dispatch_state() {
     let bot_dispatcher = include_str!("../src/bot/dispatcher.rs");
-    let web_dispatcher = include_str!("../src/web/dispatcher.rs");
+    // The web dispatcher is a responsibility-split module tree (Task 16
+    // review round); the structural contract applies to every split part.
+    let web_dispatcher = concat!(
+        include_str!("../src/web/dispatcher/mod.rs"),
+        include_str!("../src/web/dispatcher/connect.rs"),
+        include_str!("../src/web/dispatcher/interaction.rs"),
+        include_str!("../src/web/dispatcher/chat.rs"),
+        include_str!("../src/web/dispatcher/replies.rs"),
+    );
     let bot_handler = include_str!("../src/bot/handler.rs");
     let web_handler = include_str!("../src/web/handler.rs");
 

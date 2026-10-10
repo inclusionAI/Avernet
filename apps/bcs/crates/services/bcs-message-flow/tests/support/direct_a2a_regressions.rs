@@ -1,6 +1,7 @@
 use super::*;
 use bcs_domain::message_delivery::{PersistedMessageDelivery, MessageDeliveryStatus as Status};
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+use bcs_service_api::types::{BotOperationActor, BotOperationContext};
 use std::sync::atomic::Ordering::SeqCst;
 
 #[derive(Default)]
@@ -25,6 +26,12 @@ fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitio
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event, now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None,
         reply: None, transport_context_json: None, deadline_at_ms: None,
+        // §12.5 REQUIRED derived sub-operation: test-lane mirror of the
+        // library helper — the delivery's target Bot reports the lifecycle.
+        operation: BotOperationContext {
+            operation_id: format!("test-transition:{}", row.delivery_id),
+            actor: BotOperationActor::Bot { bot_id: row.target_bot_id.clone() },
+        },
     }
 }
 

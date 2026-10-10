@@ -10,6 +10,22 @@ use crate::core::{
     ParticipantKind, MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError,
     ServiceSpec, Workspace,
 };
+use crate::types::BotOperationContext;
+
+/// Trusted Human sponsorship credential (spec §8.3, plan Task 10).
+///
+/// A Human originator may bring their owned/managed Bots into a
+/// collaboration without any Bot-to-Bot friendship. The credential is built
+/// ONLY by the application boundary after authenticating a real Human caller
+/// — `user_id` is the trusted User ID, never a request-body string. Bot
+/// originators never carry this credential, and downstream use cases must
+/// RE-VERIFY current qualification (`BotAuthorityHook::can_manage`) against
+/// it, never trust the string itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanSponsorship {
+    /// Trusted User ID of the verified Human caller who sponsors the Bots.
+    pub user_id: String,
+}
 
 /// Request for creating a group collaboration session.
 #[derive(Debug, Clone)]
@@ -41,6 +57,9 @@ pub struct GroupCreateCommand {
     pub visibility: Option<String>,
     /// Keep the row hidden until Event Subscription/Event finalization.
     pub provisioning: bool,
+    /// Trusted Human sponsorship (spec §8.3). `None` for Bot-originated
+    /// creates; a Bot originator must NOT carry this credential.
+    pub human_sponsorship: Option<HumanSponsorship>,
 }
 
 /// Participant input for group creation.
@@ -83,6 +102,10 @@ pub struct GroupAddMemberCommand {
     pub group_id: String,
     pub bot_id: String,
     pub message_view_scope: Option<MessageViewScope>,
+    /// Trusted Human sponsorship (spec §8.3): the verified Human acting for
+    /// the authorized group-manager Actor. Group-management authorization is
+    /// checked FIRST, then the sponsorship of the target.
+    pub human_sponsorship: Option<HumanSponsorship>,
 }
 
 /// Request for deleting a group.
@@ -121,6 +144,10 @@ pub struct GroupUpdateWorkspaceCommand {
     pub caller_actor_id: Option<String>,
     pub group_id: String,
     pub workspace: Workspace,
+    /// REQUIRED caller-side audit identity (spec §12.5): the real operator
+    /// (Human/Bot/System) and the effective actor selected by the
+    /// application. Never taken from a request body.
+    pub operation: BotOperationContext,
 }
 
 /// Request for updating a group's routing policy.

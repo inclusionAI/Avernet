@@ -207,7 +207,11 @@ mod tests {
                 .await
                 .expect("create Service Session");
             session_repo
-                .complete_if_running(id, None, None)
+                .complete_if_running(
+                    id,
+                    None,
+                    None
+                )
                 .await
                 .expect("complete Service Session");
         }

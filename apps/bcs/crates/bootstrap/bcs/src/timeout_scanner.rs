@@ -88,7 +88,14 @@ pub async fn scan_once_with_url_guard(
             }
 
             match session_mgmt
-                .complete_if_running(&sess.id, None, Some("timeout".to_string()))
+                .complete_if_running(
+                    &sess.id,
+                    None,
+                    Some("timeout".to_string()),
+                    // Scanner lane: an honest System operator — the timeout
+                    // sweep is an independent runtime action (spec §12.5).
+                    &bcs_service_api::types::system_lane_operation("bcs-timeout-scanner"),
+                )
                 .await
             {
                 Ok(Some(completed_session)) => {

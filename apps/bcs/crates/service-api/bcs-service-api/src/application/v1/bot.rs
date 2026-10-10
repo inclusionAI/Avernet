@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{ApplicationError, AuthenticatedCaller, FriendCheckInStrategy, Page, UserVisibility};
+pub use crate::types::BotAccessRelation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,6 +169,23 @@ pub struct BotList {
     pub items: Vec<Bot>,
 }
 
+/// One `GET /bots/mine` item (spec §7.1): the Bot fields FLATTENED on the
+/// wire plus the REQUIRED `access_relation` label. A wire item missing
+/// the label, or carrying anything other than `owner`/`manager`, is a
+/// contract violation — the label is NEVER defaulted to `owner`.
+///
+/// This extended DTO exists only for the mine endpoint; the generic
+/// [`Bot`] DTO must not carry the label (ownership is a per-reader
+/// snapshot, not a Bot attribute).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MyBot {
+    /// Flattened Bot projection (all `Bot` fields inline on the wire).
+    #[serde(flatten)]
+    pub bot: Bot,
+    /// The current Human's highest effective relation on this Bot.
+    pub access_relation: BotAccessRelation,
+}
+
 #[derive(Debug, Clone)]
 pub struct ListBotCandidates {
     pub caller: AuthenticatedCaller,
@@ -283,7 +301,13 @@ pub trait BotService: Send + Sync {
 
     async fn update(&self, command: UpdateBot) -> Result<Bot, ApplicationError>;
 
-    /// Materializes the authenticated Human Actor, then lists actors owned by it.
-    /// Human materialization is idempotent and does not bind physical Bot ownership.
-    async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError>;
+    /// Materializes the authenticated Human Actor, then lists the Bot rows
+    /// that Human currently controls: the physical owner ∪ manager union
+    /// (deduplicated per Bot, owner-labeled first) plus the Human's own
+    /// self row as an explicit `Owner`-labeled compatibility projection
+    /// (spec §7). Every item carries the REQUIRED `access_relation`
+    /// label computed from the CURRENT authority edges — `created_by`
+    /// never determines the label. Human materialization is idempotent
+    /// and does not bind physical Bot ownership.
+    async fn list_mine(&self, command: ListMyBots) -> Result<Page<MyBot>, ApplicationError>;
 }

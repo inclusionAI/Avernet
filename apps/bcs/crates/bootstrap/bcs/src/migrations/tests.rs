@@ -208,7 +208,8 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
                 "sqlite".to_string()
             ),
             (32, "session_registry".to_string(), "sqlite".to_string()),
-            (33, "provider_slug".to_string(), "sqlite".to_string())
+            (33, "provider_slug".to_string(), "sqlite".to_string()),
+            (34, "bot_authority".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())
@@ -220,7 +221,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
 
     let report = check_sqlite_migrations(&db).await?;
 
-    assert_eq!(report.pending_versions.len(), 33);
+    assert_eq!(report.pending_versions.len(), 34);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -657,7 +658,8 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
                 "sqlite".to_string()
             ),
             (32, "session_registry".to_string(), "sqlite".to_string()),
-            (33, "provider_slug".to_string(), "sqlite".to_string())
+            (33, "provider_slug".to_string(), "sqlite".to_string()),
+            (34, "bot_authority".to_string(), "sqlite".to_string())
         ]
     );
     Ok(())

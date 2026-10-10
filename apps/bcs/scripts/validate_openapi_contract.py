@@ -22,6 +22,17 @@ HTTP_METHODS = {
     "options",
     "trace",
 }
+# Task 13 (spec §6.1): the internal team-manager sources slice lives
+# OUTSIDE the /api/v1/collaboration/ prefix, so it is allow-listed
+# operation-by-operation at its precise path templates — the team slice
+# never widens into an arbitrary `/api/v1/*` acceptance.
+TEAM_MANAGER_SOURCE_OPERATIONS = frozenset(
+    {
+        ("put", "/api/v1/bots/{bot_id}/manager-sources/teams/{team_id}"),
+        ("post", "/api/v1/bots/{bot_id}/manager-sources/teams/{team_id}/members"),
+        ("delete", "/api/v1/bots/{bot_id}/manager-sources/teams/{team_id}/members"),
+    }
+)
 ROUTING_ONLY_OPERATION_ID_PARTS = {"collaboration", "bcn", "openapi"}
 ENVELOPE_FIELDS = {"code", "message", "data", "request_id"}
 PUBLIC_COLLABORATION_PREFIX = "/openapi/v1/collaboration/"
@@ -147,8 +158,18 @@ def validate_contract(
     for method, path, operation in _iter_operations(contract):
         location = f"{method.upper()} {path}"
         allowed_prefixes = _allowed_path_prefixes(path_prefix)
-        if not any(path.startswith(prefix) for prefix in allowed_prefixes):
+        # The only non-prefix path acceptance is the precise team-manager
+        # sources allow-set, and only while validating the internal
+        # (collaboration-prefix) contract entrypoint.
+        approved_team_manager_source = (
+            path_prefix == INTERNAL_COLLABORATION_PREFIX
+            and (method, path) in TEAM_MANAGER_SOURCE_OPERATIONS
+        )
+        in_allowed_prefix = any(path.startswith(prefix) for prefix in allowed_prefixes)
+        if not in_allowed_prefix and not approved_team_manager_source:
             joined = " or ".join(f"{prefix}**" for prefix in allowed_prefixes)
+            if path_prefix == INTERNAL_COLLABORATION_PREFIX:
+                joined = f"{joined} or the approved team-manager source templates"
             errors.append(f"{location}: path is outside {joined}")
 
         operation_id = operation.get("operationId")

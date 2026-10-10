@@ -8,9 +8,19 @@ use bcs_service_api::{
     RunFallbackDelivery,
 };
 use bcs_ws::shared::RunChannelManager;
-use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery};
+use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery, WorkbenchOutbound};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+/// Legacy-lane test helper: everything this suite drains sits on the
+/// PublicControl lane, asserted to make the typed queue visible.
+async fn recv_payload(rx: &mut mpsc::Receiver<WorkbenchOutbound>) -> String {
+    match rx.recv().await {
+        Some(WorkbenchOutbound::PublicControl(payload)) => payload,
+        Some(WorkbenchOutbound::Protected { payload, .. }) => payload,
+        None => panic!("expected a queued frame"),
+    }
+}
 
 #[tokio::test]
 async fn frontend_delivery_publishes_to_group_connection() {
@@ -40,9 +50,8 @@ async fn frontend_delivery_publishes_to_group_connection() {
         .unwrap();
 
     assert_eq!(result.delivered, 1);
-    let delivered = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+    let delivered = tokio::time::timeout(Duration::from_secs(1), recv_payload(&mut rx))
         .await
-        .unwrap()
         .unwrap();
     assert!(delivered.contains(r#""event":"chat""#));
 }
@@ -125,11 +134,11 @@ async fn frontend_delivery_does_not_run_fallback_when_group_channel_is_bound() {
     let connections = Arc::new(WorkbenchConnectionRegistry::new());
     let run_channels = Arc::new(RunChannelManager::new());
     let delivery = WorkbenchFrontendDelivery::new(connections.clone(), run_channels.clone());
-    let (frontend_tx, _frontend_rx) = mpsc::channel(1);
+    let (frontend_tx, _frontend_rx) = mpsc::channel::<WorkbenchOutbound>(1);
     let (run_tx, mut run_rx) = mpsc::channel(1);
 
     frontend_tx
-        .try_send("existing-message".to_string())
+        .try_send(WorkbenchOutbound::PublicControl("existing-message".to_string()))
         .unwrap();
     connections
         .subscribe(
@@ -232,9 +241,8 @@ async fn frontend_delivery_excludes_sender_conn_id_from_broadcast() {
             .is_err(),
         "sender connection should not receive its own message"
     );
-    let other_received = tokio::time::timeout(Duration::from_secs(1), rx_other.recv())
+    let other_received = tokio::time::timeout(Duration::from_secs(1), recv_payload(&mut rx_other))
         .await
-        .unwrap()
         .unwrap();
     assert!(other_received.contains(r#""event":"chat""#));
 }
@@ -413,7 +421,7 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
         .begin_scope_change("session-scoped", "human_target")
         .await
         .unwrap();
-    let close = rx.recv().await.expect("scope change close event");
+    let close = recv_payload(&mut rx).await;
     assert!(close.contains("view_scope_changed"));
     assert!(shutdown.is_cancelled());
     assert_eq!(connections.connection_count("session-scoped").await, 0);
@@ -453,8 +461,9 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
 #[tokio::test]
 async fn scope_change_cancels_socket_when_close_queue_is_full() {
     let connections = WorkbenchConnectionRegistry::new();
-    let (tx, _rx) = mpsc::channel(1);
-    tx.try_send("queued event".to_string()).unwrap();
+    let (tx, _rx) = mpsc::channel::<WorkbenchOutbound>(1);
+    tx.try_send(WorkbenchOutbound::PublicControl("queued event".to_string()))
+        .unwrap();
     let shutdown = CancellationToken::new();
     connections
         .subscribe_with_shutdown(

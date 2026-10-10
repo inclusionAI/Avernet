@@ -3,10 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
-    ActorKind, BotRegistryCoreService, CreateInviteTokenCommand, GroupCoreService, GroupKind,
-    GroupStatus, InviteService, InviteTargetType, InviteTokenError, InviteTokenPayload,
-    InviteTokenResult, InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult, Participant,
-    ParticipantMode, ParticipantRole, SessionManagementService, SystemMessageEvent,
+    ActorKind, BotQueryService, BotRegistryCoreService, CreateInviteTokenCommand, GroupCoreService,
+    GroupKind, GroupStatus, InviteService, InviteTargetType, InviteTokenError, InviteTokenPayload,
+    InviteTokenResult, InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult, MyBotsCommand,
+    Participant, ParticipantMode, ParticipantRole, SessionManagementService, SystemMessageEvent,
     SystemMessageService,
     invite_token_decode_no_expiry, invite_token_encode,
 };
@@ -16,6 +16,11 @@ pub struct InviteServiceImpl {
     pub group: Arc<dyn GroupCoreService>,
     pub session: Arc<dyn SessionManagementService>,
     pub system_message: Arc<dyn SystemMessageService>,
+    /// Live mine-union projection (spec §12.4, final-review cutover): the
+    /// Human "controlled Bots" questions resolve through
+    /// `BotQueryService::list_my_bots` (live owner/manager union) — never
+    /// through the historical `created_by` creation listing.
+    pub bot_query: Arc<dyn BotQueryService>,
     pub token_secret: Vec<u8>,
     pub default_ttl_seconds: u64,
     pub base_url: Option<String>,
@@ -28,6 +33,38 @@ impl InviteServiceImpl {
         self.base_url
             .clone()
             .unwrap_or_else(|| "http://localhost:21000".to_string())
+    }
+
+    /// The ids of the Bots the Human CURRENTLY controls (live owner/manager
+    /// union through the mine projection — the same Answer the Task-12
+    /// legacy session routes use). Fail-closed on a lookup failure: the
+    /// failure DENIES, never falling back to a created_by allowance.
+    async fn current_controllable_bot_ids(&self, staff_no: &str) -> Vec<String> {
+        match self
+            .bot_query
+            .list_my_bots(MyBotsCommand {
+                staff_no: staff_no.to_string(),
+                offset: 0,
+                limit: 500,
+                active_only: false,
+            })
+            .await
+        {
+            Ok(page) => page
+                .items
+                .into_iter()
+                .filter(|bot| bot.actor_kind == ActorKind::Bot)
+                .map(|bot| bot.bot_uuid)
+                .collect(),
+            Err(error) => {
+                tracing::warn!(
+                    staff_no,
+                    error = %error,
+                    "invite: failed to resolve the controllable Bot union; failing closed"
+                );
+                Vec::new()
+            }
+        }
     }
 
     async fn authorize_group_invite(
@@ -54,14 +91,15 @@ impl InviteServiceImpl {
                 return Ok(());
             }
         }
-        // Owner of driver/originator bot can generate invites.
+        // Final-review cutover (spec §12.2/§12.4): a Human caller qualifies
+        // through a Bot they CURRENTLY own or MANAGE — the live mine union
+        // over the driver/originator, never the historical `created_by`
+        // creation listing.
         if let Some(staff_no) = caller_staff_no {
-            let owned = self.registry.list_bots_by_creator(staff_no).await;
-            let owned_ids: Vec<&str> = owned.iter().map(|b| b.bot_uuid.as_str()).collect();
-            if owned_ids.contains(&group.driver_bot.as_str()) {
-                return Ok(());
-            }
-            if owned_ids.contains(&originator) {
+            let controlled = self.current_controllable_bot_ids(staff_no).await;
+            if controlled.iter().any(|bot_id| {
+                bot_id == group.driver_bot.as_str() || bot_id == originator
+            }) {
                 return Ok(());
             }
         }
@@ -73,9 +111,10 @@ impl InviteServiceImpl {
 
     /// Session invite tokens are gated on session membership only: any
     /// participant of the session (any role, bot or human) may mint one. A
-    /// Human caller also qualifies through any owned Bot that participates in
-    /// the session. Group-level roles (driver, originator, manager) are
-    /// intentionally NOT required here.
+    /// Human caller also qualifies through any Bot they CURRENTLY own or
+    /// manage that participates in the session (live mine union, final-review
+    /// cutover — never the `created_by` listing). Group-level roles
+    /// (driver, originator, manager) are intentionally NOT required here.
     async fn ensure_session_member(
         &self,
         cmd: &CreateInviteTokenCommand,
@@ -90,10 +129,8 @@ impl InviteServiceImpl {
             if is_member(&format!("human_{}", staff_no)) {
                 return Ok(());
             }
-            let owned = self.registry.list_bots_by_creator(staff_no).await;
-            if owned.iter().any(|bot| {
-                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
-            }) {
+            let controlled = self.current_controllable_bot_ids(staff_no).await;
+            if controlled.iter().any(|bot_id| is_member(bot_id.as_str())) {
                 return Ok(());
             }
         }
@@ -388,9 +425,19 @@ impl InviteService for InviteServiceImpl {
             tags: Vec::new(),
             message_view_scope,
         };
+        // REQUIRED audit identity (spec §12.5): the invite was accepted by the
+        // verified Human (staff_no authenticated through the invite token);
+        // the effective actor is that Human's own actor entry.
+        let operation = bcs_service_api::types::BotOperationContext {
+            operation_id: format!("invite-join:session:{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::Human {
+                user_id: cmd.staff_no.clone(),
+                effective_actor_id: actor_id.clone(),
+            },
+        };
         let updated_session = self
             .session
-            .add_participant(session_id, participant.clone())
+            .add_participant(session_id, participant.clone(), &operation)
             .await
             .map_err(|e| match e {
                 bcs_service_api::SessionUseCaseError::NotFound(msg) => {

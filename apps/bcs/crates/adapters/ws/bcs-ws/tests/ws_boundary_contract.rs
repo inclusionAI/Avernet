@@ -17,7 +17,13 @@ const WS_SOURCES: &[&str] = &[
     "src/shared/mod.rs",
     "src/shared/run_channels.rs",
     "src/web/connection_registry.rs",
-    "src/web/dispatcher.rs",
+    // The web dispatcher is a responsibility-split module tree (Task 16
+    // review round); every split part stays under the same boundary rules.
+    "src/web/dispatcher/mod.rs",
+    "src/web/dispatcher/connect.rs",
+    "src/web/dispatcher/interaction.rs",
+    "src/web/dispatcher/chat.rs",
+    "src/web/dispatcher/replies.rs",
     "src/web/frontend_delivery.rs",
     "src/web/handler.rs",
     "src/web/mod.rs",

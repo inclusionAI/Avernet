@@ -299,6 +299,14 @@ async fn cleanup_repairs_orphan_without_waiting_for_the_run_deadline() {
     let mut record = ChatRunRecord::new("orphan".into(), "bot-observer".into(), "bot-driver".into(), "orphan-session".into(),
         now - 31_000, now + 3_600_000, None, ChatResponseMode::Full, ChatRunCompletionPolicy::WaitForFinal);
     record.delivery_id = Some("missing".into());record.source_message_id = Some("missing-source".into());
+    // §12.5: the store requires the create command's operation context;
+    // the orphan-cleanup conformance seeds the run as the sending Bot.
+    record.operation = Some(types::BotOperationContext {
+        operation_id: "direct-chat-create:orphan".to_string(),
+        actor: types::BotOperationActor::Bot {
+            bot_id: "bot-driver".into(),
+        },
+    });
     h.direct.run_store().create(record).await.unwrap();
     A2aChatService::cleanup_expired(h.direct.as_ref(), now, 60_000).await.unwrap();
     let repaired = h.direct.run_store().get("orphan").await.unwrap();

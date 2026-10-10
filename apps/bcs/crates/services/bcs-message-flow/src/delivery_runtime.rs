@@ -79,6 +79,8 @@ fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -
 }
 
 fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionCommand {
+    // The runtime dispatcher/sweeper is an independent engine lane; its
+    // §12.5 context is an HONEST System identity (plan Task 12 fix round).
     DeliveryTransitionCommand {
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
@@ -89,6 +91,7 @@ fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionComma
         reply: None,
         transport_context_json: None,
         deadline_at_ms: None,
+        operation: bcs_service_api::types::system_lane_operation("delivery-runtime"),
     }
 }
 

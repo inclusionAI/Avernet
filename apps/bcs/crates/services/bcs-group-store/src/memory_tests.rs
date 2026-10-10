@@ -3,6 +3,7 @@
 //! Copied verbatim from the single-file `memory.rs` fixtures.
 use super::*;
 use bcs_domain::{GroupMessageType, MessageRole, ParticipantRole};
+use bcs_service_api::types::{BotOperationActor, BotOperationContext};
 
 #[test]
 fn group_builder_uses_canonical_generated_id() {
@@ -196,7 +197,7 @@ async fn test_update_workspace() {
     };
 
     store
-        .update_workspace("test-group", workspace.clone())
+        .update_workspace("test-group", workspace.clone(), BotOperationContext { operation_id: "test-group-operation".to_string(), actor: BotOperationActor::Bot { bot_id: "driver".to_string() } })
         .await
         .unwrap();
 
@@ -211,7 +212,7 @@ async fn test_update_workspace_nonexistent_group() {
     let store = MemoryGroupRepo::new();
 
     let workspace = Workspace::default();
-    let result = store.update_workspace("nonexistent", workspace).await;
+    let result = store.update_workspace("nonexistent", workspace, BotOperationContext { operation_id: "test-group-operation".to_string(), actor: BotOperationActor::Bot { bot_id: "driver".to_string() } }).await;
     assert!(result.is_err());
 }
 
@@ -680,7 +681,7 @@ async fn test_group_workspace_persistence() {
     };
 
     store
-        .update_workspace("test-group", workspace)
+        .update_workspace("test-group", workspace, BotOperationContext { operation_id: "test-group-operation".to_string(), actor: BotOperationActor::Bot { bot_id: "driver".to_string() } })
         .await
         .unwrap();
 

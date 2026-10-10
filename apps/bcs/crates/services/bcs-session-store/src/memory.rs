@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
@@ -20,10 +21,15 @@ use bcs_service_api::port::repo::{
     RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
-use bcs_service_api::types::MessageViewScope;
+use bcs_service_api::types::{BotActionAuditRecord, BotOperationContext, MessageViewScope};
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
+};
+
+use crate::action_audit::{
+    collect_state_audit_record, create_participant_audit_record, create_session_audit_record,
+    remove_participant_audit_record, session_action_audit_id, update_session_audit_record,
 };
 
 // ---------------------------------------------------------------------------
@@ -146,6 +152,11 @@ pub struct MemorySessionRepo {
     state: Arc<RwLock<MemoryState>>,
     event_store: Option<Arc<MemoryEventStore>>,
     registry: Arc<crate::registry::MemorySessionRegistry>,
+    /// Published ordinary-business audit rows (the in-memory counterpart of
+    /// `bcs_bot_action_audits`), kept SEPARATE from `state` so an armed audit
+    /// failure can be observed without touching business state.
+    action_audits: RwLock<Vec<BotActionAuditRecord>>,
+    action_audit_failure_armed: AtomicBool,
 }
 
 impl MemorySessionRepo {
@@ -159,6 +170,75 @@ impl MemorySessionRepo {
     pub fn with_event_store(mut self, event_store: Arc<MemoryEventStore>) -> Self {
         self.event_store = Some(event_store);
         self
+    }
+
+    /// TEST-ONLY: arm a one-shot failure of the next ordinary-business audit
+    /// append; the co-published business mutation must be discarded too.
+    pub fn arm_action_audit_write_failure(&self) {
+        self.action_audit_failure_armed
+            .store(true, Ordering::SeqCst);
+    }
+
+    /// TEST/diagnostic observation of the published ordinary-business audit
+    /// rows (the in-memory counterpart of querying `bcs_bot_action_audits`).
+    /// The audit table is not a permission fact source and no public query
+    /// API is added.
+    pub async fn session_action_audit_records(&self) -> ServiceResult<Vec<BotActionAuditRecord>> {
+        let audits = self.action_audits.read().await;
+        Ok(audits.clone())
+    }
+
+    fn audit_env(&self) -> String {
+        "memory".to_string()
+    }
+
+    /// STAGE one ordinary-business audit row (spec §12.5): every fallible
+    /// decision — the armed test failure AND the `(env, operation_id,
+    /// step_key)` slot conflict check — happens HERE, BEFORE any business or
+    /// Event side effect commits, so an audit failure leaves no partial
+    /// success: the state, the Event and the audit all publish together or
+    /// not at all.
+    /// A same-slot record with identical content stages as an idempotent
+    /// no-op; different content under the same slot is a Conflict.
+    ///
+    /// Returns the held write guard so the caller can publish the staged row
+    /// synchronously inside its own critical section (including the event
+    /// store's sync business closure).
+    async fn stage_action_audit(
+        &self,
+        record: &BotActionAuditRecord,
+    ) -> ServiceResult<tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>> {
+        if self.action_audit_failure_armed.swap(false, Ordering::SeqCst) {
+            return Err(ServiceError::InternalError(
+                "injected session action audit append failure".to_string(),
+            ));
+        }
+        let mut audits = self.action_audits.write().await;
+        if let Some(existing) = audits.iter().find(|existing| existing.same_slot(record)) {
+            if existing.content_conflicts(record) {
+                return Err(ServiceError::Conflict(format!(
+                    "session action audit slot '{}' already carries different content",
+                    record.step_key
+                )));
+            }
+        }
+        Ok(audits)
+    }
+
+    /// Publish a staged audit row synchronously (the event store's business
+    /// closure is `FnOnce() -> Result<_, EventRepoError>` and cannot
+    /// await). Only valid after [`Self::stage_action_audit`] returned Ok and
+    /// while the caller still owns its critical section; a slot already
+    /// carrying identical content stays a no-op. The audit id is
+    /// deterministic, so a replayed identical record byte-matches the first
+    /// committed row.
+    fn publish_staged_action_audit(
+        audits: &mut tokio::sync::RwLockWriteGuard<'_, Vec<BotActionAuditRecord>>,
+        record: &BotActionAuditRecord,
+    ) {
+        if !audits.iter().any(|existing| existing.same_slot(record)) {
+            audits.push(record.clone());
+        }
     }
 }
 
@@ -455,6 +535,7 @@ impl SessionRepoPort for MemorySessionRepo {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let now = now_ms();
         let mut st = self.state.write().await;
@@ -465,7 +546,21 @@ impl SessionRepoPort for MemorySessionRepo {
 
         // Idempotent: skip if bot already in list.
         let bot_uuid = participant.bot_uuid.clone();
-        if !sess.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
+        let added = !sess.participants.iter().any(|p| p.bot_uuid == bot_uuid);
+        // Same-critical-section audit (spec §12.5): the membership row stages
+        // inside the write lock and publishes WITH the participant push or
+        // not at all — independent of eventing. An already-present
+        // participant is a no-change add and writes no audit row.
+        let mut staged_audit = None;
+        if added {
+            let record = create_participant_audit_record(
+                operation,
+                &self.audit_env(),
+                session_id,
+            );
+            staged_audit = Some((self.stage_action_audit(&record).await?, record));
+        }
+        if added {
             sess.participants.push(participant);
             sess.updated_at = now;
         }
@@ -484,6 +579,10 @@ impl SessionRepoPort for MemorySessionRepo {
         );
         sess.participant_join_seq = Some(serde_json::Value::Object(join_map));
 
+        if let Some((mut staged, record)) = staged_audit {
+            Self::publish_staged_action_audit(&mut staged, &record);
+        }
+
         Ok(sess.clone())
     }
 
@@ -492,7 +591,12 @@ impl SessionRepoPort for MemorySessionRepo {
         command: AddSessionParticipantWithEvent,
     ) -> ServiceResult<Session> { self.repo_add_participant_with_event(command).await }
 
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> {
         let now = now_ms();
         let mut st = self.state.write().await;
         let sess = st
@@ -507,11 +611,17 @@ impl SessionRepoPort for MemorySessionRepo {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
+        // Same-critical-section audit (spec §12.5): the removal row stages
+        // only after the not-found error path and publishes with the
+        // participant removal or not at all.
+        let record = remove_participant_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged = self.stage_action_audit(&record).await?;
         sess.updated_at = now;
         let updated = sess.clone();
         // collection mark is per-participant; leaving drops it
         st.collected
             .retain(|key, _| !(key.0 == session_id && key.1 == bot_uuid));
+        Self::publish_staged_action_audit(&mut staged, &record);
         Ok(updated)
     }
 
@@ -525,6 +635,7 @@ impl SessionRepoPort for MemorySessionRepo {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let now = now_ms();
         let mut st = self.state.write().await;
@@ -543,8 +654,14 @@ impl SessionRepoPort for MemorySessionRepo {
                 ))
             })?;
 
+        // Same-critical-section audit (spec §12.5): `update/session/applied`
+        // publishes with the mode write in one critical section, independent
+        // of eventing.
+        let record = update_session_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged = self.stage_action_audit(&record).await?;
         p.mode = Some(mode);
         sess.updated_at = now;
+        Self::publish_staged_action_audit(&mut staged, &record);
         Ok(sess.clone())
     }
 
@@ -553,6 +670,7 @@ impl SessionRepoPort for MemorySessionRepo {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let now = now_ms();
         let mut state = self.state.write().await;
@@ -574,8 +692,14 @@ impl SessionRepoPort for MemorySessionRepo {
                 "Bot participants must use full message_view_scope".to_string(),
             ));
         }
+        // Same-critical-section audit (spec §12.5, see
+        // `update_participant_mode`): the scope write publishes with its
+        // `update/session/applied` row or not at all.
+        let record = update_session_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged = self.stage_action_audit(&record).await?;
         participant.message_view_scope = message_view_scope;
         session.updated_at = now;
+        Self::publish_staged_action_audit(&mut staged, &record);
         Ok(session.clone())
     }
 
@@ -585,6 +709,7 @@ impl SessionRepoPort for MemorySessionRepo {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let now = now_ms();
         let mut state = self.state.write().await;
@@ -608,11 +733,16 @@ impl SessionRepoPort for MemorySessionRepo {
                 "Participant mode or message_view_scope is invalid for the actor kind".to_string(),
             ));
         }
+        // Same-critical-section audit (spec §12.5, see
+        // `update_participant_mode`).
+        let record = update_session_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged = self.stage_action_audit(&record).await?;
         participant.message_view_scope = message_view_scope;
         if let Some(mode) = mode {
             participant.mode = Some(mode);
         }
         session.updated_at = now;
+        Self::publish_staged_action_audit(&mut staged, &record);
         Ok(session.clone())
     }
 
@@ -651,14 +781,21 @@ impl SessionRepoPort for MemorySessionRepo {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let mut st = self.state.write().await;
         let sess = st
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        // Same-critical-section audit (spec §12.5, plan Task 11): the title
+        // write publishes WITH its `update/session/applied` row in one
+        // critical section — the audit never depends on eventing.
+        let record = update_session_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged = self.stage_action_audit(&record).await?;
         sess.session_title = title;
         sess.updated_at = now_ms();
+        Self::publish_staged_action_audit(&mut staged, &record);
         Ok(sess.clone())
     }
 
@@ -683,7 +820,12 @@ impl SessionRepoPort for MemorySessionRepo {
         Ok(existed)
     }
 
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
         let mut st = self.state.write().await;
         let session = st
             .sessions
@@ -694,22 +836,44 @@ impl SessionRepoPort for MemorySessionRepo {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
+        let key = (session_id.to_string(), bot_uuid.to_string());
+        if st.collected.contains_key(&key) {
+            // Idempotent no-change collect: NO audit row is created (spec §12.5
+            // "幂等无变化不制造 applied"), matching the SQL twin's
+            // conditional-UPDATE + stop-on-no-rows shape.
+            return Ok(());
+        }
         // Idempotent on the timestamp: a repeat collect keeps the original event time
         // (entry().or_insert) so the list ordering reflects first-collection time.
-        st.collected
-            .entry((session_id.to_string(), bot_uuid.to_string()))
-            .or_insert(now_ms());
+        // The state flip and the audit row publish in the SAME critical
+        // section; an armed audit failure discards the staged flip.
+        let record = collect_state_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged_audit = self.stage_action_audit(&record).await?;
+        st.collected.entry(key).or_insert(now_ms());
+        Self::publish_staged_action_audit(&mut staged_audit, &record);
         Ok(())
     }
 
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
         let mut st = self.state.write().await;
         // Idempotent: session must exist; otherwise no-op removal.
         if !st.sessions.contains_key(session_id) {
             return Err(ServiceError::SessionNotFound(session_id.to_string()));
         }
-        st.collected
-            .remove(&(session_id.to_string(), bot_uuid.to_string()));
+        let key = (session_id.to_string(), bot_uuid.to_string());
+        if !st.collected.contains_key(&key) {
+            // Idempotent no-change uncollect: no audit row (see `collect`).
+            return Ok(());
+        }
+        let record = collect_state_audit_record(operation, &self.audit_env(), session_id);
+        let mut staged_audit = self.stage_action_audit(&record).await?;
+        st.collected.remove(&key);
+        Self::publish_staged_action_audit(&mut staged_audit, &record);
         Ok(())
     }
 
@@ -746,6 +910,7 @@ fn check_group_claim(entries: &HashMap<String, bcs_service_api::port::repo::sess
     if let Some(row) = entries.get(id) { crate::registry::check_type(row, bcs_service_api::port::repo::session_registry::SessionType::Group)?; }
     Ok(())
 }
+
 fn commit_group_claim(entries: &mut HashMap<String, bcs_service_api::port::repo::session_registry::SessionRegistration>, id: &str) {
     use bcs_service_api::port::repo::session_registry::*;
     entries.insert(id.into(), SessionRegistration { session_id: id.into(), session_type: SessionType::Group, current_msg_seq: None });

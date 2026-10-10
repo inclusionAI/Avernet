@@ -9,6 +9,15 @@ use bcs_service_api::{
 use bcs_group::GroupManagementWithRuntimeCleanup;
 use bcs_test_support::{NoopCollaborationRuntimeService, NoopGroupManagementService};
 
+fn test_operation_context(actor: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: "test-group-operation".to_string(),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: actor.to_string(),
+        },
+    }
+}
+
 #[tokio::test]
 async fn cleanup_wrapper_forwards_non_delete_operations() {
     let service = GroupManagementWithRuntimeCleanup::new(
@@ -71,6 +80,7 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
                 caller_actor_id: Some("driver".to_string()),
                 group_id: "group-1".to_string(),
                 workspace: Workspace::default(),
+                operation: test_operation_context("driver"),
             })
             .await
             .is_err()

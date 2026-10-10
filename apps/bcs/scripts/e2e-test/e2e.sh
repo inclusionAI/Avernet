@@ -86,12 +86,13 @@ source "$SCRIPT_DIR/cli-stories.sh"
 source "$SCRIPT_DIR/fixed_loop_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
+source "$SCRIPT_DIR/bot_authority.sh"
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)
 # ============================================================================
 
-ALL_SUITES=(stories edge_permission)
+ALL_SUITES=(stories edge_permission bot_authority)
 ALL_TESTS=()
 
 for test_name in "${E2E_TESTS_STORIES[@]}"; do
@@ -100,6 +101,10 @@ done
 
 for test_name in "${E2E_TESTS_EDGE_PERMISSION[@]}"; do
     ALL_TESTS+=("edge_permission:$test_name")
+done
+
+for test_name in "${E2E_TESTS_BOT_AUTHORITY[@]}"; do
+    ALL_TESTS+=("bot_authority:$test_name")
 done
 
 # ============================================================================
@@ -114,6 +119,10 @@ if [ "$LIST_ONLY" = true ]; then
     done
     echo "  edge_permission:"
     for test_name in "${E2E_TESTS_EDGE_PERMISSION[@]}"; do
+        echo "    - $test_name"
+    done
+    echo "  bot_authority:"
+    for test_name in "${E2E_TESTS_BOT_AUTHORITY[@]}"; do
         echo "    - $test_name"
     done
     exit 0

@@ -79,6 +79,16 @@ impl A2aChat {
         // Direct has exactly one Send, so its delivery uses the preallocated run ID.
         record.delivery_id = Some(run.into());
         record.source_message_id = Some(message_id.clone());
+        // §12.5 REQUIRED operation context of the queued create command: the
+        // Direct Chat lane is authenticated as the sending Bot (its verified
+        // bot token resolved `from`), so the operator is that Bot — the
+        // admitted run projection commits with the identity snapshot.
+        record.operation = Some(bcs_service_api::types::BotOperationContext {
+            operation_id: format!("direct-chat-create:{run}"),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: from.to_string(),
+            },
+        });
         self.run_store.create(record.clone()).await.map_err(|_| invalid("cannot persist chat run"))?;
         let expires = i64::try_from(expires).map_err(|_| invalid("invalid direct deadline"))?;
         let command = AdmitMessageDeliveries {
@@ -96,6 +106,15 @@ impl A2aChat {
                 max_queued: policy.policy.bot(&cmd.target_bot_id).max_queued,
                 semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))? }],
             now_ms: now as i64, expire_at_ms: Some(policy.policy.queue_ttl_ms.map_or(expires, |ttl| expires.min((now as i64).saturating_add(ttl as i64)))), event: None,
+            // §12.5 REQUIRED operation context: same sending-Bot operator as
+            // the chat run create above — the admitted delivery inherits the
+            // verified Bot lane identity of the Direct Chat command.
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("direct-chat-create:{run}"),
+                actor: bcs_service_api::types::BotOperationActor::Bot {
+                    bot_id: from.to_string(),
+                },
+            },
         };
         // Independent replicas can lose the session-sequence CAS. Reuse the
         // same message/run identity after rollback; never repeat transport I/O.
@@ -244,8 +263,19 @@ pub(crate) fn transition_conflict(error: &bcs_service_api::ManagedDeliveryError)
 }
 
 pub(crate) fn transition(row: &PersistedMessageDelivery, event: Event, actor_id: Option<String>) -> DeliveryTransitionCommand {
+    // §12.5 REQUIRED derived per-delivery sub-operation: the verified lane
+    // actor (the Bot calling cancel, or the target Bot reporting its chat
+    // terminal event) owns the step — never a forged Human, and no silent
+    // System downgrade when the acting identity is known.
+    let acting_bot = actor_id.clone().unwrap_or_else(|| row.target_bot_id.clone());
+    let operation = bcs_service_api::types::BotOperationContext {
+        operation_id: format!("direct-delivery-transition:{}:{}", row.delivery_id, row.state.state_version),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: acting_bot,
+        },
+    };
     DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
-        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None }
+        event, now_ms: now_ms() as i64, request_id: None, actor_id, reply: None, transport_context_json: None, deadline_at_ms: None, operation }
 }
 
 

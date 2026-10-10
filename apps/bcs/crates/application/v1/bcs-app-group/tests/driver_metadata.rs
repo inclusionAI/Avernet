@@ -15,6 +15,8 @@ use bcs_service_api::{
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
+
+mod common;
 use serde_json::{Value, json};
 
 struct Fixture {
@@ -27,7 +29,8 @@ impl Fixture {
     fn new() -> Self {
         let repo = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(repo.clone()));
-        let bots = Arc::new(BotCore::memory());
+        let authority_repo = Arc::new(bcs_bot_store::MemoryBotRepo::new());
+        let bots = Arc::new(BotCore::with_repo(authority_repo.clone()));
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -53,6 +56,7 @@ impl Fixture {
             relation,
             sessions,
             management,
+            common::repo_authority_hook(&authority_repo),
             GroupServiceConfig {
                 relation_env: "dev".into(),
             },
