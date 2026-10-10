@@ -5,6 +5,6 @@ export type RunViewScope = "all" | "deny" | { bots: RunViewBot[] };
 
 /** Supplied by the host with its configured Bot directory and permission policy. */
 export interface RunViewPermissions {
-  getViewByIdsForOwner(userId: string): Promise<{ viewableIds: Set<string> } | null>;
-  resolveRunViewScope(workflowId: string, userId: string): Promise<RunViewScope>;
+  /** Resolve readable direct and inherited grants together, without per-workflow queries. */
+  listRunViewScopes(userId: string, workflowId?: string): Promise<Map<string, RunViewScope>>;
 }

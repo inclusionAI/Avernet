@@ -211,43 +211,38 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
 
   /** Run reads must preserve owner identity; the legacy botIds-only scope cannot authorize them. */
   async resolveRunViewScope(workflowId: string, userId: string): Promise<RunViewScope> {
-    // Rule 1: all users, all bots
-    const globalRows = await this.db.query<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND bot_id = '*' AND bot_owner_id = '*' AND can_view = 1`,
-      [workflowId],
-    );
-    if (globalRows[0].cnt > 0) return "all";
+    return (await this.listRunViewScopes(userId, workflowId)).get(workflowId) ?? "deny";
+  }
 
-    // Rule 2: this user, all bots (owner-level with NULL/empty bot_id or bot_id='*')
-    const userAllBotsRows = await this.db.query<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND bot_owner_id = ? AND can_view = 1
-         AND (bot_id = '*' OR bot_id IS NULL OR bot_id = '')`,
-      [workflowId, userId],
-    );
-    if (userAllBotsRows[0].cnt > 0) return "all";
-
-    // Rule 3 & 4: specific bot permissions
-    // - bot_owner_id='*' AND bot_id=<specific>  → all users, specific bot
-    // - bot_owner_id=userId AND bot_id=<specific> → specific user, specific bot
-    const botRows = await this.db.query<{ bot_id: string | null; bot_owner_id: string }>(
-      `SELECT DISTINCT bot_id, bot_owner_id FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND can_view = 1
-         AND bot_id IS NOT NULL AND bot_id != '' AND bot_id != '*'
-         AND (bot_owner_id = ? OR bot_owner_id = '*')`,
-      [workflowId, userId],
+  async listRunViewScopes(userId: string, workflowId?: string): Promise<Map<string, RunViewScope>> {
+    type Grant = Pick<BotWorkflowPermissionRow, "workflow_id" | "bot_id" | "bot_owner_id" | "can_view" | "can_edit">;
+    const direct = await this.db.query<Grant>(
+      `SELECT workflow_id, bot_id, bot_owner_id, can_view, can_edit FROM bot_workflow_permissions
+       WHERE (can_view = 1 OR can_edit = 1)
+         AND (bot_owner_id = ? OR (bot_owner_id = '*' AND bot_id IS NOT NULL AND bot_id != ''))
+         ${workflowId ? "AND workflow_id = ?" : ""}`,
+      workflowId ? [userId, workflowId] : [userId],
     );
     const inherited = await this.inheritedGrants(userId, workflowId);
-    const identities = new Map<string, RunViewBot>();
-    for (const row of [...botRows, ...inherited.filter(r => r.can_view === 1 || r.can_edit === 1)]) {
-      if (!row.bot_id || !row.bot_owner_id) continue;
-      const bot = { botId: row.bot_id, ownerId: row.bot_owner_id };
-      identities.set(JSON.stringify([bot.botId, bot.ownerId]), bot);
+    const scopes = new Map<string, RunViewScope>();
+    const seen = new Set<string>();
+    for (const row of [...direct, ...inherited]) {
+      if (row.can_view !== 1 && row.can_edit !== 1) continue;
+      if (scopes.get(row.workflow_id) === "all") continue;
+      if (!row.bot_id || row.bot_id === "*") {
+        scopes.set(row.workflow_id, "all");
+        continue;
+      }
+      if (!row.bot_owner_id) continue;
+      const bot: RunViewBot = { botId: row.bot_id, ownerId: row.bot_owner_id };
+      const key = JSON.stringify([row.workflow_id, bot.botId, bot.ownerId]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const scope = scopes.get(row.workflow_id);
+      if (scope && typeof scope !== "string") scope.bots.push(bot);
+      else scopes.set(row.workflow_id, { bots: [bot] });
     }
-    if (identities.size > 0) return { bots: [...identities.values()] };
-
-    return "deny";
+    return scopes;
   }
 
   /**

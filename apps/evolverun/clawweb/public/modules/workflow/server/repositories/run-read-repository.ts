@@ -32,26 +32,23 @@ export class RunReadRepository {
     const scope = q.scope ?? "bot";
     if (!["bot", "session", "all"].includes(scope)) throw new Error("Invalid run scope");
     const where: string[] = []; const args: unknown[] = [];
+    let grants: { sql: string; args: unknown[] }[] | undefined;
     if (scope === "all") {
       if (!q.userId?.trim()) throw new Error("Missing userId for all scope");
-      const view = await this.permissions.getViewByIdsForOwner(q.userId);
-      // Missing permissions never authorize a cross-Bot query.
-      const allowed = [...(view?.viewableIds ?? [])].filter(id => !q.workflowId || id === q.workflowId);
-      const grants: string[] = [];
-      for (const workflowId of allowed) {
-        const viewScope = await this.permissions.resolveRunViewScope(workflowId, q.userId);
-        if (viewScope === "deny") continue;
+      const scopes = await this.permissions.listRunViewScopes(q.userId, q.workflowId);
+      grants = [];
+      for (const [workflowId, viewScope] of scopes) {
         if (viewScope === "all") {
-          grants.push("workflow_id = ?"); args.push(workflowId);
-        } else if (viewScope.bots.length) {
-          grants.push(`(workflow_id = ? AND (${viewScope.bots.map(bot => bot.ownerId === "*"
-            ? "origin_bot_id LIKE ? ESCAPE '!'" : "origin_bot_id = ?").join(" OR ")}))`);
-          args.push(workflowId, ...viewScope.bots.map(bot => bot.ownerId === "*"
-            ? `${bot.botId.replace(/[!%_]/g, "!$&")}:%` : `${bot.botId}:${bot.ownerId}`));
+          grants.push({ sql: "workflow_id = ?", args: [workflowId] });
+        } else if (viewScope !== "deny") {
+          for (const bot of viewScope.bots) {
+            grants.push(bot.ownerId === "*"
+              ? { sql: "(workflow_id = ? AND origin_bot_id LIKE ? ESCAPE '!')", args: [workflowId, `${bot.botId.replace(/[!%_]/g, "!$&")}:%`] }
+              : { sql: "(workflow_id = ? AND origin_bot_id = ?)", args: [workflowId, `${bot.botId}:${bot.ownerId}`] });
+          }
         }
       }
       if (!grants.length) return { items: [], nextCursor: null };
-      where.push(`(${grants.join(" OR ")})`);
     } else {
       where.push("origin_bot_id = ?"); args.push(key);
     }
@@ -71,10 +68,20 @@ export class RunReadRepository {
     }
     if (q.beforeId !== undefined) { where.push("id < ?"); args.push(q.beforeId); }
     if (!q.includeHidden) where.push("COALESCE(CAST(JSON_EXTRACT(state_json, '$.workflowData.flowHidden') AS CHAR), 'false') NOT IN ('true', '1')");
-    const rows = await this.db.query<Record<string, unknown>>(
+    const readBatch = (batch?: typeof grants) => this.db.query<Record<string, unknown>>(
       `SELECT id, flow_id, workflow_id, status, origin_bot_id, origin_session_key, origin_session_id, identity_key, started_at, gmt_modified
-       FROM flow_runs WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`, [...args, limit + 1]);
-    return page(rows, limit);
+       FROM flow_runs WHERE ${[...where, ...(batch ? [`(${batch.map(g => g.sql).join(" OR ")})`] : [])].join(" AND ")}
+       ORDER BY id DESC LIMIT ?`, [...args, ...(batch?.flatMap(g => g.args) ?? []), limit + 1]);
+    if (!grants) return page(await readBatch(), limit);
+    // Bound expression depth and placeholders even when one workflow grants thousands of Bots.
+    // Each batch's top limit+1 contains every row it could contribute to the global page.
+    let merged: Record<string, unknown>[] = [];
+    for (let offset = 0; offset < grants.length; offset += 100) {
+      const rows = await readBatch(grants.slice(offset, offset + 100));
+      const unique = new Map([...merged, ...rows].map(row => [Number(row.id), row]));
+      merged = [...unique.values()].sort((a, b) => Number(b.id) - Number(a.id)).slice(0, limit + 1);
+    }
+    return page(merged, limit);
   }
 
   async readLogs(q: RunLogQuery): Promise<ReadPage> {
