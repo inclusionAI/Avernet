@@ -175,7 +175,7 @@ class TestFusionSimulationFixtureBased:
         # 验证
         assert result.fusion_mode == "agent"
         assert len(result.perspectives) <= 2
-        assert result.perspectives[0].participant_id == "staff_fixture_001:default"
+        assert result.perspectives[0].participant_id == "fixture_001:default"
         assert "Python" in result.perspectives[0].summary or "API" in result.perspectives[0].summary
 
     def test_g2_simulation_with_fixture_profiles(self, fixture_profiles):

@@ -238,7 +238,7 @@ async fn disable_downlink(f: &Fixture) {
     config["downlink"]["enabled"] = serde_json::json!(false);
     let config = config.to_string();
     f.providers
-        .update_provider_metadata(&f.provider, None, Some(&config), provider.updated_at + 1)
+        .update_provider_metadata(&f.provider, None, Some(&config), None, provider.updated_at + 1)
         .await
         .unwrap()
         .unwrap();

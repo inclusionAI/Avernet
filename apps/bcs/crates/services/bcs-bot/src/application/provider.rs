@@ -175,32 +175,29 @@ impl ProviderManagement {
 
 #[async_trait]
 impl ProviderManagementService for ProviderManagement {
+    async fn get_provider_by_slug(
+        &self, slug: &str,
+    ) -> ServiceResult<Option<bcs_service_api::ProviderBasicInfo>> {
+        self.provider_core.get_provider_by_slug(slug).await
+    }
+
     async fn register_provider(
         &self,
         command: RegisterProviderCommand,
     ) -> ServiceResult<RegisterProviderOutcome> {
-        let admin_callback_url = command.admin_callback_url;
         let registered = self
             .provider_core
-            .register_provider(
+            .register_provider_with_slug(
                 command.name,
                 command.webhook_url,
                 command.auth_mode,
                 command.created_by,
                 command.protocol_version,
                 command.coordination,
+                command.slug,
+                command.admin_callback_url,
             )
             .await?;
-        if let Some(admin_callback_url) = admin_callback_url {
-            self.provider_core
-                .update_provider_admin_callback_url(
-                    &registered.provider.provider_id,
-                    &registered.provider_admin_token,
-                    &registered.provider.created_by,
-                    admin_callback_url,
-                )
-                .await?;
-        }
         Ok(RegisterProviderOutcome {
             provider_id: registered.provider.provider_id,
             provider_admin_token: registered.provider_admin_token,
@@ -231,10 +228,9 @@ impl ProviderManagementService for ProviderManagement {
         &self,
         command: UpdateProviderCommand,
     ) -> ServiceResult<ProviderRecord> {
-        let admin_callback_url = command.admin_callback_url;
-        let provider = self
+        self
             .provider_core
-            .update_provider(
+            .update_provider_with_slug(
                 &command.provider_id,
                 &command.provider_admin_token,
                 &command.authenticated_staff_id,
@@ -243,21 +239,10 @@ impl ProviderManagementService for ProviderManagement {
                 command.protocol_version,
                 command.coordination,
                 command.organization_management,
+                command.slug,
+                command.admin_callback_url,
             )
-            .await?;
-        match admin_callback_url {
-            Some(admin_callback_url) => {
-                self.provider_core
-                    .update_provider_admin_callback_url(
-                        &provider.provider_id,
-                        &command.provider_admin_token,
-                        &command.authenticated_staff_id,
-                        admin_callback_url,
-                    )
-                    .await
-            }
-            None => Ok(provider),
-        }
+            .await
     }
 
     async fn register_provider_bot(

@@ -53,7 +53,7 @@ describe('SquareIdentityPicker', () => {
     expect(props.identityStatus).toBe('ready');
     expect(props.headerLabel).toBe('为 Ta 加好友：');
     expect(props.headerTooltip).toBe('每个身份（用户或 Bot）都拥有各自独立的好友关系。');
-    expect(props.layout).toBe('sidebar');
+    expect(props.layout).toBe('collaboration');
     expect(props.hideBotRegistration).toBe(true);
     expect(props.triggerClassName).toContain('bg-background');
   });
@@ -70,6 +70,7 @@ describe('SquareIdentityPicker', () => {
     act(() => selectorProps().onChange('bot-1:900003'));
 
     expect(useSquareIdentityStore.getState().selectedIdentityId).toBe('bot-1:900003');
+    expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_900003');
     expect(window.localStorage.getItem('teamclaw:square:identityId')).toBe('bot-1:900003');
   });
 

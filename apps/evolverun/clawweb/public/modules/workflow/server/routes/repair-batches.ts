@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { RepairInboxFilter, RepairWorkbenchService } from '../contracts/repair-workbench.js';
 import { RepairBatchError, boundedRepairJson, MAX_REQUEST_BYTES } from '../contracts/repair-batch.js';
+import { finishRepairDiagnostic, recordRepairAccess, repairRequestDiagnostic, repairStage } from '../observability/repair-diagnostics.js';
 
 export type RepairAuthorize = (request: Request, workflowId: string, mode: 'view' | 'edit') => Promise<{ actorId: string; canEdit: boolean } | null>;
 function text(value: unknown, field: string): string {
@@ -14,15 +15,15 @@ function revision(value: unknown): number {
 }
 function positive(value: unknown, field: string, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
   if (value === undefined) return fallback;
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^[1-9]\d*$/.test(value))) throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed > max) throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > max) throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
   return parsed;
 }
 function boolean(value: unknown, field: string, fallback = false): boolean {
   if (value === undefined) return fallback;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
+  if (value === 'true' || value === true) return true;
+  if (value === 'false' || value === false) return false;
   throw new RepairBatchError('INVALID_INPUT', `Invalid ${field}`);
 }
 
@@ -32,9 +33,14 @@ function boolean(value: unknown, field: string, fallback = false): boolean {
 export function createRepairBatchesRouter(input: { service: RepairWorkbenchService; authorize: RepairAuthorize }): Router {
   const router = Router();
   const { service, authorize } = input;
-  const handle = (fn: (request: Request, response: Response) => Promise<void>) => async (request: Request, response: Response) => {
+  router.use((request, response, next) => repairRequestDiagnostic(context => {
+    response.setHeader('X-Repair-Request-Id', context.requestId);
+    response.once('finish', () => finishRepairDiagnostic(context, request.method, request.route?.path ?? 'unmatched', response.statusCode));
+    next();
+  }));
+  const handle = (fn: (request: Request, response: Response) => Promise<void>, bodyLimit = MAX_REQUEST_BYTES) => async (request: Request, response: Response) => {
     try {
-      if (request.method !== 'GET') boundedRepairJson(request.body, MAX_REQUEST_BYTES);
+      if (request.method !== 'GET') boundedRepairJson(request.body, bodyLimit);
       await fn(request, response);
     } catch (error) {
       if (error instanceof RepairBatchError) {
@@ -46,16 +52,19 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
         console.error('[workflow-repair] request failed', {
           method: request.method,
           path: request.path,
+          requestId: response.getHeader('X-Repair-Request-Id'),
           error,
         });
-        response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR' });
+        response.status(500).json({ error: 'Repair request failed', code: 'INTERNAL_ERROR', requestId: response.getHeader('X-Repair-Request-Id') });
       }
     }
   };
   async function access(request: Request, response: Response, workflowId: string, mode: 'view' | 'edit') {
-    const actor = await authorize(request, workflowId, mode);
+    const actor = await repairStage('authorization', () => authorize(request, workflowId, mode));
+    recordRepairAccess({ workflowId, mode, actorId: actor?.actorId ?? null,
+      reason: actor && (mode === 'view' || actor.canEdit) ? 'ALLOWED' : 'HOST_DENIED' }, true);
     if (!actor || (mode === 'edit' && !actor.canEdit)) {
-      response.status(403).json({ error: 'Workflow access denied', code: 'FORBIDDEN' });
+      response.status(403).json({ error: 'Workflow access denied', code: 'FORBIDDEN', requestId: response.getHeader('X-Repair-Request-Id') });
       return null;
     }
     return actor;
@@ -65,15 +74,24 @@ export function createRepairBatchesRouter(input: { service: RepairWorkbenchServi
     const actor = await access(request, response, task.workflowId, mode);
     return actor ? { task, actor } : null;
   }
-  router.get('/candidates', handle(async (req, res) => {
-    const workflowId = text(req.query.workflowId, 'workflowId');
+  const candidates = handle(async (req, res) => {
+    const query = req.method === 'GET' ? req.query : req.body;
+    const workflowId = text(query?.workflowId, 'workflowId');
     const actor = await access(req, res, workflowId, 'view');
-    const state = req.query.state ?? 'all';
+    const state = query.state ?? 'all';
     if (typeof state !== 'string' || !['pending', 'processing', 'awaiting_verification', 'closed', 'no_action', 'all'].includes(state)) throw new RepairBatchError('INVALID_INPUT', 'Invalid state');
     if (actor) res.json({ ...await service.candidates(workflowId, { state: state as RepairInboxFilter,
-      page: positive(req.query.page, 'page', 1), pageSize: positive(req.query.pageSize, 'pageSize', 20, 200),
-      includeHistorical: boolean(req.query.includeHistorical, 'includeHistorical') }), canEdit: actor.canEdit });
-  }));
+      page: positive(query.page, 'page', 1), pageSize: positive(query.pageSize, 'pageSize', 20, 200),
+      nodeId: query.nodeId === undefined ? undefined : text(query.nodeId, 'nodeId'),
+      failureMode: query.failureMode === undefined ? undefined : text(query.failureMode, 'failureMode'),
+      signature: query.signature === undefined ? undefined : text(query.signature, 'signature'),
+      previewSignatures: req.method !== 'GET' ? query.previewSignatures : query.previewSignature === undefined ? undefined
+        : (Array.isArray(query.previewSignature) ? query.previewSignature : [query.previewSignature]).map(value => text(value, 'previewSignature')),
+      includeHistorical: boolean(query.includeHistorical, 'includeHistorical') }), canEdit: actor.canEdit });
+  }, 256 * 1024);
+  router.get('/candidates', candidates);
+  // Body-bearing query only: view authorization, identical snapshot, no materialization or task writes.
+  router.post('/candidates/query', candidates);
   router.get('/items/:itemId', handle(async (req, res) => {
     const workflowId = text(req.query.workflowId, 'workflowId');
     const actor = await access(req, res, workflowId, 'view');

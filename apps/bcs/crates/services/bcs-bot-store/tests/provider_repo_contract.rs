@@ -7,6 +7,7 @@ use bcs_service_api::{
 fn provider(provider_id: &str) -> ProviderRecord {
     ProviderRecord {
         provider_id: provider_id.to_string(),
+        slug: None,
         name: format!("Provider {provider_id}"),
         config: r#"{"downlink":{"enabled":true,"webhook_url":"https://provider.example.com/bcs/webhook","auth_mode":"static_bearer","protocol_version":"1.0"}}"#.to_string(),
         created_by: "11111111".to_string(),

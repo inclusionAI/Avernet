@@ -17,6 +17,7 @@ test('文件和文件夹均展示下载入口，并传递正确资源类型', ()
       onDelete={jest.fn()}
       onUpload={jest.fn()}
       onPreview={jest.fn().mockResolvedValue({ kind: 'text', content: '', contentType: 'text/plain' })}
+      onCopyPath={jest.fn().mockResolvedValue(undefined)}
       onDownload={onDownload}
       onLoadDirectory={jest.fn()}
       loadingPaths={[]}

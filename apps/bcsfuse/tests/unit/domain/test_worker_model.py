@@ -33,7 +33,7 @@ class TestWorkerModelConstruction:
             skills=[],
             resources=[],
             state={
-                "availability": "available",
+                "availability": "public",
                 "trust_level": "trusted"
             }
         )
@@ -59,7 +59,7 @@ class TestWorkerModelConstruction:
             skills=[],
             resources=[],
             state={
-                "availability": "available",
+                "availability": "public",
                 "trust_level": "trusted"
             }
         )
@@ -83,7 +83,7 @@ class TestWorkerModelConstruction:
             skills=[],
             resources=[],
             state={
-                "availability": "available",
+                "availability": "public",
                 "trust_level": "trusted"
             }
         )
@@ -94,13 +94,13 @@ class TestWorkerModelConstruction:
 class TestWorkerModelValidation:
     """Worker 模型校验测试"""
 
-    def test_worker_id_must_match_pattern(self):
-        """验证 worker_id 必须符合 wrk_ 前缀模式"""
+    def test_worker_id_must_not_be_empty(self):
+        """Worker IDs need not have a wrk_ prefix, but must not be empty."""
         from src.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
-                id="invalid_id",  # 缺少 wrk_ 前缀
+                id="",
                 type="bot",
                 identity={"name": "Test", "handle": "@test"},
                 responsibilities=["test"],
@@ -108,7 +108,7 @@ class TestWorkerModelValidation:
                 constraints=[],
                 skills=[],
                 resources=[],
-                state={"availability": "available", "trust_level": "trusted"}
+                state={"availability": "public", "trust_level": "trusted"}
             )
 
     def test_worker_type_must_be_human_or_bot(self):
@@ -125,7 +125,7 @@ class TestWorkerModelValidation:
                 constraints=[],
                 skills=[],
                 resources=[],
-                state={"availability": "available", "trust_level": "trusted"}
+                state={"availability": "public", "trust_level": "trusted"}
             )
 
     def test_worker_identity_name_required(self):
@@ -142,7 +142,7 @@ class TestWorkerModelValidation:
                 constraints=[],
                 skills=[],
                 resources=[],
-                state={"availability": "available", "trust_level": "trusted"}
+                state={"availability": "public", "trust_level": "trusted"}
             )
 
     def test_worker_state_availability_must_be_valid(self):
@@ -176,7 +176,7 @@ class TestWorkerModelValidation:
                 constraints=[],
                 skills=[],
                 resources=[],
-                state={"availability": "available", "trust_level": "trusted"}
+                state={"availability": "public", "trust_level": "trusted"}
             )
 
 
@@ -197,7 +197,7 @@ class TestWorkerModelSerialization:
             constraints=[],
             skills=[],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         )
 
         # 转换为 dict 再序列化（使用 mode='json' 确保 datetime 等类型可序列化）
@@ -220,7 +220,7 @@ class TestWorkerModelSerialization:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         }
 
         worker = Worker.model_validate(data)

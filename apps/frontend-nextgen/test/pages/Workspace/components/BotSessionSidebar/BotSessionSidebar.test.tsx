@@ -64,9 +64,6 @@ describe('BotSessionSidebar', () => {
   it('可聊 bot 显示名称,不可聊 bot 显示并带禁用提示', () => {
     const { container } = render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -90,13 +87,10 @@ describe('BotSessionSidebar', () => {
       />,
     );
     expect(container.querySelector('.self-start')).not.toBeInTheDocument();
-    const activeTab = screen.getByRole('button', { name: '对话' });
-    const inactiveTab = screen.getByRole('button', { name: '协作群' });
+    // 视图切换收口到 App Shell:侧栏不再渲染一级 Tab。
+    expect(screen.queryByRole('button', { name: '对话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '协作群' })).not.toBeInTheDocument();
     const botTrigger = screen.getByRole('button', { name: '可聊Bot' });
-    expect(activeTab).toHaveAttribute('aria-pressed', 'true');
-    expect(inactiveTab).toHaveAttribute('aria-pressed', 'false');
-    expect(activeTab).toHaveClass('bg-background', 'text-primary', 'shadow-sm');
-    expect(inactiveTab).toHaveClass('text-muted-foreground');
     expect(screen.queryByRole('button', { name: '发起协作' })).not.toBeInTheDocument();
     expect(botTrigger.parentElement).toHaveClass('min-h-16', 'bg-muted', 'px-4', 'py-2.5');
     expect(botTrigger.parentElement?.querySelector('svg.lucide-chevron-down')).toBeInTheDocument();
@@ -122,9 +116,6 @@ describe('BotSessionSidebar', () => {
   it('v1.5：Bot 行操作区绝对定位悬浮不占位，badge 行 hover 换行展开兜底', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -165,49 +156,10 @@ describe('BotSessionSidebar', () => {
     expect(badgeRow).toHaveClass('truncate', 'group-hover:pr-20');
   });
 
-  it('收起态保留对话与协作群快捷切换图标', () => {
-    const onViewChange = jest.fn();
-    render(
-      <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={onViewChange}
-        chatBots={bots}
-        friendBots={[]}
-        isMyBotsLoading={false}
-        isFriendBotsLoading={false}
-        expandedBotSectionKey={{}}
-        expandedBotIds={{}}
-        sessionsByBotId={{}}
-        isSessionsLoading={false}
-        selectedBotSessionId={null}
-        onToggleBotExpanded={noop}
-        onSelectSession={noop}
-        onCreateSession={noop}
-        onDeleteSession={noopBool}
-        onRenameSession={noopBool}
-        onClearSessionContext={noopBool}
-        onToggleFavorite={noopBool}
-        onLoadFavorites={noopAsync}
-        onOpenPublicBots={noop}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
-
-    expect(screen.getByRole('button', { name: '切换到对话' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: '切换到协作群' }));
-    expect(onViewChange).toHaveBeenCalledWith('group');
-    fireEvent.click(screen.getByRole('button', { name: '展开对话协作左栏' }));
-  });
-
   it('Bot 身份无可协作 Bot 时引导前往公开 Bot', () => {
     const onOpenPublicBots = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={noop}
         identities={[{ id: 'bot-viewer', name: '当前 Bot', kind: 'bot', avatar: 'B' }]}
         activeIdentityId="bot-viewer"
         chatBots={[]}
@@ -241,9 +193,6 @@ describe('BotSessionSidebar', () => {
     const onRetry = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={[]}
@@ -277,9 +226,6 @@ describe('BotSessionSidebar', () => {
     const onReloadBot = jest.fn().mockResolvedValue(undefined);
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={[bots[0]]}
@@ -311,44 +257,9 @@ describe('BotSessionSidebar', () => {
     expect(onReloadBot).toHaveBeenCalledWith('b:1');
   });
 
-  it('对话列表向下滚动时一级 Tab 吸顶', () => {
-    render(
-      <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
-        chatBots={bots}
-        friendBots={[]}
-        isMyBotsLoading={false}
-        isFriendBotsLoading={false}
-        expandedBotSectionKey={{}}
-        expandedBotIds={{}}
-        sessionsByBotId={{}}
-        isSessionsLoading={false}
-        selectedBotSessionId={null}
-        onToggleBotExpanded={() => {}}
-        onSelectSession={() => {}}
-        onCreateSession={() => {}}
-        onDeleteSession={noopBool}
-        onRenameSession={noopBool}
-        onClearSessionContext={noopBool}
-        onToggleFavorite={noopBool}
-        onLoadFavorites={noopAsync}
-        onOpenPublicBots={noop}
-      />,
-    );
-
-    const tabGroup = screen.getByRole('group', { name: '工作区类型' });
-    expect(tabGroup.parentElement).toHaveClass('h-10', 'items-center');
-    expect(tabGroup.parentElement?.parentElement).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted/20');
-  });
-
   it('对话筛选行与协作群搜索行使用统一上下留白', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -377,9 +288,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 行辅助信息使用 bots 接口 engine 字段的统一展示名', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[
           { ...bots[0], engine: 'TEClaw' },
           { ...bots[1], engine: 'Hermes' },
@@ -411,9 +319,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 名称搜索框为 focus ring 预留水平空间', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -443,9 +348,6 @@ describe('BotSessionSidebar', () => {
   it('使用当前身份名称展示 Bot 分组标题', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={bots}
@@ -480,9 +382,6 @@ describe('BotSessionSidebar', () => {
     const onCreateSession = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -543,9 +442,6 @@ describe('BotSessionSidebar', () => {
 
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[teclawBot]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -582,9 +478,6 @@ describe('BotSessionSidebar', () => {
     const onToggleFavorite = jest.fn().mockResolvedValue(true);
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -619,9 +512,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 会话更多操作保留会话管理能力', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -655,9 +545,6 @@ describe('BotSessionSidebar', () => {
     const onCreateSession = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={noop}
         identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={[]}
@@ -708,9 +595,6 @@ describe('BotSessionSidebar', () => {
     const onToggle = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -740,9 +624,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 展开与承载当前会话时使用一致选中指示', () => {
     const { rerender } = render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[bots[0]]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -770,9 +651,6 @@ describe('BotSessionSidebar', () => {
 
     rerender(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[bots[0]]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -802,9 +680,6 @@ describe('BotSessionSidebar', () => {
   it('v1.4：Bot 行操作区默认透明隐藏，悬停/键盘聚焦可显现，选中或展开时常显', () => {
     const { rerender } = render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -838,9 +713,6 @@ describe('BotSessionSidebar', () => {
 
     rerender(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -879,9 +751,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 会话背景铺满列表宽度，不保留整体缩进', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[bots[0]]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -913,9 +782,6 @@ describe('BotSessionSidebar', () => {
   it('Bot 对象行通过纯 Icon 切换全部/已收藏会话', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={bots}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -952,9 +818,6 @@ describe('BotSessionSidebar', () => {
     const onToggleBotExpanded = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[bots[0]]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -991,9 +854,6 @@ describe('BotSessionSidebar', () => {
   it('展开 Bot 会话区不再渲染旧会话范围工具栏', () => {
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         chatBots={[bots[0]]}
         friendBots={[]}
         isMyBotsLoading={false}
@@ -1022,9 +882,6 @@ describe('BotSessionSidebar', () => {
     const onOpenBotWorkshop = jest.fn();
     render(
       <BotSessionSidebar
-        view="chat"
-        availableViews={['chat', 'group']}
-        onViewChange={() => {}}
         identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={bots}

@@ -5,23 +5,33 @@ import { Compass, Sparkles } from 'lucide-react';
 
 // getMergedNavigationItems 分组模型（section: collab|bot|legacy）断言。
 // split-admin-space-ticket-pages：【管理后台】基线项退役（管理域拆分至 /space-admin、/ticket-center
-// 独立路由，入口不再占导航位），legacy 过渡组仅剩 任务列表/协作权限；adminEntry 形态开关随项退役
+// 独立路由，入口不再占导航位）；collab-permission-entry-migration：【协作权限】入口随旧页面退役，
+// legacy 过渡组仅剩 任务列表；adminEntry 形态开关随项退役
 // （getShellVisibility 剩 spaceSwitcher/notificationBell 两字段）。
 // 注意：extendCapabilities 合并后无法恢复，故越靠后的用例携带越多的 capability override，
 // 默认形态用例一律置前，internal 注入 override 用例按依赖顺序排列。
 
 describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
+  // workspace-conversation-navigation-refactor：原「对话协作」项拆分为
+  // 对话（/workspace/chat）与 协作群（/workspace/collaboration）两个一级入口。
+  it('exposes separate conversation and collaboration navigation items', () => {
+    expect(navigationItems.filter((item) => item.section === 'collab')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'conversation', label: '对话', path: '/workspace/chat' }),
+        expect.objectContaining({ id: 'collaboration', label: '协作群', path: '/workspace/collaboration' }),
+      ]),
+    );
+  });
+
   it('双固定分组 + legacy 过渡组：flat 序 = collab → bot → legacy，组内基线项原序', () => {
     const merged = getMergedNavigationItems();
     expect(merged.filter((item) => item.section === 'collab').map((item) => item.id)).toEqual([
-      'workspace',
+      'conversation',
+      'collaboration',
       'collaboration-square',
     ]);
     expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop']);
-    expect(merged.filter((item) => item.section === 'legacy').map((item) => item.id)).toEqual([
-      'my-task',
-      'collaboration-privacy',
-    ]);
+    expect(merged.filter((item) => item.section === 'legacy').map((item) => item.id)).toEqual(['my-task']);
   });
 
   it('同路由就地改名项归组正确且不打 deprecated（Bot管理 / 发现）', () => {
@@ -37,13 +47,14 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     expect(found?.deprecated).toBeUndefined();
   });
 
-  it('在新 IA 中无继任位的项沉淀 legacy 过渡组并带 deprecated 标记（管理后台项已退役）', () => {
-    for (const id of ['my-task', 'collaboration-privacy']) {
+  it('在新 IA 中无继任位的项沉淀 legacy 过渡组并带 deprecated 标记（管理后台/协作权限入口均已退役）', () => {
+    for (const id of ['my-task']) {
       const item = getMergedNavigationItems().find((entry) => entry.id === id);
       expect(item?.section).toBe('legacy');
       expect(item?.deprecated).toBe(true);
     }
     expect(getMergedNavigationItems().some((item) => item.id === 'admin')).toBe(false);
+    expect(getMergedNavigationItems().some((item) => item.id === 'collaboration-privacy')).toBe(false);
   });
 
   it('基线 navigationItems 数组字面量本身不被改动（分组与过滤只发生在合并点）', () => {
@@ -93,13 +104,13 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
 
     const merged = getMergedNavigationItems();
     expect(merged.map((item) => item.id)).toEqual([
-      'workspace',
+      'conversation',
+      'collaboration',
       'collaboration-square',
       'bot-workshop',
       'capability-workshop',
       'market',
       'my-task',
-      'collaboration-privacy',
       'legacy-portal',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');

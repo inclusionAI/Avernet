@@ -58,13 +58,13 @@ describe('Welcome 欢迎页(Open 形态默认入口)', () => {
     expect(screen.getByText('让智能体像组织一样，在此协同、执行、持续进化。')).toBeTruthy();
   });
 
-  it('CTA「进入 Avernet」点击 → history.push(/workspace),登录态交给既有登录链路', async () => {
+  it('CTA「进入 Avernet」点击 → history.push(/workspace/chat),登录态交给既有登录链路', async () => {
     mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
     await act(async () => {
       render(<Welcome />);
     });
     fireEvent.click(screen.getByRole('button', { name: '进入 Avernet' }));
-    expect(mockedHistoryPush).toHaveBeenCalledWith('/workspace');
+    expect(mockedHistoryPush).toHaveBeenCalledWith('/workspace/chat');
   });
 
   it('GitHub 外链 Hero 与 Footer 两处均为开源仓地址 + target=_blank', async () => {

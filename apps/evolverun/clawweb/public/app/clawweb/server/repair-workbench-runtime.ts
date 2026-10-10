@@ -40,6 +40,22 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
     },
     evidence: (tx, _workflowId, eventIds) => new WorkflowEvolutionRepository(tx).listEvidenceByEventIds(eventIds),
   });
+  sources.readVersion = async (tx, workflowId) => {
+    // No JSON bodies: independently committed analysis, legacy sources and human
+    // dispositions all invalidate the bounded read projection on every instance.
+    const tables = [
+      ['workflow_evolution_analysis_runs', 'state_version', 'requested_at_ms'],
+      ['workflow_healing_diagnoses', 'id', 'gmt_modified'],
+      ['workflow_healing_suggestions', 'id', 'gmt_modified'],
+      ['workflow_repair_items', 'state_version', 'updated_at_ms'],
+    ];
+    const versions = [];
+    for (const [table, version, updated] of tables) {
+      versions.push(await tx.query(`SELECT COUNT(*) AS n, COALESCE(SUM(${version}), 0) AS v, MAX(${updated}) AS t
+        FROM ${table} WHERE workflow_id = ?`, [workflowId]));
+    }
+    return JSON.stringify(versions);
+  };
   const service = createRepairWorkbenchService(db, sources, options.execution);
   const authorize = createRepairAuthorizer(options.principal, new BotWorkflowPermissionRepository(db));
   return { service, router: createRepairBatchesRouter({ service, authorize }) };

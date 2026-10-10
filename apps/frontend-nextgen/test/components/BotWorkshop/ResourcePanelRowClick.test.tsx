@@ -3,7 +3,7 @@
 import { ResourcePanel } from '@/components/BotWorkshop/Editor/ResourcePanel';
 import type { BotEditorResource } from '@/domain/botEditor';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const resources: BotEditorResource[] = [
   { path: 'docs', parentPath: '', name: 'docs', type: 'folder' },
@@ -20,6 +20,7 @@ function renderPanel(overrides: Partial<Parameters<typeof ResourcePanel>[0]> = {
     onUpload: jest.fn().mockResolvedValue(undefined),
     onPreview: jest.fn().mockResolvedValue({ kind: 'text' as const, content: '', contentType: 'text/plain' }),
     onDownload: jest.fn().mockResolvedValue(undefined),
+    onCopyPath: jest.fn().mockResolvedValue(undefined),
     onLoadDirectory: jest.fn().mockResolvedValue(undefined),
     loadingPaths: [],
     ...overrides,
@@ -83,6 +84,49 @@ test('点击下载不触发展开（操作区与热区互为兄弟节点）', ()
   expect(onDownload).toHaveBeenCalledWith('docs', 'folder');
   expect(onLoadDirectory).not.toHaveBeenCalled();
   expect(screen.queryByText('guide')).not.toBeInTheDocument();
+});
+
+test('目录节点支持向当前目录添加文件并刷新该目录', async () => {
+  const { onUpload, onLoadDirectory } = renderPanel();
+  const file = new File(['hello'], 'hello.txt', { type: 'text/plain' });
+
+  fireEvent.click(screen.getByRole('button', { name: '向docs添加文件' }));
+  fireEvent.change(screen.getByLabelText('资源文件选择'), { target: { files: [file] } });
+
+  expect(onUpload).toHaveBeenCalledWith('docs/hello.txt', file);
+  await waitFor(() => expect(onLoadDirectory).toHaveBeenCalledWith('docs'));
+});
+
+test('目录节点支持在当前目录新建子文件夹并刷新该目录', async () => {
+  const { onCreateDirectory, onLoadDirectory } = renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '在docs中新建子目录' }));
+  fireEvent.change(screen.getByPlaceholderText('输入目录名称'), { target: { value: 'assets' } });
+  fireEvent.click(screen.getByRole('button', { name: '创建' }));
+
+  expect(onCreateDirectory).toHaveBeenCalledWith('docs/assets');
+  await waitFor(() => expect(onLoadDirectory).toHaveBeenCalledWith('docs'));
+});
+
+test('文件和目录节点都支持复制路径', () => {
+  const { onCopyPath } = renderPanel();
+
+  fireEvent.click(screen.getByRole('button', { name: '复制路径docs' }));
+  fireEvent.click(screen.getByRole('button', { name: '复制路径README.md' }));
+
+  expect(onCopyPath).toHaveBeenNthCalledWith(1, 'docs');
+  expect(onCopyPath).toHaveBeenNthCalledWith(2, 'README.md');
+});
+
+test('点击文件名称从右侧抽屉打开预览', async () => {
+  const onPreview = jest.fn().mockResolvedValue({ kind: 'text', content: '# TeamClaw', contentType: 'text/markdown' });
+  renderPanel({ onPreview });
+
+  fireEvent.click(screen.getByRole('button', { name: '预览README.md' }));
+
+  expect(onPreview).toHaveBeenCalledWith('README.md');
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByText('# TeamClaw')).toBeInTheDocument();
 });
 
 test('删除确认弹层内取消不会误折叠已展开目录', async () => {

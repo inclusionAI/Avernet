@@ -1029,11 +1029,21 @@ class TestGetDeviceInfo:
         assert "dev-001" in exc_info.value.message
 
     def test_get_device_info_sync_generic_error(self, service, mock_sandbox):
-        """Generic exception is translated to DEVICE_NOT_FOUND."""
+        """Generic exception is translated to DEVICE_UNAVAILABLE."""
         mock_sandbox.get_info.side_effect = RuntimeError("info failed")
         with pytest.raises(PaasError) as exc_info:
             service._get_device_info_sync("dev-001")
-        assert exc_info.value.code == ErrorCode.DEVICE_NOT_FOUND
+        assert exc_info.value.code == ErrorCode.DEVICE_UNAVAILABLE
+
+    def test_get_device_info_sync_oserror_not_misclassified(
+        self, service, mock_sandbox
+    ):
+        """Local OSError (e.g. fd exhaustion) is DEVICE_UNAVAILABLE, never DEVICE_NOT_FOUND."""
+        mock_sandbox.get_info.side_effect = OSError(24, "Too many open files")
+        with pytest.raises(PaasError) as exc_info:
+            service._get_device_info_sync("dev-001")
+        assert exc_info.value.code == ErrorCode.DEVICE_UNAVAILABLE
+        assert "Too many open files" in exc_info.value.message
 
     @pytest.mark.asyncio
     async def test_get_device_info_async(self, service, mock_sandbox):

@@ -32,7 +32,7 @@ from src.domain.models.llm_task_spec import (
     TaskType,
 )
 from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.application.utils.drm_config_helper import profile_prompt_template
+from src.application.utils.drm_config_helper import get_profile_prompt_template
 
 if TYPE_CHECKING:
     from src.domain.protocols.bot_cognition_protocol import BotCognitionProvider
@@ -40,14 +40,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_TAGS = 3
+_EMPTY_CAPABILITY_TAGS = frozenset({"无", "none", "null", "[]"})
 
 
 SYSTEM_PROMPT = "你是一个专业的企业 AI Bot 能力标签评估器。"
 
-if profile_prompt_template is not None and profile_prompt_template != "":
-    USER_PROMPT_TEMPLATE = profile_prompt_template
-else:
-    USER_PROMPT_TEMPLATE = """
+USER_PROMPT_TEMPLATE = """
 请阅读以下agent配置文件，生成一个精简的profile用于agent职责与能力的匹配。
 
 ## 基本信息
@@ -240,7 +238,9 @@ class ProfileAnalyzerService:
         skill_sets_data = [skill.model_dump(mode='json') for skill in content_obj.skill_sets]
         skills_list_section = format_section("skill_list", json.dumps(skill_sets_data, ensure_ascii=False))
 
-        user_prompt = USER_PROMPT_TEMPLATE.format(
+        configured_template = get_profile_prompt_template()
+        prompt_template = configured_template or USER_PROMPT_TEMPLATE
+        user_prompt = prompt_template.format(
             display_name=display_name,
             description=description,
             soul_md_section=soul_md_section,
@@ -393,7 +393,10 @@ class ProfileAnalyzerService:
             return tags
 
         # 尝试匹配 "能力标签:" 前缀，如果有则取后面的内容
-        prefix_match = re.match(r"^标签列表[:：]\s*", section_content)
+        prefix_match = re.match(
+            r"^(?:能力标签|标签列表)[:：]\s*",
+            section_content,
+        )
         if prefix_match:
             section_content = section_content[prefix_match.end():].strip()
 
@@ -408,7 +411,18 @@ class ProfileAnalyzerService:
             if t.strip() and t.strip() not in ["能力标签:", "能力标签："]
         ]
 
-        return tags
+        return self._normalize_capability_tags(tags)
+
+    @staticmethod
+    def _normalize_capability_tags(tags: list[object]) -> list[str]:
+        """Drop empty LLM placeholders before they reach profile/vector storage."""
+        normalized = []
+        for raw_tag in tags:
+            tag = str(raw_tag).strip()
+            if not tag or tag.casefold() in _EMPTY_CAPABILITY_TAGS:
+                continue
+            normalized.append(tag)
+        return normalized
 
     def _build_semantic_profile(self, raw_text: str) -> Optional[str]:
         """
@@ -502,9 +516,9 @@ class ProfileAnalyzerService:
             ProfileAnalysisResult
         """
         semantic_profile = data.get("semantic_profile")
-        capability_tags = data.get("capability_tags", [])
-
-
+        capability_tags = self._normalize_capability_tags(
+            data.get("capability_tags", [])
+        )
         logger.info(
             f"[ProfileAnalyzer] 解析成功: tags={capability_tags}, "
             f"profile_len={len(semantic_profile) if semantic_profile else 0}"

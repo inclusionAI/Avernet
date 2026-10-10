@@ -30,6 +30,8 @@ impl Default for ProviderBotDiscoverySelector {
 pub trait ProviderRepoPort: Send + Sync {
     async fn insert_provider(&self, provider: ProviderRecord) -> ServiceResult<()>;
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>>;
+    /// One environment-scoped lookup; disabled rows remain discoverable.
+    async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderRecord>>;
     async fn list_providers_by_ids(
         &self,
         provider_ids: &[String],
@@ -48,6 +50,7 @@ pub trait ProviderRepoPort: Send + Sync {
         provider_id: &str,
         name: Option<&str>,
         config: Option<&str>,
+        slug: Option<&str>,
         updated_at: u64,
     ) -> ServiceResult<Option<ProviderRecord>>;
     async fn update_provider_disabled(

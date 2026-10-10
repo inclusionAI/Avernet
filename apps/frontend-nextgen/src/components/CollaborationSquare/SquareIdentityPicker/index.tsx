@@ -42,23 +42,21 @@ export function SquareIdentityPicker() {
   };
 
   return (
-    // sidebar 布局：触发按钮为紧凑单行（头像+名称+用户/BOT 徽标），限宽容器内不折行；
-    // default 布局的按钮含多行详情（引擎/工号副行），窄容器下会折行散乱（页面反馈）。
+    // 与协作群共用 collaboration 选择器卡片；身份来源与切换仍由发现模块独立维护。
     <div className="w-full max-w-[280px] shrink-0">
       <WorkspaceIdentitySelector
         identities={displayIdentities}
         activeId={selectedIdentity?.id ?? null}
         onChange={handleChange}
         userAvatarUrl={humanIdentity?.avatarUrl}
-        layout="sidebar"
+        layout="collaboration"
         identityStatus={listStatus}
         identityError={listStatus === 'error' ? humanIdentityError : undefined}
         headerLabel="为 Ta 加好友："
         headerTooltip="每个身份（用户或 Bot）都拥有各自独立的好友关系。"
         onRetry={() => void retryLoadIdentities()}
         hideBotRegistration
-        // 公开Bot 页面底色为 bg-muted，默认触发按钮 bg-muted/40 会与背景融合；
-        // 覆盖为白底（bg-background）+ 边框，与页面卡片（Card）同对比方式。
+        // 发现页底色为 bg-muted，卡片保留协作群布局，但用背景 token 确保与页面对比清晰。
         triggerClassName="bg-background hover:bg-accent hover:text-foreground"
       />
     </div>

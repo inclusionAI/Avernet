@@ -21,7 +21,7 @@
 | TeamClaw 市场、SC Public 市场、手动巡检 | `market/router.py`：POST `/market/skills`、`/market/skill-center/skills`、`/market/skill-center/sync`；SC Public 搜索省略 `sortBy` 时默认 `hottest` | `SkillMarketService`、`SkillCenterGatewayService`、`SkillCenterSyncService` |
 | Space Skill 创建、列表、详情、Version、下线、复制 | `spaces/skill_routes.py` | `SpaceSkillApplicationService`、`SpaceSkillQueryService`、`SpaceSkillVersionQueryService`、`SpaceSkillOfflineService` |
 | Draft 文件、升级、Git 刷新、删除 | `spaces/router.py`：`/spaces/{space_id}/skills/{skill_id}/draft/...` | `SpaceSkillApplicationService` → Draft Repository + `DraftContentStore` |
-| Owner/Manager、编辑租约、编辑权限申请 | `spaces/router.py`：Skill grants/managers/owner、`draft/lease`、`editor-requests` | `SpaceSkillGrantService`、`DraftEditLeaseService`、`SpaceSkillEditorRequestService` |
+| Owner/Manager、编辑租约、编辑权限申请 | `spaces/router.py`：Skill grants/managers/owner、`draft/lease`、`editor-requests`、`editor-approval-policy` | `SpaceSkillGrantService`、`DraftEditLeaseService`、`SpaceSkillEditorRequestService` |
 | 发布影响面、发布、查询 Attempt、重试 | `spaces/publication_routes.py` | `SpaceSkillPublicationService` → Publication Repository → TaskQueue → Publication Worker |
 
 精确 HTTP method、分页、状态码和请求字段直接检查以上 Router 与同目录 `schemas.py`。例如已有资产加入 Set 使用 PUT `/{set_id}/skills/{skill_id}`；SC Public 引用使用专门的异步 POST，不能混用两种身份。
@@ -110,7 +110,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Grant 的 Owner/Manager 与 Space Membership 分别校验。编辑租约无 TTL/renew；Team 写入校验 holder/fencing token，修订冲突由 revision CAS 处理。发布入口由 Repository 在事务中协调租约和冻结，不能凭旧讨论给 Router 增加未实现的 token 参数。
 - 发布成功后清除当前 Draft；升级从精确 Published Version 创建后继 Draft。`published_version_draft.py` 优先读取 Canonical Store，缺失时按 SC 精确版本恢复。
 - 删除 Draft 使用现有 Repository 分支及 `deleted_scope`：Version、非 FAILED Attempt、成员/Installation、编辑工单等外部事实存在时仅清除 Draft；没有这些事实时清理自身关联并删除 Skill，允许清除仅剩 FAILED Attempt 的首次草稿。FROZEN Draft 不能删除。不要绕开检查直接删 `ac_skill`。
-- Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在人工审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。AUTO 的可信内部入口是 `SkillEditorRequestRepositoryProtocol.apply_auto_skill_editor_request(session, work_order_id, env)`：只处理已 claim 的 `PROCESSING`、无人工审批人记录的工单，在 WorkOrder 提供的同一事务内复核未下线 Skill、团队成员及绑定开关，仅写 Manager Grant，不自行提交；工单终态与申请人通知由 WorkOrder 在该事务内完成。当前用户申请入口在开关为真时仍抛异常，直至 WorkOrder AUTO 分发和 Skill 调用集成。
+- Editor Request 创建 `SKILL_COLLABORATOR` Work Order；`skill_collaborator_approval_handler.py` 在人工审批时重新验证并写 Manager Grant。直接添加 Manager 不创建工单。按 Skill 的 `editor-approval-policy` 只允许有效 Team Skill Owner 读写，默认关闭；个人空间和已下线 Skill 拒绝。申请入口先由 Skill Repository 校验申请人与绑定，关闭时沿用人工待办，开启时在内部调用 WorkOrder AUTO（`approver_user_ids=[applicant_user_id]`、`recipient_user_ids=[]`；无人工审批人、仅申请人收结果）。AUTO 创建事务先调用 Skill-owned `admit_auto_skill_editor_request(session, ...)`：锁定绑定并复核资格、开关、已有 Grant 及 `PENDING/PROCESSING` 工单，成功后才插入工单；前置 `inspect_editor_request` 不跨事务持锁。完成事务再调用 `apply_auto_skill_editor_request(session, work_order_id, env)`：复核未下线 Skill、团队成员及绑定开关，仅写 Manager Grant；工单终态与申请人通知由 WorkOrder 在同一事务内完成。公开通用 events 路由拒绝外部 AUTO。
 
 发布链路读 `services/space_skill_publication_service.py`、`services/space_skill_publication_task.py`、`publication_contract.py` 及 Publication Repository：
 

@@ -115,11 +115,11 @@ export const NodeListView: React.FC<{
             : isCoopGroupDisplay
             ? '协作群会话'
             : node.executor ?? node.assignee ?? ownerBotId;
-        // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
+        // 会话跳转链接：协作群走 /workspace/collaboration，单 bot 走 /workspace/chat。
         // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
         // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
         const conversationHref = node.sessionId
-          ? isGroupSession // 群会话不依赖 assignee(注释约定:由 workspace 按 group=/session= 解析成员)
+          ? isGroupSession // 群会话不依赖 assignee(注释约定:由协作群页按 group=/session= 解析成员)
             ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
             : !isUnassigned && getConversationBotId(node)
             ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)

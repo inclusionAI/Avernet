@@ -3235,7 +3235,7 @@
         "type": "object"
       },
       "CreateWorkOrderEventRequest": {
-        "description": "Generic request for creating an approval work order or notice.",
+        "description": "Generic approval or notice event; Skill editor approvals use their own endpoint.",
         "properties": {
           "applicant_user_id": {
             "anyOf": [
@@ -3263,8 +3263,13 @@
             "description": "Reason supplied for an approval event, when applicable.",
             "title": "Apply Reason"
           },
+          "approval_mode": {
+            "$ref": "#/components/schemas/WorkOrderApprovalMode",
+            "default": "MANUAL",
+            "description": "Approval workflow; AUTO is reserved for trusted internal business callers and is rejected by this public endpoint."
+          },
           "approver_user_ids": {
-            "description": "User identifiers who may approve the event.",
+            "description": "MANUAL approvers; AUTO uses no human approver rows.",
             "items": {
               "type": "string"
             },
@@ -3323,7 +3328,7 @@
             "type": "string"
           },
           "recipient_user_ids": {
-            "description": "User identifiers who receive the event notice.",
+            "description": "Recipients for notice events and trusted internal AUTO approval results.",
             "items": {
               "type": "string"
             },
@@ -20504,11 +20509,14 @@
         "type": "object"
       },
       "SkillEditorRequestCreated": {
-        "description": "Pending Work Order created for a Skill editor application.",
+        "description": "Work Order result for a Skill editor application.",
         "properties": {
           "status": {
-            "const": "PENDING",
-            "description": "Initial Work Order status.",
+            "description": "Work Order status.",
+            "enum": [
+              "PENDING",
+              "APPROVED"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -24442,6 +24450,64 @@
           "request_id"
         ],
         "title": "Envelope[BotRecycleResult]",
+        "type": "object"
+      },
+      "SkillEditorApprovalPolicy": {
+        "additionalProperties": false,
+        "description": "Owner-managed approval policy for one Team Space Skill.",
+        "properties": {
+          "auto_approve_editor_requests": {
+            "description": "Whether new qualified editor applications are approved automatically.",
+            "title": "Auto Approve Editor Requests",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auto_approve_editor_requests"
+        ],
+        "title": "SkillEditorApprovalPolicy",
+        "type": "object"
+      },
+      "Envelope_SkillEditorApprovalPolicy_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillEditorApprovalPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillEditorApprovalPolicy]",
         "type": "object"
       }
     }
@@ -89298,6 +89364,402 @@
         "summary": "Recycle Dormant Bot",
         "tags": [
           "bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy": {
+      "get": {
+        "operationId": "get_space_skill_editor_approval_policy_openapi_v1_bots_spaces__space_id__skills__skill_id__editor_approval_policy_get",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillEditorApprovalPolicy_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Space Skill Editor Approval Policy",
+        "tags": [
+          "spaces"
+        ]
+      },
+      "put": {
+        "operationId": "update_space_skill_editor_approval_policy_openapi_v1_bots_spaces__space_id__skills__skill_id__editor_approval_policy_put",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillEditorApprovalPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillEditorApprovalPolicy_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Update Space Skill Editor Approval Policy",
+        "tags": [
+          "spaces"
         ]
       }
     }

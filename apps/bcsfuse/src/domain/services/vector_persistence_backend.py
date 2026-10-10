@@ -30,9 +30,19 @@ VectorPersistenceBackend Protocol
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from src.domain.models.vector_point import VectorPoint
+
+
+@dataclass(frozen=True)
+class VectorChangeSet:
+    """Durable vector mutations after a synchronization checkpoint."""
+
+    upserts: list[VectorPoint] = field(default_factory=list)
+    deleted_ids: list[str] = field(default_factory=list)
+    checkpoint: float = 0.0
 
 
 @runtime_checkable
@@ -151,4 +161,17 @@ class VectorPersistenceBackend(Protocol):
         ...
 
 
-__all__ = ["VectorPersistenceBackend"]
+@runtime_checkable
+class IncrementalVectorPersistenceBackend(VectorPersistenceBackend, Protocol):
+    """Persistence backend that exposes an ordered durable change feed."""
+
+    def load_changes_since(self, checkpoint: float) -> VectorChangeSet:
+        """Load durable upserts and deletions after a synchronization point."""
+        ...
+
+
+__all__ = [
+    "IncrementalVectorPersistenceBackend",
+    "VectorChangeSet",
+    "VectorPersistenceBackend",
+]

@@ -1261,6 +1261,7 @@ export async function handleChatAbort(
   // competing final/error event.
   context.finalSent = true;
   context.terminalState = 'aborted';
+  sendVisibleReplyDelta(runId, log);
   controller.abort();
   context.client.sendEvent(
     'chat',

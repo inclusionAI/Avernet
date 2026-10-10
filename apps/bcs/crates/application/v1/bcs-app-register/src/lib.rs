@@ -3,8 +3,8 @@
 //! Unscoped v1 tokens retain the legacy payload, TTL and onboarding behavior
 //! and are interchangeable with tokens from the legacy registration route.
 //! Provider-scoped v2 tokens carry signed owner, Provider and mode restrictions;
-//! they are not accepted by legacy registration and are not interchangeable.
-//! the injected core owns authorization and all scoped registration mutations.
+//! both HTTP surfaces delegate scoped registration to this facade.
+//! The injected core owns authorization and all scoped registration mutations.
 //! `POST /register` is anonymous and the register token is its only credential.
 
 use std::sync::Arc;

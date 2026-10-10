@@ -49,12 +49,14 @@ describe("BotWorkflowPermissionRepository", () => {
       const { repo } = createRepo();
       await repo.upsert({ bot_id: "botA", bot_owner_id: "*", workflow_id: "wf", can_view: 1, can_execute: 0, can_edit: 0 });
       expect(await repo.resolveViewScope("wf", "anyone")).toEqual({ botIds: ["botA"] });
+      expect(await repo.resolveRunViewScope("wf", "anyone")).toEqual({ bots: [{ botId: "botA", ownerId: "*" }] });
     });
 
     it("returns allowed botIds for user-specific-bot records", async () => {
       const { repo } = createRepo();
       await repo.upsert({ bot_id: "botA", bot_owner_id: "160855", workflow_id: "wf", can_view: 1, can_execute: 0, can_edit: 0 });
       expect(await repo.resolveViewScope("wf", "160855")).toEqual({ botIds: ["botA"] });
+      expect(await repo.resolveRunViewScope("wf", "160855")).toEqual({ bots: [{ botId: "botA", ownerId: "160855" }] });
       expect(await repo.resolveViewScope("wf", "other")).toBe("deny");
     });
 
@@ -74,10 +76,10 @@ describe("BotWorkflowPermissionRepository", () => {
       expect(await repo.resolveViewScope("wf", "160855")).toBe("all");
     });
 
-    it("ignores can_view=0 records", async () => {
+    it("treats direct edit permission as readable", async () => {
       const { repo } = createRepo();
       await repo.upsert({ bot_id: "botA", bot_owner_id: "160855", workflow_id: "wf", can_view: 0, can_execute: 0, can_edit: 1 });
-      expect(await repo.resolveViewScope("wf", "160855")).toBe("deny");
+      expect(await repo.resolveViewScope("wf", "160855")).toEqual({ botIds: ["botA"] });
     });
 
     it("returns 'deny' when no permission records exist", async () => {

@@ -7,6 +7,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from secbaas.community.api.device_manage import (
     ArcaCredentials,
@@ -21,6 +22,7 @@ from secbaas.community.plugins.sandbox.arca.local_k8s import (
 )
 from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
     LocalK8sClientManager,
+    _convert_outbound_rules,
     _image_pull_policy,
     _use_incluster_config,
 )
@@ -37,6 +39,38 @@ def _make_credentials(**overrides: object) -> ArcaCredentials:
     }
     defaults.update(overrides)
     return ArcaCredentials(**defaults)
+
+
+class TestOutboundRulesConversion:
+    def test_overlapping_domain_groups_emit_one_rule_per_domain(self) -> None:
+        """Overlapping groups must not produce duplicate Envoy domains."""
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["a.example.com", "b.example.com"],
+                    action="set",
+                    header_name="X-A",
+                    value="value-a",
+                ),
+                HeaderOperationRule(
+                    domains=["b.example.com", "c.example.com"],
+                    action="set",
+                    header_name="X-B",
+                    value="value-b",
+                ),
+            ]
+        )
+
+        rendered = yaml.safe_load(_convert_outbound_rules(rule))
+        assert [item["domains"] for item in rendered["rules"]] == [
+            ["a.example.com"],
+            ["b.example.com"],
+            ["c.example.com"],
+        ]
+        assert rendered["rules"][1]["set"] == [
+            {"header": "X-A", "value": "value-a"},
+            {"header": "X-B", "value": "value-b"},
+        ]
 
 
 @pytest.fixture

@@ -185,8 +185,9 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
         "bcsfuse-internal",
     ]
 
-    oss_provider_dir = Path("src/infra/oss")
-    bootstrap_dir = Path("src/bootstrap")
+    module_root = Path(__file__).resolve().parents[2]
+    oss_provider_dir = module_root / "src/infra/public"
+    bootstrap_dir = module_root / "src/bootstrap"
 
     violations = []
 
@@ -204,6 +205,10 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     module_name = node.module if isinstance(node, ast.ImportFrom) else None
                     if module_name:
+                        # This is our environment/YAML adapter, not the internal
+                        # DRM SDK. Its own imports are scanned below as well.
+                        if module_name == "src.infra.public.config.drm_config_provider":
+                            continue
                         for pattern in forbidden_patterns:
                             if pattern.lower() in module_name.lower():
                                 violations.append(f"{file_path}: imports {module_name}")
@@ -234,6 +239,81 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
     else:
         print("✓ No forbidden internal imports found in provider modules")
         return True
+
+
+def test_runtime_service_providers_can_be_added_without_replacing_storage(
+    monkeypatch,
+):
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:8001")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8002")
+    monkeypatch.setenv("LLM_AUTH_TOKEN", "test-token")
+
+    from src.bootstrap.opensource import (
+        build_opensource_provider_registry,
+        register_runtime_service_providers,
+    )
+    from src.infra.public.config.yaml_env_config_provider import (
+        YamlEnvConfigProvider,
+    )
+    from src.infra.public.embedding.real_embedding_provider import (
+        RealEmbeddingProvider,
+    )
+    from src.infra.public.llm.anthropic_compatible_provider import (
+        AnthropicCompatibleProvider,
+    )
+
+    registry = build_opensource_provider_registry(mode="test")
+    original_store = registry.get("worker_registry_store")
+
+    register_runtime_service_providers(registry, YamlEnvConfigProvider())
+
+    assert registry.get("worker_registry_store") is original_store
+    assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
+    assert isinstance(registry.get("llm_provider"), AnthropicCompatibleProvider)
+
+
+def test_runtime_service_providers_preserve_environment_model_selection(
+    monkeypatch,
+):
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:8001")
+    monkeypatch.setenv("EMBEDDING_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8002")
+    monkeypatch.setenv("LLM_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("LLM_FAST_MODEL", "internal-fast")
+    monkeypatch.setenv("LLM_REASONING_MODEL", "internal-reasoning")
+
+    from src.bootstrap.opensource import (
+        build_opensource_provider_registry,
+        register_runtime_service_providers,
+    )
+    from src.infra.public.llm import anthropic_compatible_provider as llm_module
+
+    captured = {}
+
+    class CapturingProvider:
+        def __init__(self, settings):
+            captured["settings"] = settings
+
+    monkeypatch.setattr(
+        llm_module,
+        "AnthropicCompatibleProvider",
+        CapturingProvider,
+    )
+
+    class InternalStyleConfig:
+        def get(self, key, default=None):
+            return default
+
+    registry = build_opensource_provider_registry(mode="test")
+    register_runtime_service_providers(registry, InternalStyleConfig())
+
+    physical_models = {
+        profile.logical_model_id: profile.physical_model_name
+        for profile in captured["settings"].model_registry
+    }
+    assert physical_models["fast.default"] == "internal-fast"
+    assert physical_models["reasoning.default"] == "internal-reasoning"
 
 
 def test_object_storage_root_dir_not_in_source_code():

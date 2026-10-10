@@ -9,7 +9,13 @@ export interface BotEditorDto {
   role: 'admin' | 'member';
 }
 
+export interface BotEditorRequestPolicyDto {
+  auto_approve: boolean;
+}
+
 const path = (botId: string) => `/openapi/v1/bots/${encodeURIComponent(botId)}/editors`;
+const editorRequestPolicyPath = (botId: string) =>
+  `/openapi/v1/bots/${encodeURIComponent(botId)}/editor-request-policy`;
 
 export const botCollaborationController = {
   list: (botId: string) =>
@@ -35,4 +41,14 @@ export const botCollaborationController = {
       `/openapi/v1/bots/${encodeURIComponent(botId)}/editor-requests`,
       { method: 'POST', params: userScopedParams({ owner_id: ownerId }), data: { reason } },
     ),
+  getEditorRequestPolicy: (botId: string) =>
+    backendRequest<BackendApiEnvelope<BotEditorRequestPolicyDto>>(editorRequestPolicyPath(botId), {
+      params: userScopedParams(),
+    }),
+  updateEditorRequestPolicy: (botId: string, autoApprove: boolean) =>
+    backendRequest<BackendApiEnvelope<BotEditorRequestPolicyDto>>(editorRequestPolicyPath(botId), {
+      method: 'PATCH',
+      params: userScopedParams(),
+      data: { auto_approve: autoApprove },
+    }),
 };

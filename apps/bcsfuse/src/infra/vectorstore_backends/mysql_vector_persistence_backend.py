@@ -29,7 +29,10 @@ import mysql.connector
 from mysql.connector import Error
 
 from src.domain.models.vector_point import VectorPoint
-from src.domain.services.vector_persistence_backend import VectorPersistenceBackend
+from src.domain.services.vector_persistence_backend import (
+    VectorChangeSet,
+    VectorPersistenceBackend,
+)
 from src.infra.public.observability.storage_logging import (
     log_storage_event,
     log_storage_error,
@@ -97,10 +100,34 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                 autocommit=False,
             )
         except Error as e:
+            log_storage_error(
+                logger,
+                "mysql_vector_connection_failure",
+                component="mysql_vector_persistence_backend",
+                operation="connect",
+                validation_phase="connection",
+                backend="mysql",
+                target_resource=TABLE_NAME,
+                error=e,
+                host=mask_host(self.host),
+                user=mask_user(self.user),
+            )
             raise RuntimeError(
                 f"Failed to connect to MySQL at {mask_host(self.host)}:{self.port}/{self.database}: {e}"
             ) from e
 
+        log_storage_event(
+            logger,
+            logging.INFO,
+            "mysql_vector_connection_success",
+            component="mysql_vector_persistence_backend",
+            operation="connect",
+            validation_phase="connection",
+            backend="mysql",
+            target_resource=TABLE_NAME,
+            host=mask_host(self.host),
+            user=mask_user(self.user),
+        )
         self._ensure_schema(self._conn)
 
     def _ensure_schema(self, conn) -> None:
@@ -127,6 +154,16 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
     @staticmethod
     def _deserialize_vector(data: bytes) -> list[float]:
         return pickle.loads(data)
+
+    def _finish_read(self, cursor) -> None:
+        """Close the cursor and release the current repeatable-read snapshot."""
+        try:
+            cursor.close()
+        finally:
+            # mysql-connector starts a transaction for SELECT when autocommit is
+            # disabled. Keeping it open makes subsequent incremental reads miss
+            # writes committed by another service instance.
+            self._conn.rollback()
 
     def save(self, point: VectorPoint) -> None:
         self.save_batch([point])
@@ -189,40 +226,52 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                     payload = json.loads(row[2]) if row[2] else {}
                     points.append(VectorPoint(id=row[0], vector=vector, payload=payload))
                 except Exception as e:
-                    logger.warning("[MySQLVectorBackend] Failed to load vector %s: %s", row[0], e)
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
 
             logger.debug("[MySQLVectorBackend] Loaded %d vectors", len(points))
             return points
         except Error as e:
             raise RuntimeError(f"Failed to load vectors from MySQL: {e}") from e
         finally:
-            cursor.close()
+            self._finish_read(cursor)
 
-    def load_changes_since(self, last_sync_time: float) -> list[VectorPoint]:
+    def load_changes_since(self, last_sync_time: float) -> VectorChangeSet:
         self._ensure_connection()
         cursor = self._conn.cursor()
 
         try:
             cursor.execute(f"""
-                SELECT `id`, `vector`, `payload`
+                SELECT `id`, `vector`, `payload`, `is_deleted`,
+                       UNIX_TIMESTAMP(`gmt_modify`)
                 FROM {TABLE_NAME}
                 WHERE `gmt_modify` >= FROM_UNIXTIME(%s)
-            """, (last_sync_time,))
+                ORDER BY `gmt_modify` ASC, `id` ASC
+            """, (max(0.0, last_sync_time - 1.0),))
 
-            points = []
+            upserts = []
+            deleted_ids = []
+            checkpoint = last_sync_time
             for row in cursor.fetchall():
+                checkpoint = max(checkpoint, float(row[4] or 0.0))
+                if bool(row[3]):
+                    deleted_ids.append(row[0])
+                    continue
                 try:
                     vector = self._deserialize_vector(row[1])
                     payload = json.loads(row[2]) if row[2] else {}
-                    points.append(VectorPoint(id=row[0], vector=vector, payload=payload))
+                    upserts.append(VectorPoint(id=row[0], vector=vector, payload=payload))
                 except Exception as e:
-                    logger.warning("[MySQLVectorBackend] Failed to load vector %s: %s", row[0], e)
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
 
-            return points
+            return VectorChangeSet(
+                upserts=upserts,
+                deleted_ids=deleted_ids,
+                checkpoint=checkpoint,
+            )
         except Error as e:
             raise RuntimeError(f"Failed to load changes from MySQL: {e}") from e
         finally:
-            cursor.close()
+            self._finish_read(cursor)
 
     def delete(self, id: str) -> bool:
         self._ensure_connection()
@@ -265,12 +314,18 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         cursor = self._conn.cursor()
 
         try:
-            cursor.execute(f"SELECT 1 FROM {TABLE_NAME} WHERE `id` = %s LIMIT 1", (id,))
+            cursor.execute(
+                f"""
+                SELECT 1 FROM {TABLE_NAME}
+                WHERE `id` = %s AND `is_deleted` = 0 LIMIT 1
+                """,
+                (id,),
+            )
             return cursor.fetchone() is not None
         except Error as e:
             raise RuntimeError(f"Failed to check existence: {e}") from e
         finally:
-            cursor.close()
+            self._finish_read(cursor)
 
     def count(self) -> int:
         self._ensure_connection()
@@ -283,7 +338,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         except Error as e:
             raise RuntimeError(f"Failed to count vectors: {e}") from e
         finally:
-            cursor.close()
+            self._finish_read(cursor)
 
     def get_last_modified_time(self) -> float:
         self._ensure_connection()
@@ -296,7 +351,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         except Error as e:
             raise RuntimeError(f"Failed to get last modified time: {e}") from e
         finally:
-            cursor.close()
+            self._finish_read(cursor)
 
     def close(self) -> None:
         if self._conn is not None and self._conn.is_connected():

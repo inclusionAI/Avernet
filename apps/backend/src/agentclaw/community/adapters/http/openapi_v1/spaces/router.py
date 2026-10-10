@@ -58,10 +58,13 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SkillGrantItem,
     SpaceSkillGrants,
     TransferSkillOwnerRequest,
-    CreateSkillEditorRequest,
-    SkillEditorRequestCreated,
     DraftEditLeaseResource,
     UpdateSpaceMemberRoleRequest,
+)
+from agentclaw.community.adapters.http.openapi_v1.spaces.schemas_editor_approval import (
+    CreateSkillEditorRequest,
+    SkillEditorApprovalPolicy,
+    SkillEditorRequestCreated,
 )
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -653,6 +656,56 @@ async def takeover_draft_edit_lease(
     return envelope(DraftEditLeaseResource.model_validate(result), request)
 
 
+@router.get(
+    "/{space_id}/skills/{skill_id}/editor-approval-policy",
+    response_model=Envelope[SkillEditorApprovalPolicy],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_space_skill_editor_approval_policy(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorApprovalPolicy]:
+    enabled = service.get_approval_policy(
+        space_id=space_id, skill_id=skill_id, actor_id=user_id
+    )
+    return envelope(
+        SkillEditorApprovalPolicy(auto_approve_editor_requests=enabled), request
+    )
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/editor-approval-policy",
+    response_model=Envelope[SkillEditorApprovalPolicy],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def update_space_skill_editor_approval_policy(
+    body: SkillEditorApprovalPolicy,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorApprovalPolicy]:
+    enabled = service.update_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        auto_approve_editor_requests=body.auto_approve_editor_requests,
+    )
+    return envelope(
+        SkillEditorApprovalPolicy(auto_approve_editor_requests=enabled), request
+    )
+
+
 @router.post(
     "/{space_id}/skills/{skill_id}/editor-requests",
     status_code=201,
@@ -678,7 +731,7 @@ async def create_space_skill_editor_request(
     )
     return created(
         SkillEditorRequestCreated(
-            work_order_id=result.id,
+            work_order_id=result.work_order_id,
             work_order_no=result.work_order_no,
             status=result.status,
         ),

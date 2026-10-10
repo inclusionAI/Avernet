@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';
+import { gzipSync } from 'node:zlib';
 import { createRepairWorkbenchService } from '../../services/repair-batch-service.js';
 import { createRepairBatchesRouter } from '../repair-batches.js';
 import { repairFixture } from '../../services/__tests__/repair-batch-fixtures.js';
@@ -25,10 +26,11 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     const server = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
     close.push(() => new Promise<void>(resolve => server.close(() => resolve())), () => f.db.close());
     const port = (server.address() as { port: number }).port;
-    async function request(path: string, body?: unknown, role = 'editor') {
+    async function request(path: string, body?: unknown, role = 'editor', gzip = false) {
       const response = await fetch(`http://127.0.0.1:${port}/api/workflow-repairs${path}`, {
-        method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'x-test-role': role },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'x-test-role': role,
+          ...(gzip ? { 'content-encoding': 'gzip' } : {}) },
+        ...(body === undefined ? {} : { body: gzip ? gzipSync(JSON.stringify(body)) : JSON.stringify(body) }),
       });
       return { status: response.status, body: await response.json() };
     }
@@ -59,6 +61,37 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request('/candidates?workflowId=wf-1&state=forged')).status).toBe(400);
     expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=1')).status).toBe(400);
     expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=true')).body.includeHistorical).toBe(true);
+  });
+  it('returns bounded previews for all visible issues in one authorized read, including empty issues', async () => {
+    const f = await setup();
+    f.items[0].context = { signature: 'issue-a' };
+    f.items[1].context = { signature: 'issue-b' };
+    const response = await f.request('/candidates?workflowId=wf-1&pageSize=1&previewSignature=issue-b&previewSignature=empty');
+    expect(response.status).toBe(200);
+    expect(response.body.issuePreviews).toMatchObject([
+      { signature: 'issue-b', total: 1, items: [{ itemId: 'item-1' }] },
+      { signature: 'empty', total: 0, items: [] },
+    ]);
+    expect(response.body.page.total).toBe(2);
+    expect((await f.request('/candidates?workflowId=wf-1&previewSignature=issue-b', undefined, 'denied')).status).toBe(403);
+    expect((await f.request('/candidates?workflowId=wf-1' + '&previewSignature=a'.repeat(51))).status).toBe(400);
+  });
+  it('accepts long batch scopes through a view-authorized read-only POST and enforces body/count bounds', async () => {
+    const f = await setup();
+    const previewSignatures = Array.from({ length: 50 }, (_, i) => `${i}:${'节点'.repeat(250)}`);
+    f.items[0].context = { signature: previewSignatures[0] };
+    const body = { workflowId: 'wf-1', pageSize: 1, includeHistorical: true, previewSignatures };
+    const result = await f.request('/candidates/query', body, 'viewer', true);
+    expect(result.status).toBe(200);
+    expect(result.body.canEdit).toBe(false);
+    expect(result.body.issuePreviews).toHaveLength(50);
+    expect(result.body.issuePreviews[0]).toMatchObject({ total: 1, items: [{ itemId: 'item-0' }] });
+    expect(result.body.issuePreviews[49]).toMatchObject({ total: 0, items: [] });
+    expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+    expect((await f.request('/candidates/query', body, 'denied')).status).toBe(403);
+    expect((await f.request('/candidates/query', { ...body, previewSignatures: [...previewSignatures, 'extra'] })).status).toBe(400);
+    expect((await f.request('/candidates/query', { ...body, pageSize: 201 })).status).toBe(400);
+    expect((await f.request('/candidates/query', { ...body, extra: 'x'.repeat(256 * 1024) })).status).toBe(413);
   });
   it('keeps dispositions usable with generation unavailable and cancels with a JSON acknowledgement', async () => {
     const f = await setup(false);

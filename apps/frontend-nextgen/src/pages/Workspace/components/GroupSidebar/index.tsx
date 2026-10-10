@@ -1,12 +1,10 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
-import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Search } from 'lucide-react';
+import { CollaborationIdentityHeader } from '../CollaborationIdentityHeader';
 import { ListErrorState } from '../ListErrorState';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
-import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
-import { WorkspaceSidebarCollapsedRail } from '../WorkspaceSidebarCollapsedRail';
 import { GroupItem } from './GroupItem';
 import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
 
@@ -14,12 +12,8 @@ export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
 
 export interface GroupSidebarProps {
-  view: 'chat' | 'group';
-  onViewChange: (v: 'chat' | 'group') => void;
   /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
   viewerKind: 'user' | 'bot';
-  /** 当前身份可见视图；Bot 仅协作群时不再渲染「会话」切换项。 */
-  availableViews?: WorkspaceView[];
   groups: GroupView[];
   isLoading: boolean;
   groupsError?: string | null;
@@ -76,10 +70,7 @@ export interface GroupSidebarProps {
 /** 二级协作群列表内容本体（不含 <aside> 外壳）。由内流 GroupSidebar 与 <lg 抽屉复用，保证两处一致。 */
 export function GroupSidebarList(props: GroupSidebarProps) {
   const {
-    view,
-    onViewChange,
     viewerKind,
-    availableViews: availableViewsProp,
     groups,
     isLoading,
     groupsError,
@@ -122,15 +113,15 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onShareGroup,
     onDissolveGroup,
   } = props;
-  const availableViews = availableViewsProp ?? ['chat', 'group'];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0">
+        <CollaborationIdentityHeader />
+      </div>
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
+        {/* 跨模块切换收口到 App Shell 一级导航,二级侧栏不再渲染视图切换 Tab。 */}
         <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
-          <div className="flex h-10 items-center gap-2 px-4">
-            <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
-          </div>
           <GroupSidebarFilters
             groupSearchText={groupSearchText}
             onSearchTextChange={onSearchTextChange}
@@ -241,16 +232,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <ResizableWorkspaceSidebar
-      ariaLabel="协作群会话侧栏"
-      collapsedContent={
-        <WorkspaceSidebarCollapsedRail
-          value={props.view}
-          options={props.availableViews ?? ['chat', 'group']}
-          onChange={props.onViewChange}
-        />
-      }
-    >
+    <ResizableWorkspaceSidebar ariaLabel="协作群列表">
       <GroupSidebarList {...props} />
     </ResizableWorkspaceSidebar>
   );

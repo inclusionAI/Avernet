@@ -2,6 +2,13 @@
 
 ## Provides
 
+`GET /providers/by-slug/{slug}` is unauthenticated and exposes only Provider
+identity, name, auth mode, enabled status, protocol version and audit timestamps.
+It consumes the application service's credential-free projection. Existing
+registration/PATCH accepts optional slug with unchanged authentication; admin
+info responses add nullable slug and effective protocol_version. Core validates
+slugs, stores enforce uniqueness, and the adapter maps absence to 404.
+
 GET/PUT /admin/message-delivery/policy allow authenticated Human identities from the configured auth boundary to manage environment-wide policy. Explicit Bot/Provider/service credentials never fall back to local mock Human identity. The old version-prefixed route has no alias; ServiceKey permissions for other APIs are unchanged.
 
 - HTTP delivery adapter for BCS.
@@ -17,10 +24,17 @@ GET/PUT /admin/message-delivery/policy allow authenticated Human identities from
   `/openapi/v1/collaboration` prefix; no unprefixed write aliases are mounted.
 - Authenticated Bot endpoints for querying current-session state-machine
   permission and submitting one-shot YAML, transient role bindings, and input.
+- Legacy `GET /register/token` and anonymous `POST /register` retain v1 behavior
+  and bare HTTP 200 responses, while accepting Provider-scoped v2 tokens through
+  the shared injected `RegisterService`. Scoped parameters are parsed only for
+  v2 redemption; the facade owns authorization, scope and persistence. Successful
+  issuance/redemption responses use `Cache-Control: no-store`.
 
 ## Consumes
 
 - `bcs-service-api` traits and DTOs.
+- `application::v1::RegisterService` for scoped issuance and registration;
+  adapter construction without it retains v1 and fails scoped calls closed.
 - `bcs-http-auth` extractors.
 - `bcs-protocol` wire DTOs when an HTTP endpoint exposes protocol-shaped payloads.
 

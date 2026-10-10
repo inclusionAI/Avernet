@@ -545,6 +545,7 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
     providers
         .insert_provider(ProviderRecord {
             provider_id: "provider-search".to_string(),
+            slug: None,
             name: "Search Provider".to_string(),
             config: "{}".to_string(),
             created_by: "staff-2".to_string(),
@@ -1184,6 +1185,7 @@ async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_r
         .providers
         .insert_provider(ProviderRecord {
             provider_id: "provider-1".to_string(),
+            slug: None,
             name: "Provider One".to_string(),
             config: "{}".to_string(),
             created_by: "staff-1".to_string(),

@@ -4,11 +4,8 @@ import path from 'node:path';
 describe('Workspace 好友入口迁移', () => {
   it('移除添加好友弹窗和重复目录状态机，只在协作群工具行保留发起协作', () => {
     const root = process.cwd();
-    const workspaceSource = readFileSync(path.join(root, 'src/pages/Workspace/index.tsx'), 'utf8');
-    const chatSlotSource = readFileSync(
-      path.join(root, 'src/pages/Workspace/components/ChatSessionSidebarSlot.tsx'),
-      'utf8',
-    );
+    // Task 10 退休旧 /workspace 混合页及其聊天侧栏容器后,相关源断言随之收敛:
+    // workspaceSource / chatSlotSource(旧页与 ChatSessionSidebarSlot)已删除。
     const botSidebarSource = readFileSync(
       path.join(root, 'src/pages/Workspace/components/BotSessionSidebar/index.tsx'),
       'utf8',
@@ -22,12 +19,6 @@ describe('Workspace 好友入口迁移', () => {
       'utf8',
     );
 
-    expect(workspaceSource).not.toContain('AddFriendModal');
-    expect(workspaceSource).not.toContain('addFriendOpen');
-    expect(workspaceSource).not.toContain('onOpenAddFriend');
-    expect(workspaceSource).not.toContain('createGroupOpen');
-    expect(workspaceSource).not.toContain('CreateGroupModal');
-    expect(chatSlotSource).not.toContain('onOpenCreateGroup');
     expect(botSidebarSource).not.toContain('WorkspaceActionButton');
     expect(botSidebarSource).not.toContain('onCreateGroup');
     expect(groupFiltersSource).toContain('<WorkspaceActionButton onCreateGroup={onCreateGroup} />');

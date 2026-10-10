@@ -1,12 +1,12 @@
 import { getCapabilities } from '@/capabilities';
-import { Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import { Button, Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { useCollapsedIdentityTooltip } from '@/hooks/useCollapsedIdentityTooltip';
 import type { HumanIdentityStatus } from '@/hooks/useHumanIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
-import { ChevronDown, Info, Loader2, Plus, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, Info, Loader2, Plus } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { BotRegistrationDialog } from './BotRegistrationDialog';
 import {
   IdentitySection,
@@ -14,22 +14,18 @@ import {
   IdentityTriggerButton,
   type IdentitySelectorLayout,
 } from './IdentitySelectorParts';
-
+import { createCollaborationOpenerHandlers } from './collaborationOpener';
 interface WorkspaceIdentitySelectorProps {
   identities: Identity[];
   activeId: string | null;
   onChange: (id: string) => void;
-  onOpenPermissions?: () => void;
   /** 顶栏右侧当前用户头像；所有用户身份复用该头像，Bot 仍使用自身头像。 */
   userAvatarUrl?: string;
   layout?: IdentitySelectorLayout;
   identityStatus?: HumanIdentityStatus;
   identityError?: string;
   identityListLoading?: boolean;
-  /**
-   * default 布局头部标签定制（如协作广场公开Bot Tab 的「为 Ta 加好友：」）。
-   * 定制时不再显示「可切换其他协作身份」副提示；缺省保持「当前协作身份」。
-   */
+  /** 头部标签定制（如「为 Ta 加好友：」）；定制时隐藏切换副提示，缺省显示「当前协作身份」。 */
   headerLabel?: string;
   /** 隐藏弹层内「接入外部 Bot」入口（如协作广场公开Bot Tab 的模块级选择器）；缺省保持显示。 */
   hideBotRegistration?: boolean;
@@ -43,13 +39,11 @@ interface WorkspaceIdentitySelectorProps {
    */
   onRetry?: () => void;
 }
-
 /** Workspace 业务层身份选择器：只消费已映射的 Identity，不直接读取 Store 或调用接口。 */
 export function WorkspaceIdentitySelector({
   identities,
   activeId,
   onChange,
-  onOpenPermissions,
   userAvatarUrl,
   layout = 'default',
   identityStatus,
@@ -62,18 +56,22 @@ export function WorkspaceIdentitySelector({
   onRetry,
 }: WorkspaceIdentitySelectorProps) {
   const [open, setOpen] = useState(false);
+  const identityCardRef = useRef<HTMLButtonElement>(null);
+  const switchButtonRef = useRef<HTMLButtonElement>(null);
+  const collaborationOpenerRef = useRef<'card' | 'switch' | null>(null);
   const collapsedTooltip = useCollapsedIdentityTooltip(activeId, open);
   const activeIdentity = identities.find((identity) => identity.id === activeId) ?? identities[0] ?? null;
   const userIdentities = identities.filter((identity) => identity.kind === 'user');
   const botIdentities = identities.filter((identity) => identity.kind === 'bot');
   const sidebarLayout = layout === 'sidebar';
   const collapsedLayout = layout === 'collapsed';
+  const collaborationLayout = layout === 'collaboration';
   const navigationLayout = sidebarLayout || collapsedLayout;
+  const popoverWidthClass = collaborationLayout ? 'w-[var(--radix-popover-trigger-width)]' : 'w-[320px]';
   const botRegistrationEnabled = getCapabilities().getBotRegistrationEnabled().value;
   const [botRegistrationOpen, setBotRegistrationOpen] = useState(false);
   const showListLoading = identityListLoading || (identities.length === 0 && identityStatus === 'loading');
   const emptyIdentityLabel = identityStatus === 'error' ? '暂无可协作身份，请刷新重试' : '暂无可协作身份';
-
   const handlePopoverOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen && collapsedLayout) collapsedTooltip.closeAndSuppress();
@@ -83,29 +81,50 @@ export function WorkspaceIdentitySelector({
     onChange(id);
     setOpen(false);
   };
+  const toggleCollaborationPopover = () => setOpen((currentOpen) => !currentOpen);
+  const collaborationTriggerProps = (source: 'card' | 'switch', toggle?: () => void) =>
+    collaborationLayout ? createCollaborationOpenerHandlers(collaborationOpenerRef, source, toggle) : undefined;
   const activeIdentityTrigger = activeIdentity ? (
     <IdentityTriggerButton
+      ref={identityCardRef}
       identity={activeIdentity}
       open={open}
       layout={layout}
       userAvatarUrl={userAvatarUrl}
       className={triggerClassName}
+      {...collaborationTriggerProps('card', toggleCollaborationPopover)}
     />
   ) : null;
-
   return (
     <div className={collapsedLayout ? undefined : 'space-y-1'}>
-      {collapsedLayout ? null : (
-        <IdentitySectionHeader
-          layout={layout}
-          headerLabel={headerLabel}
-          headerTooltip={headerTooltip}
-          showSwitchHint={headerLabel === undefined && identities.length > 1}
-        />
-      )}
-      {activeIdentity ? (
-        <>
-          <Popover open={open} onOpenChange={handlePopoverOpenChange}>
+      <Popover open={open} onOpenChange={handlePopoverOpenChange}>
+        {collapsedLayout ? null : (
+          <IdentitySectionHeader
+            layout={layout}
+            headerLabel={headerLabel}
+            headerTooltip={headerTooltip}
+            showSwitchHint={!collaborationLayout && headerLabel === undefined && identities.length > 1}
+            action={
+              collaborationLayout && activeIdentity ? (
+                <PopoverTrigger asChild>
+                  <Button
+                    ref={switchButtonRef}
+                    variant="link"
+                    size="sm"
+                    aria-label="切换工作身份"
+                    aria-expanded={open}
+                    aria-haspopup="dialog"
+                    {...collaborationTriggerProps('switch')}
+                  >
+                    切换
+                  </Button>
+                </PopoverTrigger>
+              ) : undefined
+            }
+          />
+        )}
+        {activeIdentity ? (
+          <>
             {collapsedLayout ? (
               <TooltipProvider delayDuration={300}>
                 <Tooltip open={collapsedTooltip.open} onOpenChange={collapsedTooltip.onOpenChange}>
@@ -117,15 +136,23 @@ export function WorkspaceIdentitySelector({
                   <TooltipContent side="right">{activeIdentity.name}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+            ) : collaborationLayout ? (
+              <PopoverAnchor asChild>{activeIdentityTrigger}</PopoverAnchor>
             ) : (
               <PopoverTrigger asChild>{activeIdentityTrigger}</PopoverTrigger>
             )}
             <PopoverContent
               align="start"
-              className="w-[320px] max-w-[calc(100vw-24px)] p-2 shadow-lg"
+              className={cn(popoverWidthClass, 'max-w-[calc(100vw-24px)] p-2 shadow-lg')}
               onOpenAutoFocus={(event) => {
                 // 不将焦点自动落到说明图标，避免打开身份列表时立即触发 Tooltip。
                 event.preventDefault();
+              }}
+              onCloseAutoFocus={(event) => {
+                if (!collaborationLayout) return;
+                event.preventDefault();
+                const openerRef = collaborationOpenerRef.current === 'switch' ? switchButtonRef : identityCardRef;
+                openerRef.current?.focus();
               }}
             >
               <div className="mb-2 flex items-center justify-between gap-2 border-b border-border px-2.5 pb-2">
@@ -152,21 +179,6 @@ export function WorkspaceIdentitySelector({
                     </TooltipProvider>
                   ) : null}
                 </div>
-                {onOpenPermissions ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="进入协作权限设置"
-                    className="h-7 shrink-0 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      setOpen(false);
-                      onOpenPermissions();
-                    }}
-                  >
-                    <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />
-                    协作权限
-                  </Button>
-                ) : null}
               </div>
               <div className="app-scrollbar max-h-80 space-y-3 overflow-y-auto">
                 <IdentitySection
@@ -220,65 +232,67 @@ export function WorkspaceIdentitySelector({
                 </div>
               ) : null}
             </PopoverContent>
-          </Popover>
-          {botRegistrationEnabled && !hideBotRegistration ? (
-            <BotRegistrationDialog open={botRegistrationOpen} onClose={() => setBotRegistrationOpen(false)} />
-          ) : null}
-        </>
-      ) : showListLoading ? (
-        <Button
-          type="button"
-          variant="ghost"
-          disabled
-          aria-live="polite"
-          aria-label="协作身份加载中"
-          className={cn(
-            collapsedLayout
-              ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0'
-              : 'h-auto min-h-9 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-left text-foreground',
-          )}
-        >
-          {collapsedLayout ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
-          ) : (
-            <>
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">加载中…</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform" aria-hidden />
-            </>
-          )}
-        </Button>
-      ) : collapsedLayout ? (
-        <div
-          role="status"
-          aria-label={emptyIdentityLabel}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-xs text-muted-foreground"
-        >
-          ?{identityStatus === 'error' && identityError ? <span className="sr-only">{identityError}</span> : null}
-        </div>
-      ) : (
-        <div
-          role="status"
-          className={cn(
-            'px-3 py-3 text-center text-xs text-muted-foreground',
-            !sidebarLayout && 'rounded-lg border border-dashed border-border',
-          )}
-        >
-          {identityStatus === 'error' && onRetry ? (
-            <>
-              <p className="m-0">身份加载失败</p>
-              <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry}>
-                重试
-              </Button>
-            </>
-          ) : (
-            emptyIdentityLabel
-          )}
-          {identityStatus === 'error' && identityError ? <span className="sr-only">{identityError}</span> : null}
-        </div>
-      )}
+            {botRegistrationEnabled && !hideBotRegistration ? (
+              <BotRegistrationDialog open={botRegistrationOpen} onClose={() => setBotRegistrationOpen(false)} />
+            ) : null}
+          </>
+        ) : showListLoading ? (
+          <Button
+            type="button"
+            variant="ghost"
+            disabled
+            aria-live="polite"
+            aria-label="协作身份加载中"
+            className={cn(
+              collapsedLayout
+                ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0'
+                : collaborationLayout
+                ? 'h-auto min-h-10 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground'
+                : 'h-auto min-h-9 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-left text-foreground',
+            )}
+          >
+            {collapsedLayout ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
+            ) : (
+              <>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">加载中…</span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform" aria-hidden />
+              </>
+            )}
+          </Button>
+        ) : collapsedLayout ? (
+          <div
+            role="status"
+            aria-label={emptyIdentityLabel}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-xs text-muted-foreground"
+          >
+            ?{identityStatus === 'error' && identityError ? <span className="sr-only">{identityError}</span> : null}
+          </div>
+        ) : (
+          <div
+            role="status"
+            className={cn(
+              'px-3 py-3 text-center text-xs text-muted-foreground',
+              !sidebarLayout && 'rounded-lg border border-dashed border-border',
+            )}
+          >
+            {identityStatus === 'error' && onRetry ? (
+              <>
+                <p className="m-0">身份加载失败</p>
+                <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry}>
+                  重试
+                </Button>
+              </>
+            ) : (
+              emptyIdentityLabel
+            )}
+            {identityStatus === 'error' && identityError ? <span className="sr-only">{identityError}</span> : null}
+          </div>
+        )}
+      </Popover>
     </div>
   );
 }

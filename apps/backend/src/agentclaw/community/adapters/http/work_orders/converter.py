@@ -14,9 +14,12 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
 )
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
 from agentclaw.community.core.work_orders.callbacks import WorkOrderCallbackCredential
+from agentclaw.community.core.work_orders.errors import WorkOrderInvalidEventError
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory as DomainNotificationCategory,
     WorkOrderApprovalMode as DomainWorkOrderApprovalMode,
+    WorkOrderBizType,
+    WorkOrderEventType,
 )
 
 
@@ -28,6 +31,16 @@ def create_work_order_event_data(
     callback_auth: WorkOrderCallbackCredential | None = None,
 ) -> WorkOrderEventCreated:
     """Delegate one event creation and translate its result to the HTTP DTO."""
+    # Both user HTTP routes share this ingress; qualified Skill applications
+    # call the WorkOrder Service in-process after Skill-owned admission.
+    if body.event_category.value == DomainNotificationCategory.APPROVAL.value and (
+        body.biz_type.strip() == WorkOrderBizType.SKILL_COLLABORATOR.value
+        or body.event_type.strip()
+        == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+    ):
+        raise WorkOrderInvalidEventError(
+            "Skill editor approvals must use the Skill editor-request endpoint"
+        )
     kwargs = dict(
         event_category=DomainNotificationCategory(body.event_category),
         biz_type=body.biz_type,

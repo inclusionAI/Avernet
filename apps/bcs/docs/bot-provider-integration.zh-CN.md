@@ -46,6 +46,40 @@ Provider 接入至少会产生 Provider 管理 token 和 BCS 到 Provider 的下
 
 这些 token 只应保存在 Bot Provider 自己的安全存储中，不要写入仓库、镜像或公开配置示例。实际部署也可以启用自有 bot 身份体系；这属于部署侧扩展，不影响本文描述的 HTTP Provider 基线协议。
 
+## 按 Provider slug 查询基本信息
+
+`POST /providers` 可传 `"slug": "coding-provider"`。使用现有 Provider admin
+认证与 Human owner 校验，`PATCH /providers/{provider_id}` 可设置或重命名 slug；
+省略或传 `null` 保留原值。存量 Provider 可以暂不设置 slug。
+
+slug 长度为 1–64，只允许小写 ASCII 字母、数字和连字符，首尾必须为字母或数字。
+同一环境内唯一，禁用的 Provider 也占用该 slug。非法值返回 HTTP 400；重复值
+返回 409，且本次提交的 name/config/slug 均不变。重命名后旧 slug 不再可查询。
+
+无需认证调用 `GET /providers/by-slug/{slug}`，响应仅包含基本信息：
+
+```json
+{
+  "slug": "coding-provider",
+  "provider_id": "prv_example",
+  "name": "Coding Provider",
+  "auth_mode": "static_bearer",
+  "enabled": true,
+  "protocol_version": "2.0",
+  "created_at": 1791532800000,
+  "updated_at": 1791532800000
+}
+```
+
+`enabled` 表示 Provider 是否启用，与下行配置开关独立；禁用后仍可查询并返回
+`enabled: false`。不存在返回 404，非法 slug 返回 400，存储或配置读取失败返回 500。
+时间戳为毫秒，存量配置未记录协议版本时返回 `1.0`。此接口不返回 token、config、
+owner 或 webhook/callback 地址。原有认证查询响应也增加可空 `slug` 与
+`protocol_version`，注册接口原有凭据响应保持兼容。
+
+升级前先执行 MySQL 迁移 032；SQLite 启动自动执行迁移 033。存量 slug 保持 null。
+完整约定见 [Provider slug spec](../specs/2026-10-09-provider-slug/spec.md)。
+
 ## 每个 Bot 使用独立 webhook
 
 由 Provider 接入程序直接向 BCS 注册 Bot。Poolab 可以使用一个 Provider 身份，为每个 Bot 配置创建后基本固定的地址；这条接入链路不需要改造 Backend。

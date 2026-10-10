@@ -56,12 +56,22 @@ impl ProviderRepoPort for MemoryProviderStore {
                 request_id: None,
             });
         }
+        if let Some(slug) = provider.slug.as_deref() {
+            if providers.values().any(|existing| existing.slug.as_deref() == Some(slug)) {
+                return Err(ServiceError::Conflict(format!("provider slug '{slug}' already exists")));
+            }
+        }
         providers.insert(provider.provider_id.clone(), provider);
         Ok(())
     }
 
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>> {
         Ok(self.providers.read().await.get(provider_id).cloned())
+    }
+
+    async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderRecord>> {
+        Ok(self.providers.read().await.values()
+            .find(|provider| provider.slug.as_deref() == Some(slug)).cloned())
     }
 
     async fn list_providers_by_ids(
@@ -88,9 +98,17 @@ impl ProviderRepoPort for MemoryProviderStore {
         provider_id: &str,
         name: Option<&str>,
         config: Option<&str>,
+        slug: Option<&str>,
         updated_at: u64,
     ) -> ServiceResult<Option<ProviderRecord>> {
         let mut providers = self.providers.write().await;
+        if !providers.contains_key(provider_id) { return Ok(None); }
+        if let Some(slug) = slug {
+            if providers.values().any(|existing| existing.provider_id != provider_id
+                && existing.slug.as_deref() == Some(slug)) {
+                return Err(ServiceError::Conflict(format!("provider slug '{slug}' already exists")));
+            }
+        }
         let Some(provider) = providers.get_mut(provider_id) else {
             return Ok(None);
         };
@@ -99,6 +117,9 @@ impl ProviderRepoPort for MemoryProviderStore {
         }
         if let Some(config) = config {
             provider.config = config.to_string();
+        }
+        if let Some(slug) = slug {
+            provider.slug = Some(slug.to_string());
         }
         provider.updated_at = updated_at;
         Ok(Some(provider.clone()))
@@ -398,8 +419,8 @@ impl DbProviderStore {
 
     fn insert_provider_sql() -> &'static str {
         "INSERT INTO bcs_providers \
-         (provider_id, env, name, config, disabled, created_by, owners) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)"
+         (provider_id, env, name, config, disabled, created_by, owners, slug) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     }
 
     fn insert_credential_sql() -> &'static str {
@@ -499,6 +520,7 @@ impl ProviderRepoPort for DbProviderStore {
                     DbValue::from(provider.disabled),
                     DbValue::from(provider.created_by.as_str()),
                     DbValue::from(provider.owners.as_str()),
+                    provider.slug.clone().map(DbValue::from).unwrap_or(DbValue::Null),
                 ],
             ),
         )
@@ -511,7 +533,7 @@ impl ProviderRepoPort for DbProviderStore {
         let env = resolve_env();
         self.providers.get(&format!("{env}:{provider_id}"), || async {
         let sql = format!(
-            "SELECT provider_id, name, config, disabled, created_by, owners, {ts} \
+            "SELECT provider_id, slug, name, config, disabled, created_by, owners, {ts} \
              FROM bcs_providers WHERE provider_id = ? AND env = ? LIMIT 1",
             ts = self.select_timestamp_columns(),
         );
@@ -524,8 +546,20 @@ impl ProviderRepoPort for DbProviderStore {
                 ),
             )
             .await?;
-        rows.first().map(|row| parse_provider(row).ok_or_else(|| ServiceError::InternalError("invalid provider record".into()))).transpose()
+        rows.first().map(parse_provider).transpose()
         }).await
+    }
+
+    async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderRecord>> {
+        let env = resolve_env();
+        let sql = format!(
+            "SELECT provider_id, slug, name, config, disabled, created_by, owners, {ts} \
+             FROM bcs_providers WHERE env = ? AND slug = ? LIMIT 1",
+            ts = self.select_timestamp_columns(),
+        );
+        let rows = self.query("get_provider_by_slug", DbStatement::with_params(sql,
+            vec![DbValue::from(env.as_str()), DbValue::from(slug)])).await?;
+        rows.first().map(parse_provider).transpose()
     }
 
     async fn list_providers_by_ids(
@@ -539,7 +573,7 @@ impl ProviderRepoPort for DbProviderStore {
         let env = resolve_env();
         let placeholders = provider_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
-            "SELECT provider_id, name, config, disabled, created_by, owners, {ts} \
+            "SELECT provider_id, slug, name, config, disabled, created_by, owners, {ts} \
              FROM bcs_providers WHERE provider_id IN ({placeholders}) AND env = ? ORDER BY provider_id",
             ts = self.select_timestamp_columns(),
         );
@@ -554,13 +588,13 @@ impl ProviderRepoPort for DbProviderStore {
                 DbStatement::with_params(sql, params),
             )
             .await?;
-        Ok(rows.iter().filter_map(parse_provider).collect())
+        rows.iter().map(parse_provider).collect()
     }
 
     async fn list_providers(&self) -> ServiceResult<Vec<ProviderRecord>> {
         let env = resolve_env();
         let sql = format!(
-            "SELECT provider_id, name, config, disabled, created_by, owners, {ts} \
+            "SELECT provider_id, slug, name, config, disabled, created_by, owners, {ts} \
              FROM bcs_providers WHERE env = ? ORDER BY provider_id",
             ts = self.select_timestamp_columns(),
         );
@@ -570,7 +604,7 @@ impl ProviderRepoPort for DbProviderStore {
                 DbStatement::with_params(sql, vec![DbValue::from(env.as_str())]),
             )
             .await?;
-        Ok(rows.iter().filter_map(parse_provider).collect())
+        rows.iter().map(parse_provider).collect()
     }
 
     async fn update_provider_metadata(
@@ -578,68 +612,27 @@ impl ProviderRepoPort for DbProviderStore {
         provider_id: &str,
         name: Option<&str>,
         config: Option<&str>,
+        slug: Option<&str>,
         _updated_at: u64,
     ) -> ServiceResult<Option<ProviderRecord>> {
         let env = resolve_env();
         let now_clause = self.now_modified_clause();
-        match (name, config) {
-            (None, None) => return self.get_provider(provider_id).await,
-            (Some(name), None) => {
-                let sql = format!(
-                    "UPDATE bcs_providers SET name = ?, {now_clause} \
-                     WHERE provider_id = ? AND env = ?"
-                );
-                self.execute(
-                    "update_provider_name",
-                    DbStatement::with_params(
-                        sql,
-                        vec![
-                            DbValue::from(name),
-                            DbValue::from(provider_id),
-                            DbValue::from(env.as_str()),
-                        ],
-                    ),
-                )
-                .await?;
-            }
-            (None, Some(config)) => {
-                let sql = format!(
-                    "UPDATE bcs_providers SET config = ?, {now_clause} \
-                     WHERE provider_id = ? AND env = ?"
-                );
-                self.execute(
-                    "update_provider_config",
-                    DbStatement::with_params(
-                        sql,
-                        vec![
-                            DbValue::from(config),
-                            DbValue::from(provider_id),
-                            DbValue::from(env.as_str()),
-                        ],
-                    ),
-                )
-                .await?;
-            }
-            (Some(name), Some(config)) => {
-                let sql = format!(
-                    "UPDATE bcs_providers SET name = ?, config = ?, {now_clause} \
-                     WHERE provider_id = ? AND env = ?"
-                );
-                self.execute(
-                    "update_provider_metadata",
-                    DbStatement::with_params(
-                        sql,
-                        vec![
-                            DbValue::from(name),
-                            DbValue::from(config),
-                            DbValue::from(provider_id),
-                            DbValue::from(env.as_str()),
-                        ],
-                    ),
-                )
-                .await?;
+        let mut assignments = Vec::new();
+        let mut params = Vec::new();
+        for (column, value) in [("name", name), ("config", config), ("slug", slug)] {
+            if let Some(value) = value {
+                assignments.push(format!("{column} = ?"));
+                params.push(DbValue::from(value));
             }
         }
+        if assignments.is_empty() { return self.get_provider(provider_id).await; }
+        assignments.push(now_clause.to_string());
+        params.push(DbValue::from(provider_id));
+        params.push(DbValue::from(env.as_str()));
+        self.execute("update_provider_metadata", DbStatement::with_params(format!(
+            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?",
+            assignments.join(", "),
+        ), params)).await?;
         self.providers.invalidate(&format!("{env}:{provider_id}"));
         self.get_provider(provider_id).await
     }
@@ -1150,13 +1143,16 @@ impl OrganizationCandidateReadPort for DbProviderStore {
     }
 }
 
-fn parse_provider(row: &DbRow) -> Option<ProviderRecord> {
-    Some(ProviderRecord {
-        provider_id: optional_string(row, "provider_id")?,
-        name: optional_string(row, "name")?,
-        config: optional_string(row, "config")?,
-        created_by: optional_string(row, "created_by")?,
-        owners: optional_string(row, "owners")?,
+fn parse_provider(row: &DbRow) -> ServiceResult<ProviderRecord> {
+    let required = |column| optional_string(row, column)
+        .ok_or_else(|| ServiceError::InternalError("invalid provider record".into()));
+    Ok(ProviderRecord {
+        provider_id: required("provider_id")?,
+        slug: row.get_string("slug").map_err(|err| service_db_error("read_provider_slug", err))?,
+        name: required("name")?,
+        config: required("config")?,
+        created_by: required("created_by")?,
+        owners: required("owners")?,
         disabled: row_bool(row, "disabled"),
         created_at: row_seconds_to_millis(row, "gmt_create_ts"),
         updated_at: row_seconds_to_millis(row, "gmt_modified_ts"),
@@ -1266,6 +1262,9 @@ fn row_seconds_to_millis(row: &DbRow, column: &'static str) -> u64 {
 }
 
 fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
+    if err.is_duplicate_key() && matches!(operation, "insert_provider" | "update_provider_metadata") {
+        return ServiceError::Conflict("provider slug or identity already exists".to_string());
+    }
     let message = err.to_string();
     let lower = message.to_ascii_lowercase();
     if lower.contains("duplicate") || lower.contains("unique") {
@@ -1336,6 +1335,7 @@ mod tests {
     fn provider(provider_id: &str) -> ProviderRecord {
         ProviderRecord {
             provider_id: provider_id.to_string(),
+            slug: None,
             name: "Provider".to_string(),
             config: r#"{"downlink":{"enabled":true}}"#.to_string(),
             created_by: "11111111".to_string(),
@@ -1385,6 +1385,7 @@ mod tests {
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_providers (
                 provider_id TEXT NOT NULL,
+                slug TEXT,
                 env TEXT NOT NULL,
                 name TEXT NOT NULL,
                 config TEXT NOT NULL,
@@ -1511,7 +1512,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
 
         let after = store
-            .update_provider_metadata("provider-upd", Some("Renamed"), None, 0)
+            .update_provider_metadata("provider-upd", Some("Renamed"), None, None, 0)
             .await
             .expect("update provider")
             .expect("returned record");

@@ -18,6 +18,7 @@ use std::collections::HashMap;
 pub mod a2a;
 pub mod attachment;
 pub mod delivery;
+pub mod frontend;
 pub mod http;
 pub mod principal;
 pub mod ws;
@@ -54,7 +55,7 @@ pub use http::{
     ProviderAbortResponse, ProviderAckResponse, ProviderAuthDto, ProviderAuthModeDto,
     ProviderCoordinationConfigDto, ProviderBotConnectionModeDto, ProviderCoordinationModeDto,
     ProviderHistoryResponse,
-    ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
+    ProviderBasicInfoResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
     ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender, QueryBotEntry,
     QueryBotsRequest, RegisterProviderBotRequest, RegisterProviderBotResponse,
     PutOrganizationMemberRequest, RegisterProviderRequest, RegisterProviderResponse,

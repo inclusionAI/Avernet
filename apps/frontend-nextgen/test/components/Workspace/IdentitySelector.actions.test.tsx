@@ -65,45 +65,19 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
     resolveBcsEndpointMock.mockReturnValue('http://127.0.0.1:21000');
   });
 
-  it('将低频协作权限入口放在身份下拉菜单标题行右侧并触发页面导航回调', async () => {
-    const onOpenPermissions = jest.fn();
-    render(
-      <WorkspaceIdentitySelector
-        identities={identities}
-        activeId="human_900004"
-        onChange={() => {}}
-        onOpenPermissions={onOpenPermissions}
-      />,
-    );
-
-    expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
+  it('身份下拉菜单不再提供协作权限入口（collab-permission-entry-migration：入口随旧页面退役）', async () => {
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
-    const permissionsButton = await screen.findByRole('button', { name: '进入协作权限设置' });
-    expect(permissionsButton).toBeInTheDocument();
-    expect(screen.getByText('切换工作身份')).toBeInTheDocument();
-    fireEvent.click(permissionsButton);
-
-    expect(onOpenPermissions).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
-    });
+    await screen.findByText('切换工作身份');
+    expect(screen.queryByRole('button', { name: /进入协作权限/ })).not.toBeInTheDocument();
   });
 
   it('身份列表为空时不渲染身份下拉菜单或协作权限入口', () => {
-    const onOpenPermissions = jest.fn();
-    render(
-      <WorkspaceIdentitySelector
-        identities={[]}
-        activeId={null}
-        onChange={() => {}}
-        onOpenPermissions={onOpenPermissions}
-      />,
-    );
+    render(<WorkspaceIdentitySelector identities={[]} activeId={null} onChange={() => {}} />);
 
-    expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /进入协作权限/ })).not.toBeInTheDocument();
     expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
-    expect(onOpenPermissions).not.toHaveBeenCalled();
   });
 
   it('能力关闭时不展示接入外部 Bot 入口', async () => {

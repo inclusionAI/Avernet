@@ -107,6 +107,13 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getBotSkillPickerSources()).toEqual({ status: 'available', value: ['mine'] });
   });
 
+  test('Open Core 不提供内部市场与工坊详情地址', () => {
+    expect(defaultCapabilities.getBotSkillPickerDetailUrl({ id: '42', name: 'Skill', active: false })).toEqual({
+      status: 'unsupported',
+      value: null,
+    });
+  });
+
   test('Open Core / 阿里云隐藏 MCP 添加能力', () => {
     expect(defaultCapabilities.getBotMcpPickerEnabled()).toEqual({ status: 'available', value: false });
   });

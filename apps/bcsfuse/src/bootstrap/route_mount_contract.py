@@ -35,10 +35,17 @@ def _router_signatures(
 
 
 def _app_signatures(app: FastAPI) -> set[RouteSignature]:
+    try:
+        from fastapi.routing import iter_route_contexts
+    except ImportError:
+        routes = app.routes
+    else:
+        routes = iter_route_contexts(app.routes)
+
     return {
         (route.path, frozenset(route.methods or ()), route.endpoint)
-        for route in app.routes
-        if isinstance(route, APIRoute)
+        for route in routes
+        if isinstance(getattr(route, "original_route", route), APIRoute)
     }
 
 

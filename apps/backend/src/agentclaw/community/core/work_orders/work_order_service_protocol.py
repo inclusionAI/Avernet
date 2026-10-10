@@ -47,7 +47,17 @@ class WorkOrderServiceProtocol(Protocol):
         biz_data: dict[str, object] | None,
         actor_id: str,
         callback_auth: WorkOrderCallbackCredential | None = None,
-    ) -> WorkOrderEventCreatedResult: ...
+    ) -> WorkOrderEventCreatedResult:
+        """Create an event; AUTO is for trusted in-process callers only.
+
+        AUTO requires nonblank approver_user_ids (normalized/deduplicated), used
+        exclusively for success/failure result notices, not human approval rights.
+        recipient_user_ids is ignored for AUTO; it remains required for NOTICE.
+        After confirmed remote success, local write failure raises
+        WorkOrderLocalFinalizeError, not a false FAILED result. This API does not
+        provide automatic reconciliation or remote exactly-once execution.
+        """
+        ...
 
     @abstractmethod
     def create_work_order(
@@ -71,7 +81,15 @@ class WorkOrderServiceProtocol(Protocol):
         decision: WorkOrderDecision,
         review_remark: str | None,
         callback_credential: WorkOrderCallbackCredential,
-    ) -> WorkOrderReviewResult: ...
+    ) -> WorkOrderReviewResult:
+        """Persist a manual decision and its result notice atomically.
+
+        Raises WorkOrderLocalFinalizeError when a remote decision succeeded but
+        local finalization failed; reconcile before retrying. Bot post-commit
+        synchronization is best-effort and cannot undo the committed decision.
+        """
+        ...
+
     @abstractmethod
     def create_space_join_request(
         self, *, space_id: int, applicant_user_id: str, reason: str | None
@@ -121,7 +139,14 @@ class WorkOrderServiceProtocol(Protocol):
         biz_id: str | None = None,
         page_no: int,
         page_size: int,
-    ) -> tuple[int, list[WorkOrderListItem]]: ...
+    ) -> tuple[int, list[WorkOrderListItem]]:
+        """List inbox entries or unique initiated orders.
+
+        Terminal order notices are processed regardless of read state. Initiated
+        ALL/APPROVAL returns orders without notifications; NOTICE stays a
+        recipient-scoped notification view. Badge counts remain read-sensitive.
+        """
+        ...
 
     @abstractmethod
     def get_detail(self, *, work_order_id: int, actor_id: str) -> WorkOrderDetail: ...

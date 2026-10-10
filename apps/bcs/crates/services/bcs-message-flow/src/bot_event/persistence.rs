@@ -386,38 +386,35 @@ pub(super) async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventComman
         .await;
 }
 
-pub(super) async fn tool_result_matches_start(
+pub(super) async fn tool_result_start_name(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     data: &Value,
-) -> bool {
+) -> Option<String> {
     let Some(tool_call_id) = data
         .get("toolCallId")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     else {
-        return false;
-    };
-    let Some(result_name) = data
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
+        return None;
     };
     let Some(start) = flow
         .message_tracker
         .get_tool_call_start(&cmd.run_id, tool_call_id)
         .await
     else {
-        return false;
+        return None;
     };
-    start.bot_id == cmd.bot_id
+    if start.bot_id == cmd.bot_id
         && start.run_id == cmd.run_id
         && start.session_id == cmd.bcs_session_id.as_deref().unwrap_or_default()
-        && start.name == result_name
+        && !start.name.trim().is_empty()
+    {
+        Some(start.name)
+    } else {
+        None
+    }
 }
 
 pub(super) async fn persist_tool_result(

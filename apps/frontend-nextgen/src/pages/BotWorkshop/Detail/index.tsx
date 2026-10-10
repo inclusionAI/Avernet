@@ -133,7 +133,6 @@ const BotWorkshopDetailPage: React.FC = () => {
                   md: desktopPolicy.markdown,
                   node: desktopPolicy.nodes,
                   channel: desktopPolicy.channels,
-                  approval: desktopPolicy.approval,
                   screen: desktopPolicy.screens,
                 }[item.key]),
             )
@@ -191,11 +190,10 @@ const BotWorkshopDetailPage: React.FC = () => {
               config={editor.engineConfig}
               editable={editable}
               engineStatus={editor.engineStatus}
-              approvalRequired={editor.approvalRequired}
-              serviceBot={bot.serviceMode === 'service'}
+              restoringDefaults={editor.restoringDefaultEngineConfig}
               onConfigChange={editor.setEngineConfig}
               onSave={editor.saveEngineConfig}
-              onApprovalChange={editor.saveApproval}
+              onRestoreDefaults={editor.restoreDefaultEngineConfig}
             />
           ) : tab === 'capability' ? (
             <CapabilityPanel
@@ -215,6 +213,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               onCreate={editor.createSkillSet}
               onDelete={editor.deleteSkillSet}
               onActive={editor.setSkillSetActive}
+              pendingSkillSetToggle={editor.pendingSkillSetToggle}
               onSkill={editor.setSkillSetSkill}
               onSkillCenterReferences={editor.addSkillCenterReferences}
               onUploadSkillFolder={editor.uploadSkillFolder}
@@ -240,6 +239,7 @@ const BotWorkshopDetailPage: React.FC = () => {
                 onDelete={editor.deleteResource}
                 onUpload={editor.uploadResource}
                 onPreview={editor.previewResource}
+                onCopyPath={editor.copyResourcePath}
                 onDownload={editor.downloadResource}
                 onLoadDirectory={editor.loadResourceDirectory}
                 loadingPaths={editor.resourceLoadingPaths}
@@ -250,12 +250,10 @@ const BotWorkshopDetailPage: React.FC = () => {
             <RoutinePanel
               routines={editor.routines}
               editable={editable}
+              onLoadModels={editor.loadRoutineModels}
               onSave={editor.saveRoutine}
               onToggle={editor.toggleRoutine}
               onDelete={editor.deleteRoutine}
-              onRun={editor.runRoutine}
-              runs={editor.routineRuns}
-              onLoadRuns={editor.loadRoutineRuns}
             />
           ) : (
             <TaskEscort bot={bot} />

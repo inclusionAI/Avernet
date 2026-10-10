@@ -804,6 +804,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.REFUSED,
     (
         "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
     ): AdmissionMode.REFUSED,
     (
@@ -857,8 +865,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/editor-requests",
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/bots/{bot_id}/editor-request-policy"): AdmissionMode.USER_GATED,
-    ("PATCH", "/openapi/v1/bots/{bot_id}/editor-request-policy"): AdmissionMode.USER_GATED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/editor-request-policy",
+    ): AdmissionMode.USER_GATED,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/editor-request-policy",
+    ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/work-orders/events"): AdmissionMode.USER_GATED,

@@ -97,14 +97,17 @@ class WorkOrderEventStatus(_DocumentedEnum):
 
 
 class CreateWorkOrderEventRequest(BaseModel):
-    """Generic request for creating an approval work order or notice."""
+    """Generic approval or notice event; Skill editor approvals use their own endpoint."""
 
     event_category: NotificationCategory = Field(
         description="Whether the event requires approval or is informational."
     )
     approval_mode: WorkOrderApprovalMode = Field(
         default=WorkOrderApprovalMode.MANUAL,
-        description="Approval workflow; AUTO is valid only for approval events.",
+        description=(
+            "Approval workflow; AUTO is reserved for trusted internal business "
+            "callers and is rejected by this public endpoint."
+        ),
     )
     biz_type: str = Field(
         min_length=1,
@@ -129,15 +132,16 @@ class CreateWorkOrderEventRequest(BaseModel):
     approver_user_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "MANUAL: users who may approve the event. AUTO: users who receive the "
-            "final approval result; they are not assigned human approval tasks."
+            "MANUAL: required human approvers. Trusted internal AUTO: required nonempty "
+            "result recipients after trimming/deduplication; no human approval rights "
+            "or tasks are created. Public endpoints reject AUTO."
         ),
     )
     recipient_user_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "Recipients for notice events. For AUTO approval events, final-result "
-            "recipients are supplied in approver_user_ids instead."
+            "Recipients for notice events. Ignored for trusted internal AUTO; "
+            "AUTO result recipients come only from approver_user_ids."
         ),
     )
     title: str = Field(
@@ -186,9 +190,17 @@ class WorkOrderQueryType(_DocumentedEnum):
     PROCESSED_BY_ME = "PROCESSED_BY_ME"
 
     __descriptions__ = {
-        "PENDING_FOR_ME": "Pending work orders awaiting the current user's review.",
-        "INITIATED_BY_ME": "Work orders submitted by the current user.",
-        "PROCESSED_BY_ME": "Completed approvals and informational notices already read by the current user.",
+        "PENDING_FOR_ME": (
+            "Pending approval tasks and unread notices without a terminal work order."
+        ),
+        "INITIATED_BY_ME": (
+            "ALL/APPROVAL returns unique initiated work orders without notification IDs; "
+            "NOTICE returns associated notices addressed to the current user."
+        ),
+        "PROCESSED_BY_ME": (
+            "Completed approvals, read notices, and notices for APPROVED/REJECTED/FAILED "
+            "work orders even when unread. Reading does not change work-order status."
+        ),
     }
 
 
@@ -414,7 +426,9 @@ class WorkOrderListItem(_UtcResponseModel):
         description="Originating event, or null when no notification is attached."
     )
     title: str = Field(description="Canonical notification title.")
-    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    summary: str = Field(
+        default="你有一条新的通知", description="Stable notification summary."
+    )
     content: str | dict[str, Any] | None = Field(
         description="Original notification content, either text or a JSON object."
     )
@@ -450,7 +464,9 @@ class WorkOrderDetailResponse(_UtcResponseModel):
         default=None, description="Legacy originating event, when available."
     )
     title: str = Field(description="Canonical display title of the work order.")
-    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    summary: str = Field(
+        default="你有一条新的通知", description="Stable notification summary."
+    )
     content: str | dict[str, Any] | None = Field(
         default=None, description="Original notification content, when available."
     )
@@ -487,7 +503,9 @@ class NotificationDetailResponse(BaseModel):
     )
     event_type: str = Field(description="Legacy event represented by the notification.")
     title: str = Field(description="Canonical display title of the notification.")
-    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    summary: str = Field(
+        default="你有一条新的通知", description="Stable notification summary."
+    )
     content: str | dict[str, Any] | None = Field(
         description="Original notification content, either text or a JSON object."
     )

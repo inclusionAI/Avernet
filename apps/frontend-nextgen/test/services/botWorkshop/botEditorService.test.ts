@@ -18,6 +18,7 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     listRenderScreens: jest.fn(),
     listRoutines: jest.fn(),
     getEngineConfig: jest.fn(),
+    getEngineDefaultConfig: jest.fn(),
     getEngineStatus: jest.fn(),
     getApprovalConfig: jest.fn(),
     listSkillSetSkills: jest.fn(),
@@ -26,6 +27,10 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     uploadSkillFolder: jest.fn(),
     getCallerContext: jest.fn(),
     updateMcpCallType: jest.fn(),
+    createSkillSet: jest.fn(),
+    setSkillSetActive: jest.fn(),
+    createRoutine: jest.fn(),
+    listModels: jest.fn(),
   },
 }));
 
@@ -280,7 +285,7 @@ it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活
       },
     };
   });
-  const result = await botEditorService.load('bot-1', false, 'owner-1');
+  const result = await botEditorService.load('bot-1', 'owner-1');
   expect(result.skills).toHaveLength(21);
   expect(result.skills.map((skill) => skill.id)).not.toContain('other-bot-shared');
   expect(result.skills[0].active).toBe(true);
@@ -301,9 +306,7 @@ it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活
 
 it('协作者加载编辑配置时为非敏感 Bot 子资源透传 owner', async () => {
   controller.listSkillSetSkills.mockResolvedValue({ data: [] });
-  controller.getApprovalConfig.mockResolvedValue({ data: { should_approval: true } });
-
-  await botEditorService.load('bot-1', true, 'owner-1');
+  await botEditorService.load('bot-1', 'owner-1');
 
   expect(controller.listSkillSetResources).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(controller.listSkillSetSkills).toHaveBeenCalledWith('bot-1', '600005', 'owner-1');
@@ -312,6 +315,14 @@ it('协作者加载编辑配置时为非敏感 Bot 子资源透传 owner', async
   expect(controller.listRoutines).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(controller.getEngineConfig).not.toHaveBeenCalled();
   expect(controller.getEngineStatus).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.getApprovalConfig).not.toHaveBeenCalled();
+});
+
+it('发布审批由通用配置按需加载并透传 owner', async () => {
+  controller.getApprovalConfig.mockResolvedValue({ data: { should_approval: true } });
+
+  await expect(botEditorService.loadApproval('bot-1', 'owner-1')).resolves.toBe(true);
+
   expect(controller.getApprovalConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
 });
 
@@ -323,6 +334,50 @@ it('引擎配置仅通过独立方法按需加载并透传 owner', async () => {
   expect(controller.getEngineConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
 });
 
+it('引擎默认配置按需读取并只返回 config 对象', async () => {
+  controller.getEngineDefaultConfig.mockResolvedValue({ data: { config: { model: 'default-model' } } });
+
+  await expect(botEditorService.loadDefaultEngineConfig('bot-1', 'owner-1')).resolves.toEqual({
+    model: 'default-model',
+  });
+  expect(controller.getEngineDefaultConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
+});
+
+it('定时任务响应映射模型和超时时间', async () => {
+  controller.listRoutines.mockResolvedValue({
+    data: {
+      total: 1,
+      items: [
+        {
+          routine_id: 'routine-1',
+          bot_id: 'bot-1',
+          name: '日报',
+          trigger: { type: 'schedule', cron: '0 9 * * *' },
+          command: '生成日报',
+          enabled: true,
+          model: 'qwen-max',
+          timeout_secs: 1800,
+        },
+      ],
+    },
+  });
+
+  const result = await botEditorService.load('bot-1');
+
+  expect(result.routines).toEqual([expect.objectContaining({ id: 'routine-1', model: 'qwen-max', timeoutSecs: 1800 })]);
+});
+
+it('定时任务模型通过 Bot 模型 OpenAPI 按需加载', async () => {
+  controller.listModels.mockResolvedValue({
+    data: { total: 1, items: [{ model_id: 'qwen-max', name: 'Qwen Max', provider: 'qwen' }] },
+  });
+
+  await expect(botEditorService.listRoutineModels('bot-1', 'owner-1')).resolves.toEqual([
+    { id: 'qwen-max', name: 'Qwen Max', provider: 'qwen' },
+  ]);
+  expect(controller.listModels).toHaveBeenCalledWith('bot-1', 'owner-1');
+});
+
 it('超过 20 项时明确拒绝，不静默截断提交', async () => {
   await expect(
     botEditorService.addSkillCenterReferences(
@@ -332,4 +387,67 @@ it('超过 20 项时明确拒绝，不静默截断提交', async () => {
     ),
   ).rejects.toThrow('一次最多添加 20 个 Skill');
   expect(controller.createSkillCenterReferences).not.toHaveBeenCalled();
+});
+
+it('新建能力集后立即启用', async () => {
+  controller.createSkillSet.mockResolvedValue({
+    data: { id: 'set-1', name: '研发能力集', is_default: false, is_active: false },
+  });
+  controller.setSkillSetActive.mockResolvedValue({
+    data: { id: 'set-1', name: '研发能力集', is_default: false, is_active: true },
+  });
+
+  await botEditorService.createSkillSet('bot-1', '研发能力集');
+
+  expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' });
+  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true);
+});
+
+it('启停能力集按服务端 is_active 返回最终状态，业务失败不得视为成功', async () => {
+  const set = { id: 'set-1', name: '个人能力集', isDefault: false, active: true, skills: [], mcps: [], clis: [] };
+  controller.setSkillSetActive.mockResolvedValueOnce({
+    code: 200000,
+    data: { id: 'set-1', name: '个人能力集', is_default: false, is_active: false },
+  });
+  await expect(botEditorService.setSkillSetActive('bot-1', set, false)).resolves.toEqual({
+    id: 'set-1',
+    active: false,
+  });
+  controller.setSkillSetActive.mockResolvedValueOnce({ code: 500000, message: '同步失败', data: undefined });
+  await expect(botEditorService.setSkillSetActive('bot-1', set, true)).rejects.toThrow('同步失败');
+  controller.setSkillSetActive.mockResolvedValueOnce({
+    code: 200000,
+    data: { id: 'other-set', name: '其他能力集', is_default: false, is_active: true },
+  });
+  await expect(botEditorService.setSkillSetActive('bot-1', set, true)).rejects.toThrow('能力集状态未确认');
+});
+
+it('相同定时任务的并发创建复用同一个请求', async () => {
+  let resolveCreate: ((value: { data: undefined }) => void) | undefined;
+  controller.createRoutine.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+  );
+  const input = {
+    name: '日报',
+    cron: '0 9 * * *',
+    command: '生成日报',
+    enabled: true,
+    model: 'qwen-max',
+    timeoutSecs: 1800,
+  };
+
+  const first = botEditorService.createRoutine('bot-1', input, 'owner-1');
+  const second = botEditorService.createRoutine('bot-1', input, 'owner-1');
+
+  expect(controller.createRoutine).toHaveBeenCalledTimes(1);
+  expect(controller.createRoutine).toHaveBeenCalledWith(
+    'bot-1',
+    expect.objectContaining({ model: 'qwen-max', timeout_secs: 1800 }),
+    'owner-1',
+  );
+  resolveCreate?.({ data: undefined });
+  await expect(Promise.all([first, second])).resolves.toHaveLength(2);
 });

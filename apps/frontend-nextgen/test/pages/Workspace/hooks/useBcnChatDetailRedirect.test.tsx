@@ -42,7 +42,7 @@ it('bot_uuid 命中群固定成员名册 → membership=direct 重定向', async
   mountWith('id=g1&bot_uuid=human_900003&session=s1');
   await waitFor(() =>
     expect(mockedReplace).toHaveBeenCalledWith(
-      '/workspace?tab=group&current=human_900003&group=g1&session=s1&membership=direct',
+      '/workspace/collaboration?current=human_900003&group=g1&session=s1&membership=direct',
     ),
   );
   expect(svc.loadGroupDetail).toHaveBeenCalledWith('g1');
@@ -52,7 +52,7 @@ it('bot_uuid 不在名册（仅参与临时会话）→ membership=session_only 
   mountWith('id=g1&bot_uuid=human_999999&session=s1');
   await waitFor(() =>
     expect(mockedReplace).toHaveBeenCalledWith(
-      '/workspace?tab=group&current=human_999999&group=g1&session=s1&membership=session_only',
+      '/workspace/collaboration?current=human_999999&group=g1&session=s1&membership=session_only',
     ),
   );
 });
@@ -68,13 +68,13 @@ it('群详情接口失败 → 降级为不带 membership（由 workspace 自动�
   mountWith('id=g1&bot_uuid=human_900003&session=s1');
   // membership 降级但 current= 身份透传不受影响（身份定位与参与方式判定相互独立）。
   await waitFor(() =>
-    expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&current=human_900003&group=g1&session=s1'),
+    expect(mockedReplace).toHaveBeenCalledWith('/workspace/collaboration?current=human_900003&group=g1&session=s1'),
   );
 });
 
 it('缺 bot_uuid → 不调群详情、不带 membership/current，仍重定向（workspace 走用户身份路径）', async () => {
   mountWith('id=g1&session=s1');
-  await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1'));
+  await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith('/workspace/collaboration?group=g1&session=s1'));
   expect(svc.loadGroupDetail).not.toHaveBeenCalled();
 });
 
@@ -82,7 +82,7 @@ it('bcs_grp_ 前缀群 → 不判定参与方式（交由 workspace BCS 路由�
   mountWith('id=bcs_grp_abc&bot_uuid=human_900003&session=s1');
   await waitFor(() =>
     expect(mockedReplace).toHaveBeenCalledWith(
-      '/workspace?tab=group&current=human_900003&group=bcs_grp_abc&session=s1',
+      '/workspace/collaboration?current=human_900003&group=bcs_grp_abc&session=s1',
     ),
   );
   expect(svc.loadGroupDetail).not.toHaveBeenCalled();

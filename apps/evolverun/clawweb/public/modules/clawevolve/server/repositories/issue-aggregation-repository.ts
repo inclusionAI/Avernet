@@ -5,6 +5,7 @@ import { buildAggregationModelInput, buildIssueGroups, ISSUE_AGGREGATION_INPUT_V
 import type { WorkflowEvolutionAnalysisRow } from './workflow-evolution-repository.js';
 
 const SCOPE = 'issue_aggregate';
+const issueProjections = new WeakMap<IDatabase, Map<string, { version: string; at: number; groups: IssueGroup[] }>>();
 type AggregationInputSummary = IssueAggregationModelInput['inputSummary'];
 type Snapshot = { parentAnalysisId: string; input: IssueGroup; inputVersion?: IssueAggregationInputVersion; inputSummary?: AggregationInputSummary };
 type SnapshotIndexRow = Pick<WorkflowEvolutionAnalysisRow, 'analysis_id' | 'status' | 'requested_at_ms'> & {
@@ -78,13 +79,62 @@ export class IssueAggregationRepository {
     return buildIssueGroups(workflowId, [...analyses, ...legacyByRun.values()]);
   }
 
-  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1): Promise<PresentedIssueGroup[]> {
+  async list(workflowId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1, signature?: string): Promise<PresentedIssueGroup[]> {
+    const allGroups = signature ? await this.readProjection(workflowId) : await this.groups(workflowId);
+    return this.present(workflowId, signature ? allGroups.filter(group => group.signature === signature) : allGroups, inputVersion);
+  }
+
+  /** Page the issue projection before loading frozen summaries, never page its suggestions. */
+  async listPage(workflowId: string, query: { page: number; pageSize: number; nodeId?: string; failureMode?: string }) {
+    const all = await this.readProjection(workflowId);
+    const identity = (group: IssueGroup) => [...group.sources].sort((a, b) =>
+      b.completedAtMs - a.completedAtMs || a.sourceId.localeCompare(b.sourceId))[0];
+    const facets = {
+      nodes: [...new Set(all.map(group => identity(group)?.nodeId ?? '未知节点'))].sort(),
+      modes: [...new Set(all.map(group => identity(group)?.failureMode ?? '').filter(Boolean))].sort(),
+    };
+    const filtered = all.filter(group => {
+      const source = identity(group);
+      return (!query.nodeId || (source?.nodeId ?? '未知节点') === query.nodeId)
+        && (!query.failureMode || source?.failureMode === query.failureMode);
+    });
+    const totalPages = Math.max(1, Math.ceil(filtered.length / query.pageSize));
+    const page = Math.min(query.page, totalPages);
+    const groups = await this.present(workflowId, filtered.slice((page - 1) * query.pageSize, page * query.pageSize), ISSUE_AGGREGATION_INPUT_V2);
+    return { groups, facets, page: { page, pageSize: query.pageSize, total: filtered.length, totalPages } };
+  }
+
+  private async readProjection(workflowId: string): Promise<IssueGroup[]> {
+    const version = async () => JSON.stringify(await Promise.all([
+      this.db.query(`SELECT COUNT(*) AS count, MAX(id) AS latest, SUM(state_version) AS revision
+        FROM workflow_evolution_analysis_runs WHERE workflow_id = ?`, [workflowId]),
+      this.db.query(`SELECT COUNT(*) AS count, MAX(gmt_modified) AS modified
+        FROM workflow_healing_diagnoses WHERE workflow_id = ?`, [workflowId]),
+    ]));
+    let cache = issueProjections.get(this.db);
+    if (!cache) { cache = new Map(); issueProjections.set(this.db, cache); }
+    const before = await version();
+    const cached = cache.get(workflowId);
+    if (cached?.version === before && Date.now() - cached.at < 10_000) return cached.groups;
+    cache.delete(workflowId);
+    const groups = await this.groups(workflowId);
+    // Read-only acceleration; preparation always rebuilds its authoritative inputs.
+    // Do not pin a mixed snapshot if evidence changed while constructing it.
+    if (before === await version() && Buffer.byteLength(JSON.stringify(groups), 'utf8') <= 8 * 1024 * 1024) {
+      if (cache.size >= 4) cache.delete(cache.keys().next().value!);
+      cache.set(workflowId, { version: before, at: Date.now(), groups });
+    }
+    return groups;
+  }
+
+  private async present(workflowId: string, groups: IssueGroup[], inputVersion: IssueAggregationInputVersion): Promise<PresentedIssueGroup[]> {
+    if (!groups.length) return [];
     // Do not transfer every historical frozen input/result just to locate the displayed revision.
     // Multi-path JSON_EXTRACT works in SQLite and MySQL/OceanBase without dialect-specific unquoting.
-    const [groups, rows] = await Promise.all([this.groups(workflowId), this.db.query<SnapshotIndexRow>(
+    const rows = await this.db.query<SnapshotIndexRow>(
       `SELECT analysis_id, status, requested_at_ms,
          JSON_EXTRACT(scope_json, '$.input.signature', '$.input.inputDigest') AS input_key
-       FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND scope_type = ? ORDER BY id DESC`, [workflowId, SCOPE])]);
+       FROM workflow_evolution_analysis_runs WHERE workflow_id = ? AND scope_type = ? ORDER BY id DESC`, [workflowId, SCOPE]);
     const selected = new Map(groups.map(group => [group.signature, {
       digest: group.inputDigest, current: undefined as SnapshotIndexRow | undefined, completed: undefined as SnapshotIndexRow | undefined,
     }]));

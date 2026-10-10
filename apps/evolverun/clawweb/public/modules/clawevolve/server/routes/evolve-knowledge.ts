@@ -73,7 +73,26 @@ export function createEvolveKnowledgeRouter(
     if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view')) return;
     try {
       // Browser eligibility uses supported compaction; Bot preparation still negotiates its version.
-      res.json({ groups: await new IssueAggregationRepository(_db).list(workflowId, ISSUE_AGGREGATION_INPUT_V2) });
+      const signature = textOrNull(req.query.signature);
+      const paged = req.query.page !== undefined || req.query.pageSize !== undefined;
+      const page = Number(req.query.page ?? 1);
+      const pageSize = Number(req.query.pageSize ?? 20);
+      if (paged && (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 200 || signature)) {
+        res.status(400).json({ error: 'invalid_issue_pagination' }); return;
+      }
+      const repository = new IssueAggregationRepository(_db);
+      const result = paged ? await repository.listPage(workflowId, { page, pageSize,
+        nodeId: textOrNull(req.query.nodeId) ?? undefined, failureMode: textOrNull(req.query.failureMode) ?? undefined })
+        : { groups: await repository.list(workflowId, ISSUE_AGGREGATION_INPUT_V2, signature ?? undefined) };
+      const groups = result.groups;
+      // Opt-in presentation keeps full-source consumers unchanged.
+      res.json({ ...result, groups: req.query.view === 'summary' ? groups.map(group => ({ ...group,
+        presentation: 'summary',
+        sources: group.sources.map(({ proposal: _proposal, reasoning: _reasoning, evidenceEventIds: _evidence, ...source }) => ({
+          ...source, reasoning: '', evidenceEventIds: [],
+        })), summarySources: [],
+        summary: group.summary ? { summary: group.summary.summary.slice(0, 240), causes: [], unknowns: [] } : null,
+      })) : groups });
     } catch {
       res.status(500).json({ error: 'issue_groups_unavailable' });
     }

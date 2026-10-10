@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import express from 'express';
 import { SqliteDatabase, runMigrations } from '@avernet/clawweb-shared/server/db';
@@ -17,7 +17,7 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   await db.exec(`CREATE TABLE workflow_evolution_analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id TEXT, status TEXT, scope_type TEXT,
     analysis_id TEXT, flow_id TEXT, scope_json TEXT, result_json TEXT,
-    requested_at_ms INTEGER, completed_at_ms INTEGER
+    requested_at_ms INTEGER, completed_at_ms INTEGER, state_version INTEGER NOT NULL DEFAULT 0
   )`);
   await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json) VALUES ('wf', '{}')");
   for (let index = 0; index < 39; index++) await db.exec(
@@ -40,6 +40,24 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
 }
 
 describe('real repair Host composition', () => {
+  it('reuses read projections across pages and invalidates them when sources change', async () => {
+    const { db, runtime } = await fixture();
+    const query = vi.spyOn(db, 'query');
+    const sourcesRead = () => query.mock.calls.filter(([sql]) => sql.includes('SELECT * FROM workflow_healing_suggestions')).length;
+    const first = await runtime.service.candidates('wf', { state: 'all', page: 1, pageSize: 20 });
+    const reads = sourcesRead();
+    expect(reads).toBeGreaterThan(0);
+    const second = await runtime.service.candidates('wf', { state: 'all', page: 2, pageSize: 20 });
+    expect(second.page.total).toBe(39);
+    expect(sourcesRead()).toBe(reads);
+    await runtime.service.item('wf', first.items[0].itemId);
+    expect(sourcesRead()).toBe(reads);
+    await db.exec("INSERT INTO workflow_healing_suggestions (workflow_id, failure_signature, fix_spec, status) VALUES ('wf', 'new', '新建议', 'pending')");
+    const updated = await runtime.service.candidates('wf', { state: 'all', page: 1, pageSize: 100 });
+    expect(updated.page.total).toBe(40);
+    expect(updated.inputDigest).not.toBe(first.inputDigest);
+    expect(sourcesRead()).toBeGreaterThan(reads);
+  });
   it('reads real legacy repositories through HTTP without AIS and preserves all 39 items', async () => {
     const { base, runtime } = await fixture();
     expect((await runtime.service.candidates('wf', { state: 'all', page: 1, pageSize: 100 })).items).toHaveLength(39);

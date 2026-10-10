@@ -414,11 +414,11 @@ class MySQLFusedProfileStore(FusedProfileRepository):
         """Append conversation turn, update statistics (thread-safe with connection pool).
 
         Transaction handling:
-        - Sets autocommit=False for transaction
+        - Starts a transaction on the underlying pooled connection
         - Locks row with FOR UPDATE
         - Updates conversation and statistics
         - Commits or rolls back
-        - Restores autocommit=True before returning connection to pool
+        - Leaves session autocommit unchanged when returning to the pool
         """
         conn = self._pool.get_connection()
 
@@ -443,7 +443,7 @@ class MySQLFusedProfileStore(FusedProfileRepository):
             self._ensure_schema(conn)
 
             # Start transaction
-            conn.autocommit = False
+            conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
 
             try:
@@ -571,8 +571,6 @@ class MySQLFusedProfileStore(FusedProfileRepository):
                 raise
 
             finally:
-                # CRITICAL: Restore autocommit before returning connection to pool
-                conn.autocommit = True
                 cursor.close()
 
         finally:

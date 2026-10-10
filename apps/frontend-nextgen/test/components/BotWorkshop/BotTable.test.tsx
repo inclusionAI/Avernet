@@ -7,6 +7,14 @@ import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
+jest.mock('@/hooks/useDesktopStartProgress', () => ({
+  useDesktopStartProgress: () => ({
+    state: { stepIndex: 1, outcome: 'running', percent: 42, detail: '42 MB / 100 MB' },
+    error: '',
+    retry: jest.fn(),
+  }),
+}));
+
 const noop = () => undefined;
 
 beforeEach(() => {
@@ -82,6 +90,30 @@ describe('BotTable 表格结构', () => {
     expect(onView).toHaveBeenCalledWith(bot);
   });
 
+  test('部署中的桌面 Bot 通过折叠行展示初始化步骤，且整行不可进入详情', () => {
+    const deployingBot = mapBotDto({
+      bot_id: 'desktop-deploying',
+      bot_name: 'Desktop Bot',
+      bot_type: 'desktop',
+      engine: 'openclaw',
+      status: 'PENDING',
+    }).item;
+    const onView = jest.fn();
+    render(<BotTable bots={[deployingBot]} onView={onView} />);
+
+    expect(dataRow()).not.toHaveAttribute('tabindex');
+    fireEvent.click(dataRow());
+    expect(onView).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '进度' }));
+    expect(screen.getByText('桌面环境初始化')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: '桌面 Bot 初始化步骤' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: '下载进度' })).toHaveAttribute('value', '42');
+
+    fireEvent.click(screen.getByRole('button', { name: '进度' }));
+    expect(screen.queryByText('桌面环境初始化')).not.toBeInTheDocument();
+  });
+
   test('机器人信息列渲染 20px 圆形首字符头像、名称与 entityKey', () => {
     renderTable(bot);
 
@@ -152,6 +184,19 @@ describe('BotTable conversation action', () => {
     });
     expect(screen.getByRole('button', { name: '与 Shared Bot 对话' })).toBeDisabled();
     expect(onConversation).not.toHaveBeenCalled();
+  });
+  test('异常态 Coding Bot 的去使用入口置灰', () => {
+    const bot = mapBotDto({
+      bot_id: 'failed-coding',
+      bot_name: 'Failed Coding Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: { template_config: { template_name: 'Coding Bot' } },
+      status: 'FAILED',
+    }).item;
+    renderTable(bot, { onConversation: jest.fn() });
+
+    expect(screen.getByRole('button', { name: '去使用 Failed Coding Bot' })).toBeDisabled();
   });
   test('团队空间新增 Owner 列并显示名称', () => {
     const bot = {
@@ -272,6 +317,41 @@ describe('BotTable management actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '抢锁并编辑' }));
 
     await waitFor(() => expect(onClaimLock).toHaveBeenCalledWith(bot));
+  });
+});
+
+describe('BotTable 通用配置菜单项（collab-permission-entry-migration AC-01~03）', () => {
+  const bot = mapBotDto({ bot_id: 'b-gc', bot_name: '配置 Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+
+  test('门禁可用时菜单项可点击并触发回调', () => {
+    const onGeneralConfig = jest.fn();
+    renderTable(bot, {
+      onAction: jest.fn(),
+      getGeneralConfigAvailability: () => ({ enabled: true }),
+      onGeneralConfig,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '通用配置' }));
+
+    expect(onGeneralConfig).toHaveBeenCalledWith(bot);
+  });
+
+  test('门禁不可用时菜单项禁用', () => {
+    renderTable(bot, {
+      onAction: jest.fn(),
+      getGeneralConfigAvailability: () => ({ enabled: false, disabledReason: '仅 Bot 管理员可变更通用配置' }),
+      onGeneralConfig: jest.fn(),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
+
+    expect(screen.getByRole('button', { name: /通用配置/ })).toBeDisabled();
+  });
+
+  test('未传回调时不渲染通用配置菜单项', () => {
+    renderTable(bot, { onAction: jest.fn() });
+    fireEvent.click(screen.getByRole('button', { name: '管理 配置 Bot' }));
+
+    expect(screen.queryByRole('button', { name: /通用配置/ })).not.toBeInTheDocument();
   });
 });
 

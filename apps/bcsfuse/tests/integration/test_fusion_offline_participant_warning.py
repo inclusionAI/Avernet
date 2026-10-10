@@ -19,6 +19,8 @@ Stage 1 Phase 5: Fusion Offline Participant Warning
 import os
 import tempfile
 import pytest
+from src.infra.config.feature_flags import FeatureFlags
+
 from datetime import datetime
 from unittest.mock import Mock
 
@@ -52,6 +54,12 @@ from src.domain.services.worker_profile_retrieval_service import WorkerProfileRe
 from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
 from src.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
 from src.domain.models.skill_profile import SkillProfile
+
+
+@pytest.fixture(autouse=True)
+def enable_registry_filtering(monkeypatch):
+    """Exercise the filtering policy independently of deployment defaults."""
+    monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
 
 
 # =============================================================================
@@ -98,7 +106,7 @@ def create_test_worker(
         domains=["testing"],
         capabilities=[Capability(name="testing", level=CapabilityLevel.EXPERT)],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             runtime_state=runtime_state,
             lifecycle_state=WorkerLifecycleState.ACTIVE,
@@ -133,7 +141,7 @@ def setup_worker_with_profile(
         "responsibilities": ["testing"],
         "capabilities": [{"name": "testing", "level": "expert"}],
         "state": {
-            "availability": "available",
+            "availability": "private",
             "trust_level": "trusted",
         },
     })
@@ -157,7 +165,7 @@ def create_test_profile(profile_key: str, skills: list[str] | None = None) -> Wo
     """创建测试用的 WorkerProfile"""
     parts = profile_key.split(":")
     if len(parts) == 2:
-        staff_id = parts[0].replace("staff_", "")
+        staff_id = parts[0]
         profile_id = parts[1]
     else:
         staff_id = profile_key

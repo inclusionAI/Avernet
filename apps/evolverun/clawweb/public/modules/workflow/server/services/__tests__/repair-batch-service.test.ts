@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRepairWorkbenchService } from '../repair-batch-service.js';
 import { digestRepairJson } from '../../contracts/repair-batch.js';
 import { repairSignatureKey } from '../../contracts/repair-workbench.js';
@@ -8,7 +8,7 @@ import { repairFixture } from './repair-batch-fixtures.js';
 
 describe('repair workbench control service', () => {
   const fixtures: Awaited<ReturnType<typeof repairFixture>>[] = [];
-  afterEach(async () => { for (const fixture of fixtures.splice(0)) await fixture.db.close(); });
+  afterEach(async () => { vi.restoreAllMocks(); for (const fixture of fixtures.splice(0)) await fixture.db.close(); });
   async function setup(count = 2, enabled = true) {
     const f = await repairFixture(count); fixtures.push(f);
     const service = createRepairWorkbenchService(f.db, f.sourcePort, enabled ? f.executionPort : undefined);
@@ -16,6 +16,21 @@ describe('repair workbench control service', () => {
     const request = { workflowId: 'wf-1', itemIds: f.items.map(i => i.itemId), inputDigest: inbox.inputDigest, instructions: '', requestId: 'create-1' };
     return { ...f, service, inbox, request };
   }
+  it('fits large previews within the shared response budget without losing issue totals or full item data', async () => {
+    const f = await repairFixture(7); fixtures.push(f);
+    f.items.forEach((item, i) => {
+      item.context = { signature: `issue-${i}` };
+      if (i < 6) item.proposal = { summary: 'large', value: '界'.repeat(300_000) };
+    });
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const result = await service.candidates('wf-1', { pageSize: 1, previewSignatures: f.items.map((_, i) => `issue-${i}`) });
+    expect(Buffer.byteLength(JSON.stringify({ ...result, canEdit: true }))).toBeLessThan(4 * 1024 * 1024);
+    expect(result.issuePreviews?.map(preview => preview.total)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+    expect(result.issuePreviews?.some(preview => preview.total > preview.items.length)).toBe(true);
+    expect(result.issuePreviews?.[6].items[0].itemId).toBe('item-6');
+    expect((await service.item('wf-1', 'item-5')).proposal).toEqual(f.items[5].proposal);
+    expect(result.page.total).toBe(7);
+  });
   it('keeps GET read-only, merges lifecycle history, and allows no_action/restore without AIS', async () => {
     const f = await setup(2, false);
     expect(f.inbox.capabilities).toMatchObject({ generation: false, publication: false });
@@ -42,6 +57,76 @@ describe('repair workbench control service', () => {
     expect(first.counts).toMatchObject({ pending: 39, all: 39 });
     expect(second.inputDigest).toBe(first.inputDigest);
     expect(new Set([...first.items, ...second.items].map(item => item.itemId))).toHaveLength(39);
+  });
+  it('limits each issue preview but keeps its real total and reads sources only once', async () => {
+    const f = await repairFixture(8); fixtures.push(f);
+    f.items.forEach((item, i) => { item.context = { signature: i < 6 ? 'many' : 'few' }; });
+    const load = vi.spyOn(f.sourcePort, 'load');
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const result = await service.candidates('wf-1', { page: 2, pageSize: 1, previewSignatures: ['many', 'few', 'empty'] });
+    expect(result.page).toMatchObject({ page: 2, total: 8 });
+    expect(result.issuePreviews?.map(p => ({ total: p.total, ids: p.items.map(i => i.itemId) }))).toEqual([
+      { total: 6, ids: ['item-0', 'item-1', 'item-2'] }, { total: 2, ids: ['item-6', 'item-7'] }, { total: 0, ids: [] },
+    ]);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+  });
+  it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
+    const f = await setup(4, false);
+    f.items.forEach((item, i) => { item.context = { signature: `issue-${i}`, diagnoses: [{ nodeId: i < 3 ? 'fetch' : 'write', failureMode: i === 2 ? 'other' : 'timeout' }] }; });
+    const all = await f.service.candidates('wf-1');
+    const page = await f.service.candidates('wf-1', { nodeId: 'fetch', failureMode: 'timeout', page: 2, pageSize: 1 });
+    expect(page.items.map(i => i.itemId)).toEqual(['item-1']);
+    expect(page.page.total).toBe(2);
+    expect(page.counts.pending).toBe(2);
+    expect(page.inputDigest).toBe(all.inputDigest);
+    const issue = await f.service.candidates('wf-1', { signature: 'issue-3' });
+    expect(issue.items.map(i => i.itemId)).toEqual(['item-3']);
+  });
+  it('hydrates a single item from its trusted summary without rereading every source', async () => {
+    const f = await repairFixture(2); fixtures.push(f);
+    let reads = 0;
+    const original = f.sourcePort.load;
+    f.sourcePort.load = async (...args) => { reads++; return original(...args); };
+    f.sourcePort.hydrate = async (_db, _workflow, items) => items.map(item => ({ ...item, context: { evidence: 'hydrated' } }));
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    expect((await service.item('wf-1', 'item-1')).context).toEqual({ evidence: 'hydrated' });
+    expect(reads).toBe(1);
+  });
+  it('reuses a versioned read snapshot across pages and item reads, but invalidates changed sources', async () => {
+    const f = await repairFixture(3); fixtures.push(f);
+    let version = 'one'; let reads = 0;
+    f.sourcePort.readVersion = async () => version;
+    const original = f.sourcePort.load;
+    f.sourcePort.load = async (...args) => { reads++; return original(...args); };
+    f.sourcePort.hydrate = async (_db, _wf, items) => items;
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    await service.candidates('wf-1', { pageSize: 1 });
+    await service.candidates('wf-1', { page: 2, pageSize: 1 });
+    expect((await service.item('wf-1', 'item-1')).itemId).toBe('item-1');
+    expect(reads).toBe(1);
+    f.items.splice(1); version = 'two';
+    expect((await service.candidates('wf-1')).page.total).toBe(1);
+    expect(reads).toBe(2);
+  });
+  it('expires read projections and never uses them as the authority for writes', async () => {
+    const f = await repairFixture(2); fixtures.push(f);
+    let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let reads = 0;
+    f.sourcePort.readVersion = async () => 'legacy-same-second';
+    const original = f.sourcePort.load;
+    f.sourcePort.load = async (...args) => { reads++; return original(...args); };
+    const service = createRepairWorkbenchService(f.db, f.sourcePort);
+    const first = await service.candidates('wf-1');
+    now += 10_001;
+    await service.candidates('wf-1');
+    expect(reads).toBe(2);
+    f.items.splice(1);
+    await expect(service.disposition('human', { workflowId: 'wf-1', itemId: 'item-0', inputDigest: first.inputDigest,
+      expectedStateVersion: 0, contentRevision: 1, action: 'no_action', reason: 'Later', requestId: 'fresh-only' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CHANGED' });
+    expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
+    expect((await service.candidates('wf-1')).page.total).toBe(1);
   });
   it('returns bounded repair signature keys across every page', async () => {
     const f = await repairFixture(2); fixtures.push(f);

@@ -298,3 +298,40 @@ describe('useCollaborationPrivacy identity wiring', () => {
     ]);
   });
 });
+
+describe('useCollaborationPrivacy fixedBotId（BotWorkshop 通用配置弹窗形态）', () => {
+  it('工作身份未就绪时仍按指定 Bot 以 activeBot scope 加载，并直接命中该 Bot', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    const mockedLoadOverview = jest
+      .spyOn(collaborationPrivacyService, 'loadOverview')
+      .mockResolvedValue(overviewWithBots);
+
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-2' }));
+
+    await waitFor(() =>
+      expect(mockedLoadOverview).toHaveBeenCalledWith('900004', expect.any(AbortSignal), {
+        target: 'activeBot',
+        botId: 'bot-2',
+      }),
+    );
+    await waitFor(() => expect(result.current.visibleBots.map((bot) => bot.id)).toEqual(['bot-2']));
+    expect(result.current.showIdentityCard).toBe(false);
+  });
+
+  it('指定 Bot 未命中时 visibleBots 为空（弹窗分区降级数据源）', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
+
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-missing' }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBeNull();
+    expect(result.current.visibleBots).toEqual([]);
+  });
+});

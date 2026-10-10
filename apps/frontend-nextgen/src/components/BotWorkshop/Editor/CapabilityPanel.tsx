@@ -1,6 +1,5 @@
 import type { BotCapabilitySet, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { CapabilitySetManager, type CapabilitySetManagerProps } from './CapabilitySetManager';
-import { LocalSkillsPanel } from './LocalSkillsPanel';
 
 interface CapabilityPanelProps
   extends Omit<
@@ -36,6 +35,9 @@ export function CapabilityPanel({
     <>
       <CapabilitySetManager
         {...actions}
+        onLocalToggle={desktop ? onLocalToggle : undefined}
+        onLocalDelete={desktop ? onLocalDelete : undefined}
+        onLocalUpload={desktop ? onLocalUpload : undefined}
         sets={skillSets}
         mySkills={mySkills}
         marketSkills={marketSkills}
@@ -43,15 +45,6 @@ export function CapabilityPanel({
         workshopSkills={workshopSkills}
         marketMcps={availableMcps}
       />
-      {desktop && onLocalToggle && onLocalDelete && onLocalUpload ? (
-        <LocalSkillsPanel
-          skills={mySkills}
-          editable={actions.editable}
-          onToggle={onLocalToggle}
-          onDelete={onLocalDelete}
-          onUpload={onLocalUpload}
-        />
-      ) : null}
     </>
   );
 }

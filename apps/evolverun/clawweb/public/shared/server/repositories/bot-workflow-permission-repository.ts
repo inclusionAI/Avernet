@@ -5,6 +5,8 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
+import type { BotDirectory, DirectoryBot } from "../services/bot-directory.js";
+import type { RunViewBot, RunViewPermissions, RunViewScope } from "../services/run-view-permissions.js";
 
 export type BotWorkflowPermissionRow = {
   id: number;
@@ -36,8 +38,46 @@ export type WorkflowViewScope =
 
 const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified" as const;
 
-export class BotWorkflowPermissionRepository {
-  constructor(private db: IDatabase) {}
+export class BotWorkflowPermissionRepository implements RunViewPermissions {
+  constructor(private db: IDatabase, private botDirectory?: Pick<BotDirectory, "listBots">) {}
+
+  /** Web users inherit only exact Bot grants, never the Bot owner's personal grants.
+   * Directory failures remove this additional access path; direct grants still work.
+   * Do not cache relationships here: membership removal must take effect on the next check.
+   */
+  private async inheritedGrants(userId: string, workflowId?: string): Promise<BotWorkflowPermissionRow[]> {
+    if (!this.botDirectory) return [];
+    let bots: DirectoryBot[];
+    try {
+      bots = await this.botDirectory.listBots(userId, "all");
+    } catch {
+      console.warn("[workflow-permissions] Bot directory unavailable; using direct grants only", { userId });
+      return [];
+    }
+    const identities = new Map<string, { botId: string; ownerId: string }>();
+    for (const bot of bots) {
+      const botId = bot.botId?.trim();
+      const ownerId = bot.ownerId?.trim();
+      if (!botId || botId === "*" || !ownerId || ownerId === "*") continue;
+      identities.set(JSON.stringify([botId, ownerId]), { botId, ownerId });
+    }
+    const pairs = [...identities.values()];
+    const grants: BotWorkflowPermissionRow[] = [];
+    // Bound SQL placeholders for users with many Bots on both SQLite and MySQL.
+    for (let offset = 0; offset < pairs.length; offset += 100) {
+      const batch = pairs.slice(offset, offset + 100);
+      const conditions = batch.map(() => "(bot_id = ? AND (bot_owner_id = ? OR bot_owner_id = '*'))");
+      const params = batch.flatMap(({ botId, ownerId }) => [botId, ownerId]);
+      if (workflowId) params.push(workflowId);
+      const rows = await this.db.query<BotWorkflowPermissionRow>(
+        `SELECT ${SELECT_COLUMNS} FROM bot_workflow_permissions
+         WHERE (${conditions.join(" OR ")})${workflowId ? " AND workflow_id = ?" : ""}`,
+        params,
+      );
+      grants.push(...rows);
+    }
+    return grants;
+  }
 
   async findByWorkflowId(workflowId: string): Promise<BotWorkflowPermissionRow[]> {
     return this.db.query<BotWorkflowPermissionRow>(
@@ -165,37 +205,44 @@ export class BotWorkflowPermissionRepository {
    *   - { botIds: string[] }: user can only view runs from these specific bot_ids
    */
   async resolveViewScope(workflowId: string, userId: string): Promise<WorkflowViewScope> {
-    // Rule 1: all users, all bots
-    const globalRows = await this.db.query<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND bot_id = '*' AND bot_owner_id = '*' AND can_view = 1`,
-      [workflowId],
-    );
-    if (globalRows[0].cnt > 0) return "all";
+    const scope = await this.resolveRunViewScope(workflowId, userId);
+    return typeof scope === "string" ? scope : { botIds: [...new Set(scope.bots.map(bot => bot.botId))] };
+  }
 
-    // Rule 2: this user, all bots (owner-level with NULL/empty bot_id or bot_id='*')
-    const userAllBotsRows = await this.db.query<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND bot_owner_id = ? AND can_view = 1
-         AND (bot_id = '*' OR bot_id IS NULL OR bot_id = '')`,
-      [workflowId, userId],
-    );
-    if (userAllBotsRows[0].cnt > 0) return "all";
+  /** Run reads must preserve owner identity; the legacy botIds-only scope cannot authorize them. */
+  async resolveRunViewScope(workflowId: string, userId: string): Promise<RunViewScope> {
+    return (await this.listRunViewScopes(userId, workflowId)).get(workflowId) ?? "deny";
+  }
 
-    // Rule 3 & 4: specific bot permissions
-    // - bot_owner_id='*' AND bot_id=<specific>  → all users, specific bot
-    // - bot_owner_id=userId AND bot_id=<specific> → specific user, specific bot
-    const botRows = await this.db.query<{ bot_id: string | null }>(
-      `SELECT DISTINCT bot_id FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND can_view = 1
-         AND bot_id IS NOT NULL AND bot_id != '' AND bot_id != '*'
-         AND (bot_owner_id = ? OR bot_owner_id = '*')`,
-      [workflowId, userId],
+  async listRunViewScopes(userId: string, workflowId?: string): Promise<Map<string, RunViewScope>> {
+    type Grant = Pick<BotWorkflowPermissionRow, "workflow_id" | "bot_id" | "bot_owner_id" | "can_view" | "can_edit">;
+    const direct = await this.db.query<Grant>(
+      `SELECT workflow_id, bot_id, bot_owner_id, can_view, can_edit FROM bot_workflow_permissions
+       WHERE (can_view = 1 OR can_edit = 1)
+         AND (bot_owner_id = ? OR (bot_owner_id = '*' AND bot_id IS NOT NULL AND bot_id != ''))
+         ${workflowId ? "AND workflow_id = ?" : ""}`,
+      workflowId ? [userId, workflowId] : [userId],
     );
-    const botIds = botRows.map((r) => r.bot_id!).filter(Boolean);
-    if (botIds.length > 0) return { botIds };
-
-    return "deny";
+    const inherited = await this.inheritedGrants(userId, workflowId);
+    const scopes = new Map<string, RunViewScope>();
+    const seen = new Set<string>();
+    for (const row of [...direct, ...inherited]) {
+      if (row.can_view !== 1 && row.can_edit !== 1) continue;
+      if (scopes.get(row.workflow_id) === "all") continue;
+      if (!row.bot_id || row.bot_id === "*") {
+        scopes.set(row.workflow_id, "all");
+        continue;
+      }
+      if (!row.bot_owner_id) continue;
+      const bot: RunViewBot = { botId: row.bot_id, ownerId: row.bot_owner_id };
+      const key = JSON.stringify([row.workflow_id, bot.botId, bot.ownerId]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const scope = scopes.get(row.workflow_id);
+      if (scope && typeof scope !== "string") scope.bots.push(bot);
+      else scopes.set(row.workflow_id, { bots: [bot] });
+    }
+    return scopes;
   }
 
   /**
@@ -254,8 +301,26 @@ export class BotWorkflowPermissionRepository {
       );
     }
     const viewableIds = new Set(viewRows.map((r) => r.workflow_id));
+    if (!botId) {
+      for (const row of await this.inheritedGrants(ownerId)) {
+        if (row.can_view === 1 || row.can_edit === 1) viewableIds.add(row.workflow_id);
+      }
+    }
 
     return { restrictedIds, viewableIds };
+  }
+
+  /** Asset filtering only, NOT authorization. Zero-valued Bot grants must not
+   * override a user's separate grant when listing workflows in a Bot context.
+   */
+  async getWorkflowIdsInBotScope(ownerId: string, botId: string): Promise<Set<string>> {
+    const rows = await this.db.query<{ workflow_id: string }>(
+      `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
+       WHERE (bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*' OR bot_id = ?))
+          OR (bot_owner_id = '*' AND (bot_id = ? OR bot_id = '*'))`,
+      [ownerId, botId, botId],
+    );
+    return new Set(rows.map(row => row.workflow_id));
   }
 
   /**
@@ -289,7 +354,8 @@ export class BotWorkflowPermissionRepository {
         `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND can_edit = 1 LIMIT 1`,
         [workflowId, userId],
       );
-      return userRows.length > 0;
+      if (userRows.length > 0) return true;
+      return (await this.inheritedGrants(userId, workflowId)).some(row => row.can_edit === 1);
     }
 
     // Step 4: A concrete bot can inherit owner-level permission.

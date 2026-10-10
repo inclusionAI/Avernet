@@ -315,12 +315,18 @@ class TestPrefixVariations:
         assert result == "staff_bot_test:default"
 
     def test_nested_prefix_staff_wrk(self):
-        """嵌套前缀 staff_wrk_"""
+        """嵌套前缀是 ID 内容，不在缺少绑定时递归推断。"""
         canonicalizer = ProfileKeyCanonicalizer()
 
         available_keys = {"staff_wrk_test:default"}
         raw_key = "test:default"
 
         result = canonicalizer._canonicalize_single(raw_key, available_keys)
-        # 应该能通过添加前缀匹配
-        assert result in available_keys
+        assert result == raw_key
+
+        binding_store = MagicMock()
+        binding_store.get_binding_by_profile_key.return_value = MagicMock(
+            worker_id="staff_wrk_test", profile_key="staff_wrk_test:default",
+        )
+        canonicalizer = ProfileKeyCanonicalizer(binding_store)
+        assert canonicalizer._canonicalize_single(raw_key, available_keys) == "staff_wrk_test:default"

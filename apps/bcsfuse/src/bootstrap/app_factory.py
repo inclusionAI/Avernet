@@ -7,12 +7,34 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from src.bootstrap.application_context import ApplicationContext
+from src.bootstrap.logging_setup import (
+    configure_business_logging,
+    resolve_business_log_level,
+)
 from src.bootstrap.oss_business_routes import include_oss_business_routes
 from src.bootstrap.route_mount_contract import (
     validate_required_oss_business_routes,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_fusion_dependencies(context: ApplicationContext) -> None:
+    from src.application.services.bot_fuse.fused_profile_storage_service import (
+        FusedProfileStorageService,
+    )
+    from src.interfaces.api.dependencies import fusion_dependencies
+
+    fusion_dependencies.set_app_context(context)
+    fused_store = context.registry.get("fused_profile_store")
+    storage_service = None
+    if fused_store is not None:
+        storage_service = FusedProfileStorageService(repository=fused_store)
+        logger.info(
+            "[App Factory] Composed fused_profile_store registered: %s",
+            type(fused_store).__name__,
+        )
+    fusion_dependencies.set_fused_profile_storage_service(storage_service)
 
 
 def _register_health_routes(app: FastAPI, context: ApplicationContext) -> None:
@@ -90,6 +112,8 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     context.registry.require("config")
     context.registry.require("secret_provider")
     startup_provider = context.registry.require("startup_provider")
+    business_log_level = resolve_business_log_level()
+    configure_business_logging(business_log_level)
     profile_store = context.registry.get("worker_profile_content_store")
     if profile_store is not None:
         from src.bootstrap.profile_store_compat import (
@@ -108,6 +132,12 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
         background_thread_started = False
         await startup_provider.initialize()
         try:
+            # A hosting SDK may reconfigure logging during provider startup.
+            configure_business_logging(business_log_level)
+            logger.info(
+                "[Startup] business_log_level=%s (LOG_LEVEL override; restart to apply)",
+                logging.getLevelName(business_log_level),
+            )
             if background_index_target is not None:
                 import threading
 
@@ -134,9 +164,7 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
     # This allows services without Request access to use the shared vector_store
     # from the provider registry instead of creating duplicate QdrantClient instances.
-    from src.interfaces.api.dependencies.fusion_dependencies import set_app_context
-
-    set_app_context(context)
+    _configure_fusion_dependencies(context)
     logger.info("[App Factory] Application context shared with fusion_dependencies")
 
     # Create FastAPI app
@@ -149,6 +177,10 @@ def create_bcsfuse_app(context: ApplicationContext) -> FastAPI:
         openapi_url="/openapi.json",
         lifespan=lifespan,
     )
+
+    from src.infra.public.observability.trace_middleware import TraceIdMiddleware
+
+    app.add_middleware(TraceIdMiddleware)
 
     # Store context in app state
     app.state.context = context

@@ -244,15 +244,18 @@ class MySQLConnectionPoolProvider:
                 )
 
             except Error as e:
+                # Driver messages may echo credentials or a DSN. Keep a useful
+                # error type/code without exposing the driver's raw message.
+                error_summary = f"{type(e).__name__} (errno={e.errno})"
                 logger.error(
                     f"[MySQLConnectionPool] Pool initialization failed: "
                     f"host={self._mask_host()}, port={self.port}, database={self.database}, "
-                    f"error={e}"
+                    f"error={error_summary}"
                 )
                 raise RuntimeError(
                     f"Failed to initialize MySQL connection pool at "
-                    f"{self._mask_host()}:{self.port}/{self.database}: {e}"
-                ) from e
+                    f"{self._mask_host()}:{self.port}/{self.database}: {error_summary}"
+                ) from None
 
     def get_connection(self):
         """Get a connection from the pool.
@@ -298,13 +301,14 @@ class MySQLConnectionPoolProvider:
             return _TrackedConnection(conn, self)
 
         except Error as e:
+            error_summary = f"{type(e).__name__} (errno={e.errno})"
             logger.error(
                 f"[MySQLConnectionPool] Failed to get connection from pool: "
-                f"pool_name={self.pool_name}, error={e}"
+                f"pool_name={self.pool_name}, error={error_summary}"
             )
             raise RuntimeError(
-                f"Failed to get connection from MySQL pool: {e}"
-            ) from e
+                f"Failed to get connection from MySQL pool: {error_summary}"
+            ) from None
 
     def return_connection(self, conn) -> None:
         """Return connection to pool (deprecated - use conn.close() instead).

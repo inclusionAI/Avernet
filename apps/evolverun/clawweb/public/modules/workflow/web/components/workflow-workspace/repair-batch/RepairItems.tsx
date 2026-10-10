@@ -29,7 +29,7 @@ export default function RepairItems({ items, selected, onToggle, canEdit, limit,
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <span className="text-xs text-slate-500">{states[item.state]}</span>
-          <button type="button" onClick={() => onOpenDetail?.(item)} className="rounded px-1 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">建议详情</button>
+          {!embedded && <button type="button" onClick={() => onOpenDetail?.(item)} className="rounded px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">建议详情</button>}
         </div>
       </article>
     })}

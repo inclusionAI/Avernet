@@ -22,7 +22,9 @@ import {
 } from './collaborationPrivacyHelpers';
 import { useCopyBotId } from './useCopyBotId';
 
-export function useCollaborationPrivacy() {
+/** 协作权限编排 Hook：默认按工作身份推导加载范围；传 fixedBotId 时按指定 Bot 弹窗加载（collab-permission-entry-migration）。 */
+export function useCollaborationPrivacy(options?: { fixedBotId?: string }) {
+  const fixedBotId = options?.fixedBotId;
   const store = useCollaborationPrivacyStore();
   const { identity, status: identityStatus, error: identityError } = useHumanIdentity();
   const activeIdentityId = useWorkspaceStore((state) => state.activeIdentityId);
@@ -49,7 +51,9 @@ export function useCollaborationPrivacy() {
       store.setLoading(true);
       store.setError(null);
       try {
-        const loadScope = resolvePrivacyLoadScope(activeIdentity);
+        const loadScope = fixedBotId
+          ? ({ target: 'activeBot', botId: fixedBotId } as const)
+          : resolvePrivacyLoadScope(activeIdentity);
         const overview = await collaborationPrivacyService.loadOverview(userId, signal, loadScope);
         if (loadId === latestLoadId.current && !signal?.aborted) store.setOverview(overview);
       } catch (error) {
@@ -59,7 +63,7 @@ export function useCollaborationPrivacy() {
         if (loadId === latestLoadId.current) store.setLoading(false);
       }
     },
-    [activeIdentity, identityError, store.setError, store.setLoading, store.setOverview, userId],
+    [activeIdentity, fixedBotId, identityError, store.setError, store.setLoading, store.setOverview, userId],
   );
   useEffect(() => {
     const controller = new AbortController();
@@ -191,18 +195,13 @@ export function useCollaborationPrivacy() {
     return await collaborationPrivacyService.searchDepartments(keyword, signal);
   }, []);
   const copyBotId = useCopyBotId();
-  const publicationBot = useMemo(
-    () => store.overview?.bots.find((bot) => bot.id === publicationEditor?.botId),
-    [publicationEditor?.botId, store.overview],
+  const botsById = useMemo(
+    () => new Map((store.overview?.bots ?? []).map((bot) => [bot.id, bot] as const)),
+    [store.overview],
   );
-  const friendEditorBot = useMemo(
-    () => store.overview?.bots.find((bot) => bot.id === friendEditorBotId),
-    [friendEditorBotId, store.overview],
-  );
-  const scopeViewerBot = useMemo(
-    () => store.overview?.bots.find((bot) => bot.id === scopeViewer?.botId),
-    [scopeViewer?.botId, store.overview],
-  );
+  const publicationBot = publicationEditor ? botsById.get(publicationEditor.botId) : undefined;
+  const friendEditorBot = friendEditorBotId ? botsById.get(friendEditorBotId) : undefined;
+  const scopeViewerBot = scopeViewer ? botsById.get(scopeViewer.botId) : undefined;
   useEffect(() => {
     if (previousActiveIdentityId.current === activeIdentityId) return;
     previousActiveIdentityId.current = activeIdentityId;
@@ -212,9 +211,11 @@ export function useCollaborationPrivacy() {
     setFriendEditorBotId(null);
   }, [activeIdentityId]);
   const visibleBots = useMemo(() => {
-    if (activeIdentity?.kind !== 'bot' || !store.overview) return [];
+    if (!store.overview) return [];
+    if (fixedBotId) return store.overview.bots.filter((bot) => matchesBotIdentity(bot.id, fixedBotId));
+    if (activeIdentity?.kind !== 'bot') return [];
     return store.overview.bots.filter((bot) => matchesBotIdentity(bot.id, activeIdentity.id));
-  }, [activeIdentity, store.overview]);
+  }, [activeIdentity, fixedBotId, store.overview]);
   return {
     ...store,
     load,
@@ -225,7 +226,7 @@ export function useCollaborationPrivacy() {
     scopeViewerBot,
     friendEditorBot,
     activeIdentity,
-    showIdentityCard: activeIdentity?.kind !== 'bot',
+    showIdentityCard: fixedBotId ? false : activeIdentity?.kind !== 'bot',
     visibleBots,
     refreshBot,
     toggleDirect,

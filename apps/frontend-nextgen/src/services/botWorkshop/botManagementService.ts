@@ -100,6 +100,16 @@ export const botManagementService = {
     if (!response.data) throw new Error('添加成员接口未返回成员信息');
     return mapCollaborator(response.data);
   },
+  async getEditorRequestPolicy(botId: string): Promise<boolean> {
+    const response = await botCollaborationController.getEditorRequestPolicy(botId);
+    if (isEnvelopeFailure(response)) throw new Error(response.message || '编辑权限申请策略加载失败');
+    return Boolean(response.data?.auto_approve);
+  },
+  async updateEditorRequestPolicy(botId: string, autoApprove: boolean): Promise<boolean> {
+    const response = await botCollaborationController.updateEditorRequestPolicy(botId, autoApprove);
+    if (isEnvelopeFailure(response)) throw new Error(response.message || '编辑权限申请策略更新失败');
+    return response.data?.auto_approve ?? autoApprove;
+  },
   async updateCollaborator(botId: string, id: number, role: BotCollaborator['role']) {
     const response = await botCollaborationController.update(botId, id, role);
     if (!response.data) throw new Error('角色更新接口未返回成员信息');

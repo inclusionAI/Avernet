@@ -1,46 +1,25 @@
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
+import { buildVisibleResourceTree, formatResourceBytes } from '@/services/botWorkshop/resourceTree';
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   Download,
-  Eye,
   File,
+  FilePlus,
   Folder,
   FolderPlus,
   Loader2,
   Trash2,
   Upload,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-
-function formatBytes(size: number) {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-export function buildVisibleResourceTree(resources: BotEditorResource[], expanded: string[]) {
-  const children = new Map<string, BotEditorResource[]>();
-  resources.forEach((item) => children.set(item.parentPath, [...(children.get(item.parentPath) ?? []), item]));
-  const result: Array<{ item: BotEditorResource; depth: number }> = [];
-  const visited = new Set<string>();
-  function append(parentPath: string, depth: number) {
-    (children.get(parentPath) ?? []).forEach((item) => {
-      if (visited.has(item.path)) return;
-      visited.add(item.path);
-      result.push({ item, depth });
-      if (item.type === 'folder' && expanded.includes(item.path)) append(item.path, depth + 1);
-    });
-  }
-  append('', 0);
-  return result;
-}
+import { useMemo, useRef, useState } from 'react';
+import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
 
 export function ResourcePanel({
   resources,
@@ -52,6 +31,7 @@ export function ResourcePanel({
   onUpload,
   onPreview,
   onDownload,
+  onCopyPath,
   onLoadDirectory,
   loadingPaths,
 }: {
@@ -64,27 +44,24 @@ export function ResourcePanel({
   onUpload: (path: string, file: File) => Promise<void>;
   onPreview: (path: string) => Promise<BotEditorResourcePreview>;
   onDownload: (path: string, type: BotEditorResource['type']) => Promise<void>;
+  onCopyPath: (path: string) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
 }) {
   const [path, setPath] = useState('');
   const [preview, setPreview] = useState<{ path: string; result: BotEditorResourcePreview }>();
-  const [previewImageUrl, setPreviewImageUrl] = useState('');
   const [directory, setDirectory] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [createParent, setCreateParent] = useState('');
   const [expanded, setExpanded] = useState<string[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const uploadDirectoryRef = useRef('');
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
-  useEffect(() => {
-    if (preview?.result.kind !== 'image') {
-      setPreviewImageUrl('');
-      return undefined;
-    }
-    const url = URL.createObjectURL(preview.result.blob);
-    setPreviewImageUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [preview]);
+  const uploadToDirectory = async (target: string, file: File) => {
+    await onUpload(target ? `${target}/${file.name}` : file.name, file);
+    if (target) await onLoadDirectory(target);
+  };
   const toggleDirectory = (target: string) => {
     const open = expanded.includes(target);
     setDirectory(target);
@@ -118,9 +95,11 @@ export function ResourcePanel({
             ref={uploadRef}
             hidden
             type="file"
+            aria-label="资源文件选择"
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file) void onUpload(directory ? `${directory}/${file.name}` : file.name, file);
+              const target = uploadDirectoryRef.current;
+              if (file) void uploadToDirectory(target, file);
               event.target.value = '';
             }}
           />
@@ -129,7 +108,10 @@ export function ResourcePanel({
             size="sm"
             disabled={!editable}
             leftIcon={<Upload className="size-4" />}
-            onClick={() => uploadRef.current?.click()}
+            onClick={() => {
+              uploadDirectoryRef.current = directory;
+              uploadRef.current?.click();
+            }}
           >
             上传文件
           </Button>
@@ -137,7 +119,10 @@ export function ResourcePanel({
             size="sm"
             disabled={!editable}
             leftIcon={<FolderPlus className="size-4" />}
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setCreateParent(directory);
+              setCreateOpen(true);
+            }}
           >
             新建目录
           </Button>
@@ -180,17 +165,56 @@ export function ResourcePanel({
                     </span>
                   </Button>
                 ) : (
-                  <>
+                  <Button
+                    variant="ghost"
+                    className="-mx-2 -my-1.5 h-auto min-w-0 flex-1 justify-start gap-3 px-2 py-1.5 text-left font-normal"
+                    aria-label={`预览${item.name}`}
+                    disabled={desktop && (item.size ?? 0) > 1048576}
+                    onClick={() => void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))}
+                  >
                     <File className="size-4 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{item.name}</div>
                       <div className="truncate text-xs text-muted-foreground">
                         {item.path}
-                        {item.type === 'file' && item.size !== undefined ? ` · ${formatBytes(item.size)}` : ''}
+                        {item.type === 'file' && item.size !== undefined ? ` · ${formatResourceBytes(item.size)}` : ''}
                       </div>
                     </div>
-                  </>
+                  </Button>
                 )}
+                {item.type === 'folder' ? (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!editable}
+                      aria-label={`向${item.name}添加文件`}
+                      leftIcon={<FilePlus className="size-4" />}
+                      onClick={() => {
+                        uploadDirectoryRef.current = item.path;
+                        uploadRef.current?.click();
+                      }}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!editable}
+                      aria-label={`在${item.name}中新建子目录`}
+                      leftIcon={<FolderPlus className="size-4" />}
+                      onClick={() => {
+                        setCreateParent(item.path);
+                        setCreateOpen(true);
+                      }}
+                    />
+                  </>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`复制路径${item.name}`}
+                  leftIcon={<Copy className="size-4" />}
+                  onClick={() => void onCopyPath(item.path)}
+                />
                 <Button
                   variant="ghost"
                   size="icon"
@@ -199,16 +223,6 @@ export function ResourcePanel({
                   leftIcon={<Download className="size-4" />}
                   onClick={() => void onDownload(item.path, item.type)}
                 />
-                {item.type === 'file' ? (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={desktop && (item.size ?? 0) > 1048576}
-                    aria-label={`预览${item.name}`}
-                    leftIcon={<Eye className="size-4" />}
-                    onClick={() => void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))}
-                  />
-                ) : null}
                 <ConfirmDialog
                   title="删除资源"
                   description={`确认递归删除「${item.path}」？`}
@@ -229,34 +243,12 @@ export function ResourcePanel({
         ) : (
           <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
         )}
-        {preview ? (
-          <Card className="mt-4 bg-muted/30 p-4 shadow-none">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="m-0 truncate text-xs font-medium">{preview.path}</p>
-              <Button variant="ghost" size="sm" onClick={() => setPreview(undefined)}>
-                关闭预览
-              </Button>
-            </div>
-            {preview.result.kind === 'image' ? (
-              previewImageUrl ? (
-                <div className="flex max-h-[480px] justify-center overflow-auto rounded-lg bg-background p-3">
-                  <img
-                    src={previewImageUrl}
-                    alt={preview.path.split('/').pop() || '资源图片预览'}
-                    className="max-h-[440px] max-w-full object-contain"
-                  />
-                </div>
-              ) : null
-            ) : (
-              <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{preview.result.content}</pre>
-            )}
-          </Card>
-        ) : null}
       </div>
+      <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>
         <ModalContent>
           <ModalHeader>
-            <ModalTitle>新建目录</ModalTitle>
+            <ModalTitle>{createParent ? `在 ${createParent} 中新建子目录` : '新建目录'}</ModalTitle>
           </ModalHeader>
           <Input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="输入目录名称" />
           <ModalFooter>
@@ -266,7 +258,8 @@ export function ResourcePanel({
             <Button
               disabled={!path.trim()}
               onClick={() =>
-                void onCreateDirectory(directory ? `${directory}/${path.trim()}` : path.trim()).then(() => {
+                void onCreateDirectory(createParent ? `${createParent}/${path.trim()}` : path.trim()).then(async () => {
+                  if (createParent) await onLoadDirectory(createParent);
                   setPath('');
                   setCreateOpen(false);
                 })

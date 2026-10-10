@@ -47,7 +47,13 @@ class WorkOrderRepositoryProtocol(Protocol):
         biz_data: str | None,
         env: str,
         callback_source_event_type: str | None = None,
-    ) -> WorkOrderEventCreatedResult: ...
+    ) -> WorkOrderEventCreatedResult:
+        """Persist normalized service input; AUTO requires approver_user_ids.
+
+        AUTO is created PROCESSING without approver rows or initial notices.
+        Completion receives the same approver-derived recipients separately.
+        """
+        ...
 
     @abstractmethod
     def create_work_order(
@@ -74,33 +80,41 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> None: ...
 
     @abstractmethod
-    def finalize_auto_approval(
-        self, *, work_order_id: int, reviewer_user_id: str, env: str
-    ) -> None: ...
+    def complete_auto_approval(
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
+    ) -> list[int]:
+        """Commit the business write, APPROVED state, and result notices together."""
+        ...
 
     @abstractmethod
-    def mark_auto_approval_failed(
-        self, *, work_order_id: int, reviewer_user_id: str,
-        review_remark: str, env: str
-    ) -> None: ...
-
-    @abstractmethod
-    def apply_auto_space_join(self, *, work_order_id: int, env: str) -> None: ...
-
-    @abstractmethod
-    def apply_auto_bot_editor_request(self, *, work_order_id: int, env: str) -> None: ...
+    def fail_auto_approval(
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        review_remark: str,
+        env: str,
+    ) -> list[int]:
+        """Commit FAILED state and result notices together."""
+        ...
 
     @abstractmethod
     def apply_auto_skill_editor_request(
-        self, *, work_order_id: int, source_event_type: str, env: str
-    ) -> None: ...
-
-    @abstractmethod
-    def create_auto_result_notifications(
-        self, *, work_order_id: int, recipient_user_ids: list[str], biz_type: str,
-        biz_id: str, source_event_type: str, status: WorkOrderStatus,
-        review_remark: str | None, env: str,
-    ) -> None: ...
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
+    ) -> list[int]:
+        """Atomically grant Skill access and notify approver-derived recipients."""
+        ...
 
     @abstractmethod
     def process_approval(
@@ -188,7 +202,14 @@ class WorkOrderRepositoryProtocol(Protocol):
         biz_id: str | None = None,
         offset: int,
         limit: int,
-    ) -> tuple[int, list[WorkOrderListItem]]: ...
+    ) -> tuple[int, list[WorkOrderListItem]]:
+        """List inbox entries or unique initiated orders.
+
+        Terminal order notices are processed regardless of read state. Initiated
+        ALL/APPROVAL returns orders without notifications; NOTICE stays a
+        recipient-scoped notification view. Badge counts remain read-sensitive.
+        """
+        ...
 
     @abstractmethod
     def get_detail(

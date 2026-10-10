@@ -18,7 +18,7 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^wrk_[a-zA-Z0-9_-]+$"
+      "minLength": 1
     },
     "type": {
       "type": "string",
@@ -170,10 +170,9 @@
         "availability": {
           "type": "string",
           "enum": [
-            "available",
-            "busy",
-            "offline",
-            "degraded"
+            "private",
+            "protected",
+            "public"
           ]
         },
         "trust_level": {

@@ -48,7 +48,7 @@ const ComponentExamplesPage: React.FC = () => {
           title="组件使用案例"
           description="以下组件由旧项目中可复用的原子抽象迁移并按新版 Token、可访问性和状态规范重写。页面代码只组合这些白名单组件。"
           actions={
-            <Button variant="secondary" onClick={() => history.push('/workspace')}>
+            <Button variant="secondary" onClick={() => history.push('/workspace/chat')}>
               返回工作台
             </Button>
           }

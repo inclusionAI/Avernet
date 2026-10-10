@@ -8,7 +8,7 @@ use tracing::{info, warn};
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CoordinationMode, ProviderAuthMode,
     ProviderBotBinding, ProviderBotBindingRepoPort, ProviderBotConnectionMode,
-    ProviderBotCoreService, ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
+    ProviderBasicInfo, ProviderBotCoreService, ProviderCoordinationConfig, ProviderCoreService, ProviderCredential,
     ProviderCredentialRepoPort, ProviderOrganizationManagementConfig, ProviderRecord,
     ProviderRepoPort, RegisterProviderBotParams, RegisteredProvider, RuntimeBotIdentity,
     ServiceError, ServiceResult, Skill, UpdateProviderBotCoreResult, mock_token,
@@ -468,6 +468,21 @@ fn validate_external_id(kind: &str, value: &str) -> ServiceResult<()> {
     }
 }
 
+fn validate_provider_slug(slug: &str) -> ServiceResult<()> {
+    let alphanumeric = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    if slug.is_empty() || slug.len() > 64
+        || !slug.bytes().all(|byte| alphanumeric(byte) || byte == b'-')
+        || !slug.as_bytes().first().copied().is_some_and(alphanumeric)
+        || !slug.as_bytes().last().copied().is_some_and(alphanumeric)
+    {
+        return Err(ServiceError::InvalidOperation {
+            message: "slug must be 1-64 lowercase ASCII letters, digits or hyphens, beginning and ending with a letter or digit".into(),
+            request_id: None,
+        });
+    }
+    Ok(())
+}
+
 fn validate_outbound_url(guard: &OutboundUrlGuard, field: &str, url: &str) -> ServiceResult<()> {
     guard
         .validate_configured_http_url(url)
@@ -696,6 +711,23 @@ fn ensure_provider_owner(provider: &ProviderRecord, staff_no: &str) -> ServiceRe
 
 #[async_trait]
 impl ProviderCoreService for ProviderCore {
+    async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderBasicInfo>> {
+        validate_provider_slug(slug)?;
+        let Some(provider) = self.providers.get_provider_by_slug(slug).await? else { return Ok(None); };
+        let downlink = parse_downlink_config(&provider.config)
+            .map_err(|_| ServiceError::InternalError("invalid provider configuration".into()))?;
+        Ok(Some(ProviderBasicInfo {
+            provider_id: provider.provider_id,
+            slug: provider.slug.ok_or_else(|| ServiceError::InternalError("provider slug is missing".into()))?,
+            name: provider.name,
+            auth_mode: downlink.auth_mode,
+            enabled: !provider.disabled,
+            protocol_version: downlink.protocol_version,
+            created_at: provider.created_at,
+            updated_at: provider.updated_at,
+        }))
+    }
+
     async fn register_provider(
         &self,
         name: String,
@@ -705,10 +737,24 @@ impl ProviderCoreService for ProviderCore {
         protocol_version: Option<String>,
         coordination: Option<ProviderCoordinationConfig>,
     ) -> ServiceResult<RegisteredProvider> {
+        self.register_provider_with_slug(name, webhook_url, auth_mode, created_by,
+            protocol_version, coordination, None, None).await
+    }
+
+    async fn register_provider_with_slug(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if let Some(slug) = slug.as_deref() { validate_provider_slug(slug)?; }
         let provider_id = new_provider_id();
         validate_external_id("provider_id", &provider_id)?;
         if let Some(url) = webhook_url.as_deref() {
             validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?;
+        }
+        if let Some(url) = admin_callback_url.as_deref() {
+            validate_outbound_url(&self.webhook_url_guard, "admin_callback_url", url)?;
         }
         let protocol_version = match protocol_version.as_deref().map(str::trim) {
             None | Some("") | Some("1.0") => "1.0",
@@ -731,10 +777,15 @@ impl ProviderCoreService for ProviderCore {
         let provider_admin_token = generated_id("bcs_pa");
         let bcs_to_provider_token = generated_id("bcs_b2p");
         let owners = serde_json::to_string(&vec![created_by.clone()])?;
+        let mut config = provider_config(webhook_url.as_deref(), auth_mode, protocol_version, coordination)?;
+        if let Some(url) = admin_callback_url.as_deref() {
+            config = replace_admin_callback_url(&config, url)?;
+        }
         let provider = ProviderRecord {
             provider_id: provider_id.clone(),
+            slug,
             name,
-            config: provider_config(webhook_url.as_deref(), auth_mode, protocol_version, coordination)?,
+            config,
             created_by,
             owners,
             disabled: false,
@@ -866,10 +917,22 @@ impl ProviderCoreService for ProviderCore {
         coordination: Option<ProviderCoordinationConfig>,
         organization_management: Option<ProviderOrganizationManagementConfig>,
     ) -> ServiceResult<ProviderRecord> {
+        self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id,
+            name, webhook_url, protocol_version, coordination, organization_management, None, None).await
+    }
+
+    async fn update_provider_with_slug(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>,
+    ) -> ServiceResult<ProviderRecord> {
         let current = self
             .provider_admin_for_path(provider_id, provider_admin_token)
             .await?;
         ensure_provider_owner(&current, authenticated_staff_id)?;
+        if let Some(slug) = slug.as_deref() { validate_provider_slug(slug)?; }
         let mut config = match webhook_url {
             Some(webhook_url) => {
                 validate_outbound_url(&self.webhook_url_guard, "webhook_url", &webhook_url)?;
@@ -884,6 +947,11 @@ impl ProviderCoreService for ProviderCore {
         if let Some(coordination) = coordination {
             let source = config.as_deref().unwrap_or(&current.config);
             config = Some(replace_coordination_config(source, coordination)?);
+        }
+        if let Some(url) = admin_callback_url.as_deref() {
+            validate_outbound_url(&self.webhook_url_guard, "admin_callback_url", url)?;
+            let source = config.as_deref().unwrap_or(&current.config);
+            config = Some(replace_admin_callback_url(source, url)?);
         }
         if let Some(mut organization_management) = organization_management {
             for manager_provider_id in &organization_management.authorized_manager_provider_ids {
@@ -923,7 +991,7 @@ impl ProviderCoreService for ProviderCore {
             )?);
         }
         self.providers
-            .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), now_ms())
+            .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), slug.as_deref(), now_ms())
             .await?
             .ok_or_else(|| ServiceError::InvalidOperation {
                 message: format!("provider '{}' not found", provider_id),
@@ -949,7 +1017,7 @@ impl ProviderCoreService for ProviderCore {
         )?;
         let config = replace_admin_callback_url(&current.config, &admin_callback_url)?;
         self.providers
-            .update_provider_metadata(provider_id, None, Some(&config), now_ms())
+            .update_provider_metadata(provider_id, None, Some(&config), None, now_ms())
             .await?
             .ok_or_else(|| ServiceError::InvalidOperation {
                 message: format!("provider '{}' not found", provider_id),

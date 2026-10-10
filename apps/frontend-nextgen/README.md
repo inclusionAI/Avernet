@@ -1,6 +1,6 @@
 # Avernet Frontend Nextgen
 
-The next-generation Open Core web frontend for Avernet. It is generated from the TeamClaw Open Core source and intentionally coexists with the legacy `apps/frontend` application.
+The next-generation Open Core web frontend for Avernet. It is generated from the TeamClaw Open Core source and intentionally coexists with the legacy `app/frontend` application.
 
 ## Requirements
 

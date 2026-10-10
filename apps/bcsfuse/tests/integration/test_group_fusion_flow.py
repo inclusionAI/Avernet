@@ -43,8 +43,15 @@ class MockPerspectiveProvider:
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """测试客户端"""
+    from src.interfaces.api import fusion_routes
+    from src.infra.config.feature_flags import FeatureFlags
+
+    # These tests deliberately exercise unknown participants. Keep their state
+    # independent of flags/provider state left by other integration modules.
+    monkeypatch.setattr(FeatureFlags, "is_explicit_participant_availability_warning_enabled", lambda: True)
+    monkeypatch.setattr(fusion_routes, "_provider", MockPerspectiveProvider())
     return TestClient(app)
 
 
@@ -165,8 +172,8 @@ class TestGroupFusionIntegration:
         for p in perspectives:
             assert p["status"] == "skipped"
 
-    def test_fusion_invalid_group_id(self, client: TestClient, mock_provider: MockPerspectiveProvider):
-        """测试无效 group_id - FastAPI Path 验证返回 422"""
+    def test_fusion_preserves_external_group_id(self, client: TestClient, mock_provider: MockPerspectiveProvider):
+        """Group identifiers do not require an application-specific prefix."""
         set_provider(mock_provider)
 
         response = client.post(
@@ -178,8 +185,8 @@ class TestGroupFusionIntegration:
             },
         )
 
-        # FastAPI Path 参数验证返回 422 Unprocessable Entity
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["group_id"] == "invalid-group-id"
 
     def test_fusion_missing_question(self, client: TestClient, mock_provider: MockPerspectiveProvider):
         """测试缺少 question"""

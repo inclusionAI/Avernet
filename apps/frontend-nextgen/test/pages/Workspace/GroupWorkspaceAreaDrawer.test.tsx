@@ -5,6 +5,7 @@
  * 内用同一 Drawer + close-on-select 模式，结构等价；自动收起则复用 useMediaQuery 副作用
  * （已由 useMediaQuery.test 与 AppShellResponsive.test 覆盖同款 useMinWidth(1024) 逻辑）。
  */
+import type { IdentityView } from '@/domain/collaboration/types';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -38,17 +39,25 @@ const baseGroup = {
 };
 
 const mockStore = {
+  identities: [{ id: 'human_test-user', kind: 'user', displayName: '测试用户', online: true }] satisfies IdentityView[],
+  activeIdentityId: 'human_test-user',
+  isIdentityListLoading: false,
   sessionTabsByGroup: {},
   setSessionTabForGroup: jest.fn(),
   selectGroup: jest.fn(),
   membership: 'direct' as const,
 };
 
+const mockUseWorkspaceStore = Object.assign(
+  (selector?: (s: typeof mockStore) => unknown) => (selector ? selector(mockStore) : mockStore),
+  { getState: (): typeof mockStore => mockStore },
+);
+
 const mockOpenSession = jest.fn();
 const mockApplySessionUpdate = jest.fn();
 
 jest.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: (selector?: (s: typeof mockStore) => unknown) => (selector ? selector(mockStore) : mockStore),
+  useWorkspaceStore: mockUseWorkspaceStore,
 }));
 jest.mock('@/services/workspace/sessionService', () => ({ sessionService: { getSessionDetail: jest.fn() } }));
 jest.mock('sonner', () => ({ toast: { info: jest.fn() } }));
@@ -167,15 +176,7 @@ const { GroupWorkspaceArea } =
 
 function renderArea(mobileListOpen: boolean) {
   const onCloseMobileList = jest.fn();
-  const view = render(
-    <GroupWorkspaceArea
-      view="group"
-      onViewChange={jest.fn()}
-      availableViews={['chat', 'group']}
-      mobileListOpen={mobileListOpen}
-      onCloseMobileList={onCloseMobileList}
-    />,
-  );
+  const view = render(<GroupWorkspaceArea mobileListOpen={mobileListOpen} onCloseMobileList={onCloseMobileList} />);
   return { view, onCloseMobileList };
 }
 
@@ -186,9 +187,10 @@ describe('GroupWorkspaceArea responsive off-canvas list (二级・协作群)', (
     expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
   });
 
-  it('mobileListOpen=true: drawer renders the group list with its session', () => {
+  it('mobileListOpen=true: drawer renders the identity region, group list, and its session', () => {
     renderArea(true);
     expect(screen.getByTestId('drawer-content')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '当前协作身份' })).toBeInTheDocument();
     expect(screen.getByText('主站群')).toBeInTheDocument();
     expect(screen.getByText('会话一')).toBeInTheDocument();
   });

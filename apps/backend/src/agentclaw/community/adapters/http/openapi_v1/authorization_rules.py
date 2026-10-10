@@ -810,6 +810,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     (
         "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    ): NoCheck("Current Skill Owner Grant, adjudicated by the Skill service"),
+    (
+        "PUT",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
+    ): NoCheck("Current Skill Owner Grant, adjudicated by the Skill service"),
+    (
+        "GET",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
     ): NoCheck("Space membership and Skill Grants, adjudicated by the Lease service"),
     (

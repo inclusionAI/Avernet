@@ -88,6 +88,8 @@ pub struct QueuedTransportContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_reason: Option<String>,
     #[serde(default)]
+    pub task_timeout: bool,
+    #[serde(default)]
     pub provider_route_headers: Vec<(String, String)>,
     /// Causal routing metadata also crosses WS runs without entering their frames.
     #[serde(default)]
@@ -223,6 +225,15 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             .run_deadline_at_ms
             .and_then(|n| u64::try_from(n).ok())
             .ok_or_else(|| invalid("queue run deadline missing"))?;
+        // A Worker task normally cancels five minutes before the Provider run
+        // deadline. Keep its callback and abort correlation alive through the
+        // Provider deadline rather than expiring the active-run index first.
+        let deadline_ms = if matches!(crate::queued_task::intent(delivery), Ok(Some(task))
+            if task.leg == crate::queued_task::TaskLeg::Dispatch) {
+            delivery.send_started_at_ms.and_then(|started| u64::try_from(started).ok())
+                .ok_or_else(|| invalid("task send start missing"))?
+                .saturating_add(flow.provider_chat_run_timeout_ms)
+        } else { deadline_ms };
         run_context
             .put_context(bcs_service_api::BotRunContext {
                 run_id: command.run_id.clone(),
@@ -297,21 +308,10 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         if metadata.version != 1 {
             return Err(invalid("unsupported queue transport version"));
         }
-        // The current Provider API aborts a whole scope. Until a scope barrier
-        // accounts for legacy traffic, an exact delivery abort must fail closed.
-        if metadata.owner != BotRunTransportOwner::WebSocket {
-            return Err(invalid("exact_abort_not_supported"));
-        }
         let target = flow
             .registry
             .resolve_delivery_target(&delivery.target_bot_id)
             .await?;
-        if !matches!(&target, BotDeliveryTarget::WebSocket { .. })
-            || metadata.connection_id.is_none()
-            || flow.bot_delivery.connection_identity(&target).await != metadata.connection_id
-        {
-            return Err(invalid("queue original Bot connection is unavailable"));
-        }
         let run_id = delivery
             .run_id
             .as_ref()
@@ -321,6 +321,53 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
         // scope/accepted alias rather than treating an expired index as proof
         // that the downstream work stopped.
         let downstream_run_id = metadata.downstream_run_id.unwrap_or_else(|| run_id.clone());
+        let worker_task = matches!(crate::queued_task::intent(delivery), Ok(Some(task))
+            if task.leg == crate::queued_task::TaskLeg::Dispatch);
+        if worker_task && let (BotRunTransportOwner::HttpProvider { provider_id, provider_bot_ref },
+            BotDeliveryTarget::HttpProvider { provider_id: current_id, provider_bot_ref: current_ref, .. })
+            = (&metadata.owner, &target) {
+            if provider_id != current_id || provider_bot_ref != current_ref {
+                return Err(invalid("queue original Provider owner changed"));
+            }
+            let scope = bcs_service_api::BotRunScope {
+                group_id: delivery.group_id.clone(), session_id: delivery.session_id.clone(),
+                bot_id: delivery.target_bot_id.clone(),
+            };
+            let context = flow.bot_run_context.as_ref()
+                .ok_or_else(|| invalid("Provider run correlation unavailable"))?;
+            let active = context.list_active_runs(&scope).await?;
+            if active.len() != 1 || active[0].canonical_run_id != *run_id
+                || active[0].downstream_run_id != downstream_run_id {
+                return Err(invalid("Provider scope does not contain only the timed-out task"));
+            }
+            let deliveries = flow.managed_deliveries.as_ref()
+                .ok_or_else(|| invalid("queue delivery service unavailable"))?;
+            let lane = deliveries.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Lane {
+                bot: delivery.target_bot_id.clone(), session: delivery.session_id.clone(),
+            }).await.map_err(|_| invalid("Provider scope delivery lookup failed"))?;
+            if lane.iter().any(|row| row.delivery_id != delivery.delivery_id
+                && row.state.kind == DeliveryType::Send
+                && matches!(row.state.status,
+                    bcs_domain::message_delivery::MessageDeliveryStatus::Dispatching
+                    | bcs_domain::message_delivery::MessageDeliveryStatus::Running
+                    | bcs_domain::message_delivery::MessageDeliveryStatus::Unknown
+                    | bcs_domain::message_delivery::MessageDeliveryStatus::Cancelling
+                    | bcs_domain::message_delivery::MessageDeliveryStatus::CancelUnknown)) {
+                return Err(invalid("Provider scope contains another active delivery"));
+            }
+            return Ok(bcs_service_api::BotAbortDeliveryCommand {
+                target, command_id:String::new(), group_id:delivery.group_id.clone(),
+                session_id:delivery.session_id.clone(), run_id:None,
+                provider_bypass_headers:metadata.provider_route_headers, timeout_ms:30_000,
+            });
+        }
+        if !matches!(&target, BotDeliveryTarget::WebSocket { .. })
+            || metadata.owner != BotRunTransportOwner::WebSocket
+            || metadata.connection_id.is_none()
+            || flow.bot_delivery.connection_identity(&target).await != metadata.connection_id
+        {
+            return Err(invalid("queue original Bot connection is unavailable"));
+        }
         Ok(bcs_service_api::BotAbortDeliveryCommand {
             target,
             command_id: String::new(),
@@ -341,6 +388,19 @@ fn invalid(message: &str) -> ServiceError {
 }
 
 impl QueuedGroupProjection {
+    pub(crate) fn timeout_notice(row: &PersistedMessageDelivery, manager: &str) -> ServiceResult<Self> {
+        let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
+        projection.task = None;
+        projection.mentions = vec![manager.to_string()];
+        projection.target_tags.clear();
+        projection.sender_name = bcs_service_api::core::BCS_SYSTEM_MESSAGE.into();
+        projection.sender_owner = None;
+        projection.text_projection = TextProjection::Original;
+        projection.reply_context = None;
+        projection.forward_hop = None;
+        projection.provider_route_headers.clear();
+        Ok(projection)
+    }
     pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>) -> ServiceResult<Self> {
         let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
         projection.sender_name = task.worker_name.clone();
@@ -778,6 +838,7 @@ async fn prepare_queued_group_bounded(
         connection_id,
         downstream_run_id: None,
         cancel_reason: None,
+        task_timeout: false,
         downstream_session_key: request_session_key(&frame)
             .ok_or_else(|| invalid("queue send lacks downstream session key"))?,
     };

@@ -26,7 +26,10 @@ class RegexCORSMiddleware(CORSMiddleware):
     """
 
     def __init__(self, app, allow_origin_regex: list[str] | None = None, **kwargs):
-        self._allow_origin_regex = allow_origin_regex or []
+        self._allow_origin_regex = [
+            ".*" if pattern == "*" else pattern
+            for pattern in (allow_origin_regex or [])
+        ]
         self._compiled_patterns = [re.compile(pattern) for pattern in self._allow_origin_regex]
         super().__init__(app, **kwargs)
 

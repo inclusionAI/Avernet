@@ -21,8 +21,10 @@ frames from canonical messages, reapplies current session membership and
 outbound policy, pins WebSocket connection identity and retains the original
 downstream session key. Per-attempt request aliases do not replace engine run
 identities. Accepted engine identities are persisted before cache projections.
-Exact queued Provider abort remains fail-closed until legacy-inclusive scope
-exclusivity is implemented; it must never be emulated by a scope-wide abort.
+Queued Worker TaskDispatch Provider abort uses the Provider's Bot/Session scope only when the
+original Provider route still resolves, the active-run index contains exactly
+the target run, and the managed lane contains no other active Send. Otherwise
+abort remains unconfirmed; the scheduler must not claim that the Worker stopped.
 
 ## Provides
 
@@ -90,6 +92,15 @@ The full run_reply body and the response-mode task_result_text are distinct;
 public history receives only the display companion, not the internal summary.
 Queued work does not start the legacy TaskStore TTL. Scoped completion refreshes
 durable task state; group-wide completion also checks its running Sessions.
+Running Worker TaskDispatch has a deadline five minutes before the configured
+Provider chat-run timeout (2h55 at the default three-hour setting), measured
+from Send start rather than queue admission. The run correlation remains valid
+until the Provider deadline so the earlier timeout can abort it. A confirmed
+abort atomically admits one timed-out TaskResult for the Manager. If stopping
+cannot be confirmed, the Worker remains in CancelUnknown and an atomic durable
+System Send tells the Manager the task reference, Worker and uncertainty; the
+Manager should verify the old run before reassigning. The legacy task ledger
+TTL uses the same 2h55 default but does not itself issue an abort.
 Task-only disable drains old work and results. Retained System context can promote
 a legacy Task Send to a scoped queue carrier; it never falls back to native inject.
 Task lifecycle event projections remain post-commit (no new outbox); their errors

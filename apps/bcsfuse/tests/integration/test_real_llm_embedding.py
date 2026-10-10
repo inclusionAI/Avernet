@@ -8,6 +8,7 @@
 - .env.fusion.real 中配置了正确的 LLM_BASE_URL 和 LLM_AUTH_TOKEN
 - .env.fusion.real 中配置了正确的 EMBEDDING_BASE_URL 和 EMBEDDING_AUTH_TOKEN
 - 本地服务已启动 (http://127.0.0.1:8765)
+- 显式设置 BCSFUSE_RUN_EXTERNAL_ACCEPTANCE=1 和 SERVICE_URL 指向获准的测试服务
 
 运行方式：
     pytest tests/integration/test_real_llm_embedding.py -v --tb=short
@@ -18,6 +19,11 @@ import time
 
 import pytest
 import requests
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("BCSFUSE_RUN_EXTERNAL_ACCEPTANCE") != "1" or not os.getenv("SERVICE_URL"),
+    reason="live service tests require explicit opt-in and an approved SERVICE_URL",
+)
 
 
 # =============================================================================

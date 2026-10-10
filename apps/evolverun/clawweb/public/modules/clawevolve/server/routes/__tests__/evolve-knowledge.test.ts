@@ -68,6 +68,42 @@ afterEach(async () => {
 });
 
 describe("evolve knowledge endpoints", () => {
+  it('filters and pages issues, with stable facets independent of the current page', async () => {
+    for (const [id, node, mode] of [['a', 'fetch', 'timeout'], ['b', 'fetch', 'timeout'], ['c', 'write', 'token-waste']]) {
+      await repo.createDiagnosis({ diagnosisId: id, flowId: id, workflowId: 'wf', runId: id,
+        nodeId: node, weakNodeId: node, failureSignature: id, failureMode: mode, executorType: 'cli-script' });
+    }
+    const read = async (query: string) => {
+      const response = await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&view=summary&${query}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const first = await read('page=1&pageSize=1&nodeId=fetch');
+    const second = await read('page=2&pageSize=1&nodeId=fetch');
+    expect(first.groups.map((g: { signature: string }) => g.signature)).toEqual(['a']);
+    expect(second.groups.map((g: { signature: string }) => g.signature)).toEqual(['b']);
+    expect(second.page).toEqual({ page: 2, pageSize: 1, total: 2, totalPages: 2 });
+    expect(second.facets).toEqual({ nodes: ['fetch', 'write'], modes: ['timeout', 'token-waste'] });
+    expect((await read('page=9&pageSize=1&failureMode=token-waste')).groups[0].signature).toBe('c');
+    expect((await read('page=1&pageSize=1&nodeId=missing')).page.total).toBe(0);
+    expect((await read('page=1&pageSize=1&nodeId=missing')).groups).toEqual([]);
+    expect((await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&page=0`)).status).toBe(400);
+    expect((await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&pageSize=201`)).status).toBe(400);
+    // Full-list and signature consumers remain backward-compatible.
+    expect((await read('')).groups).toHaveLength(3);
+  });
+  it('reuses a version-checked issue projection between pages and invalidates it for new evidence', async () => {
+    await repo.createDiagnosis({ diagnosisId: 'one', flowId: 'one', workflowId: 'wf', runId: 'one',
+      nodeId: 'fetch', weakNodeId: 'fetch', failureSignature: 'one', failureMode: 'timeout', executorType: 'cli-script' });
+    await new IssueAggregationRepository(db).listPage('wf', { page: 1, pageSize: 1 });
+    const reads = vi.spyOn(db, 'query');
+    const second = await new IssueAggregationRepository(db).listPage('wf', { page: 2, pageSize: 1 });
+    expect(second.page.total).toBe(1);
+    expect(reads.mock.calls.filter(([sql]) => sql.includes('result_json, completed_at_ms'))).toHaveLength(0);
+    await repo.createDiagnosis({ diagnosisId: 'two', flowId: 'two', workflowId: 'wf', runId: 'two',
+      nodeId: 'fetch', weakNodeId: 'fetch', failureSignature: 'two', failureMode: 'timeout', executorType: 'cli-script' });
+    expect((await new IssueAggregationRepository(db).listPage('wf', { page: 2, pageSize: 1 })).groups[0].signature).toBe('two');
+  });
   it.each([false, true])('refreshes removed run-set sources with partial findings=%s', async (partial) => {
     const insert = async (id: string, flows: string[], findings: string[], time: number) => {
       const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns: [],
@@ -107,6 +143,14 @@ describe("evolve knowledge endpoints", () => {
     const response = await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf`);
     expect(response.status).toBe(200);
     expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
+    const light = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&view=summary`)).json() as { groups: Array<{ presentation: string; sources: Array<Record<string, unknown>> }> };
+    expect(light.groups[0].presentation).toBe('summary');
+    expect(light.groups[0].sources[0].reasoning).toBe('');
+    expect(light.groups[0].sources[0]).not.toHaveProperty('proposal');
+    const detail = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=timeout`)).json() as { groups: Array<{ sources: Array<{ proposal: { summary: string } }> }> };
+    expect(detail.groups[0].sources[0].proposal.summary).toMatch(/timeout/);
+    const missing = await (await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf&signature=missing`)).json() as { groups: unknown[] };
+    expect(missing.groups).toHaveLength(0);
     expect((await fetch(`${baseUrl}/api/evolve/issue-groups`)).status).toBe(400);
   });
   it('bounds repair sources by recent activity and skips one incompatible historical analysis', async () => {

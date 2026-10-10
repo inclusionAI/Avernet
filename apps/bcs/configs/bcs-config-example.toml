@@ -165,6 +165,15 @@ max_filters_per_subscription = 64
 # logical secret name for group-session WebSocket JWT signing material.
 signing_key_secret = "bcn-group-session-ws-jwt"
 
+[bot_ws_admission]
+# Optional. Per-process token bucket for /ws/bot upgrades, used to spread the
+# reconnect storm after a BCS restart. Excess upgrades get HTTP 429 with
+# Retry-After before the WebSocket upgrade; bots retry on their reconnect
+# interval. Disabled by default.
+enabled = false
+rate_per_sec = 20
+burst = 50
+
 [cache]
 type = "redis"
 

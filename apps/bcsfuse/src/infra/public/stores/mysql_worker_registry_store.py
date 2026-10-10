@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 from typing import Optional
 
-from mysql.connector import Error
+from mysql.connector import Error, errorcode
 
 from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
 from src.domain.models.worker import (
@@ -184,8 +184,7 @@ class MySQLWorkerRegistryStore:
             "version": worker.version,
             "created_by": worker.created_by,
             "updated_by": worker.updated_by,
-            "gmt_create": worker.created_at.isoformat() if worker.created_at else None,
-            "gmt_modify": worker.updated_at.isoformat() if worker.updated_at else None,
+            # Database defaults own record timestamps, in its session timezone.
         }
 
     def _row_to_worker(self, row: dict) -> Worker:
@@ -300,10 +299,6 @@ class MySQLWorkerRegistryStore:
     def create(self, worker: Worker) -> Worker:
         if self.exists(worker.id):
             raise DuplicateWorkerException(worker.id)
-        now = datetime.utcnow()
-        worker.created_at = now
-        worker.updated_at = now
-
         data = self._worker_to_dict(worker)
         columns = ", ".join(data.keys())
         placeholders = ", ".join(["%s"] * len(data))
@@ -311,14 +306,29 @@ class MySQLWorkerRegistryStore:
 
         conn = self._pool.get_connection()
         try:
-            cursor = conn.cursor()
+            conn.start_transaction()
+            cursor = conn.cursor(dictionary=True)
             try:
                 cursor.execute(sql, list(data.values()))
+                cursor.execute(
+                    "SELECT gmt_create, gmt_modify FROM bcsfuse_workers WHERE id = %s",
+                    (worker.id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("created worker could not be read back")
+                created = worker.model_copy(deep=True)
+                created.created_at = row["gmt_create"]
+                created.updated_at = row["gmt_modify"]
                 conn.commit()
-                return worker.model_copy(deep=True)
+                return created
             except Error as e:
+                conn.rollback()
                 if e.errno == 1062:
                     raise DuplicateWorkerException(worker.id)
+                raise
+            except Exception:
+                conn.rollback()
                 raise
             finally:
                 cursor.close()
@@ -403,7 +413,6 @@ class MySQLWorkerRegistryStore:
             raise ValueError(f"Version conflict: expected {existing.version}, got {worker.version}")
 
         updated = worker.model_copy(deep=True)
-        updated.updated_at = datetime.utcnow()
         updated.version = existing.version + 1
 
         data = self._worker_to_dict(updated)
@@ -413,11 +422,24 @@ class MySQLWorkerRegistryStore:
 
         conn = self._pool.get_connection()
         try:
-            cursor = conn.cursor()
+            conn.start_transaction()
+            cursor = conn.cursor(dictionary=True)
             try:
                 cursor.execute(sql, params)
+                cursor.execute(
+                    "SELECT gmt_create, gmt_modify FROM bcsfuse_workers WHERE id = %s",
+                    (updated.id,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("updated worker could not be read back")
+                updated.created_at = row["gmt_create"]
+                updated.updated_at = row["gmt_modify"]
                 conn.commit()
                 return updated.model_copy(deep=True)
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 cursor.close()
         finally:
@@ -456,20 +478,38 @@ class MySQLWorkerRegistryStore:
         try:
             cursor = conn.cursor()
             try:
-                conn.autocommit = False
+                # Method delegation works for both raw connections and the
+                # tracked pool proxy; assigning autocommit on a proxy does not.
+                conn.start_transaction()
                 try:
-                    cursor.execute("DELETE FROM bcsfuse_worker_profile_contents WHERE worker_id = %s", (worker_id,))
-                    cursor.execute("DELETE FROM bcsfuse_worker_runtime_states WHERE worker_id = %s", (worker_id,))
-                    cursor.execute("DELETE FROM bcsfuse_worker_profile_bindings WHERE worker_id = %s", (worker_id,))
-                    cursor.execute("DELETE FROM bcsfuse_worker_audit_logs WHERE worker_id = %s", (worker_id,))
+                    for table in (
+                        "bcsfuse_worker_profile_contents",
+                        "bcsfuse_worker_runtime_states",
+                        "bcsfuse_worker_profile_bindings",
+                        "bcsfuse_worker_audit_logs",
+                    ):
+                        try:
+                            cursor.execute(f"DELETE FROM {table} WHERE worker_id = %s", (worker_id,))
+                        except Error as error:
+                            if error.errno != errorcode.ER_NO_SUCH_TABLE:
+                                raise
+                            # Sibling stores initialize lazily. Do not create
+                            # their schema here: DDL would commit this transaction.
+                            # A trigger may also raise 1146 for another table;
+                            # only an absent cascade target can be ignored.
+                            cursor.execute(
+                                "SELECT 1 FROM information_schema.tables "
+                                "WHERE table_schema = DATABASE() AND table_name = %s",
+                                (table,),
+                            )
+                            if cursor.fetchone() is not None:
+                                raise
                     cursor.execute("DELETE FROM bcsfuse_workers WHERE id = %s", (worker_id,))
                     conn.commit()
                     return True
                 except Exception:
                     conn.rollback()
                     raise
-                finally:
-                    conn.autocommit = True
             finally:
                 cursor.close()
         finally:

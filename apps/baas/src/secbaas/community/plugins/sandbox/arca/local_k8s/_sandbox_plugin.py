@@ -57,7 +57,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 
-from ._sandbox import LocalK8sArcaSandbox
+from ._sandbox import LocalK8sArcaSandbox, _convert_outbound_rules
 
 if TYPE_CHECKING:
     from kubernetes.client import ApiClient
@@ -289,37 +289,6 @@ def _resolve_outbound_rule() -> OutBoundOperationRule | None:
             f"local_k8s: {ENV_OUTBOUND_RULE} does not match "
             f"OutBoundOperationRule schema"
         ) from exc
-
-
-def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
-    """把 OutBoundOperationRule 转成 envoy sidecar 所需的 header-rules.yaml 文本。"""
-    if not rule or not rule.header_operation_rules:
-        return "rules: []"
-
-    domain_groups: dict[tuple[str, ...], dict[str, Any]] = {}
-    for h in rule.header_operation_rules:
-        key = tuple(sorted(h.domains))
-        if key not in domain_groups:
-            domain_groups[key] = {
-                "name": h.domains[0],
-                "domains": list(h.domains),
-                "set": [],
-                "remove": [],
-            }
-        action = (h.action or "").lower()
-        if action in ("replace", "set"):
-            set_entry: dict[str, Any] = {"header": h.header_name, "value": h.value}
-            if h.placeholder:
-                set_entry["placeholder"] = h.placeholder
-            domain_groups[key]["set"].append(set_entry)
-        elif action == "remove":
-            domain_groups[key]["remove"].append(h.header_name)
-
-    return yaml.safe_dump(
-        {"rules": list(domain_groups.values())},
-        default_flow_style=False,
-        sort_keys=False,
-    )
 
 
 def _build_resources(

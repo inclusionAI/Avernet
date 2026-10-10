@@ -18,6 +18,7 @@ import os
 import sys
 import pytest
 from typing import Optional
+from unittest.mock import MagicMock, patch
 
 
 class TestMySQLWorkerProfileBindingStoreContract:
@@ -40,25 +41,19 @@ class TestMySQLWorkerProfileBindingStoreContract:
             MySQLWorkerProfileBindingStore,
         )
 
-        # Should not raise error on construction
-        store = MySQLWorkerProfileBindingStore()
-        assert store is not None
-        assert store.host == "localhost"
-        assert store.port == 3306
-
-        # Should also accept explicit config without connecting
-        store = MySQLWorkerProfileBindingStore(
-            host="test-host",
-            port=3307,
-            user="test-user",
-            password="test-password",
-            database="test-db",
-        )
-        assert store.host == "test-host"
-        assert store.port == 3307
-        assert store.user == "test-user"
-        assert store.password == "test-password"
-        assert store.database == "test-db"
+        # Connection settings belong to the pool; constructing a store is lazy.
+        with patch(
+            "src.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider"
+        ) as pool_factory:
+            MySQLWorkerProfileBindingStore()
+            pool_factory.return_value.get_connection.assert_not_called()
+            config = dict(
+                host="test-host", port=3307, user="test-user",
+                password="test-password", database="test-db",
+            )
+            MySQLWorkerProfileBindingStore(**config)
+            pool_factory.assert_called_with(**config)
+            pool_factory.return_value.get_connection.assert_not_called()
 
     def test_required_methods_exist(self):
         """Test that all required methods exist."""
@@ -170,32 +165,35 @@ class TestMySQLWorkerProfileBindingStoreContract:
         )
         from src.domain.models.worker_source_info import WorkerSourceType
 
-        store = MySQLWorkerProfileBindingStore()
+        pool = MagicMock()
+        failure = RuntimeError("Failed to initialize MySQL connection pool")
+        pool.get_connection.side_effect = failure
+        store = MySQLWorkerProfileBindingStore(connection_pool=pool)
 
         # All methods should fail with clear MySQL connection error
         with pytest.raises(RuntimeError) as exc_info:
             store.bind_profile("worker-1", "profile-1", WorkerSourceType.API)
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
         with pytest.raises(RuntimeError) as exc_info:
             store.unbind_profile("worker-1", "profile-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
         with pytest.raises(RuntimeError) as exc_info:
             store.get_active_binding("worker-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
         with pytest.raises(RuntimeError) as exc_info:
             store.set_active_profile("worker-1", "profile-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
         with pytest.raises(RuntimeError) as exc_info:
             store.list_bindings_by_worker("worker-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
         with pytest.raises(RuntimeError) as exc_info:
             store.get_binding_by_profile_key("profile-1")
-        assert "Failed to connect to MySQL" in str(exc_info.value)
+        assert exc_info.value is failure
 
 
 @pytest.mark.skipif(

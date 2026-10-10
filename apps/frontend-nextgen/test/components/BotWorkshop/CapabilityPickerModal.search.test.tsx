@@ -41,3 +41,32 @@ it('服务端命中不二次过滤，选择最多20项且可以取消选择', as
   await waitFor(() => expect(confirm).toHaveBeenCalled());
   expect(confirm.mock.calls[0][0]).toHaveLength(20);
 });
+
+test('SkillCenter 详情操作不改变已选集合', () => {
+  jest.mocked(useSkillCenterPicker).mockReturnValue({
+    items: [{ id: 'sc-code', name: 'SkillCenter 示例', active: false, source: 'skillcenter-market', version: '1.0' }],
+    loading: false,
+    error: '',
+    hasMore: false,
+    loadMore: jest.fn(),
+    retry: jest.fn(),
+  });
+  const onViewSkill = jest.fn();
+  render(
+    <CapabilityPickerModal
+      kind="skill"
+      open
+      marketItems={[]}
+      skillCenterItems={[]}
+      workshopItems={[]}
+      myItems={[]}
+      existingIds={[]}
+      onOpenChange={jest.fn()}
+      onConfirm={jest.fn()}
+      onViewSkill={onViewSkill}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '查看SkillCenter 示例 Skill 详情' }));
+  expect(onViewSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'sc-code', version: '1.0' }));
+  expect(screen.getByRole('button', { name: '添加' })).toBeDisabled();
+});

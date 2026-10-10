@@ -29,6 +29,17 @@ An explicitly selected space still requires a successful membership check.
 Missing access or a failed directory request must not silently change that
 selection to no space. Existing records keep their stored space ownership.
 
+Skill owners can edit registration metadata using `PATCH /api/evolve/skill-assets/:assetId`.
+The request currently accepts exactly `{ "spaceId": string | number | null }`;
+the response contains `spaceId`, `spaceType` and `spaceName`. The existing space
+directory validates a selected space, and null clears all three ownership fields.
+Missing fields or unrelated metadata are rejected. Administrators' read access
+does not grant editing rights.
+
+This updates only the asset's space metadata, without creating a Skill version
+or accessing Bot files. Team visibility and defaults for newly created tasks
+follow the new space; existing tasks keep their captured configuration.
+
 ## Skill administrator view
 
 Skill management and Skill event logs reuse the Evolve administrator view and

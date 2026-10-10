@@ -156,7 +156,10 @@ def app(service: MagicMock):
     test_app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     test_app.add_exception_handler(RequestValidationError, _validation_error_handler)
     test_app.add_exception_handler(Exception, _unhandled_exception_handler)
-    from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
+    from agentclaw.community.adapters.http.openapi_v1.errors import (
+        MissingPrincipalError,
+    )
+
     test_app.add_exception_handler(MissingPrincipalError, _principal_error_handler)
 
     @test_app.middleware("http")
@@ -235,6 +238,75 @@ def test_create_notice_event_returns_created_status(
         "notification_ids": [21],
         "status": "CREATED",
     }
+
+
+def test_authenticated_user_cannot_submit_auto_approval(
+    client: TestClient, service: MagicMock
+) -> None:
+    payload = _approval_payload() | {
+        "approval_mode": "AUTO",
+        "biz_type": "SKILL_COLLABORATOR",
+        "biz_id": "91",
+        "event_type": "SKILL_COLLABORATOR_APPLIED",
+        "approver_user_ids": [],
+        "recipient_user_ids": [_USER_ID],
+    }
+
+    response = client.post(_PATH, json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["code"] == 403201
+    service.create_work_order_event.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("biz_type", "event_type"),
+    [
+        ("SKILL_COLLABORATOR", "SKILL_COLLABORATOR_APPLIED"),
+        ("SKILL_COLLABORATOR", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "SKILL_COLLABORATOR_APPLIED"),
+        (" SKILL_COLLABORATOR ", "SPACE_JOIN_APPLIED"),
+        ("SPACE_JOIN", "\tSKILL_COLLABORATOR_APPLIED\n"),
+    ],
+)
+def test_authenticated_user_cannot_create_skill_approval_via_generic_events(
+    client: TestClient,
+    service: MagicMock,
+    biz_type: str,
+    event_type: str,
+) -> None:
+    payload = _approval_payload() | {
+        "biz_type": biz_type,
+        "event_type": event_type,
+        "biz_id": "91",
+        "biz_data": {"space_id": 7, "skill_id": 91},
+        "approver_user_ids": ["real-skill-owner"],
+    }
+
+    response = client.post(_PATH, json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == 400201
+    service.create_work_order_event.assert_not_called()
+
+
+def test_skill_review_notice_remains_available_via_generic_events(
+    client: TestClient, service: MagicMock
+) -> None:
+    service.create_work_order_event.return_value = _result(NotificationCategory.NOTICE)
+    payload = _approval_payload() | {
+        "event_category": "NOTICE",
+        "biz_type": "SKILL_COLLABORATOR",
+        "event_type": "SKILL_COLLABORATOR_REVIEWED",
+        "applicant_user_id": None,
+        "approver_user_ids": [],
+        "recipient_user_ids": [_USER_ID],
+    }
+
+    response = client.post(_PATH, json=payload)
+
+    assert response.status_code == 201
+    service.create_work_order_event.assert_called_once()
 
 
 @pytest.mark.parametrize(

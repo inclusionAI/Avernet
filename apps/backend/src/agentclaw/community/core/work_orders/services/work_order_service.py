@@ -37,10 +37,10 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderInvalidReasonError,
     WorkOrderInvalidRemarkError,
     WorkOrderJoinNotAllowedError,
-    WorkOrderNotificationNotFoundError,
     WorkOrderNotFoundError,
     WorkOrderNoReviewerError,
     WorkOrderInvalidEventError,
+    WorkOrderLocalFinalizeError,
 )
 from agentclaw.community.core.work_orders.callbacks import (
     WorkOrderCallbackCredential,
@@ -58,9 +58,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
     WorkOrderItemType,
     WorkOrderMessageContent,
-    WorkOrderMessageTitle,
     WorkOrderTitleKey,
-    WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
     WorkOrderDecision,
@@ -79,9 +77,18 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
-from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderNotificationServiceProtocol
-from agentclaw.community.core.work_orders.work_order_service_protocol import WorkOrderServiceProtocol
+from agentclaw.community.core.work_orders.services.notification_service import (
+    WorkOrderNotificationService as WorkOrderNotificationService,
+)
+from agentclaw.community.core.work_orders.work_order_service_protocol import (
+    WorkOrderServiceProtocol,
+)
 
+
+from agentclaw.community.core.work_orders.execution import (
+    execution_phase,
+    notify_bot_collaboration_changed,
+)
 
 logger = get_logger()
 
@@ -180,16 +187,6 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderInvalidEventError(
                 "approval_mode AUTO is only valid for approval events"
             )
-        if (
-            approval_mode is WorkOrderApprovalMode.MANUAL
-            and (
-                biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
-                or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
-            )
-        ):
-            raise WorkOrderInvalidEventError(
-                "Skill editor requests must use the Skill endpoint"
-            )
         if event_category is NotificationCategory.APPROVAL:
             if approval_mode is WorkOrderApprovalMode.MANUAL and (
                 not approvers or recipients
@@ -198,10 +195,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
                     "manual approval events require approvers and no recipients"
                 )
             if approval_mode is WorkOrderApprovalMode.AUTO:
-                if not approvers or recipients:
+                if not approvers:
                     raise WorkOrderInvalidEventError(
-                        "auto approval events require approver_user_ids and no recipient_user_ids"
+                        "AUTO requires nonempty approver_user_ids for result notifications"
                     )
+                # AUTO uses this field only for result recipients, never approval rights.
+                # recipient_user_ids is deliberately ignored, even when supplied.
+                recipients = approvers
         elif event_category is NotificationCategory.NOTICE:
             if not recipients or approvers or applicant_user_id is not None:
                 raise WorkOrderInvalidEventError(
@@ -232,26 +232,45 @@ class WorkOrderService(WorkOrderServiceProtocol):
 
         repository_kwargs = dict(
             event_category=event_category,
-            biz_type=biz_type, biz_id=biz_id, event_type=persisted_event_type,
-            applicant_user_id=applicant or None, approver_user_ids=approvers,
-            recipient_user_ids=recipients, title=title, content=serialized_content,
-            apply_reason=reason, biz_data=serialized_data, env=get_current_env(),
+            biz_type=biz_type,
+            biz_id=biz_id,
+            event_type=persisted_event_type,
+            applicant_user_id=applicant or None,
+            approver_user_ids=approvers,
+            recipient_user_ids=recipients,
+            title=title,
+            content=serialized_content,
+            apply_reason=reason,
+            biz_data=serialized_data,
+            env=get_current_env(),
         )
         if approval_mode is WorkOrderApprovalMode.AUTO:
             repository_kwargs["approval_mode"] = approval_mode
             repository_kwargs["callback_source_event_type"] = event_type
 
-        result = self._repository.create_work_order_event(**repository_kwargs)
+        with execution_phase(
+            "event_create",
+            work_order_id=None,
+            biz_type=biz_type,
+            event_type=event_type,
+            approval_mode=approval_mode.value,
+        ):
+            result = self._repository.create_work_order_event(**repository_kwargs)
+        logger.info(
+            "work-order event persisted",
+            extra={
+                "work_order_id": result.work_order_id,
+                "env": get_current_env(),
+                "status": result.status.value,
+                "event_type": event_type,
+            },
+        )
         if (
             approval_mode is WorkOrderApprovalMode.AUTO
             and event_category is NotificationCategory.APPROVAL
             and result.work_order_id is not None
         ):
-            self._repository.claim_auto_approval(
-                work_order_id=result.work_order_id,
-                reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
-                env=get_current_env(),
-            )
+            callback_succeeded = False
             try:
                 if (
                     biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
@@ -262,78 +281,103 @@ class WorkOrderService(WorkOrderServiceProtocol):
                         reviewer_user_id=SYSTEM_REVIEWER_USER_ID,
                         env=get_current_env(),
                     ).model_copy(update={"source_event_type": event_type})
-                    self._decision_callbacks.dispatch(
-                        context=context,
-                        decision=WorkOrderDecision.APPROVED,
-                        review_remark=None,
-                        credential=callback_auth or WorkOrderCallbackCredential(headers={}),
-                    )
-                if biz_type == WorkOrderBizType.SPACE_JOIN.value:
-                    self._repository.apply_auto_space_join(
-                        work_order_id=result.work_order_id, env=get_current_env()
-                    )
-                elif biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
-                    detail = self.get_detail(
-                        work_order_id=result.work_order_id, actor_id=applicant
-                    )
-                    data = _business_data(detail.work_order.biz_data)
-                    bot_id = str(data.get("bot_id") or "")
-                    owner_id = str(data.get("owner_id") or "")
-                    self._repository.apply_auto_bot_editor_request(
-                        work_order_id=result.work_order_id, env=get_current_env()
-                    )
-                    if bot_id and owner_id:
-                        self._collaborators.on_collaboration_changed(
-                            bot_id, owner_id, get_current_env()
-                        )
-                elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
-                    self._repository.apply_auto_skill_editor_request(
+                    with execution_phase(
+                        "auto_callback",
                         work_order_id=result.work_order_id,
+                        event_type=event_type,
+                    ):
+                        self._decision_callbacks.dispatch(
+                            context=context,
+                            decision=WorkOrderDecision.APPROVED,
+                            review_remark=None,
+                            credential=callback_auth
+                            or WorkOrderCallbackCredential(headers={}),
+                        )
+                    callback_succeeded = True
+                with execution_phase(
+                    "auto_finalize",
+                    work_order_id=result.work_order_id,
+                    remote_confirmed=callback_succeeded,
+                ):
+                    if biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+                        notification_ids = (
+                            self._repository.apply_auto_skill_editor_request(
+                                work_order_id=result.work_order_id,
+                                recipient_user_ids=recipients,
+                                source_event_type=event_type,
+                                env=get_current_env(),
+                            )
+                        )
+                    else:
+                        if (
+                            biz_type == WorkOrderBizType.BOT_FRIEND.value
+                            and not callback_succeeded
+                        ):
+                            raise WorkOrderInvalidEventError(
+                                "AUTO friend approval requires a registered business callback"
+                            )
+                        notification_ids = self._repository.complete_auto_approval(
+                            work_order_id=result.work_order_id,
+                            recipient_user_ids=recipients,
+                            source_event_type=event_type,
+                            env=get_current_env(),
+                        )
+            except WorkOrderAlreadyProcessedError:
+                # A competing completion must not be converted into a failure write.
+                raise
+            except Exception as exc:
+                if callback_succeeded:
+                    logger.error(
+                        "remote decision confirmed; local finalization failed",
+                        extra={
+                            "work_order_id": result.work_order_id,
+                            "env": get_current_env(),
+                            "phase": "auto_finalize",
+                            "remote_confirmed": True,
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+                    raise WorkOrderLocalFinalizeError(result.work_order_id) from exc
+                with execution_phase(
+                    "auto_failure_record",
+                    work_order_id=result.work_order_id,
+                    exception_type=type(exc).__name__,
+                ):
+                    notification_ids = self._repository.fail_auto_approval(
+                        work_order_id=result.work_order_id,
+                        recipient_user_ids=recipients,
                         source_event_type=event_type,
+                        review_remark=(
+                            f"AUTO approval failed ({type(exc).__name__}); "
+                            "external outcome may require reconciliation"
+                            if biz_type == WorkOrderBizType.BOT_FRIEND.value
+                            else f"AUTO approval failed ({type(exc).__name__})"
+                        ),
                         env=get_current_env(),
                     )
-                elif biz_type == WorkOrderBizType.BOT_FRIEND.value:
-                    if not self._decision_callbacks.requires_callback(event_type):
-                        raise WorkOrderInvalidEventError(
-                            "AUTO friend approval requires a registered business callback"
-                        )
-                else:
-                    raise WorkOrderInvalidEventError(
-                        f"AUTO callback is not implemented for {biz_type}"
+                return result.model_copy(
+                    update={
+                        "status": WorkOrderEventStatus.FAILED,
+                        "notification_ids": notification_ids,
+                    }
+                )
+            if biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
+                data = biz_data or {}
+                bot_id = str(data.get("bot_id") or "")
+                owner_id = str(data.get("owner_id") or "")
+                if bot_id and owner_id:
+                    notify_bot_collaboration_changed(
+                        self._collaborators,
+                        work_order_id=result.work_order_id,
+                        bot_id=bot_id,
+                        owner_id=owner_id,
                     )
-            except Exception as exc:
-                self._repository.mark_auto_approval_failed(
-                    work_order_id=result.work_order_id,
-                    review_remark=f"AUTO approval failed: {str(exc)[:480]}",
-                    env=get_current_env(),
-                )
-                self._repository.create_auto_result_notifications(
-                    work_order_id=result.work_order_id,
-                    recipient_user_ids=approvers,
-                    biz_type=biz_type,
-                    biz_id=biz_id,
-                    source_event_type=event_type,
-                    status=WorkOrderStatus.FAILED,
-                    review_remark=f"AUTO approval failed: {str(exc)[:480]}",
-                    env=get_current_env(),
-                )
-                return result.model_copy(update={"status": WorkOrderEventStatus.FAILED})
-            if biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value:
-                self._repository.finalize_auto_approval(
-                    work_order_id=result.work_order_id,
-                    env=get_current_env(),
-                )
-                self._repository.create_auto_result_notifications(
-                    work_order_id=result.work_order_id,
-                    recipient_user_ids=approvers,
-                    biz_type=biz_type,
-                    biz_id=biz_id,
-                    source_event_type=event_type,
-                    status=WorkOrderStatus.APPROVED,
-                    review_remark=None,
-                    env=get_current_env(),
-                )
-            result = result.model_copy(update={"status": WorkOrderEventStatus.APPROVED})
+            result = result.model_copy(
+                update={
+                    "status": WorkOrderEventStatus.APPROVED,
+                    "notification_ids": notification_ids,
+                }
+            )
         return result
 
     def create_work_order(
@@ -382,6 +426,26 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
 
     def process_approval(
+        self,
+        *,
+        work_order_id: int,
+        actor_id: str,
+        decision: WorkOrderDecision,
+        review_remark: str | None,
+        callback_credential: WorkOrderCallbackCredential,
+    ):
+        with execution_phase(
+            "manual_review", work_order_id=work_order_id, decision=decision.value
+        ):
+            return self._process_approval(
+                work_order_id=work_order_id,
+                actor_id=actor_id,
+                decision=decision,
+                review_remark=review_remark,
+                callback_credential=callback_credential,
+            )
+
+    def _process_approval(
         self,
         *,
         work_order_id: int,
@@ -443,6 +507,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 raise WorkOrderInvalidEventError(
                     "BOT_FRIEND work order has an unsupported source event"
                 )
+        callback_succeeded = False
         if self._decision_callbacks.requires_callback(source_event_type):
             if (
                 context.work_order.status is not WorkOrderStatus.PENDING
@@ -450,19 +515,47 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 or context.approver.status is not WorkOrderApproverStatus.PENDING
             ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")
-            self._decision_callbacks.dispatch(
-                context=context,
-                decision=decision,
-                review_remark=normalized,
-                credential=callback_credential,
+            with execution_phase(
+                "manual_callback", work_order_id=work_order_id, decision=decision.value
+            ):
+                self._decision_callbacks.dispatch(
+                    context=context,
+                    decision=decision,
+                    review_remark=normalized,
+                    credential=callback_credential,
+                )
+            callback_succeeded = True
+        try:
+            with execution_phase(
+                "manual_finalize",
+                work_order_id=work_order_id,
+                decision=decision.value,
+                remote_confirmed=callback_succeeded,
+            ):
+                return self._repository.process_approval(
+                    work_order_id=work_order_id,
+                    reviewer_user_id=actor_id,
+                    decision=decision,
+                    review_remark=normalized,
+                    env=get_current_env(),
+                )
+        except WorkOrderAlreadyProcessedError:
+            raise
+        except Exception as exc:
+            if not callback_succeeded:
+                raise
+            logger.error(
+                "remote decision confirmed; local finalization failed",
+                extra={
+                    "work_order_id": work_order_id,
+                    "env": get_current_env(),
+                    "phase": "manual_finalize",
+                    "remote_confirmed": True,
+                    "decision": decision.value,
+                    "exception_type": type(exc).__name__,
+                },
             )
-        return self._repository.process_approval(
-            work_order_id=work_order_id,
-            reviewer_user_id=actor_id,
-            decision=decision,
-            review_remark=normalized,
-            env=get_current_env(),
-        )
+            raise WorkOrderLocalFinalizeError(work_order_id) from exc
 
     def get_bot_editor_request_policy(
         self,
@@ -547,20 +640,35 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyEditorError(
                 "applicant already has Bot editor access"
             )
-        record = self._repository.create_bot_editor_request(
-            bot_pk=int(bot["id"]),
-            bot_id=bot_id,
-            bot_name=str(bot.get("bot_name") or bot_id),
-            owner_id=str(bot["owner_id"]),
-            space_id=space.id,
-            applicant_user_id=applicant_user_id,
-            applicant_name=applicant_user_id,
-            apply_reason=reason,
-            env=get_current_env(),
+        with execution_phase(
+            "bot_request_create", work_order_id=None, bot_id=bot_id, owner_id=owner_id
+        ):
+            record = self._repository.create_bot_editor_request(
+                bot_pk=int(bot["id"]),
+                bot_id=bot_id,
+                bot_name=str(bot.get("bot_name") or bot_id),
+                owner_id=str(bot["owner_id"]),
+                space_id=space.id,
+                applicant_user_id=applicant_user_id,
+                applicant_name=applicant_user_id,
+                apply_reason=reason,
+                env=get_current_env(),
+            )
+        logger.info(
+            "Bot editor request persisted",
+            extra={
+                "work_order_id": record.id,
+                "status": record.status.value,
+                "env": get_current_env(),
+                "phase": "bot_request_create",
+            },
         )
         if record.status is WorkOrderStatus.APPROVED:
-            self._collaborators.on_collaboration_changed(
-                bot_id, owner_id, get_current_env()
+            notify_bot_collaboration_changed(
+                self._collaborators,
+                work_order_id=record.id,
+                bot_id=bot_id,
+                owner_id=owner_id,
             )
         return record
 
@@ -588,9 +696,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderApplicantAlreadyMemberError(
                 "applicant is already a space member"
             )
-        applicant_name = self._get_applicant_name(
-            applicant_user_id=applicant_user_id
-        )
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
         return self._repository.create_space_join_request(
             space_id=space_id,
             applicant_user_id=applicant_user_id,
@@ -792,122 +898,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
             env=get_current_env(),
         )
         if target_status is WorkOrderStatus.APPROVED:
-            self._collaborators.on_collaboration_changed(
-                bot_id, owner_id, get_current_env()
+            notify_bot_collaboration_changed(
+                self._collaborators,
+                work_order_id=detail.work_order.id,
+                bot_id=bot_id,
+                owner_id=owner_id,
             )
         return result
-
-
-class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
-    @inject
-    def __init__(self, repository: WorkOrderRepositoryProtocol) -> None:
-        self._repository = repository
-
-    @staticmethod
-    def build_space_join_review_result(
-        *,
-        detail: WorkOrderDetail,
-        target_status: WorkOrderStatus,
-        review_remark: str | None,
-    ) -> WorkOrderNotificationDraft:
-        if target_status is WorkOrderStatus.APPROVED:
-            title = WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
-            content = {
-                "text": WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
-                    space_name=detail.space_name
-                )
-            }
-        elif target_status is WorkOrderStatus.REJECTED:
-            if review_remark is None:
-                raise WorkOrderInvalidRemarkError("review remark is required")
-            title = WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
-            content = {
-                "text": WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
-                    space_name=detail.space_name,
-                    review_remark=review_remark,
-                )
-            }
-        else:
-            raise ValueError(f"unsupported review status: {target_status}")
-
-        event_type = WorkOrderEventType.SPACE_JOIN_REVIEWED
-        return WorkOrderNotificationDraft(
-            recipient_user_id=detail.work_order.applicant_user_id,
-            notification_category=EVENT_CATEGORIES[event_type],
-            event_type=event_type,
-            biz_type=detail.work_order.biz_type,
-            biz_id=detail.work_order.biz_id,
-            title=title,
-            content=content,
-        )
-
-    @staticmethod
-    def build_bot_editor_review_result(
-        *,
-        detail: WorkOrderDetail,
-        bot_name: str,
-        target_status: WorkOrderStatus,
-        review_remark: str | None,
-    ) -> WorkOrderNotificationDraft:
-        if target_status is WorkOrderStatus.APPROVED:
-            title = WorkOrderMessageTitle.BOT_COLLABORATOR_APPROVED.value
-            content = WorkOrderMessageContent.BOT_COLLABORATOR_APPROVED.value.format(
-                bot_name=bot_name
-            )
-        elif target_status is WorkOrderStatus.REJECTED:
-            if review_remark is None:
-                raise WorkOrderInvalidRemarkError("review remark is required")
-            title = WorkOrderMessageTitle.BOT_COLLABORATOR_REJECTED.value
-            content = WorkOrderMessageContent.BOT_COLLABORATOR_REJECTED.value.format(
-                bot_name=bot_name, review_remark=review_remark
-            )
-        else:
-            raise ValueError(f"unsupported review status: {target_status}")
-        return WorkOrderNotificationDraft(
-            recipient_user_id=detail.work_order.applicant_user_id,
-            notification_category=NotificationCategory.NOTICE,
-            event_type=WorkOrderEventType.BOT_COLLABORATOR_REVIEWED,
-            biz_type=WorkOrderBizType.BOT_COLLABORATOR,
-            biz_id=detail.work_order.biz_id,
-            title=title,
-            content={"text": content},
-        )
-
-    def get_detail(self, *, notification_id: int, actor_id: str):
-        result = self._repository.get_notification(
-            notification_id=notification_id,
-            recipient_user_id=actor_id,
-            env=get_current_env(),
-            mark_read=True,
-        )
-        if result is None:
-            raise WorkOrderNotificationNotFoundError("notification not found")
-        return result
-
-    def unread_count(self, *, actor_id: str) -> int:
-        return self._repository.count_unread(
-            recipient_user_id=actor_id, env=get_current_env()
-        )
-
-    def badge_summary(self, *, actor_id: str):
-        return self._repository.get_notification_badge_summary(
-            recipient_user_id=actor_id, env=get_current_env()
-        )
-
-    def mark_read(self, *, notification_id: int, actor_id: str):
-        record = self._repository.mark_notification_read(
-            notification_id=notification_id,
-            recipient_user_id=actor_id,
-            env=get_current_env(),
-        )
-        if record is None:
-            raise WorkOrderNotificationNotFoundError("notification not found")
-        return record
-
-    def mark_all_read(self, *, actor_id: str) -> int:
-        return self._repository.mark_all_notifications_read(
-            recipient_user_id=actor_id, env=get_current_env()
-        )
 
 
 def _business_data(raw: str | None) -> dict[str, object]:

@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.bootstrap.oss_business_routes import require_oss_auth
 from src.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
+from src.interfaces.api.schemas.worker_config_schemas import (
+    BatchQueryConfigRequest,
+    BatchQueryConfigResponse,
+    WorkerConfigItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,37 @@ def _runtime_response(worker) -> dict:
         "lifecycle_state": _enum_value(worker.lifecycle_state),
         "version": worker.version,
     }
+
+
+@router.post(
+    "/workers/config/batch",
+    response_model=BatchQueryConfigResponse,
+)
+async def batch_query_worker_configs(
+    payload: BatchQueryConfigRequest,
+    request: Request,
+) -> BatchQueryConfigResponse:
+    """Preserve the gateway-facing batch config query contract."""
+    require_oss_auth(request)
+    store = request.app.state.context.registry.get("worker_registry_store")
+    if store is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "message": "worker_registry_store provider not available",
+            },
+        )
+
+    configs, not_found_ids = store.batch_get_configs(payload.worker_ids)
+    return BatchQueryConfigResponse(
+        success=True,
+        data={
+            worker_id: WorkerConfigItem(fusion_enable=config.fusion_enable)
+            for worker_id, config in configs.items()
+        },
+        not_found_ids=not_found_ids,
+    )
 
 
 @router.post("/workers", status_code=status.HTTP_201_CREATED)
@@ -261,22 +297,56 @@ async def activate_worker_profile(
 
     from src.domain.models.worker_source_info import WorkerSourceType
 
-    previous_binding = binding_store.get_active_binding(worker_id)
+    previous_binding = None
+    previous_active_profile = None
+    persisted_worker = None
     binding_written = False
+    worker_written = False
+    activation_attempted = False
     try:
+        previous_binding = binding_store.get_active_binding(worker_id)
+        previous_active_profile = profile_store.get_active(worker_id)
         binding_store.bind_profile(
             worker_id=worker_id,
             profile_key=f"{worker_id}:{profile_id}",
             source_type=WorkerSourceType.API,
         )
         binding_written = True
+        updated_worker = worker.model_copy(deep=True)
+        updated_worker.active_profile_key = f"{worker_id}:{profile_id}"
+        persisted_worker = worker_store.update(updated_worker)
+        worker_written = True
+        activation_attempted = True
         activated = profile_store.activate(worker_id, profile_id)
         if activated is None:
             raise RuntimeError("profile activation did not update a record")
-        updated_worker = worker.model_copy(deep=True)
-        updated_worker.active_profile_key = f"{worker_id}:{profile_id}"
-        worker_store.update(updated_worker)
     except Exception as error:
+        if (
+            activation_attempted
+            and previous_active_profile is not None
+            and previous_active_profile.profile_id != profile_id
+        ):
+            try:
+                profile_store.activate(
+                    worker_id,
+                    previous_active_profile.profile_id,
+                )
+            except Exception:
+                logger.exception(
+                    "[Profiles OSS] Failed to compensate profile activation for worker %s",
+                    worker_id,
+                )
+        if worker_written:
+            try:
+                rollback_worker = worker.model_copy(deep=True)
+                rollback_worker.version = persisted_worker.version
+                worker_store.update(rollback_worker)
+            except Exception:
+                logger.exception(
+                    "[Profiles OSS] Failed to compensate worker profile mirror "
+                    "for worker %s",
+                    worker_id,
+                )
         if binding_written:
             try:
                 if previous_binding is None:
@@ -308,6 +378,25 @@ async def activate_worker_profile(
             },
         ) from error
 
+    # Index refresh is a separate side effect after durable activation. Never
+    # compensate the saved binding/content merely because its index needs retry.
+    from src.bootstrap.profile_activation_index import refresh_activated_profile_index
+
+    try:
+        refresh_activated_profile_index(registry, persisted_worker, profile_id)
+    except Exception as error:
+        logger.exception("[Profiles OSS] Activated profile index refresh failed for %s", worker_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "ACTIVATE_PROFILE_INDEX_ERROR",
+                "message": "Profile activation persisted; retry activation to refresh its index",
+                "activation_persisted": True,
+                "index_updated": False,
+                "retryable": True,
+            },
+        ) from error
+
     return {
         "worker_id": worker_id,
         "profile_id": profile_id,
@@ -336,7 +425,7 @@ async def delete_worker(worker_id: str, request: Request) -> dict:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "PROVIDER_NOT_AVAILABLE",
-                "message": "worker_registry_store provider not available in OSS mode",
+                "message": "worker_registry_store provider unavailable",
             },
         )
     if store.get_by_id(worker_id) is None:
@@ -361,6 +450,7 @@ async def delete_worker(worker_id: str, request: Request) -> dict:
         profiles = profile_service.list_profiles(worker_id)
         for profile in profiles.items:
             profile_service.delete_profile_vectors(worker_id, profile.profile_id)
+        profile_service.delete_worker_vectors(worker_id)
         store.delete(worker_id)
         return {"success": True, "worker_id": worker_id, "deleted": True}
     except HTTPException:

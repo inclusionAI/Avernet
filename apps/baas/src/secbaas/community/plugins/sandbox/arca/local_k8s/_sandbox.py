@@ -30,27 +30,33 @@ def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
     if not rule or not rule.header_operation_rules:
         return "rules: []"
 
-    domain_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+    # Envoy requires domain values to be unique in a route config. Split input
+    # groups by individual domain so overlapping groups remain valid while each
+    # domain still receives every header operation that targets it.
+    domain_rules: dict[str, dict[str, Any]] = {}
+    domain_order: list[str] = []
     for h in rule.header_operation_rules:
-        key = tuple(sorted(h.domains))
-        if key not in domain_groups:
-            domain_groups[key] = {
-                "name": h.domains[0],
-                "domains": list(h.domains),
-                "set": [],
-                "remove": [],
-            }
-        action = (h.action or "").lower()
-        if action in ("replace", "set"):
-            set_entry: dict[str, Any] = {"header": h.header_name, "value": h.value}
-            if h.placeholder:
-                set_entry["placeholder"] = h.placeholder
-            domain_groups[key]["set"].append(set_entry)
-        elif action == "remove":
-            domain_groups[key]["remove"].append(h.header_name)
+        for domain in h.domains:
+            if domain not in domain_rules:
+                domain_rules[domain] = {
+                    "name": domain,
+                    "domains": [domain],
+                    "set": [],
+                    "remove": [],
+                }
+                domain_order.append(domain)
+
+            action = (h.action or "").lower()
+            if action in ("replace", "set"):
+                set_entry: dict[str, Any] = {"header": h.header_name, "value": h.value}
+                if h.placeholder:
+                    set_entry["placeholder"] = h.placeholder
+                domain_rules[domain]["set"].append(set_entry)
+            elif action == "remove":
+                domain_rules[domain]["remove"].append(h.header_name)
 
     return yaml.safe_dump(
-        {"rules": list(domain_groups.values())},
+        {"rules": [domain_rules[domain] for domain in domain_order]},
         default_flow_style=False,
         sort_keys=False,
     )

@@ -4,7 +4,7 @@ use bcs_domain::LedgerSummary;
 use bcs_service_api::ChatResponseMode;
 use tokio::sync::RwLock;
 
-pub const TASK_TTL_MS: u64 = 5 * 60 * 1000;
+pub const TASK_TTL_MS: u64 = (2 * 60 + 55) * 60 * 1000;
 
 #[derive(Debug, Clone)]
 pub struct TaskEntry {

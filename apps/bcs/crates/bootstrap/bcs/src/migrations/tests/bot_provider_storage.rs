@@ -6,7 +6,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=32).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=33).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(
         SQLITE_VERSIONED_MIGRATIONS[29].name,
@@ -36,7 +36,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .collect::<Vec<_>>();
     // MySQL Provider storage remains version 029; the new Group migration is
     // MySQL version 030.
-    assert_eq!(versions, (1..=31).collect::<Vec<_>>());
+    assert_eq!(versions, (1..=32).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(
@@ -70,12 +70,12 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32]
+        vec![30, 31, 32, 33]
     );
 
     run_sqlite_migrations(&db).await?;
     // The full runner includes the Session registry migration.
-    assert_eq!(current_sqlite_version(&db, true).await?, Some(32));
+    assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
     let storage = applied_sqlite_migration(&db, 30).await?.unwrap();
     assert_eq!(storage.name, "bot_provider_storage");
     assert_eq!(
@@ -114,7 +114,7 @@ async fn bot_provider_expansion_resumes_every_partial_step() -> DbResult<()> {
         for statement in &statements[..completed] { db.execute(DbStatement::new(*statement)).await?; }
         run_sqlite_migrations(&db).await?;
         run_sqlite_migrations(&db).await?;
-        assert_eq!(current_sqlite_version(&db, true).await?, Some(32));
+        assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
         assert!(index_exists(&db, "uk_bcs_bots_provider_ref_env").await?);
     }
     Ok(())

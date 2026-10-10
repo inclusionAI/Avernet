@@ -88,7 +88,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials impo
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
+from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
+    WORK_ORDER_ERROR_STATUS, WORK_ORDER_ERROR_CODES,
+)
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -201,24 +203,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceNameInvalidError,
     SpaceNotFoundError,
 )
-from agentclaw.community.core.work_orders.errors import (
-    WorkOrderAccessDeniedError,
-    WorkOrderAlreadyPendingError,
-    WorkOrderAlreadyProcessedError,
-    WorkOrderCallbackError,
-    WorkOrderApplicantAlreadyEditorError,
-    WorkOrderApplicantAlreadyMemberError,
-    WorkOrderBotEditorRequestNotAllowedError,
-    WorkOrderSkillEditorRequestNotAllowedError,
-    WorkOrderSkillApplicantAlreadyEditorError,
-    WorkOrderInvalidReasonError,
-    WorkOrderInvalidEventError,
-    WorkOrderInvalidRemarkError,
-    WorkOrderJoinNotAllowedError,
-    WorkOrderNoReviewerError,
-    WorkOrderNotFoundError,
-    WorkOrderNotificationNotFoundError,
-)
+
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
@@ -419,58 +404,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # and ``@envelope_errors`` maps it. Fixed message — the cause is logged, never
     # returned (mirrors MissingPrincipalError keeping its reason off the wire).
     DeptLookupError: (502, "Department directory unavailable"),
-    WorkOrderAccessDeniedError: (403, WorkOrderPublicErrorMessage.FORBIDDEN),
-    WorkOrderNotFoundError: (404, WorkOrderPublicErrorMessage.NOT_FOUND),
-    WorkOrderNotificationNotFoundError: (
-        404,
-        WorkOrderPublicErrorMessage.NOT_FOUND,
-    ),
-    WorkOrderInvalidEventError: (400, "Invalid work-order event"),
-    WorkOrderInvalidReasonError: (
-        400,
-        WorkOrderPublicErrorMessage.INVALID_REASON,
-    ),
-    WorkOrderInvalidRemarkError: (
-        400,
-        WorkOrderPublicErrorMessage.INVALID_REMARK,
-    ),
-    WorkOrderAlreadyPendingError: (
-        409,
-        WorkOrderPublicErrorMessage.ALREADY_PENDING,
-    ),
-    WorkOrderAlreadyProcessedError: (
-        409,
-        WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
-    ),
-    WorkOrderCallbackError: (502, WorkOrderPublicErrorMessage.CALLBACK_FAILED),
-    WorkOrderApplicantAlreadyMemberError: (
-        409,
-        WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
-    ),
-    WorkOrderApplicantAlreadyEditorError: (
-        409,
-        WorkOrderPublicErrorMessage.APPLICANT_ALREADY_EDITOR,
-    ),
-    WorkOrderJoinNotAllowedError: (
-        409,
-        WorkOrderPublicErrorMessage.JOIN_NOT_ALLOWED,
-    ),
-    WorkOrderBotEditorRequestNotAllowedError: (
-        409,
-        WorkOrderPublicErrorMessage.BOT_EDITOR_REQUEST_NOT_ALLOWED,
-    ),
-    WorkOrderSkillEditorRequestNotAllowedError: (
-        409,
-        WorkOrderPublicErrorMessage.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
-    ),
-    WorkOrderSkillApplicantAlreadyEditorError: (
-        409,
-        WorkOrderPublicErrorMessage.SKILL_APPLICANT_ALREADY_EDITOR,
-    ),
-    WorkOrderNoReviewerError: (
-        409,
-        WorkOrderPublicErrorMessage.NO_REVIEWER,
-    ),
+    **WORK_ORDER_ERROR_STATUS,
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
@@ -832,22 +766,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
     **SPACE_SKILL_ERROR_CODES,
-    WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
-    WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
-    WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
-    WorkOrderAccessDeniedError: WorkOrderErrorCode.ACCESS_DENIED,
-    WorkOrderNotFoundError: WorkOrderErrorCode.NOT_FOUND,
-    WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
-    WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
-    WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
-    WorkOrderCallbackError: WorkOrderErrorCode.CALLBACK_FAILED,
-    WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
-    WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,
-    WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
-    WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
-    WorkOrderBotEditorRequestNotAllowedError: WorkOrderErrorCode.BOT_EDITOR_REQUEST_NOT_ALLOWED,
-    WorkOrderSkillEditorRequestNotAllowedError: WorkOrderErrorCode.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
-    WorkOrderSkillApplicantAlreadyEditorError: WorkOrderErrorCode.SKILL_APPLICANT_ALREADY_EDITOR,
+    **WORK_ORDER_ERROR_CODES,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,

@@ -69,3 +69,14 @@ class WorkOrderCallbackError(WorkOrderError):
     """A required upstream business callback failed or reported failure."""
 
     pass
+
+
+class WorkOrderLocalFinalizeError(WorkOrderError):
+    """Remote decision confirmed, local persistence failed or outcome is uncertain."""
+
+    def __init__(self, work_order_id: int) -> None:
+        self.work_order_id = work_order_id
+        super().__init__(
+            "External decision completed; local result persistence failed. "
+            "Reconcile before retrying."
+        )

@@ -1,8 +1,9 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { RepairInboxItem } from '../../../../server/contracts/repair-workbench'
 
-export const button = 'rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600'
-export const primary = `${button} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`
+const buttonBase = 'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-xs font-medium disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600'
+export const button = `${buttonBase} border-slate-200 bg-white text-slate-700 enabled:hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-500`
+export const primary = `${buttonBase} border-blue-600 bg-blue-600 text-white enabled:hover:bg-blue-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500`
 export const states: Record<RepairInboxItem['state'], string> = {
   pending: '待处理', processing: '处理中', awaiting_verification: '待验证', verified: '已验证', ineffective: '未达预期', no_action: '暂不处理',
 }
