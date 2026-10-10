@@ -41,6 +41,7 @@ from agentclaw.community.core.caller_identity.credential import (
     AuthContext,
     CallerToken,
 )
+from agentclaw.community.core.caller_identity.session_authorizer import CallerSessionAuthorizer
 from agentclaw.community.core.caller_identity.protocols import (
     CallerMcpSyncProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -76,7 +77,9 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         passport_plugin: PassportPlugin | None = None,
         cli_scope_reconciler: CliPassportScopeReconciler | None = None,
         collaborator_service: CollaboratorServiceProtocol | None = None,
+        session_authorizer: CallerSessionAuthorizer,
     ) -> None:
+        self._session_authorizer = session_authorizer
         self._bot_repository = bot_repository
         self._collaborator_repository = collaborator_repository
         self._collaborator_service = collaborator_service
@@ -541,9 +544,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
+        session_key: str | None = None,
         caller_token: CallerToken | None = None,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
+        self._session_authorizer.authorize(bot_id=bot_id, owner_id=owner_user_id, caller_user_id=caller_user_id, binding_id=binding_id, stage=stage, session_key=session_key)
         token_reused = caller_token is not None
         if caller_token is None:
             caller_token = self.exchange_caller_token(
@@ -564,6 +569,8 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         }
         if isinstance(binding_id, int) and not isinstance(binding_id, bool) and binding_id > 0:
             runtime_update_kwargs["binding_id"] = binding_id
+        if session_key is not None:
+            runtime_update_kwargs["session_key"] = session_key
         if is_test_exchange:
             # The HTTP adapter restricts this temporary path to a non-production
             # Bot owner. BaaS needs the marker only to accept a personal Bot for

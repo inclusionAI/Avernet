@@ -1,6 +1,13 @@
 """Token exchange HTTP boundary; Caller policy lives in application services."""
 
-from fastapi import APIRouter, Query, Request, Response
+import time
+import uuid
+
+from agentclaw.community.core.caller_identity.boundary_logging import redact_boundary
+from agentclaw.community.log import get_logger
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.api.caller_iam_token_service import (
@@ -17,6 +24,7 @@ from agentclaw.community.plugin_api.token_exchange import TokenExchangePlugin
 
 
 router = APIRouter()
+logger = get_logger()
 
 
 def _cors_headers(request: Request) -> dict[str, str]:
@@ -96,21 +104,46 @@ async def get_iam_token(
     entity_id: str | None = Query(default=None),
     is_test_exchange: bool = False,
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
+    session_key: str | None = Query(default=None, alias="sessionKey"),
 ) -> Response:
-    result = await service.get_iam_token(
-        iam_token=request.cookies.get("IAM_TOKEN") or "",
-        auth_request=_auth_request(request),
-        bot_id=bot_id,
-        stage=stage,
-        publish_id=publish_id,
-        entity_id=entity_id,
-        is_test_exchange=is_test_exchange,
-    )
+    # Query defaults are also used by direct adapter tests; only strings are data.
+    session_key = session_key if isinstance(session_key, str) else None
+    fields = {"system": "backend", "direction": "inbound", "operation": "caller_iam",
+              "operation_id": uuid.uuid4().hex, "method": "GET", "route": "/api/v1/token/iam",
+              "request_id": request.headers.get("x-request-id"), "bot_id": bot_id,
+              "stage": stage.value, "publish_id": publish_id, "entity_id": entity_id,
+              "is_test_exchange": is_test_exchange,
+              "session_key": "[REDACTED]" if session_key is not None else None}
+    started_at = time.monotonic()
+    logger.info("caller_iam_request_received fields=%s", fields)
+    try:
+        session_kwargs = {"session_key": session_key} if session_key is not None else {}
+        result = await service.get_iam_token(
+            iam_token=request.cookies.get("IAM_TOKEN") or "",
+            auth_request=_auth_request(request),
+            bot_id=bot_id,
+            stage=stage,
+            publish_id=publish_id,
+            entity_id=entity_id,
+            is_test_exchange=is_test_exchange,
+            **session_kwargs,
+        )
+    except Exception as exc:
+        logger.warning("caller_iam_response_failed fields=%s duration_ms=%.1f status_code=%s error_type=%s error_message=caller_iam_failed",
+                       fields, (time.monotonic() - started_at) * 1000, getattr(exc, "status_code", 500), type(exc).__name__)
+        # COSEC: transport errors may contain the original credential-bearing URL.
+        if isinstance(exc, StarletteHTTPException):
+            raise HTTPException(status_code=exc.status_code, detail="Caller IAM request failed", headers=exc.headers) from None
+        raise HTTPException(status_code=500, detail="Caller IAM request failed") from None
     content = {"success": result.error is None}
     if result.error is None:
         content["iam_token"] = result.iam_token
     else:
         content["error"] = result.error
+    logger.info("%s fields=%s status_code=%s duration_ms=%.1f response=%s",
+                "caller_iam_response_succeeded" if result.error is None else "caller_iam_response_failed",
+                fields, 200 if result.error is None else _caller_error_status(result.error),
+                (time.monotonic() - started_at) * 1000, redact_boundary(content, secrets=(request.cookies.get("IAM_TOKEN") or "", session_key or "")))
     return JSONResponse(
         content=content,
         status_code=200 if result.error is None else _caller_error_status(result.error),

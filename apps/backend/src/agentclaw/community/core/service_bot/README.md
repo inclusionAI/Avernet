@@ -61,6 +61,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_startup_script.protocols  # StartupScriptReaderProtocol — the read side of the per-bot startup script, consumed while composing the container start command
   - agentclaw.community.core.channel    # per-stage engine_overrides (DingTalk channels) reader at verify/online promotion
   - agentclaw.community.core.config_compose
+  - agentclaw.community.core.caller_identity.boundary_logging  # Credential-safe Caller outbound audit
   - agentclaw.community.core.caller_identity.credential  # CallerToken used by BaaS outbound-rule update
   - agentclaw.community.core.devices
   - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates

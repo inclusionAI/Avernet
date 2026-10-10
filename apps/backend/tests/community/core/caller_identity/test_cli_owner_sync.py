@@ -70,6 +70,7 @@ def _world(cli_code: str, *, explicit_caller: bool = True) -> SimpleNamespace:
     mcp_provider = MagicMock()
     mcp_provider.collect_bot_active_mcps.return_value = [{"server_code": "local-mcp"}]
     service = CallerIdentityService(
+        session_authorizer=MagicMock(),
         bot_repository=bot_repository, collaborator_repository=MagicMock(),
         lock_repository=lock_repository, mcp_provider=mcp_provider,
         repository=repository, mcp_sync_service=MagicMock(),

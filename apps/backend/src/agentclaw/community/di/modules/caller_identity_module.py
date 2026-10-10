@@ -28,6 +28,10 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerTokenProviderProtocol,
 )
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
+from agentclaw.community.core.caller_identity.session_authorizer import CallerSessionAuthorizer
+from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
@@ -59,6 +63,16 @@ class CallerIdentityModule(Module):
     @singleton
     @provider
     @inject
+    def caller_session_authorizer(
+        self, binding_repository: DeviceBindingRepository, resolver: DeviceContextResolver,
+        transport: DeviceAdapterTransport, runtime_bindings: RuntimeBindingResolutionService,
+    ) -> CallerSessionAuthorizer:
+        return CallerSessionAuthorizer(binding_repository=binding_repository, resolver=resolver,
+                                       transport=transport, runtime_bindings=runtime_bindings)
+
+    @singleton
+    @provider
+    @inject
     def caller_identity_service(
         self,
         bot_repository: BotRepository,
@@ -69,6 +83,7 @@ class CallerIdentityModule(Module):
         mcp_sync_service: MCPSyncServiceProtocol,
         passport_plugin: PassportPlugin,
         collaborator_service: CoreCollaboratorServiceProtocol,
+        session_authorizer: CallerSessionAuthorizer,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -80,6 +95,7 @@ class CallerIdentityModule(Module):
             mcp_sync_service=mcp_sync_service,
             passport_plugin=passport_plugin,
             collaborator_service=collaborator_service,
+            session_authorizer=session_authorizer,
         )
 
     @singleton
@@ -142,6 +158,7 @@ class CallerIdentityModule(Module):
         runtime_updater: CallerRuntimeUpdater,
         runtime_bindings: RuntimeBindingResolutionService,
         lock_repository: BotCollabLockRepositoryProtocol,
+        session_authorizer: CallerSessionAuthorizer,
     ) -> CallerIamTokenService:
         return CallerIamTokenService(
             caller_identity=caller_identity,
@@ -150,6 +167,7 @@ class CallerIdentityModule(Module):
             runtime_updater=runtime_updater,
             runtime_bindings=runtime_bindings,
             lock_repository=lock_repository,
+            session_authorizer=session_authorizer,
         )
 
     @singleton

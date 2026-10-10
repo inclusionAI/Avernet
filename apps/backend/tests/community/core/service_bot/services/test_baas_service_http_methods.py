@@ -274,7 +274,8 @@ class TestBaasServiceHttpMethods:
         assert service.append_caller_outbound_rule("dev-1@tpl-1", rule) is True
 
         call = http.calls_to("put")[0]
-        assert call.args[0] == "/api/v1/paas/devices/dev-1@tpl-1/outbound-rule?mode=append"
+        assert call.args[0] == "/api/v1/paas/devices/dev-1@tpl-1/outbound-rule"
+        assert call.kwargs["params"] == {"mode": "append"}
         assert call.kwargs["json"] == {
             "header_operation_rules": [{"header_name": "x-caller-token"}]
         }
