@@ -13,7 +13,7 @@ Walks the full chain:
                               setup time (X-BCS-Service-Key header).
   3. WS /ws (workbench)     → subscribe and observe events.
   4. Manager bot dispatches via bcs_assign_task; Worker executes.
-  5. Manager bot calls bcs_task_complete → BCS completes the
+  5. Test client sends task.complete as the Manager → BCS completes the
      service-invocation Session and dispatches the post-completion
      callback against service_spec.callback_config.channels.
   6. The test polls Session.callback_status until it reaches a
@@ -282,8 +282,8 @@ async def phase_invoke_via_service_api(client, group_id):
 
 async def phase_send_user_kickoff(group_id, session_id):
     """Sends an kickoff message into the group on the service invocation's
-    session_id. The manager bot is instructed to forward to DBA and call
-    bcs_task_complete as soon as DBA replies (no full audit needed),
+    session_id. The manager bot is instructed to forward to DBA and summarize
+    as soon as DBA replies (no full audit needed),
     keeping the test fast."""
     info("Phase 3: kickoff manager via workbench WS chat.send (session_id=invocation)")
     obs = WorkbenchObserver(group_id)
@@ -298,7 +298,7 @@ async def phase_send_user_kickoff(group_id, session_id):
         params = {
             "sessionKey": "service-main",
             "message": (
-                "向 DBA 发一条消息，收到 DBA 任何回复后立刻调用 bcs_task_complete 提交总结，不需要等完整分析结果"
+                "向 DBA 发一条消息，收到 DBA 任何回复后在普通回复中给出总结，不需要等完整分析结果"
             ),
             "group_id": group_id,
             "bot_uuid": COORD_UUID,
@@ -324,7 +324,7 @@ async def phase_send_user_kickoff(group_id, session_id):
             fail_msg(f"DBA did not complete task in {BOT_RESPONSE_TIMEOUT}s")
             return False
 
-        info("Waiting for Coordinator to wrap up via bcs_task_complete...")
+        info("Waiting for Coordinator to summarize the result...")
         try:
             await asyncio.wait_for(coord_final.wait(), timeout=BOT_RESPONSE_TIMEOUT)
             ok("Coordinator produced final after task completion")
@@ -334,6 +334,38 @@ async def phase_send_user_kickoff(group_id, session_id):
         return True
     finally:
         await obs.close()
+
+
+async def phase_complete_session(session_id):
+    """Exercise the explicit protocol after the Bot's work has finished.
+
+    The completion tool is no longer mounted. This short-lived test connection
+    uses the Manager identity only after observing its final response.
+    """
+    ws_url = BCS_URL.replace("https://", "wss://").replace("http://", "ws://")
+    async with websockets.connect(ws_url + "/ws/bot") as ws:
+        async def request(req_id, method, params):
+            await ws.send(json.dumps({"type": "req", "id": req_id,
+                                      "method": method, "params": params}))
+            async with asyncio.timeout(30):
+                while True:
+                    frame = json.loads(await ws.recv())
+                    if frame.get("type") == "res" and frame.get("id") == req_id:
+                        assert frame.get("ok"), f"{method} rejected: {frame.get('error', {}).get('code')}"
+                        return
+                    if frame.get("type") == "req":
+                        # This client does not execute Bot work.
+                        await ws.send(json.dumps({"type": "res", "id": frame["id"],
+                                                  "ok": False, "error": {
+                                                      "code": "UNSUPPORTED_METHOD",
+                                                      "message": "Completion test client",
+                                                      "retryable": False}}))
+
+        await request("connect", "bot.connect", {"bot_uuid": COORD_UUID,
+                                                 "token": COORD_TOKEN,
+                                                 "protocol_version": 2})
+        await request("complete", "task.complete", {"group_id": session_id,
+                                                    "summary": "Manager-worker round trip completed"})
 
 
 async def phase_assert_callback_terminal(client, group_id, session_id):
@@ -394,6 +426,9 @@ async def main():
 
         if not await phase_send_user_kickoff(group_id, session_id):
             failures.append("Phase 3 (manager-worker round trip)")
+
+        if not failures:
+            await phase_complete_session(session_id)
 
         if not failures and not await phase_assert_callback_terminal(
             client, group_id, session_id

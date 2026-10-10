@@ -13,7 +13,6 @@ BCS WebSocket channel plugin for OpenClaw.
   - `bcs_route`
   - `bcs_assign_task`
   - `bcs_send_task_message`
-  - `bcs_task_complete`
 
 This plugin package intentionally does not include internal HITL, environment detection,
 or internal endpoint defaults.

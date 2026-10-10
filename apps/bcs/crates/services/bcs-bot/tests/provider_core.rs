@@ -144,7 +144,6 @@ async fn register_provider_persists_native_mcp_tool_name_mapping() {
     let ctx = test_context();
     let assign_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_assign_task";
     let send_message_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_send_task_message";
-    let complete_tool = "mcp_mcp.ant.agentclawscs.bcs_mcp_bcs_task_complete";
     let registered = ctx
         .core
         .register_provider(
@@ -164,10 +163,6 @@ async fn register_provider_persists_native_mcp_tool_name_mapping() {
                         send_message_tool.to_string(),
                         "bcs_send_task_message".to_string(),
                     ),
-                    (
-                        complete_tool.to_string(),
-                        "bcs_task_complete".to_string(),
-                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -186,10 +181,6 @@ async fn register_provider_persists_native_mcp_tool_name_mapping() {
     assert_eq!(
         config["coordination"]["tool_name_mapping"][send_message_tool],
         "bcs_send_task_message"
-    );
-    assert_eq!(
-        config["coordination"]["tool_name_mapping"][complete_tool],
-        "bcs_task_complete"
     );
 }
 
@@ -280,29 +271,31 @@ async fn register_provider_rejects_invalid_provider_tool_name() {
 
 #[tokio::test]
 async fn register_provider_rejects_unsupported_canonical_tool_name() {
-    let ctx = test_context();
-    let err = ctx
-        .core
-        .register_provider(
-            "Provider".to_string(),
-            Some("https://provider.example.com/bcs/webhook".to_string()),
-            ProviderAuthMode::StaticBearer,
-            "197262".to_string(),
-            None,
-            Some(ProviderCoordinationConfig {
-                mode: CoordinationMode::NativeMcp,
-                worker_send_task_message_enabled: true,
-                mcp_server: Some("bcs".to_string()),
-                mcporter_command: None,
-                tool_name_mapping: [("provider-tool".to_string(), "unknown-tool".to_string())]
-                    .into_iter()
-                    .collect(),
-            }),
-        )
-        .await
-        .expect_err("unknown canonical tool names should fail");
+    for canonical_tool in ["unknown-tool", "bcs_task_complete"] {
+        let ctx = test_context();
+        let err = ctx
+            .core
+            .register_provider(
+                "Provider".to_string(),
+                Some("https://provider.example.com/bcs/webhook".to_string()),
+                ProviderAuthMode::StaticBearer,
+                "197262".to_string(),
+                None,
+                Some(ProviderCoordinationConfig {
+                    mode: CoordinationMode::NativeMcp,
+                    worker_send_task_message_enabled: true,
+                    mcp_server: Some("bcs".to_string()),
+                    mcporter_command: None,
+                    tool_name_mapping: [("provider-tool".to_string(), canonical_tool.to_string())]
+                        .into_iter()
+                        .collect(),
+                }),
+            )
+            .await
+            .expect_err("unknown canonical tool names should fail");
 
-    assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains("unsupported canonical tool 'unknown-tool'")));
+        assert!(matches!(err, ServiceError::InvalidOperation { message, .. } if message.contains(&format!("unsupported canonical tool '{canonical_tool}'"))));
+    }
 }
 
 #[tokio::test]

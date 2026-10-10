@@ -702,7 +702,7 @@ describe('openclaw-channel-bcn', () => {
 
     assert.deepEqual(
       [ ...new Set(registeredToolNames) ].sort(),
-      [ 'bcs_assign_task', 'bcs_route', 'bcs_send_task_message', 'bcs_task_complete' ].sort(),
+      [ 'bcs_assign_task', 'bcs_route', 'bcs_send_task_message' ].sort(),
     );
     assert.equal(registeredEvents.includes('before_tool_call'), false);
   });
@@ -858,7 +858,7 @@ describe('openclaw-channel-bcn', () => {
 
       const ctx = { messageChannel: 'bcs', sessionKey: 'legacy-task-session' };
       assert.equal(factories.get('bcs_assign_task')?.(ctx), null);
-      assert.equal(factories.get('bcs_task_complete')?.(ctx), null);
+      assert.equal(factories.has('bcs_task_complete'), false);
     } finally {
       abortAllStreams();
       if (originalBotUuid === undefined) {

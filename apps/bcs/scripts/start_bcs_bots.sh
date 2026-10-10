@@ -268,7 +268,7 @@ port_already_assigned() {
 config_has_bcs_core_tools() {
     local config_file="$1"
     [ -f "$config_file" ] || return 1
-    for tool in bcs_route bcs_assign_task bcs_send_task_message bcs_task_complete; do
+    for tool in bcs_route bcs_assign_task bcs_send_task_message; do
         if ! grep -q "\"${tool}\"" "$config_file"; then
             return 1
         fi
@@ -906,8 +906,7 @@ ${models_block}
     "alsoAllow": [
       "bcs_route",
       "bcs_assign_task",
-      "bcs_send_task_message",
-      "bcs_task_complete"
+      "bcs_send_task_message"
     ]
   },
   "messages": {

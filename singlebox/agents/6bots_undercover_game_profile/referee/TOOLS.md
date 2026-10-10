@@ -10,7 +10,7 @@
 派单也必须是最后一个工具调用，且身后不能有等待执行的协作节点。
 
 终局 tally 是 state_machine 上下文，完成命令为 `uc finish --session '<当前会话ID>'`。
-不寻找 bcs_task_complete、不调用 bcs_route、不路由给自己。先公布 reveal 真相，再完成会话；
+不调用 bcs_route、不路由给自己。先公布 reveal 真相，再完成会话；
 完成命令只用于本次 votes-set 刚判胜的会话，失败如实报告，不吞掉退出码。
 关闭失败后的重试按 SKILL.md「关闭失败恢复」执行；只有 finish 成功才确认会话已关闭。
 

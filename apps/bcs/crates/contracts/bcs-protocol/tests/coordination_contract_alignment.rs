@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use bcs_protocol::{
-    CONTRACT_VERSION, MAGIC_KEY, TOOL_ASSIGN_TASK, TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE,
+    CONTRACT_VERSION, MAGIC_KEY, TOOL_ASSIGN_TASK, TOOL_SEND_TASK_MESSAGE,
 };
 use serde::Deserialize;
 
@@ -30,7 +30,6 @@ fn contract_alignment_matches_rust_coordination_constants() {
         vec![
             TOOL_ASSIGN_TASK,
             TOOL_SEND_TASK_MESSAGE,
-            TOOL_TASK_COMPLETE,
         ]
     );
 }
@@ -49,10 +48,6 @@ fn contract_alignment_locks_tool_argument_shapes() {
             .get(TOOL_SEND_TASK_MESSAGE)
             .map(Vec::as_slice),
         Some(&["message".to_string()][..])
-    );
-    assert_eq!(
-        contract.tools.get(TOOL_TASK_COMPLETE).map(Vec::as_slice),
-        Some(&["summary".to_string()][..])
     );
 }
 

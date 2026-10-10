@@ -219,10 +219,6 @@ impl CoordinationSurface {
                     "mcp__bcs__bcs_send_task_message".to_string(),
                     "bcs_send_task_message".to_string(),
                 ),
-                (
-                    "mcp__bcs__bcs_task_complete".to_string(),
-                    "bcs_task_complete".to_string(),
-                ),
             ]),
         }
     }

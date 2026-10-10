@@ -228,63 +228,6 @@ pub(super) async fn dispatch_coordination_call(
                 }
             }
         }
-        TOOL_TASK_COMPLETE => {
-            let Some(summary) = coordination_argument_str(call, "summary") else {
-                warn!(
-                    bot_id = %cmd.bot_id,
-                    group_id = %cmd.group_id,
-                    "Ignoring bcs_task_complete echo without summary"
-                );
-                return Ok(None);
-            };
-            let mut payload = serde_json::json!({
-                "group_id": cmd.group_id.as_str(),
-                "summary": summary,
-                "status": "completed",
-            });
-            if let Some(session_id) = cmd.bcs_session_id.as_deref() {
-                payload["bcs_session_id"] = Value::String(session_id.to_string());
-            }
-            match crate::task_flow::handle_task_complete(
-                flow,
-                TaskCompleteCommand {
-                    task_id: cmd.group_id.clone(),
-                    bot_id: cmd.bot_id.clone(),
-                    via_echo: true,
-                    payload,
-                },
-            )
-            .await
-            {
-                Ok(outcome) => {
-                    if outcome.blocked {
-                        warn!(
-                            bot_id = %cmd.bot_id,
-                            group_id = %cmd.group_id,
-                            run_id = %cmd.run_id,
-                            pending = ?outcome.pending,
-                            "Task completion coordination echo blocked by pending targets"
-                        );
-                        return Ok(None);
-                    }
-                    Ok(Some(CoordinationEchoDispatch {
-                        task_id: None,
-                        bot_deliveries: Vec::new(),
-                        frontend_deliveries: outcome.frontend_deliveries,
-                    }))
-                }
-                Err(error) => {
-                    warn!(
-                        bot_id = %cmd.bot_id,
-                        group_id = %cmd.group_id,
-                        run_id = %cmd.run_id,
-                        error = %error,
-                        "Failed to dispatch bcs_task_complete coordination echo"
-                    );
-                    if call.v == 2 { Err(error) } else { Ok(None) }
-                }
-            }
-        }
         _ => {
             warn!(
                 bot_id = %cmd.bot_id,

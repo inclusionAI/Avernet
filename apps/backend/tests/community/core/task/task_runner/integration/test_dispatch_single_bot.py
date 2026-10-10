@@ -315,7 +315,7 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     assert "human 仅为观察者" in s
     assert "视为已提供全部所需上下文" in s and "严禁以“缺详情/需完整方案”为由" in s
     assert "交接只描述,不路由群外" in s and "正文不重复输出" in s
-    assert "bcs_task_complete" in s and "bcs_fuse" in s
+    assert "bcs_task_complete" not in s and "bcs_fuse" in s
     assert "按问题智能匹配能力" not in s
     # 中文输出约束
     assert "必须使用中文" in s

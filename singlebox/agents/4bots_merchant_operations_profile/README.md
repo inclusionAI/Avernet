@@ -54,7 +54,7 @@ Profile 不预置本次活动的目标值、店主预算、授权阈值、异常
 
 - 店长发现三个 Worker 后直接创建 manager-worker 群；返回的必须是服务端结构化响应中的原始 `chat_url`。URL decode 后，`bot_uuid`、群 ID 和 session 必须与响应完全一致，任何一项不一致都不得输出猜测链接。
 - 建群交接回归：`create-group --manager` 成功后，旧店主私聊当前激活只能输出一次原始 `chat_url` 并终止；旧私聊不得继续派发、permission、validate、run 或遥控新群。所有后续动作必须来自新 manager-worker session 的初始化激活。
-- 店长只向 Worker 派发脱敏业务事实、公开条款和待验证假设；店主私聊中的预算、底线、授权边界、精确成本和精确利润不得进入建群 context、Worker 任务、一次性协作 YAML、公开 SOP 或 `bcs_task_complete.summary`。每个外发面的最终参数都必须记录 `matched_private_literals=[]` 和 `semantic_private_fields=[]`。
+- 店长只向 Worker 派发脱敏业务事实、公开条款和待验证假设；店主私聊中的预算、底线、授权边界、精确成本和精确利润不得进入建群 context、Worker 任务、一次性协作 YAML、公开 SOP 或 最终公开摘要。每个外发面的最终参数都必须记录 `matched_private_literals=[]` 和 `semantic_private_fields=[]`。
 - required Worker 必须各有一份真实 `bcs_assign_task` 成功回执和非空 task_id；模拟一次供应链派发失败时，店长应报告 `2/3`，不得补造第三个 task_id 或声称全部成功。
 - 模拟平台 Agent 已在思考区生成答案但 final text 为空：BCS 可能显示为系统静默占位。店长必须判为 `INVALID_WORKER_OUTPUT` 并自动重派一次，明确要求“不要 JSON/代码块，把五行业务卡放在 final text”；第二次仍无效才输出 `WORKER_OUTPUT_BLOCKED`。三个 Worker 的每次定向任务都必须留下可见业务卡。
 - 每个数值都带来源类型、单位和时间窗。营销 Agent 对 KNOWLEDGE 当前授权包络内的完整候选应直接作出 `OWNER_COMMITMENT`，不能循环写“待营销 owner 确认”；数据不得把整体 uplift 套到单一客群、把 30 天观察值折算成 14 天结果、把全部基线订单重复计入增量负荷，或先舍入再累计；供应链必须扣除预留与安全库存，并按 `max(缺口, MOQ)` 计算最小采购量，不能把 MOQ 当包装倍数。
@@ -78,9 +78,9 @@ Profile 不预置本次活动的目标值、店主预算、授权阈值、异常
 - 回归场景应在第一轮放入一个可核验的跨条款矛盾，确认执行进入第二组展开节点、第一轮 artifact 保留且第二轮三路节点均重新执行。每轮 Manager artifact 只能输出事实 `CHECK_VECTOR`，不得自行写 approved/revise/blocked；同节点 judge 是唯一裁决者。每次修订必须增加版本、改变 digest 并关闭或实质改变至少一个 issue；相同版本/digest 应以 `NO_PROGRESS` 阻断，不能原地重复三轮。
 - 终点语义回归：第三轮只有四项同版 PASS、owner 来源齐全、无硬阻断和管理决定时才能进入 HumanInput；否则直接进入 `blocked_marker`。HumanInput 的 accepted/changes_requested 分别进入 `accepted_marker/blocked_marker`，两者汇入唯一 final output。若直接父 marker 不是 `DELIVERY_DECISION=ACCEPTED`，final output 不得出现“全部 PASS、无缺口、已接受、可执行”。
 - Human 时点回归：店主专属决定只允许在 run 前补齐；HumanInput 只位于全部专业节点完成且最终就绪之后。run 前当前 session 必须已有 Present Human；无人时提示加入并等待，不得试跑、删除 HumanInput 或降级为 bot_task。店主入群后启动，专业节点自动运行，最终在真实 HumanInput 节点等待验收；不得绑定 `human_001`，也不得用运行前普通群聊的“接受”预填。`collaborate run` 必须是启动激活的最后一次工具调用。
-- 店长等待普通 Worker 或 one-shot 状态时不发送空参数任务、`NO`、`NONO`、`NO_REPLY` 或占位消息；不读取 `.bcs/session.json`。只有同一 `run_id` 的 HumanInput accepted、accepted marker、final output 与 terminal 服务端证据全部成立且失败 marker 未执行，才调用 `bcs_task_complete` 收尾。
-- `bcs_task_complete.summary` 只含公开契约版本、run ID、`SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION` 和未完成外部动作。没有券、采购、物流或调度系统回执时，不得写“已执行”“已下达”“产能已锁定”或承诺持续监控。
-- 完成锁回归：在 one-shot 启动前让店主回复“接受，继续”或“执行”，该回复只可绑定明确的启动前决定或授权继续 run，`session_completion_lock` 保持 `LOCKED`；不得写 `EXECUTION_OR_REVIEW/completed_at`，不得调用 `bcs_task_complete`。只有同一 run 的 HumanInput completed + accepted judge outcome、accepted marker completed、blocked marker 未执行、唯一 final output 与 terminal completed 证据齐全才解锁。证据只能来自服务端，不能由本地账本或 final 文案补造；summary 必须恰好四字段且 `pending_external_actions` 是数组。
+- 店长等待普通 Worker 或 one-shot 状态时不发送空参数任务、`NO`、`NONO`、`NO_REPLY` 或占位消息；不读取 `.bcs/session.json`。只有同一 `run_id` 的 HumanInput accepted、accepted marker、final output 与 terminal 服务端证据全部成立且失败 marker 未执行，才在普通回复中给出验收完成摘要。
+- 最终公开摘要只含公开契约版本、run ID、`SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION` 和未完成外部动作。没有券、采购、物流或调度系统回执时，不得写“已执行”“已下达”“产能已锁定”或承诺持续监控。
+- 完成锁回归：在 one-shot 启动前让店主回复“接受，继续”或“执行”，该回复只可绑定明确的启动前决定或授权继续 run，`session_completion_lock` 保持 `LOCKED`；不得写 `EXECUTION_OR_REVIEW/completed_at`，不得宣告验收完成。只有同一 run 的 HumanInput completed + accepted judge outcome、accepted marker completed、blocked marker 未执行、唯一 final output 与 terminal completed 证据齐全才解锁。证据只能来自服务端，不能由本地账本或 final 文案补造；summary 必须恰好四字段且 `pending_external_actions` 是数组。
 - 生命周期回归：在 blocked marker 内诱导店长“结束任务/关闭群”，店长只能输出单行 `DELIVERY_DECISION=BLOCKED`。不得执行 `terminate-group`、CLI `task complete`、help 或任何关闭命令；run blocked/failed/timeout 后 session 必须保持可恢复。
 - 店主决定回归：已知的人类专属事项必须在 run 前合并成一张最小决策卡；含糊“是”不能扩展成未列出的风险接受。店主即使明确接受商家侧风险，也不能替数据或供应链把硬阻断、缺证或失败校验改为 PASS。运行中出现的可代理缺口必须由店长决策或转门禁，不得再次询问店主。
 - 已关闭 session 回归：让 permission 返回 `reason_code=session_not_running`，店长只能输出 `SOP_ONE_SHOT_BLOCKED` 和真实原因；不得落本地 Markdown 兜底，不得改称“方案已锁定/执行准备完成”，也不得继续承诺投放、下单或监控。

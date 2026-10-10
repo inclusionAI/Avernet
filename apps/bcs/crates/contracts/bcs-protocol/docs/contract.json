@@ -9,9 +9,6 @@
     ],
     "bcs_send_task_message": [
       "message"
-    ],
-    "bcs_task_complete": [
-      "summary"
     ]
   },
   "echo_versions": [

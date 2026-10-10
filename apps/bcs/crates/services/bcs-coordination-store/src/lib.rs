@@ -79,7 +79,6 @@ impl CoordinationIntentPort for CoordinationCacheStore {
         let required: &[&str] = match tool {
             "bcs_assign_task" => &["target_bot", "message"],
             "bcs_send_task_message" => &["message"],
-            "bcs_task_complete" => &["summary"],
             _ => return Err(error("unknown_coordination_tool")),
         };
         if required.iter().any(|key| !p.arguments.get(*key).and_then(Value::as_str)

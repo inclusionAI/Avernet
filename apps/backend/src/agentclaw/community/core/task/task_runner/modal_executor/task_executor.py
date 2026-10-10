@@ -800,7 +800,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 and not str(_task_instruction).lstrip().startswith("# 接自")
             ):
                 # 所有 manager_worker 群（单 bot 的退化群和多 bot 群）使用同一业务协议。
-                # BCS 的 bcs_assign_task/bcs_task_complete 系统指令不在此重复，避免业务 prompt
+                # BCS 的 bcs_assign_task 系统指令不在此重复，避免业务 prompt
                 # 与协调运行时争夺时序；driver 仍在协议内被明确要求参与执行、汇总、验收和回投。
                 try:
                     _task_id, _node_id = str(_loop_task_id).split("::", 1)

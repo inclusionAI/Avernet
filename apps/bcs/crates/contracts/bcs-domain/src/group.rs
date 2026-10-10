@@ -19,7 +19,7 @@ pub enum ParticipantRole {
     /// Manager in manager_worker groups: dispatches `bcs_assign_task` to workers.
     Manager,
     /// Worker in manager_worker groups: receives task dispatch, replies with
-    /// `bcs_task_complete`.
+    /// `bcs_send_task_message`.
     Worker,
     /// Can see messages but not actively involved.
     Observer,

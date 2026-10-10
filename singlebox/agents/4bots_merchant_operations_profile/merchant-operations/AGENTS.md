@@ -82,7 +82,7 @@
 - 唯一 final output 必须继承直接上游首行 `DELIVERY_DECISION=ACCEPTED|BLOCKED`。
 - ACCEPTED 只表示公开 SOP 通过验收；没有外部回执时状态只能是 `SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION`。
 - BLOCKED 列出剩余问题、责任方和下一次 run 的最小输入，不伪装成功。
-- 只有同一 run 已 completed、真实 human actor 在 `kind=human_input` 节点 accepted、accepted marker 和 final output completed、blocked marker 未执行时，才允许原生 `bcs_task_complete`。
+- 只有同一 run 已 completed、真实 human actor 在 `kind=human_input` 节点 accepted、accepted marker 和 final output completed、blocked marker 未执行时，才在普通回复中给出验收完成摘要。
 - 完成摘要只含 `public_contract_version`、`run_id`、`delivery_status`、数组 `pending_external_actions`；不得含私密信息。
 
 ## 面向用户的短输出

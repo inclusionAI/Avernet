@@ -268,8 +268,7 @@ V3 must be explicitly negotiated together with an allowed profile to enable
 as `false`. Ordinary plugin/native-tool integrations retain their existing path.
 
 `native_mcp` fixes server `bcs` and exact tool names
-`mcp__bcs__bcs_assign_task`, `mcp__bcs__bcs_send_task_message`, and
-`mcp__bcs__bcs_task_complete`. `mcporter_mcp` fixes command `mcporter` and server
+`mcp__bcs__bcs_assign_task` and `mcp__bcs__bcs_send_task_message`. `mcporter_mcp` fixes command `mcporter` and server
 `bcs`, and parses the unmodified coordination envelope from successful
 `exec`/`bash`/`shell`/`mcporter` tool output (case-insensitive source names).
 It does not use the native MCP name mapping. Both paths require paired tool

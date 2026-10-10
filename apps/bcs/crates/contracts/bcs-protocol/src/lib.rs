@@ -77,7 +77,7 @@ pub use ws::{
     ProtocolDeprecation, RequestFrame, RequestSource, ResponseDirective, ResponseFrame,
     ResponseMode, RouteSelectorWire, ToolEventData, ToolPhase, ToolResult,
     ToolResultContent, UsageInfo, WsBotCapabilities, CONTRACT_VERSION,
-    MAGIC_KEY, TOOL_ASSIGN_TASK, TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE,
+    MAGIC_KEY, TOOL_ASSIGN_TASK, TOOL_SEND_TASK_MESSAGE,
     GROUP_ID_PREFIX, build_session_key,
     apply_channel_info, apply_sender_display_name, build_chat_inject_frame, build_chat_send_frame,
     build_direct_chat_inject_frame, build_direct_chat_send_frame,

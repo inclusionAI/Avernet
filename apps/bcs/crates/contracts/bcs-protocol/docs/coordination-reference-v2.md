@@ -1,7 +1,7 @@
 # Coordination reference echo v2
 
-Large `message`/`summary` arguments must not travel in tool stdout: providers may
-truncate even successful Bash output. All three coordination tools may return:
+Large `message` arguments must not travel in tool stdout: providers may
+truncate even successful Bash output. Both coordination tools may return:
 
 ```json
 {"__bcs_coordination__":true,"v":2,"tool":"bcs_assign_task","intent_id":"bcs_intent_0123456789abcdef0123456789abcdef","status":"stored"}
@@ -88,3 +88,16 @@ shared keys, immutable receipts, transient failures and lost acknowledgements.
 Deployment-specific cache plugins must pass the existing CachePlugin contract,
 including atomic insert-only writes with TTL. Real cross-process connectivity
 and vendor byte encoding require deployment integration verification.
+
+## Removed task-completion tool
+
+`bcs_task_complete` is no longer exposed by the BCN plugins or accepted as a
+coordination echo (v1 or v2). Remove its native MCP tool-name mappings and tool
+allowlist entries before registering or updating Provider configuration. Managers
+summarize results in their ordinary replies; those replies do not implicitly
+close the Session. GroupContext does not instruct Bots to call a completion tool.
+
+This removes a tool capability without changing the v1/v2 envelope encodings.
+The independent `task.complete` WebSocket/service API and explicit Session
+management remain available to existing clients. Worker `task.completed` and
+Session lifecycle events retain their existing meanings.

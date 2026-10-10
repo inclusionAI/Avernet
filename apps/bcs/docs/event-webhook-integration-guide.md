@@ -142,7 +142,7 @@ Event Subscription 的 `payload.mode` 默认为 `metadata_only`。该模式下�
 | 自定义协作群的单个节点 | `state_machine.node.completed` | `data.output.json` | 该节点本次成功 attempt 的 Bot 输出产物 |
 | 自定义协作群的整个 Run | `state_machine.run.completed` | `data.output.json` | 标记为 `final_output` 的节点产物；没有该标记时回退为最后一个有产物的节点 |
 | 任务协作群的单个 Worker 子任务 | `task.completed` | `data.result.text` | Worker 返回并被 BCS 接收的 final result |
-| 任务协作群的整个 Session | `session.completed` | `data.summary.json` | Manager 调用 `bcs_task_complete` 时提交的 `summary`，不保证等于 Manager 的原始 assistant 消息 |
+| 任务协作群的整个 Session | `session.completed` | `data.summary.json` | 会话完成命令提交的 `summary`，不保证等于 Manager 的原始 assistant 消息 |
 
 当前状态机生产方把文本产物编码为 `content_type=application/json` 的 JSON string，因此实际文本位于
 `json`；Task 生产方使用 `content_type=text/plain`，因此 Worker 结果位于 `text`。为了兼容后续生产方，
@@ -350,7 +350,7 @@ Manager 完成整个任务协作 Session 时产生的是 `session.completed`。�
 - `message.created` 和 `session.completed` 使用 `stream.key=session:{session_id}`，与 task stream
   之间没有全局顺序保证，也没有可供接入方依赖的显式因果关系；
 - `task.completed` 只表示一个 Worker 子任务完成，不表示整个协作完成；
-- 存在未完成子任务时，Manager 的 `bcs_task_complete` 会被阻止；它完成实际 Session 时产生
+- 存在未完成子任务时，Manager 的 `task.complete` 协议请求会被阻止；它完成实际 Session 时产生
   `session.completed`，不会额外产生一个代表“全部任务”的虚构 `task.completed`；
 - `session.completed.data.reason` 为 `completed` 或 `failed`，`completed_by` 当前为
   `bcs-system`；若命令只更新 Group 状态而没有完成实际 Session，则不会产生该事件；

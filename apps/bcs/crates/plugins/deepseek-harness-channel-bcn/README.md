@@ -28,7 +28,7 @@ session-key mapping helper for persisted sessions created by older releases.
 - BCN coordination tools selected from the authenticated group type and
   recipient role carried by each downlink
 - `bcs_route` capture with routing metadata attached to the final chat event
-- Manager-worker `task.dispatch`, `task.message`, and `task.complete` support
+- Manager-worker `task.dispatch` and `task.message` support
 - Heartbeat, exponential reconnect, token rotation, and lifecycle cleanup
 
 The plugin does not create an OpenClaw-style `.bcs/session.json` file or any
@@ -47,7 +47,7 @@ session:
 | BCN session | BCN tools added by this plugin |
 | --- | --- |
 | Ordinary structured-routing group | `bcs_route` |
-| Manager in a `manager_worker` group | `bcs_assign_task`, `bcs_task_complete` |
+| Manager in a `manager_worker` group | `bcs_assign_task` |
 | Worker in a `manager_worker` group | `bcs_send_task_message` |
 | Mention-routing group, or manager-worker session without a valid recipient role | None |
 
@@ -222,8 +222,8 @@ sends:
 - model-visible `tool/result` content and its `isError` flag;
 - assistant-visible text and final routing metadata.
 
-Calls to `bcs_assign_task`, `bcs_send_task_message`, and `bcs_task_complete`
-use the existing BCN `task.dispatch`, `task.message`, and `task.complete`
+Calls to `bcs_assign_task` and `bcs_send_task_message`
+use the existing BCN `task.dispatch` and `task.message`
 requests. Their arguments and model-visible results also appear through the
 same canonical `agent/tool` telemetry as other DSH tools.
 

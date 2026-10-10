@@ -9,18 +9,15 @@ import {
   getSessionTaskGroupInfo,
   handleAssignTask,
   handleTaskMessage,
-  handleTaskComplete,
   BCS_ROUTE_TOOL_SCHEMA,
   BCS_ASSIGN_TASK_TOOL_SCHEMA,
   BCS_TASK_MESSAGE_TOOL_SCHEMA,
-  BCS_TASK_COMPLETE_TOOL_SCHEMA,
 } from './inbound-handler.js';
 
 export const BCS_CORE_TOOL_NAMES = [
   'bcs_route',
   'bcs_assign_task',
   'bcs_send_task_message',
-  'bcs_task_complete',
 ] as const;
 
 export interface BcsCoreRegistrationOptions {
@@ -205,42 +202,6 @@ export function registerBcsCore(
       };
     },
     { name: 'bcs_send_task_message' },
-  );
-
-  // Register bcs_task_complete tool — only for manager bot in manager_worker service groups
-  api.registerTool(
-    (ctx: OpenClawPluginToolContext) => {
-      const { sessionKey, channel } = rememberSessionSandbox(ctx);
-
-      if (channel !== 'bcs') return null;
-      if (!sessionKey) return null;
-
-      const taskInfo = getSessionTaskGroupInfo(sessionKey);
-      if (!taskInfo || taskInfo.groupType !== 'manager_worker') return null;
-
-      // Manager check: prefer recipient_role (new BCS), fall back to
-      // originator.includes(botUuid) for older BCS that didn't surface role.
-      const botUuid = process.env.BCN_BOT_UUID;
-      const isManager = taskInfo.recipientRole
-        ? taskInfo.recipientRole === 'manager'
-        : (botUuid ? taskInfo.originator.includes(botUuid) : false);
-      if (!isManager) return null;
-
-      return {
-        name: BCS_TASK_COMPLETE_TOOL_SCHEMA.name,
-        label: 'BCS Task Complete',
-        description: BCS_TASK_COMPLETE_TOOL_SCHEMA.description,
-        parameters: BCS_TASK_COMPLETE_TOOL_SCHEMA.parameters,
-        async execute(_toolCallId: string, params: Record<string, unknown>) {
-          const result = await handleTaskComplete(sessionKey, params);
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-            details: result,
-          };
-        },
-      };
-    },
-    { name: 'bcs_task_complete' },
   );
 
   return {
