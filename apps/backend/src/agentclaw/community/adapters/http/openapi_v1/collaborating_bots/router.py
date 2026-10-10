@@ -20,9 +20,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors, page
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
 from agentclaw.community.di import Injected
 
@@ -73,10 +71,13 @@ async def list_collaborating_bots(
     not every Bot the user can operate. Application callers see only exact
     Bot/owner pairs delegated to that application.
     """
+    granted_pairs = caller.granted_bot_owner_pairs()
+    if granted_pairs is not None and not granted_pairs:
+        return page(0, [], request)
+
     relations = await asyncio.to_thread(
         collaborators.list_user_collaborations, user_id
     )
-    granted_pairs = caller.granted_bot_owner_pairs()
     if granted_pairs is not None:
         relations = [
             relation

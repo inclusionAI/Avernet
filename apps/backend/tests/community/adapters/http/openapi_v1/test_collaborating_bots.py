@@ -14,10 +14,8 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import require_acting_caller
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRecord
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
 from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client
 
 
