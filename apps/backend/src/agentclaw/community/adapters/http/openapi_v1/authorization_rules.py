@@ -1,9 +1,10 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_retiring import RETIRING_AUTHORIZATION
 from .models_authorization import (
     EDIT_LOCK,
-    INHERITED,
+    INHERITED as INHERITED,
     OWNER_SCOPED,
     SCAFFOLDING_MODES as SCAFFOLDING_MODES,
     Authorization,
@@ -233,8 +234,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # Reading how a bot is set up is part of working on it (the config-manifest
     # read's bar), so any collaborator at MEMBER may; rewriting a persona is an
     # ADMIN act behind the edit lock, like the manifest beside it. The retiring
-    # addresses below mirror these rows explicitly, the way the engine-runtime
-    # legacy rows do.
+    # addresses unioned in at the end mirror these rows explicitly, the way
+    # the engine-runtime legacy rows do.
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): Check(
         PermissionLevel.MEMBER
@@ -921,77 +922,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"
     ),
-    # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER, explicit=True),
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): Check(PermissionLevel.MEMBER),
-    # Identity's retiring addresses mirror the replacement's new rows, not
-    # INHERITED — a forced move, named as such. The chain has no exit:
-    # a ``Check`` replacement leaves an ``INHERITED`` twin abandoned by the
-    # twin guard unless it is exempted; the exemption exists only for twins
-    # with no ``{bot_id}`` on the path (a ``Check`` row's gate cannot read a
-    # query-string bot), and these paths carry the bot; and a ``Check`` row's
-    # handler must consume ``OwnerIdDep``, so honouring a *pinned* owner is
-    # not available either. So these retiring addresses publish and honour
-    # ``owner_id`` — a capability their frozen contract did not have, the one
-    # the resources/routines retirements below refuse via the pin — recorded
-    # here rather than hidden: the alternative was an unadjudicated owner
-    # read at an address the handler still serves. ``relocate`` does not
-    # carry route-level gate dependencies either, so the rows are what makes
-    # the twin's gate attach at all. The resources and routines retiring
-    # addresses below stay INHERITED for that opposite reason: their bots
-    # travel as query/body parameters these paths cannot offer a ``Check``
-    # row's gate, and their shims pin the owner to the caller instead
-    # (``deprecated._requery``).
-    ("GET", "/openapi/v1/bots/identity/{bot_id}"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(
-        PermissionLevel.ADMIN, EDIT_LOCK
-    ),
-    ("GET", "/openapi/v1/bots/models/{bot_id}"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("DELETE", "/openapi/v1/bots/resources"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/download"): INHERITED,
-    ("POST", "/openapi/v1/bots/resources/mkdir"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/preview"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/stat"): INHERITED,
-    ("POST", "/openapi/v1/bots/resources/upload"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines"): INHERITED,
-    ("POST", "/openapi/v1/bots/routines"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("PATCH", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
-    ("GET", "/openapi/v1/bots/skills"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/upload"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"): INHERITED,
-    ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
+    # ── Retiring addresses in ``deprecated/``: the other half of the table,
+    # a same-keyed dict unioned in unchanged — split out to keep this file
+    # inside the module-size cap (Rule 9). See
+    # ``authorization_rules_retiring`` for the rows.
+    **RETIRING_AUTHORIZATION,
 }
 
 
