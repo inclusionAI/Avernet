@@ -8,6 +8,7 @@ from src.application.services.fragment_candidate_selection import (
 )
 from src.application.services.worker_vector_match_types import FragmentProfileCandidate
 from src.domain.models.profile_fragment import FragmentMatch
+from src.domain.models.vector_search_hit import VectorSearchHit
 from src.domain.services.retrieval_logging import log_rows, log_stage
 from src.domain.services.vector_store_adapter import VectorStoreAdapter
 
@@ -23,58 +24,34 @@ def keyword_candidates(
     allowed: set[str] | None,
     enabled_types: set[str],
 ) -> list[FragmentProfileCandidate]:
-    if not query.strip():
+    if not query.strip() or limit <= 0 or allowed == set() or not enabled_types:
         return []
     try:
-        hits = store.text_search(query, limit, filters=filters)
-        grouped = {}
-        for hit in hits:
-            payload = hit.payload or {}
-            # Providers must prefilter; also fail closed for legacy implementations.
-            if any(
-                payload.get(k) not in (v if isinstance(v, list) else [v])
-                for k, v in (filters or {}).items()
-            ):
-                continue
-            kind = payload.get("fragment_type", "full")
-            if kind not in enabled_types:
-                continue
-            worker, profile = payload.get("worker_id"), payload.get("profile_id")
-            key = payload.get("profile_key") or (
-                f"{worker}:{profile}" if worker and profile else None
+        fetch_limit, lookups = limit, 0
+        while True:
+            hits = store.text_search(query, fetch_limit, filters=filters)
+            lookups += 1
+            grouped = _group_keyword_hits(
+                hits, filters, excluded, allowed, enabled_types
             )
-            if (
-                not key
-                or key in excluded
-                or (allowed is not None and key not in allowed)
-            ):
-                continue
-            candidate = grouped.setdefault(
-                key, FragmentProfileCandidate(key, 0.0, [], dict(payload))
-            )
-            if payload.get("_keyword_exact_id"):
-                candidate.metadata["_keyword_exact_id"] = True
-            candidate.fragments.append(
-                FragmentMatch(
-                    fragment_type=kind,
-                    fragment_id=hit.id,
-                    score=0.0,
-                    content=str(
-                        payload.get("content")
-                        or payload.get("searchable_text")
-                        or payload.get("content_preview")
-                        or ""
-                    ),
-                )
-            )
+            if len(grouped) >= limit or len(hits) < fetch_limit:
+                break
+            # The plugin limit counts physical fragments, not eligible profiles.
+            # Re-read a larger ranked prefix; do not append repeated pages or
+            # discard sibling fragments needed by downstream consumers.
+            fetch_limit *= 2
+        selected = list(grouped.values())[:limit]
         log_stage(
             logger,
             "keyword_search",
             hit_count=len(hits),
-            candidate_count=len(grouped),
+            candidate_count=len(selected),
+            profile_budget=limit,
+            fragment_fetch_limit=fetch_limit,
+            lookups=lookups,
             available=True,
         )
-        return list(grouped.values())
+        return selected
     except Exception as error:  # noqa: BLE001 -- Optional plugin read failure uses the documented dense fallback.
         log_stage(
             logger, "keyword_search", available=False, error_type=type(error).__name__
@@ -84,6 +61,52 @@ def keyword_candidates(
             type(error).__name__,
         )
         return []
+
+
+def _group_keyword_hits(
+    hits: list[VectorSearchHit],
+    filters: dict | None,
+    excluded: set[str],
+    allowed: set[str] | None,
+    enabled_types: set[str],
+) -> dict[str, FragmentProfileCandidate]:
+    grouped = {}
+    for hit in hits:
+        payload = hit.payload or {}
+        # Providers must prefilter; also fail closed for legacy implementations.
+        if any(
+            payload.get(k) not in (v if isinstance(v, list) else [v])
+            for k, v in (filters or {}).items()
+        ):
+            continue
+        kind = payload.get("fragment_type", "full")
+        if kind not in enabled_types:
+            continue
+        worker, profile = payload.get("worker_id"), payload.get("profile_id")
+        key = payload.get("profile_key") or (
+            f"{worker}:{profile}" if worker and profile else None
+        )
+        if not key or key in excluded or (allowed is not None and key not in allowed):
+            continue
+        candidate = grouped.setdefault(
+            key, FragmentProfileCandidate(key, 0.0, [], dict(payload))
+        )
+        if payload.get("_keyword_exact_id"):
+            candidate.metadata["_keyword_exact_id"] = True
+        candidate.fragments.append(
+            FragmentMatch(
+                fragment_type=kind,
+                fragment_id=hit.id,
+                score=0.0,
+                content=str(
+                    payload.get("content")
+                    or payload.get("searchable_text")
+                    or payload.get("content_preview")
+                    or ""
+                ),
+            )
+        )
+    return grouped
 
 
 def fuse_candidates(

@@ -117,6 +117,14 @@ The application also retains profile exclusions, metadata scope and enabled
 fragment types. Both routes use the existing fragment search limit. Hits are
 deduplicated by complete `profile_key`, consistent with the dense profile contract;
 fragments of one profile never consume multiple rerank slots.
+The plugin `text_search` limit still counts physical fragment hits. The lexical
+candidate selector doubles the requested ranked prefix until it has enough
+eligible unique profiles or the provider returns fewer hits than requested.
+Grouping happens after exclusions, allowed-profile scope and fragment-type checks.
+The first eligible hit determines each profile's lexical rank (highest matching
+fragment score, with exact worker-ID matches first); sibling hits already fetched
+are retained without duplicate appends across lookups. This does not change the
+sparse scoring formula or the dense fragment recall/aggregation budgets.
 
 For `N = topK * expand_factor`, take at most N unique dense max/weighted candidates
 and N unique keyword candidates. Dense eligibility uses the original aggregate

@@ -90,6 +90,88 @@ def test_exact_worker_id_first_and_preview_only_records_searchable(store):
     assert store.text_search("   ", 10) == []
 
 
+@pytest.mark.parametrize("fragment_count", [3, 130])
+def test_keyword_budget_counts_unique_profiles_not_fragments(store, fragment_count):
+    from src.application.services.keyword_candidate_selection import keyword_candidates
+
+    store.upsert(
+        [point("many", "编程 " * 10, kind=f"skills:{i}", fragment_type="skills")
+         for i in range(fragment_count)]
+        + [point("second", "编程 编程"), point("third", "编程")]
+        + [point("hidden", "编程 " * 20, availability="private")]
+    )
+    filters = {"runtime_state": ["online"], "availability": ["public"]}
+    candidates = keyword_candidates(
+        store, "编程", 3, filters, set(), None, {"full", "skills"}
+    )
+    assert [candidate.profile_key for candidate in candidates] == [
+        "many:default", "second:default", "third:default",
+    ]
+    # Exhaustion returns fewer unique profiles, never duplicate padding.
+    assert len(keyword_candidates(
+        store, "编程", 10, filters, set(), None, {"full", "skills"}
+    )) == 3
+    assert len(candidates[0].fragments) == fragment_count
+
+
+def test_exact_id_budget_counts_profiles_and_preserves_priority(store):
+    from src.application.services.keyword_candidate_selection import keyword_candidates
+
+    store.upsert(
+        [point("target", "irrelevant", kind=f"skills:{i}", fragment_type="skills")
+         for i in range(130)]
+        + [VectorPoint(id="target:other:full", vector=[0., 1.], payload={
+            "worker_id": "target", "profile_id": "other", "profile_key": "target:other",
+            "fragment_type": "full", "content": "irrelevant", "runtime_state": "online",
+        }), point("other", "target " * 20)]
+    )
+    candidates = keyword_candidates(
+        store, "target", 3, {"runtime_state": ["online"]}, set(), None,
+        {"full", "skills"},
+    )
+    assert {candidate.profile_key for candidate in candidates[:2]} == {
+        "target:default", "target:other",
+    }
+    assert all(candidate.metadata["_keyword_exact_id"] for candidate in candidates[:2])
+    assert candidates[2].profile_key == "other:default"
+
+
+@pytest.mark.parametrize("scope", ["excluded", "allowed", "disabled_type"])
+def test_keyword_refill_counts_only_eligible_profiles(store, scope):
+    from src.application.services.keyword_candidate_selection import keyword_candidates
+
+    store.upsert(
+        [point("many", "编程 " * 10, kind=f"skills:{i}", fragment_type="skills")
+         for i in range(10)]
+        + [point("second", "编程 编程"), point("third", "编程")]
+    )
+    candidates = keyword_candidates(
+        store, "编程", 2, None,
+        {"many:default"} if scope == "excluded" else set(),
+        {"second:default", "third:default"} if scope == "allowed" else None,
+        {"full"} if scope == "disabled_type" else {"full", "skills"},
+    )
+    assert [candidate.profile_key for candidate in candidates] == [
+        "second:default", "third:default",
+    ]
+
+
+def test_keyword_refill_failure_does_not_return_a_partial_pool(store, monkeypatch):
+    from src.application.services.keyword_candidate_selection import keyword_candidates
+
+    store.upsert([point("many", "编程", kind=f"skills:{i}", fragment_type="skills")
+                  for i in range(3)])
+    search = store.text_search
+
+    def interrupted_search(query, top_k, filters=None):
+        if top_k > 2:
+            raise RuntimeError("keyword index unavailable during refill")
+        return search(query, top_k, filters)
+
+    monkeypatch.setattr(store, "text_search", interrupted_search)
+    assert keyword_candidates(store, "编程", 2, None, set(), None, {"skills"}) == []
+
+
 def test_keyword_index_tracks_rebuild_update_delete_and_tombstones(store):
     backend = store._persistence
     backend.save(point("bot", "旧名字"))
