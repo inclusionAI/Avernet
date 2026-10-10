@@ -691,3 +691,33 @@ def test_submission_error_cleanup_never_clears_a_newer_operation(fenced):
         clear.assert_not_called()
     finally:
         current_restart.reset(context_reset_handle)
+
+
+@pytest.mark.parametrize('phase', ['RESTARTING', 'WAITING_READY'])
+@pytest.mark.parametrize('queue_status', [TaskStatus.PENDING, TaskStatus.RUNNING])
+@pytest.mark.parametrize('binding_cleared', [False, True])
+@pytest.mark.asyncio
+async def test_duplicate_during_rebuild_never_starts_another_backup(
+    setup, phase, queue_status, binding_cleared
+):
+    s = setup
+    first = await submit(s)
+    original_task = task(s)
+    original_task.status = queue_status
+    s.repo.bot['ext'][KEY]['phase'] = phase
+    s.binding['status'] = 'PENDING'
+    if binding_cleared:
+        s.repo.bot['binding_id'] = None
+        s.binding.clear()
+    with patch(
+        'agentclaw.community.core.bot_management.engines.aicoding.restart_baas.'
+        'AicodingBaasRestart.preflight'
+    ) as preflight, patch.object(s.strategy, 'prepare_restart') as backup:
+        second = await submit(s)
+    assert second['restart_operation_id'] == first['restart_operation_id']
+    assert second['restart_in_progress'] is True
+    assert task(s) is original_task
+    assert len(s.queue.tasks) == 1
+    preflight.assert_not_called()
+    backup.assert_not_called()
+    s.service.restart_bot.assert_not_called()
