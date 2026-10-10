@@ -252,7 +252,8 @@
     "bcn": {
       "base_url": "http://localhost:21000",
       "provider_admin_token": "",
-      "provider_id": ""
+      "provider_id": "",
+      "provider_registration_enabled": false
     },
     "bcsfuse": {
       "base_url": "https://bcsfuse-pre.teamclaw.com",

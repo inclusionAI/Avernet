@@ -73,12 +73,15 @@ class BcnConfig:
     prod/pre selection).
     Neutral empty defaults — the community build embeds no BCN host or provider
     credentials. Empty host ⇒ BCN calls degrade; empty provider id / token ⇒
-    ``register_provider_bot`` skips.
+    ``register_provider_bot`` skips. ``provider_registration_enabled`` is the
+    simulator/local-k8s opt-in for the same standard Provider path in dev;
+    prod/pre rely on their environment gate and leave it off.
     """
 
     base_url: str = ""
     provider_id: str = ""
     provider_admin_token: str = ""
+    provider_registration_enabled: bool = False
 
 
 # ── Task runner dispatch (community, public) ────────────────────────────
