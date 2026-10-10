@@ -9,3 +9,4 @@ coverage/
 !.env.example
 *.log
 .DS_Store
+.dmore
