@@ -84,6 +84,17 @@ class _FakeScheduler:
         self.unregistered.append(bot_id)
 
 
+class _FakeRunner:
+    """Records push_install_bbs_skills (fire-and-forget skill install) calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def push_install_bbs_skills(self, *, bot_id):
+        self.calls.append({"op": "install", "bot_id": bot_id})
+        return {"action": "install_skills", "bot_id": bot_id}
+
+
 # ---------------------------------------------------------------------------
 # POST browse-subscription — join (openclaw / B-scheme) only
 # ---------------------------------------------------------------------------
@@ -109,6 +120,7 @@ async def test_upsert_creates_openclaw_cron_under_resolved_owner():
     response = Response()
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
+    runner = _FakeRunner()
     payload = await upsert_bbs_browse_subscription(
         body=BrowsSubscriptionJoinRequest(note="self cron"),
         bot_id="bot-a",
@@ -118,6 +130,7 @@ async def test_upsert_creates_openclaw_cron_under_resolved_owner():
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
+        runner=runner,
     )
     assert response.status_code == 201
     assert isinstance(payload.data, SubscriptionItem)
@@ -125,6 +138,7 @@ async def test_upsert_creates_openclaw_cron_under_resolved_owner():
     # B-scheme: OpenClaw cron installed under the resolved owner; no scheduler job.
     assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
     assert scheduler.registered == [] and scheduler.unregistered == []
+    assert runner.calls == [{"op": "install", "bot_id": "bot-a"}]
 
 
 @pytest.mark.asyncio
@@ -147,6 +161,7 @@ async def test_upsert_no_body_joins_without_remark():
     response = Response()
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
+    runner = _FakeRunner()
     await upsert_bbs_browse_subscription(
         body=None,
         bot_id="bot-a",
@@ -156,6 +171,7 @@ async def test_upsert_no_body_joins_without_remark():
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
+        runner=runner,
     )
     assert response.status_code == 201
     assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
@@ -178,6 +194,7 @@ async def test_upsert_swaps_legacy_framework_to_openclaw_unregisters_scheduler()
     response = Response()
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
+    runner = _FakeRunner()
     await upsert_bbs_browse_subscription(
         body=BrowsSubscriptionJoinRequest(),
         bot_id="bot-a",
@@ -187,6 +204,7 @@ async def test_upsert_swaps_legacy_framework_to_openclaw_unregisters_scheduler()
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
+        runner=runner,
     )
     # An update, not a first create, reports 200. The OpenClaw cron is installed
     # and the legacy framework job the bot used to carry is taken down.

@@ -93,6 +93,7 @@ async def test_upsert_subscription_openclaw_ensures_cron():
     response = Response()
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
+    runner = _FakeRunner()
     payload = await upsert_subscription_internal(
         body=BrowsSubscriptionJoinRequest(note="self cron"),
         bot_id="bot-a",
@@ -102,6 +103,7 @@ async def test_upsert_subscription_openclaw_ensures_cron():
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
+        runner=runner,
     )
     assert response.status_code == 201
     assert isinstance(payload.data, SubscriptionItem)
@@ -109,6 +111,7 @@ async def test_upsert_subscription_openclaw_ensures_cron():
     # openclaw create -> backend upserts the fixed-name cron; no scheduler job
     assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
     assert scheduler.registered == [] and scheduler.unregistered == []
+    assert runner.calls == [{"op": "install", "bot_id": "bot-a"}]
 
 
 @pytest.mark.asyncio
@@ -125,6 +128,7 @@ async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_sche
 
     cron_manager = _FakeCronManager()
     scheduler = _FakeScheduler()
+    runner = _FakeRunner()
     response = Response()
     await upsert_subscription_internal(
         body=BrowsSubscriptionJoinRequest(),
@@ -135,6 +139,7 @@ async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_sche
         service=Service(),
         cron_manager=cron_manager,
         scheduler=scheduler,
+        runner=runner,
     )
     assert response.status_code == 200
     assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
@@ -340,6 +345,10 @@ class _FakeRunner:
     async def push_cron_event(self, *, bot_id, action, timeout=30.0):
         self.calls.append({"op": "cron", "bot_id": bot_id, "action": action})
         return {"run_id": "run_cron", "session_id": None}
+
+    async def push_install_bbs_skills(self, *, bot_id):
+        self.calls.append({"op": "install", "bot_id": bot_id})
+        return {"action": "install_skills", "bot_id": bot_id}
 
 
 @pytest.mark.asyncio
