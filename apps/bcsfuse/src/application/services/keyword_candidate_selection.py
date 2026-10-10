@@ -74,8 +74,15 @@ def _group_keyword_hits(
     for hit in hits:
         payload = hit.payload or {}
         # Providers must prefilter; also fail closed for legacy implementations.
+        # Array payloads match when any element matches, just like MatchAny
+        # and MatchValue in the provider. Strings remain exact scalar matches.
         if any(
-            payload.get(k) not in (v if isinstance(v, list) else [v])
+            not any(
+                actual in (v if isinstance(v, list) else [v])
+                for actual in (
+                    payload[k] if isinstance(payload.get(k), list) else [payload.get(k)]
+                )
+            )
             for k, v in (filters or {}).items()
         ):
             continue

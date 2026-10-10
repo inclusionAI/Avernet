@@ -78,6 +78,51 @@ def test_filters_apply_before_top_k_and_exact_id_does_not_bypass_them(store):
     )
 
 
+@pytest.mark.parametrize("requested", ["backend", ["backend"], ["frontend", "backend"]])
+def test_keyword_candidates_preserve_list_payload_matches(store, requested):
+    from src.application.services.keyword_candidate_selection import keyword_candidates
+
+    store.upsert([
+        point("match", "编程", domains=["backend", "data"]),
+        point("wrong-domain", "编程", domains=["mobile"]),
+        point("offline", "编程", domains=["backend"], runtime_state="offline"),
+    ])
+    candidates = keyword_candidates(
+        store, "编程", 10,
+        {"domains": requested, "runtime_state": ["online"]},
+        set(), None, {"full"},
+    )
+    assert [candidate.profile_key for candidate in candidates] == ["match:default"]
+
+
+@pytest.mark.parametrize("metadata,requested,expected", [
+    ({"domains": ["backend", "data"]}, ["mobile", "backend"], True),
+    ({"domains": ["backend"]}, "backend", True),
+    ({"domains": "backend"}, ["backend"], True),
+    ({"domains": "backend"}, "backend", True),
+    ({"domains": ["mobile"]}, ["backend"], False),
+    ({"domains": []}, ["backend"], False),
+    ({"domains": ["backend"]}, [], False),
+    ({}, ["backend"], False),
+    ({"domains": None}, ["backend"], False),
+    ({"domains": "backend-services"}, "backend", False),
+])
+def test_keyword_legacy_filter_uses_contains_any(metadata, requested, expected):
+    from src.application.services.keyword_candidate_selection import _group_keyword_hits
+    from src.domain.models.vector_search_hit import VectorSearchHit
+
+    # Legacy providers may return unfiltered hits; application filtering must
+    # preserve valid array matches without admitting mismatches or substrings.
+    hit = VectorSearchHit(
+        id="worker:default:full", score=1.0,
+        payload={"profile_key": "worker:default", "fragment_type": "full", **metadata},
+    )
+    candidates = _group_keyword_hits(
+        [hit], {"domains": requested}, set(), None, {"full"}
+    )
+    assert list(candidates) == (["worker:default"] if expected else [])
+
+
 def test_exact_worker_id_first_and_preview_only_records_searchable(store):
     store.upsert(
         [
