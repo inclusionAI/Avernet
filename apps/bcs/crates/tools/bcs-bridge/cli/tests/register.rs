@@ -80,7 +80,7 @@ fn diagnostic(output: &Output) -> String {
 async fn gateway_registration_uses_the_explicit_provider_bot_ref_and_default_engine() {
     let home = tempfile::tempdir().unwrap();
     let api = Api::new().await;
-    let output = register(home.path(), &["--api-url", &api.base, "--webhook-url", "https://hook.example/webhook",
+    let output = register(home.path(), &["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook",
         "--provider-bot-ref", "worker-1"]).output().await.unwrap();
     assert!(output.status.success(), "{}", diagnostic(&output));
     assert!(!diagnostic(&output).contains(BOT_TOKEN));
@@ -119,12 +119,12 @@ async fn plugin_registration_generates_a_provider_bot_ref_when_none_is_given() {
 async fn missing_explicit_inputs_are_rejected_before_registration() {
     let api = Api::new().await;
     for (args, expected) in [
-        (vec!["--webhook-url", "https://hook.example/webhook", "--provider-bot-ref", "worker-1"], "--api-url"),
-        (vec!["--api-url", &api.base, "--webhook-url", "https://hook.example/webhook"], "--provider-bot-ref"),
-        (vec!["--api-url", &api.base, "--mode", "plugin"], "--upstream-url"),
-        (vec!["--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-bot-ref", "bad ref"], "--provider-bot-ref"),
-        (vec!["--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--engine", "bogus"], "claude-code, codex"),
-        (vec!["--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-auth", "unknown-auth"], "static-bearer"),
+        (vec!["--mode", "gateway", "--webhook-url", "https://hook.example/webhook", "--provider-bot-ref", "worker-1"], "--api-url"),
+        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook"], "--provider-bot-ref"),
+        (vec!["--api-url", &api.base], "--upstream-url"),
+        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-bot-ref", "bad ref"], "--provider-bot-ref"),
+        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--engine", "bogus"], "claude-code, codex"),
+        (vec!["--mode", "gateway", "--api-url", &api.base, "--webhook-url", "https://hook.example/webhook", "--provider-auth", "unknown-auth"], "static-bearer"),
     ] {
         let home = tempfile::tempdir().unwrap();
         let output = register(home.path(), &args).output().await.unwrap();
