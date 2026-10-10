@@ -457,11 +457,30 @@ impl ProviderManagementService for ProviderManagement {
         // binding retains the identity needed for retries. Unbound legacy bots
         // have no such durable lookup key, so keep the registry identity active
         // until cleanup succeeds and a failed request remains retryable.
+        //
+        // Either way the Bot retires through the SAME governed single-
+        // transaction deletion boundary the leave lane and the SQL provider
+        // tombstone use (plan Task 5/17, spec §12.5): a plain soft delete
+        // would tombstone the Bot while leaving its approved owner/manager
+        // edges and PENDING transfers behind, and the strict controllable
+        // union then fails the former owner's WHOLE mine read with a
+        // CorruptAuthority dangling edge. The Provider admin token is a
+        // service identity: the audit records the honest System context,
+        // never a User ID (the same `bcs-provider-tombstone` marker the
+        // durable tombstone lane writes).
+        let operation = bcs_service_api::types::BotOperationContext {
+            operation_id: uuid::Uuid::new_v4().to_string(),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "bcs-provider-tombstone".to_string(),
+                effective_actor_id: format!("provider:{}", command.provider_id),
+            },
+        };
         let deleted = if cleanup_before_soft_delete {
             self.cleanup_deleted_bot(&bot_uuid).await?;
-            self.registry.soft_delete(&bot_uuid).await
+            self.registry.retire_bot_lifecycle(&bot_uuid, operation).await?
         } else {
-            let deleted = self.registry.soft_delete(&bot_uuid).await || was_active_binding;
+            let deleted =
+                self.registry.retire_bot_lifecycle(&bot_uuid, operation).await? || was_active_binding;
             self.cleanup_deleted_bot(&bot_uuid).await?;
             deleted
         };

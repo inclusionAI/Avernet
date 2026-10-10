@@ -82,32 +82,89 @@ fn session_to_json_with_state_machine_run(
 /// `BotQueryService::list_my_bots` (the Task-12 mine projection: live
 /// owner/manager union, never the historical `created_by` listing — plan
 /// Task 12 fix round, spec §12.4).
+///
+/// The mine projection is read page by page until the projection's `total`
+/// is covered (Finding F3, PR #2568 full re-review): the previous single
+/// `offset=0, limit=500` call silently denied every page-2+ Bot of a
+/// >500-Bot Human. Only real `ActorKind::Bot` rows enter the union — the
+/// projection legitimately carries the caller's own Human self row (spec
+/// §4.1 compat projection), which is self identity, never a controlled Bot.
 pub(crate) async fn current_controllable_bot_ids(
     state: &HttpAppState,
     staff_no: &str,
 ) -> Vec<String> {
-    match state
-        .services
-        .bot_query
-        .list_my_bots(bcs_service_api::MyBotsCommand {
-            staff_no: staff_no.to_string(),
-            offset: 0,
-            limit: 500,
-            active_only: false,
-        })
-        .await
-    {
-        Ok(page) => page.items.into_iter().map(|bot| bot.bot_uuid).collect(),
-        Err(error) => {
+    current_controllable_bot_ids_paged(state, staff_no, CONTROLLABLE_BOTS_PAGE_SIZE).await
+}
+
+/// Single-page size for the union read. 500 keeps the whole realistic mine
+/// on one round trip; tests shrink it to spread a few rows across pages.
+pub(crate) const CONTROLLABLE_BOTS_PAGE_SIZE: u64 = 500;
+
+/// Hard guard on the page loop: even a misbehaving backend (bogus `total`,
+/// items beyond it) cannot drive unbounded reads. A mine larger than the cap
+/// truncates — tail Bots then miss membership matches, the same fail-closed
+/// direction every error lane takes; realistic mines are orders of magnitude
+/// below it.
+pub(crate) const CONTROLLABLE_BOTS_MAX_IDS: u64 = 20_000;
+
+/// Size-bounded page loop behind [`current_controllable_bot_ids`]. Every page
+/// read fails closed (warn + empty) — an error on ANY page denies, never
+/// partially allows.
+pub(crate) async fn current_controllable_bot_ids_paged(
+    state: &HttpAppState,
+    staff_no: &str,
+    page_size: u64,
+) -> Vec<String> {
+    let page_size = page_size.max(1);
+    let mut ids: Vec<String> = Vec::new();
+    let mut offset = 0u64;
+    loop {
+        let page = match state
+            .services
+            .bot_query
+            .list_my_bots(bcs_service_api::MyBotsCommand {
+                staff_no: staff_no.to_string(),
+                offset,
+                limit: page_size,
+                active_only: false,
+            })
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    error = %error,
+                    staff_no,
+                    offset,
+                    "legacy session route failed to resolve the controllable Bot union; failing closed"
+                );
+                return Vec::new();
+            }
+        };
+        let returned = page.items.len() as u64;
+        ids.extend(
+            page
+                .items
+                .into_iter()
+                .filter(|entry| entry.actor_kind == ActorKind::Bot)
+                .map(|entry| entry.bot_uuid),
+        );
+        offset += returned;
+        if returned == 0 || offset >= page.total {
+            break;
+        }
+        if offset >= CONTROLLABLE_BOTS_MAX_IDS {
             tracing::warn!(
                 request_id = %bcs_observability::CurrentRequestId,
-                error = %error,
                 staff_no,
-                "legacy session route failed to resolve the controllable Bot union; failing closed"
+                offset,
+                "controllable Bot union page loop hit the hard id cap; truncating fail-closed"
             );
-            Vec::new()
+            break;
         }
     }
+    ids
 }
 
 pub(crate) async fn human_has_session_access(
@@ -2411,6 +2468,275 @@ mod tests {
         assert!(
             text.contains("SELECT owner FROM edge_grants"),
             "the server-side log must retain the SQL/row detail"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // current_controllable_bot_ids: full pagination + Bot-only filter
+    // (PR #2568 full re-review Finding F3).
+    // ---------------------------------------------------------------
+
+    /// A `BotQueryService` stub answering ONLY the mine lane and recording
+    /// every `(offset, limit)` page read, honoring the store's real
+    /// skip/take window semantics.
+    #[derive(Default)]
+    struct MinePageStub {
+        entries: Vec<bcs_service_api::BotQueryEntry>,
+        calls: Mutex<Vec<(u64, u64)>>,
+        /// When set, `list_my_bots` ALWAYS returns `limit` synthetic Bot
+        /// entries and reports this fake `total` (a misbehaving / far larger
+        /// mine), exercising the bounded page loop.
+        infinite_total: Option<u64>,
+    }
+
+    impl MinePageStub {
+        fn entry(bot_uuid: &str, actor_kind: ActorKind) -> bcs_service_api::BotQueryEntry {
+            bcs_service_api::BotQueryEntry {
+                bot_uuid: bot_uuid.to_string(),
+                capabilities: bcs_service_api::BotCapabilities::default(),
+                visibility: "protected".to_string(),
+                status: bcs_service_api::ActorStatus::Hidden,
+                actor_kind,
+                env: None,
+                dynamic_status: bcs_service_api::DynamicStatusResponse {
+                    status: "offline".to_string(),
+                },
+                created_by: None,
+                user_visibility: "protected".to_string(),
+                friend_ext: serde_json::Map::new(),
+                friend_check_in_strategy: "approval".to_string(),
+                is_friend: None,
+                access_relation: Some("owner".to_string()),
+            }
+        }
+    }
+
+    fn operation_not_configured() -> bcs_service_api::BotUseCaseError {
+        bcs_service_api::BotUseCaseError::Service(bcs_service_api::ServiceError::InvalidOperation {
+            message: "not configured in this stub".to_string(),
+            request_id: None,
+        })
+    }
+
+    #[async_trait::async_trait]
+    impl bcs_service_api::BotQueryService for MinePageStub {
+        async fn list_bots(
+            &self,
+            _command: bcs_service_api::BotListCommand,
+        ) -> Result<bcs_service_api::BotListResult, bcs_service_api::BotUseCaseError> {
+            Err(operation_not_configured())
+        }
+
+        async fn get_bot(
+            &self,
+            _command: bcs_service_api::BotDetailCommand,
+        ) -> Result<bcs_service_api::BotDetailResult, bcs_service_api::BotUseCaseError> {
+            Err(operation_not_configured())
+        }
+
+        async fn get_visibility(
+            &self,
+            _command: bcs_service_api::BotVisibilityQueryCommand,
+        ) -> Result<bcs_service_api::BotVisibilityQueryResult, bcs_service_api::BotUseCaseError>
+        {
+            Err(operation_not_configured())
+        }
+
+        async fn list_my_bots(
+            &self,
+            command: bcs_service_api::MyBotsCommand,
+        ) -> Result<bcs_service_api::BotPagedListResult, bcs_service_api::BotUseCaseError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((command.offset, command.limit));
+            if let Some(infinite) = self.infinite_total {
+                let start = command.offset;
+                let items = (start..start + command.limit)
+                    .map(|index| Self::entry(&format!("bot-synthetic-{}", index), ActorKind::Bot))
+                    .collect();
+                return Ok(bcs_service_api::BotPagedListResult {
+                    items,
+                    total: infinite,
+                    offset: command.offset,
+                    limit: command.limit,
+                });
+            }
+            let start = (command.offset as usize).min(self.entries.len());
+            let end = start
+                .saturating_add(command.limit as usize)
+                .min(self.entries.len());
+            Ok(bcs_service_api::BotPagedListResult {
+                items: self.entries[start..end].to_vec(),
+                total: self.entries.len() as u64,
+                offset: command.offset,
+                limit: command.limit,
+            })
+        }
+    }
+
+    fn mine_state(bot_query: Arc<dyn bcs_service_api::BotQueryService>) -> HttpAppState {
+        HttpAppState::new(
+            bcs_services_container::Services::builder()
+                .bot_query(bot_query)
+                .build_for_test(),
+        )
+    }
+
+    #[tokio::test]
+    async fn controllable_bot_ids_excludes_the_human_self_projection_row() {
+        // The mine projection legitimately carries the caller's own Human
+        // self row (spec §4.1 compatibility projection); it is NOT a Bot the
+        // Human "controls" and must never reach the controllable-id union.
+        let stub = Arc::new(MinePageStub {
+            entries: vec![
+                MinePageStub::entry("bot-alpha", ActorKind::Bot),
+                MinePageStub::entry("bot-beta", ActorKind::Bot),
+                MinePageStub::entry("bot-gamma", ActorKind::Bot),
+                MinePageStub::entry("human_u1", ActorKind::Human),
+            ],
+            calls: Mutex::new(Vec::new()),
+            infinite_total: None,
+        });
+        let state = mine_state(stub.clone());
+        let ids = current_controllable_bot_ids_paged(&state, "u1", 2).await;
+        assert_eq!(
+            ids,
+            vec!["bot-alpha".to_string(), "bot-beta".to_string(), "bot-gamma".to_string()],
+            "the Human self projection row must never enter the controllable union"
+        );
+        let calls = stub.calls.lock().unwrap().clone();
+        assert!(
+            calls.iter().any(|(offset, _)| *offset == 0),
+            "the helper must read the union pages: {calls:?}"
+        );
+    }
+
+    /// A variant stub that starts failing `list_my_bots` from a given offset
+    /// (a mid-union read error).
+    struct FailFromOffsetStub {
+        entries: Vec<bcs_service_api::BotQueryEntry>,
+        fail_from_offset: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl bcs_service_api::BotQueryService for FailFromOffsetStub {
+        async fn list_bots(
+            &self,
+            _command: bcs_service_api::BotListCommand,
+        ) -> Result<bcs_service_api::BotListResult, bcs_service_api::BotUseCaseError> {
+            Err(operation_not_configured())
+        }
+
+        async fn get_bot(
+            &self,
+            _command: bcs_service_api::BotDetailCommand,
+        ) -> Result<bcs_service_api::BotDetailResult, bcs_service_api::BotUseCaseError> {
+            Err(operation_not_configured())
+        }
+
+        async fn get_visibility(
+            &self,
+            _command: bcs_service_api::BotVisibilityQueryCommand,
+        ) -> Result<bcs_service_api::BotVisibilityQueryResult, bcs_service_api::BotUseCaseError>
+        {
+            Err(operation_not_configured())
+        }
+
+        async fn list_my_bots(
+            &self,
+            command: bcs_service_api::MyBotsCommand,
+        ) -> Result<bcs_service_api::BotPagedListResult, bcs_service_api::BotUseCaseError> {
+            if command.offset >= self.fail_from_offset {
+                return Err(operation_not_configured());
+            }
+            let start = (command.offset as usize).min(self.entries.len());
+            let limit = command.limit as usize;
+            let end = (start + limit).min(self.entries.len());
+            Ok(bcs_service_api::BotPagedListResult {
+                items: self.entries[start..end].to_vec(),
+                total: self.entries.len() as u64,
+                offset: command.offset,
+                limit: command.limit,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn controllable_bot_ids_paginate_beyond_the_first_page() {
+        // Four mine rows read at page size 2: page 2 carries a real Bot plus
+        // the Human self row. All three Bots must come back, the Human row
+        // must not, and the helper must actually walk the pages.
+        let stub = Arc::new(MinePageStub {
+            entries: vec![
+                MinePageStub::entry("bot-alpha", ActorKind::Bot),
+                MinePageStub::entry("bot-beta", ActorKind::Bot),
+                MinePageStub::entry("bot-gamma", ActorKind::Bot),
+                MinePageStub::entry("human_u1", ActorKind::Human),
+            ],
+            calls: Mutex::new(Vec::new()),
+            infinite_total: None,
+        });
+        let state = mine_state(stub.clone());
+        let ids = current_controllable_bot_ids_paged(&state, "u1", 2).await;
+        assert_eq!(
+            ids,
+            vec![
+                "bot-alpha".to_string(),
+                "bot-beta".to_string(),
+                "bot-gamma".to_string(),
+            ],
+            "a Bot on any page of the mine union must be authorized"
+        );
+        let calls = stub.calls.lock().unwrap();
+        assert_eq!(
+            calls.as_slice(),
+            [(0, 2), (2, 2)],
+            "the union read must walk every page until total is covered"
+        );
+    }
+
+    #[tokio::test]
+    async fn controllable_bot_ids_fail_closed_when_any_page_errors() {
+        // A page-2 read error denies the WHOLE union (warn + empty), exactly
+        // like a page-1 error — never a partial allowance.
+        let stub = Arc::new(FailFromOffsetStub {
+            entries: vec![
+                MinePageStub::entry("bot-alpha", ActorKind::Bot),
+                MinePageStub::entry("bot-beta", ActorKind::Bot),
+                MinePageStub::entry("bot-gamma", ActorKind::Bot),
+            ],
+            fail_from_offset: 2,
+        });
+        let state = mine_state(stub);
+        let ids = current_controllable_bot_ids_paged(&state, "u1", 2).await;
+        assert!(
+            ids.is_empty(),
+            "any later page error must fail the whole union closed, got {ids:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn controllable_bot_ids_page_loop_is_bounded_by_the_hard_cap() {
+        // A backend that always returns full pages with an inflated total
+        // cannot drive the read unbounded: the loop stops at the hard cap
+        // (fail-closed truncation for a pathological mine).
+        let stub = Arc::new(MinePageStub {
+            entries: Vec::new(),
+            calls: Mutex::new(Vec::new()),
+            infinite_total: Some(u64::MAX),
+        });
+        let state = mine_state(stub.clone());
+        let ids = current_controllable_bot_ids_paged(&state, "u1", 2).await;
+        assert_eq!(
+            ids.len(),
+            CONTROLLABLE_BOTS_MAX_IDS as usize,
+            "the paginated union read must stop at the hard cap"
+        );
+        assert_eq!(
+            stub.calls.lock().unwrap().len(),
+            (CONTROLLABLE_BOTS_MAX_IDS / 2) as usize,
+            "the page loop must issue exactly cap/page_size reads"
         );
     }
 }

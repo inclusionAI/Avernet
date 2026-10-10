@@ -16,7 +16,7 @@ fn consumer_history_fixture_matches_actual_wire_projection() {
 async fn chat_loop_outputs_preserve_content_role_identity_and_execution_metadata() {
     let (service, repo, sessions, _, session_id) =
         service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
-    sessions.add_participant(&session_id, Participant::human("human-1", ParticipantRole::Observer))
+    sessions.add_participant(&session_id, Participant::human("human-1", ParticipantRole::Observer), &session_write_operation())
         .await.expect("add Human author");
     let metadata = serde_json::json!({"state_machine": {
         "event": "output", "run_id": "sm-loop", "node_id": "cycle__2__review",

@@ -869,7 +869,10 @@ async fn scope_change_retires_binding_and_replaces_connection() {
 }
 
 /// Persistent authority-read failures fail the whole enqueue batch closed,
-/// never queue a partially verified target, and stop querying per frame.
+/// never queue a partially verified target, and DEREGISTER both bindings'
+/// protected subscriptions in the SAME event (spec §17.2): later events
+/// authorize NOTHING for the dead bindings — the connections themselves
+/// stay open and merely go silent on the broadcast lanes.
 #[tokio::test]
 async fn persistent_authority_failure_fails_batch_closed_and_stops_querying() {
     let (registry, hook) = registry_with_hook();
@@ -906,8 +909,9 @@ async fn persistent_authority_failure_fails_batch_closed_and_stops_querying() {
     assert!(!gate.binding_active(a.binding_id));
     assert!(!gate.binding_active(b.binding_id));
 
-    // Repeated pushes stay bounded: one enqueue batch read per event, no
-    // per-frame retry loop for a closed binding.
+    // Repeated pushes stay bounded AND stop querying the dead bindings: the
+    // failed event already deregistered both protected subscriptions, so
+    // later events include NO authorize read for them.
     for _ in 0..3 {
         assert_eq!(
             registry
@@ -917,14 +921,120 @@ async fn persistent_authority_failure_fails_batch_closed_and_stops_querying() {
         );
     }
     let reads = hook.total_authorize_reads() - reads_at_start;
-    assert_eq!(reads, 4, "one batch read per push; the backlog itself reads nothing");
+    assert_eq!(reads, 1, "only the failed event's single batch read; the backlog itself reads nothing");
     assert!(!gate.binding_active(a.binding_id));
+    assert_eq!(hook.authorize_reads_for("user-a", "bot-view-a", session), 1);
+    assert_eq!(hook.authorize_reads_for("user-b", "bot-view-b", session), 1);
     assert_eq!(socket_count(&mut a.socket).len(), 0);
     assert_eq!(socket_count(&mut b.socket).len(), 0);
-    assert!(matches!(
-        hook.batch_sizes().as_slice(),
-        &[2, 2, 2, 2]
-    ));
+    assert!(matches!(hook.batch_sizes().as_slice(), &[2]));
+    // Both protected subscriptions left the registry: no later event can
+    // enqueue any frame of any kind for the failed batch's targets.
+    assert_eq!(registry.connection_count(session).await, 0);
+    // The connections themselves were NOT closed: their writer queues still
+    // accept and deliver direct PublicControl sends (dispatcher-originated
+    // request/response frames); the broadcast lanes just went silent.
+    a.tx.send(WorkbenchOutbound::PublicControl("task16-db-direct-a".to_string()))
+        .await
+        .unwrap();
+    b.tx.send(WorkbenchOutbound::PublicControl("task16-db-direct-b".to_string()))
+        .await
+        .unwrap();
+    drain_into_socket(&mut a.rx, gate.clone(), a.socket_tx.clone(), 1).await;
+    drain_into_socket(&mut b.rx, gate.clone(), b.socket_tx.clone(), 1).await;
+    assert_eq!(socket_count(&mut a.socket).len(), 1);
+    assert_eq!(socket_count(&mut b.socket).len(), 1);
+}
+
+/// An InvalidateBinding decision deregisters that binding's protected
+/// subscription from the registry in the SAME event (spec §17.2): later
+/// events authorize only the surviving binding — the dead binding costs
+/// ZERO further authority reads — while the neighbor keeps delivering and
+/// the invalidated connection itself stays open (its queue merely goes
+/// silent).
+#[tokio::test]
+async fn invalidated_binding_deregisters_and_later_events_stop_querying() {
+    let (registry, hook) = registry_with_hook();
+    let gate = registry.protected_delivery();
+    let session = "session-task16-dead";
+    let mut a = ProtectedSocket::connect(
+        &registry,
+        &hook,
+        session,
+        "user-dead",
+        "bot-view-dead",
+        BindingFacts::full(),
+    )
+    .await;
+    let mut b = ProtectedSocket::connect(
+        &registry,
+        &hook,
+        session,
+        "user-live",
+        "bot-view-live",
+        BindingFacts::full(),
+    )
+    .await;
+
+    // The dead view's authority facts are revoked "from another instance".
+    hook.revoke("user-dead", "bot-view-dead", session);
+    let (chat, audience) = chat_public();
+    assert_eq!(
+        registry
+            .broadcast_visible_excluding(session, "task16-dead-e1", chat, audience.as_ref(), None)
+            .await,
+        1
+    );
+    assert!(!gate.binding_active(a.binding_id));
+    assert!(gate.binding_active(b.binding_id));
+    assert_eq!(
+        registry.connection_count(session).await,
+        1,
+        "the invalidated binding's protected subscription left the registry; the neighbor stays"
+    );
+
+    // Later events authorize ONLY the surviving binding: the dead binding is
+    // queried no further (spec §17.2 — stop querying after failure/closure),
+    // and no frame of any kind reaches the invalidated connection anymore.
+    for tag in ["task16-dead-e2", "task16-dead-e3"] {
+        assert_eq!(
+            registry
+                .broadcast_visible_excluding(session, tag, chat, audience.as_ref(), None)
+                .await,
+            1
+        );
+    }
+    assert_eq!(
+        hook.authorize_reads_for("user-dead", "bot-view-dead", session),
+        1,
+        "the dead binding must not be queried by later events"
+    );
+    assert_eq!(hook.authorize_reads_for("user-live", "bot-view-live", session), 3);
+    assert!(matches!(hook.batch_sizes().as_slice(), &[2, 1, 1]));
+
+    // The invalidated connection was NOT closed: its writer queue still
+    // accepts a direct PublicControl send; the broadcast lanes enqueue
+    // nothing further for it.
+    a.tx.send(WorkbenchOutbound::PublicControl("task16-dead-direct".to_string()))
+        .await
+        .unwrap();
+    drain_into_socket(&mut a.rx, gate.clone(), a.socket_tx.clone(), 1).await;
+    assert_eq!(
+        socket_count(&mut a.socket),
+        vec!["task16-dead-direct".to_string()]
+    );
+
+    // The surviving connection received all three events, in order.
+    drain_into_socket(&mut b.rx, gate.clone(), b.socket_tx.clone(), 3).await;
+    let drained = socket_count(&mut b.socket);
+    assert_eq!(
+        drained,
+        vec![
+            "task16-dead-e1".to_string(),
+            "task16-dead-e2".to_string(),
+            "task16-dead-e3".to_string()
+        ]
+    );
 }
 
 /// A slow in-flight authorization check must not hold the registry's

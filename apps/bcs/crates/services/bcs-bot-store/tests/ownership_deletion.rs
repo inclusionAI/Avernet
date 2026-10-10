@@ -90,6 +90,95 @@ async fn sqlite_retirement_is_atomic_and_its_failing_audit_leaves_the_bot_live()
 }
 
 #[tokio::test]
+async fn sqlite_retirement_invalidates_transfers_under_the_fixed_system_marker() {
+    // The receipt's decision columns are a SYSTEM terminal (spec: "system
+    // terminal: fixed system marker", the ownership-validation/deadline
+    // naming family): the retirement lane must record the fixed
+    // `ownership-deletion` decider — never the retiring Human's User ID —
+    // while the REAL Human operator stays recorded on the lifecycle audit
+    // row. Terminal replays re-read the same committed identity.
+    let db = sqlite().await;
+    let repo = persistent(db.clone());
+    assert!(
+        repo.create_registration_if_absent_with_initialization(
+            "bot-ret-sys".into(),
+            caps("retire"),
+            "owner-registration",
+            "token-ret-sys",
+            human_init("user-1"),
+        )
+        .await
+        .unwrap()
+    );
+    seed_manager_edge(db.as_ref(), "bot-ret-sys", "user-mgr").await;
+    seed_pending_transfer(db.as_ref(), "bot-ret-sys", "user-1", "user-2").await;
+    assert!(
+        repo.retire_bot_lifecycle("bot-ret-sys", operation("user-1"))
+            .await
+            .unwrap()
+    );
+    let env = bcs_config::resolve_env_str();
+    assert_eq!(
+        scalar(
+            db.as_ref(),
+            "SELECT COUNT(*) AS value FROM bot_ownership_transfers \
+             WHERE env = ? AND bot_id = 'bot-ret-sys' AND status = 'invalidated' \
+               AND terminal_reason = 'bot_deleted' \
+               AND decision_actor_kind = 'system' AND decided_by = 'ownership-deletion'",
+            vec![env.as_str().into()],
+        )
+        .await,
+        1,
+        "invalidation must record the fixed system decider, not the Human operator id"
+    );
+    assert_eq!(
+        scalar(
+            db.as_ref(),
+            "SELECT COUNT(*) AS value FROM bot_ownership_transfers \
+             WHERE env = ? AND bot_id = 'bot-ret-sys' AND decision_actor_kind = 'system' \
+               AND decided_by = 'user-1'",
+            vec![env.as_str().into()],
+        )
+        .await,
+        0,
+        "a Human User ID must never appear as a system-terminal decider"
+    );
+    assert_eq!(
+        scalar(
+            db.as_ref(),
+            "SELECT COUNT(*) AS value FROM bcs_bot_action_audits \
+             WHERE resource_id = 'bot-ret-sys' AND action = 'delete' AND phase = 'applied' \
+               AND operator_kind = 'human' AND operator_id = 'user-1' \
+               AND operator_user_id = 'user-1'",
+            vec![],
+        )
+        .await,
+        1,
+        "the lifecycle audit row keeps the retiring Human operator"
+    );
+    // Terminal replay: a repeated retirement commits nothing new and the
+    // committed identity pair stays exactly the same.
+    assert!(
+        !repo
+            .retire_bot_lifecycle("bot-ret-sys", operation("user-1"))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        scalar(
+            db.as_ref(),
+            "SELECT COUNT(*) AS value FROM bot_ownership_transfers \
+             WHERE env = ? AND bot_id = 'bot-ret-sys' AND status = 'invalidated' \
+               AND decision_actor_kind = 'system' AND decided_by = 'ownership-deletion'",
+            vec![env.as_str().into()],
+        )
+        .await,
+        1,
+        "terminal rows never change their recorded identity on replay"
+    );
+}
+
+#[tokio::test]
 async fn sqlite_acceptance_cannot_resurrect_a_retired_bot_in_either_order() {
     // Winner A: retirement commits first — the probe must fail and leave no
     // trace of an attempted acceptance.

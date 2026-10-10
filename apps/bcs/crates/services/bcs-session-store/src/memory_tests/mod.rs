@@ -408,7 +408,7 @@
                 .len(),
             1
         );
-        repo.remove_participant(&sess.id, "bot1")
+        repo.remove_participant(&sess.id, "bot1", &unit_test_operation())
             .await
             .expect("remove");
         // after leaving, collection mark is gone (memory set must be pruned)

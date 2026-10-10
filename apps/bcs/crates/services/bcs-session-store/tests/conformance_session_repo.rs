@@ -426,6 +426,7 @@ async fn sqlite_mode_and_scope_update_succeeds_on_legacy_participants_bytes() {
             "human-1",
             Some(ParticipantMode::Present),
             MessageViewScope::Participant,
+            &conformance_operation(),
         )
         .await
         .expect("legacy participants bytes must not break the scope CAS");

@@ -3,8 +3,9 @@
 //! `DbSqlFlavor`. Kept beside the Task 4 audit primitives; the protocol
 //! engine lives in `team_sync.rs`.
 //!
-//! Parameter budgets: IN-list statements bind at most `100 + 6`
-//! parameters; fresh-INSERT statements bind at most `60 * 13 = 780`
+//! Parameter budgets: IN-list statements bind at most `100 + 8`
+//! parameters (the team audit statement's leading literals are the
+//! widest); fresh-INSERT statements bind at most `60 * 13 = 780`
 //! guarded parameters — both far below the SQLite bind ceiling. Every
 //! changing statement shares the lane's in-lock subject guards so the
 //! `ExecuteChecked` pins own the drift revalidation.
@@ -15,7 +16,7 @@ use bcs_service_api::port::repo::bot_authority::human_actor_id;
 use bcs_service_api::types::team_manager_sync::TeamManagerOperation;
 use bcs_service_api::types::AuditActor;
 
-use super::audit::{audit_id_expr, MANAGER_CHANGE_COLUMNS};
+use super::audit::{audit_id_expr, team_manager_change_columns};
 use super::team_sync::{PreparedSync, TEAM_SYNC_INSERT_CHUNK};
 use super::transfer_query::binary_identity;
 
@@ -309,7 +310,9 @@ impl super::reads::DbBotAuthorityStore {
     /// row conditions are the same POST-state predicates the changing
     /// statements just produced, `subject_user_id` is decoded in SQL from
     /// the shared `human_<uid>` actor shape, and the columns/audit-id
-    /// rule are the Task 4 shared primitives.
+    /// rule are the Task 4 shared primitives. TEAM rows additionally carry
+    /// the request's `idempotency_key` (the contract column that is NULL
+    /// for non-team operations): the SELECT binds it AFTER `operation_id`.
     pub(super) fn sync_lane_audit_statement(
         &self,
         action: &'static str,
@@ -318,6 +321,7 @@ impl super::reads::DbBotAuthorityStore {
         chunk: &[String],
         actor: &AuditActor,
         operation_id: &str,
+        idempotency_key: &str,
     ) -> DbStatement {
         let subject_expr = match self.flavor {
             DbSqlFlavor::Sqlite => "substr(from_id, 7)",
@@ -331,12 +335,13 @@ impl super::reads::DbBotAuthorityStore {
         let (conjunction, params) = in_list_params(
             vec![
                 // SELECT-list literals after the audit_id expression:
-                // actor_kind, actor_id, operation_id; then the WHERE
-                // literals: env, bot, team.
+                // actor_kind, actor_id, operation_id, idempotency_key;
+                // then the WHERE literals: env, bot, team.
                 DbValue::from(operation_id),
                 DbValue::from(actor.kind_str()),
                 DbValue::from(actor.actor_id()),
                 DbValue::from(operation_id),
+                DbValue::from(idempotency_key),
                 DbValue::from(self.env.as_str()),
                 DbValue::from(bot_id),
                 DbValue::from(team_id),
@@ -345,13 +350,14 @@ impl super::reads::DbBotAuthorityStore {
         );
         DbStatement::with_params(
             &format!(
-                "INSERT INTO bot_manager_changes ({MANAGER_CHANGE_COLUMNS}) \
+                "INSERT INTO bot_manager_changes ({team_columns}) \
                  SELECT {audit_id}, env, to_id, {subject}, id, management_source_kind, \
-                   management_source_id, '{action}', ?, ?, ? \
+                   management_source_id, '{action}', ?, ?, ?, ? \
                  FROM edge_grants \
                  WHERE env = ? AND {to_b} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'team' AND management_source_id = ? \
                    AND status = '{post_status}' AND {from_b} IN ({conjunction})",
+                team_columns = team_manager_change_columns(),
                 audit_id = audit_id_expr(&self.flavor),
                 subject = subject_expr,
                 action = action,

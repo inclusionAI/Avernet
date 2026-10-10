@@ -36,7 +36,8 @@ use bcs_service_api::{
 };
 
 use crate::action_audit::{
-    collect_state_audit_record, create_session_audit_record, remove_participant_audit_record,
+    audit_slot_retry_classified, audit_slot_select, collect_state_audit_record,
+    create_participant_audit_record, create_session_audit_record, remove_participant_audit_record,
     session_action_audit_insert, update_session_audit_record,
 };
 
@@ -650,7 +651,8 @@ impl SessionRepoPort for MySqlSessionStore {
         &self,
         session_id: &str,
         title: Option<String>,
-    ) -> ServiceResult<Session> { self.repo_update_title(session_id, title).await }
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_update_title(session_id, title, operation).await }
 
     async fn list_by_group(
         &self,
@@ -710,14 +712,20 @@ impl SessionRepoPort for MySqlSessionStore {
         &self,
         session_id: &str,
         participant: Participant,
-    ) -> ServiceResult<Session> { self.repo_add_participant(session_id, participant).await }
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_add_participant(session_id, participant, operation).await }
 
     async fn add_participant_with_event(
         &self,
         command: AddSessionParticipantWithEvent,
     ) -> ServiceResult<Session> { self.repo_add_participant_with_event(command).await }
 
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> { self.repo_remove_participant(session_id, bot_uuid).await }
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_remove_participant(session_id, bot_uuid, operation).await }
 
     async fn remove_participant_with_event(
         &self,
@@ -729,14 +737,16 @@ impl SessionRepoPort for MySqlSessionStore {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
-    ) -> ServiceResult<Session> { self.repo_update_participant_mode(session_id, bot_uuid, mode).await }
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_update_participant_mode(session_id, bot_uuid, mode, operation).await }
 
     async fn update_participant_message_view_scope(
         &self,
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
-    ) -> ServiceResult<Session> { self.repo_update_participant_message_view_scope(session_id, actor_id, message_view_scope).await }
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_update_participant_message_view_scope(session_id, actor_id, message_view_scope, operation).await }
 
     async fn update_participant_mode_and_message_view_scope(
         &self,
@@ -744,7 +754,8 @@ impl SessionRepoPort for MySqlSessionStore {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
-    ) -> ServiceResult<Session> { self.repo_update_participant_mode_and_message_view_scope(session_id, actor_id, mode, message_view_scope).await }
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> { self.repo_update_participant_mode_and_message_view_scope(session_id, actor_id, mode, message_view_scope, operation).await }
 
     async fn update_participant_message_view_scope_with_event(
         &self,
@@ -785,3 +796,24 @@ mod mysql_operations_operations_2;
 
 #[path = "mysql_operations/operations_3.rs"]
 mod mysql_operations_operations_3;
+
+impl MySqlSessionStore {
+    /// Classify a failed audited-write transaction against its audit slot
+    /// (spec §12.5): a slot row with byte-identical content means an earlier
+    /// attempt of the SAME operation fully committed the same write (the
+    /// caller falls through to the read path); different content under the
+    /// slot is a Conflict; no slot row means the failure was genuine (the
+    /// whole transaction rolled back, no partial success).
+    pub(super) async fn classify_action_audit_transaction_failure(
+        &self,
+        record: &bcs_service_api::types::BotActionAuditRecord,
+        error: DbError,
+    ) -> ServiceResult<()> {
+        let probe_rows = self
+            .db
+            .query(audit_slot_select(record))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        audit_slot_retry_classified(record, probe_rows, &format!("session db: {error}"))
+    }
+}

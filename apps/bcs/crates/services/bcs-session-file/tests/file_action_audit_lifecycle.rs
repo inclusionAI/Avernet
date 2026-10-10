@@ -227,6 +227,7 @@ impl SessionRepoPort for FakeSessionRepo {
         &self,
         _session_id: &str,
         _participant: bcs_service_api::types::Participant,
+        _operation: &BotOperationContext,
     ) -> bcs_service_api::ServiceResult<Session> {
         Err(bcs_service_api::ServiceError::InternalError("unsupported".into()))
     }
@@ -234,6 +235,7 @@ impl SessionRepoPort for FakeSessionRepo {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &BotOperationContext,
     ) -> bcs_service_api::ServiceResult<Session> {
         Err(bcs_service_api::ServiceError::InternalError("unsupported".into()))
     }
@@ -242,6 +244,7 @@ impl SessionRepoPort for FakeSessionRepo {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: bcs_service_api::types::ParticipantMode,
+        _operation: &BotOperationContext,
     ) -> bcs_service_api::ServiceResult<Session> {
         Err(bcs_service_api::ServiceError::InternalError("unsupported".into()))
     }
@@ -254,6 +257,7 @@ impl SessionRepoPort for FakeSessionRepo {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &BotOperationContext,
     ) -> bcs_service_api::ServiceResult<Session> {
         Err(bcs_service_api::ServiceError::InternalError("unsupported".into()))
     }

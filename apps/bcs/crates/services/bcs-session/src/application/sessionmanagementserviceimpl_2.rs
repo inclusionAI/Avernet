@@ -351,7 +351,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     operation: operation.clone(),
                 })
                 .await?),
-            None => Ok(self.repo.add_participant(session_id, participant).await?),
+            None => Ok(self
+                .repo
+                .add_participant(session_id, participant, operation)
+                .await?),
         }
     }
 
@@ -434,7 +437,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     operation: operation.clone(),
                 })
                 .await?),
-            None => Ok(self.repo.remove_participant(session_id, bot_uuid).await?),
+            None => Ok(self
+                .repo
+                .remove_participant(session_id, bot_uuid, operation)
+                .await?),
         }
     }
 
@@ -445,9 +451,12 @@ impl SessionManagementService for SessionManagementServiceImpl {
         mode: ParticipantMode,
         operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
+        // The REQUIRED operation context flows to the store's audited write
+        // port (spec §12.5): `update/session/applied` commits with the mode
+        // write in ONE transaction, whether or not eventing is enabled.
         Ok(self
             .repo
-            .update_participant_mode(session_id, bot_uuid, mode)
+            .update_participant_mode(session_id, bot_uuid, mode, operation)
             .await?)
     }
 
@@ -513,6 +522,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     session_id,
                     actor_id,
                     mode.expect("mode differs when scope is unchanged"),
+                    operation,
                 )
                 .await?);
         }
@@ -549,6 +559,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     actor_id,
                     mode,
                     message_view_scope,
+                    operation,
                 )
                 .await?),
         }
@@ -560,8 +571,14 @@ impl SessionManagementService for SessionManagementServiceImpl {
         title: Option<String>,
         operation: &BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
-        let _ = operation;
-        Ok(self.repo.update_title(session_id, title).await?)
+        // (PR #2568 review F4): `let _ = operation` is gone — the REQUIRED
+        // context threads through the store's audited write port so the
+        // `update/session/applied` row commits with the title write in ONE
+        // transaction, carrying the operator identity.
+        Ok(self
+            .repo
+            .update_title(session_id, title, operation)
+            .await?)
     }
 
     async fn list_group_ids_by_session_participant(

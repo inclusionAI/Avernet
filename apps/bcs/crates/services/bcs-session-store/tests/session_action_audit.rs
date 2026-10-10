@@ -496,3 +496,236 @@ async fn memory_publishes_collect_state_and_audit_together_or_not_at_all() {
         .await;
     assert_eq!(sessions.len(), 1, "the collect survived the discarded flip");
 }
+
+const UPDATE_STEP_KEY: &str = "update/session/applied";
+const ADD_PARTICIPANT_STEP_KEY: &str = "create_participant/session/applied";
+const REMOVE_STEP_KEY: &str = "delete/session/applied";
+
+#[tokio::test]
+async fn sqlite_update_title_commits_exactly_one_applied_row_with_the_operator() {
+    // PR #2568 review F4: `update_title` used to drop its operation context
+    // (`let _ = operation;`). The title UPDATE and its `update/session/applied`
+    // audit row now commit in ONE transaction carrying the operator identity.
+    let db = sqlite().await;
+    let repo = sqlite_store(db.clone()).await;
+    let seed_operation = human_operation("seeder", "bot-x");
+    let session = repo
+        .create(
+            "session-a-group",
+            seed_params(vec!["bot-x".into()], &seed_operation),
+        )
+        .await
+        .expect("seed session");
+
+    let operation = human_operation("title-operator", "bot-x");
+    let updated = repo
+        .update_title(&session.id, Some("新标题".into()), &operation)
+        .await
+        .expect("update title");
+    assert_eq!(updated.session_title.as_deref(), Some("新标题"));
+
+    let rows = audit_toolbox(db.as_ref(), operation.operation_id.as_str(), UPDATE_STEP_KEY).await;
+    assert_eq!(rows.len(), 1, "update_title writes exactly one applied row");
+    let audit = &rows[0];
+    assert_eq!(row_str(audit, "operator_kind"), "human");
+    assert_eq!(row_str(audit, "operator_id"), "title-operator");
+    assert_eq!(row_str(audit, "effective_actor_id"), "bot-x");
+    assert_eq!(row_str(audit, "action"), "update");
+    assert_eq!(row_str(audit, "phase"), "applied");
+
+    // A retry of the SAME operation keeps the first committed row (idempotent
+    // audit slot, spec §12.5).
+    repo.update_title(&session.id, Some("新标题".into()), &operation)
+        .await
+        .expect("same-context retry");
+    let rows = audit_toolbox(db.as_ref(), operation.operation_id.as_str(), UPDATE_STEP_KEY).await;
+    assert_eq!(rows.len(), 1, "the retry adds no duplicate step");
+}
+
+#[tokio::test]
+async fn sqlite_update_participant_mode_commits_its_applied_row_without_eventing() {
+    // PR #2568 review F4: the plain participant-mode update (eventing OFF)
+    // must audit in the same transaction as the write.
+    let db = sqlite().await;
+    let repo = sqlite_store(db.clone()).await;
+    let seed_operation = human_operation("seeder", "bot-x");
+    let session = repo
+        .create(
+            "session-a-group",
+            seed_params(vec!["bot-x".into()], &seed_operation),
+        )
+        .await
+        .expect("seed session");
+
+    let operation = human_operation("mode-operator", "bot-x");
+    repo.update_participant_mode(
+        &session.id,
+        "bot-x",
+        bcs_service_api::types::ParticipantMode::Muted,
+        &operation,
+    )
+    .await
+    .expect("mute participant");
+
+    let rows = audit_toolbox(db.as_ref(), operation.operation_id.as_str(), UPDATE_STEP_KEY).await;
+    assert_eq!(rows.len(), 1, "the mode write audits its applied row");
+    assert_eq!(row_str(&rows[0], "operator_id"), "mode-operator");
+    assert_eq!(row_str(&rows[0], "resource_id"), session.id);
+}
+
+#[tokio::test]
+async fn sqlite_eventless_membership_writes_commit_their_own_step_keys() {
+    // PR #2568 review F1/F4: the PLAIN add/remove participant lanes (eventing
+    // OFF) audit with their own stable step keys in the same transaction.
+    let db = sqlite().await;
+    let repo = sqlite_store(db.clone()).await;
+    let seed_operation = human_operation("seeder", "bot-x");
+    let session = repo
+        .create(
+            "session-a-group",
+            seed_params(vec!["bot-x".into()], &seed_operation),
+        )
+        .await
+        .expect("seed session");
+
+    let add_operation = human_operation("member-operator", "bot-x");
+    let added = repo
+        .add_participant(
+            &session.id,
+            participant_params(vec!["bot-new".into()]).remove(0),
+            &add_operation,
+        )
+        .await
+        .expect("add participant without eventing");
+    assert!(added
+        .participants
+        .iter()
+        .any(|participant| participant.bot_uuid == "bot-new"));
+
+    let rows = audit_toolbox(
+        db.as_ref(),
+        add_operation.operation_id.as_str(),
+        ADD_PARTICIPANT_STEP_KEY,
+    )
+    .await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "the membership creation audits its dedicated step"
+    );
+
+    let remove_operation = human_operation("member-remover", "bot-x");
+    let removed = repo
+        .remove_participant(&session.id, "bot-new", &remove_operation)
+        .await
+        .expect("remove participant without eventing");
+    assert!(!removed
+        .participants
+        .iter()
+        .any(|participant| participant.bot_uuid == "bot-new"));
+
+    let rows = audit_toolbox(
+        db.as_ref(),
+        remove_operation.operation_id.as_str(),
+        REMOVE_STEP_KEY,
+    )
+    .await;
+    assert_eq!(rows.len(), 1, "the membership removal audits too");
+
+    // An already-present participant is a no-change add: no new audit row.
+    let idempotent = human_operation("member-idempotent", "bot-x");
+    repo.add_participant(
+        &session.id,
+        participant_params(vec!["bot-x".into()]).remove(0),
+        &idempotent,
+    )
+    .await
+    .expect("idempotent add succeeds");
+    let rows = audit_toolbox(db.as_ref(), idempotent.operation_id.as_str(), ADD_PARTICIPANT_STEP_KEY)
+        .await;
+    assert!(
+        rows.is_empty(),
+        "幂等无变化不制造 applied: an already-member add writes no audit row"
+    );
+}
+
+#[tokio::test]
+async fn sqlite_audit_insert_failure_rolls_the_title_write_back() {
+    // PR #2568 review F4, all-or-nothing: a failing audit INSERT rolls the
+    // title UPDATE back with it (business write + audit commit together).
+    let db = sqlite().await;
+    let injected = InjectedStepDb::new(db.clone());
+    let repo = MySqlSessionStore::sqlite(injected.clone(), AUDIT_ENV.to_string());
+    let seed_operation = human_operation("a", "bot-x");
+    let session = repo
+        .create(
+            "session-a-group",
+            seed_params(vec!["bot-x".into()], &seed_operation),
+        )
+        .await
+        .expect("seed session");
+
+    injected.arm("INTO bcs_bot_action_audits");
+    let operation = human_operation("b", "bot-x");
+    let error = repo
+        .update_title(&session.id, Some("不会留下的标题".into()), &operation)
+        .await
+        .expect_err("the audit INSERT failure must fail the whole title write");
+    assert!(matches!(error, ServiceError::InternalError(_)));
+
+    // The reloaded session keeps the ORIGINAL title: no partial success.
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert_ne!(
+        reloaded.session_title.as_deref(),
+        Some("不会留下的标题"),
+        "the rolled-back title write must not survive"
+    );
+    let rows = all_audit_rows(db.as_ref()).await;
+    assert_eq!(rows.len(), 1, "only the seeded create row may remain");
+}
+
+#[tokio::test]
+async fn memory_update_title_publishes_state_and_audit_together_or_not_at_all() {
+    // PR #2568 review F4 (memory twin): the title write and its
+    // `update/session/applied` row publish in ONE critical section.
+    let repo = Arc::new(MemorySessionRepo::new());
+    let seed_operation = human_operation("seeder", "bot-x");
+    let session = repo
+        .create(
+            "session-a-group",
+            seed_params(vec!["bot-x".into()], &seed_operation),
+        )
+        .await
+        .expect("seed memory session");
+
+    let operation = human_operation("title-operator", "bot-x");
+    repo.update_title(&session.id, Some("标题".into()), &operation)
+        .await
+        .expect("memory title update publishes");
+    let audits = repo
+        .session_action_audit_records()
+        .await
+        .expect("memory audits");
+    let title_rows: Vec<_> = audits
+        .iter()
+        .filter(|record| record.step_key == UPDATE_STEP_KEY)
+        .collect();
+    assert_eq!(title_rows.len(), 1);
+    assert_eq!(title_rows[0].operator.operator_user_id(), Some("title-operator"));
+    assert_eq!(title_rows[0].operator.effective_actor_id(), "bot-x");
+
+    // Armed audit failure: the staged title write is DISCARDED (all-or-nothing).
+    repo.arm_action_audit_write_failure();
+    let flip = human_operation("title-operator-2", "bot-x");
+    let error = repo
+        .update_title(&session.id, Some("不会留下的标题".into()), &flip)
+        .await
+        .expect_err("armed audit failure discards the title write");
+    assert!(matches!(error, ServiceError::InternalError(_)));
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert_eq!(
+        reloaded.session_title.as_deref(),
+        Some("标题"),
+        "the discarded title write must not survive"
+    );
+}

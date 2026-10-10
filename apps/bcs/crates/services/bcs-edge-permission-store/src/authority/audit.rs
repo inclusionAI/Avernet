@@ -38,6 +38,17 @@ pub(super) const MANAGER_CHANGE_COLUMNS: &str = "audit_id, env, bot_id, subject_
      edge_id, management_source_kind, management_source_id, action, actor_kind, actor_id, \
      operation_id";
 
+/// Column list of the TEAM-sync audit INSERT SELECT: the shared
+/// manager-change columns PLUS the request's `idempotency_key` — the
+/// schema contract pins the column as "required for team sync rows; NULL
+/// for non-team operations" (migration 033/034 `bot_manager_changes`).
+/// The direct-manager lanes keep the shared list above (the column
+/// defaults NULL); the team statement binds one extra SELECT literal
+/// after `operation_id` (see `sync_lane_audit_statement`).
+pub(super) fn team_manager_change_columns() -> String {
+    format!("{MANAGER_CHANGE_COLUMNS}, idempotency_key")
+}
+
 /// Per-flavor `audit_id` expression over the selected edge row
 /// (`<operation_id param> || '-' || <edge id>` / `CONCAT(?, '-', <edge id>)`).
 pub(super) fn audit_id_expr(flavor: &DbSqlFlavor) -> &'static str {

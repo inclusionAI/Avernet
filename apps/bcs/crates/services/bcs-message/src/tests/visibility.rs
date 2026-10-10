@@ -79,6 +79,7 @@ async fn manager_worker_human_view_reads_public_rows_after_cutoff() {
         .add_participant(
             &session_id,
             Participant::human("human_1", ParticipantRole::Observer),
+            &session_write_operation(),
         )
         .await
         .expect("add full Human participant");

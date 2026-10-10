@@ -585,6 +585,18 @@ mod attachment_parse_tests {
     }
 }
 
+/// Honest System identity for the test-only Session membership writes
+/// (spec §12.5): no verified Human operator on this lane.
+fn session_write_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("bcs-message-test-write:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "bcs-message-test-write".to_string(),
+            effective_actor_id: "bcs-message-test-write".to_string(),
+        },
+    }
+}
+
 mod history;
 mod fallback;
 mod visibility;

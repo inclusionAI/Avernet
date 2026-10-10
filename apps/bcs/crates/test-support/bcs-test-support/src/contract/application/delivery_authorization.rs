@@ -59,8 +59,8 @@ use bcs_service_api::types::error::ServiceResult;
 use bcs_service_api::core::DmActorSpec;
 use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::types::{
-    BotManagerList, Group, GroupMessage, GroupStatus, Participant, ParticipantMode, ServiceError,
-    Session, ServiceSpec, Workspace,
+    BotManagerList, BotOperationContext, Group, GroupMessage, GroupStatus, Participant,
+    ParticipantMode, ServiceError, Session, ServiceSpec, Workspace,
 };
 use bcs_service_api::types::ownership_transfer::{
     CommittedTransferOutcome, CreateOwnershipTransfer, CreateTransferResult,
@@ -735,7 +735,7 @@ impl GroupCoreService for CountingGroupCore {
         &self,
         id: &str,
         workspace: Workspace,
-        operation: bcs_service_api::types::BotOperationContext,
+        operation: BotOperationContext,
     ) -> ServiceResult<()> {
         self.inner.update_workspace(id, workspace, operation).await
     }
@@ -929,12 +929,20 @@ impl SessionRepoPort for CountingSessionRepo {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        self.inner.add_participant(session_id, participant).await
+        self.inner
+            .add_participant(session_id, participant, operation)
+            .await
     }
 
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
-        self.inner.remove_participant(session_id, bot_uuid).await
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> {
+        self.inner.remove_participant(session_id, bot_uuid, operation).await
     }
 
     async fn update_participant_mode(
@@ -942,9 +950,10 @@ impl SessionRepoPort for CountingSessionRepo {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         self.inner
-            .update_participant_mode(session_id, bot_uuid, mode)
+            .update_participant_mode(session_id, bot_uuid, mode, operation)
             .await
     }
 
@@ -956,8 +965,9 @@ impl SessionRepoPort for CountingSessionRepo {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        self.inner.update_title(session_id, title).await
+        self.inner.update_title(session_id, title, operation).await
     }
 
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> {

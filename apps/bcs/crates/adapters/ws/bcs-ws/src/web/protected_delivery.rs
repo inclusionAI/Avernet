@@ -16,7 +16,10 @@
 //!   generation / closed state, and enqueues ONLY items judged `Deliver`.
 //!   `SkipMessage` skips just this frame (no unsubscribe, no close);
 //!   `InvalidateBinding` and any `Err` invalidate the binding and drop its
-//!   protected backlog. An enqueue decision is NEVER a writer pass.
+//!   protected backlog — and the registry deregisters the connection's
+//!   protected subscription in the same event, so broadcasts stop and NO
+//!   later event queries the dead binding (spec §17.2). An enqueue decision
+//!   is NEVER a writer pass.
 //! - Position 2 (pre-send): the writer re-authorizes the dequeued frame with
 //!   a single-context batch against current committed authority and only
 //!   then starts the socket send. No positive caching, no TTL (spec §14.5).
@@ -228,7 +231,9 @@ impl ProtectedDeliveryGate {
 
     /// Invalidate a binding after a revoke / failed authority read: its
     /// protected backlog stops (drop-on-drain) while the connection itself
-    /// may keep receiving PublicControl frames.
+    /// stays open — its broadcast subscription was already deregistered by
+    /// the registry, so frames simply go silent and only direct
+    /// dispatcher-originated PublicControl responses keep flowing.
     pub fn invalidate_binding(&self, binding_id: u64) {
         self.bindings.lock().unwrap().remove(&binding_id);
     }

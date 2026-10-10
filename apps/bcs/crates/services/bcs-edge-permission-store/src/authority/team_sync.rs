@@ -415,6 +415,7 @@ impl super::reads::DbBotAuthorityStore {
                         chunk,
                         &prepared.actor,
                         &operation_id,
+                        &prepared.idempotency_key,
                     ),
                     expected_affected_rows: chunk.len() as u64,
                 });
@@ -438,6 +439,7 @@ impl super::reads::DbBotAuthorityStore {
                     chunk,
                     &prepared.actor,
                     &operation_id,
+                    &prepared.idempotency_key,
                 ),
                 expected_affected_rows: chunk.len() as u64,
             });
@@ -466,6 +468,7 @@ impl super::reads::DbBotAuthorityStore {
                     chunk,
                     &prepared.actor,
                     &operation_id,
+                    &prepared.idempotency_key,
                 ),
                 expected_affected_rows: chunk.len() as u64,
             });

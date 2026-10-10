@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 bcs-channel-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
+uuid = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

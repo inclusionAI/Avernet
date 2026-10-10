@@ -154,6 +154,7 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         unimplemented!("not used by membership error test")
     }
@@ -162,6 +163,7 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         unimplemented!("not used by membership error test")
     }
@@ -171,6 +173,7 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         unimplemented!("not used by membership error test")
     }
@@ -187,6 +190,7 @@ impl SessionRepoPort for FailingMembershipSessionRepo {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         unimplemented!("not used by membership error test")
     }

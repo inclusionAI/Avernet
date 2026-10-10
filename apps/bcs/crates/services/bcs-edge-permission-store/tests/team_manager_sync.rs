@@ -377,6 +377,91 @@ async fn sqlite_audit_records_service_actor_and_operation_id() {
     assert_eq!(actions, vec!["revoke".to_string(), "grant".to_string()]);
 }
 
+/// PR 2568 round-3, F7: the shared `bot_manager_changes` audit INSERT
+/// must carry the sync request's idempotency_key for TEAM rows (the
+/// schema contract: "required for team sync rows; NULL for non-team
+/// operations"), while the direct-manager lane keeps the column NULL.
+/// Both shapes are read back through the committed rows exactly as the
+/// request supplied them.
+#[tokio::test]
+async fn sqlite_team_audit_rows_carry_the_request_idempotency_key() {
+    let (h, db) = sqlite_harness().await;
+    h.driver.seed_owned("bot-idem", "io").await;
+    h.driver.seed_humans(&["io", "i1", "i2"]).await;
+    // A DIFFERING snapshot: the existing team member i1 is revoked and
+    // i2 is granted, all under the request key "idem-key-1".
+    h.driver.seed_manager_source("bot-idem", "i1", "team", "team-id").await;
+    let receipt = h
+        .repo
+        .sync_team(sync_cmd(
+            verified_service(&h.driver.env()),
+            "bot-idem",
+            "team-id",
+            &["i2"],
+            "idem-key-1",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(receipt.granted_count, 1);
+    assert_eq!(receipt.revoked_count, 1);
+
+    let team_rows = db
+        .inner
+        .query(DbStatement::with_params(
+            "SELECT action, idempotency_key FROM bot_manager_changes \
+             WHERE env = ? AND bot_id = ? AND management_source_kind = 'team' ORDER BY id",
+            vec![
+                DbValue::from("local"),
+                DbValue::from("bot-idem"),
+            ],
+        ))
+        .await
+        .expect("read team audit rows");
+    assert_eq!(team_rows.len(), 2, "one revoke + one grant");
+    for row in &team_rows {
+        assert_eq!(
+            row.get_string("idempotency_key").ok().flatten(),
+            Some("idem-key-1".to_string()),
+            "team-lane audit rows carry the sync request's idempotency_key"
+        );
+    }
+
+    // The direct-manager lane on the same bot keeps the platform column
+    // NULL ("required for team sync rows; NULL for non-team operations").
+    assert!(h
+        .repo
+        .mutate_manager(
+            bcs_service_api::types::AuditActor::Human { user_id: "io".to_string() },
+            "bot-idem",
+            bcs_service_api::types::ManagerMutation::GrantDirect {
+                user_id: "i1".to_string(),
+            },
+        )
+        .await
+        .unwrap()
+        .changed);
+    let direct_rows = db
+        .inner
+        .query(DbStatement::with_params(
+            "SELECT idempotency_key FROM bot_manager_changes \
+             WHERE env = ? AND bot_id = ? AND management_source_kind = 'direct' ORDER BY id",
+            vec![
+                DbValue::from("local"),
+                DbValue::from("bot-idem"),
+            ],
+        ))
+        .await
+        .expect("read direct audit rows");
+    assert_eq!(direct_rows.len(), 1, "the direct grant appended its audit row");
+    for row in &direct_rows {
+        assert_eq!(
+            row.get_string("idempotency_key").ok().flatten(),
+            None,
+            "direct-manager audits never fabricate a platform idempotency_key"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MySQL live conformance (ignored: requires BCS_TEST_MYSQL_URL)
 // ---------------------------------------------------------------------------

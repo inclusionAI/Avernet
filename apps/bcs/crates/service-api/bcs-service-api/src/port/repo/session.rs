@@ -338,10 +338,16 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Adds one participant WITHOUT an Event. REQUIRES the ordinary-business
+    /// audit identity (spec §12.5, plan Task 11, PR #2568 review F4): the
+    /// owning store commits the `create_participant/session/applied` row in
+    /// the SAME transaction as the membership write — the audit never depends
+    /// on eventing being enabled.
     async fn add_participant(
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session>;
     async fn add_participant_with_event(
         &self,
@@ -353,7 +359,15 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session>;
+    /// Removes one participant WITHOUT an Event. REQUIRES the audit identity
+    /// (see `add_participant`): `delete/session/applied` commits with the
+    /// removal in ONE transaction.
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session>;
     async fn remove_participant_with_event(
         &self,
         command: RemoveSessionParticipantWithEvent,
@@ -364,19 +378,26 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Updates one participant's mode. REQUIRES the audit identity (see
+    /// `add_participant`): `update/session/applied` commits with the mode
+    /// write in ONE transaction, independent of eventing.
     async fn update_participant_mode(
         &self,
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session>;
+    /// Updates one participant's message-view scope. REQUIRES the audit
+    /// identity (see `add_participant`).
     async fn update_participant_message_view_scope(
         &self,
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        let _ = (session_id, actor_id, message_view_scope);
+        let _ = (session_id, actor_id, message_view_scope, operation);
         Err(ServiceError::InvalidOperation {
             message: "Session participant scope updates are not configured".to_string(),
             request_id: None,
@@ -388,16 +409,18 @@ pub trait SessionRepoPort: Send + Sync {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let updated = self
             .update_participant_message_view_scope(
                 session_id,
                 actor_id,
                 message_view_scope,
+                operation,
             )
             .await?;
         if let Some(mode) = mode {
-            self.update_participant_mode(session_id, actor_id, mode).await
+            self.update_participant_mode(session_id, actor_id, mode, operation).await
         } else {
             Ok(updated)
         }
@@ -428,8 +451,16 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
-    async fn update_title(&self, session_id: &str, title: Option<String>)
-    -> ServiceResult<Session>;
+    /// Updates the Session title. REQUIRES the audit identity (see
+    /// `add_participant`): `update/session/applied` commits with the title
+    /// write in ONE transaction — `let _ = operation` on this port was a
+    /// review finding (PR #2568 F4) and is gone.
+    async fn update_title(
+        &self,
+        session_id: &str,
+        title: Option<String>,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
     async fn try_list_group_ids_by_session_participant(
         &self,

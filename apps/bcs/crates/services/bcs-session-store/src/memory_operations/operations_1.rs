@@ -369,7 +369,7 @@ impl MemorySessionRepo {
         // Same-critical-section audit (spec §12.5): the staged row publishes
         // INSIDE the event store's business closure — state, Event and audit
         // publish together or not at all.
-        let record = create_session_audit_record(
+        let record = create_participant_audit_record(
             &command.operation,
             &self.audit_env(),
             &command.session_id,

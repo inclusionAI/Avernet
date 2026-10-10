@@ -21,9 +21,15 @@
 //! - Session creation → `create/session/applied`;
 //! - collect/uncollect → `collect/session/applied` (both directions of the
 //!   favorite-state flip — `BotActionKind::Collect` covers both);
-//! - participant add → `create/session/applied` (a membership record is
-//!   created), participant remove → `delete/session/applied`;
-//! - participant mode/scope updates and eventful completion →
+//! - participant add → `create_participant/session/applied`
+//!   ([`CREATE_PARTICIPANT_STEP_KEY`]: a membership record is created as its
+//!   own stable sub-command step, so ONE shared operation whose launch both
+//!   creates the Session and materializes its deferred Human creator commits
+//!   two DISTINCT audit rows — reusing `create/session/applied` here would
+//!   collide in the `(env, operation_id, step_key)` slot and roll the
+//!   deferred membership back after the Session had already committed),
+//!   participant remove → `delete/session/applied`;
+//! - participant mode/scope updates, title updates and eventful completion →
 //!   `update/session/applied`.
 //!
 //! Idempotency: an already-collected collect / an uncollected uncollect uses
@@ -75,14 +81,43 @@ fn applied_record(
     }
 }
 
-/// `create/session/applied` — Session creation (and participant addition:
-/// both create a persisted membership record).
+/// `create/session/applied` — Session creation.
 pub(crate) fn create_session_audit_record(
     operation: &BotOperationContext,
     env: &str,
     session_id: &str,
 ) -> BotActionAuditRecord {
     applied_record(operation, env, session_id, BotActionKind::Create)
+}
+
+/// `create_participant/session/applied` — the participant-membership
+/// creation sub-command step (plan Task 11: 子命令同 operation、不同稳定
+/// step_key). A membership write is its own stable step WITHIN the owning
+/// operation, deliberately distinct from the operation's `create/session/
+/// applied` row so one shared launch operation that creates a Session AND
+/// materializes a deferred participant commits two coexisting audit rows
+/// instead of colliding in the `(env, operation_id, step_key)` unique slot.
+pub(crate) const CREATE_PARTICIPANT_STEP_KEY: &str = "create_participant/session/applied";
+
+/// The `create_participant/session/applied` audit record of one participant
+/// membership creation (both the plain and the eventful store lane).
+pub(crate) fn create_participant_audit_record(
+    operation: &BotOperationContext,
+    env: &str,
+    session_id: &str,
+) -> BotActionAuditRecord {
+    BotActionAuditRecord {
+        audit_id: session_action_audit_id(env, &operation.operation_id, CREATE_PARTICIPANT_STEP_KEY),
+        env: env.to_string(),
+        operation_id: operation.operation_id.clone(),
+        step_key: CREATE_PARTICIPANT_STEP_KEY.to_string(),
+        operator: operation.actor.clone(),
+        resource_kind: BotActionResourceKind::Session,
+        resource_id: session_id.to_string(),
+        action: BotActionKind::Create,
+        phase: BotActionAuditPhase::Applied,
+        reason_code: None,
+    }
 }
 
 /// `collect/session/applied` — collect AND uncollect favorites (both are the
@@ -259,6 +294,7 @@ mod tests {
 /// value, per every writer pen (message/group/session/file/chat-run/edge).
 mod audit_width_conformance {
     use super::session_action_audit_id;
+    use super::CREATE_PARTICIPANT_STEP_KEY;
     use bcs_service_api::types::*;
 
     #[test]
@@ -279,6 +315,18 @@ mod audit_width_conformance {
                 id.len() <= AUTHORITY_AUDIT_ID_VARCHAR_WIDTH,
                 "lane audit_id length {} exceeds the durable {AUTHORITY_AUDIT_ID_VARCHAR_WIDTH}-char budget",
                 id.len()
+            );
+            // The dedicated participant-membership step key is longer than
+            // every stable-vocabulary key; it must still fit the budgets.
+            let participant_id = session_action_audit_id(
+                env,
+                &"o".repeat(AUTHORITY_OPERATION_ID_VARCHAR_WIDTH),
+                CREATE_PARTICIPANT_STEP_KEY,
+            );
+            assert!(
+                participant_id.len() <= AUTHORITY_AUDIT_ID_VARCHAR_WIDTH,
+                "participant audit_id length {} exceeds the durable {AUTHORITY_AUDIT_ID_VARCHAR_WIDTH}-char budget",
+                participant_id.len()
             );
         }
     }

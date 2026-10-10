@@ -51,6 +51,14 @@ use super::{MemoryBotRepo, PersistentBotRepo, Value, resolve_env};
 /// attempt, not replayed against the stale expectation until exhaustion).
 const MAX_DELETION_ATTEMPTS: usize = 3;
 
+/// Fixed system decider recorded on the transfers a retirement
+/// invalidates: the decision columns are a SYSTEM terminal ("system
+/// terminal: fixed system marker", the `ownership-validation`/
+/// `ownership-deadline` naming family), so this lane never records the
+/// retiring Human's User ID as a system decider — the real operator
+/// stays on the lifecycle audit row.
+const DELETION_SYSTEM_MARKER: &str = "ownership-deletion";
+
 /// Lifecycle audit record for one committed deletion (the store fills
 /// resource/action/phase from the controlled vocabulary; operator columns
 /// project ONLY from the typed operation context).
@@ -130,20 +138,19 @@ pub(crate) fn retirement_withdrawal_steps(
         // Terminate the Bot's PENDING transfers: an acceptance racing
         // this commit loses its pending slot and can never resurrect
         // the Bot. Already-decided rows are history and stay untouched.
+        // The decision is a SYSTEM terminal (the Bot's deletion itself),
+        // so the receipt records the fixed deletion marker — never the
+        // retiring Human's User ID under a system kind.
         DbTransactionStep::Execute(DbStatement::with_params(
             format!(
                 "UPDATE bot_ownership_transfers \
                  SET status = 'invalidated', terminal_reason = 'bot_deleted', \
-                     decision_actor_kind = 'system', decided_by = ?, decided_at = {now}, \
+                     decision_actor_kind = 'system', decided_by = '{DELETION_SYSTEM_MARKER}', decided_at = {now}, \
                      gmt_modified = {now} \
                  WHERE env = ? AND bot_id = ? AND status = 'pending'",
                 now = now_sql(flavor)
             ),
-            vec![
-                Value::from(operation.actor.operator_id()),
-                Value::from(env),
-                Value::from(bot_id),
-            ],
+            vec![Value::from(env), Value::from(bot_id)],
         )),
         // The lifecycle audit row commits with the retirement or not at
         // all: a failed audit rolls the tombstone back with it.
@@ -521,7 +528,7 @@ impl MemoryBotRepo {
                 transfer.status = "invalidated".to_string();
                 transfer.terminal_reason = Some("bot_deleted".to_string());
                 transfer.decision_actor_kind = Some("system".to_string());
-                transfer.decided_by = Some(operation.actor.operator_id().to_string());
+                transfer.decided_by = Some(DELETION_SYSTEM_MARKER.to_string());
                 transfer.decided_at = Some(crate::memory::transfer::now_db_text());
                 transfer.gmt_modified = crate::memory::transfer::now_db_text();
             }

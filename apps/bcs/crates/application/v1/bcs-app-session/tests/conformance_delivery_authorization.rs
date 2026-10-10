@@ -261,7 +261,11 @@ impl DeliveryAuthorizationDriver for RealMemoryDriver {
         // The REAL session-membership removal lane.
         self.resources
             .raw_session_repo
-            .remove_participant(SESSION_ID, &human_actor_id(PARTICIPANT_USER))
+            .remove_participant(
+                SESSION_ID,
+                &human_actor_id(PARTICIPANT_USER),
+                &conformance_write_operation(),
+            )
             .await
             .expect("real session removal of the participant user");
     }
@@ -367,13 +371,34 @@ impl DeliveryAuthorizationDriver for MapAuthorityDriver {
     async fn remove_participant_user(&self) {
         self.resources
             .raw_session_repo
-            .remove_participant(SESSION_ID, &human_actor_id(PARTICIPANT_USER))
+            .remove_participant(
+                SESSION_ID,
+                &human_actor_id(PARTICIPANT_USER),
+                &conformance_write_operation(),
+            )
             .await
             .expect("real session removal of the participant user");
     }
 }
 
 // ── conformance mounts ──────────────────────────────────────────────────
+
+
+/// Honest System identity for the membership-withdrawal contract writes
+/// (spec §12.5): the conformance harness has no verified Human operator on
+/// this lane, so the audit names the system actor itself.
+fn conformance_write_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!(
+            "conformance-delivery-write:{}",
+            uuid::Uuid::new_v4()
+        ),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "conformance-delivery-write".to_string(),
+            effective_actor_id: "conformance-delivery-write".to_string(),
+        },
+    }
+}
 
 #[tokio::test]
 async fn real_memory_authority_stack_meets_delivery_authorization_contract() {

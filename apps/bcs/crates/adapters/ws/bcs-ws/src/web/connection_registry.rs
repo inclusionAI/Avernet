@@ -385,9 +385,13 @@ impl WorkbenchConnectionRegistry {
     /// `Deliver` items:
     /// - `SkipMessage`: skip just this frame — no unsubscribe, no close,
     ///   no fallback re-send;
-    /// - `InvalidateBinding` / batch `Err`: invalidate the binding (its
-    ///   protected backlog is dropped on drain with no further reads) —
-    ///   PublicControl traffic of the connection is unaffected.
+    /// - `InvalidateBinding` / batch `Err`: invalidate the binding AND
+    ///   DEREGISTER its protected subscription from the registry in the
+    ///   same event (spec §17.2: a dead binding is fed to NO later
+    ///   authorize batch; its protected backlog is dropped on drain with
+    ///   no further reads). The connection itself is never closed here —
+    ///   it merely goes silent on the broadcast lanes, while direct
+    ///   dispatcher-originated PublicControl responses keep flowing.
     async fn broadcast_selected(&self, session_id: &str, event_json: &str, visibility_domain: MessageVisibilityDomain, audience: Option<&MessageAudience>, exclude_conn_id: Option<u64>, actor_ids: Option<&[String]>) -> usize {
         let mut delivered = 0usize;
         // ---- bounded snapshot under the registry lock ----
@@ -475,6 +479,15 @@ impl WorkbenchConnectionRegistry {
     /// enqueue only the `Deliver` items. Every registered (still live) target
     /// of the event is verified or invalidated — none is defaulted to
     /// authorized, and a failing batch fails the whole event closed.
+    ///
+    /// A dead binding (an `InvalidateBinding` decision or a failed batch)
+    /// leaves the registry in the SAME event: its connection record is
+    /// deregistered so no later event pins the dead binding into an
+    /// authorize batch (spec §17.2 — stop querying after failure/closure).
+    /// Only the delivery subscription is dropped: `shutdown` is never
+    /// cancelled here, the socket handler's writer queue keeps serving
+    /// direct PublicControl responses, and the connection simply goes
+    /// silent on the broadcast lanes.
     async fn deliver_authorized_bound(
         &self,
         session_id: &str,
@@ -500,6 +513,10 @@ impl WorkbenchConnectionRegistry {
         let decisions = gate.authorize_targets(contexts.clone()).await;
         let mut delivered = 0usize;
         let mut disconnected = Vec::new();
+        // (conn_id, binding_id) pairs whose binding died in THIS event: their
+        // protected subscriptions leave the registry right below so later
+        // events authorize them no further (spec §17.2).
+        let mut invalidated: Vec<(u64, u64)> = Vec::new();
         match decisions {
             Ok(decisions) => {
                 for ((target, context), decision) in targets.iter().zip(contexts).zip(decisions) {
@@ -548,19 +565,23 @@ impl WorkbenchConnectionRegistry {
                         }
                         bcs_service_api::application::v1::delivery_authorization::DeliveryAuthorizationDecision::InvalidateBinding => {
                             gate.invalidate_binding(target.binding_id);
+                            invalidated.push((target.conn_id, target.binding_id));
                         }
                     }
                 }
             }
             Err(()) => {
                 // Fail the whole event's batch closed: every not-yet-verified
-                // target is invalidated, nothing is queued (spec §17.2).
+                // target is invalidated, nothing is queued, and each dead
+                // binding's protected subscription leaves the registry in the
+                // same event (spec §17.2).
                 for target in &targets {
                     gate.invalidate_binding(target.binding_id);
+                    invalidated.push((target.conn_id, target.binding_id));
                 }
             }
         }
-        if !disconnected.is_empty() {
+        if !disconnected.is_empty() || !invalidated.is_empty() {
             let mut sessions = self.sessions.write().await;
             if let Some(connections) = sessions.get_mut(session_id) {
                 let mut retired = Vec::new();
@@ -572,10 +593,26 @@ impl WorkbenchConnectionRegistry {
                         if let Some(slot) = conn.protected.as_ref() {
                             retired.push(slot.binding_id);
                         }
-                        false
-                    } else {
-                        true
+                        return false;
                     }
+                    // §17.2: a binding whose authority judgment killed it in
+                    // THIS event must stop being a delivery target — remove
+                    // the connection record (matched by conn id AND the same
+                    // binding generation) so later events for this session
+                    // authorize no dead binding and enqueue no frame (the
+                    // raw backlog alone keeps dropping on drain with no
+                    // read). Only the broadcast subscription goes: shutdown
+                    // is not cancelled, the connection merely goes silent.
+                    if invalidated.iter().any(|(conn_id, binding_id)| {
+                        *conn_id == conn.conn_id
+                            && conn
+                                .protected
+                                .as_ref()
+                                .is_some_and(|slot| slot.binding_id == *binding_id)
+                    }) {
+                        return false;
+                    }
+                    true
                 });
                 drop(sessions);
                 for binding_id in retired {

@@ -151,8 +151,8 @@ impl MySqlSessionStore {
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap SELECT + UPDATE + materialize INSERT in a DbPlugin transaction once supported.
         let select_cols = self.select_cols();
         let select_sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions \
@@ -211,19 +211,6 @@ impl MySqlSessionStore {
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(join_seq_str.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
         // Materialized side-table: upsert presence row (idempotent).
         let upsert_sql = format!(
             "INSERT INTO bcs_session_participants \
@@ -234,19 +221,43 @@ impl MySqlSessionStore {
             self.flavor
                 .on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
         );
-        self.db
-            .execute(DbStatement::with_params(
-                &upsert_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(group_id.as_str()),
-                    DbValue::from(bot_uuid.as_str()),
-                    DbValue::from(role_str),
-                ],
-            ))
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `create_participant/session/applied` row joins the membership
+        // UPDATE (and its side-table upsert) in ONE transaction — the
+        // audit must NOT depend on eventing being enabled. An audit INSERT
+        // failure rolls the membership write back with it.
+        let audit_record =
+            create_participant_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &update_sql,
+                    vec![
+                        DbValue::from(new_json.as_str()),
+                        DbValue::from(join_seq_str.as_str()),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                    ],
+                )),
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &upsert_sql,
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(group_id.as_str()),
+                        DbValue::from(bot_uuid.as_str()),
+                        DbValue::from(role_str),
+                    ],
+                )),
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        {
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
+        }
+
 
         info!(
             session_id = %session_id,
@@ -362,8 +373,13 @@ impl MySqlSessionStore {
         })?;
         steps.extend(event_plan.steps);
         // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
-        // `create/session/applied` for a membership record being created.
-        let audit_record = create_session_audit_record(
+        // `create_participant/session/applied` — the membership creation is
+        // its own stable sub-command step, distinct from the operation's
+        // `create/session/applied` row, so one shared launch operation that
+        // creates the Session AND materializes a deferred participant commits
+        // two coexisting rows (the old shared key collided in the
+        // `(env, operation_id, step_key)` unique slot).
+        let audit_record = create_participant_audit_record(
             &command.operation,
             &self.env,
             &command.session_id,
@@ -386,8 +402,12 @@ impl MySqlSessionStore {
 }
 
 impl MySqlSessionStore {
-    pub(super) async fn repo_remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap in a DbPlugin transaction once supported.
+    pub(super) async fn repo_remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session> {
         let select_cols = self.select_cols();
         let select_sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions \
@@ -424,30 +444,38 @@ impl MySqlSessionStore {
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `delete/session/applied` joins the membership removal UPDATE (and
+        // its side-table DELETE) in ONE transaction, independent of eventing.
+        let audit_record = remove_participant_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &update_sql,
+                    vec![
+                        DbValue::from(new_json.as_str()),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                    ],
+                )),
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    "DELETE FROM bcs_session_participants \
+                     WHERE env = ? AND session_id = ? AND bot_uuid = ?",
+                    vec![
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                        DbValue::from(bot_uuid),
+                    ],
+                )),
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        {
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
+        }
 
-        self.db
-            .execute(DbStatement::with_params(
-                "DELETE FROM bcs_session_participants \
-                 WHERE env = ? AND session_id = ? AND bot_uuid = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
 
         Ok(current)
     }
@@ -562,8 +590,8 @@ impl MySqlSessionStore {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap in a DbPlugin transaction once supported.
         let select_cols = self.select_cols();
         let select_sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions \
@@ -603,19 +631,32 @@ impl MySqlSessionStore {
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // `update/session/applied` joins the participant mode UPDATE in ONE
+        // transaction — the audit does NOT depend on eventing being enabled.
+        // bcs_session_participants tracks presence only (not mode); no
+        // side-table update needed.
+        let audit_record = update_session_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &update_sql,
+                    vec![
+                        DbValue::from(new_json.as_str()),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                    ],
+                )),
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        {
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
+        }
 
-        // bcs_session_participants tracks presence only (not mode); no side-table update needed.
+
         Ok(current)
     }
 }
@@ -626,6 +667,7 @@ impl MySqlSessionStore {
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let select_cols = self.select_cols();
         let select_sql = format!(
@@ -669,18 +711,30 @@ impl MySqlSessionStore {
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(participants_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
+        // Same-transaction ordinary-business audit (spec §12.5, see
+        // repo_update_participant_mode): `update/session/applied` joins the
+        // scope UPDATE in ONE transaction, independent of eventing.
+        let audit_record = update_session_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
+            .db
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &update_sql,
+                    vec![
+                        DbValue::from(participants_json.as_str()),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                    ],
+                )),
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        {
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
+        }
         Ok(current)
+
     }
 }
 
@@ -691,6 +745,7 @@ impl MySqlSessionStore {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let (mut current, stored_participants_json) = self
             .load_with_raw_participants(session_id)
@@ -724,23 +779,40 @@ impl MySqlSessionStore {
              WHERE env = ? AND session_id = ? AND participants = ?",
             self.flavor.set_modified_now(),
         );
-        let result = self
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11,
+        // PR #2568 review F4): the CAS UPDATE and its `update/session/applied`
+        // row commit together — a lost CAS race (ConditionFailed) rolls the
+        // audit back with it, and an audit INSERT failure rolls the write
+        // back. The audit never depends on eventing being enabled.
+        let audit_record = update_session_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
             .db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(participants_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(stored_participants_json.as_str()),
-                ],
-            ))
+            .transaction(vec![
+                DbTransactionStep::ExecuteChecked {
+                    statement: DbStatement::with_params(
+                        &update_sql,
+                        vec![
+                            DbValue::from(participants_json.as_str()),
+                            DbValue::from(self.env.as_str()),
+                            DbValue::from(session_id),
+                            DbValue::from(stored_participants_json.as_str()),
+                        ],
+                    ),
+                    expected_affected_rows: 1,
+                },
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
-        if result.affected_rows != 1 {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{session_id}' participants changed during message-view scope update"
-            )));
+        {
+            if matches!(error, DbError::ConditionFailed { .. }) {
+                // Lost CAS race: the participants changed concurrently — this
+                // is a retryable conflict, not an internal error.
+                return Err(ServiceError::Conflict(format!(
+                    "Session '{session_id}' participants changed during message-view scope update"
+                )));
+            }
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
         }
         Ok(current)
     }

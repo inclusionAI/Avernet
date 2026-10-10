@@ -1193,3 +1193,149 @@ async fn live_manager_may_launch_through_participant_bot() {
         .expect("a live manager of a participating Bot may launch");
     assert_eq!(outcome.session.created_by.as_deref(), Some("human_manager-1"));
 }
+
+// ---------------------------------------------------------------------------
+// PR #2568 review F1: the deferred Human creator (explicit creator on a
+// private group, eventing ON) writes its OWN `create_participant/session/
+// applied` audit step inside the SAME launch operation, so the Session creation
+// row (`create/session/applied`) and the membership row coexist instead of
+// colliding in the `(env, operation_id, step_key)` unique slot and failing
+// AFTER the creation already committed (SQLite + the real launch application).
+// ---------------------------------------------------------------------------
+
+#[path = "../../../bootstrap/bcs/src/migrations.rs"]
+#[allow(dead_code)]
+mod launch_audit_migrations;
+
+async fn launch_audit_sqlite() -> Arc<dyn bcs_db_api::DbPlugin> {
+    let db: Arc<dyn bcs_db_api::DbPlugin> = Arc::new(
+        bcs_db_local::LocalSqliteDbPlugin::new().expect("sqlite db"),
+    );
+    launch_audit_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    db
+}
+
+#[tokio::test]
+async fn eventful_launch_materializes_deferred_creator_with_distinct_audit_step() {
+    let db = launch_audit_sqlite().await;
+    let bots = Arc::new(BotCore::memory());
+    let group_repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
+    let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+    let session_repo: Arc<dyn SessionRepoPort> = Arc::new(
+        bcs_session_store::MySqlSessionStore::sqlite(db.clone(), "contract".to_string()),
+    );
+    let event_store = Arc::new(bcs_event_store::MemoryEventStore::new());
+    let factory = Arc::new(bcs_event_store::EventRecorder::new(
+        event_store,
+        true,
+        "contract",
+        7,
+        65536,
+    ));
+    let sessions = Arc::new(
+        SessionManagementServiceImpl::new(session_repo.clone(), group_repo)
+            .with_event_record_factory(factory),
+    );
+    let runtime = Arc::new(RecordingRuntime::default());
+    let system_message = Arc::new(RecordingSystemMessage::default());
+    let authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+        Arc::new(CreatedByAuthorityHook { bots: bots.clone() });
+    let service = SessionLaunchApplication::new(
+        bots.clone(),
+        groups.clone(),
+        sessions.clone(),
+        runtime.clone(),
+        system_message.clone(),
+        authority,
+    );
+
+    bots
+        .register(
+            "driver".to_string(),
+            BotCapabilities {
+                name: Some("driver".to_string()),
+                visibility: "public".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("register bot");
+    bots
+        .save_created_by("driver", "alice", true)
+        .await
+        .expect("store owner");
+    groups
+        .upsert(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .await
+        .expect("store group");
+
+    // Explicit HUMAN creator on a private group: the creator qualifies
+    // through the owned `driver` Bot but is no group participant, so the
+    // launch defers the Human's own membership to AFTER the create — under
+    // ONE launch operation.
+    let mut launch = request(human("alice"), "group-1", Some("human_alice"));
+    launch.human_message_view_scope = Some(MessageViewScope::Participant);
+    let outcome = service
+        .create(CreateSessionLaunch { request: launch })
+        .await
+        .expect("the deferred Human creator materializes within the SAME launch operation");
+
+    let participant = outcome
+        .session
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("the session ends WITH the Human participant");
+    assert_eq!(participant.role, ParticipantRole::Driver);
+    assert_eq!(participant.actor_kind, ActorKind::Human);
+
+    // ONE operation, TWO distinct stable steps, both committed.
+    let rows = db
+        .query(bcs_db_api::DbStatement::new(
+            "SELECT operation_id, step_key FROM bcs_bot_action_audits ORDER BY id",
+        ))
+        .await
+        .expect("query session audits");
+    assert_eq!(rows.len(), 2, "expected exactly the create + membership rows");
+    let operation_ids: Vec<Option<String>> = rows
+        .iter()
+        .map(|row| row.get_string("operation_id").expect("decode operation_id"))
+        .collect();
+    assert!(
+        operation_ids[0].is_some() && operation_ids[0] == operation_ids[1],
+        "both rows share the launch operation id: {operation_ids:?}"
+    );
+    let step_keys: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            row.get_string("step_key")
+                .expect("decode step_key")
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(step_keys[0], "create/session/applied");
+    assert_eq!(
+        step_keys[1], "create_participant/session/applied",
+        "the deferred membership owns its distinct stable step key"
+    );
+
+    // The reloaded session persists the participant too (no partial state).
+    let reloaded = sessions
+        .get(&outcome.session.id)
+        .await
+        .expect("reload session")
+        .expect("the created session reloads");
+    assert!(
+        reloaded
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "human_alice"),
+        "the persisted session keeps the Human driver"
+    );
+}

@@ -2168,12 +2168,21 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     // add_participant / update_participant_mode / remove_participant
     let extra = Participant::bot("bot2", ParticipantRole::Consultant);
     let added = repo
-        .add_participant(&svc.id, extra.clone())
+        .add_participant(
+            &svc.id,
+            extra.clone(),
+            &contract_session_write_operation(),
+        )
         .await
         .expect("add_participant");
     assert_eq!(added.participants.len(), 2);
     let modded = repo
-        .update_participant_mode(&svc.id, "bot2", ParticipantMode::Muted)
+        .update_participant_mode(
+            &svc.id,
+            "bot2",
+            ParticipantMode::Muted,
+            &contract_session_write_operation(),
+        )
         .await
         .expect("update_participant_mode");
     let bot2 = modded
@@ -2183,14 +2192,18 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .expect("bot2 participant");
     assert_eq!(bot2.mode, Some(ParticipantMode::Muted));
     let removed = repo
-        .remove_participant(&svc.id, "bot2")
+        .remove_participant(&svc.id, "bot2", &contract_session_write_operation())
         .await
         .expect("remove_participant");
     assert_eq!(removed.participants.len(), 1);
 
     // update_title
     let titled = repo
-        .update_title(&svc.id, Some("hello".to_string()))
+        .update_title(
+            &svc.id,
+            Some("hello".to_string()),
+            &contract_session_write_operation(),
+        )
         .await
         .expect("update_title");
     assert_eq!(titled.session_title.as_deref(), Some("hello"));
@@ -2222,6 +2235,23 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
         .await
         .is_empty());
 
+
+/// Contract-test audit identity for the plain Session write ports
+/// (spec §12.5, PR #2568 review F4): add/remove participant, participant
+/// mode updates and title updates now REQUIRE the operation context and
+/// commit their `applied` audit row with the write. Every distinct
+/// instruction is its own logical operation.
+fn contract_session_write_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!(
+            "contract-session-write:{}",
+            uuid::Uuid::new_v4()
+        ),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "bot-writer".to_string(),
+        },
+    }
+}
 
 /// Contract-test audit identity for the collect-family repo checks
 /// (spec §12.5): every distinct collect/uncollect instruction is its own
