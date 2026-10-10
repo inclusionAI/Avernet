@@ -18,11 +18,14 @@ The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 """
 from __future__ import annotations
 
+from agentclaw.community.core.caller_identity.boundary_logging import install_httpx_credential_filter, redact_boundary
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
 import re
 import time
+import uuid
 
 import httpx
 from agentclaw.community.core.service_bot.baas_service_errors import (
@@ -3197,39 +3200,49 @@ class BaasService:  # pragma: no cover
         self,
         paas_device_id: str,
         caller_rule: OutBoundOperationRule,
+        *,
+        session_key: str | None = None,
     ) -> bool:
-        """Append one validated Caller overlay without replacing base rules."""
+        """Append a Caller overlay with a credential-safe boundary audit."""
+        install_httpx_credential_filter()
         payload = self._outbound_rule_to_dict(caller_rule)
-        logger.info(
-            "caller_outbound_append_started rule_count=%s",
-            len(caller_rule.header_operation_rules),
-        )
+        secrets = tuple(rule.value for rule in caller_rule.header_operation_rules if isinstance(rule.value, str)) + ((session_key,) if session_key else ())
+        params = {"mode": "append"}
+        if session_key is not None:
+            params["session_key"] = session_key
+        route = f"/api/v1/paas/devices/{paas_device_id}/outbound-rule"
+        started_at = time.monotonic()
+        operation_id = uuid.uuid4().hex
+        fields = {"system": "baas", "direction": "outbound", "operation": "caller_outbound_append",
+                  "operation_id": operation_id, "method": "PUT", "route": route,
+                  "params": redact_boundary(params), "body": redact_boundary(payload)}
+        logger.info("caller_outbound_append_started fields=%s", fields)
+        response = None
+        response_data = None
         try:
-            response = self._http.put(
-                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append",
-                json=payload,
-                timeout=30.0,
-            )
+            response = self._http.put(route, params=params, json=payload, timeout=30.0)
+            try:
+                response_data = response.json()
+            except ValueError:
+                response_data = {"response_type": "non_json", "length": len(response.content)}
             response.raise_for_status()
-            response_data = response.json()
-            if response_data.get("code") != 0:
-                logger.warning("caller_outbound_append_rejected")
+            if not isinstance(response_data, dict) or response_data.get("code") != 0:
                 raise BaasServiceError("BaaS Caller outbound append rejected")
-        except httpx.HTTPStatusError as exc:
-            logger.warning(
-                "caller_outbound_append_http_failed status_code=%s",
-                exc.response.status_code,
-            )
-            raise BaasServiceError("BaaS Caller outbound append failed") from exc
-        except BaasServiceError:
-            raise
         except Exception as exc:
             logger.warning(
-                "caller_outbound_append_failed error_type=%s",
-                type(exc).__name__,
+                "caller_outbound_append_failed fields=%s status_code=%s duration_ms=%.1f "
+                "error_type=%s error_message=outbound_request_failed response=%s",
+                fields, getattr(response, "status_code", None),
+                (time.monotonic() - started_at) * 1000, type(exc).__name__,
+                redact_boundary(response_data, secrets=secrets),
             )
-            raise BaasServiceError("BaaS Caller outbound append failed") from exc
-        logger.info("caller_outbound_append_succeeded")
+            # COSEC: HTTP exception chains can contain token/session query URLs.
+            raise BaasServiceError("BaaS Caller outbound append failed") from None
+        logger.info(
+            "caller_outbound_append_succeeded fields=%s status_code=%s duration_ms=%.1f response=%s",
+            fields, response.status_code, (time.monotonic() - started_at) * 1000,
+            redact_boundary(response_data, secrets=secrets),
+        )
         return True
 
     def resolve_token_outbound_device_id(
@@ -3245,7 +3258,7 @@ class BaasService:  # pragma: no cover
         binding_id = getattr(binding, "id", None)
         provider = getattr(binding, "device_provider", None)
         # COSEC: unknown provider values may contain secrets or log controls.
-        safe_provider = provider if provider in ("baas", "arca") else "unsupported"
+        safe_provider = provider if provider in ("baas", "arca", "teclaw") else "unsupported"
         logger.info(
             "token_outbound_target_resolution_started binding_id=%s provider=%s "
             "reason=pending error_type=none",
@@ -3254,9 +3267,9 @@ class BaasService:  # pragma: no cover
         try:
             if binding is None or str(getattr(binding, "status", "")).upper() != "ACTIVE":
                 raise BaasOutboundTargetError("binding_unavailable")
-            if provider not in ("baas", "arca"):
+            if provider not in ("baas", "arca", "teclaw"):
                 raise BaasOutboundTargetError("unsupported_provider")
-            if provider == "baas":
+            if provider in ("baas", "teclaw"):
                 bot_uuid = getattr(binding, "device_id", None)
                 if not bot_uuid:
                     raise BaasOutboundTargetError("target_not_found")
@@ -3314,6 +3327,7 @@ class BaasService:  # pragma: no cover
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
+        session_key: str | None = None,
     ) -> None:
         """Install one Caller-token overlay on the Bot's current BaaS device."""
         if (
@@ -3358,6 +3372,10 @@ class BaasService:  # pragma: no cover
             )
         )
         binding = self._device_binding_repo.get_by_id(resolved_binding_id)
+        is_teclaw = binding is not None and binding.device_provider == "teclaw"
+        if is_teclaw and (session_key is None or not session_key.strip()):
+            logger.warning("caller_session_key_rejected bot_id=%s binding_id=%s reason=missing_session_key", bot_id, resolved_binding_id)
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
         try:
             paas_device_id = self.resolve_token_outbound_device_id(binding)
         except BaasOutboundTargetError as exc:
@@ -3385,7 +3403,8 @@ class BaasService:  # pragma: no cover
             is_test_exchange,
         )
         try:
-            updated = self.append_caller_outbound_rule(paas_device_id, caller_rule)
+            session_kwargs = {"session_key": session_key} if is_teclaw else {}
+            updated = self.append_caller_outbound_rule(paas_device_id, caller_rule, **session_kwargs)
         except Exception as exc:
             logger.warning(
                 "caller_outbound_update_failed bot_id=%s stage=%s error_type=%s "

@@ -40,10 +40,12 @@ class TokenExchangeOrchestrator:
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
     ) -> CallerIamTokenOutcome:
         caller_error: Exception | None = None
         caller_outcome: CallerIamTokenOutcome | None = None
         try:
+            session_kwargs = {"session_key": session_key} if session_key is not None else {}
             caller_outcome = await self._caller_service.get_iam_token(
                 iam_token=iam_token,
                 auth_request=auth_request,
@@ -52,6 +54,7 @@ class TokenExchangeOrchestrator:
                 publish_id=publish_id,
                 entity_id=entity_id,
                 is_test_exchange=is_test_exchange,
+                **session_kwargs,
             )
         except Exception as exc:
             caller_error = exc

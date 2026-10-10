@@ -75,6 +75,7 @@ def _service(
         else cli_scope_reconciler or MagicMock()
     )
     service = CallerIdentityService(
+        session_authorizer=MagicMock(),
         bot_repository=bot_repository,
         collaborator_repository=collaborator_repository,
         lock_repository=lock_repository,

@@ -27,6 +27,7 @@ class SingleboxCallerIamTokenService:
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
     ) -> CallerIamTokenOutcome:
         return CallerIamTokenOutcome(iam_token="mock_iam_token")
 
