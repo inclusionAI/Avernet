@@ -2,6 +2,14 @@
 
 ## Provides
 
+- Normal Group summaries resolve nullable `driver_bot_name` from the driver
+  participant after existing Bot-name backfill, without extra registry reads.
+  Normal Group details resolve nullable `driver_bot_owner` (`human_<created_by>`)
+  and `driver_bot_owner_name` through at most two best-effort registry reads,
+  matching legacy display semantics without changing authorization. Missing
+  ownership yields nulls; a missing Human name preserves the owner ID. DM
+  projections are unchanged. Shared projections also apply to create/update.
+
 - `GroupServiceImpl`, the transport-agnostic implementation of the BCN V1
   Group Service API.
 - Principal-aware authorization, V1 projections, and orchestration over the
