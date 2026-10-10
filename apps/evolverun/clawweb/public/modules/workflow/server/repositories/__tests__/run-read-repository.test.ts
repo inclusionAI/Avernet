@@ -19,10 +19,11 @@ function fixture() {
   UPDATE flow_runs SET origin_session_key='session-a', origin_session_id='session-id-a' WHERE flow_id='f2';`);
   raw.exec(`CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, workflow_id TEXT, bot_id TEXT, bot_owner_id TEXT, can_view INTEGER, can_edit INTEGER, can_execute INTEGER DEFAULT 0, env TEXT DEFAULT 'test', gmt_create INTEGER DEFAULT 0, gmt_modified INTEGER DEFAULT 0);
   INSERT INTO bot_workflow_permissions (workflow_id,bot_id,bot_owner_id,can_view,can_edit) VALUES ('wf', NULL, 'viewer', 1, 0);`);
-  const db = { dbType: "sqlite", dialect: sqliteDialect, query: async (sql: string, args: any[] = []) => raw.prepare(sql).all(...args) } as unknown as IDatabase;
+  const queries: {sql: string; args: any[]}[] = [];
+  const db = { dbType: "sqlite", dialect: sqliteDialect, query: async (sql: string, args: any[] = []) => { queries.push({sql,args}); return raw.prepare(sql).all(...args); } } as unknown as IDatabase;
   const bots: DirectoryBot[] = [];
   const permissions = new BotWorkflowPermissionRepository(db, { listBots: async () => bots });
-  return { raw, db, bots, permissions, repo: new RunReadRepository(db, permissions), close: () => raw.close() };
+  return { raw, db, bots, queries, permissions, repo: new RunReadRepository(db, permissions), close: () => raw.close() };
 }
 const scope = { botId: "bot", ownerId: "owner" };
 describe("scoped shared run reads", () => {
@@ -204,4 +205,69 @@ it("allows all owners only for explicit wildcard-owner grants and escapes litera
   const page = await f.repo.listRuns({...scope,scope:"all",userId:"viewer"});
   expect(page.items.map(r=>r.flow_id)).toEqual(["legacy","f1"]);
  } finally { f.close(); }
+});
+
+
+it.each([
+ ["specific Bot", "bot", "viewer", ["f2","f1"]],
+ ["all Bots of the workflow", null, "viewer", ["legacy","other","f2","f1"]],
+ ["global workflow", "*", "*", ["legacy","other","f2","f1"]],
+] as const)("reads direct edit-only grants for %s", async (_label,botId,ownerId,expected) => {
+ const f=fixture(); try {
+  f.raw.prepare("UPDATE bot_workflow_permissions SET bot_id=?,bot_owner_id=?,can_view=0,can_edit=1").run(botId,ownerId);
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot:viewer' WHERE flow_id IN ('f1','f2')");
+  expect((await f.repo.listRuns({...scope,scope:"all",userId:"viewer"})).items.map(r=>r.flow_id)).toEqual(expected);
+ } finally {f.close();}
+});
+
+it.each(["view","edit"])("reads a standalone wildcard-owner %s grant without any direct or inherited grant", async mode => {
+ const f=fixture(); try {
+  f.raw.prepare("UPDATE bot_workflow_permissions SET bot_id='bot',bot_owner_id='*',can_view=?,can_edit=?").run(mode === "view" ? 1 : 0,mode === "edit" ? 1 : 0);
+  const first=await f.repo.listRuns({...scope,scope:"all",userId:"stranger",limit:2});
+  expect(first.items.map(r=>r.flow_id)).toEqual(["other","f2"]);
+  expect(first.nextCursor).toBe(2);
+  expect((await f.repo.listRuns({...scope,scope:"all",userId:"stranger",beforeId:2})).items.map(r=>r.flow_id)).toEqual(["f1"]);
+ } finally {f.close();}
+});
+
+it.each(["workflows","Bots"])("paginates more than 1000 %s with bounded SQL and no per-workflow permission reads", async kind => {
+ const f=fixture(); try {
+  f.raw.exec("DELETE FROM bot_workflow_permissions; DELETE FROM flow_runs");
+  const grant=f.raw.prepare("INSERT INTO bot_workflow_permissions(workflow_id,bot_id,bot_owner_id,can_view,can_edit) VALUES (?,?,'viewer',1,0)");
+  const run=f.raw.prepare("INSERT INTO flow_runs(id,flow_id,workflow_id,status,origin_bot_id) VALUES (?,?,?,'failed',?)");
+  for(let id=1;id<=1200;id++) {
+   const wf=kind==="workflows" ? `wf-${id}` : "wf";
+   const bot=kind==="Bots" ? `bot-${id}` : null;
+   grant.run(wf,bot);run.run(id,`r-${id}`,wf,`${bot ?? "bot"}:viewer`);
+  }
+  let beforeId: number|undefined;const seen:unknown[]=[];
+  do {
+   f.queries.splice(0);
+   const page=await f.repo.listRuns({...scope,scope:"all",userId:"viewer",beforeId,limit:50});
+   seen.push(...page.items.map(r=>r.id));
+   expect(f.queries.filter(q=>q.sql.includes("FROM bot_workflow_permissions"))).toHaveLength(1);
+   expect(f.queries.length).toBeLessThanOrEqual(20);
+   expect(Math.max(...f.queries.map(q=>q.args.length))).toBeLessThan(500);
+   beforeId=page.nextCursor ?? undefined;
+  } while(beforeId!==undefined);
+  expect(seen).toEqual(Array.from({length:1200},(_,i)=>1200-i));
+ } finally {f.close();}
+});
+
+
+it("deduplicates overlapping grants across batches while preserving the global cursor", async () => {
+ const f=fixture();try {
+  f.raw.exec("UPDATE bot_workflow_permissions SET bot_id='bot',bot_owner_id='*'");
+  const grant=f.raw.prepare("INSERT INTO bot_workflow_permissions(workflow_id,bot_id,bot_owner_id,can_view,can_edit) VALUES ('wf',?,'viewer',1,0)");
+  for(let i=0;i<100;i++)grant.run(`unused-${i}`);
+  grant.run("bot");
+  f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot:viewer' WHERE flow_id IN ('f1','f2')");
+  const q={...scope,scope:"all" as const,userId:"viewer",limit:2};
+  const first=await f.repo.listRuns(q);
+  expect(first.items.map(r=>r.flow_id)).toEqual(["other","f2"]);
+  expect(first.nextCursor).toBe(2);
+  const second=await f.repo.listRuns({...q,beforeId:2});
+  expect(second.items.map(r=>r.flow_id)).toEqual(["f1"]);
+  expect(second.nextCursor).toBeNull();
+ }finally{f.close();}
 });
