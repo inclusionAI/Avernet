@@ -1,3 +1,4 @@
+import type { DeliveryStatusView } from '@/domain/collaboration/types';
 import type { SessionMessageData } from '@/services/backendApi/collaboration/sessionController';
 import type { Block, ChatMessage, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
 import { imageAttachmentsToBlocks } from './messageBlockBuilder';
@@ -222,4 +223,32 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
     if (runKey) assistantByRun.set(runKey, message);
   }
   return result;
+}
+
+/**
+ * 按投递终态把历史 assistant 消息标注为 aborted。
+ *
+ * 历史 DTO（GroupMessage）不携带 run 终止字段，但后端投递状态机（PersistedMessageDelivery）
+ * 持久化了终态；abort 的 delivery 终态为 cancelled 且带 run_id。历史消息经 extra.runId
+ * 与 delivery.run_id 关联——命中的 assistant 消息 status 置为 'aborted'，
+ * 使刷新后「已终止」与实时 WS 路径一致（hydrateRun 亦据此恢复 parser tombstone）。
+ *
+ * 纯函数：无 cancelled 投递时原样返回入参（引用不变），调用方零成本短路。
+ */
+export function annotateAbortedRunsFromDeliveries(
+  messages: ChatMessage[],
+  deliveries: DeliveryStatusView[],
+): ChatMessage[] {
+  const cancelledRunIds = new Set(
+    deliveries
+      .filter((d) => d.status === 'cancelled' && typeof d.run_id === 'string' && d.run_id.length > 0)
+      .map((d) => d.run_id as string),
+  );
+  if (cancelledRunIds.size === 0) return messages;
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    const runId = typeof message.extra?.runId === 'string' ? message.extra.runId : null;
+    if (!runId || !cancelledRunIds.has(runId)) return message;
+    return { ...message, status: 'aborted' };
+  });
 }

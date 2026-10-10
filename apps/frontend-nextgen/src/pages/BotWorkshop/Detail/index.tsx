@@ -73,8 +73,8 @@ const BotWorkshopDetailPage: React.FC = () => {
     return (
       <Empty
         title="缺少 Bot 标识"
-        description="请从 Bot 工坊重新进入。"
-        action={<Button onClick={detail.back}>返回 Bot 工坊</Button>}
+        description="请从 Bot 管理重新进入。"
+        action={<Button onClick={detail.back}>返回 Bot 管理</Button>}
       />
     );
   if (requestIdentity.loading) return <Spin tip="正在获取当前用户身份…" />;
@@ -83,7 +83,7 @@ const BotWorkshopDetailPage: React.FC = () => {
       <Empty
         title="无法加载用户身份"
         description={requestIdentity.error}
-        action={<Button onClick={detail.back}>返回 Bot 工坊</Button>}
+        action={<Button onClick={detail.back}>返回 Bot 管理</Button>}
       />
     );
   if (detail.loading) return <Spin tip="加载 Bot 配置…" />;
@@ -92,7 +92,7 @@ const BotWorkshopDetailPage: React.FC = () => {
       <Empty
         title="无法查看 Bot"
         description={detail.error ?? 'Bot 不存在或无权访问'}
-        action={<Button onClick={detail.back}>返回 Bot 工坊</Button>}
+        action={<Button onClick={detail.back}>返回 Bot 管理</Button>}
       />
     );
   const bot = detail.bot;

@@ -899,10 +899,13 @@ describe('CollaborationSquareApiAdapter', () => {
     });
     const members = await new CollaborationSquareApiAdapter().listGroupMembers('group-1');
     expect(mockedGetGroup).toHaveBeenCalledWith('group-1');
-    expect(members).toEqual([
-      { id: 'bot-1', displayName: '主理 Bot', type: 'bot', role: 'manager' },
-      { id: 'human_1', displayName: '章梧', type: 'human', role: 'consultant' },
-    ]);
+    expect(members).toEqual({
+      ownerUserName: '未公开',
+      members: [
+        { id: 'bot-1', displayName: '主理 Bot', type: 'bot', role: 'manager' },
+        { id: 'human_1', displayName: '章梧', type: 'human', role: 'consultant' },
+      ],
+    });
     mockedGetGroup.mockRestore();
   });
 

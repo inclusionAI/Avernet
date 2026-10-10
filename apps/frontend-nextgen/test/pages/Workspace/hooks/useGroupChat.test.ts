@@ -287,7 +287,7 @@ it('allows follow-up sends while a human-only request is in flight', () => {
   );
 });
 
-it('blocks ordinary sends after a bot request starts during human-only processing', () => {
+it('allows ordinary sends while a bot request is in flight（输出中可继续发言，排队由后端拥塞控制兜底）', () => {
   const mixedSession: SessionView = {
     ...session,
     participants: [
@@ -296,12 +296,15 @@ it('blocks ordinary sends after a bot request starts during human-only processin
     ],
   };
   const { result } = renderHook(() => useGroupChat(mixedSession));
-  result.current.send('@李四 出个主意', ['human_2']);
-  mockChat.isRequesting = true;
   result.current.send('@甲 回答', ['bot-a']);
+  mockChat.isRequesting = true;
   result.current.send('普通消息');
+  result.current.send('再补充一条');
 
-  expect(mockChat.onRequest).toHaveBeenCalledTimes(2);
+  expect(mockChat.onRequest).toHaveBeenCalledTimes(3);
+  expect(mockChat.onRequest).toHaveBeenLastCalledWith(
+    expect.objectContaining({ content: '再补充一条', sessionId: 's1' }),
+  );
 });
 
 it('send forwards image attachments into chat.onRequest and userMessage extra for local echo', () => {

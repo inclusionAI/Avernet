@@ -84,3 +84,11 @@ describe('CollaborationIdentityHeader', () => {
     expect(screen.getByRole('button', { name: '协作身份加载中' })).toHaveClass('min-h-10', 'gap-2', 'px-4', 'py-2');
   });
 });
+
+it('read-only header has identity details but no switchable button or popover', () => {
+  mockUseWorkspaceIdentitySwitcherModel.mockReturnValue(model);
+  render(<CollaborationIdentityHeader readOnly />);
+  expect(screen.getByText('当前协作身份')).toBeInTheDocument();
+  expect(screen.getByText('用户 ID：fengtai')).toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});

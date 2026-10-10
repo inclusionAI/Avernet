@@ -181,19 +181,21 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
 
   return (
     <div className="border-t border-border bg-background px-3 pb-3 pt-2 sm:px-6" data-testid="collab-panel">
-      <div className="w-56">
-        <Segmented
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'bot', label: 'Bot控制' },
-            { value: 'human', label: '用户协作' },
-          ]}
-        />
-      </div>
+      {!panel.identityLocked && (
+        <div className="w-56">
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'bot', label: 'Bot控制' },
+              { value: 'human', label: '用户协作' },
+            ]}
+          />
+        </div>
+      )}
       {/* 内容区固定最小高度并垂直居中,避免 Bot控制/用户协作 切换时因各行文案行数不同导致面板高度来回跳动。 */}
       <div className="flex min-h-[72px] flex-col justify-center">
-        {tab === 'bot' ? (
+        {panel.identityLocked || tab === 'bot' ? (
           panel.botMode ? (
             <BotControlRow
               botMode={panel.botMode}

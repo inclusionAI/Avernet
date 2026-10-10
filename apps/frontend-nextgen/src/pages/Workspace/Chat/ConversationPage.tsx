@@ -8,6 +8,7 @@
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { IdentityView } from '@/domain/collaboration/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import { buildSingleChatBridgeRequest } from '@/hooks/singleChatBridgeRequest';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
@@ -23,6 +24,7 @@ import { history } from '@umijs/max';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
+import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
 import {
   ConversationSidebar,
   ConversationSidebarContent,
@@ -34,6 +36,7 @@ import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
 import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionEdits } from './hooks/useConversationSessionEdits';
+import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
 import { useManagedBotOthers } from './hooks/useManagedBotOthers';
@@ -46,42 +49,53 @@ export default function ConversationPage(): JSX.Element {
 
   // 登录用户变化才整仓重置(不随挂载/重渲染触发);首次出现不算切换。
   const previousUserIdRef = useRef<string | null>(null);
+  const identityChanged = previousUserIdRef.current !== null && previousUserIdRef.current !== userId;
   useEffect(() => {
     const previousUserId = previousUserIdRef.current;
     previousUserIdRef.current = userId;
-    if (previousUserId !== null && userId !== null && previousUserId !== userId) {
+    if (previousUserId !== null && previousUserId !== userId) {
       useConversationStore.getState().reset();
     }
   }, [userId]);
 
   const directory = useConversationDirectory(userId);
+  const managedAndTeamBots = useMemo(
+    () => [...directory.managedBots, ...directory.teamBots],
+    [directory.managedBots, directory.teamBots],
+  );
   const sessions = useConversationSessions({
     userId,
-    managedBots: directory.managedBots,
+    managedBots: managedAndTeamBots,
     friendBots: directory.friendBots,
+  });
+  const placeholder = useConversationSessionPlaceholder({
+    userId,
+    managedBots: managedAndTeamBots,
+    friendBots: directory.friendBots,
+    sessions,
   });
   const others = useManagedBotOthers({
     userId,
-    managedBots: directory.managedBots,
+    managedBots: managedAndTeamBots,
     enabled: true,
   });
-  const hydrated = !directory.managedLoading && !directory.friendLoading;
+  const hydrated = !directory.managedLoading && !directory.teamLoading && !directory.friendLoading;
   const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession } =
     useConversationSelection({
-      managedBots: directory.managedBots,
+      managedBots: managedAndTeamBots,
       friendBots: directory.friendBots,
       hydrated,
     });
   useConversationUrlSync({ hydrated, selection, onRouteSelection });
 
   // 交互式(mine)装配:target/viewer/认证信息/请求身份全部来自登录 Human(Task 7 约定)。
-  const interactiveBot = interactive.bot;
-  const selectedSession = interactive.session;
+  const interactiveBot = identityChanged || !userId ? null : interactive.bot;
+  const selectedSession = interactiveBot ? interactive.session : null;
   const target = useMemo(
     () => (interactiveBot ? buildBotChatTarget(interactiveBot, selectedSession) : null),
     [interactiveBot, selectedSession],
   );
-  const botChat = useBotChat(interactiveBot, selectedSession, panelRef);
+  const botChat = useBotChat(interactiveBot, selectedSession, panelRef, undefined, userId);
   const sessionEdits = useConversationSessionEdits(userId);
   // viewer:登录 Human 的身份视图(kind 恒 user,是「查看者」而非可选身份)。
   const viewer = useMemo<IdentityView | null>(
@@ -98,8 +112,8 @@ export default function ConversationPage(): JSX.Element {
     [human],
   );
   const chatBots = useMemo(
-    () => [...directory.managedBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
-    [directory.managedBots, directory.friendBots],
+    () => [...managedAndTeamBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
+    [managedAndTeamBots, directory.friendBots],
   );
 
   const interactiveModel = useConversationInteractiveChat({
@@ -114,7 +128,6 @@ export default function ConversationPage(): JSX.Element {
     botChat,
     panelRef,
     inputRef,
-    // AgentCoding Bot 不进对话目录(目录 Service 已剔除),入口统一收敛到 Bot 工坊。
     selectedAgentCodingBot: null,
     sessions: sessionEdits,
   });
@@ -148,15 +161,18 @@ export default function ConversationPage(): JSX.Element {
     sessionId: string,
     friendUserId?: string,
   ) => {
-    if (section === 'managed' && friendUserId) {
+    if (isManagedConversationSection(section) && friendUserId) {
       selectReadonlySession(botId, sessionId, friendUserId);
       return;
     }
     if (section === 'friend') sessions.selectFriendBotSession(botId, sessionId);
     else sessions.selectMineSession(botId, sessionId);
   };
+  const openAgentCodingBot = (bot: ChatBotView) =>
+    history.push(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
   const sidebarProps: ConversationSidebarProps = {
     managedBots: directory.managedBots,
+    teamBots: directory.teamBots,
     friendBots: directory.friendBots,
     store,
     directory,
@@ -164,10 +180,8 @@ export default function ConversationPage(): JSX.Element {
     others,
     onOpenSession: handleOpenSession,
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
-    onOpenBotWorkshop: () => history.push('/bot-workshop'),
+    onOpenAgentCodingBot: openAgentCodingBot,
   };
-  const openAgentCodingBot = (bot: ChatBotView) =>
-    history.push(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -206,6 +220,8 @@ export default function ConversationPage(): JSX.Element {
             onLoadMore={() => void readonlyHistory.loadMore()}
             onOpenSessionList={() => setMobileListOpen(true)}
           />
+        ) : placeholder ? (
+          <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
         ) : (
           <ConversationInteractiveStage
             model={interactiveModel}

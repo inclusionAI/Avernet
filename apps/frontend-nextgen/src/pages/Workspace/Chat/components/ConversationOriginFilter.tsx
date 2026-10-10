@@ -14,6 +14,8 @@ export interface ConversationOriginFilterProps {
   /** 当前生效读取范围(others 强制 all)。 */
   scope: ConversationSessionScope;
   supportsFavorites?: boolean;
+  /** 团队 Bot 他人会话后端尚未就绪；保留选项提示但不可操作。 */
+  othersDisabled?: boolean;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;
 }
@@ -28,20 +30,22 @@ const SCOPE_OPTIONS: Array<{ value: ConversationSessionScope; label: string }> =
   { value: 'favorite', label: '仅看已收藏' },
 ];
 
-function OptionButton(props: { role: 'radio'; label: string; checked: boolean; onSelect(): void }) {
+function OptionButton(props: { role: 'radio'; label: string; checked: boolean; disabled?: boolean; onSelect(): void }) {
   return (
     <Button
       variant="ghost"
       size="sm"
       role={props.role}
       aria-checked={props.checked}
+      disabled={props.disabled}
       onClick={(event) => {
         event.stopPropagation();
         props.onSelect();
       }}
       className={cn(
         'h-8 w-full justify-start gap-2 rounded-sm px-2 text-xs font-normal',
-        props.checked && 'bg-accent font-medium text-primary',
+        props.checked && !props.disabled && 'bg-accent font-medium text-primary',
+        props.disabled && 'text-muted-foreground',
       )}
     >
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
@@ -60,6 +64,7 @@ export function ConversationOriginFilter({
   origin,
   scope,
   supportsFavorites = true,
+  othersDisabled = false,
   onOriginChange,
   onScopeChange,
 }: ConversationOriginFilterProps) {
@@ -101,7 +106,8 @@ export function ConversationOriginFilter({
             <OptionButton
               key={option.value}
               role="radio"
-              label={option.label}
+              label={option.value === 'others' && othersDisabled ? '他人发起的（开发中）' : option.label}
+              disabled={option.value === 'others' && othersDisabled}
               checked={origin === option.value}
               onSelect={() => {
                 onOriginChange(option.value);

@@ -1,6 +1,7 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { createBot, getBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
@@ -15,6 +16,9 @@ jest.mock('@/services/backendApi/bots/botController', () => ({
 jest.mock('@/services/botWorkshop/botEditorService', () => ({
   botEditorService: { restartLifecycle: jest.fn() },
 }));
+jest.mock('@/services/botWorkshop/botAvatarService', () => ({
+  botAvatarService: { save: jest.fn() },
+}));
 
 const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
 const mockedGetBot = getBot as jest.MockedFunction<typeof getBot>;
@@ -23,6 +27,7 @@ const mockedPollBotAuthStatus = pollBotAuthStatus as jest.MockedFunction<typeof 
 const mockedRestartLifecycle = botEditorService.restartLifecycle as jest.MockedFunction<
   typeof botEditorService.restartLifecycle
 >;
+const mockedSaveAvatar = botAvatarService.save as jest.MockedFunction<typeof botAvatarService.save>;
 
 afterEach(() => {
   // 覆盖过引擎清单的用例退出时还原 Open 默认，避免污染同文件后续用例。
@@ -332,6 +337,29 @@ describe('botWorkshopService', () => {
     });
   });
 
+  test('创建接口完成后再通过头像接口持久化用户选择的头像', async () => {
+    mockedCreateBot.mockResolvedValue({
+      code: 201000,
+      data: { bot_id: 'bot-avatar-1', bot_name: '头像助手', engine: 'openclaw', status: 'ACTIVE' },
+    });
+    mockedSaveAvatar.mockResolvedValue('https://example.test/avatar.png');
+
+    const result = await botWorkshopService.create({
+      scenario: 'cloud',
+      name: '头像助手',
+      description: '',
+      engine: 'openclaw',
+      spaceId: '10001',
+      ownership: 'personal',
+      serviceMode: 'non-service',
+      initialize: true,
+      avatarUrl: 'data:image/png;base64,avatar',
+    });
+
+    expect(mockedSaveAvatar).toHaveBeenCalledWith('bot-avatar-1', 'data:image/png;base64,avatar');
+    expect(result).toMatchObject({ type: 'created', bot: { avatarUrl: 'https://example.test/avatar.png' } });
+  });
+
   test('echoes the original create request when polling authorization and maps the issued Bot', async () => {
     const request = {
       bot_name: '授权助手',
@@ -414,7 +442,7 @@ describe('botWorkshopService', () => {
         serviceMode: 'service',
         initialize: false,
       }),
-    ).toThrow('Bot 名称不能包含 @');
+    ).toThrow(/名称不能包含.*@/);
 
     expect(() =>
       botWorkshopService.validateCreate({

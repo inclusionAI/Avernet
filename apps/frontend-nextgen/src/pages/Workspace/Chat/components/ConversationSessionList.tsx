@@ -1,10 +1,12 @@
 import { Button, Skeleton } from '@/components/ui';
 import type { ConversationSessionListState } from '@/domain/conversation/types';
 import { ListErrorState } from '../../components/ListErrorState';
+import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationSessionRow } from './ConversationSessionRow';
 
 /** 我发起 / 好友 Bot 的交互式 Session 列表(选中 / 加载更多均来自 Hook 模型)。 */
 export function ConversationSessionList(props: {
+  actions?: ConversationSessionListActions;
   sessions: ConversationSessionListState | undefined;
   selectedSessionId: string | null;
   onSelectSession(sessionId: string): void;
@@ -12,7 +14,8 @@ export function ConversationSessionList(props: {
   onToggleFavorite?(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
 }) {
-  const { sessions, selectedSessionId, onSelectSession, onLoadMore, onToggleFavorite, isFavoritePending } = props;
+  const { actions, sessions, selectedSessionId, onSelectSession, onLoadMore, onToggleFavorite, isFavoritePending } =
+    props;
   if (!sessions) {
     // 未加载 ≠ 空列表:展开后由 Hook 首拉,先给骨架。
     return (
@@ -41,6 +44,17 @@ export function ConversationSessionList(props: {
             onSelect={() => onSelectSession(session.sessionId)}
             onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
             favoritePending={isFavoritePending(session.sessionId)}
+            actions={
+              actions
+                ? {
+                    run: (action) => actions.run(session.sessionId, action),
+                    pending:
+                      actions.pending ||
+                      Boolean(sessions.loading || sessions.isLoadingMore) ||
+                      isFavoritePending(session.sessionId),
+                  }
+                : undefined
+            }
           />
         ))}
       </div>
@@ -49,7 +63,11 @@ export function ConversationSessionList(props: {
           <Button
             variant="ghost"
             size="sm"
-            disabled={sessions.isLoadingMore || sessions.items.some((session) => isFavoritePending(session.sessionId))}
+            disabled={
+              actions?.pending ||
+              sessions.isLoadingMore ||
+              sessions.items.some((session) => isFavoritePending(session.sessionId))
+            }
             onClick={() => onLoadMore()}
             className="h-7 rounded-md border border-input bg-background px-3 text-xs text-foreground hover:bg-accent"
           >

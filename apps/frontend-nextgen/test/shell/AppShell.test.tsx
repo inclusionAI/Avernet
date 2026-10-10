@@ -138,3 +138,18 @@ it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，侧栏用户
 
   await waitFor(() => expect(view.getByTestId('app-sidebar')).toHaveTextContent('福惠'));
 });
+
+it.each(['/workspace/collaboration-only', '/workspace/collaboration/group', '/workspace/collaboration/session'])(
+  'hides desktop and mobile global navigation for %s without skipping boot',
+  async (path) => {
+    mockPathname = path;
+    const view = render(<AppShell>精简协作区</AppShell>);
+    expect(view.queryByTestId('app-sidebar')).toBeNull();
+    expect(view.queryByRole('button', { name: '打开导航' })).toBeNull();
+    expect(view.getByText('精简协作区')).toBeInTheDocument();
+    await waitFor(() => expect(mockInitWorkspace).toHaveBeenCalled());
+    mockPathname = '/workspace/collaboration';
+    view.rerender(<AppShell>完整协作区</AppShell>);
+    expect(view.getByTestId('app-sidebar')).toBeInTheDocument();
+  },
+);

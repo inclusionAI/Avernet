@@ -1,6 +1,11 @@
 import type { GroupHistoryDto } from '@/services/workspace/groupMessageMapper';
-import { mapGroupHistoryMessages, toolResultToToolStep } from '@/services/workspace/groupMessageMapper';
+import {
+  annotateAbortedRunsFromDeliveries,
+  mapGroupHistoryMessages,
+  toolResultToToolStep,
+} from '@/services/workspace/groupMessageMapper';
 import { describe, expect, it } from '@jest/globals';
+import type { ChatMessage } from '@tc-chat/core';
 
 describe('groupMessageMapper', () => {
   it('system message maps to role=system, kept as standalone message', () => {
@@ -426,5 +431,69 @@ describe('attachments', () => {
     ]);
     const blocks = items[0].blocks ?? [];
     expect(blocks.some((b) => b.type === 'image')).toBe(false);
+  });
+});
+
+describe('annotateAbortedRunsFromDeliveries', () => {
+  const delivery = (runId: string | null, status: string) =>
+    ({
+      delivery_id: `d-${runId ?? 'null'}`,
+      message_id: 'u1',
+      target_bot_id: 'bot-a',
+      flow_kind: 'group',
+      kind: 'send',
+      status,
+      state_version: 1,
+      run_id: runId,
+      wait_reason: null,
+      admission_error: null,
+    } as never);
+
+  const assistantOf = (id: string, runId?: string): ChatMessage =>
+    ({
+      id,
+      role: 'assistant',
+      content: '',
+      status: 'history',
+      extra: runId ? { runId, botUuid: 'bot-a' } : { botUuid: 'bot-a' },
+    } as ChatMessage);
+
+  it('cancelled 投递的 run_id 命中的 assistant 消息标注为 aborted', () => {
+    const out = annotateAbortedRunsFromDeliveries(
+      [assistantOf('a1', 'run-1'), assistantOf('a2', 'run-2')],
+      [delivery('run-1', 'cancelled')],
+    );
+    expect(out[0].status).toBe('aborted');
+    expect(out[1].status).toBe('history');
+  });
+
+  it('completed / failed / running 等非 cancelled 状态不标注', () => {
+    const out = annotateAbortedRunsFromDeliveries(
+      [assistantOf('a1', 'run-1'), assistantOf('a2', 'run-2'), assistantOf('a3', 'run-3')],
+      [delivery('run-1', 'completed'), delivery('run-2', 'failed'), delivery('run-3', 'running')],
+    );
+    expect(out.map((m) => m.status)).toEqual(['history', 'history', 'history']);
+  });
+
+  it('run_id 为 null 的投递（排队即取消）不参与标注', () => {
+    const out = annotateAbortedRunsFromDeliveries([assistantOf('a1', 'run-1')], [delivery(null, 'cancelled')]);
+    expect(out[0].status).toBe('history');
+  });
+
+  it('assistant 消息缺 runId 时不误伤', () => {
+    const out = annotateAbortedRunsFromDeliveries([assistantOf('a1')], [delivery('run-1', 'cancelled')]);
+    expect(out[0].status).toBe('history');
+  });
+
+  it('user 消息不受影响', () => {
+    const userMsg = { id: 'u1', role: 'user', content: 'hi', status: 'history' } as ChatMessage;
+    const out = annotateAbortedRunsFromDeliveries([userMsg], [delivery('run-1', 'cancelled')]);
+    expect(out[0].status).toBe('history');
+  });
+
+  it('无 cancelled 投递时原样返回（引用不变）', () => {
+    const messages = [assistantOf('a1', 'run-1')];
+    expect(annotateAbortedRunsFromDeliveries(messages, [delivery('run-1', 'completed')])).toBe(messages);
+    expect(annotateAbortedRunsFromDeliveries(messages, [])).toBe(messages);
   });
 });

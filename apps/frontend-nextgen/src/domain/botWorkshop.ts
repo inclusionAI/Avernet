@@ -112,6 +112,8 @@ export interface BotCreateInput {
   ownership: BotOwnership;
   serviceMode: BotServiceMode;
   initialize: boolean;
+  /** 创建成功后通过头像 OpenAPI 持久化；创建接口本身不接收该字段。 */
+  avatarUrl?: string;
   local?: { machineId: string; mountPath: string };
   agentCoding?: AgentCodingDraft;
 }
@@ -156,6 +158,8 @@ export interface BotCreateAuthorization {
   redirectUrl: string;
   request: AvernetBotCreateRequest | LocalBotAuthorizationRequest;
   agentCoding?: AgentCodingDraft;
+  /** 授权完成后再持久化，避免尚未创建完成时写头像。 */
+  avatarUrl?: string;
 }
 
 export type BotCreateResult =

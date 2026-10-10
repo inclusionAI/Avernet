@@ -41,7 +41,7 @@ jest.mock('@/hooks/useMediaQuery', () => ({ useMinWidth: () => true }));
 
 const mockListDirectory = jest.fn().mockResolvedValue({
   ok: true,
-  data: { managedBots: [managedBot], friendBots: [], hasAgentCodingBots: false },
+  data: { managedBots: [managedBot], friendBots: [] },
 });
 
 jest.mock('@/services/workspace/conversationService', () => ({

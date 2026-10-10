@@ -1,10 +1,23 @@
 /** @jest-environment jsdom */
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
-import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
+import {
+  agentCodingTemplateService,
+  type AgentCodingTemplate,
+} from '@/services/botWorkshop/agentCodingTemplateService';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => {
+  const actual = jest.requireActual('@/services/botWorkshop/agentCodingTemplateService');
+  return {
+    ...actual,
+    agentCodingTemplateService: { ...actual.agentCodingTemplateService, list: jest.fn() },
+  };
+});
+
+const templateList = agentCodingTemplateService.list as jest.Mock;
 
 const makeTemplate = (): AgentCodingTemplate => ({
   key: 'architect',
@@ -35,6 +48,7 @@ beforeEach(() => {
   HTMLElement.prototype.setPointerCapture = jest.fn();
   HTMLElement.prototype.releasePointerCapture = jest.fn();
   HTMLElement.prototype.scrollIntoView = jest.fn();
+  templateList.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -63,6 +77,37 @@ test('创建云端 Bot（Open Core 形态）卡片化展示 OpenClaw + Claude Co
   expect(screen.queryByRole('button', { name: 'Hermes' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'TEClaw' })).not.toBeInTheDocument();
   expect(screen.queryByRole('combobox', { name: '引擎类型' })).not.toBeInTheDocument();
+  expect(screen.getByText('Bot 头像')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '上传图片' })).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /选择头像/ })).toHaveLength(8);
+});
+
+test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async () => {
+  const onSubmit = jest.fn().mockResolvedValue(undefined);
+  render(
+    <CreateBotModal
+      scenario="cloud"
+      spaces={[{ id: '10001', name: '个人空间', ownership: 'personal', canCreate: true }]}
+      creating={false}
+      onClose={jest.fn()}
+      onSubmit={onSubmit}
+    />,
+  );
+  fireEvent.change(screen.getByPlaceholderText('例如：项目知识助手'), { target: { value: '头像 Bot' } });
+  const input = screen.getByLabelText('上传 Bot 头像') as HTMLInputElement;
+  const file = new File(['image'], 'avatar.png', { type: 'image/png' });
+  fireEvent.change(input, { target: { files: [file] } });
+  await waitFor(() =>
+    expect(screen.getByAltText('当前 Bot 头像')).toHaveAttribute(
+      'src',
+      expect.stringMatching(/^data:image\/png;base64,/),
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: '创建云端 Bot' }));
+
+  expect(onSubmit).toHaveBeenCalledWith(
+    expect.objectContaining({ name: '头像 Bot', avatarUrl: expect.stringMatching(/^data:image\/png;base64,/) }),
+  );
 });
 
 test('capability 引擎清单为空时显示错误并禁用创建，不回退硬编码引擎', () => {
@@ -84,7 +129,7 @@ test('capability 引擎清单为空时显示错误并禁用创建，不回退硬
   expect(screen.getByRole('button', { name: '创建云端 Bot' })).toBeDisabled();
 });
 
-test('internal overlay 引擎卡片沿用 open-claw 描述，AgentCoding 展开后再次点击不折叠', () => {
+test('internal overlay 引擎卡片沿用 open-claw 描述，选中 AgentCoding 后才加载并展开模板', async () => {
   extendCapabilities({
     getBotEngineOptions: () => ({
       status: 'available',
@@ -105,12 +150,12 @@ test('internal overlay 引擎卡片沿用 open-claw 描述，AgentCoding 展开�
       ],
     }),
   });
+  templateList.mockResolvedValue([makeTemplate()]);
   render(
     <CreateBotModal
       scenario="cloud"
       spaces={[{ id: '10001', name: '个人空间', ownership: 'personal', canCreate: true }]}
       creating={false}
-      agentCodingTemplates={[]}
       onClose={jest.fn()}
       onSubmit={jest.fn()}
     />,
@@ -122,13 +167,17 @@ test('internal overlay 引擎卡片沿用 open-claw 描述，AgentCoding 展开�
   expect(screen.getByText('Hermes agent，支持skill自进化')).toBeInTheDocument();
   expect(screen.getByText('企业级分布式Agent，支持多租户隔离与高并发，数据持久化且权限可控')).toBeInTheDocument();
   expect(screen.queryByTestId('agent-coding-section')).not.toBeInTheDocument();
+  expect(templateList).not.toHaveBeenCalled();
 
   const agentCoding = screen.getByRole('button', { name: 'AgentCoding' });
   fireEvent.click(agentCoding);
   expect(screen.getByTestId('agent-coding-section')).toBeInTheDocument();
+  await screen.findByText('架构 Bot');
+  expect(templateList).toHaveBeenCalledTimes(1);
 
   fireEvent.click(agentCoding);
   expect(screen.getByTestId('agent-coding-section')).toBeInTheDocument();
+  expect(templateList).toHaveBeenCalledTimes(1);
 });
 
 test('切换到普通引擎时收起 AgentCoding 面板并清理模板提交状态', async () => {
@@ -147,7 +196,6 @@ test('切换到普通引擎时收起 AgentCoding 面板并清理模板提交状�
       scenario="cloud"
       spaces={[{ id: '10001', name: '个人空间', ownership: 'personal', canCreate: true }]}
       creating={false}
-      agentCodingTemplates={[makeTemplate()]}
       onClose={jest.fn()}
       onSubmit={onSubmit}
     />,
@@ -156,6 +204,7 @@ test('切换到普通引擎时收起 AgentCoding 面板并清理模板提交状�
   fireEvent.change(screen.getByLabelText(/Bot 名称/), { target: { value: '普通引擎 Bot' } });
   fireEvent.click(screen.getByRole('button', { name: 'AgentCoding' }));
   expect(screen.getByTestId('agent-coding-section')).toBeInTheDocument();
+  await waitFor(() => expect(templateList).toHaveBeenCalledTimes(1));
 
   fireEvent.click(screen.getByRole('button', { name: 'OpenClaw' }));
   expect(screen.queryByTestId('agent-coding-section')).not.toBeInTheDocument();
@@ -167,7 +216,7 @@ test('切换到普通引擎时收起 AgentCoding 面板并清理模板提交状�
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ engine: 'openclaw', agentCoding: undefined }));
 });
 
-test('AgentCoding 未选择可服务化模板时，创建弹窗仍禁用服务开关', () => {
+test('AgentCoding 未选择可服务化模板时，创建弹窗仍禁用服务开关', async () => {
   extendCapabilities({
     getBotEngineOptions: () => ({
       status: 'available',
@@ -182,13 +231,13 @@ test('AgentCoding 未选择可服务化模板时，创建弹窗仍禁用服务�
       scenario="cloud"
       spaces={[{ id: '10001', name: '个人空间', ownership: 'personal', canCreate: true }]}
       creating={false}
-      agentCodingTemplates={[makeTemplate()]}
       onClose={jest.fn()}
       onSubmit={jest.fn()}
     />,
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'AgentCoding' }));
+  await waitFor(() => expect(templateList).toHaveBeenCalledTimes(1));
 
   expect(screen.getByRole('switch', { name: '是否提供服务' })).toHaveProperty('disabled', true);
   expect(screen.getByText('当前模板未开启服务 Bot 能力')).toBeInTheDocument();
