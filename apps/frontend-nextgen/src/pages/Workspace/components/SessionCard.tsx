@@ -131,24 +131,16 @@ export const SessionCard = React.memo(function SessionCard({
   );
 
   return (
-    // v1.4：会话行保持全宽行式。
-    // 验收微调：树形导轨改为每行自带——干线（data-session-tree-rail）+ 拐角横线（elbow）
-    // 均由行渲染；非末行干线贯穿整行，末行经 :last-child 变体止于拐角高度，
-    // 消除末行下方的多余线段；选中态行首显示 2px 品牌条。
+    // 会话行保持全宽行式（restore-design-chat-page-b2-b3 Batch 1 parity 最小同步：
+    // 树形 rail/elbow 导轨按 dmore 平齐化裁决移除——一/二级行文字平齐,零功能改动）。
     <div
       className={cn(
         'group relative flex items-stretch text-sm transition-colors',
-        // 末行干线止于拐角高度：树形导轨不再垂到列表底部（jsdom 不计算 CSS 行为，测试锁定类名契约）。
-        'last:[&_[data-session-tree-rail]]:bottom-1/2',
         compact ? 'min-h-12' : 'min-h-15',
         selected ? 'bg-primary/10' : 'hover:bg-primary/5',
         className,
       )}
     >
-      {/* 干线：对齐容器缩进 16px 处（行内 -left-2），非末行贯穿整行、末行止于拐角。 */}
-      <span data-session-tree-rail aria-hidden="true" className="absolute -left-2 top-0 bottom-0 w-px bg-border" />
-      {/* 拐角横线 8px：左端紧贴干线、右端无缝接到会话卡片行首——完整下钻路径。 */}
-      <span data-session-tree-elbow aria-hidden="true" className="absolute -left-2 top-1/2 h-px w-2 bg-border" />
       {selected && (
         <span
           data-session-left-bar

@@ -190,8 +190,12 @@ export interface AgentCodingInternalResources {
 export interface ProductBrand {
   /** 产品名；运行时品牌文案（弹窗标题/欢迎语/toast）以插值消费。 */
   name: string;
-  /** 页头品牌视觉组件（接收 className 控制尺寸）。 */
-  Logo: ComponentType<{ className?: string }>;
+  /**
+   * 页头品牌视觉组件（接收 className 控制尺寸）。
+   * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
+   * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
+   */
+  Logo: ComponentType<{ className?: string; compact?: boolean }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
