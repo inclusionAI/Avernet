@@ -125,8 +125,8 @@ async def get_device_connection_user(
     never downgraded to browser Cookie authentication.  Requests without
     ``x-iam-token`` retain the existing login flow.
     """
-    iam_token = (request.headers.get("x-iam-token") or "").strip()
-    if not iam_token:
+    iam_assertion = (request.headers.get("x-iam-token") or "").strip()
+    if not iam_assertion:
         return await get_current_user(request=request, auth_plugin=auth_plugin)
 
     authorization = (request.headers.get("authorization") or "").strip()
@@ -138,14 +138,18 @@ async def get_device_connection_user(
     if not secret_name:
         raise Unauthorized("Invalid authorization")
     try:
-        secret = secret_resolver.get_secret(secret_name)
+        resolved_entry = secret_resolver.get_secret(secret_name)
     except Exception as exc:
         raise Unauthorized("Invalid authorization") from exc
-    expected = getattr(secret, "secret_value", None) if secret is not None else None
+    expected = (
+        getattr(resolved_entry, "secret_value", None)
+        if resolved_entry is not None
+        else None
+    )
     if not expected or not hmac.compare_digest(bearer, str(expected)):
         raise Unauthorized("Invalid authorization")
 
-    sno = _parse_sno_from_iam_token(iam_token)
+    sno = _parse_sno_from_iam_token(iam_assertion)
     if not sno:
         raise Unauthorized("Invalid authorization")
     return AuthenticatedUser(id=sno, staffId=sno, operatorName=sno)

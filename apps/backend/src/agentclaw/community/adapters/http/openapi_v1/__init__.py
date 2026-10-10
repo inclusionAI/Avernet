@@ -40,10 +40,10 @@ So ``TODO(#960)`` is *narrowed* by this rule, from seven operations to four, and
 stays open — see ``principal.py`` and ``admission.SKILL_SCOPED_OPERATIONS``.
 
 The account-level operations are the ones with no single bot to name: creating
-a bot, listing them, checking a name, the ``authorized`` groups, the tenant-wide
-MCP catalogue, the trace query (which reads *across* bots), and the load-test
-endpoints. They keep a literal where a bot id would otherwise be read, and they
-are the only things that do.
+a bot, listing owned or collaborating bots, checking a name, the ``authorized``
+groups, the tenant-wide MCP catalogue, the trace query (which reads *across*
+bots), and the load-test endpoints. They keep a literal where a bot id would
+otherwise be read, and they are the only things that do.
 
 Because ``{bot_id}`` is a single wildcard segment, a bot whose id equals a
 literal served in that position is unreachable at that address. Bot-first
@@ -201,6 +201,7 @@ from .bots.create_with_manifest import router as create_with_manifest_router
 from .bots.engine_config import router as engine_config_router
 from .caller_identity import router as caller_identity_router
 from .channels import router as channels_router
+from .collaborating_bots import router as collaborating_bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .containers import router as containers_router
 from .contracts import (
@@ -340,6 +341,7 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    collaborating_bots_router,
     # The user-level delegation, `/openapi/v1/bots/authorized-apps`: a
     # top-level literal like `authorized`, and depends on this order for the
     # same reason — `/openapi/v1/bots/{bot_id}` would otherwise claim it.

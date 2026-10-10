@@ -552,6 +552,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/org/dept"): NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
+    ("GET", "/openapi/v1/bots/collaborations"): NoCheck(
+        "the acting user's collaborator relationships, filtered before pagination"
+    ),
     ("POST", "/openapi/v1/bots"): NoCheck(
         "a creation, not one addressed bot; an app-only caller is admitted on the user-level delegation (admission.py USER_DELEGATED) and granted the bot it creates"
     ),
