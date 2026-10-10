@@ -135,12 +135,12 @@ def assert_template_member_management(
 @pytest.mark.acceptance
 @pytest.mark.parametrize(
     ("active_engine", "allowed"),
-    [("claude_code", True), ("aicoding", True), ("openclaw", False)],
+    [("claude_code", True), ("aicoding", True), ("openclaw", True)],
 )
 def test_template_ext_member_management_allows_live_collaborator_add(
     live_backend, active_engine, allowed,
 ):
-    """Only template-readable engines can enable members via persisted ext."""
+    """Non-default Bots can enable members via persisted ext on any engine."""
     owner_id = _fresh_id("collab_owner")
     with httpx.Client(
         base_url=live_backend,

@@ -517,18 +517,14 @@ class TemplateRepository(Protocol):
         ...
 
     @abstractmethod
-    def get_by_bot_id(
-        self, bot_id: str, *, owner_id: str | None = None
-    ) -> Optional[Dict[str, Any]]:
-        """Get a template only for a live claude_code / aicoding Bot in this env.
+    def get_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Get template by bot_id.
 
-        Missing or ineligible Bots return None without querying templates.
-        Other repository methods are not engine-filtered. Errors propagate.
+        The shared bot_id "default" returns None without accessing the database.
+        Other IDs use the existing lookup without engine or owner filtering.
 
         Args:
             bot_id: Bot ID
-            owner_id: Exact Bot owner for owner-scoped reads. None retains the
-                legacy unscoped lookup for callers without owner context.
 
         Returns:
             Template record as dictionary, or None if not found

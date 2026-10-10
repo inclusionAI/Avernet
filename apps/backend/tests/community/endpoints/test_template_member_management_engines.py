@@ -9,9 +9,9 @@ from tests.community.acceptance.bot_collaborator.test_member_management_live imp
 
 @pytest.mark.parametrize(
     ("active_engine", "allowed"),
-    [("claude_code", True), ("aicoding", True), ("openclaw", False)],
+    [("claude_code", True), ("aicoding", True), ("openclaw", True)],
 )
-def test_persisted_template_member_management_engine_gate(
+def test_persisted_template_member_management_across_engines(
     app_with_testing_modules, active_engine, allowed,
 ):
     # Reuse SQL seeds and assertions with an explicit client, without patching
