@@ -332,6 +332,10 @@ class ProfileEmbeddingStore:
             if point is None:
                 continue
             payload = (point.get("metadata") if isinstance(point, dict) else point.payload) or {}
+            # A prefix alone is ambiguous when worker/profile IDs contain colons.
+            # Only the exact legacy profile ID may omit ownership metadata.
+            if vector_id != profile_key and not {"profile_key", "worker_id"} <= payload.keys():
+                continue
             if payload.get("profile_key", profile_key) != profile_key:
                 continue
             if payload.get("worker_id", worker_id) != worker_id:

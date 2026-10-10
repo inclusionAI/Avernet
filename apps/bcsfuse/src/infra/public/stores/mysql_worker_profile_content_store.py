@@ -222,9 +222,9 @@ class MySQLWorkerProfileContentStore:
         profile_id = content.profile_id or "default"
 
         conn = self._pool.get_connection()
-        original_autocommit = conn.autocommit
         try:
-            conn.autocommit = False
+            # Method delegation reaches the raw connection through both pool wrappers.
+            conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
             try:
                 # Check for existing row to determine version
@@ -314,7 +314,6 @@ class MySQLWorkerProfileContentStore:
             finally:
                 cursor.close()
         finally:
-            conn.autocommit = original_autocommit
             conn.close()
 
     def get(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
@@ -392,7 +391,7 @@ class MySQLWorkerProfileContentStore:
         try:
             cursor = conn.cursor()
             try:
-                conn.autocommit = False
+                conn.start_transaction()
                 try:
                     cursor.execute(
                         "UPDATE bcsfuse_worker_profile_contents SET is_active = 0 WHERE worker_id = %s",
@@ -406,9 +405,6 @@ class MySQLWorkerProfileContentStore:
                 except Exception:
                     conn.rollback()
                     raise
-                finally:
-                    conn.autocommit = True
-
                 if cursor.rowcount == 0:
                     return None
                 return self.get(worker_id, profile_id)

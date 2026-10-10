@@ -70,3 +70,22 @@ def test_replacement_cleanup_skips_retained_vectors_and_removes_legacy_id(
         assert vector_store.get("worker:default:full") is not None
     finally:
         vector_store.close()
+
+
+@pytest.mark.parametrize("metadata", [{}, {"worker_id": "a"}, {"profile_key": "a:b"}])
+def test_replacement_cleanup_requires_explicit_prefix_ownership(tmp_path, metadata):
+    vector_store = QdrantLocalVectorStore(
+        collection_name="ownership_cleanup", path=str(tmp_path / "vectors"), dimension=2,
+    )
+    profile_store = ProfileEmbeddingStore(dimension=2, vector_store=vector_store)
+    try:
+        # Worker a/profile b shares a prefix with worker a:b/profile default.
+        vector_store.upsert("a:b:default", [1.0, 0.0], metadata)
+        vector_store.upsert("a:b:skills:0", [1.0, 0.0], {"worker_id": "a", "profile_key": "a:b"})
+        vector_store.upsert("a:b", [1.0, 0.0], {})
+        profile_store.delete_stale_fragments("a:b", {"a:b:full"}, "a")
+        assert vector_store.get("a:b:default") is not None
+        assert vector_store.get("a:b:skills:0") is None
+        assert vector_store.get("a:b") is None
+    finally:
+        vector_store.close()

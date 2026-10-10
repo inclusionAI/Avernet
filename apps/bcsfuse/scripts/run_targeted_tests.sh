@@ -34,6 +34,7 @@ case "${1:---isolated}" in
       tests/contract/test_faiss_get_contract.py \
       tests/contract/test_mysql_storage_clock_contract.py \
       tests/integration/test_mysql_storage_timestamps.py \
+      tests/integration/test_mysql_pooled_transactions.py \
       tests/integration/test_mysql_registry_delete.py \
       tests/unit/application/test_worker_vector_match_service.py \
       tests/unit/application/test_worker_candidate_recommendation_impl.py \

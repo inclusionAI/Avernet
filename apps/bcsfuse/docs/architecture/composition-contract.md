@@ -200,6 +200,10 @@ Worker/Profile write results carry the persisted record timestamps, including
 the original creation time on update. Reading these generated fields is part
 of the write transaction: a read-back failure rolls back the write. Existing
 SQLite and in-memory timestamp behavior is unchanged.
+MySQL stores start these transactions through `start_transaction()`, which
+reaches the underlying connection through both runtime pool wrappers. Assigning
+`autocommit` on a wrapper does not start a database transaction. Profile/binding
+switches and fused-conversation appends use the same explicit transaction rule.
 
 Audit `performed_at` is an event instant, not a record-write timestamp. Naive
 input retains the legacy UTC interpretation; aware input preserves its offset.
@@ -263,6 +267,10 @@ offline in vector metadata. Repeating activation is supported.
 After all new fragments are successfully written, activation removes obsolete
 fragment IDs belonging to that same profile (including a legacy unsplit ID).
 It does not delete other profiles or workers. Enumeration and deletion errors
+are propagated. Prefix matches require explicit matching `profile_key` and
+`worker_id` metadata because compound IDs can share prefixes. Only the exact
+legacy unsplit ID may omit ownership metadata. Ambiguous legacy prefix matches
+are retained rather than guessed to belong to the target. Cleanup failures
 are reported as index refresh failures; they cannot silently acknowledge a
 partial cleanup. Failed embedding or replacement writes do not start cleanup.
 

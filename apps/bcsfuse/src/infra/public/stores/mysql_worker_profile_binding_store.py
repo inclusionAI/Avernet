@@ -11,7 +11,7 @@ R12-Pool-4 Fix:
 - Each method gets its own connection from pool
 - Connection returned to pool after use (conn.close())
 - Thread-safe by design (pool handles connection distribution)
-- Transaction handling: restore autocommit before returning connection
+- Transaction handling: explicit transaction without changing session autocommit
 - No more Fatal Python error from concurrent MySQL connector access
 """
 
@@ -57,7 +57,7 @@ class MySQLWorkerProfileBindingStore:
         - Each method borrows connection from pool
         - Connection returned to pool after use
         - No shared connection state
-        - Transaction handling: restore autocommit before returning
+        - Transaction handling: explicit transaction without changing session autocommit
 
     Denormalized Column Sync (Phase C1):
         - After set_active_profile(): sync workers.active_profile_key
@@ -210,10 +210,9 @@ class MySQLWorkerProfileBindingStore:
     ) -> WorkerProfileBinding:
         """Bind Profile to Worker (thread-safe with connection pool)."""
         conn = self._pool.get_connection()
-        original_autocommit = conn.autocommit
         try:
             self._ensure_schema(conn)
-            conn.autocommit = False
+            conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
 
             try:
@@ -327,7 +326,6 @@ class MySQLWorkerProfileBindingStore:
                 cursor.close()
 
         finally:
-            conn.autocommit = original_autocommit
             conn.close()
 
     def unbind_profile(self, worker_id: str, profile_key: str) -> bool:
@@ -410,11 +408,11 @@ class MySQLWorkerProfileBindingStore:
         """Set active Profile (thread-safe with connection pool).
 
         Transaction handling:
-        - Sets autocommit=False for transaction
+        - Starts a transaction on the underlying pooled connection
         - Deactivates previous active binding
         - Activates target binding
         - Commits or rolls back
-        - Restores autocommit=True before returning connection to pool
+        - Leaves session autocommit unchanged when returning to the pool
         """
         conn = self._pool.get_connection()
         try:
@@ -441,7 +439,7 @@ class MySQLWorkerProfileBindingStore:
 
             try:
                 # Start transaction
-                conn.autocommit = False
+                conn.start_transaction()
 
                 # Deactivate all active bindings for this worker
                 cursor.execute(
@@ -554,8 +552,6 @@ class MySQLWorkerProfileBindingStore:
                 raise
 
             finally:
-                # CRITICAL: Restore autocommit before returning connection to pool
-                conn.autocommit = True
                 cursor.close()
 
         finally:

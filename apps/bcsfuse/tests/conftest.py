@@ -42,11 +42,15 @@ def reset_stores_before_test(monkeypatch):
     from src.interfaces.api.dependencies.worker_dependencies import reset_stores
     from src.interfaces.api.dependencies.fusion_dependencies import reset_fusion_services
     from src.interfaces.api.dependencies import fusion_dependencies
+    from src.interfaces.api import fusion_routes
     from src.infra.config.feature_flags import FeatureFlags
 
     # A composed app from a previous test must not supply stores to an
     # unrelated legacy app test. Provider selection is application-scoped.
     monkeypatch.setattr(fusion_dependencies, "_app_context", None)
+    # Legacy route tests use set_provider(); its process-global double must not
+    # replace the composed services of later G9/runtime acceptance tests.
+    monkeypatch.setattr(fusion_routes, "_provider", None)
 
     reset_stores()
     reset_fusion_services()
