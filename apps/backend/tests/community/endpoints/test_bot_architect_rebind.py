@@ -71,7 +71,7 @@ def _seed_architect_and_coding_bot(world):
             "creator_id": "test_user",
             "entity_id": "test_user",
             "entity_type": "staff",
-            "active_engine": "openclaw",
+            "active_engine": "claude_code",
             "bot_type": "personal",
             "status": "ACTIVE",
             "template_type": "applicationCoding",

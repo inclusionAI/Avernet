@@ -185,11 +185,14 @@ class TemplateService:
     def get_template(
         self,
         bot_id: str,
+        *,
+        owner_id: str | None = None,
     ) -> Optional[Dict[str, Any]]:
         """Get template by bot_id.
 
         Args:
             bot_id: Bot ID
+            owner_id: Bot owner when known; required to disambiguate shared IDs.
 
         Returns:
             Template record or None if not found
@@ -197,7 +200,10 @@ class TemplateService:
         logger.debug("[template_service.get_template] Querying template for bot %s", bot_id)
 
         try:
-            template = self._repository.get_by_bot_id(bot_id)
+            if owner_id is None:
+                template = self._repository.get_by_bot_id(bot_id)
+            else:
+                template = self._repository.get_by_bot_id(bot_id, owner_id=owner_id)
             if template:
                 logger.info("[template_service.get_template] Template found for bot %s", bot_id)
             else:

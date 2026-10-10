@@ -18,6 +18,8 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.bot_management.repository.models import TemplateModel
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository as TemplateRepositoryProtocol
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -54,16 +56,30 @@ class TemplateRepository(
             db.flush()
             return template.to_dict()
 
-    def get_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
-        """Get template by bot_id.
+    def get_by_bot_id(
+        self, bot_id: str, *, owner_id: str | None = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get a readable template by bot_id; ineligible Bots return None.
 
         Args:
             bot_id: Bot ID
+            owner_id: Exact Bot owner for owner-scoped reads. None retains the
+                legacy unscoped lookup for callers without owner context.
 
         Returns:
             Template record as dictionary, or None if not found
         """
         with self._db.orm_session() as db:
+            eligible = db.query(BotModel.bot_id).filter(
+                BotModel.bot_id == bot_id,
+                BotModel.active_engine.in_(("claude_code", "aicoding")),
+                BotModel.is_delete == 0,
+                BotModel.env == get_current_env(),
+            )
+            if owner_id is not None:
+                eligible = eligible.filter(BotModel.owner_id == owner_id)
+            if eligible.first() is None:
+                return None
             template = db.query(TemplateModel).filter(
                 TemplateModel.bot_id == bot_id
             ).first()

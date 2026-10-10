@@ -40,7 +40,8 @@ def _seed_operator_with_bot_and_template(world):
     """Seed an operator, a bot, and a template for the bot."""
     make_staff_user(world, user_id="u_operator")
     make_staff_user(world, user_id="u_owner")
-    make_bot(world, bot_id="bot_tpl", owner_id="u_owner", bot_type="personal", status="ACTIVE")
+    make_bot(world, bot_id="bot_tpl", owner_id="u_owner", bot_type="personal",
+             status="ACTIVE", active_engine="claude_code")
     _make_template(world, bot_id="bot_tpl", ext={"image": "original:latest", "envs": {"FOO": "bar"}})
 
 

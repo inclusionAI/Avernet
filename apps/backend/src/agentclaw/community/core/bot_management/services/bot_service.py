@@ -2385,7 +2385,7 @@ class BotService(BotServiceProtocol):
 
         # Fetch template info if exists
         try:
-            template = self._template_service.get_template(bot_id)
+            template = self._template_service.get_template(bot_id, owner_id=user_id)
             if template:
                 bot["template_config"] = template.get("ext")
         except Exception as e:
