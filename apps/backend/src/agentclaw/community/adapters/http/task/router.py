@@ -136,7 +136,7 @@ async def benchmark_execute_task_internal(
         if bcs_client is not None:
             try:
                 caller_token = (
-                    bot_tokens.get_token(body.owner_bot_id) if bot_tokens is not None else None
+                    bot_tokens.get_token(bot_identity) if bot_tokens is not None else None
                 )
                 sent = await bcs_client.send_message_a2a(
                     target_bot_id=a2a_target_bot,
