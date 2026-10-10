@@ -54,7 +54,6 @@ describe('SquareIdentityPicker', () => {
     expect(props.headerLabel).toBe('为 Ta 加好友：');
     expect(props.headerTooltip).toBe('每个身份（用户或 Bot）都拥有各自独立的好友关系。');
     expect(props.layout).toBe('collaboration');
-    expect(props.hideBotRegistration).toBe(true);
     expect(props.triggerClassName).toContain('bg-background');
   });
 
