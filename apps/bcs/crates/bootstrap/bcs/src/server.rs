@@ -1120,6 +1120,9 @@ pub struct BcsServerState {
     /// Auth chain configuration.
     pub auth_config: bcs_auth_api::AuthConfig,
 
+    /// Rate limiter for `/ws/bot` upgrades; `None` when admission control is disabled.
+    pub bot_ws_admission: Option<Arc<bcs_ws::bot::BotWsAdmission>>,
+
     /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
     pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
 
@@ -2699,6 +2702,7 @@ impl Default for BcsServerState {
             bot_registry.clone(),
             user_identity_port.clone(),
         ));
+        let bot_ws_admission = config.bot_ws_admission.build();
 
         Self {
             config,
@@ -2721,6 +2725,7 @@ impl Default for BcsServerState {
             metrics,
             auth_chain,
             auth_config,
+            bot_ws_admission,
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
@@ -4318,6 +4323,7 @@ impl BcsServer {
             metrics,
             auth_chain,
             auth_config,
+            bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
@@ -5217,6 +5223,7 @@ impl BcsServer {
             metrics,
             auth_chain,
             auth_config,
+            bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
@@ -6745,6 +6752,16 @@ async fn bot_ws_handler(
     headers: axum::http::HeaderMap,
     ws: WsUpgrade,
 ) -> Response {
+    if let Some(admission) = &state.bot_ws_admission {
+        if let Err(retry_after) = admission.try_acquire() {
+            debug!(
+                retry_after_ms = retry_after.as_millis() as u64,
+                "Bot WebSocket upgrade rate limited"
+            );
+            return bcs_ws::bot::bot_ws_rate_limited_response(retry_after);
+        }
+    }
+
     let agent_token = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
