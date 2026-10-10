@@ -38,6 +38,10 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     send,
     abortBot,
     abortingBotIds,
+    queuedDeliveries,
+    processingDeliveries,
+    cancellingDeliveryIds,
+    cancelDelivery,
     reconnect,
     onOpenSessionList,
     reloadHistory,
@@ -65,6 +69,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityId,
     userIdentityName,
     updateMemberScope,
+    props.identityLocked,
   );
 
   const messages = filterVisibleGroupMessages(chat.messages ?? []);
@@ -252,12 +257,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           messages={messages}
           abortingBotIds={abortingBotIds}
           abortBot={abortBot}
+          queuedDeliveries={queuedDeliveries}
+          processingDeliveries={processingDeliveries}
+          cancellingDeliveryIds={cancellingDeliveryIds}
+          onCancelDelivery={cancelDelivery}
         />
         {/* 输入框仅在 human 视角显示：Bot 视角由协作面板控制发言；Human absent 时由「加入」条接管。 */}
         {session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly ? (
           <GroupChatComposer
             session={session}
-            isRequesting={isRequesting && isWaitingForBot}
             connectionStatus={connectionStatus}
             mentionConfig={mentionConfig}
             showReconnectToolbar={showReconnectToolbar}

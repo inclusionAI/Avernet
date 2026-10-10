@@ -5,37 +5,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-export interface CollabPanelState {
-  /** 是否展示底部协作面板：bot 视角恒显；human 视角仅在 human 姿态为 absent 时显示加入条。 */
-  visible: boolean;
-  /** human 视角 absent 时直接渲染「未加入当前会话」条（无 tab）。 */
-  humanAbsentOnly: boolean;
-  /** 当前浏览身份（bot 发言控制对象）。 */
-  botActorId: string | null;
-  botMode: 'auto' | 'muted' | null;
-  botName: string;
-  /** 会话内 human 成员（当前查看用户身份对应的协作者）。 */
-  human: ParticipantView | null;
-  humanJoined: boolean;
-  humanName: string;
-  humanAvatarUrl?: string;
-  /** 是否存在可切换的 human 身份（「去发言」按钮可用性）。 */
-  canSwitchToHuman: boolean;
-  switchingBotMode: boolean;
-  joining: boolean;
-  /** human 成员的消息可见域回显（后端未返回时为 null，UI 不渲染切换控件）。 */
-  humanViewScope: MessageViewScope | null;
-  /** 消息视角切换请求进行中（禁用 Switch）。 */
-  switchingViewScope: boolean;
-  setBotMode: (mode: 'auto' | 'muted') => Promise<void>;
-  joinSession: (scope?: MessageViewScope) => Promise<boolean>;
-  /** 退出当前会话（将 human mode 置为 absent）。 */
-  leaveSession: () => Promise<boolean>;
-  /** 切换到用户视角继续发言（对齐 open-claw「去发言」）。 */
-  switchToHuman: () => void;
-  /** 仅切换 human 成员消息可见域；成功后触发 ws 整体重连（重拉一次性 token）。 */
-  setViewScope: (scope: MessageViewScope) => Promise<boolean>;
-}
+import type { CollabPanelState } from './useCollabPanel.types';
+export type { CollabPanelState } from './useCollabPanel.types';
 
 /**
  * useCollabPanel —— 「我的协作」协作群会话底部协作面板的状态编排。
@@ -58,6 +29,7 @@ export function useCollabPanel(
   authenticatedUserId?: string | null,
   authenticatedUserName?: string | null,
   updateMemberScope?: (sessionId: string, actorId: string, scope: MessageViewScope) => Promise<boolean>,
+  identityLocked = false,
 ): CollabPanelState {
   const [switchingBotMode, setSwitchingBotMode] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -139,13 +111,14 @@ export function useCollabPanel(
   }, []);
 
   const switchToHuman = useCallback(() => {
+    if (identityLocked) return;
     if (!humanActorId) {
       toast.error('未找到用户身份，请稍后重试');
       return;
     }
     setActiveIdentity(humanActorId);
     if (session) openGroupSessionAsHuman(session);
-  }, [humanActorId, openGroupSessionAsHuman, session, setActiveIdentity]);
+  }, [humanActorId, identityLocked, openGroupSessionAsHuman, session, setActiveIdentity]);
 
   const setBotMode = useCallback(
     async (mode: 'auto' | 'muted') => {
@@ -162,7 +135,7 @@ export function useCollabPanel(
 
   const joinSession = useCallback(
     async (scope?: MessageViewScope): Promise<boolean> => {
-      if (!session) return false;
+      if (!session || (identityLocked && isBotViewer)) return false;
       const actorId = human?.actorId ?? humanActorId;
       if (!actorId) {
         toast.error('未找到用户身份，请稍后重试');
@@ -171,7 +144,7 @@ export function useCollabPanel(
       setJoining(true);
       try {
         const ok = await updateMemberMode(session.sessionId, actorId, 'present', scope);
-        if (ok) {
+        if (ok && !identityLocked) {
           if (humanActorId) setActiveIdentity(humanActorId);
           openGroupSessionAsHuman(session);
         }
@@ -180,7 +153,16 @@ export function useCollabPanel(
         setJoining(false);
       }
     },
-    [human, humanActorId, openGroupSessionAsHuman, session, setActiveIdentity, updateMemberMode],
+    [
+      human,
+      humanActorId,
+      identityLocked,
+      isBotViewer,
+      openGroupSessionAsHuman,
+      session,
+      setActiveIdentity,
+      updateMemberMode,
+    ],
   );
 
   const leaveSession = useCallback(async (): Promise<boolean> => {
@@ -216,6 +198,7 @@ export function useCollabPanel(
   const visible = !!session && (isBotViewer || humanAbsent || humanJoined);
 
   return {
+    identityLocked,
     visible,
     humanAbsentOnly,
     botActorId,
@@ -225,7 +208,7 @@ export function useCollabPanel(
     humanJoined,
     humanName,
     humanAvatarUrl: human?.avatarUrl,
-    canSwitchToHuman: !!humanActorId,
+    canSwitchToHuman: !identityLocked && !!humanActorId,
     switchingBotMode,
     joining,
     humanViewScope: human?.messageViewScope ?? null,

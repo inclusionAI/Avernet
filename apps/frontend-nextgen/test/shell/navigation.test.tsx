@@ -29,6 +29,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
       'conversation',
       'collaboration',
       'collaboration-square',
+      'lab',
     ]);
     expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop']);
     expect(merged.filter((item) => item.section === 'legacy').map((item) => item.id)).toEqual(['my-task']);
@@ -107,6 +108,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'conversation',
       'collaboration',
       'collaboration-square',
+      'lab',
       'bot-workshop',
       'capability-workshop',
       'market',

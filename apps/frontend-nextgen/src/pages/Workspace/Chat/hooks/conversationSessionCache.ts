@@ -8,6 +8,7 @@ import type {
   ConversationSessionScope,
   ManagedBotConversationView,
 } from '@/domain/conversation/types';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import type { BotSessionPageView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -78,7 +79,7 @@ export const writeSessionState = (
   state: ConversationSessionListState,
 ): void => {
   const store = useConversationStore.getState();
-  if (section === 'managed')
+  if (isManagedConversationSection(section))
     store.setManagedBotCache(botId, managedViewOf(botId, scope, store.sessionsByBotId[botId], state));
   else store.setFriendBotSessions(botId, state);
 };

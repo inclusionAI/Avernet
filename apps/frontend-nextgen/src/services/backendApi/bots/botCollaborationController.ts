@@ -13,6 +13,12 @@ export interface BotEditorRequestPolicyDto {
   auto_approve: boolean;
 }
 
+export interface BotEditorRequestCreatedDto {
+  work_order_id: number;
+  work_order_no: string;
+  status: 'PENDING' | 'APPROVED';
+}
+
 const path = (botId: string) => `/openapi/v1/bots/${encodeURIComponent(botId)}/editors`;
 const editorRequestPolicyPath = (botId: string) =>
   `/openapi/v1/bots/${encodeURIComponent(botId)}/editor-request-policy`;
@@ -37,9 +43,14 @@ export const botCollaborationController = {
   remove: (botId: string, editorId: number) =>
     backendRequest(`${path(botId)}/${editorId}`, { method: 'DELETE', params: userScopedParams() }),
   requestAccess: (botId: string, ownerId: string, reason: string) =>
-    backendRequest<BackendApiEnvelope<{ work_order_id: number; work_order_no: string; status: string }>>(
+    backendRequest<BackendApiEnvelope<BotEditorRequestCreatedDto>>(
       `/openapi/v1/bots/${encodeURIComponent(botId)}/editor-requests`,
-      { method: 'POST', params: userScopedParams({ owner_id: ownerId }), data: { reason } },
+      {
+        method: 'POST',
+        params: userScopedParams({ owner_id: ownerId }),
+        data: { reason },
+        operation: 'request-bot-editor-access',
+      },
     ),
   getEditorRequestPolicy: (botId: string) =>
     backendRequest<BackendApiEnvelope<BotEditorRequestPolicyDto>>(editorRequestPolicyPath(botId), {

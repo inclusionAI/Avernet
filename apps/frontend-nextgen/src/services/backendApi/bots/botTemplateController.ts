@@ -1,3 +1,4 @@
+import { getCapabilities, type RuntimeEnvironment } from '@/capabilities';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendUnknownRecord } from '../types';
 
@@ -22,11 +23,12 @@ export interface BotTemplateField {
 export type TemplateFactoryEnv = 'pre' | 'prod';
 
 /**
- * 模板工厂环境与 TeamClaw 当前运行环境保持一致。
- * 本地/开发/预发均使用 pre，生产使用 prod；开发环境由 config.local.ts 注入。
+ * 模板工厂环境与 TeamClaw 业务环境保持一致：
+ * LOCAL/DEV/PRE 均传 `pre`，仅 PROD 传 `prod`。
+ * 运行环境识别由 `getRuntimeEnvironment` capability 承载，Open Core 不写部署域名。
  */
-export function getTemplateFactoryEnv(): TemplateFactoryEnv {
-  const currentEnv = typeof TEAMCLAW_DEV_ENV !== 'undefined' ? TEAMCLAW_DEV_ENV : 'PROD';
+export function getTemplateFactoryEnv(runtimeEnv?: RuntimeEnvironment): TemplateFactoryEnv {
+  const currentEnv = runtimeEnv ?? getCapabilities().getRuntimeEnvironment().value;
   return currentEnv === 'PROD' ? 'prod' : 'pre';
 }
 

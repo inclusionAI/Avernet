@@ -12,6 +12,8 @@ export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
 
 export interface GroupSidebarProps {
+  /** 单群入口不展示身份切换或跨群工具。 */
+  restricted?: boolean;
   /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
   viewerKind: 'user' | 'bot';
   groups: GroupView[];
@@ -117,21 +119,23 @@ export function GroupSidebarList(props: GroupSidebarProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0">
-        <CollaborationIdentityHeader />
+        <CollaborationIdentityHeader readOnly={props.restricted} />
       </div>
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
         {/* 跨模块切换收口到 App Shell 一级导航,二级侧栏不再渲染视图切换 Tab。 */}
-        <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
-          <GroupSidebarFilters
-            groupSearchText={groupSearchText}
-            onSearchTextChange={onSearchTextChange}
-            kindFilter={kindFilter}
-            onKindFilterChange={onKindFilterChange}
-            membership={membership}
-            onMembershipChange={onMembershipChange}
-            onCreateGroup={onCreateGroup}
-          />
-        </div>
+        {!props.restricted && (
+          <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
+            <GroupSidebarFilters
+              groupSearchText={groupSearchText}
+              onSearchTextChange={onSearchTextChange}
+              kindFilter={kindFilter}
+              onKindFilterChange={onKindFilterChange}
+              membership={membership}
+              onMembershipChange={onMembershipChange}
+              onCreateGroup={onCreateGroup}
+            />
+          </div>
+        )}
 
         {!isLoading && groupsError && <ListErrorState message={groupsError} onRetry={() => void onRetryGroups?.()} />}
 
@@ -165,7 +169,9 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             ))}
           </div>
         ) : groups.length === 0 ? (
-          groupsError ? null : groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
+          groupsError ? null : props.restricted ? (
+            <Empty title="指定协作群不可用" />
+          ) : groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
             <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
               <p className="m-0 text-sm font-medium text-foreground">没有匹配的协作群</p>
               <p className="mt-2 text-sm text-muted-foreground">试试调整搜索词或筛选条件。</p>

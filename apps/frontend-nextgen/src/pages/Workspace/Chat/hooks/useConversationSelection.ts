@@ -4,6 +4,7 @@
 // - 推导:当前选中对应的交互式(mine)与只读(others)视图数据,交由页面分支渲染。
 // section 未解析的旧/外部链接原样透传;目录 hydration 完成后按目录重解析一次。
 import type { ConversationBotView, ConversationRouteState, ConversationUserView } from '@/domain/conversation';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useConversationStore, type ConversationState } from '@/stores/conversationStore';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -46,13 +47,17 @@ export function useConversationSelection(options: {
     return map;
   }, [managedBots, friendBots]);
   // 目录 key 变化才触发重解析 effect(数组引用每次渲染都变)。
-  const managedBotIdKey = useMemo(() => managedBots.map((v) => v.bot.botId).join('|'), [managedBots]);
+  const managedBotIdKey = useMemo(() => managedBots.map((v) => `${v.section}=${v.bot.botId}`).join('|'), [managedBots]);
   const friendBotIdKey = useMemo(() => friendBots.map((v) => v.bot.botId).join('|'), [friendBots]);
 
+  const selectedInDirectory =
+    store.selectedSection === 'friend'
+      ? friendBotIdKey.split('|').includes(store.selectedBotId ?? '')
+      : managedBotIdKey.split('|').includes(`${store.selectedSection}=${store.selectedBotId}`);
   const origin: 'mine' | 'others' =
-    store.selectedBotId !== null && store.selectedSection === 'managed' ? store.selectedOrigin : 'mine';
+    store.selectedBotId !== null && isManagedConversationSection(store.selectedSection) ? store.selectedOrigin : 'mine';
   const selection = useMemo<ConversationRouteState>(() => {
-    const managedSelection = store.selectedSection === 'managed';
+    const managedSelection = isManagedConversationSection(store.selectedSection);
     return {
       botId: store.selectedBotId ?? undefined,
       section: store.selectedSection ?? undefined,
@@ -75,9 +80,9 @@ export function useConversationSelection(options: {
     const botId = store.selectedBotId;
     const sessionId = store.selectedSessionId;
     if (!botId || !sessionId || store.selectedOrigin !== 'mine') return null;
-    if (store.selectedSection === 'managed') {
+    if (isManagedConversationSection(store.selectedSection)) {
       const cache = store.sessionsByBotId[botId];
-      return cache && cache.origin === 'mine'
+      return cache && cache.origin === 'mine' && cache.scope === store.selectedScope
         ? cache.sessions.items.find((item) => item.sessionId === sessionId) ?? null
         : null;
     }
@@ -90,14 +95,15 @@ export function useConversationSelection(options: {
     store.selectedSection,
     store.selectedSessionId,
     store.selectedOrigin,
+    store.selectedScope,
     store.sessionsByBotId,
     store.friendBotSessionsByBotId,
   ]);
 
   const interactive = useMemo(() => {
-    const bot = mineSession ? botById.get(mineSession.botId) ?? null : null;
+    const bot = mineSession && selectedInDirectory ? botById.get(mineSession.botId) ?? null : null;
     return { bot, session: bot ? mineSession : null };
-  }, [botById, mineSession]);
+  }, [botById, mineSession, selectedInDirectory]);
 
   const readonly = useMemo(() => {
     const botId = store.selectedBotId;
@@ -144,21 +150,28 @@ export function useConversationSelection(options: {
       }
       const section =
         route.section ??
-        (managedBotIdKey.split('|').includes(route.botId)
+        (managedBotIdKey.split('|').includes(`managed=${route.botId}`)
           ? 'managed'
+          : managedBotIdKey.split('|').includes(`team=${route.botId}`)
+          ? 'team'
           : friendBotIdKey.split('|').includes(route.botId)
           ? 'friend'
           : null);
-      const managedOrigin = section === 'managed' ? route.origin ?? 'mine' : 'mine';
+      const managedOrigin = isManagedConversationSection(section) ? route.origin ?? 'mine' : 'mine';
       const scope =
-        section === 'managed' ? route.scope ?? storeNow.effectiveScopeByManagedBotId[route.botId] ?? 'all' : 'all';
-      const friendUserId = section === 'managed' && managedOrigin === 'others' ? route.friendUserId ?? null : null;
+        isManagedConversationSection(section) && managedOrigin === 'mine'
+          ? route.scope ?? storeNow.effectiveScopeByManagedBotId[route.botId] ?? 'all'
+          : 'all';
+      const friendUserId =
+        isManagedConversationSection(section) && managedOrigin === 'others' ? route.friendUserId ?? null : null;
       // origin=others 缺 friend 的非法 URL:sessionId 无法归属到某好友,从选中态剔除,
       // 避免投影回写 origin=others&session=… 残缺组合(AC-13 路由语法)。
       const sessionId =
-        section === 'managed' && managedOrigin === 'others' && !friendUserId ? null : route.sessionId ?? null;
+        isManagedConversationSection(section) && managedOrigin === 'others' && !friendUserId
+          ? null
+          : route.sessionId ?? null;
       storeNow.setExpandedBot(route.botId, true);
-      if (section === 'managed') {
+      if (isManagedConversationSection(section)) {
         if ((storeNow.originByManagedBotId[route.botId] ?? 'mine') !== managedOrigin) {
           storeNow.setManagedBotOrigin(route.botId, managedOrigin);
         }
@@ -187,19 +200,31 @@ export function useConversationSelection(options: {
     onRouteSelection(lastRouteRef.current);
   }, [friendBotIdKey, hydrated, managedBotIdKey, onRouteSelection]);
 
-  const selectReadonlySession = useCallback((botId: string, sessionId: string, friendUserId: string) => {
-    const storeNow = useConversationStore.getState();
-    storeNow.setExpandedBot(botId, true);
-    storeNow.setExpandedFriend(botId, friendUserId, true);
-    storeNow.selectConversation({
-      botId,
-      section: 'managed',
-      origin: 'others',
-      scope: 'all',
-      friendUserId,
-      sessionId,
-    });
-  }, []);
+  // 完整目录到达后按管理→团队→好友归类；不能拿旧 friend 缓存搭配 team 请求身份。
+  useEffect(() => {
+    if (!hydrated || selectedInDirectory || !store.selectedBotId) return;
+    const section =
+      managedBots.find((view) => view.bot.botId === store.selectedBotId)?.section ??
+      friendBots.find((view) => view.bot.botId === store.selectedBotId)?.section;
+    if (section) onRouteSelection({ ...selection, section });
+  }, [hydrated, selectedInDirectory, store.selectedBotId, managedBots, friendBots, onRouteSelection, selection]);
+
+  const selectReadonlySession = useCallback(
+    (botId: string, sessionId: string, friendUserId: string) => {
+      const storeNow = useConversationStore.getState();
+      storeNow.setExpandedBot(botId, true);
+      storeNow.setExpandedFriend(botId, friendUserId, true);
+      storeNow.selectConversation({
+        botId,
+        section: managedBotIdKey.split('|').includes(`team=${botId}`) ? 'team' : 'managed',
+        origin: 'others',
+        scope: 'all',
+        friendUserId,
+        sessionId,
+      });
+    },
+    [managedBotIdKey],
+  );
 
   const clearSelection = useCallback(() => {
     useConversationStore.getState().selectConversation({

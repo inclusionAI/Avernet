@@ -33,12 +33,13 @@ cargo install --locked --manifest-path apps/bcs/Cargo.toml -p bcs-bridge-cli
 # Gateway: BCS delivers work to https://<public-host>/webhook, forwarded to --listen.
 export BCS_BRIDGE_PROVIDER_TOKENS='{"<provider-id>":"<webhook-token>"}'
 bcs-bridge register --token '<registration-token>' --bot-name 'My Bot' \
-  --api-url https://<bcs-host>/<prefix> \
+  --mode gateway --api-url https://<bcs-host>/<prefix> \
   --webhook-url https://<public-host>/webhook --provider-bot-ref my-bot
 bcs-bridge start            # foreground; --daemon to run in the background
 
-# Plugin: the bridge connects to the BCS Bot WebSocket; no webhook or webhook token.
-bcs-bridge register --token '<registration-token>' --bot-name 'My Bot' --mode plugin \
+# Plugin (the default `--mode`, matching the BCS register API): the bridge connects
+# to the BCS Bot WebSocket; no webhook or webhook token.
+bcs-bridge register --token '<registration-token>' --bot-name 'My Bot' \
   --api-url https://<bcs-host>/<prefix> --upstream-url wss://<bcs-host>/ws/bot \
   --engine codex
 bcs-bridge status

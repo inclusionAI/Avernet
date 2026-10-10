@@ -15,6 +15,7 @@ jest.mock('@/services/backendApi/bots/botCollaborationController', () => ({
   botCollaborationController: {
     add: jest.fn(),
     update: jest.fn(),
+    requestAccess: jest.fn(),
     getEditorRequestPolicy: jest.fn(),
     updateEditorRequestPolicy: jest.fn(),
   },
@@ -72,6 +73,31 @@ test('读取和更新协作者编辑权限申请自动通过策略', async () =>
 
   expect(getPolicy).toHaveBeenCalledWith('bot-1');
   expect(updatePolicy).toHaveBeenCalledWith('bot-1', false);
+});
+
+test('申请编辑权限时区分自动通过与待审批', async () => {
+  const requestAccess = botCollaborationController.requestAccess as jest.Mock;
+  requestAccess
+    .mockResolvedValueOnce({
+      code: 201000,
+      data: { work_order_id: 11, work_order_no: 'WO-11', status: 'APPROVED' },
+    })
+    .mockResolvedValueOnce({
+      code: 201000,
+      data: { work_order_id: 12, work_order_no: 'WO-12', status: 'PENDING' },
+    });
+  const target = { id: 'bot-1', ownerId: 'owner-1' } as ReturnType<typeof mapBotDto>['item'];
+
+  await expect(botManagementService.requestAccess(target, '需要共同编辑')).resolves.toEqual({
+    status: 'approved',
+    workOrderId: 11,
+    workOrderNo: 'WO-11',
+  });
+  await expect(botManagementService.requestAccess(target, '请审批')).resolves.toEqual({
+    status: 'pending',
+    workOrderId: 12,
+    workOrderNo: 'WO-12',
+  });
 });
 
 test('授权候选仅查询 Bot 所属空间成员并保留姓名', async () => {

@@ -24,6 +24,7 @@ export function useBotCreateAuthorization(
           authorization.botId,
           authorization.request,
           authorization.agentCoding,
+          authorization.avatarUrl,
         );
         if (!active) return;
         if (result.status === 'ISSUED' && result.bot) {
@@ -63,7 +64,7 @@ export function useBotCreateAuthorization(
       active = false;
       window.clearInterval(timer);
     };
-  }, [authorization?.botId, authorization?.request, onCreated, onTerminated]);
+  }, [authorization?.botId, authorization?.request, authorization?.avatarUrl, onCreated, onTerminated]);
 
   return {
     authorization,

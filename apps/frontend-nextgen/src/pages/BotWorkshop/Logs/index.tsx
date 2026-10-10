@@ -18,7 +18,7 @@ const BotChatLogsPage: React.FC = () => {
         <Button
           variant="ghost"
           size="icon"
-          aria-label="返回 Bot 工坊"
+          aria-label="返回 Bot 管理"
           onClick={logs.backToWorkshop}
           leftIcon={<ArrowLeft className="size-4" />}
         />
@@ -36,7 +36,7 @@ const BotChatLogsPage: React.FC = () => {
             <Empty
               title="无法打开日志"
               description={logs.initializationError}
-              action={<Button onClick={logs.backToWorkshop}>返回 Bot 工坊</Button>}
+              action={<Button onClick={logs.backToWorkshop}>返回 Bot 管理</Button>}
             />
           ) : logs.detail ? (
             <BotChatDetail

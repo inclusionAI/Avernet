@@ -15,7 +15,7 @@ jest.mock('@/services/workspace/conversationService', () => ({
 }));
 
 jest.mock('@/services/workspace/botSessionService', () => ({
-  botSessionService: { createSession: require('jest-mock').fn() },
+  botSessionService: { createSession: require('jest-mock').fn(), deleteSession: require('jest-mock').fn() },
   splitBotId: (botId: string) => {
     const idx = botId.indexOf(':');
     return idx < 0
@@ -191,10 +191,11 @@ describe('useConversationSessions', () => {
     listManagedSessions.mockResolvedValue(okPage(['s1']));
     const { result } = renderSessions();
 
+    act(() => useConversationStore.getState().setExpandedBot('fb-1:327325', true));
     act(() => result.current.selectMineSession('bot-a:2088', 's1'));
 
     const store = useConversationStore.getState();
-    expect(store.expandedBotIds['bot-a:2088']).toBe(true);
+    expect(store.expandedBotIds).toEqual({ 'bot-a:2088': true });
     expect(store.selectedBotId).toBe('bot-a:2088');
     expect(store.selectedSection).toBe('managed');
     expect(store.selectedOrigin).toBe('mine');
@@ -206,10 +207,13 @@ describe('useConversationSessions', () => {
   it('selectFriendBotSession expands the Bot and writes the friend selection', () => {
     const { result } = renderSessions();
 
-    act(() => result.current.selectFriendBotSession('fb-1:327325', 'fs1'));
+    act(() => {
+      useConversationStore.getState().setExpandedBot('bot-a:2088', true);
+      result.current.selectFriendBotSession('fb-1:327325', 'fs1');
+    });
 
     const store = useConversationStore.getState();
-    expect(store.expandedBotIds['fb-1:327325']).toBe(true);
+    expect(store.expandedBotIds).toEqual({ 'fb-1:327325': true });
     expect(store.selectedBotId).toBe('fb-1:327325');
     expect(store.selectedSection).toBe('friend');
     expect(store.selectedSessionId).toBe('fs1');
@@ -223,7 +227,9 @@ describe('useConversationSessions', () => {
     act(() => result.current.toggleBot('bot-a:2088', 'managed'));
     await waitFor(() => expect(useConversationStore.getState().sessionsByBotId['bot-a:2088']).toBeDefined());
 
+    act(() => useConversationStore.getState().setExpandedBot('fb-1:327325', true));
     await act(async () => result.current.createSession('bot-a:2088'));
+    expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-a:2088': true });
 
     expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325');
     const view = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
@@ -368,4 +374,142 @@ it('refills a shifted favorite page after unfavoriting without skipping or dupli
   const list = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions;
   expect(list.items.map((item) => item.sessionId)).toEqual([...items.map((item) => item.sessionId), 's10']);
   expect(list.items[0].favorite).toBe(true);
+});
+
+it('exposes session actions and blocks pagination during deletion, then refills the shifted page', async () => {
+  const ids = Array.from({ length: 10 }, (_, i) => `s${i + 1}`);
+  listManagedSessions
+    .mockResolvedValueOnce(okPage(ids, 21))
+    .mockResolvedValueOnce(okPage([...ids.slice(1), 's11'], 20));
+  const deletion = deferred<{ ok: true; data: null }>();
+  (botSessionService.deleteSession as jest.Mock).mockReturnValue(deletion.promise);
+  const { result } = renderSessions();
+  act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
+  await waitFor(() =>
+    expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId]?.sessions.items).toHaveLength(10),
+  );
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = result.current.actions.run(managedBot.bot.botId, 'managed', 's1', { type: 'delete' });
+  });
+  await act(async () => result.current.loadMoreSessions(managedBot.bot.botId, 'managed', 'all'));
+  expect(listManagedSessions).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    deletion.resolve({ ok: true, data: null });
+    await pending;
+  });
+  await act(async () => result.current.loadMoreSessions(managedBot.bot.botId, 'managed', 'all'));
+  expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'all', 1);
+  const list = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions;
+  expect(list.items.map((s) => s.sessionId)).toEqual([...ids.slice(1), 's11']);
+  expect(list.total).toBe(20);
+});
+
+it('resumes a deferred scope load when the pending session action finishes', async () => {
+  listManagedSessions.mockResolvedValueOnce(okPage(['s1'], 1)).mockResolvedValueOnce(okPage(['s2'], 1));
+  const deletion = deferred<{ ok: true; data: null }>();
+  (botSessionService.deleteSession as jest.Mock).mockReturnValue(deletion.promise);
+  const { result } = renderSessions();
+  act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
+  await waitFor(() =>
+    expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId]?.sessions.items).toHaveLength(1),
+  );
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = result.current.actions.run(managedBot.bot.botId, 'managed', 's1', { type: 'delete' });
+  });
+  act(() => useConversationStore.getState().setManagedBotScope(managedBot.bot.botId, 'favorite'));
+  expect(listManagedSessions).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    deletion.resolve({ ok: true, data: null });
+    await pending;
+  });
+  await waitFor(() => expect(listManagedSessions).toHaveBeenLastCalledWith(managedBot.bot, '327325', 'favorite', 1));
+});
+
+it('expands managed and friend Bots exclusively, selects their first session and reuses cached sessions', async () => {
+  listManagedSessions.mockResolvedValue(okPage(['s1']));
+  listFriendBotSessions.mockResolvedValue(okPage(['fs1']));
+  const { result } = renderSessions();
+  act(() => result.current.selectMineSession(managedBot.bot.botId, 's1'));
+  await waitFor(() =>
+    expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId]?.sessions.items).toHaveLength(1),
+  );
+  act(() => result.current.toggleBot(friendBot.bot.botId, 'friend'));
+  await waitFor(() =>
+    expect(useConversationStore.getState().friendBotSessionsByBotId[friendBot.bot.botId]?.items).toHaveLength(1),
+  );
+  expect(result.current.openBotIds).toEqual({ [friendBot.bot.botId]: true });
+  expect(useConversationStore.getState()).toMatchObject({
+    selectedBotId: friendBot.bot.botId,
+    selectedSessionId: 'fs1',
+  });
+  act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
+  expect(result.current.openBotIds).toEqual({ [managedBot.bot.botId]: true });
+  expect(listManagedSessions).toHaveBeenCalledTimes(1);
+  expect(listFriendBotSessions).toHaveBeenCalledTimes(1);
+  act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
+  expect(result.current.openBotIds).toEqual({});
+});
+
+it('a late response only caches the collapsed Bot without re-expanding it', async () => {
+  const request = deferred<ReturnType<typeof okPage>>();
+  listManagedSessions.mockReturnValue(request.promise);
+  const { result } = renderSessions();
+  act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
+  act(() => result.current.toggleBot(friendBot.bot.botId, 'friend'));
+  await act(async () => {
+    request.resolve(okPage(['s1']));
+    await request.promise;
+  });
+  expect(result.current.openBotIds).toEqual({ [friendBot.bot.botId]: true });
+  expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions.items).toHaveLength(1);
+});
+
+describe('团队 Bot 复用管理会话', () => {
+  const teamBot: ConversationBotView = { ...managedBot, section: 'team' };
+  it('展开走管理列表、自动首选、切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
+    listManagedSessions.mockResolvedValue(okPage(['first']));
+    const { result } = renderSessions({ managedBots: [teamBot] });
+    act(() => result.current.toggleBot(teamBot.bot.botId, 'team'));
+    await waitFor(() => expect(useConversationStore.getState().selectedSessionId).toBe('first'));
+    expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1);
+    expect(listFriendBotSessions).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().selectedSection).toBe('team');
+    act(() => result.current.selectMineSession(teamBot.bot.botId, 'first'));
+    expect(useConversationStore.getState().selectedSection).toBe('team');
+    createSession.mockResolvedValue({ ok: true, data: sessionOf('new') });
+    await act(async () => {
+      await result.current.createSession(teamBot.bot.botId);
+    });
+    expect(useConversationStore.getState()).toMatchObject({ selectedSection: 'team', selectedSessionId: 'new' });
+    expect(useConversationStore.getState().sessionsByBotId[teamBot.bot.botId].sessions.items[0].sessionId).toBe('new');
+  });
+  it('他人来源不加载 mine，不允许创建', async () => {
+    useConversationStore.getState().setManagedBotOrigin(teamBot.bot.botId, 'others');
+    const { result } = renderSessions({ managedBots: [teamBot] });
+    act(() => result.current.toggleBot(teamBot.bot.botId, 'team'));
+    await act(async () => {
+      await result.current.createSession(teamBot.bot.botId);
+    });
+    expect(listManagedSessions).not.toHaveBeenCalled();
+    expect(listFriendBotSessions).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().selectedOrigin).toBe('others');
+  });
+});
+
+it('团队缺 entity 的不可聊天 Bot 即使被深链展开也不查询/创建会话', async () => {
+  const invalid: ConversationBotView = {
+    ...managedBot,
+    section: 'team',
+    bot: { ...managedBot.bot, ownerId: undefined, chatable: false },
+  };
+  useConversationStore.getState().setExpandedBot(invalid.bot.botId, true);
+  const { result } = renderSessions({ managedBots: [invalid] });
+  await act(async () => {
+    await result.current.createSession(invalid.bot.botId);
+  });
+  expect(listManagedSessions).not.toHaveBeenCalled();
+  expect(createSession).not.toHaveBeenCalled();
 });

@@ -19,6 +19,11 @@ export interface BotSpaceMember {
   userId: string;
   name: string;
 }
+export interface BotEditorRequestResult {
+  status: 'approved' | 'pending';
+  workOrderId: number;
+  workOrderNo: string;
+}
 
 const memberCache = new Map<string, { expires: number; members: BotSpaceMember[] }>();
 
@@ -116,8 +121,17 @@ export const botManagementService = {
     return mapCollaborator(response.data);
   },
   removeCollaborator: (botId: string, id: number) => botCollaborationController.remove(botId, id),
-  requestAccess: (bot: BotDomain, reason: string) => {
+  requestAccess: async (bot: BotDomain, reason: string): Promise<BotEditorRequestResult> => {
     if (!bot.ownerId) throw new Error('缺少 Bot Owner 信息，无法提交申请');
-    return botCollaborationController.requestAccess(bot.id, bot.ownerId, reason);
+    const response = await botCollaborationController.requestAccess(bot.id, bot.ownerId, reason);
+    if (isEnvelopeFailure(response)) throw new Error(response.message || '操作权限申请失败');
+    if (!response.data || !['APPROVED', 'PENDING'].includes(response.data.status)) {
+      throw new Error('申请接口未返回有效处理状态');
+    }
+    return {
+      status: response.data.status === 'APPROVED' ? 'approved' : 'pending',
+      workOrderId: response.data.work_order_id,
+      workOrderNo: response.data.work_order_no,
+    };
   },
 };

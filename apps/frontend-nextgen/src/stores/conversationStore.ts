@@ -1,6 +1,7 @@
 // Conversation Store:只提供同步 setter / 选择 / 展开 / 缓存写入 / reset。
 // 不调用 API、Service、Toast、Router;网络请求与分页写入由 Hook 经 Service 完成。
 import type { ConversationSessionScope } from '@/domain/conversation';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import { create } from 'zustand';
 import { conversationInitialState, type ConversationState } from './conversationStoreState';
 
@@ -16,9 +17,11 @@ export const useConversationStore = create<ConversationState>((set) => ({
   ...conversationInitialState,
   setExpandedBot: (botId, expanded) =>
     set((state) => {
-      if (state.expandedBotIds[botId] === expanded) return state;
-      if (!expanded) return { expandedBotIds: withoutKey(state.expandedBotIds, botId) };
-      return { expandedBotIds: { ...state.expandedBotIds, [botId]: true } };
+      if (!expanded)
+        return state.expandedBotIds[botId] ? { expandedBotIds: withoutKey(state.expandedBotIds, botId) } : state;
+      if (state.expandedBotIds[botId] && Object.keys(state.expandedBotIds).length === 1) return state;
+      // 管理/团队/好友 Bot 共用展开位；仅收起旧列表，缓存、筛选和主会话选中保持不变。
+      return { expandedBotIds: { [botId]: true } };
     }),
   setManagedBotOrigin: (botId, origin) =>
     set((state) => {
@@ -26,7 +29,7 @@ export const useConversationStore = create<ConversationState>((set) => ({
       // effective 读取范围:others 强制 all;mine 恢复记忆范围(缺省 all)。
       const effectiveScope: ConversationSessionScope =
         origin === 'others' ? 'all' : state.scopeByManagedBotId[botId] ?? 'all';
-      const selectedHere = state.selectedBotId === botId && state.selectedSection === 'managed';
+      const selectedHere = state.selectedBotId === botId && isManagedConversationSection(state.selectedSection);
       return {
         originByManagedBotId: { ...state.originByManagedBotId, [botId]: origin },
         effectiveScopeByManagedBotId: { ...state.effectiveScopeByManagedBotId, [botId]: effectiveScope },
@@ -48,7 +51,9 @@ export const useConversationStore = create<ConversationState>((set) => ({
       scopeByManagedBotId: { ...state.scopeByManagedBotId, [botId]: scope },
       effectiveScopeByManagedBotId: { ...state.effectiveScopeByManagedBotId, [botId]: scope },
       // 所选管理 Bot 且当前归属为 mine 时,选中范围同步跟随(AC-7 筛选投影 URL)。
-      ...(state.selectedBotId === botId && state.selectedSection === 'managed' && state.selectedOrigin === 'mine'
+      ...(state.selectedBotId === botId &&
+      isManagedConversationSection(state.selectedSection) &&
+      state.selectedOrigin === 'mine'
         ? { selectedScope: scope }
         : {}),
     })),

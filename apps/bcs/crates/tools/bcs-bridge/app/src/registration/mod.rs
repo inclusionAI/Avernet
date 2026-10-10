@@ -28,8 +28,9 @@ pub struct RegisterArgs {
     /// Display name for the registered Bot
     #[arg(long)]
     bot_name: String,
-    /// Connection mode: gateway webhook delivery, or plugin Bot WebSocket dialed to BCS
-    #[arg(long, value_enum, default_value = "gateway")]
+    /// Connection mode: plugin Bot WebSocket dialed to BCS (default, matching the
+    /// BCS register API), or gateway webhook delivery
+    #[arg(long, value_enum, default_value = "plugin")]
     mode: Mode,
     /// How the Provider authenticates its Bots; selects how the Bot identity is obtained
     #[arg(long)]

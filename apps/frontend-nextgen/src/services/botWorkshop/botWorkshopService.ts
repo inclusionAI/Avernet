@@ -1,4 +1,3 @@
-import { getCapabilities } from '@/capabilities';
 import type { LocalBotAuthorizationRequest } from '@/domain/botWorkshop';
 import { restartPublishStageOf } from '@/domain/botWorkshop';
 import {
@@ -18,7 +17,9 @@ import {
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { runAfterCreateActions } from './agentCodingAfterCreateService';
-import { agentCodingTemplateService, supportsServiceBot, type AgentCodingTemplate } from './agentCodingTemplateService';
+import { agentCodingTemplateService, type AgentCodingTemplate } from './agentCodingTemplateService';
+import { botAvatarService } from './botAvatarService';
+import { personalCreateSpace, toBotCreateRequest, validateBotCreate } from './botCreatePolicy';
 import { botEditorService } from './botEditorService';
 import { mapBotDto, mapBotList } from './botMapper';
 import { localBotService } from './localBotService';
@@ -38,92 +39,31 @@ export interface BotWorkshopServiceOverview {
   description: string;
 }
 
-const PUBLIC_ENGINES = new Set(['openclaw', 'claude_code', 'aicoding', 'hermes', 'teclaw']);
-const SERVICE_ENGINES = new Set(['openclaw', 'claude_code', 'teclaw']);
+type AfterCreateFailure = { key: string; retryable: boolean; message: string };
 
-/**
- * 当前形态的引擎可选清单是否提供原生 Claude Code 直建入口（经 getBotEngineOptions 差异化）：
- * - Open Core（含阿里云部署）：清单含 `claude_code`，普通 CC 个人云端直建合法；
- * - internal overlay：清单不含（CC 创建由 AgentCoding 模板接管），手工 `engine=claude_code` 仍拦截。
- */
-function nativeClaudeCodeSelectable(): boolean {
-  return getCapabilities()
-    .getBotEngineOptions()
-    .value.some((option) => option.value === 'claude_code');
-}
-
-function configuredLocalUserId() {
-  return typeof TEAMCLAW_OPENAPI_USER_ID === 'string' ? TEAMCLAW_OPENAPI_USER_ID.trim() : '';
-}
-
-function personalSpace(userId = configuredLocalUserId()): BotCreateSpace {
-  const localUserId = userId.trim();
-  return {
-    id: localUserId ? `personal:${localUserId}` : '',
-    name: '个人空间',
-    ownership: 'personal',
-    canCreate: Boolean(localUserId),
-  };
-}
-
-function validateCreate(input: BotCreateInput) {
-  const name = input.name.trim();
-  if (!name) throw new Error('请输入 Bot 名称');
-  if (name.includes('@')) throw new Error('Bot 名称不能包含 @');
-  if (name.length > 40) throw new Error('Bot 名称不能超过 40 个字符');
-  if (!PUBLIC_ENGINES.has(input.engine)) throw new Error('请选择可用的公开引擎');
-  if (input.scenario === 'cloud' && input.serviceMode === 'service') {
-    if (input.engine === 'aicoding') {
-      const template = input.agentCoding?.template as AgentCodingTemplate | undefined;
-      if (!template) throw new Error('请选择 AgentCoding 模板');
-      if (!supportsServiceBot(template)) throw new Error('当前模板未开启服务 Bot 能力');
-    } else if (!SERVICE_ENGINES.has(input.engine)) {
-      const engineName = input.engine === 'hermes' ? 'Hermes' : '当前引擎';
-      throw new Error(`${engineName} 暂不支持服务化`);
-    }
+async function persistCreatedAvatar(
+  bot: BotDomain,
+  avatarUrl?: string,
+): Promise<{ bot: BotDomain; failure?: AfterCreateFailure }> {
+  if (!avatarUrl) return { bot };
+  try {
+    const savedUrl = await botAvatarService.save(bot.id, avatarUrl);
+    return { bot: { ...bot, avatarUrl: savedUrl } };
+  } catch (error) {
+    return {
+      bot,
+      failure: {
+        key: 'avatar',
+        retryable: true,
+        message: error instanceof Error ? error.message : '头像保存失败',
+      },
+    };
   }
-  if (input.scenario === 'cloud' && !input.spaceId.trim()) throw new Error('请选择有效的归属空间');
-  if (input.engine === 'aicoding') {
-    const template = input.agentCoding?.template;
-    if (!template) throw new Error('请选择 AgentCoding 模板');
-    const templateError = agentCodingTemplateService.validate(template as never, input.agentCoding?.values ?? {});
-    if (templateError) throw new Error(templateError);
-  }
-  if (
-    input.scenario === 'cloud' &&
-    input.ownership === 'personal' &&
-    input.engine === 'claude_code' &&
-    !input.agentCoding?.template &&
-    !nativeClaudeCodeSelectable()
-  )
-    throw new Error('普通 Claude Code 请通过 AgentCoding 模板创建');
-  if (input.agentCoding?.template && ['normal', 'normalCC'].includes(input.agentCoding.template.templateType))
-    throw new Error('普通 Claude Code 模板不能走 AgentCoding 创建');
-}
-
-function toCreateRequest(input: BotCreateInput): AvernetBotCreateRequest {
-  validateCreate(input);
-  const engine = input.agentCoding?.template?.engine || input.engine;
-  return {
-    bot_name: input.name.trim(),
-    bot_desc: input.description.trim(),
-    engine,
-    cluster_name: engine === 'teclaw' ? 'ANDC' : 'ACRA',
-    bot_type: input.serviceMode === 'service' ? 'service' : 'personal',
-    space_id: input.spaceId || undefined,
-    ...(input.agentCoding?.template
-      ? agentCodingTemplateService.toCreateFields(
-          input.agentCoding.template as never,
-          input.agentCoding.values,
-          input.name,
-        )
-      : {}),
-  };
 }
 
 export const botWorkshopService = {
   getOverview(): BotWorkshopServiceOverview {
-    return { module: 'botWorkshop', description: 'Bot 工坊通过领域 Service 统一承载列表查询、映射和能力隔离。' };
+    return { module: 'botWorkshop', description: 'Bot 管理通过领域 Service 统一承载列表查询、映射和能力隔离。' };
   },
   async list(query: BotListQuery = {}): Promise<BotListResult> {
     const response = await listBotInventory(
@@ -163,7 +103,7 @@ export const botWorkshopService = {
     localUserId?: string,
     currentSpace?: BotCreateSpace,
   ): BotCreateSpace[] {
-    const personal = personalSpace(localUserId);
+    const personal = personalCreateSpace(localUserId);
     if (scenario === 'local') return [personal];
     if (currentSpace) return [currentSpace];
     const spaces = personal.canCreate ? [personal] : [];
@@ -172,19 +112,32 @@ export const botWorkshopService = {
     }
     return spaces;
   },
-  validateCreate,
-  toCreateRequest,
+  validateCreate: validateBotCreate,
+  toCreateRequest: toBotCreateRequest,
   async listAgentCodingTemplates() {
     return agentCodingTemplateService.list();
   },
   async create(input: BotCreateInput): Promise<BotCreateResult> {
-    validateCreate(input);
+    validateBotCreate(input);
     const normalized: BotCreateInput =
       input.scenario === 'local'
-        ? { ...input, spaceId: personalSpace().id, ownership: 'personal', serviceMode: 'non-service' }
+        ? { ...input, spaceId: personalCreateSpace().id, ownership: 'personal', serviceMode: 'non-service' }
         : input;
-    const request = normalized.scenario === 'cloud' ? toCreateRequest(normalized) : undefined;
-    if (normalized.scenario === 'local') return localBotService.create(normalized);
+    const request = normalized.scenario === 'cloud' ? toBotCreateRequest(normalized) : undefined;
+    if (normalized.scenario === 'local') {
+      const localResult = await localBotService.create(normalized);
+      if (localResult.type === 'authorization_required') {
+        return normalized.avatarUrl ? { ...localResult, avatarUrl: normalized.avatarUrl } : localResult;
+      }
+      const avatar = await persistCreatedAvatar(localResult.bot, normalized.avatarUrl);
+      const failures = [
+        ...(localResult.type === 'created_with_pending_after_create' ? localResult.afterCreateFailures : []),
+        ...(avatar.failure ? [avatar.failure] : []),
+      ];
+      return failures.length
+        ? { type: 'created_with_pending_after_create', bot: avatar.bot, afterCreateFailures: failures }
+        : { type: 'created', bot: avatar.bot };
+    }
     const response = await createBot(request as unknown as BackendUnknownRecord);
     const dto = response.data;
     if (!dto) throw new Error('创建接口未返回 Bot 数据');
@@ -200,9 +153,11 @@ export const botWorkshopService = {
         redirectUrl,
         request: request!,
         agentCoding: normalized.agentCoding,
+        ...(normalized.avatarUrl ? { avatarUrl: normalized.avatarUrl } : {}),
       };
     }
-    const bot = mapBotDto(dto).item;
+    let bot = mapBotDto(dto).item;
+    const afterCreateFailures: AfterCreateFailure[] = [];
     if (normalized.agentCoding?.template) {
       const failures = await runAfterCreateActions({
         botId: bot.id,
@@ -210,28 +165,38 @@ export const botWorkshopService = {
         template: normalized.agentCoding.template as AgentCodingTemplate,
         values: normalized.agentCoding.values,
       });
-      if (failures.length > 0) {
-        return {
-          type: 'created_with_pending_after_create',
-          bot,
-          afterCreateFailures: failures.map((failure) => ({
-            key: failure.action.key,
-            retryable: failure.action.retryable,
-            message: failure.error.message,
-          })),
-        };
-      }
+      afterCreateFailures.push(
+        ...failures.map((failure) => ({
+          key: failure.action.key,
+          retryable: failure.action.retryable,
+          message: failure.error.message,
+        })),
+      );
     }
+    const avatar = await persistCreatedAvatar(bot, normalized.avatarUrl);
+    bot = avatar.bot;
+    if (avatar.failure) afterCreateFailures.push(avatar.failure);
+    if (afterCreateFailures.length > 0) return { type: 'created_with_pending_after_create', bot, afterCreateFailures };
     return { type: 'created', bot };
   },
   async pollCreateAuthorization(
     botId: string,
     request: AvernetBotCreateRequest | LocalBotAuthorizationRequest,
     agentCoding?: BotCreateInput['agentCoding'],
+    avatarUrl?: string,
   ): Promise<BotCreateAuthorizationPollResult> {
     let response;
     try {
-      if ('machine_id' in request) return await localBotService.poll(botId, request);
+      if ('machine_id' in request) {
+        const result = await localBotService.poll(botId, request);
+        if (result.status !== 'ISSUED' || !result.bot) return result;
+        const avatar = await persistCreatedAvatar(result.bot, avatarUrl);
+        return {
+          ...result,
+          bot: avatar.bot,
+          afterCreateFailures: avatar.failure ? [avatar.failure] : undefined,
+        };
+      }
       response = await pollBotAuthStatus(botId, request as unknown as BackendUnknownRecord);
     } catch (error) {
       if (error instanceof BackendRequestError && error.data && typeof error.data === 'object') {
@@ -247,23 +212,32 @@ export const botWorkshopService = {
     }
     const dto = response.data;
     if (!dto?.status) throw new Error('授权状态接口未返回有效状态');
-    const bot = dto.bot ? mapBotDto(dto.bot, botId).item : undefined;
-    if (dto.status === 'ISSUED' && bot && agentCoding?.template) {
-      const failures = await runAfterCreateActions({
-        botId: bot.id,
-        ownerId: bot.ownerId,
-        template: agentCoding.template as AgentCodingTemplate,
-        values: agentCoding.values,
-      });
+    let bot = dto.bot ? mapBotDto(dto.bot, botId).item : undefined;
+    if (dto.status === 'ISSUED' && bot) {
+      const failures: AfterCreateFailure[] = [];
+      if (agentCoding?.template) {
+        const actionFailures = await runAfterCreateActions({
+          botId: bot.id,
+          ownerId: bot.ownerId,
+          template: agentCoding.template as AgentCodingTemplate,
+          values: agentCoding.values,
+        });
+        failures.push(
+          ...actionFailures.map((failure) => ({
+            key: failure.action.key,
+            retryable: failure.action.retryable,
+            message: failure.error.message,
+          })),
+        );
+      }
+      const avatar = await persistCreatedAvatar(bot, avatarUrl);
+      bot = avatar.bot;
+      if (avatar.failure) failures.push(avatar.failure);
       return {
         status: dto.status,
         message: dto.message,
         bot,
-        afterCreateFailures: failures.map((failure) => ({
-          key: failure.action.key,
-          retryable: failure.action.retryable,
-          message: failure.error.message,
-        })),
+        afterCreateFailures: failures.length ? failures : undefined,
       };
     }
     return { status: dto.status, message: dto.message, bot };

@@ -7,6 +7,7 @@ import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { cn } from '@/utils/cn';
 import type React from 'react';
+import AvatarEditor from '../BotAvatar/AvatarEditor';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
 import { CreateBotEngineSelector } from './CreateBotEngineSelector';
 import { DesktopDeviceFields } from './DesktopDeviceFields';
@@ -148,6 +149,16 @@ export function CreateBotFormFields({
             onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))}
           />
         </label>
+
+        <div className="space-y-2 text-xs font-medium text-foreground">
+          <span className="block">Bot 头像</span>
+          <AvatarEditor
+            value={values.avatarUrl ?? ''}
+            seed={values.name.trim() || 'new-bot'}
+            disabled={creating}
+            onChange={(avatarUrl) => setValues((current) => ({ ...current, avatarUrl }))}
+          />
+        </div>
       </div>
 
       <div className="flex flex-col gap-2 text-xs font-medium text-foreground">

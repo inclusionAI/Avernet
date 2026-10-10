@@ -174,3 +174,20 @@ it('blocks favorite-list writes while that list is paginating', async () => {
   });
   expect(toggle).not.toHaveBeenCalled();
 });
+
+it('team 收藏写回管理类缓存，不写好友缓存；他人来源禁止收藏', async () => {
+  const team: ConversationBotView = { ...view, section: 'team', bot: { ...view.bot, isTeamBot: true } };
+  const { result } = renderFavorites(team);
+  await act(async () => {
+    await result.current.toggleFavorite(team.bot.botId, 'team', 's1');
+  });
+  expect(toggle).toHaveBeenCalledWith(team.bot, 'user', 's1', true);
+  expect(useConversationStore.getState().sessionsByBotId[team.bot.botId].sessions.items[0].favorite).toBe(true);
+  expect(useConversationStore.getState().friendBotSessionsByBotId).toEqual({});
+  act(() => useConversationStore.getState().setManagedBotOrigin(team.bot.botId, 'others'));
+  toggle.mockClear();
+  await act(async () => {
+    await result.current.toggleFavorite(team.bot.botId, 'team', 's1');
+  });
+  expect(toggle).not.toHaveBeenCalled();
+});

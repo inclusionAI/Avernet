@@ -32,6 +32,13 @@ const INVALID_CONTEXT_ERROR: DomainError = {
   canRetry: false,
 };
 
+// 临时关闭团队 Bot 他人会话，避免历史 URL/缓存绕过禁用入口继续请求未就绪后端。
+const TEAM_OTHERS_UNAVAILABLE: DomainError = {
+  code: 'TEAM_OTHERS_UNAVAILABLE',
+  friendlyMessage: '他人发起的会话功能开发中',
+  canRetry: false,
+};
+
 /** 管理 Bot 上下文:复合 botId 拆出 realBotId/ownerId,所有者不可缺省。 */
 function resolveOwnerContext(bot: ChatBotView): { realBotId: string; ownerId: string } | null {
   const { realBotId, ownerId } = splitBotId(bot.botId);
@@ -92,6 +99,7 @@ async function loadAllFriendUsers(botIdentityId: string, signal: AbortSignal): P
 export const managedBotConversationService = {
   /** 管理 Bot 的好友 Human 用户列表(bot actor 查询,signal 透传给 AbortController 取消)。 */
   async loadFriendUsers(bot: ChatBotView, signal?: AbortSignal): Promise<DomainResult<ConversationUserView[]>> {
+    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const requestSignal = signal ?? new AbortController().signal;
     try {
       const users = await loadAllFriendUsers(bot.botId, requestSignal);
@@ -111,6 +119,7 @@ export const managedBotConversationService = {
     page: number = 1,
     pageSize: number = BOT_SESSION_PAGE_SIZE,
   ): Promise<DomainResult<ConversationSessionListState>> {
+    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const context = resolveOwnerContext(bot);
     const friendId = normalizeFriendUserId(friendUserId);
     if (!context || !friendId) {
@@ -155,6 +164,7 @@ export const managedBotConversationService = {
     page: number = 1,
     pageSize: number = BOT_MESSAGE_PAGE_SIZE,
   ): Promise<DomainResult<ConversationMessagePageView>> {
+    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const context = resolveOwnerContext(bot);
     const friendId = normalizeFriendUserId(friendUserId);
     if (!context || !friendId || !sessionId.trim()) {

@@ -1,6 +1,7 @@
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { useAgentCodingTemplates } from '@/hooks/useAgentCodingTemplates';
 import type { BotCreateAuthorization, BotCreateInput, BotCreateScenario, BotCreateSpace } from '@/services/botWorkshop';
-import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { Cloud, Laptop } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { AuthorizationPanel } from './AuthorizationPanel';
@@ -13,10 +14,6 @@ interface CreateBotModalProps {
   authorization?: BotCreateAuthorization & { message?: string; error?: string };
   onClose: () => void;
   onSubmit: (input: BotCreateInput) => Promise<void>;
-  agentCodingTemplates?: AgentCodingTemplate[];
-  agentCodingTemplatesLoading?: boolean;
-  agentCodingTemplatesError?: string;
-  onRetryAgentCodingTemplates?: () => void;
 }
 
 const initialValues = (scenario: BotCreateScenario, spaces: BotCreateSpace[]): BotCreateInput => {
@@ -30,6 +27,7 @@ const initialValues = (scenario: BotCreateScenario, spaces: BotCreateSpace[]): B
     ownership: firstSpace.ownership,
     serviceMode: 'non-service',
     initialize: true,
+    avatarUrl: generateBotAvatar('new-bot'),
   };
 };
 
@@ -40,10 +38,6 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
   authorization,
   onClose,
   onSubmit,
-  agentCodingTemplates = [],
-  agentCodingTemplatesLoading,
-  agentCodingTemplatesError,
-  onRetryAgentCodingTemplates,
 }) => {
   const [values, setValues] = useState<BotCreateInput>(() => initialValues('cloud', spaces));
   const [error, setError] = useState<string>();
@@ -53,6 +47,9 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
   const open = Boolean(scenario);
   const isLocal = scenario === 'local';
   const isAgentCoding = values.engine === 'aicoding';
+
+  // 模板列表属于 AgentCoding 一级选项的二级数据；选中该引擎后才加载，避免打开云端创建弹窗即预取。
+  const agentCodingTemplates = useAgentCodingTemplates(scenario === 'cloud' && isAgentCoding);
 
   useEffect(() => {
     if (!scenario) {
@@ -123,10 +120,10 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
             creating={creating}
             error={error}
             agentCodingError={agentCodingError}
-            agentCodingTemplates={agentCodingTemplates}
-            agentCodingTemplatesLoading={agentCodingTemplatesLoading}
-            agentCodingTemplatesError={agentCodingTemplatesError}
-            onRetryAgentCodingTemplates={onRetryAgentCodingTemplates}
+            agentCodingTemplates={agentCodingTemplates.templates}
+            agentCodingTemplatesLoading={agentCodingTemplates.loading}
+            agentCodingTemplatesError={agentCodingTemplates.error}
+            onRetryAgentCodingTemplates={agentCodingTemplates.retry}
             onValidateReady={(validator) => {
               agentCodingValidatorRef.current = validator;
             }}
