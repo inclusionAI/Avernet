@@ -64,16 +64,19 @@ def _get_provider_config(
 ) -> Optional[Dict[str, str]]:
     """Return the BCN provider config for ``env``, or None when there is none.
 
-    claude_code 下行链路仅 prod / pre 两个环境注册到真实 BCN——这是行为开关
-    (dev 不注册)，不是选配置：``provider_id`` 与 ``provider_admin_token`` 各只有
-    一个值，由部署 overlay 提供（社区构建默认空），直接读
-    :class:`BcnConfig`。任一为空视作未配置（返回 None），``register_provider_bot``
-    据此跳过（与旧 dev 路径一致）。
+    claude_code 下行链路默认仅 prod / pre 注册到真实 BCN。local-k8s/simulator
+    可用 ``user_config.bcn.provider_registration_enabled`` 显式打开 dev 注册，
+    但仍复用同一标准 ``POST /providers/{provider_id}/bots`` 链路和同一
+    ``provider_id`` / ``provider_admin_token`` 凭据，不引入备用接口。任一凭据
+    为空视作未配置（返回 None），``register_provider_bot`` 据此跳过。
     """
-    if env not in ("prod", "pre"):
+    registration_allowed = env in ("prod", "pre") or (
+        env == "dev" and config.provider_registration_enabled
+    )
+    if not registration_allowed:
         logger.info(
-            "[BcnService._get_provider_config] env=%s unsupported for "
-            "provider credentials",
+            "[BcnService._get_provider_config] env=%s provider registration "
+            "disabled",
             env,
         )
         return None

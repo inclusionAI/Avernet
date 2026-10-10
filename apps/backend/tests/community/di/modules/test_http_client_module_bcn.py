@@ -6,6 +6,8 @@ import dataclasses
 import pytest
 
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules import config_module
+from agentclaw.community.di.modules.config_module import ConfigModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, QUALIFIER_BCN
 from agentclaw.community.plugins.http_client import HttpxClient
@@ -36,7 +38,25 @@ def test_bcn_config_has_no_legacy_env_suffixed_fields() -> None:
             "provider_admin_token_pre",
         }
     )
-    assert {"base_url", "provider_id", "provider_admin_token"} <= fields
+    assert {
+        "base_url",
+        "provider_id",
+        "provider_admin_token",
+        "provider_registration_enabled",
+    } <= fields
+
+
+def test_bcn_registration_gate_is_read_from_overlay_and_defaults_off(monkeypatch) -> None:
+    """The local-k8s overlay opts dev into the standard Provider path."""
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {"bcn": {"provider_registration_enabled": True}},
+    )
+    assert ConfigModule().bcn().provider_registration_enabled is True
+
+    monkeypatch.setattr(config_module, "_user_config", lambda: {"bcn": {}})
+    assert ConfigModule().bcn().provider_registration_enabled is False
 
 
 # ── transport policy resolution ──────────────────────────────────────────────
