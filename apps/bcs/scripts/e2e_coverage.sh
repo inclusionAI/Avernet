@@ -279,14 +279,17 @@ if [[ "$no_stop" -eq 0 ]]; then
   echo "--- aggregating coverage ---"
   # Exclude crates the bcs server e2e structurally never executes from the
   # line-coverage denominator: the test harness (bcs-test-support), standalone
-  # tool binaries the e2e never runs (bcs-rule-bot, bcs-admin, ding-logger), and
-  # plugins never loaded by the e2e stack (bcs-db-mysql — e2e uses SQLite;
-  # bcs-llm-anthropic — no LLM calls in e2e). They are ~9k lines at 0% coverage
-  # that only bloat the denominator; excluding them reports the real
-  # e2e-reachable coverage (~44%) instead of being dragged to ~40% by dead code.
+  # tool binaries the e2e never runs (bcs-rule-bot, bcs-admin, ding-logger, the
+  # bcs-bridge CLI crates under tools/bcs-bridge/ — they run their own
+  # per-turn engine protocol against external engines, not exercised by the
+  # server e2e), and plugins never loaded by the e2e stack (bcs-db-mysql —
+  # e2e uses SQLite; bcs-llm-anthropic — no LLM calls in e2e). They are ~9k
+  # lines at 0% coverage that only bloat the denominator; excluding them
+  # reports the real e2e-reachable coverage (~44%) instead of being dragged
+  # to ~40% by dead code.
   # `cargo llvm-cov report` does not accept --exclude (that's test/nextest only),
   # so filter by source path via --ignore-filename-regex, which report supports.
-  cov_ignore_regex='(test-support/bcs-test-support|tools/bcs-rule-bot|tools/bcs-admin|plugins/bcs-db-mysql|plugins/bcs-llm-anthropic|auxiliary/ding-logger)/'
+  cov_ignore_regex='(test-support/bcs-test-support|tools/bcs-rule-bot|tools/bcs-admin|tools/bcs-bridge|plugins/bcs-db-mysql|plugins/bcs-llm-anthropic|auxiliary/ding-logger)/'
   set +e
   (
     cd "$bcs_dir"

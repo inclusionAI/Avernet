@@ -101,6 +101,10 @@ members = [
     "crates/external-clients/bcs-webhook-client",
     "crates/services/bcs-coordination-store",
     # tools
+    # bcs-bridge (gateway/plugin bridge to local coding-agent engines)
+    "crates/tools/bcs-bridge/cli",
+    "crates/tools/bcs-bridge/app",
+    "crates/tools/bcs-bridge/core",
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
     "crates/tools/bcs-rule-bot",
@@ -126,7 +130,7 @@ edition      = "2024"
 license      = "Apache-2.0"
 repository   = "https://github.com/inclusionAI/bcs"
 rust-version = "1.91"
-version      = "0.1.0"
+version      = "0.1.3"
 
 [workspace.dependencies]
 # Async runtime
@@ -241,6 +245,8 @@ redis = { version = "0.27.6", features = ["tokio-comp"] }
 # Workspace crates
 bcs            = { path = "crates/bootstrap/bcs" }
 bcs-api-http   = { path = "crates/adapters/http/bcs-api-http" }
+bcs-bridge-app  = { path = "crates/tools/bcs-bridge/app" }
+bcs-bridge-core = { path = "crates/tools/bcs-bridge/core" }
 bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-rule-bot   = { path = "crates/tools/bcs-rule-bot" }
