@@ -24,13 +24,17 @@ import { history } from '@umijs/max';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
 import { useBotChat } from '../hooks/useBotChat';
+import { ChatHeaderActions } from './components/ChatHeaderActions';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
+import { ChatHeaderRightPanel, SessionDetailPanel } from './components/ChatHeaderRightPanel';
 import {
   ConversationSidebar,
   ConversationSidebarContent,
   type ConversationSidebarProps,
 } from './components/ConversationSidebar';
+import { SessionHistorySearchPanel } from './components/SessionHistorySearchPanel';
 import { ConversationInteractiveStage } from './ConversationInteractiveStage';
+import { useChatHeaderPanels } from './hooks/useChatHeaderPanels';
 import { useConversationDirectory } from './hooks/useConversationDirectory';
 import { useConversationHistory } from './hooks/useConversationHistory';
 import { useConversationInteractiveChat } from './hooks/useConversationInteractiveChat';
@@ -59,6 +63,9 @@ export default function ConversationPage(): JSX.Element {
   }, [userId]);
 
   const directory = useConversationDirectory(userId);
+  // 团队 Bot 独立目录(section=team)与会话模型合并消费:
+  // 会话加载/选中/URL 同步等按「管理域全集」(managed + team)装配
+  // (sprint spec 2026-10-10-conversation-team-bots,取代 B2/B3 Batch 1 临时的空间拆桶分层)。
   const managedAndTeamBots = useMemo(
     () => [...directory.managedBots, ...directory.teamBots],
     [directory.managedBots, directory.teamBots],
@@ -89,8 +96,9 @@ export default function ConversationPage(): JSX.Element {
   useConversationUrlSync({ hydrated, selection, onRouteSelection });
 
   // 交互式(mine)装配:target/viewer/认证信息/请求身份全部来自登录 Human(Task 7 约定)。
+  // 登录用户切换瞬间不再装载旧用户会话(identityChanged 防串话,expand-selection 竞态保护)。
   const interactiveBot = identityChanged || !userId ? null : interactive.bot;
-  const selectedSession = interactiveBot ? interactive.session : null;
+  const selectedSession = interactive.session;
   const target = useMemo(
     () => (interactiveBot ? buildBotChatTarget(interactiveBot, selectedSession) : null),
     [interactiveBot, selectedSession],
@@ -128,6 +136,7 @@ export default function ConversationPage(): JSX.Element {
     botChat,
     panelRef,
     inputRef,
+    // AgentCoding Bot 行点击直达 /coding/coding-chat(专属形态),不进 ChatPanel 装配。
     selectedAgentCodingBot: null,
     sessions: sessionEdits,
   });
@@ -168,6 +177,7 @@ export default function ConversationPage(): JSX.Element {
     if (section === 'friend') sessions.selectFriendBotSession(botId, sessionId);
     else sessions.selectMineSession(botId, sessionId);
   };
+  // AgentCoding Bot 行点击直达专用 coding 对话页(与 Bot 工坊「去使用」一致;spec 2026-10-09 G2)。
   const openAgentCodingBot = (bot: ChatBotView) =>
     history.push(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
   const sidebarProps: ConversationSidebarProps = {
@@ -182,6 +192,49 @@ export default function ConversationPage(): JSX.Element {
     onOpenPublicBots: () => history.push('/collaboration-square/bots'),
     onOpenAgentCodingBot: openAgentCodingBot,
   };
+
+  // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
+  // 资源管理 = 既有会话文件副屏承接；与右缘面板互斥由 togglePanel 一并处理。
+  const headerPanels = useChatHeaderPanels({
+    session: interactiveModel.selectedSession,
+    messages: botChat.chat.messages,
+    panelRef,
+    section: store.selectedSection ?? 'managed',
+    botId: interactiveBot?.botId ?? null,
+    toggleFavorite: sessions.favorites.toggleFavorite,
+    favoritePending: sessions.favorites.isPending,
+    openFileDrawer: interactiveModel.fileFeature.openFileDrawer,
+    closeFileDrawer: interactiveModel.fileFeature.closeFileDrawer,
+    fileDrawerOpen: interactiveModel.fileFeature.fileDrawerOpen,
+  });
+  const toggleFileDrawer = () => {
+    if (interactiveModel.fileFeature.fileDrawerOpen) interactiveModel.fileFeature.closeFileDrawer();
+    else {
+      headerPanels.closePanel();
+      interactiveModel.fileFeature.openFileDrawer();
+    }
+  };
+  const headerActions = (
+    <ChatHeaderActions
+      favorites={headerPanels.favorites}
+      openPanel={headerPanels.openPanel}
+      onTogglePanel={headerPanels.togglePanel}
+      fileDrawerOpen={interactiveModel.fileFeature.fileDrawerOpen}
+      onToggleFileDrawer={toggleFileDrawer}
+      sidePaneOpen={headerPanels.sidePaneOpen}
+      onToggleSidePane={headerPanels.toggleSidePane}
+    />
+  );
+  const headerRightPanels =
+    headerPanels.openPanel === 'detail' ? (
+      <ChatHeaderRightPanel title="会话详情" onClose={headerPanels.closePanel}>
+        <SessionDetailPanel session={interactiveModel.selectedSession} />
+      </ChatHeaderRightPanel>
+    ) : headerPanels.openPanel === 'history' ? (
+      <ChatHeaderRightPanel title="历史消息" onClose={headerPanels.closePanel}>
+        <SessionHistorySearchPanel search={headerPanels.historySearch} onLocate={headerPanels.locateMessage} />
+      </ChatHeaderRightPanel>
+    ) : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -221,12 +274,17 @@ export default function ConversationPage(): JSX.Element {
             onOpenSessionList={() => setMobileListOpen(true)}
           />
         ) : placeholder ? (
+          // 展开 Bot 后目标尚无选中会话:占位(加载/失败/空态/无效指定,expand-selection spec),
+          // 不挂载旧对话。
           <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
         ) : (
           <ConversationInteractiveStage
             model={interactiveModel}
             onOpenSessionList={() => setMobileListOpen(true)}
             onOpenAgentCodingBot={openAgentCodingBot}
+            headerActions={headerActions}
+            headerRightPanels={headerRightPanels}
+            highlightMessageId={headerPanels.highlightMessageId}
           />
         )}
       </div>

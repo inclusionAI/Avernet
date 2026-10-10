@@ -17,19 +17,14 @@ export function getMessageBlocks(message: ChatMessage) {
   return buildMessageBlocks(message);
 }
 
+// dmore 交付包复测（index.html + artboard-005/006/009/013 一致，2026-10-10）：消息区
+// 用户与 Bot 头像均为 24px 圆、距内容列 12px（x=36）；旧 32px/无头像系早期误读。
 function renderUserAvatar(name: string, avatarUrl?: string) {
-  return <Avatar name={name} src={avatarUrl} size={32} />;
+  return <Avatar name={name} src={avatarUrl} size={24} />;
 }
 
-function renderAvatar(name: string, avatarUrl?: string, fallbackAvatar?: string) {
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name} className="h-8 w-8 shrink-0 rounded-full object-cover" />;
-  }
-  return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-      {fallbackAvatar || name.charAt(0)}
-    </span>
-  );
+function renderBotAvatar(name: string, avatar?: string) {
+  return <Avatar name={name} src={avatar} size={24} />;
 }
 
 export function resolveSingleSender(
@@ -39,9 +34,10 @@ export function resolveSingleSender(
   userAvatarUrl?: string,
   authenticatedUserId?: string | null,
   authenticatedUserName?: string | null,
-): { name: string; avatar: ReactNode } {
+): { name: string; avatar: ReactNode | null } {
   if (message.role === 'assistant') {
-    return { name: target.name || '未命名 Bot', avatar: renderAvatar(target.name || 'Bot', undefined, target.avatar) };
+    const name = target.name || '未命名 Bot';
+    return { name, avatar: renderBotAvatar(name, target.avatar) };
   }
   const senderId = typeof message.extra?.senderId === 'string' ? message.extra.senderId : undefined;
   const senderName = typeof message.extra?.senderName === 'string' ? message.extra.senderName.trim() : '';

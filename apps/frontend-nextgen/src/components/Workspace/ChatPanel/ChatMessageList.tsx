@@ -1,4 +1,5 @@
-import { Button, Spin } from '@/components/ui';
+import { Button } from '@/components/ui';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import {
   MessageCopyAction,
   MessageInteractionToolbar,
@@ -16,7 +17,7 @@ import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { aixUiPlugin, fileRefPlugin } from '@tc-chat/ui/es/MarkdownRender';
 import { SystemNotice } from '@tc-chat/ui/es/SystemNotice';
 import { ArrowDown } from 'lucide-react';
-import { useCallback, useRef, type MutableRefObject, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -35,6 +36,8 @@ interface ChatMessageListProps {
   onLoadMoreHistory?: () => void;
   readOnly?: boolean;
   emptyPlaceholder?: string;
+  /** 待定位高亮的消息 id（历史面板结果点击）：滚动至该消息并短暂高亮（chat-header-panels）。 */
+  highlightMessageId?: string | null;
 }
 
 export function ChatMessageList({
@@ -54,6 +57,7 @@ export function ChatMessageList({
   onLoadMoreHistory,
   readOnly = false,
   emptyPlaceholder,
+  highlightMessageId,
 }: ChatMessageListProps) {
   const latestUserMessageId = getLatestUserMessageId(messages);
   const messagesRef = useRef(messages);
@@ -73,6 +77,13 @@ export function ChatMessageList({
 
   const loadMoreWithAnchor = useHistoryPrependAnchor(messages, listRootRef, onLoadMoreHistory);
 
+  // 定位高亮（历史消息面板结果点击）：滚动至目标消息行并呈现高亮态；id 清空或消息不在已载入范围则不动作。
+  useEffect(() => {
+    if (!highlightMessageId || !listRootRef.current) return;
+    const target = listRootRef.current.querySelector(`[data-message-id="${highlightMessageId}"]`);
+    if (target instanceof HTMLElement) target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [highlightMessageId]);
+
   const getCurrentMessageText = (messageId: string, fallbackText: string) => {
     const currentMessage = messagesRef.current.find((message) => message.id === messageId);
     return currentMessage ? getMessageText(currentMessage) : fallbackText;
@@ -85,13 +96,11 @@ export function ChatMessageList({
       className="flex min-h-0 flex-1 flex-col bg-background"
     >
       {isLoadingMessages ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center" aria-label="加载会话消息">
-          <Spin />
-        </div>
+        <ChatMessageSkeleton />
       ) : (
         <div data-workspace-message-scroll-region="single-chat" className="flex min-h-0 flex-1 flex-col">
           <ChatLayout.List
-            className="h-full bg-background px-3 py-3 sm:px-6 sm:py-4"
+            className="h-full bg-background px-3 py-3 sm:py-4 sm:pl-14 sm:pr-3"
             messages={messages}
             computeItemKey={(message) => message.id}
             isStreaming={isRequesting}
@@ -102,13 +111,25 @@ export function ChatMessageList({
             emptyPlaceholder={emptyPlaceholder ?? (readOnly ? '暂无历史消息' : '发送一条消息开始对话')}
             renderItem={(message, index) => {
               if (message.role === 'system') {
-                return <SystemNotice>{message.content}</SystemNotice>;
+                // dmore 系统消息：居中弱化纯文字条（12px 弱灰），无 severity 图标。
+                return (
+                  <SystemNotice showIcon={false} className="text-content-soft">
+                    {message.content}
+                  </SystemNotice>
+                );
               }
               const isLastMessage = index === messages.length - 1;
               const sender = resolveSender(message);
               const messageText = getMessageText(message);
               return (
-                <div data-message-id={message.id} className="group relative">
+                // 分组间距(mb-4/mb-6)落在消息项外壳：操作行随内容列渲染在气泡紧下方，
+                // 不再隔着 mb 间距悬浮（dmore 实测：操作图标 x=36 与正文左对齐、距正文 ~8px）。
+                <div
+                  data-message-id={message.id}
+                  className={`group relative rounded-lg transition-colors ${
+                    message.id === highlightMessageId ? 'bg-selected' : ''
+                  } ${getMessageSpacingClass(messages, index)}`}
+                >
                   <MessageSenderLayout
                     avatar={sender.avatar}
                     align={message.role === 'user' ? 'right' : 'left'}
@@ -121,15 +142,12 @@ export function ChatMessageList({
                     }
                   >
                     <Bubble
-                      className={`${getMessageSpacingClass(
-                        messages,
-                        index,
-                      )} message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]`}
+                      className="message-bubble-compact [--aix-markdown-font-size:13px] [--aix-font-size-base:13px]"
                       sender={{
                         role: message.role,
                         align: message.role === 'user' ? 'right' : 'left',
                         name: undefined,
-                        bubbleColor: message.role === 'user' ? 'hsl(var(--primary) / 0.1)' : undefined,
+                        bubbleColor: message.role === 'user' ? 'hsl(var(--muted))' : undefined,
                         maxWidth: '48rem',
                       }}
                       timestamp={undefined}
@@ -151,19 +169,20 @@ export function ChatMessageList({
                         ) : undefined
                       }
                     />
+                    <MessageCopyAction
+                      testId={`message-copy-action-${message.id}`}
+                      align={message.role === 'user' ? 'right' : 'left'}
+                      withinContentColumn
+                      onCopy={() => interactions.copyText(getCurrentMessageText(message.id, messageText))}
+                      onEdit={readOnly ? undefined : () => onEditMessage(message)}
+                      isEditable={
+                        !readOnly &&
+                        message.role === 'user' &&
+                        message.id === latestUserMessageId &&
+                        Boolean(messageText.trim())
+                      }
+                    />
                   </MessageSenderLayout>
-                  <MessageCopyAction
-                    testId={`message-copy-action-${message.id}`}
-                    align={message.role === 'user' ? 'right' : 'left'}
-                    onCopy={() => interactions.copyText(getCurrentMessageText(message.id, messageText))}
-                    onEdit={readOnly ? undefined : () => onEditMessage(message)}
-                    isEditable={
-                      !readOnly &&
-                      message.role === 'user' &&
-                      message.id === latestUserMessageId &&
-                      Boolean(messageText.trim())
-                    }
-                  />
                 </div>
               );
             }}
@@ -177,16 +196,23 @@ export function ChatMessageList({
         onExplain={readOnly ? undefined : onExplainSelected}
       />
       {interactions.unreadCount > 0 ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 gap-1 rounded-full shadow-md"
-          onClick={interactions.markRead}
-          aria-label={`回到底部，${interactions.unreadCount} 条新消息`}
-        >
-          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
-          {interactions.unreadCount} 条新消息
-        </Button>
+        // dmore 回底按钮：38×38 白底圆形图标件（artboard-005/006 Container w38 r-full bg-white），
+        // 右下角浮动；unread 计数以徽标角标保留既有 markRead 语义，行为零变更。
+        <div className="absolute bottom-4 right-6 z-10">
+          <Button
+            variant="ghost"
+            onClick={interactions.markRead}
+            aria-label={`回到底部，${interactions.unreadCount} 条新消息`}
+            className="relative size-[38px] rounded-full bg-background p-0 text-muted-foreground shadow-md hover:bg-background"
+          >
+            <ArrowDown className="h-4 w-4" aria-hidden="true" />
+            {interactions.unreadCount > 0 ? (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-4 text-primary-foreground">
+                {interactions.unreadCount}
+              </span>
+            ) : null}
+          </Button>
+        </div>
       ) : null}
     </div>
   );
