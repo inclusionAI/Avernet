@@ -272,6 +272,11 @@ vectors are retained, matching the existing activation policy; activation does
 not imply that search returns only the selected profile. Offline workers remain
 offline in vector metadata. Repeating activation is supported.
 
+Explicit activation builds semantic content only from the selected
+`worker_id/profile_id` in the application's profile content store. Registry
+descriptions and skills do not override it, including when the selected content
+is shorter or its fields or skills have been removed.
+
 After all new fragments are successfully written, activation removes obsolete
 fragment IDs belonging to that same profile (including a legacy unsplit ID).
 It does not delete other profiles or workers. Enumeration and deletion errors
