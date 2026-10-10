@@ -344,9 +344,11 @@ impl super::reads::DbBotAuthorityStore {
             &self.flavor,
             "grant",
             &format!(
-                "env = ? AND to_id = ? AND from_id = ? AND status = 'approved' \
+                "env = ? AND {} = ? AND {} = ? AND status = 'approved' \
                  AND grant_kind = 'manager' \
-                 AND management_source_kind = 'direct' AND management_source_id = 'manual'"
+                 AND management_source_kind = 'direct' AND management_source_id = 'manual'",
+                super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "from_id"),
             ),
             &self.env,
             bot_id,
@@ -400,9 +402,11 @@ impl super::reads::DbBotAuthorityStore {
         expected_edge_writes: u64,
     ) -> Result<Vec<String>, MutateAttempt> {
         let row_conditions = format!(
-            "env = ? AND to_id = ? AND from_id = ? AND status = 'approved' \
+            "env = ? AND {} = ? AND {} = ? AND status = 'approved' \
              AND grant_kind = 'manager' \
-             AND management_source_kind IN ('direct', 'ownership_transfer')"
+             AND management_source_kind IN ('direct', 'ownership_transfer')",
+            super::transfer_query::binary_identity(&self.flavor, "to_id"),
+            super::transfer_query::binary_identity(&self.flavor, "from_id"),
         );
         let audit = manager_change_audit_statement(
             &self.flavor,
@@ -434,12 +438,14 @@ impl super::reads::DbBotAuthorityStore {
         let revoke_update = DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'revoked', gmt_modified = {} \
-                 WHERE env = ? AND to_id = ? AND from_id = ? AND status = 'approved' \
+                 WHERE env = ? AND {} = ? AND {} = ? AND status = 'approved' \
                    AND grant_kind = 'manager' \
                    AND management_source_kind IN ('direct', 'ownership_transfer') \
                    AND {}",
                 self.flavor.now(),
-                super::audit::mutation_guards(),
+                super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "from_id"),
+                super::audit::mutation_guards(&self.flavor),
             ),
             revoke_params,
         );
@@ -523,42 +529,46 @@ impl super::reads::DbBotAuthorityStore {
         subject_from_id: &str,
     ) -> DbStatement {
         let env = self.env.as_str();
+        let to_b = super::transfer_query::binary_identity(&self.flavor, "e.to_id");
+        let from_b = super::transfer_query::binary_identity(&self.flavor, "e.from_id");
         DbStatement::with_params(
-            "SELECT \
-               b.ownership_version AS ownership_version, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.grant_kind = 'owner' \
-                    AND e.status = 'approved') AS owner_edge_count, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? \
-                    AND e.grant_kind IN ('owner', 'manager') \
-                    AND e.status = 'approved') AS actor_role_count, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? \
-                    AND e.grant_kind = 'owner' AND e.status = 'approved') \
-                 AS target_is_owner_count, \
-               (SELECT COUNT(*) FROM bcs_bots h \
-                  WHERE h.bot_uuid = ? AND h.env = ? AND h.actor_kind = 'human' \
-                    AND COALESCE(h.is_deleted, 0) = 0) AS target_live_count, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? \
-                    AND e.grant_kind = 'manager' \
-                    AND e.management_source_kind = 'direct' \
-                    AND e.management_source_id = 'manual' \
-                    AND e.status = 'approved') AS direct_approved_count, \
-               (SELECT e.id FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? \
-                    AND e.grant_kind = 'manager' \
-                    AND e.management_source_kind = 'direct' \
-                    AND e.management_source_id = 'manual' \
-                    AND e.status = 'revoked') AS direct_revoked_id, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? \
-                    AND e.grant_kind = 'manager' AND e.status = 'approved' \
-                    AND e.management_source_kind IN ('direct', 'ownership_transfer')) \
-                 AS nonteam_approved_count \
-             FROM bcs_bots b \
-             WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0",
+            &format!(
+                "SELECT \
+                   b.ownership_version AS ownership_version, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND e.grant_kind = 'owner' \
+                        AND e.status = 'approved') AS owner_edge_count, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND {from_b} = ? \
+                        AND e.grant_kind IN ('owner', 'manager') \
+                        AND e.status = 'approved') AS actor_role_count, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND {from_b} = ? \
+                        AND e.grant_kind = 'owner' AND e.status = 'approved') \
+                     AS target_is_owner_count, \
+                   (SELECT COUNT(*) FROM bcs_bots h \
+                      WHERE h.bot_uuid = ? AND h.env = ? AND h.actor_kind = 'human' \
+                        AND COALESCE(h.is_deleted, 0) = 0) AS target_live_count, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND {from_b} = ? \
+                        AND e.grant_kind = 'manager' \
+                        AND e.management_source_kind = 'direct' \
+                        AND e.management_source_id = 'manual' \
+                        AND e.status = 'approved') AS direct_approved_count, \
+                   (SELECT e.id FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND {from_b} = ? \
+                        AND e.grant_kind = 'manager' \
+                        AND e.management_source_kind = 'direct' \
+                        AND e.management_source_id = 'manual' \
+                        AND e.status = 'revoked') AS direct_revoked_id, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {to_b} = ? AND {from_b} = ? \
+                        AND e.grant_kind = 'manager' AND e.status = 'approved' \
+                        AND e.management_source_kind IN ('direct', 'ownership_transfer')) \
+                     AS nonteam_approved_count \
+                 FROM bcs_bots b \
+                 WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0"
+            ),
             vec![
                 DbValue::from(env),
                 DbValue::from(bot_id),
@@ -589,10 +599,14 @@ impl super::reads::DbBotAuthorityStore {
     /// `user_id`-stably by source id.
     fn subject_team_sources_statement(&self, bot_id: &str, subject_from_id: &str) -> DbStatement {
         DbStatement::with_params(
-            "SELECT e.management_source_id AS team_id FROM edge_grants e \
-             WHERE e.env = ? AND e.to_id = ? AND e.from_id = ? AND e.status = 'approved' \
-               AND e.grant_kind = 'manager' AND e.management_source_kind = 'team' \
-             ORDER BY e.management_source_id",
+            &format!(
+                "SELECT e.management_source_id AS team_id FROM edge_grants e \
+                 WHERE e.env = ? AND {} = ? AND {} = ? AND e.status = 'approved' \
+                   AND e.grant_kind = 'manager' AND e.management_source_kind = 'team' \
+                 ORDER BY e.management_source_id",
+                super::transfer_query::binary_identity(&self.flavor, "e.to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "e.from_id"),
+            ),
             vec![
                 DbValue::from(self.env.as_str()),
                 DbValue::from(bot_id),
@@ -645,17 +659,21 @@ impl super::reads::DbBotAuthorityStore {
                  SELECT ?, ?, ?, 'manager', 0, NULL, 'approved', 'same_as_from', NULL, \
                     'direct', 'manual'{from_dual} \
                  WHERE NOT EXISTS (SELECT 1 FROM edge_grants t \
-                       WHERE t.env = ? AND t.to_id = ? AND t.from_id = ? \
+                       WHERE t.env = ? AND {} = ? AND {} = ? \
                          AND t.grant_kind = 'manager' \
                          AND t.management_source_kind = 'direct' \
                          AND t.management_source_id = 'manual' AND t.status = 'approved') \
                    AND NOT EXISTS (SELECT 1 FROM edge_grants t \
-                       WHERE t.env = ? AND t.to_id = ? AND t.from_id = ? \
+                       WHERE t.env = ? AND {} = ? AND {} = ? \
                          AND t.grant_kind = 'manager' \
                          AND t.management_source_kind = 'direct' \
                          AND t.management_source_id = 'manual' AND t.status = 'revoked') \
                    AND {}",
-                super::audit::mutation_guards(),
+                super::transfer_query::binary_identity(&self.flavor, "t.to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "t.from_id"),
+                super::transfer_query::binary_identity(&self.flavor, "t.to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "t.from_id"),
+                super::audit::mutation_guards(&self.flavor),
             ),
             params,
         )
@@ -686,12 +704,14 @@ impl super::reads::DbBotAuthorityStore {
         DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'approved', gmt_modified = {} \
-                 WHERE env = ? AND to_id = ? AND from_id = ? AND grant_kind = 'manager' \
+                 WHERE env = ? AND {} = ? AND {} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'direct' AND management_source_id = 'manual' \
                    AND status = 'revoked' \
                    AND {}",
                 self.flavor.now(),
-                super::audit::mutation_guards(),
+                super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "from_id"),
+                super::audit::mutation_guards(&self.flavor),
             ),
             params,
         )
@@ -737,8 +757,9 @@ impl super::reads::DbBotAuthorityStore {
             .query(DbStatement::with_params(
                 &format!(
                     "SELECT {ROLE_ROW_COLUMNS} FROM edge_grants \
-                     WHERE env = ? AND to_id = ? AND grant_kind = 'owner' \
-                       AND status = 'approved' ORDER BY id"
+                     WHERE env = ? AND {} = ? AND grant_kind = 'owner' \
+                       AND status = 'approved' ORDER BY id",
+                    super::transfer_query::binary_identity(&self.flavor, "to_id"),
                 ),
                 vec![
                     DbValue::from(self.env.as_str()),
@@ -770,10 +791,14 @@ impl super::reads::DbBotAuthorityStore {
         let page_users = self
             .db
             .query(DbStatement::with_params(
-                "SELECT e.from_id AS from_id FROM edge_grants e \
-                 WHERE e.env = ? AND e.to_id = ? AND e.grant_kind = 'manager' \
-                   AND e.status = 'approved' AND e.from_id <> ? \
-                 GROUP BY e.from_id ORDER BY e.from_id LIMIT ? OFFSET ?",
+                &format!(
+                    "SELECT e.from_id AS from_id FROM edge_grants e \
+                     WHERE e.env = ? AND {} = ? AND e.grant_kind = 'manager' \
+                       AND e.status = 'approved' AND {} <> ? \
+                     GROUP BY e.from_id ORDER BY e.from_id LIMIT ? OFFSET ?",
+                    super::transfer_query::binary_identity(&self.flavor, "e.to_id"),
+                    super::transfer_query::binary_identity(&self.flavor, "e.from_id"),
+                ),
                 vec![
                     DbValue::from(self.env.as_str()),
                     DbValue::from(bot_id),
@@ -795,7 +820,10 @@ impl super::reads::DbBotAuthorityStore {
                 if index > 0 {
                     conjunction.push_str(" OR ");
                 }
-                conjunction.push_str("from_id = ?");
+                conjunction.push_str(&format!(
+                    "{} = ?",
+                    super::transfer_query::binary_identity(&self.flavor, "from_id")
+                ));
                 params.push(DbValue::from(
                     row.get_string("from_id").ok().flatten().unwrap_or_default(),
                 ));
@@ -805,9 +833,10 @@ impl super::reads::DbBotAuthorityStore {
                 .query(DbStatement::with_params(
                     &format!(
                         "SELECT {ROLE_ROW_COLUMNS} FROM edge_grants \
-                         WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
+                         WHERE env = ? AND {} = ? AND grant_kind = 'manager' \
                            AND status = 'approved' AND ({conjunction}) \
-                         ORDER BY from_id, id"
+                         ORDER BY from_id, id",
+                        super::transfer_query::binary_identity(&self.flavor, "to_id"),
                     ),
                     params,
                 ))

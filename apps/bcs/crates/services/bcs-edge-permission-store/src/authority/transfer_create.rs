@@ -456,9 +456,12 @@ impl super::reads::DbBotAuthorityStore {
     /// The approved owner-slot rows of the Bot (the strict decode input).
     fn owner_slot_statement(&self, bot_id: &str) -> bcs_db_api::DbStatement {
         bcs_db_api::DbStatement::with_params(
-            "SELECT from_id FROM edge_grants \
-             WHERE env = ? AND to_id = ? AND grant_kind = 'owner' AND status = 'approved' \
-             ORDER BY id",
+            &format!(
+                "SELECT from_id FROM edge_grants \
+                 WHERE env = ? AND {} = ? AND grant_kind = 'owner' AND status = 'approved' \
+                 ORDER BY id",
+                super::transfer_query::binary_identity(&self.flavor, "to_id"),
+            ),
             vec![
                 DbValue::from(self.env.as_str()),
                 DbValue::from(bot_id),
@@ -513,6 +516,9 @@ impl super::reads::DbBotAuthorityStore {
     /// caller paths decide it under their own branches.
     fn cleanup_mismatched_statement(&self, bot_id: &str) -> bcs_db_api::DbStatement {
         let now = self.flavor.now();
+        let owner_from =
+            super::transfer_query::binary_identity(&self.flavor, "o.from_id");
+        let owner_to = super::transfer_query::binary_identity(&self.flavor, "o.to_id");
         bcs_db_api::DbStatement::with_params(
             &format!(
                 "UPDATE bot_ownership_transfers \
@@ -520,8 +526,8 @@ impl super::reads::DbBotAuthorityStore {
                      decision_actor_kind = 'system', decided_by = 'ownership-validation', \
                      decided_at = {now}, gmt_modified = {now} \
                  WHERE env = ? AND bot_id = ? AND status = 'pending' \
-                   AND ( from_user_id <> (SELECT SUBSTR(o.from_id, 7) FROM edge_grants o \
-                           WHERE o.env = ? AND o.to_id = ? AND o.grant_kind = 'owner' \
+                   AND ( from_user_id <> (SELECT SUBSTR({owner_from}, 7) FROM edge_grants o \
+                           WHERE o.env = ? AND {owner_to} = ? AND o.grant_kind = 'owner' \
                              AND o.status = 'approved' ORDER BY o.id LIMIT 1) \
                          OR expected_owner_version <> (SELECT b.ownership_version \
                                FROM bcs_bots b \
@@ -598,10 +604,10 @@ impl super::reads::DbBotAuthorityStore {
                        WHERE tb.bot_uuid = ? AND tb.env = ? AND tb.ownership_version > 0 \
                          AND COALESCE(tb.is_deleted, 0) = 0) \
                    AND EXISTS (SELECT 1 FROM edge_grants os \
-                       WHERE os.env = ? AND os.to_id = ? AND os.grant_kind = 'owner' \
+                       WHERE os.env = ? AND {os_to} = ? AND os.grant_kind = 'owner' \
                          AND os.status = 'approved') \
                    AND EXISTS (SELECT 1 FROM edge_grants ao \
-                       WHERE ao.env = ? AND ao.to_id = ? AND ao.from_id = ? \
+                       WHERE ao.env = ? AND {ao_to} = ? AND {ao_from} = ? \
                          AND ao.grant_kind = 'owner' AND ao.status = 'approved') \
                    AND (SELECT nb.ownership_version FROM bcs_bots nb \
                         WHERE nb.bot_uuid = ? AND nb.env = ?) = ? \
@@ -613,6 +619,9 @@ impl super::reads::DbBotAuthorityStore {
                    AND ? <> ?",
                 expires_plus_7_days(&self.flavor),
                 dual = from_dual(&self.flavor),
+                os_to = super::transfer_query::binary_identity(&self.flavor, "os.to_id"),
+                ao_to = super::transfer_query::binary_identity(&self.flavor, "ao.to_id"),
+                ao_from = super::transfer_query::binary_identity(&self.flavor, "ao.from_id"),
             ),
             params,
         )

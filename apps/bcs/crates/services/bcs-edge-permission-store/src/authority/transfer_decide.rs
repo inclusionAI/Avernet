@@ -256,11 +256,13 @@ impl super::reads::DbBotAuthorityStore {
         // back and re-validates into the owner_changed invalidation — never
         // a phantom terminal on a snapshot the authority already replaced.
         let snapshot_guard = format!(
-            "from_user_id = (SELECT SUBSTR(o.from_id, 7) FROM edge_grants o \
-                   WHERE o.env = ? AND o.to_id = ? AND o.grant_kind = 'owner' \
+            "from_user_id = (SELECT SUBSTR({}, 7) FROM edge_grants o \
+                   WHERE o.env = ? AND {} = ? AND o.grant_kind = 'owner' \
                      AND o.status = 'approved' ORDER BY o.id LIMIT 1) \
              AND expected_owner_version = (SELECT b.ownership_version FROM bcs_bots b \
-                   WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0)"
+                   WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0)",
+            super::transfer_query::binary_identity(&self.flavor, "o.from_id"),
+            super::transfer_query::binary_identity(&self.flavor, "o.to_id"),
         );
         // The action's all-or-nothing transaction.
         match action {
@@ -312,9 +314,11 @@ impl super::reads::DbBotAuthorityStore {
                         snapshot_guard,
                         format!(
                             "EXISTS (SELECT 1 FROM edge_grants co \
-                               WHERE co.env = ? AND co.to_id = ? \
+                               WHERE co.env = ? AND {} = ? \
                                  AND co.grant_kind = 'owner' AND co.status = 'approved' \
-                                 AND co.from_id = {})",
+                                 AND {} = {})",
+                            super::transfer_query::binary_identity(&self.flavor, "co.to_id"),
+                            super::transfer_query::binary_identity(&self.flavor, "co.from_id"),
                             human_expr(&self.flavor)
                         ),
                     ],
@@ -369,6 +373,9 @@ impl super::reads::DbBotAuthorityStore {
     /// the changing statement against CURRENT rows. Zero rows is a drift.
     async fn invalidate_probe(&self, bot_id: &str, transfer_id: &str) -> DecideAttempt {
         let now = self.flavor.now();
+        let owner_from =
+            super::transfer_query::binary_identity(&self.flavor, "o.from_id");
+        let owner_to = super::transfer_query::binary_identity(&self.flavor, "o.to_id");
         let step = DbStatement::with_params(
             &format!(
                 "UPDATE bot_ownership_transfers \
@@ -377,8 +384,8 @@ impl super::reads::DbBotAuthorityStore {
                      decided_at = {now}, gmt_modified = {now} \
                  WHERE env = ? AND transfer_id = ? AND status = 'pending' \
                    AND expires_at > {now} \
-                   AND ( from_user_id <> (SELECT SUBSTR(o.from_id, 7) FROM edge_grants o \
-                           WHERE o.env = ? AND o.to_id = ? AND o.grant_kind = 'owner' \
+                   AND ( from_user_id <> (SELECT SUBSTR({owner_from}, 7) FROM edge_grants o \
+                           WHERE o.env = ? AND {owner_to} = ? AND o.grant_kind = 'owner' \
                              AND o.status = 'approved' ORDER BY o.id LIMIT 1) \
                          OR expected_owner_version <> (SELECT b.ownership_version \
                                FROM bcs_bots b WHERE b.bot_uuid = ? AND b.env = ? \
@@ -534,9 +541,13 @@ impl super::reads::DbBotAuthorityStore {
         let recipient_manager_plan = match self
             .db
             .query(DbStatement::with_params(
-                "SELECT id FROM edge_grants \
-                 WHERE env = ? AND to_id = ? AND from_id = ? AND grant_kind = 'owner' \
-                 ORDER BY id LIMIT 1",
+                &format!(
+                    "SELECT id FROM edge_grants \
+                     WHERE env = ? AND {} = ? AND {} = ? AND grant_kind = 'owner' \
+                     ORDER BY id LIMIT 1",
+                    super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                    super::transfer_query::binary_identity(&self.flavor, "from_id"),
+                ),
                 vec![
                     DbValue::from(env),
                     DbValue::from(bot_id),
@@ -569,8 +580,10 @@ impl super::reads::DbBotAuthorityStore {
             statement: DbStatement::with_params(
                 &format!(
                     "UPDATE edge_grants SET status = 'revoked', gmt_modified = {now} \
-                     WHERE env = ? AND to_id = ? AND grant_kind = 'owner' \
-                       AND status = 'approved' AND from_id = {}",
+                     WHERE env = ? AND {} = ? AND grant_kind = 'owner' \
+                       AND status = 'approved' AND {} = {}",
+                    super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                    super::transfer_query::binary_identity(&self.flavor, "from_id"),
                     human_expr(&self.flavor)
                 ),
                 vec![
@@ -587,8 +600,10 @@ impl super::reads::DbBotAuthorityStore {
                 statement: DbStatement::with_params(
                     &format!(
                         "UPDATE edge_grants SET status = 'approved', gmt_modified = {now} \
-                         WHERE id = ? AND env = ? AND to_id = ? AND grant_kind = 'owner' \
-                           AND status = 'revoked' AND from_id = {}",
+                         WHERE id = ? AND env = ? AND {} = ? AND grant_kind = 'owner' \
+                           AND status = 'revoked' AND {} = {}",
+                        super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                        super::transfer_query::binary_identity(&self.flavor, "from_id"),
                         human_expr(&self.flavor)
                     ),
                     vec![
@@ -610,10 +625,12 @@ impl super::reads::DbBotAuthorityStore {
                          SELECT ?, {edge}, ?, 'owner', 0, NULL, 'approved', 'same_as_from', NULL, \
                             'owner', 'owner'{dual} \
                          WHERE NOT EXISTS (SELECT 1 FROM edge_grants ne \
-                               WHERE ne.env = ? AND ne.to_id = ? AND ne.from_id = {edge} \
+                               WHERE ne.env = ? AND {ne_to} = ? AND {ne_from} = {edge} \
                                  AND ne.grant_kind = 'owner')",
                         edge = human_expr(&self.flavor),
                         dual = from_dual(&self.flavor),
+                        ne_to = super::transfer_query::binary_identity(&self.flavor, "ne.to_id"),
+                        ne_from = super::transfer_query::binary_identity(&self.flavor, "ne.from_id"),
                     ),
                     vec![
                         DbValue::from(env),
@@ -639,12 +656,14 @@ impl super::reads::DbBotAuthorityStore {
                      SELECT ?, {edge}, ?, 'manager', 0, NULL, 'approved', 'same_as_from', NULL, \
                         'ownership_transfer', ?{dual} \
                      WHERE NOT EXISTS (SELECT 1 FROM edge_grants ps \
-                           WHERE ps.env = ? AND ps.to_id = ? AND ps.from_id = {edge} \
+                           WHERE ps.env = ? AND {ps_to} = ? AND {ps_from} = {edge} \
                              AND ps.grant_kind = 'manager' \
                              AND ps.management_source_kind = 'ownership_transfer' \
                              AND ps.management_source_id = ?)",
                     edge = human_expr(&self.flavor),
                     dual = from_dual(&self.flavor),
+                    ps_to = super::transfer_query::binary_identity(&self.flavor, "ps.to_id"),
+                    ps_from = super::transfer_query::binary_identity(&self.flavor, "ps.from_id"),
                 ),
                 vec![
                     DbValue::from(env),
@@ -663,9 +682,11 @@ impl super::reads::DbBotAuthorityStore {
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'revoked', gmt_modified = {now} \
-                 WHERE env = ? AND to_id = ? AND from_id = {} AND grant_kind = 'manager' \
+                 WHERE env = ? AND {} = ? AND {} = {} AND grant_kind = 'manager' \
                    AND status = 'approved' \
                    AND management_source_kind IN ('direct', 'ownership_transfer')",
+                super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                super::transfer_query::binary_identity(&self.flavor, "from_id"),
                 human_expr(&self.flavor)
             ),
             vec![
@@ -714,9 +735,11 @@ impl super::reads::DbBotAuthorityStore {
                              WHERE rh.bot_uuid = ? AND rh.env = ? AND rh.actor_kind = 'human' \
                                AND COALESCE(rh.is_deleted, 0) = 0) \
                        AND EXISTS (SELECT 1 FROM edge_grants ae \
-                             WHERE ae.env = ? AND ae.to_id = ? \
+                             WHERE ae.env = ? AND {} = ? \
                                AND ae.grant_kind = 'owner' AND ae.status = 'approved' \
-                               AND ae.from_id = {})",
+                               AND {} = {})",
+                    super::transfer_query::binary_identity(&self.flavor, "ae.to_id"),
+                    super::transfer_query::binary_identity(&self.flavor, "ae.from_id"),
                     human_expr(&self.flavor)
                 ),
                 vec![
@@ -843,9 +866,12 @@ impl super::reads::DbBotAuthorityStore {
                     ],
                 )),
                 DbTransactionStep::Query(DbStatement::with_params(
-                    "SELECT from_id FROM edge_grants \
-                     WHERE env = ? AND to_id = ? AND grant_kind = 'owner' \
-                       AND status = 'approved' ORDER BY id",
+                    &format!(
+                        "SELECT from_id FROM edge_grants \
+                         WHERE env = ? AND {} = ? AND grant_kind = 'owner' \
+                           AND status = 'approved' ORDER BY id",
+                        super::transfer_query::binary_identity(&self.flavor, "to_id"),
+                    ),
                     vec![
                         DbValue::from(self.env.as_str()),
                         DbValue::from(bot_id),

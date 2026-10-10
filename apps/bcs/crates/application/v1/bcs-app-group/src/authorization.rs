@@ -405,7 +405,7 @@ impl GroupServiceImpl {
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = resolve_authorized_principal(caller, self.authority.as_ref()).await?;
         let group = self
             .groups
             .try_get(group_id)

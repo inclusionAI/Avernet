@@ -16,7 +16,7 @@ use bcs_service_api::{
 };
 
 use crate::application::bot::{
-    authorize_bot_management, bot_capabilities_from_record, effective_dynamic_status,
+    bot_capabilities_from_record, effective_dynamic_status,
  friend_check_in_strategy_to_wire, owner_actor_id,
     to_usize, user_visibility_to_wire, Bot,
 };
@@ -87,7 +87,11 @@ impl BotRuntimeConnectionService for Bot {
         } = command;
 
         match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
+            Some(bot) => {
+                let bot_id = bot.bot_uuid.clone();
+                self.authorize_management_caller(caller_actor_id.as_deref(), &bot_id, &bot)
+                    .await?
+            }
             None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }

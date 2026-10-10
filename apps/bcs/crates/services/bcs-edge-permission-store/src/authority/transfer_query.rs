@@ -79,6 +79,26 @@ pub(super) fn human_expr(flavor: &DbSqlFlavor) -> &'static str {
     }
 }
 
+/// Binary-identity comparison expression for one `edge_grants` identity
+/// column (`from_id` / `to_id`, optionally qualified by an alias).
+///
+/// Live MySQL keeps the LEGACY `edge_grants` column collation: migration
+/// 032 deliberately created the new authority tables with
+/// `COLLATE utf8mb4_bin` but left `edge_grants` untouched, relying on the
+/// store's per-flavor dialect encapsulation (spec §5.3, the same
+/// treatment the older grant queries already apply — `CAST(col AS BINARY)`
+/// on MySQL, `col COLLATE BINARY` on SQLite). Without the pin, MySQL's
+/// default case-insensitive collation would fold `USER-A` onto
+/// `user-a`'s approved owner/manager rows and the authority answers a
+/// foreign identity. Callers wrap the COLUMN side of every authority-lane
+/// identity predicate; bound parameters never need wrapping.
+pub(super) fn binary_identity(flavor: &DbSqlFlavor, column: &str) -> String {
+    match flavor {
+        DbSqlFlavor::Mysql => format!("CAST({column} AS BINARY)"),
+        DbSqlFlavor::Sqlite => format!("{column} COLLATE BINARY"),
+    }
+}
+
 /// Per-flavor `FROM DUAL` tail for INSERT…SELECT guarded statements.
 pub(super) fn from_dual(flavor: &DbSqlFlavor) -> &'static str {
     match flavor {

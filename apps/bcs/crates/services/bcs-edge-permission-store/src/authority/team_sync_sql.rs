@@ -17,6 +17,7 @@ use bcs_service_api::types::AuditActor;
 
 use super::audit::{audit_id_expr, MANAGER_CHANGE_COLUMNS};
 use super::team_sync::{PreparedSync, TEAM_SYNC_INSERT_CHUNK};
+use super::transfer_query::binary_identity;
 
 impl super::reads::DbBotAuthorityStore {
 
@@ -25,12 +26,15 @@ impl super::reads::DbBotAuthorityStore {
     pub(super) fn sync_read_aggregate_statement(&self, bot_id: &str) -> DbStatement {
         let env = self.env.as_str();
         DbStatement::with_params(
-            "SELECT b.ownership_version AS ownership_version, \
-               (SELECT COUNT(*) FROM edge_grants e \
-                  WHERE e.env = ? AND e.to_id = ? AND e.grant_kind = 'owner' \
-                    AND e.status = 'approved') AS owner_edge_count \
-             FROM bcs_bots b \
-             WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0",
+            &format!(
+                "SELECT b.ownership_version AS ownership_version, \
+                   (SELECT COUNT(*) FROM edge_grants e \
+                      WHERE e.env = ? AND {} = ? AND e.grant_kind = 'owner' \
+                        AND e.status = 'approved') AS owner_edge_count \
+                 FROM bcs_bots b \
+                 WHERE b.bot_uuid = ? AND b.env = ? AND COALESCE(b.is_deleted, 0) = 0",
+                binary_identity(&self.flavor, "e.to_id"),
+            ),
             vec![
                 DbValue::from(env),
                 DbValue::from(bot_id),
@@ -60,8 +64,11 @@ impl super::reads::DbBotAuthorityStore {
     /// The Bot's exclusive approved owner edge.
     pub(super) fn sync_owner_slot_statement(&self, bot_id: &str) -> DbStatement {
         DbStatement::with_params(
-            "SELECT from_id FROM edge_grants \
-             WHERE env = ? AND to_id = ? AND grant_kind = 'owner' AND status = 'approved'",
+            &format!(
+                "SELECT from_id FROM edge_grants \
+                 WHERE env = ? AND {} = ? AND grant_kind = 'owner' AND status = 'approved'",
+                binary_identity(&self.flavor, "to_id"),
+            ),
             vec![
                 DbValue::from(self.env.as_str()),
                 DbValue::from(bot_id),
@@ -72,11 +79,14 @@ impl super::reads::DbBotAuthorityStore {
     /// The current approved members of ONE team's manager source.
     pub(super) fn sync_current_members_statement(&self, bot_id: &str, team_id: &str) -> DbStatement {
         DbStatement::with_params(
-            "SELECT from_id FROM edge_grants \
-             WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
-               AND management_source_kind = 'team' AND management_source_id = ? \
-               AND status = 'approved' \
-             ORDER BY from_id",
+            &format!(
+                "SELECT from_id FROM edge_grants \
+                 WHERE env = ? AND {} = ? AND grant_kind = 'manager' \
+                   AND management_source_kind = 'team' AND management_source_id = ? \
+                   AND status = 'approved' \
+                 ORDER BY from_id",
+                binary_identity(&self.flavor, "to_id"),
+            ),
             vec![
                 DbValue::from(self.env.as_str()),
                 DbValue::from(bot_id),
@@ -121,10 +131,12 @@ impl super::reads::DbBotAuthorityStore {
         DbStatement::with_params(
             &format!(
                 "SELECT from_id FROM edge_grants \
-                 WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
+                 WHERE env = ? AND {to_b} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'team' AND management_source_id = ? \
-                   AND status = 'revoked' AND from_id IN ({conjunction}) \
-                 ORDER BY from_id"
+                   AND status = 'revoked' AND {from_b} IN ({conjunction}) \
+                 ORDER BY from_id",
+                to_b = binary_identity(&self.flavor, "to_id"),
+                from_b = binary_identity(&self.flavor, "from_id"),
             ),
             params,
         )
@@ -135,13 +147,20 @@ impl super::reads::DbBotAuthorityStore {
     /// the current owner. This is the in-transaction re-proof of the
     /// validated snapshot — drift fails the pin and rolls the whole
     /// attempt back. Binding order: `(env)`, then `(env, bot_id)`.
-    pub(super) fn sync_subject_guard_sql() -> &'static str {
-        " AND from_id IN (SELECT th.bot_uuid FROM bcs_bots th \
-             WHERE th.env = ? AND th.actor_kind = 'human' \
-               AND COALESCE(th.is_deleted, 0) = 0) \
-           AND from_id NOT IN (SELECT so.from_id FROM edge_grants so \
-             WHERE so.env = ? AND so.to_id = ? AND so.grant_kind = 'owner' \
-               AND so.status = 'approved')"
+    /// Identity columns compare binary (see `binary_identity`).
+    pub(super) fn sync_subject_guard_sql(&self) -> String {
+        format!(
+            " AND {} IN (SELECT th.bot_uuid FROM bcs_bots th \
+                 WHERE th.env = ? AND th.actor_kind = 'human' \
+                   AND COALESCE(th.is_deleted, 0) = 0) \
+           AND {} NOT IN (SELECT {} FROM edge_grants so \
+                 WHERE so.env = ? AND {} = ? AND so.grant_kind = 'owner' \
+                   AND so.status = 'approved')",
+            binary_identity(&self.flavor, "from_id"),
+            binary_identity(&self.flavor, "from_id"),
+            binary_identity(&self.flavor, "so.from_id"),
+            binary_identity(&self.flavor, "so.to_id"),
+        )
     }
 
     /// Bulk revoke of one lane chunk: only approved `team/<id>` rows of
@@ -169,10 +188,12 @@ impl super::reads::DbBotAuthorityStore {
         DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'revoked', gmt_modified = {} \
-                 WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
+                 WHERE env = ? AND {to_b} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'team' AND management_source_id = ? \
-                   AND status = 'approved' AND from_id IN ({conjunction})",
+                   AND status = 'approved' AND {from_b} IN ({conjunction})",
                 self.flavor.now(),
+                to_b = binary_identity(&self.flavor, "to_id"),
+                from_b = binary_identity(&self.flavor, "from_id"),
             ),
             params,
         )
@@ -203,11 +224,13 @@ impl super::reads::DbBotAuthorityStore {
         DbStatement::with_params(
             &format!(
                 "UPDATE edge_grants SET status = 'approved', gmt_modified = {} \
-                 WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
+                 WHERE env = ? AND {} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'team' AND management_source_id = ? \
-                   AND status = 'revoked' AND from_id IN ({conjunction}){}",
+                   AND status = 'revoked' AND {} IN ({conjunction}){}",
                 self.flavor.now(),
-                Self::sync_subject_guard_sql(),
+                binary_identity(&self.flavor, "to_id"),
+                binary_identity(&self.flavor, "from_id"),
+                self.sync_subject_guard_sql(),
             ),
             params,
         )
@@ -263,7 +286,7 @@ impl super::reads::DbBotAuthorityStore {
                 "SELECT ?, ?, ?, 'manager', 0, NULL, 'approved', 'same_as_from', NULL, \
                  'team', ?{from_dual} \
                  WHERE NOT EXISTS (SELECT 1 FROM edge_grants t \
-                       WHERE t.env = ? AND t.to_id = ? AND t.from_id = ? \
+                       WHERE t.env = ? AND {t_to} = ? AND {t_from} = ? \
                          AND t.grant_kind = 'manager' \
                          AND t.management_source_kind = 'team' \
                          AND t.management_source_id = ?) \
@@ -271,8 +294,12 @@ impl super::reads::DbBotAuthorityStore {
                        WHERE th.bot_uuid = ? AND th.env = ? AND th.actor_kind = 'human' \
                          AND COALESCE(th.is_deleted, 0) = 0) \
                    AND NOT EXISTS (SELECT 1 FROM edge_grants so \
-                       WHERE so.env = ? AND so.to_id = ? AND so.from_id = ? \
-                         AND so.grant_kind = 'owner' AND so.status = 'approved')"
+                       WHERE so.env = ? AND {so_to} = ? AND {so_from} = ? \
+                         AND so.grant_kind = 'owner' AND so.status = 'approved')",
+                t_to = binary_identity(&self.flavor, "t.to_id"),
+                t_from = binary_identity(&self.flavor, "t.from_id"),
+                so_to = binary_identity(&self.flavor, "so.to_id"),
+                so_from = binary_identity(&self.flavor, "so.from_id"),
             ));
         }
         DbStatement::with_params(sql, params)
@@ -322,13 +349,15 @@ impl super::reads::DbBotAuthorityStore {
                  SELECT {audit_id}, env, to_id, {subject}, id, management_source_kind, \
                    management_source_id, '{action}', ?, ?, ? \
                  FROM edge_grants \
-                 WHERE env = ? AND to_id = ? AND grant_kind = 'manager' \
+                 WHERE env = ? AND {to_b} = ? AND grant_kind = 'manager' \
                    AND management_source_kind = 'team' AND management_source_id = ? \
-                   AND status = '{post_status}' AND from_id IN ({conjunction})",
+                   AND status = '{post_status}' AND {from_b} IN ({conjunction})",
                 audit_id = audit_id_expr(&self.flavor),
                 subject = subject_expr,
                 action = action,
                 post_status = post_status,
+                to_b = binary_identity(&self.flavor, "to_id"),
+                from_b = binary_identity(&self.flavor, "from_id"),
             ),
             params,
         )
@@ -407,8 +436,9 @@ impl super::reads::DbBotAuthorityStore {
                        WHERE tb.bot_uuid = ? AND tb.env = ? AND tb.ownership_version > 0 \
                          AND COALESCE(tb.is_deleted, 0) = 0) \
                    AND EXISTS (SELECT 1 FROM edge_grants os \
-                       WHERE os.env = ? AND os.to_id = ? AND os.grant_kind = 'owner' \
-                         AND os.status = 'approved')"
+                       WHERE os.env = ? AND {} = ? AND os.grant_kind = 'owner' \
+                         AND os.status = 'approved')",
+                binary_identity(&self.flavor, "os.to_id"),
             ),
             vec![
                 // SELECT list

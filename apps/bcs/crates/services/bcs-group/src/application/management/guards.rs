@@ -356,26 +356,6 @@ impl GroupManagement {
         }
     }
 
-    pub(crate) async fn relation_has_creator_edge(
-        &self,
-        human_actor_id: &str,
-        bot_id: &str,
-    ) -> Result<bool, GroupUseCaseError> {
-        match self
-            .relation
-            .get_edge(human_actor_id, bot_id, &self.config.relation_env)
-            .await
-        {
-            Ok(Some(edge)) => Ok(edge.is_creator),
-            Ok(None) => Ok(false),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "Failed to verify owner relation: {}",
-                error
-            ))
-            .into()),
-        }
-    }
-
     pub(crate) async fn has_bidirectional_relation_or_friendship(
         &self,
         actor_id: &str,
@@ -410,18 +390,20 @@ impl GroupManagement {
             GroupUseCaseError::InvalidProposal("caller actor_id must use human_ prefix".to_string())
         })?;
 
-        if target.created_by.as_deref() == Some(staff_no)
-            || self
-                .relation_has_creator_edge(human_actor_id, &target.bot_uuid)
-                .await?
-        {
-            return Ok(());
-        }
+        // Review F6 (spec §12.2/§8.2): the DM lane authorizes CURRENT
+        // control, never the historical creation source. The former
+        // `created_by == caller || relation_has_creator_edge(...)` arm
+        // granted a retired creator a live channel into a protected Bot
+        // (ownership transferred away and the manager edge revoked); the
+        // creation-source facts are history/audit only (spec §12.2 forbids
+        // the fallback). The remaining arms keep their own order: public
+        // reachability, the LIVE owner/manager authority, then the
+        // friendship/relation arms.
 
         // Authority cutover (spec §8.2/§12.4): a Human who currently owns or
-        // manages the target Bot may DM it without any legacy creator fact.
-        // Public Bots never reach this point — the public arm below keeps the
-        // DM lane independent of any ownership initialization.
+        // manages the target Bot may DM it. Public Bots never reach this
+        // point — the public arm below keeps the DM lane independent of any
+        // ownership initialization.
         if target.capabilities.visibility != "public"
             && self.authority.is_some()
             && self

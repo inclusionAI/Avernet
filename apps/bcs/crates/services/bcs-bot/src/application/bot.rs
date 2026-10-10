@@ -37,6 +37,10 @@ pub struct Bot {
     pub(crate) user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     pub(crate) connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     pub(crate) organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// Live Human→Bot authority hook (spec §12.4): the manage-permission
+    /// lanes (delete/status/visibility) resolve the CURRENT owner/manager
+    /// facts through it. Unwired = fail closed, never a `created_by` fallback.
+    pub(crate) authority: Option<Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>>,
     pub(crate) uplink: bcs_config_api::UplinkConfig,
 }
 
@@ -59,6 +63,7 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            authority: None,
             uplink: Default::default(),
         }
     }
@@ -121,6 +126,74 @@ impl Bot {
     ) -> Self {
         self.organization = Some(organization);
         self
+    }
+
+    /// Wire the live Human→Bot authority hook that answers the
+    /// manage-permission lanes (delete/status/visibility, spec §12.2/§12.4).
+    /// Without it those lanes fail closed — the historical `created_by`
+    /// creation fact is NOT a fallback authority anymore.
+    pub fn with_authority(
+        mut self,
+        authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
+    ) -> Self {
+        self.authority = Some(authority);
+        self
+    }
+
+    /// Authorize a manage-permission lane caller (status/visibility).
+    ///
+    /// The Bot's own self lane keeps its full allow; every Human caller
+    /// resolves the CURRENT owner/manager fact live through the authority
+    /// hook (spec §12.2: the creation-source fact never authorizes). Any
+    /// other caller (a Bot for another Bot) is denied.
+    pub(crate) async fn authorize_management_caller(
+        &self,
+        caller_actor_id: Option<&str>,
+        bot_id: &str,
+        bot: &RegisteredBot,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(caller) = caller_actor_id else {
+            return Err(BotUseCaseError::Unauthorized(format!(
+                "caller identity is required to modify bot '{bot_id}'"
+            )));
+        };
+
+        if caller == bot.bot_uuid {
+            return Ok(());
+        }
+
+        let Some(staff_no) = caller.strip_prefix("human_") else {
+            return Err(BotUseCaseError::Forbidden(format!(
+                "caller '{caller}' is not the bot itself and holds no current \
+                 owner/manager role for bot '{bot_id}'"
+            )));
+        };
+
+        self.authorize_can_manage(staff_no, bot_id).await
+    }
+
+    /// Fail-closed live can_manage for a human staff caller (the Task-12
+    /// cutover's error shape: an unwired hook denies, and the hook's typed
+    /// validation errors propagate — never flatten to a silent deny).
+    pub(crate) async fn authorize_can_manage(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(authority) = self.authority.as_ref() else {
+            return Err(BotUseCaseError::Forbidden(format!(
+                "managing bot '{bot_id}' requires the bot authority service; \
+                 the live owner/manager check is unavailable (authority not wired)"
+            )));
+        };
+
+        match authority.can_manage(staff_no, bot_id).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(BotUseCaseError::Forbidden(format!(
+                "caller 'human_{staff_no}' holds no current owner/manager role for bot '{bot_id}'"
+            ))),
+            Err(error) => Err(BotUseCaseError::Service(error)),
+        }
     }
 
     async fn ensure_provider_switch_bot_onboarded(
@@ -505,7 +578,11 @@ impl BotManagementService for Bot {
             status,
         } = command;
         match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
+            Some(bot) => {
+                let bot_id = bot.bot_uuid.clone();
+                self.authorize_management_caller(caller_actor_id.as_deref(), &bot_id, &bot)
+                    .await?
+            }
             None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
@@ -538,7 +615,8 @@ impl BotManagementService for Bot {
             .get(&bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-        authorize_bot_management(caller_actor_id.as_deref(), &bot)?;
+        self.authorize_management_caller(caller_actor_id.as_deref(), &bot_id, &bot)
+            .await?;
 
         self.registry
             .update_visibility(&bot_id, &visibility)
@@ -570,7 +648,6 @@ impl BotManagementService for Bot {
             .get(&command.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_human_creator_required(staff_no, &bot)?;
 
         if is_owner_suffixed_bot_id_for_staff(&command.bot_id, staff_no) {
             return Err(BotUseCaseError::Forbidden(
@@ -583,6 +660,15 @@ impl BotManagementService for Bot {
                 "provider-managed bot must be deleted from provider side".to_string(),
             ));
         }
+
+        // Cutover plan (spec §12.2/§12.4): a Bot delete is CURRENT control,
+        // resolved through the live authority hook. The historical
+        // `created_by` creation fact no longer grants it: the CURRENT owner
+        // — and any live manager, at the §8.2 business parity the §1.3
+        // defaults set (managers may perform destructive business actions,
+        // still subject to the TC/provider business conditions above) —
+        // may retire the Bot. A former creator with no live role is denied.
+        self.authorize_can_manage(staff_no, &command.bot_id).await?;
 
         // The owner-delete lane is an authority lifecycle act, not a plain
         // cache tombstone: the Bot retires through the governed single-
@@ -916,58 +1002,18 @@ fn authorize_visibility_read(
     }
 }
 
-fn authorize_human_creator_required(
-    staff_no: &str,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    match bot.created_by.as_deref() {
-        Some(owner) if owner == staff_no => Ok(()),
-        _ => Err(BotUseCaseError::Forbidden(format!(
-            "User {} is not the creator of bot {}",
-            staff_no, bot.bot_uuid
-        ))),
-    }
-}
-
 fn is_owner_suffixed_bot_id_for_staff(bot_uuid: &str, staff_no: &str) -> bool {
     bot_uuid
         .rsplit_once(':')
         .is_some_and(|(_, suffix)| suffix == staff_no)
 }
 
-pub(crate) fn authorize_bot_management(
-    caller_actor_id: Option<&str>,
-    bot: &RegisteredBot,
-) -> Result<(), BotUseCaseError> {
-    let Some(caller_actor_id) = caller_actor_id else {
-        return Err(BotUseCaseError::Unauthorized(format!(
-            "caller identity is required to modify bot '{}'",
-            bot.bot_uuid
-        )));
-    };
-
-    if caller_actor_id == bot.bot_uuid {
-        return Ok(());
-    }
-
-    let Some(owner_staff_no) = bot.created_by.as_deref() else {
-        return Err(BotUseCaseError::Forbidden(format!(
-            "caller '{}' is not the owner of bot '{}'",
-            caller_actor_id, bot.bot_uuid
-        )));
-    };
-
-    if caller_actor_id == owner_staff_no
-        || caller_actor_id.strip_prefix("human_") == Some(owner_staff_no)
-    {
-        return Ok(());
-    }
-
-    Err(BotUseCaseError::Forbidden(format!(
-        "caller '{}' is not the owner of bot '{}'",
-        caller_actor_id, bot.bot_uuid
-    )))
-}
+// `authorize_human_creator_required` / `authorize_bot_management` were the
+// legacy `created_by` owner checks retired by the §12.2/§12.4 cutover: the
+// creation-source fact is history/audit only and never authorizes current
+// control. The delete/status/visibility lanes resolve the live owner/manager
+// facts through `Bot::authorize_can_manage` (the wired
+// `bcs_service_api::application::v1::BotAuthorityHook`) instead.
 
 pub(crate) fn to_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)

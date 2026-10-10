@@ -1762,7 +1762,16 @@ async fn mismatched_human_and_bot_caller_is_rejected_before_provisioning() {
         .await
         .expect_err("mismatched User/Bot ownership must be rejected");
 
-    assert!(matches!(error, ApplicationError::Forbidden { .. }));
+    // The mixed pair resolves through the LIVE authority hook (plan Task 11
+    // / review F4): the signed `owner_id` claim is no longer consulted, so
+    // the fail-closed branch here is the hook's own answer — a typed
+    // authority error, or its internal wrap for a Bot the authority store
+    // has no surface for at all. Either way the create never runs and the
+    // provisioner stays untouched below.
+    assert!(matches!(
+        error,
+        ApplicationError::Forbidden(_) | ApplicationError::Internal(_)
+    ));
     assert!(
         provisioner
             .prepared_group_ids

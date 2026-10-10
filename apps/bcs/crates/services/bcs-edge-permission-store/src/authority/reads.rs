@@ -126,9 +126,10 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 DbStatement::with_params(
                     &format!(
                         "SELECT {} FROM edge_grants \
-                         WHERE env = ? AND to_id = ? AND grant_kind = 'owner' \
+                         WHERE env = ? AND {} = ? AND grant_kind = 'owner' \
                            AND status = 'approved' ORDER BY id",
-                        ROLE_ROW_COLUMNS
+                        ROLE_ROW_COLUMNS,
+                        super::transfer_query::binary_identity(&self.flavor, "to_id"),
                     ),
                     vec![DbValue::from(self.env.as_str()), DbValue::from(bot_id)],
                 ),
@@ -155,9 +156,11 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
                 DbStatement::with_params(
                     &format!(
                         "SELECT {} FROM edge_grants \
-                         WHERE env = ? AND from_id = ? AND to_id = ? AND status = 'approved' \
+                         WHERE env = ? AND {} = ? AND {} = ? AND status = 'approved' \
                            AND grant_kind IN ('owner', 'manager') ORDER BY id",
-                        ROLE_ROW_COLUMNS
+                        ROLE_ROW_COLUMNS,
+                        super::transfer_query::binary_identity(&self.flavor, "from_id"),
+                        super::transfer_query::binary_identity(&self.flavor, "to_id"),
                     ),
                     vec![
                         DbValue::from(self.env.as_str()),
@@ -183,7 +186,10 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
         // `(from_id = ? AND to_id = ?)` conjunction joined by OR. Two
         // independent IN lists would authorize the cartesian product of the
         // user/bot sets (spec: 批量 SQL 按完整 pair 关联) and per-pair
-        // statements would be an N+1 lookup.
+        // statements would be an N+1 lookup. Both identity comparisons pin
+        // binary collation (see `binary_identity`).
+        let from_binary = super::transfer_query::binary_identity(&self.flavor, "from_id");
+        let to_binary = super::transfer_query::binary_identity(&self.flavor, "to_id");
         let mut sql = format!(
             "SELECT {} FROM edge_grants \
              WHERE env = ? AND status = 'approved' \
@@ -197,7 +203,7 @@ impl BotAuthorityRepoPort for DbBotAuthorityStore {
             if index > 0 {
                 sql.push_str(" OR ");
             }
-            sql.push_str("(from_id = ? AND to_id = ?)");
+            sql.push_str(&format!("({from_binary} = ? AND {to_binary} = ?)"));
             params.push(DbValue::from(human_actor_id(user_id)));
             params.push(DbValue::from(bot_id.clone()));
         }

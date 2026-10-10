@@ -64,22 +64,34 @@ pub(super) fn audit_id_expr(flavor: &DbSqlFlavor) -> &'static str {
 ///
 /// Binding order (12 `?`): `(bot_id, env, env, bot_id, env, bot_id,
 /// actor_from_id, subject_from_id, env, env, bot_id, subject_from_id)`.
-pub(super) fn mutation_guards() -> &'static str {
-    "EXISTS (SELECT 1 FROM bcs_bots tb \
-         WHERE tb.bot_uuid = ? AND tb.env = ? \
-           AND tb.ownership_version > 0 AND COALESCE(tb.is_deleted, 0) = 0) \
-     AND EXISTS (SELECT 1 FROM edge_grants os \
-         WHERE os.env = ? AND os.to_id = ? \
-           AND os.grant_kind = 'owner' AND os.status = 'approved') \
-     AND EXISTS (SELECT 1 FROM edge_grants ar \
-         WHERE ar.env = ? AND ar.to_id = ? AND ar.from_id = ? \
-           AND ar.grant_kind IN ('owner', 'manager') AND ar.status = 'approved') \
-     AND EXISTS (SELECT 1 FROM bcs_bots th \
-         WHERE th.bot_uuid = ? AND th.env = ? AND th.actor_kind = 'human' \
-           AND COALESCE(th.is_deleted, 0) = 0) \
-     AND NOT EXISTS (SELECT 1 FROM edge_grants so \
-         WHERE so.env = ? AND so.to_id = ? AND so.from_id = ? \
-           AND so.grant_kind = 'owner' AND so.status = 'approved')"
+///
+/// The `edge_grants` identity columns compare with pinned binary collation
+/// (`binary_identity`): live MySQL keeps the legacy table's
+/// case-insensitive collation and an unpinned match would let a
+/// case-variant identity pass the in-transaction guards.
+pub(super) fn mutation_guards(flavor: &DbSqlFlavor) -> String {
+    let os_to = super::transfer_query::binary_identity(flavor, "os.to_id");
+    let ar_to = super::transfer_query::binary_identity(flavor, "ar.to_id");
+    let ar_from = super::transfer_query::binary_identity(flavor, "ar.from_id");
+    let so_to = super::transfer_query::binary_identity(flavor, "so.to_id");
+    let so_from = super::transfer_query::binary_identity(flavor, "so.from_id");
+    format!(
+        "EXISTS (SELECT 1 FROM bcs_bots tb \
+           WHERE tb.bot_uuid = ? AND tb.env = ? \
+             AND tb.ownership_version > 0 AND COALESCE(tb.is_deleted, 0) = 0) \
+         AND EXISTS (SELECT 1 FROM edge_grants os \
+           WHERE os.env = ? AND {os_to} = ? \
+             AND os.grant_kind = 'owner' AND os.status = 'approved') \
+         AND EXISTS (SELECT 1 FROM edge_grants ar \
+           WHERE ar.env = ? AND {ar_to} = ? AND {ar_from} = ? \
+             AND ar.grant_kind IN ('owner', 'manager') AND ar.status = 'approved') \
+         AND EXISTS (SELECT 1 FROM bcs_bots th \
+           WHERE th.bot_uuid = ? AND th.env = ? AND th.actor_kind = 'human' \
+             AND COALESCE(th.is_deleted, 0) = 0) \
+         AND NOT EXISTS (SELECT 1 FROM edge_grants so \
+           WHERE so.env = ? AND {so_to} = ? AND {so_from} = ? \
+             AND so.grant_kind = 'owner' AND so.status = 'approved')"
+    )
 }
 
 /// The parameters bound into [`mutation_guards`], in its documented order.
@@ -168,7 +180,7 @@ pub(super) fn manager_change_audit_statement(
              WHERE {row_conditions} \
                AND {guards}",
             audit_id = audit_id_expr(flavor),
-            guards = mutation_guards(),
+            guards = mutation_guards(flavor),
         ),
         audit_params(
             env,

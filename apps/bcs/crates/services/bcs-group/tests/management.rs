@@ -1912,6 +1912,110 @@ async fn create_dm_rejects_mismatched_driver_bot_for_human_caller() {
     ));
 }
 
+/// Review F6 (spec §12.2/§8.2): the DM lane authorizes CURRENT control, so
+/// the HISTORICAL creation source never grants a channel. A protected Bot
+/// recorded as created by alice — with NO live owner/manager edge and no
+/// friendship (the post-transfer + manager-revoke state) must refuse the
+/// DM. Pre-fix, the `created_by` arm granted this lane outright.
+#[tokio::test]
+async fn create_dm_denies_the_former_creator_without_friendship() {
+    let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(
+        "assistant",
+        "Assistant",
+        "protected",
+        Some("alice"),
+    );
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let err = service
+        .create_dm(DmCreateCommand {
+            group_id: None,
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect_err("the former creator cannot DM the protected Bot");
+    assert!(matches!(err, GroupUseCaseError::Forbidden(_)));
+
+    // The formal reuse lane refuses the retired creator too (opening_message
+    // reuses the DM through the same guard).
+    let reuse = service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-reuse-probe".to_string()),
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect_err("the retired creator cannot reuse the channel either");
+    assert!(matches!(reuse, GroupUseCaseError::Forbidden(_)));
+}
+
+/// Review F6 counterpart: the CURRENT arms of the same lane stay open — a
+/// live manager (or owner) DNs the protected Bot without friendship, and
+/// the friendship arm keeps serving its own reachability path.
+#[tokio::test]
+async fn create_dm_keeps_owner_manager_and_friend_lanes_open() {
+    // Manager arm: the CONTROL authority lives, the friendship is absent.
+    let managed = Fixture::new().with_human("human_bob", "Bob").with_bot(
+        "managed-assistant",
+        "Managed Assistant",
+        "protected",
+        Some("someone-else"),
+    );
+    managed.authority.grant("bob", "managed-assistant");
+    let service = managed.service_with_limits(5, 10, 10);
+    let allowed = service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-manager".to_string()),
+            caller_actor_id: Some("human_bob".to_string()),
+            driver_bot: None,
+            target_actor_id: "managed-assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect("a current manager DMs the protected Bot without friendship");
+    assert!(allowed.created);
+
+    // Friendship arm: no authority fact, but the friendship exists.
+    let friended = Fixture::new()
+        .with_human("human_carol", "Carol")
+        .with_bot(
+            "friendly-assistant",
+            "Friendly Assistant",
+            "protected",
+            Some("someone-else"),
+        )
+        .with_friendship("human_carol", "friendly-assistant");
+    let friended_service = friended.service_with_limits(5, 10, 10);
+    let via_friendship = friended_service
+        .create_dm(DmCreateCommand {
+            group_id: Some("dm-friend".to_string()),
+            caller_actor_id: Some("human_carol".to_string()),
+            driver_bot: None,
+            target_actor_id: "friendly-assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+            provisioning: false,
+        })
+        .await
+        .expect("the friendship arm keeps serving its own reachability path");
+    assert!(via_friendship.created);
+}
+
 #[tokio::test]
 async fn workbench_human_bot_dm_rejects_owner_bot_proxy_sender_by_default() {
     let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(

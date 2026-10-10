@@ -2306,7 +2306,11 @@ impl Default for BcsServerState {
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(
                 bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
-            );
+            )
+            // Delete/status/visibility authorize CURRENT control through
+            // the live authority hook (spec §12.2/§12.4); unwired lanes fail
+            // closed instead of falling back to `created_by`.
+            .with_authority(authority_hook.clone());
         if let Some(user_directory) = user_directory.clone() {
             bot_use_cases = bot_use_cases.with_user_directory(user_directory);
         }
@@ -3087,7 +3091,11 @@ fn build_use_case_bundle(
         .with_control_plane(provider_control_plane.clone())
         .with_organization(organization_core.clone())
         .with_relation(relation.clone())
-        .with_connection_control(bot_connection_control.clone());
+        .with_connection_control(bot_connection_control.clone())
+        // Delete/status/visibility authorize CURRENT control through the
+        // live authority hook (spec §12.2/§12.4); unwired lanes fail closed
+        // instead of falling back to `created_by`.
+        .with_authority(authority_hook.clone());
     if let Some(edge_grants) = edge_grants {
         bot_use_cases = bot_use_cases.with_edge_grants(edge_grants);
     }
@@ -4004,7 +4012,11 @@ impl BcsServer {
             .with_relation(relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>)
             .with_connection_control(
                 bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
-            );
+            )
+            // Delete/status/visibility authorize CURRENT control through
+            // the live authority hook (spec §12.2/§12.4); unwired lanes fail
+            // closed instead of falling back to `created_by`.
+            .with_authority(authority_hook.clone());
         if let Some(user_directory) = user_directory.clone() {
             bot_use_cases = bot_use_cases.with_user_directory(user_directory);
         }
@@ -4872,7 +4884,10 @@ impl BcsServer {
                 .with_organization(organization_core.clone())
                 .with_connection_control(
                     bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>
-                );
+                )
+                // Runtime status writes resolve CURRENT authority facts
+                // (spec §12.2/§12.4) — no `created_by` fallback.
+                .with_authority(authority_management.hook.clone());
         if let Some(user_directory) = user_directory.clone() {
             bot_runtime_for_session = bot_runtime_for_session.with_user_directory(user_directory);
         }

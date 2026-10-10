@@ -1263,6 +1263,225 @@ async fn web_chat_send_uses_view_bound_to_the_target_session() {
     );
 }
 
+/// Review F3 (spec §14, the §12.4 cutover): a connection holding a
+/// PROTECTED Group subscription must never let a session-referenced chat
+/// run silently downgrade onto the unguarded legacy PublicControl lane.
+/// The pre-fix behavior found `channel_binding_of(session_key)` empty (the
+/// binding lives under the GROUP key), registered the run with
+/// `protected_run_anchor = None`, and a revoked user kept receiving run
+/// frames without any re-authorization. The send must instead be refused.
+#[tokio::test]
+async fn protected_group_subscription_refuses_session_scoped_run_downgrade() {
+    let state = new_state();
+
+    let (tx, mut rx) = mpsc::channel::<bcs_ws::web::WorkbenchOutbound>(64);
+    let mut connection_state = WebClientConnectionState::default();
+
+    // A live PROTECTED group subscription: real User 100001, selected view
+    // human_100001, Group resource bound under the GROUP key.
+    state
+        .protected
+        .register("100001", "human_100001", "group-web-1", common::BindingFacts::full());
+    let binding = bcs_ws::web::protected_delivery::ProtectedDeliveryBinding {
+        tenant: None,
+        env: "env-test".to_string(),
+        user_id: "100001".to_string(),
+        resource_kind: bcs_service_api::application::v1::delivery_authorization::DeliveryResourceKind::Group,
+        resource_id: "group-web-1".to_string(),
+        view_actor_id: "human_100001".to_string(),
+    };
+    let (conn_id, _binding_id) = state
+        .dispatch_state
+        .frontend_connections
+        .subscribe_bound(
+            "group-web-1".to_string(),
+            tx.clone(),
+            Some("human_100001".to_string()),
+            None,
+            Some(binding),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("protected group subscribe");
+    connection_state
+        .subscribed_sessions
+        .push(("group-web-1".to_string(), conn_id, None));
+
+    // The chat references a Session of the group the connection has NO
+    // protected binding for.
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-session-ref",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "session_id": "group-web-1:sess-ref",
+            "message": "hello session"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let raw = rx.recv().await.expect("the refusal reply");
+    let refused = match raw {
+        bcs_ws::web::WorkbenchOutbound::PublicControl(payload) => payload,
+        other => panic!("expected a refusal response, got {other:?}"),
+    };
+    let frame: BcsFrame = serde_json::from_str(&refused).unwrap();
+    let response = match frame {
+        BcsFrame::Response(response) => response,
+        other => panic!("expected a response frame, got {other:?}"),
+    };
+    assert!(
+        !response.ok,
+        "the session-referenced chat must be refused: {:?}",
+        response.payload
+    );
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("protected_subscription_scope_mismatch"),
+        "the refusal names the protected scope mismatch"
+    );
+
+    // The message never reached the message flow and no run channel was
+    // registered on the unguarded lane.
+    assert!(
+        state.message_flow.web_sends.lock().await.is_empty(),
+        "the refused chat must not reach the message flow"
+    );
+    assert!(
+        !state
+            .dispatch_state
+            .run_channels
+            .is_registered("run-web-1")
+            .await,
+        "no run channel may be registered on the legacy lane"
+    );
+    assert!(
+        connection_state.active_run_ids.is_empty(),
+        "no run ids may be tracked for the refused chat"
+    );
+    // The connection is refused for THIS send, not closed outright: the
+    // same connection chats in a session it HOLDS a protected binding for,
+    // while the authorize checks keep protecting the run frames.
+    let session = "group-web-1:sess-ok";
+    // The registry subscription under the SESSION key carries the protected
+    // binding the dispatcher resolves for the session-referenced send.
+    let (session_tx, _session_rx) = mpsc::channel::<bcs_ws::web::WorkbenchOutbound>(64);
+    let _ = &_session_rx;
+    state
+        .protected
+        .register("100001", "human_100001", session, common::BindingFacts::full());
+    let binding2 = bcs_ws::web::protected_delivery::ProtectedDeliveryBinding {
+        tenant: None,
+        env: "env-test".to_string(),
+        user_id: "100001".to_string(),
+        resource_kind: bcs_service_api::application::v1::delivery_authorization::DeliveryResourceKind::Session,
+        resource_id: session.to_string(),
+        view_actor_id: "human_100001".to_string(),
+    };
+    let (conn_id2, binding_id2) = state
+        .dispatch_state
+        .frontend_connections
+        .subscribe_bound(
+            session.to_string(),
+            session_tx,
+            Some("human_100001".to_string()),
+            None,
+            Some(binding2),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("protected session subscribe");
+    connection_state
+        .subscribed_sessions
+        .push((session.to_string(), conn_id2, None));
+    assert_ne!(binding_id2, 0, "the session binding is registered");
+
+    let (send_tx, mut send_rx) = mpsc::channel::<bcs_ws::web::WorkbenchOutbound>(16);
+    let send2 = BcsFrame::Request(RequestFrame::new(
+        "send-session-ok",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "session_id": session,
+            "message": "hello authorized session"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send2).unwrap(),
+        &send_tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    let raw = send_rx.recv().await.expect("the send reply");
+    let payload = match raw {
+        bcs_ws::web::WorkbenchOutbound::PublicControl(payload) => payload,
+        other => panic!("expected a success response, got {other:?}"),
+    };
+    let frame: BcsFrame = serde_json::from_str(&payload).unwrap();
+    match frame {
+        BcsFrame::Response(response) => assert!(response.ok),
+        other => panic!("expected a success response, got {other:?}"),
+    }
+    assert!(
+        state
+            .dispatch_state
+            .run_channels
+            .is_registered("run-web-1")
+            .await,
+        "the authorized session chat registers its run"
+    );
+
+    // While the binding is valid the protected run lane delivers through
+    // the recorded authorization (enqueue authorize + writer re-check).
+    assert!(
+        state
+            .dispatch_state
+            .run_channels
+            .send_visible_event(
+                "run-web-1",
+                "run-frame-authorized".to_string(),
+                MessageVisibilityDomain::Chat,
+                Some(&MessageAudience::Public),
+            )
+            .await,
+        "the still-authorized view keeps receiving run frames"
+    );
+
+    // Revoked mid-flight: each subsequent dispatch re-authorizes against
+    // the committed facts; the revoked view receives ZERO run frames.
+    state.protected.revoke("100001", "human_100001", session);
+    assert!(
+        !state
+            .dispatch_state
+            .run_channels
+            .send_visible_event(
+                "run-web-1",
+                "run-frame-after-revoke".to_string(),
+                MessageVisibilityDomain::Chat,
+                Some(&MessageAudience::Public),
+            )
+            .await,
+        "a revoked binding must not deliver run frames (spec §14.5)"
+    );
+}
+
 #[tokio::test]
 async fn user_bound_chat_abort_preserves_existing_response() {
     let state = new_state();

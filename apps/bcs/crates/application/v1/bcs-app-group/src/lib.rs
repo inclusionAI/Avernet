@@ -12,14 +12,14 @@ use bcs_service_api::application::v1::{
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
+    GroupVisibility, HumanMentionNotifyMode, HumanPrincipal,
     InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter,
     NormalGroupSummary, Page, Participant as V1Participant, PreparedGroupEventSubscriptions,
     Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
-    require_authenticated_user, require_human, select_principal,
+    require_authenticated_user, require_human, resolve_authorized_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};

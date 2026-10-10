@@ -201,7 +201,7 @@ impl GroupService for GroupServiceImpl {
         command: CreateGroup,
         event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = resolve_authorized_principal(&command.caller, self.authority.as_ref()).await?;
         let Some(provisioner) = self.event_subscription_provisioner.as_ref().cloned() else {
             if event_subscriptions.is_empty() {
                 return self.create_without_eventing(command, principal).await;
@@ -403,7 +403,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = resolve_authorized_principal(&command.caller, self.authority.as_ref()).await?;
         let mutation_actor = event_actor_for_principal(&principal);
         if command.patch.is_empty() {
             return Err(ApplicationError::invalid(
@@ -515,7 +515,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = resolve_authorized_principal(&command.caller, self.authority.as_ref()).await?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)

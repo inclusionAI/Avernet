@@ -167,6 +167,65 @@ pub(super) async fn handle_chat_send(
                 .find(|(key, _, _)| key == &group_id)
         });
     let sender_conn_id = sender_subscription.map(|(_, id, _)| *id);
+
+    // The run scope this chat registers its channel under (identical to the
+    // registration key below).
+    let run_session_key = session_id.clone().unwrap_or_else(|| group_id.clone());
+
+    // Task 16 (spec §14, the §12.4 cutover, review F3): a PROTECTED
+    // subscription must never let a run silently fall back to the
+    // unguarded legacy PublicControl lane. If the referenced run scope
+    // carries no protected binding for this connection while one of the
+    // connection's OTHER subscriptions does, the send is REFUSED — the new
+    // run's frames would otherwise leave the continuous-authorization path
+    // (pre-enqueue + pre-send re-checks) and a revoked user would keep
+    // receiving run messages through a group subscription that the
+    // referenced Session never inherits (the Session-scoped rule stated
+    // below). Subscribe to the referenced Session first, then send.
+    {
+        let mut foreign_protected_keys = Vec::new();
+        for (key, bound_conn_id, _) in &connection_state.subscribed_sessions {
+            if key.as_str() == run_session_key {
+                continue;
+            }
+            if state
+                .frontend_connections
+                .channel_binding_of(key, *bound_conn_id)
+                .await
+                .is_some()
+            {
+                foreign_protected_keys.push(key.clone());
+            }
+        }
+        let run_scope_binding = match sender_conn_id {
+            Some(conn_id) => state
+                .frontend_connections
+                .channel_binding_of(&run_session_key, conn_id)
+                .await
+                .is_some(),
+            None => false,
+        };
+        if !foreign_protected_keys.is_empty() && !run_scope_binding {
+            warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                group_id = %group_id,
+                run_session_key = %run_session_key,
+                bound_actor_id = ?bound_actor_id,
+                protected_keys = ?foreign_protected_keys,
+                "chat.send refused: the protected subscription does not cover \
+                 the referenced run scope; refusing the legacy run downgrade"
+            );
+            send_error(
+                tx,
+                &req.id,
+                "protected_subscription_scope_mismatch",
+                "The connection's protected subscription does not cover the \
+                 referenced Session; subscribe to the Session before sending",
+            )
+            .await?;
+            return Ok(());
+        }
+    }
     // A Session run must never inherit a broader Group subscription. User-bound
     // clients historically may send before connect, so resolve the authoritative
     // Session participant view on demand instead of registering an unrestricted
@@ -263,7 +322,6 @@ pub(super) async fn handle_chat_send(
     connection_state
         .active_run_ids
         .extend(outcome.active_run_ids.iter().cloned());
-    let run_session_key = session_id.unwrap_or_else(|| group_id.clone());
     // Task 16: run lanes carry the SAME real identity context as the
     // session subscription — run fallback / re-dispatch re-authorizes this
     // exact binding, never the registry's legacy actor slot.

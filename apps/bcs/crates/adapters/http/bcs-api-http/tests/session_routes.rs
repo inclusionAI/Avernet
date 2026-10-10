@@ -828,6 +828,283 @@ async fn protected_session_file_mutations_and_download_follow_v1_statuses() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Review F5 (spec §12.1, plan Task 11): the session-file routes do not
+// re-run the deprecated synchronous claim comparison in the HTTP adapter.
+// The application layer resolves the mixed identity through the LIVE
+// authority; the adapter must forward such requests (and surface the
+// application's own refusal, never an early uniform 403).
+// ---------------------------------------------------------------------------
+
+/// Live-authority hook double: answers `can_manage` from the seeded CURRENT
+/// owner/manager pairs (what `load_member` consumes through
+/// `resolve_authorized_principal`).
+struct SeededAuthorityHook {
+    managers: Vec<(String, String)>,
+}
+
+#[async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for SeededAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> bcs_service_api::ServiceResult<bool> {
+        Ok(self
+            .managers
+            .iter()
+            .any(|(user, bot)| user == user_id && bot == bot_id))
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Unauthorized(format!(
+            "user '{user_id}' is not the owner of bot '{bot_id}'"
+        )))
+    }
+}
+
+/// Application-layer stand-in: resolves every protected file command's
+/// effective Principal through the LIVE hook FIRST (mirroring the Task-11
+/// `load_member` gate), then answers through the fixture double.
+struct HookedSessionFileService {
+    delegate: FakeSessionFileService,
+    hook: Arc<SeededAuthorityHook>,
+}
+
+impl HookedSessionFileService {
+    async fn authorize_member(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<(), ApplicationError> {
+        bcs_service_api::application::v1::resolve_authorized_principal(
+            caller,
+            self.hook.as_ref(),
+        )
+        .await
+        .map(|_| ())
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::application::v1::SessionFileApplicationService for HookedSessionFileService {
+    async fn prepare(
+        &self,
+        command: bcs_service_api::application::v1::PrepareSessionFile,
+    ) -> Result<bcs_service_api::application::v1::PrepareSessionFileResult, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.prepare(command).await
+    }
+
+    async fn upload_content(
+        &self,
+        mut command: bcs_service_api::application::v1::UploadSessionFileContent,
+    ) -> Result<bcs_service_api::application::v1::UploadSessionFileResult, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        command.body = byte_stream_from_bytes(Bytes::from_static(b"abc"));
+        self.delegate.upload_content(command).await
+    }
+
+    async fn complete(
+        &self,
+        command: bcs_service_api::application::v1::CompleteSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileView, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.complete(command).await
+    }
+
+    async fn delete(
+        &self,
+        command: bcs_service_api::application::v1::DeleteSessionFile,
+    ) -> Result<DeleteResult, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.delete(command).await
+    }
+
+    async fn get(
+        &self,
+        command: bcs_service_api::application::v1::GetSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileView, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.get(command).await
+    }
+
+    async fn list(
+        &self,
+        command: bcs_service_api::application::v1::ListSessionFiles,
+    ) -> Result<bcs_service_api::application::v1::SessionFilePage, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.list(command).await
+    }
+
+    async fn download(
+        &self,
+        command: bcs_service_api::application::v1::DownloadSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.download(command).await
+    }
+
+    async fn share(
+        &self,
+        command: bcs_service_api::application::v1::ShareSessionFile,
+    ) -> Result<bcs_service_api::application::v1::ShareSessionFileResult, ApplicationError> {
+        self.authorize_member(&command.caller).await?;
+        self.delegate.share(command).await
+    }
+
+    async fn download_shared(
+        &self,
+        command: bcs_service_api::application::v1::DownloadSharedSessionFile,
+    ) -> Result<bcs_service_api::application::v1::SessionFileContent, ApplicationError> {
+        self.delegate.download_shared(command).await
+    }
+}
+
+fn hooked_session_file_router(caller: AuthenticatedCaller, hook: Arc<SeededAuthorityHook>) -> axum::Router {
+    router(
+        ApiState::new(
+            Arc::new(NoopGroupService),
+            Arc::new(FakeSessionService::default()),
+            Arc::new(FakeSessionMessageService::default()),
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
+            Arc::new(NoopFriendshipService),
+            Arc::new(HeaderVerifier { caller }),
+        )
+        .with_session_file_service(
+            Arc::new(HookedSessionFileService {
+                delegate: FakeSessionFileService,
+                hook,
+            }),
+            SessionFileUrlProjector::new(
+                "https://gateway.example.com/api/v1/collaboration".into(),
+            )
+            .expect("valid base"),
+        ),
+    )
+}
+
+fn mixed_identity_caller(user_id: &str, bot_id: &str, signed_owner: &str) -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: Some("tenant-a".into()),
+        user: Some(AuthenticatedUserIdentity {
+            id: user_id.into(),
+            username: user_id.into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: bot_id.into(),
+            owner_id: signed_owner.into(),
+            app_id: 7,
+            agent_code: format!("agent-{bot_id}"),
+        }),
+        app: None,
+        access_key: None,
+    }
+}
+
+#[tokio::test]
+async fn mixed_identity_file_routes_pass_the_stale_claim_to_the_live_authority() {
+    // The CURRENT manager's caller carries a STALE signed owner claim naming
+    // the former creator: pre-fix the adapter's synchronous gate rejected
+    // this pair with an uniform 403 before the application ran.
+    let caller = mixed_identity_caller("staff-1", "bot-9", "staff-former-creator");
+    let hook = Arc::new(SeededAuthorityHook {
+        managers: vec![("staff-1".to_string(), "bot-9".to_string())],
+    });
+    let app = hooked_session_file_router(caller, hook);
+
+    let list = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/api/v1/collaboration/sessions/session-1/files",
+            json!(null),
+        ))
+        .await
+        .expect("list response");
+    assert_eq!(
+        list.status(),
+        StatusCode::OK,
+        "the current manager's list passes through despite the stale claim"
+    );
+
+    let prepare = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/api/v1/collaboration/sessions/session-1/files",
+            json!({
+                "file_name": "report.txt",
+                "size": 42,
+                "mime_type": "text/plain"
+            }),
+        ))
+        .await
+        .expect("prepare response");
+    assert_eq!(prepare.status(), StatusCode::CREATED);
+
+    let upload = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/collaboration/sessions/session-1/files/file-1/content?part=1")
+        .header("x-test-auth", "yes")
+        .header("x-request-id", "request-upload")
+        .body(Body::from("abc"))
+        .expect("upload request");
+    let upload_response = app.clone().oneshot(upload).await.expect("upload response");
+    assert_eq!(upload_response.status(), StatusCode::ACCEPTED);
+
+    let download = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/api/v1/collaboration/sessions/session-1/files/file-1/content",
+            json!(null),
+        ))
+        .await
+        .expect("download response");
+    assert_eq!(download.status(), StatusCode::FOUND);
+}
+
+#[tokio::test]
+async fn mixed_identity_file_routes_reject_the_former_creator_in_the_application_layer() {
+    // The FORMER creator holds no current relation: the live resolution
+    // inside the application layer refuses; the adapter adds no claim
+    // comparison of its own (its removal is what this suite pins).
+    let caller = mixed_identity_caller("staff-former-creator", "bot-9", "staff-former-creator");
+    let hook = Arc::new(SeededAuthorityHook {
+        managers: vec![("staff-1".to_string(), "bot-9".to_string())],
+    });
+    let app = hooked_session_file_router(caller, hook);
+
+    let list = app
+        .clone()
+        .oneshot(authenticated_request(
+            "GET",
+            "/api/v1/collaboration/sessions/session-1/files",
+            json!(null),
+        ))
+        .await
+        .expect("list response");
+    assert_eq!(list.status(), StatusCode::FORBIDDEN);
+    let body = response_json(list).await;
+    assert!(
+        !body["ok"].as_bool().unwrap_or(false),
+        "the envelope reports the application-layer refusal: {body}"
+    );
+
+    let prepare = app
+        .clone()
+        .oneshot(authenticated_request(
+            "POST",
+            "/api/v1/collaboration/sessions/session-1/files",
+            json!({
+                "file_name": "report.txt",
+                "size": 42,
+                "mime_type": "text/plain"
+            }),
+        ))
+        .await
+        .expect("prepare response");
+    assert_eq!(prepare.status(), StatusCode::FORBIDDEN);
+}
+
 #[tokio::test]
 async fn shared_file_content_is_public_and_token_failures_are_uniform_not_found() {
     let app = test_session_router(
@@ -917,7 +1194,12 @@ async fn shared_file_content_preserves_infrastructure_failures() {
 }
 
 #[tokio::test]
-async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers() {
+async fn session_file_routes_admit_bot_and_reject_unauthorized_mixed_or_app_only_callers() {
+    // Review F5: the adapter no longer rejects a mixed User/Bot caller by
+    // comparing the signed `owner_id` claim — the application layer's LIVE
+    // authority resolution decides. Everything this suite keeps failing
+    // closed: an unauthorized pair (no owner/manager fact) or an App-only
+    // identity is still a 403, decided in the application.
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
     let bot = AuthenticatedBotIdentity {
@@ -926,10 +1208,11 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
         app_id: 1,
         agent_code: "agent".into(),
     };
+    // No live owner/manager facts at all: every mixed identity below must
+    // be refused by the application's authority resolution.
+    let empty_hook = Arc::new(SeededAuthorityHook { managers: Vec::new() });
 
-    let bot_only = test_session_router_for_caller(
-        session.clone(),
-        message.clone(),
+    let bot_only = hooked_session_file_router(
         AuthenticatedCaller {
             tenant: Some("tenant-a".into()),
             user: None,
@@ -937,6 +1220,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
             app: None,
             access_key: None,
         },
+        empty_hook.clone(),
     );
     let response = bot_only
         .oneshot(authenticated_request(
@@ -947,10 +1231,9 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
         .await
         .expect("Bot-only response");
     assert_eq!(response.status(), StatusCode::OK);
+    let _ = (session, message);
 
-    let mismatched = test_session_router_for_caller(
-        session.clone(),
-        message.clone(),
+    let unauthorized_mixed = hooked_session_file_router(
         AuthenticatedCaller {
             tenant: Some("tenant-a".into()),
             user: caller().user,
@@ -961,20 +1244,19 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
             app: None,
             access_key: None,
         },
+        empty_hook.clone(),
     );
-    let response = mismatched
+    let response = unauthorized_mixed
         .oneshot(authenticated_request(
             "GET",
             "/api/v1/collaboration/sessions/session-1/files",
             Value::Null,
         ))
         .await
-        .expect("mismatched User/Bot response");
+        .expect("unauthorized User/Bot response");
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-    let app_only = test_session_router_for_caller(
-        session,
-        message,
+    let app_only = hooked_session_file_router(
         AuthenticatedCaller {
             tenant: Some("tenant-a".into()),
             user: None,
@@ -987,6 +1269,7 @@ async fn session_file_routes_admit_bot_and_reject_mismatched_or_app_only_callers
             }),
             access_key: None,
         },
+        empty_hook,
     );
     let response = app_only
         .oneshot(authenticated_request(

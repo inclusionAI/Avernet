@@ -8,6 +8,7 @@ use bcs_bot::{
     ActorDirectory, Bot, BotCandidateSearchCore, BotOnboarding, BotCore,
     EmptyWorkerProfileCoreService, HumanActor,
 };
+use bcs_bot_store::MemoryBotRepo;
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_session::SessionManagementServiceImpl;
@@ -260,6 +261,55 @@ fn bot_onboarding_use_cases(
 
 fn services_builder_with_bot_use_cases(registry: Arc<BotCore>) -> ServicesBuilder {
     services_builder_with_bot_use_cases_and_friend(registry, Arc::new(NoopFriendCoreService))
+}
+
+/// Live-authority hook over one `MemoryBotRepo` — the same
+/// validation-then-role composition the production
+/// `BotAuthorityHookImpl` gets from `BotAuthorityCoreServiceImpl`, so the
+/// delete/status/visibility lanes resolve the LIVE owner/manager facts.
+struct RepoAuthorityHook(Arc<MemoryBotRepo>);
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for RepoAuthorityHook {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<bool> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        self.0.ownership(bot_id).await?;
+        Ok(self.0.role(user_id, bot_id).await?.is_some())
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        match self.0.role(user_id, bot_id).await? {
+            Some(bcs_service_api::types::BotAccessRelation::Owner) => Ok(()),
+            _ => Err(bcs_service_api::ServiceError::Unauthorized(format!(
+                "user '{user_id}' is not the owner of bot '{bot_id}'"
+            ))),
+        }
+    }
+}
+
+fn services_builder_with_bot_use_cases_and_authority(
+    repo: Arc<MemoryBotRepo>,
+    registry: Arc<BotCore>,
+) -> ServicesBuilder {
+    let registry_service: Arc<dyn BotRegistryCoreService> = registry;
+    let bot_use_cases = Arc::new(
+        Bot::new_with_friend(
+            registry_service.clone(),
+            Arc::new(NoopFriendCoreService),
+        )
+        .with_authority(Arc::new(RepoAuthorityHook(repo))),
+    );
+    Services::builder()
+        .registry(registry_service)
+        .friend(Arc::new(NoopFriendCoreService))
+        .bot_query(bot_use_cases.clone())
+        .bot_management(bot_use_cases.clone())
+        .bot_discovery(bot_use_cases)
 }
 
 fn services_builder_with_bot_use_cases_and_friend(
@@ -656,7 +706,11 @@ async fn leave_bot_route_rejects_bot_token_without_human_identity() {
 #[tokio::test]
 async fn leave_bot_route_soft_deletes_owner_bot() {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    // The live authority lane (review F1, spec §12.2/§12.4): the delete
+    // resolves alice's CURRENT approved owner edge, never the bare
+    // `created_by` creation fact.
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(repo.clone()));
     registry
         .register("bot-leave".to_string(), BotCapabilities::default())
         .await
@@ -665,7 +719,11 @@ async fn leave_bot_route_soft_deletes_owner_bot() {
         .save_created_by("bot-leave", "alice", true)
         .await
         .unwrap();
-    let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
+    repo.seed_authority_owned("bot-leave", "alice")
+        .await
+        .unwrap();
+    let services = services_builder_with_bot_use_cases_and_authority(repo, registry.clone())
+        .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(chain),
