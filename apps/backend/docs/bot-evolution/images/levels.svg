@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="480" viewBox="0 0 1260 480" font-family="system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="Three levels: agent, single system improvement, recursive self-improvement">
+<title>Three levels: agent, single system improvement, recursive self-improvement</title>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<rect width="1260" height="480" fill="#ffffff"/>
+<rect x="15" y="15" width="400" height="425" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="215" y="45" font-size="17" font-weight="700" fill="#2563eb" text-anchor="middle" dominant-baseline="middle">1  Agent (minimal form)</text>
+<rect x="430" y="15" width="400" height="425" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="630" y="45" font-size="17" font-weight="700" fill="#0d9488" text-anchor="middle" dominant-baseline="middle">2  Single system improvement</text>
+<rect x="845" y="15" width="400" height="425" rx="12" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="1045" y="45" font-size="17" font-weight="700" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle">3  Recursive self-improvement</text>
+<rect x="60" y="75" width="140" height="40" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="130.0" y="95.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Task</text>
+<rect x="60" y="155" width="140" height="50" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="130.0" y="180.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Bot S1</text>
+<rect x="270" y="155" width="125" height="50" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="332.5" y="180.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Environment</text>
+<rect x="60" y="255" width="140" height="40" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="130.0" y="275.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Task result</text>
+<path d="M 130 115 L 130 153" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 200 170 L 268 170" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="234" y="160" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">action</text>
+<path d="M 270 192 L 202 192" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="236" y="207" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">feedback</text>
+<path d="M 130 205 L 130 253" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="35" y="395" width="360" height="36" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="215" y="413" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Execution loop: completes the current task</text>
+<rect x="510" y="65" width="140" height="36" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="580.0" y="83.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Current version S1</text>
+<path d="M 580 101 L 580 126" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="590" y="114" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">task feedback</text>
+<rect x="505" y="128" width="150" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="580.0" y="148.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Mechanism M1</text>
+<path d="M 580 168 L 580 195" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="590" y="182" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">propose change</text>
+<rect x="505" y="197" width="150" height="44" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="580.0" y="219.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Candidate S′</text>
+<rect x="700" y="197" width="110" height="44" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="755.0" y="219.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Environment</text>
+<path d="M 655 211 L 698 211" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 700 229 L 657 229" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 580 241 L 580 264" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="495" y="266" width="170" height="38" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="580.0" y="285.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Verify &amp; accept</text>
+<path d="M 580 304 L 580 325" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="510" y="327" width="140" height="34" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="580.0" y="344.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">New version S2</text>
+<rect x="450" y="395" width="360" height="36" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="630" y="413" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Changes the system: later tasks use S2</text>
+<rect x="860" y="65" width="112" height="44" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="916.0" y="79.91250000000001" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Ledger H</text>
+<text x="916.0" y="95.775" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">experiments</text>
+<rect x="995" y="65" width="108" height="44" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="1049.0" y="87.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Improve M1</text>
+<rect x="1122" y="65" width="113" height="44" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="1178.5" y="79.9125" font-size="12.5" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Verify &amp; adopt</text>
+<text x="1178.5" y="95.4375" font-size="10.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">M2</text>
+<path d="M 972 87 L 993 87" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 1103 87 L 1120 87" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="983" y="122" font-size="10.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle">evidence</text>
+<path d="M 1178 109 L 1178 170 L 1072 170" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1170" y="132" font-size="10.5" font-weight="400" fill="#334155" text-anchor="end" dominant-baseline="middle">M2 takes over</text>
+<rect x="920" y="150" width="150" height="40" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="995.0" y="170.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Mechanism M2</text>
+<path d="M 995 190 L 995 215" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="1003" y="203" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">propose change</text>
+<rect x="920" y="217" width="150" height="44" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+<text x="995.0" y="239.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Candidate S′</text>
+<rect x="1115" y="217" width="115" height="44" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
+<text x="1172.5" y="239.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Environment</text>
+<path d="M 1070 231 L 1113 231" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 1115 249 L 1072 249" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M 995 261 L 995 284" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="910" y="286" width="170" height="38" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+<text x="995.0" y="305.0" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Verify &amp; accept</text>
+<path d="M 995 324 L 995 345" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="925" y="347" width="140" height="34" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="995.0" y="364.0" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">New version S2</text>
+<path d="M 910 305 L 880 305 L 880 111" fill="none" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#ah)"/>
+<text x="868" y="215" font-size="11" font-weight="400" fill="#7c3aed" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 868 215)">experiment results</text>
+<rect x="865" y="395" width="360" height="36" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="1045" y="413" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">Changes the mechanism: M2 runs the next round</text>
+<text x="630" y="462" font-size="12" font-weight="400" fill="#64748b" text-anchor="middle" dominant-baseline="middle" font-style="italic">Structural sketch. Every change is verified; a round is not guaranteed to improve.</text>
+</svg>
