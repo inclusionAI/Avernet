@@ -273,7 +273,7 @@ class TestWorkerVectorIndexIntegration:
         assert len(results) == 2
 
         # Verify metadata intact
-        record = service2.get_metadata("staff_001:default")
+        record = service2.get_metadata("001:default")
         assert record is not None
         assert record.vector_id is not None
         assert "python" in record.active_skill_names
@@ -289,7 +289,7 @@ class TestWorkerVectorIndexIntegration:
         assert service.metadata_store.size() == 2
 
         # Get initial record
-        initial_record = service.get_metadata("staff_001:default")
+        initial_record = service.get_metadata("001:default")
         initial_vector_id = initial_record.vector_id
 
         # Update profile with new embedding
@@ -322,7 +322,7 @@ class TestWorkerVectorIndexIntegration:
         assert service.metadata_store.size() == 2
 
         # Verify updated metadata
-        updated_record = service.get_metadata("staff_001:default")
+        updated_record = service.get_metadata("001:default")
         assert "golang" in updated_record.active_skill_names
 
     def test_delete_and_search(
@@ -333,7 +333,7 @@ class TestWorkerVectorIndexIntegration:
         service.index_profiles(sample_profiles, embeddings)
 
         # Delete one profile
-        service.delete_profiles(["staff_001:default"])
+        service.delete_profiles(["001:default"])
 
         # Verify deleted
         assert service.metadata_store.size() == 3
@@ -344,7 +344,7 @@ class TestWorkerVectorIndexIntegration:
         results = service.search_by_vector(query_vector, top_k=10)
 
         for r in results:
-            assert r.profile_key != "staff_001:default"
+            assert r.profile_key != "001:default"
 
     def test_filter_by_domains(
         self, service, embedding_fn, sample_profiles

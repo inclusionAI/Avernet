@@ -25,7 +25,8 @@ from pydantic import BaseModel
 
 from src.domain.services.retriever import Retriever
 from src.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
-from src.domain.models.retrieval_result import RetrievalResult, RetrievalExplanation
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
+from src.domain.models.retrieval_result import RetrievalExplanation
 from src.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
 from src.domain.models.worker import Worker, SkillRef, ResourceRef, TrustLevel
 from src.domain.models.worker_lifecycle_state import WorkerLifecycleState

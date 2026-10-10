@@ -13,6 +13,8 @@ Stage 1 Phase 4: Registry State → Candidate Filtering
 """
 
 import pytest
+from src.infra.config.feature_flags import FeatureFlags
+
 
 from src.domain.models.worker import (
     Worker,
@@ -35,6 +37,12 @@ from src.application.services.retrieval_service import RetrievalService
 from src.application.services.registry_aware_worker_filter import RegistryAwareWorkerFilter
 from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
 from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+
+
+@pytest.fixture(autouse=True)
+def enable_registry_filtering(monkeypatch):
+    """Exercise the filtering policy independently of deployment defaults."""
+    monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
 
 
 # =============================================================================
@@ -65,7 +73,7 @@ def create_test_worker(
         domains=["testing"],
         capabilities=caps,
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PRIVATE,
             trust_level=TrustLevel.TRUSTED,
             runtime_state=runtime_state,
         ),
@@ -462,6 +470,35 @@ class TestFilterStatistics:
 
 class TestEdgeCases:
     """边界情况测试"""
+
+    def test_compatibility_mode_does_not_restore_inactive_registered_profile(
+        self, registry_store, runtime_state_store,
+    ):
+        worker = create_test_worker(
+            "wrk_inactive_only", "Inactive",
+            lifecycle_state=WorkerLifecycleState.INACTIVE,
+        )
+        worker.active_profile_key = "staff_inactive:default"
+        registry_store.create(worker)
+        profile_filter = RegistryAwareWorkerFilter(
+            registry_store, runtime_state_store, strict_mode=False,
+        )
+        assert profile_filter.get_allowed_profile_keys(
+            ["staff_inactive:default", "unregistered:default"]
+        ) == {"unregistered:default"}
+
+    def test_public_offline_profile_remains_eligible(
+        self, registry_store, runtime_state_store,
+    ):
+        worker = create_test_worker("wrk_public_offline", "Public offline")
+        worker.state.availability = Availability.PUBLIC
+        worker.active_profile_key = "public:default"
+        registry_store.create(worker)
+        runtime_state_store.set_runtime_state(worker.id, WorkerRuntimeState.OFFLINE)
+        profile_filter = RegistryAwareWorkerFilter(
+            registry_store, runtime_state_store, strict_mode=True,
+        )
+        assert profile_filter.get_allowed_profile_keys(["public:default"]) == {"public:default"}
 
     def test_empty_registry(
         self,

@@ -23,7 +23,7 @@ import pytest
 from src.domain.services.retriever import Retriever
 from src.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
 from src.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
-from src.domain.models.retrieval_result import RetrievalResult
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
 from src.domain.models.candidate_bundle import KnowledgeItem
 from src.domain.models.worker import (
     Worker, WorkerType, WorkerIdentity, Capability, CapabilityLevel,
@@ -526,7 +526,7 @@ class TestEdgeCases:
             capabilities=[
                 Capability(name="special_capability", level=CapabilityLevel.EXPERT)
             ],
-            state=WorkerState(availability=Availability.AVAILABLE, trust_level=TrustLevel.TRUSTED),
+            state=WorkerState(availability=Availability.PUBLIC, trust_level=TrustLevel.TRUSTED),
         )
 
         catalog = CandidateCatalog(workers=[worker])

@@ -35,7 +35,6 @@ import logging
 import os
 import threading
 import uuid
-from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -219,12 +218,13 @@ class MySQLWorkerProfileContentStore:
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent:
         """Save profile content (object API)."""
-        now = datetime.utcnow()
         content_id = self._generate_id(content.worker_id, content.profile_id or "default")
         profile_id = content.profile_id or "default"
 
         conn = self._pool.get_connection()
         try:
+            # Method delegation reaches the raw connection through both pool wrappers.
+            conn.start_transaction()
             cursor = conn.cursor(dictionary=True)
             try:
                 # Check for existing row to determine version
@@ -251,7 +251,7 @@ class MySQLWorkerProfileContentStore:
                             metadata = %s,
                             content_type = %s,
                             version = %s,
-                            gmt_modify = %s
+                            gmt_modify = CURRENT_TIMESTAMP
                         WHERE worker_id = %s AND profile_id = %s
                     """, (
                         data["display_name"],
@@ -265,19 +265,17 @@ class MySQLWorkerProfileContentStore:
                         data["metadata"],
                         data["content_type"],
                         new_version,
-                        now,
                         content.worker_id,
                         profile_id,
                     ))
-                    content.version = new_version
                 else:
                     cursor.execute("""
                         INSERT INTO bcsfuse_worker_profile_contents (
                             id, worker_id, profile_id, display_name,
                             soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                             contents, skill_sets, metadata,
-                            content_type, is_active, version, gmt_create, gmt_modify
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            content_type, is_active, version
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         content_id,
                         data["worker_id"],
@@ -294,15 +292,25 @@ class MySQLWorkerProfileContentStore:
                         data["content_type"],
                         data["is_active"],
                         data["version"],
-                        now,
-                        now,
                     ))
-                    content.version = data["version"]
 
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = %s AND profile_id = %s",
+                    (content.worker_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("saved profile could not be read back")
+                saved = content.model_copy(deep=True)
+                saved.created_at = row["gmt_create"]
+                saved.updated_at = row["gmt_modify"]
+                saved.version = row["version"]
+                saved.is_active = bool(row["is_active"])
                 conn.commit()
-                content.created_at = content.created_at or now
-                content.updated_at = now
-                return content
+                return saved
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 cursor.close()
         finally:
@@ -383,24 +391,20 @@ class MySQLWorkerProfileContentStore:
         try:
             cursor = conn.cursor()
             try:
-                now = datetime.utcnow()
-                conn.autocommit = False
+                conn.start_transaction()
                 try:
                     cursor.execute(
                         "UPDATE bcsfuse_worker_profile_contents SET is_active = 0 WHERE worker_id = %s",
                         (worker_id,),
                     )
                     cursor.execute(
-                        "UPDATE bcsfuse_worker_profile_contents SET is_active = 1, gmt_modify = %s WHERE worker_id = %s AND profile_id = %s",
-                        (now, worker_id, profile_id),
+                        "UPDATE bcsfuse_worker_profile_contents SET is_active = 1, gmt_modify = CURRENT_TIMESTAMP WHERE worker_id = %s AND profile_id = %s",
+                        (worker_id, profile_id),
                     )
                     conn.commit()
                 except Exception:
                     conn.rollback()
                     raise
-                finally:
-                    conn.autocommit = True
-
                 if cursor.rowcount == 0:
                     return None
                 return self.get(worker_id, profile_id)

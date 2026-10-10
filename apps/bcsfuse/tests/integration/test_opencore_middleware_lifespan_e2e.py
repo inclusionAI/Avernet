@@ -20,10 +20,11 @@ from fastapi.testclient import TestClient
 import sys
 
 
-@pytest.fixture(scope="module")
-def test_client():
+@pytest.fixture
+def test_client(monkeypatch):
     """Create test client for dev_smoke mode."""
     # Set environment for dev_smoke mode
+    monkeypatch.setenv("BCSFUSE_TRUST_GATEWAY", "false")
     original_mode = os.getenv("BCSFUSE_PROVIDER_MODE")
     original_token = os.getenv("BCSFUSE_AUTH_TOKEN")
     os.environ["BCSFUSE_PROVIDER_MODE"] = "dev_smoke"
@@ -33,8 +34,8 @@ def test_client():
         from src.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
-        client = TestClient(app)
-        yield client
+        with TestClient(app) as client:
+            yield client
     finally:
         # Restore original mode
         if original_mode is not None:
@@ -218,26 +219,27 @@ class TestOpencoreMiddlewareLifespanE2E:
         assert all(status == 200 for status in results), \
             f"Concurrent requests failed: {results}"
 
-    def test_middleware_chain_works_correctly(self, test_client):
-        """Test that middleware chain processes requests correctly"""
-        # Test auth middleware
-        response_no_auth = test_client.post(
-            "/api/v1/recommend",
-            json={"question": "test", "topK": 3}
+    def test_runtime_auth_rejects_missing_token(self, test_client, monkeypatch):
+        """Use the real runtime auth provider; dev_smoke bypasses auth by design."""
+        from src.infra.public.auth.simple_token_auth_provider import SimpleTokenAuthProvider
+        monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
+        test_client.app.state.context.registry.register(
+            "auth", SimpleTokenAuthProvider(valid_token="test_token_for_e2e"),
         )
+        # Test auth middleware
+        response_no_auth = test_client.get("/v1/workers")
 
         # Should require auth (401) or reject (403)
-        assert response_no_auth.status_code in [401, 403, 422], \
+        assert response_no_auth.status_code == 401, \
             f"Unauthenticated request should be rejected, got {response_no_auth.status_code}"
 
         # Test with auth
-        response_with_auth = test_client.post(
-            "/api/v1/recommend",
-            json={"question": "test", "topK": 3},
+        response_with_auth = test_client.get(
+            "/v1/workers",
             headers={"Authorization": "Bearer test_token_for_e2e"}
         )
 
         # Should process request (any status except auth error)
         # 200, 400, 422 are OK - just not 401/403
-        assert response_with_auth.status_code in [200, 400, 422, 500], \
+        assert response_with_auth.status_code == 200, \
             f"Authenticated request should be processed, got {response_with_auth.status_code}"

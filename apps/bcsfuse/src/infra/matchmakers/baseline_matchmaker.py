@@ -25,7 +25,8 @@ from src.domain.models.composition_result import (
     CompositionError,
 )
 from src.domain.models.team_spec import TeamSpec, RoleAssignment
-from src.domain.models.worker import Worker, Availability
+from src.domain.models.worker import Worker
+from src.domain.models.worker_runtime_state import WorkerRuntimeState
 from src.domain.models.candidate_bundle import CandidateBundle
 
 
@@ -77,7 +78,7 @@ class BaselineMatchmaker:
         # Filter available workers
         available_workers = [
             w for w in bundle.workers
-            if w.state.availability == Availability.AVAILABLE
+            if w.state.runtime_state == WorkerRuntimeState.ONLINE
         ]
 
         if not available_workers:

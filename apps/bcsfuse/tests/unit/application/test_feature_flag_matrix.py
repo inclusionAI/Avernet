@@ -36,7 +36,7 @@ class TestFeatureFlagMatrix:
         FeatureFlags.reset()
         reset_taxonomy_registry()
 
-    def _create_test_perspective(self, summary: str = "存在安全漏洞") -> Perspective:
+    def _create_test_perspective(self, summary: str = "存在严重安全漏洞，必须立即修复") -> Perspective:
         """创建测试视角"""
         return Perspective(
             participant_id="expert_test",

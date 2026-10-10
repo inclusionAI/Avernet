@@ -22,6 +22,7 @@ from src.domain.models.worker import (
     SkillSource, TrustLevel, ResourceKind, ResourceAccess, Availability,
 )
 from src.domain.models.team_spec import RoleAssignment
+from src.domain.models.worker_runtime_state import WorkerRuntimeState
 
 
 # =============================================================================
@@ -52,7 +53,7 @@ def architect_worker() -> Worker:
         ],
         domains=["architecture"],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.0,
         ),
@@ -77,7 +78,7 @@ def developer_worker() -> Worker:
         ],
         domains=["development"],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.5,
         ),
@@ -102,7 +103,7 @@ def researcher_worker() -> Worker:
         ],
         domains=["research"],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.0,
         ),
@@ -203,6 +204,26 @@ def development_plan_draft() -> PlanDraft:
 
 class TestBaselineMatchmakerBasic:
     """BaselineMatchmaker 基础测试"""
+
+    def test_runtime_state_not_visibility_selects_available_candidates(
+        self, matchmaker, architect_worker, architecture_task_spec, architecture_plan_draft,
+    ):
+        online = architect_worker.model_copy(deep=True)
+        online.id = "wrk_online"
+        online.state.runtime_state = WorkerRuntimeState.ONLINE
+        online.state.availability = Availability.PROTECTED
+        offline = architect_worker.model_copy(deep=True)
+        offline.id = "wrk_offline"
+        offline.state.runtime_state = WorkerRuntimeState.OFFLINE
+        offline.state.availability = Availability.PUBLIC
+
+        result = matchmaker.compose(CompositionInput(
+            task_spec=architecture_task_spec, plan_draft=architecture_plan_draft,
+            candidate_bundle=CandidateBundle(workers=[offline, online]),
+        ))
+
+        assert result.is_success
+        assert result.team_spec.members == ["wrk_online"]
 
     def test_compose_with_single_worker(
         self,
@@ -454,7 +475,7 @@ class TestBaselineMatchmakerWorkload:
             capabilities=[Capability(name="coding", level=CapabilityLevel.ADVANCED)],
             domains=["development"],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
                 current_load=0.1,
             ),
@@ -468,7 +489,7 @@ class TestBaselineMatchmakerWorkload:
             capabilities=[Capability(name="coding", level=CapabilityLevel.ADVANCED)],
             domains=["development"],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
                 current_load=0.9,
             ),
@@ -652,7 +673,8 @@ class TestBaselineMatchmakerEdgeCases:
             capabilities=[Capability(name="system_design", level=CapabilityLevel.EXPERT)],
             domains=["architecture"],
             state=WorkerState(
-                availability=Availability.OFFLINE,
+                availability=Availability.PUBLIC,
+                runtime_state=WorkerRuntimeState.OFFLINE,
                 trust_level=TrustLevel.TRUSTED,
                 current_load=1.0,
             ),
@@ -690,7 +712,7 @@ class TestBaselineMatchmakerEdgeCases:
                 ],
                 domains=["architecture"],
                 state=WorkerState(
-                    availability=Availability.AVAILABLE,
+                    availability=Availability.PUBLIC,
                     trust_level=TrustLevel.TRUSTED,
                     current_load=0.0,
                 ),

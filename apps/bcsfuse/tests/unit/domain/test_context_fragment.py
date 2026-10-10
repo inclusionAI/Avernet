@@ -174,13 +174,11 @@ class TestContextFragment:
         """测试缺少必填字段抛出错误"""
         from src.domain.models.context_fragment import ContextFragment, ContextKind
 
-        # 缺少 kind
-        with pytest.raises(ValidationError):
-            ContextFragment(
-                filename="SOUL.md",
-                content="test",
-                source_path="/test",
-            )
+        # kind 已弃用；动态 fragment 通过 metadata.embedding_field 定义类型。
+        fragment = ContextFragment(
+            filename="SOUL.md", content="test", source_path="/test",
+        )
+        assert fragment.kind == ContextKind.OTHER
 
         # 缺少 filename
         with pytest.raises(ValidationError):

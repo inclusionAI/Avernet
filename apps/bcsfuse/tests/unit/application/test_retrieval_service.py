@@ -17,7 +17,8 @@ import pytest
 from src.application.services.retrieval_service import RetrievalService
 from src.domain.services.retriever import Retriever
 from src.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
-from src.domain.models.retrieval_result import RetrievalResult, RetrievalExplanation
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
+from src.domain.models.retrieval_result import RetrievalExplanation
 from src.domain.models.candidate_bundle import CandidateBundle
 from src.domain.models.task_spec import TaskSpec, RiskLevel
 from src.domain.models.plan_draft import PlanDraft, PlanStep

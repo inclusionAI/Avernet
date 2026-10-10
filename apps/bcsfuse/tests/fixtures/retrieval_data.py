@@ -270,7 +270,7 @@ def get_researcher_bot() -> Worker:
         skills=[get_web_search_skill_ref()],
         resources=[get_internal_wiki_resource_ref()],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.2,
         ),
@@ -309,7 +309,7 @@ def get_architect_bot() -> Worker:
         skills=[get_code_generator_skill_ref()],
         resources=[get_project_repo_resource_ref(), get_internal_wiki_resource_ref()],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.4,
         ),
@@ -342,7 +342,7 @@ def get_developer_bot() -> Worker:
         skills=[get_code_generator_skill_ref(), get_web_search_skill_ref()],
         resources=[get_project_repo_resource_ref()],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.GUARDED,
             current_load=0.6,
         ),
@@ -381,7 +381,7 @@ def get_human_reviewer() -> Worker:
         skills=[],
         resources=[get_project_repo_resource_ref(), get_production_db_resource_ref()],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.3,
         ),
@@ -412,7 +412,7 @@ def get_busy_bot() -> Worker:
         skills=[],
         resources=[get_dashboard_resource_ref()],
         state=WorkerState(
-            availability=Availability.BUSY,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.95,
         ),

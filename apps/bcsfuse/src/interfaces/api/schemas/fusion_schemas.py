@@ -575,6 +575,11 @@ class FusionResult(BaseModel):
         description="Result metadata",
     )
 
+    extend_result: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="G9 fused_profile, group_conversation and step timing; absent for other modes",
+    )
+
 
 __all__ = [
     "FuseOptions",

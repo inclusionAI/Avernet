@@ -49,7 +49,7 @@ class TestWorkerRegistryServiceCreateWorker:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         }
 
         worker = service.create_worker(worker_data)
@@ -68,7 +68,7 @@ class TestWorkerRegistryServiceCreateWorker:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         }
 
         worker = service.create_worker(worker_data)
@@ -89,7 +89,7 @@ class TestWorkerRegistryServiceCreateWorker:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         }
 
         service.create_worker(worker_data)
@@ -120,7 +120,7 @@ class TestWorkerRegistryServiceGetWorker:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         }
         service.create_worker(worker_data)
 
@@ -158,7 +158,7 @@ class TestWorkerRegistryServiceListWorkers:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
         service.create_worker({
             "id": "wrk_bot_002",
@@ -169,7 +169,7 @@ class TestWorkerRegistryServiceListWorkers:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         workers = service.list_workers()
@@ -187,7 +187,7 @@ class TestWorkerRegistryServiceListWorkers:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
         service.create_worker({
             "id": "wrk_human_001",
@@ -198,7 +198,7 @@ class TestWorkerRegistryServiceListWorkers:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         bots = service.list_workers(type="bot")
@@ -230,7 +230,7 @@ class TestWorkerRegistryServiceUpdateWorker:
             "constraints": [],
             "skills": [],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         updated = service.update_worker("wrk_bot_001", {
@@ -275,7 +275,7 @@ class TestWorkerRegistryServiceFiltering:
             "constraints": [],
             "skills": [{"name": "python", "source": "builtin", "trust_level": "trusted"}],
             "resources": [{"id": "res_db_001", "kind": "dataset", "name": "DB", "access": "read"}],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         # Worker 2: human, review 能力, python + js skills
@@ -294,7 +294,7 @@ class TestWorkerRegistryServiceFiltering:
                 {"name": "javascript", "source": "builtin", "trust_level": "trusted"}
             ],
             "resources": [{"id": "res_api_001", "kind": "api", "name": "API", "access": "read"}],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         # Worker 3: human, design 能力, figma skill
@@ -307,7 +307,7 @@ class TestWorkerRegistryServiceFiltering:
             "constraints": [],
             "skills": [{"name": "figma", "source": "plugin", "trust_level": "guarded"}],
             "resources": [],
-            "state": {"availability": "available", "trust_level": "trusted"}
+            "state": {"availability": "public", "trust_level": "trusted"}
         })
 
         return service

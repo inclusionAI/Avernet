@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from src.domain.models.retrieval_input import RetrievalInput, RetrievalFilters
-from src.domain.models.retrieval_result import RetrievalResult
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
 from src.domain.models.candidate_bundle import CandidateBundle
 from src.infra.retrievers.baseline_retriever import BaselineRetriever, CandidateCatalog
 from src.application.services.retrieval_service import RetrievalService

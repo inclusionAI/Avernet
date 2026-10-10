@@ -58,7 +58,7 @@ class TestInMemoryWorkerRepositoryCRUD:
             constraints=[],
             skills=[],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         )
 
     def test_create_worker(self, repo, sample_worker):
@@ -108,7 +108,7 @@ class TestInMemoryWorkerRepositoryCRUD:
             constraints=[],
             skills=[],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         )
         repo.create(human_worker)
 
@@ -177,7 +177,7 @@ class TestInMemoryWorkerRepositoryErrors:
             constraints=[],
             skills=[],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         )
 
     def test_create_duplicate_raises_error(self, repo, sample_worker):
@@ -237,7 +237,7 @@ class TestInMemoryWorkerRepositoryFiltering:
             constraints=[],
             skills=[{"name": "python", "source": "builtin", "trust_level": "trusted"}],
             resources=[{"id": "res_db_001", "kind": "dataset", "name": "DB", "access": "read"}],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         ))
 
         # Worker 2: 有 testing 和 review 能力，有 python 和 js skill，有 api resource
@@ -256,7 +256,7 @@ class TestInMemoryWorkerRepositoryFiltering:
                 {"name": "javascript", "source": "builtin", "trust_level": "trusted"}
             ],
             resources=[{"id": "res_api_001", "kind": "api", "name": "API", "access": "read"}],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         ))
 
         # Worker 3: 有 design 能力，有 figma skill，无 resource
@@ -269,7 +269,7 @@ class TestInMemoryWorkerRepositoryFiltering:
             constraints=[],
             skills=[{"name": "figma", "source": "plugin", "trust_level": "guarded"}],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         ))
 
         return repo

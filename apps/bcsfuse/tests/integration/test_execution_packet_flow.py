@@ -63,7 +63,7 @@ def architect_worker() -> Worker:
             ),
         ],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.0,
         ),
@@ -95,7 +95,7 @@ def developer_worker() -> Worker:
             ),
         ],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.3,
         ),

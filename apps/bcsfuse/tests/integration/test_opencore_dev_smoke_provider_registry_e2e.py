@@ -53,7 +53,7 @@ class TestDevSmokeProviderRegistryE2E:
             "worker_registry_store",
             "worker_runtime_state_store",
             "worker_profile_content_store",
-            "audit_log_store",
+            "worker_audit_log_store",
             "vector_store",
             "embedding_provider",
             "reranker_provider",

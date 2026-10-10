@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+from src.infra.config.feature_flags import FeatureFlags
 
 
 def test_delete_by_profile_uses_profile_store_delete_contract():
@@ -65,3 +66,35 @@ def test_delete_by_profile_uses_native_cleanup_when_ids_cannot_be_enumerated():
 
     assert deleted == 4
     profile_store.delete.assert_not_called()
+
+
+def test_smart_update_deletes_fragments_removed_from_profile(monkeypatch):
+    monkeypatch.setattr(
+        FeatureFlags,
+        "is_profile_embedding_index_enabled",
+        lambda: True,
+    )
+    profile_key = "bot:owner:default"
+    full_fragment = MagicMock(content_hash="same")
+    full_fragment.compute_fragment_id.return_value = f"{profile_key}:full"
+    profile = MagicMock(profile_key=profile_key)
+    profile_store = MagicMock()
+    profile_store.get_fragments_by_profile.return_value = [
+        (f"{profile_key}:full", [0.1], {"content_hash": "same"}),
+        (
+            f"{profile_key}:capabilities",
+            [0.2],
+            {"content_hash": "old-empty-placeholder"},
+        ),
+    ]
+    indexer = ProfileEmbeddingIndexer(MagicMock(), profile_store)
+    indexer._fragment_decomposer.decompose = MagicMock(
+        return_value=[full_fragment],
+    )
+
+    result = indexer.update_index_smart([profile])
+
+    assert result.failed_count == 0
+    profile_store.delete.assert_called_once_with(
+        [f"{profile_key}:capabilities"],
+    )
