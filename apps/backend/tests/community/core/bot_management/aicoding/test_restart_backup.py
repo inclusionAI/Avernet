@@ -692,3 +692,56 @@ def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, rec
     device.exec_shell_new.assert_not_called()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING'])
+def test_other_provider_keeps_backup_probe_and_verification(engine, status):
+    ctx = BotProvisioningContext(
+        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
+    )
+    device = Mock()
+    device.get_device.return_value = {
+        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
+    }
+    device.exec_shell_new.return_value = response('not_mounted')
+    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
+    repository = Mock()
+    repository.get_by_id_and_owner.return_value = {'binding_id': 42}
+
+    verify = AicodingProvisioningStrategy(engine).prepare_restart(
+        ctx, binding_id=42, device_service_provider=lambda: device,
+        target_runtime_provider=runtime_provider, bot_repository=repository,
+        operation_id=OPERATION,
+    )
+    assert device.exec_shell_new.call_count == 1
+    verify()
+    assert device.exec_shell_new.call_count == 2
+    assert all(call.kwargs['device_id'] == 'container-1'
+               for call in device.exec_shell_new.call_args_list)
+    runtime_provider.assert_not_called()
+    repository.update_by_owner.assert_not_called()
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('status', ['FAILED', 'STOPPED'])
+def test_other_provider_recovery_still_blocks_without_backup(engine, status):
+    ctx = BotProvisioningContext(
+        bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
+    )
+    device = Mock()
+    device.get_device.return_value = {
+        'device_id': 'container-1', 'device_provider': 'local', 'status': status,
+    }
+    runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
+    repository = Mock()
+    with patch.object(backup, 'prepare_backup') as prepared:
+        with pytest.raises(backup.RestartBackupError, match='无法定位待恢复容器'):
+            AicodingProvisioningStrategy(engine).prepare_restart(
+                ctx, binding_id=42, device_service_provider=lambda: device,
+                target_runtime_provider=runtime_provider, bot_repository=repository,
+            )
+    prepared.assert_not_called()
+    device.exec_shell_new.assert_not_called()
+    runtime_provider.assert_not_called()
+    repository.update_by_owner.assert_not_called()
