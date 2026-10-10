@@ -15,6 +15,7 @@ from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionIn
 from secbaas.community.api.device_manage import (
     DeviceCallbackContext,
     ErrorCode,
+    OutBoundOperationRuleUpdatedMode,
     PaasError,
     TeClawCreateConfig,
     TeClawCreationResult,
@@ -71,6 +72,7 @@ def mock_plugin():
     plugin.resolve_ws_conn_info = AsyncMock()
     plugin.close = AsyncMock()
     plugin.update_outbound_rule = AsyncMock()
+    plugin.append_session_outbound_rule = AsyncMock()
     return plugin
 
 
@@ -690,6 +692,8 @@ class TestUpdateOutboundOperationRule:
         mock_plugin.update_outbound_rule.assert_awaited_once_with(
             "bot-123",
             {"header_operation_rules": [{"value": "test1"}, {"action": "replace"}]},
+            mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+            session_key=None,
         )
         assert result is True
 
@@ -703,7 +707,10 @@ class TestUpdateOutboundOperationRule:
         result = await service.update_outbound_operation_rule("bot-123", mock_rule)
 
         mock_plugin.update_outbound_rule.assert_awaited_once_with(
-            "bot-123", {"header_operation_rules": []}
+            "bot-123",
+            {"header_operation_rules": []},
+            mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+            session_key=None,
         )
         assert result is True
 
@@ -717,7 +724,10 @@ class TestUpdateOutboundOperationRule:
         result = await service.update_outbound_operation_rule("bot-123", mock_rule)
 
         mock_plugin.update_outbound_rule.assert_awaited_once_with(
-            "bot-123", {"header_operation_rules": []}
+            "bot-123",
+            {"header_operation_rules": []},
+            mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+            session_key=None,
         )
         assert result is True
 
@@ -732,6 +742,96 @@ class TestUpdateOutboundOperationRule:
         result = await service.update_outbound_operation_rule("bot-456", mock_rule)
 
         mock_plugin.update_outbound_rule.assert_awaited_once_with(
-            "bot-456", {"header_operation_rules": [{"key": "val"}]}
+            "bot-456",
+            {"header_operation_rules": [{"key": "val"}]},
+            mode=OutBoundOperationRuleUpdatedMode.REPLACE,
+            session_key=None,
         )
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_session_key_uses_session_dimension_append(
+        self, service, mock_plugin
+    ):
+        """Verify each header rule is appended under the supplied session key."""
+        mock_plugin.update_outbound_rule.return_value = True
+        mock_hrule = MagicMock()
+        mock_hrule.model_dump.return_value = {
+            "domains": ["mcp.example.com"],
+            "action": "set",
+            "header_name": "x-caller-token",
+            "value": "caller-token",
+            "placeholder": None,
+            "separator": None,
+        }
+        mock_rule = MagicMock()
+        mock_rule.header_operation_rules = [mock_hrule]
+
+        result = await service.update_outbound_operation_rule(
+            "bot-123",
+            mock_rule,
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            session_key="session-key",
+        )
+
+        mock_plugin.update_outbound_rule.assert_awaited_once_with(
+            "bot-123",
+            {
+                "header_operation_rules": [
+                    {
+                        "domains": ["mcp.example.com"],
+                        "action": "set",
+                        "header_name": "x-caller-token",
+                        "value": "caller-token",
+                        "placeholder": None,
+                        "separator": None,
+                    }
+                ]
+            },
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            session_key="session-key",
+        )
+        mock_plugin.append_session_outbound_rule.assert_not_awaited()
+        assert result is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("session_key", [None, ""])
+    async def test_append_requires_non_empty_session_key(
+        self, service, mock_plugin, session_key
+    ):
+        """``mode=append`` without a non-empty session key fails closed."""
+        mock_rule = MagicMock()
+        mock_rule.header_operation_rules = []
+
+        with pytest.raises(PaasError) as exc_info:
+            await service.update_outbound_operation_rule(
+                "bot-123",
+                mock_rule,
+                mode=OutBoundOperationRuleUpdatedMode.APPEND,
+                session_key=session_key,
+            )
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        mock_plugin.append_session_outbound_rule.assert_not_awaited()
+        mock_plugin.update_outbound_rule.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", [None, OutBoundOperationRuleUpdatedMode.REPLACE])
+    async def test_session_key_without_append_rejected(
+        self, service, mock_plugin, mode
+    ):
+        """A session key is rejected unless the caller explicitly asks to append."""
+        mock_rule = MagicMock()
+        mock_rule.header_operation_rules = []
+
+        with pytest.raises(PaasError) as exc_info:
+            await service.update_outbound_operation_rule(
+                "bot-123",
+                mock_rule,
+                mode=mode,
+                session_key="session-key",
+            )
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+        mock_plugin.append_session_outbound_rule.assert_not_awaited()
+        mock_plugin.update_outbound_rule.assert_not_awaited()
