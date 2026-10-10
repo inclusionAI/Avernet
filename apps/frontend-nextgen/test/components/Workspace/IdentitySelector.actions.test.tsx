@@ -3,10 +3,10 @@
  * IdentitySelector 测试拆分（actions 分册）：能力入口、接入外部 Bot 弹窗与 Popover 交互类用例。
  *
  * 拆分背景与口径见 IdentitySelector.display.test.tsx 头注。
- * 用例与断言逐字保留，仅做文件级拆分（零断言语义变化）。
  */
 import { extendCapabilities } from '@/capabilities';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
+import { BotRegistrationDialog } from '@/components/Workspace/IdentitySelector/BotRegistrationDialog';
 import { botRegistrationService, resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -80,16 +80,14 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
     expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
   });
 
-  it('能力关闭时不展示接入外部 Bot 入口', async () => {
-    extendCapabilities({
-      getBotRegistrationEnabled: () => ({ status: 'available', value: false }),
-    });
+  it('接入能力开启时身份选择器也不展示接入外部 Bot 入口', async () => {
     render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
     await screen.findByText('隐藏 Bot');
 
     expect(screen.queryByRole('button', { name: '接入外部 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('接入外部 Bot 说明')).not.toBeInTheDocument();
     expect(getRegistrationTokenMock).not.toHaveBeenCalled();
   });
 
@@ -104,15 +102,7 @@ describe('WorkspaceIdentitySelector 能力入口与 Popover 交互', () => {
         note: 'Use this token for bot registration within 6 hours',
       },
     });
-    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
-
-    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
-    expect(getRegistrationTokenMock).not.toHaveBeenCalled();
-    const registrationButton = await screen.findByRole('button', { name: '接入外部 Bot' });
-    const registrationInfo = screen.getByLabelText('接入外部 Bot 说明');
-    fireEvent.focus(registrationInfo);
-    expect(await screen.findByText('获取接入指令，将当前平台之外创建的 Bot 接入当前协作网络。')).toBeInTheDocument();
-    fireEvent.click(registrationButton);
+    render(<BotRegistrationDialog open onClose={() => {}} />);
 
     await waitFor(() => expect(getRegistrationTokenMock).toHaveBeenCalledTimes(1));
     const dialog = await screen.findByRole('dialog');
