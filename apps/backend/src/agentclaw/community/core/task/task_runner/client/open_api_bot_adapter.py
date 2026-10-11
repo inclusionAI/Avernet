@@ -3,6 +3,8 @@
 ensure_grant:GET allowed-bots → 缺则 POST grant(Cookie+Referer 登录态,非 Bearer)。
 send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id);顺带回包 session_id(BaaS 当前未返时前向兼容为 None,将来补字段自动落库)。
 get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写不敏感)。
+get_session_messages:GET /openapi/v1/sessions/{sid}/messages(Bearer)→ 引擎侧会话明细
+(轨迹纯读/分析实拉用,鉴权面=派发面——同一 api_key 同一 policy gate)。
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import contextlib
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -321,6 +324,52 @@ class OpenApiBotAdapter(
         if code is not None and code != 0:
             raise OpenApiError(f"get_run 业务失败 code={code} payload={payload}")
         return payload.get("data") or {}
+
+    async def get_session_messages(
+        self, session_id: str, *, limit: int = 50, bot_id: str | None = None
+    ) -> list[Any]:
+        """读引擎侧会话(OpenClaw 等)消息:BaaS ``GET /openapi/v1/sessions/{sid}/messages``。
+
+        与 ``send_message`` 同款 Bearer api_key(会话即派发链创建,鉴权面=派发面);``bot_id``
+        复合 ``bot_id:owner_id`` 寻址,``None`` → BaaS 按 api_key 默认解析。返回 ``data.messages``
+        原始 dict 列表(role/content 由服务端 excerpt builder 统一裁形)。lifecycle_stage 不传
+        (BaaS 默认 online,与生产派发一致)。「最近 N 条」方向性以引擎实际排序为准(联调验证项)。
+        """
+        # BaaS Query 校验 ge=1 le=1000(session_router.py limit 定义),越界会 422
+        # None → 默认 50;0/负数 → 钳到 1(不被 `or` 吞成默认值)
+        try:
+            clamped = 50 if limit is None else max(1, min(1000, int(limit)))
+        except (TypeError, ValueError):
+            clamped = 50
+        # 引擎 session key 满是冒号(agent:main:session:...),percent-encode 防中间层拒裸冒号
+        # (参照 session_key.py teclaw 案例:部分网关对 path 内冒号敏感)
+        path = f"/openapi/v1/sessions/{quote(session_id, safe='')}/messages"
+        params: dict[str, Any] = {"limit": clamped}
+        if bot_id:
+            params["bot_id"] = bot_id
+        logger.info(
+            "[task][openapi_bot] >>> get_session_messages GET %s base_url=%s limit=%s bot_id_set=%s",
+            path,
+            self._k.base_url,
+            clamped,
+            bool(bot_id),
+        )
+        async with self._client_for_current_loop() as client:
+            r = await client.get(path, params=params, headers=self._headers())
+        logger.info(
+            "[task][openapi_bot] <<< get_session_messages status=%s body=%s",
+            r.status_code,
+            _resp_summary(r),
+        )
+        _map_status(r)
+        payload = r.json()
+        code = payload.get("code")
+        if code is not None and code != 0:
+            raise OpenApiError(
+                f"get_session_messages 业务失败 code={code} payload={payload}"
+            )
+        data = payload.get("data") or {}
+        return data.get("messages") or []
 
     async def cancel_run(self, run_id: str) -> None:
         """Best-effort stop tracking hook.

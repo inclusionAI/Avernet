@@ -15,6 +15,13 @@ NOT built; ``do_analysis`` on ``/trajectory`` is the single trigger):
 * ``do_analysis=False`` (default, PURE READ) — ``assembler.assemble(task_id)``
   → ``TaskTrajectory``; return it (``analysis`` = persisted or ``None``, no DB
   write, no bot). No ``task_action_log`` touch (trajectory is an 独立旁路).
+  REQ-8 amendment (2026-10-10): pure read NOW ALSO performs READ-ONLY live
+  external session-detail fetches per session-bearing node (BCS channel for
+  BCS session keys; BaaS Open API channel for engine-side
+  ``agent:main:session:*`` keys — ``_live_session_msgs_for_read``), attaching
+  the fresh excerpt ONLY to the returned in-memory trajectory. It still
+  performs NO DB write of any kind and NO tc_bot call; per-node fetch failure
+  degrades with WARNING to the persisted ``ext_info.session_msgs`` snapshot.
 
 * ``do_analysis=True``:
   1. ``assemble(task_id)`` → ``TaskTrajectory`` (timeline).
@@ -68,6 +75,7 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
@@ -80,6 +88,7 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisNotConfiguredError,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
@@ -110,6 +119,7 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.task.task_runner.client.ports import (
         BcsClientPort,
+        OpenApiBotPort,
     )
 
 logger = logging.getLogger("task.trajectory")
@@ -118,6 +128,28 @@ logger = logging.getLogger("task.trajectory")
 # 字符预算,按需求保留会话原文;N 经 TrajectoryAnalysisConfig.
 # running_session_message_limit 配置,默认 50)。
 _RUNNING_SESSION_DEFAULT_MSG_LIMIT = 50
+
+# 引擎侧会话 key 判别(读通道分派依据):匹配 → 引擎会话(BaaS Open API 读,
+# ``agent:main:session:{uuid}:user:{pid}`` openclaw / ``agent:{bot}:session:...``
+# base 引擎 / ``user:{u}:session:{r}:agent:{b}`` claude_code / 裸
+# ``session:{uuid}:user:{pid}`` 归一形);不匹配 → BCS 会话键(``bcs-cli:*`` A2A、
+# ``{group_id}:initial`` 协作群——BCS GET /sessions/{sid}/messages 读口自管)。
+# 形态镜像 openapi_v1 sessions converter 的权威正则(converter_creation.py:25-28;
+# 复制不 import,避免 core→adapters 反向依赖)+ claude_code 变体
+# (core/bot_management/engines/aicoding/strategy.py:726 同源)。锚定全匹配。
+_ENGINE_SESSION_KEY_RE = re.compile(
+    r"^(?:(?:agent:[^:]+:)?session:[^:]+:user:[^:]+"
+    r"|user:[^:]+:session:[^:]+:agent:[^:]+)$",
+    re.IGNORECASE,
+)
+
+
+def _is_engine_session_id(session_id: str) -> bool:
+    """``session_id`` 是否为引擎侧会话 key(→ BaaS Open API 读通道)。
+
+    False = BCS 会话键或无法识别的形态 → 走既有 BCS 通道(读失败按既有
+    WARNING 降级,不误伤 BCS 新格式)。"""
+    return bool(session_id) and _ENGINE_SESSION_KEY_RE.match(session_id) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -364,18 +396,23 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         graph: "TaskGraphService | None" = None,
         bcs: "BcsClientPort | None" = None,
         bcs_bot_tokens: "BcsBotTokenProvider | None" = None,
+        openapi_bot: "OpenApiBotPort | None" = None,
     ) -> None:
-        """``graph`` + ``bcs`` (the RUNNING-node session probe's collaborators)
-        are optional lightweight-DI deps: either unbound/None → the probe is
-        DISABLED and do_analysis passes ``running_sessions=None`` (zero
-        behavior change vs. the pre-probe service). Full DI wires both via
-        try/except-get fallbacks in ``TaskPersistenceModule``.
+        """``graph`` + ``bcs`` + ``openapi_bot`` (the session probe's collaborators)
+        are optional lightweight-DI deps: either unbound/None → the corresponding
+        read CHANNEL degrades per-node (WARNING), never raising. Full DI wires both
+        via try/except-get fallbacks in ``TaskPersistenceModule``.
 
         ``bcs_bot_tokens`` resolves the RUNNING 节点持有者 bot 的 BCS session_token
         (``BcsBotTokenProvider``):BCS 会话历史读口有参与者级 ACL(401 "valid Human
         identity or Bot token is required")——服务 HMAC 签名不是会话参与者;探测带
         持有者 bot 的 Bearer 才能读到明细。未注入/解析不到 → 裸 HMAC 尝试,401 再
-        按既有路径 WARNING 跳过(降级不阻断主分析)。"""
+        按既有路径 WARNING 跳过(降级不阻断主分析)。
+
+        ``openapi_bot`` is the ENGINE-session read channel (``BaaS Open API
+        ``GET /openapi/v1/sessions/{sid}/messages``)—same ``OpenApiBotPort`` the
+        tc_bot analyzer consumes; 鉴权面=派发面(同 api_key 同 validate_policy gate,
+        派发成功的 bot 读回必过)。未注入 → 引擎会话节点逐个 WARNING 跳过。"""
         self._assembler = assembler
         self._repo = repo
         self._analyzer = analyzer
@@ -383,6 +420,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         self._graph = graph
         self._bcs = bcs
         self._bcs_bot_tokens = bcs_bot_tokens
+        self._openapi_bot = openapi_bot
 
     async def get_trajectory(
         self,
@@ -395,7 +433,10 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
 
         ``do_analysis=False`` (default, PURE READ): assembler reads the events
         table and returns ``TaskTrajectory``; ``analysis`` = persisted or
-        ``None``; no DB write, no bot call.
+        ``None``; no DB write, no bot call. 纯读也会对每个带 session_id 的子任务
+        **实拉会话明细**(只读外部服务;BCS 键走 BCS 读口,引擎键
+        ``agent:main:session:*`` 走 BaaS Open API——结果只挂返回的内存轨迹对象,
+        不落库);单节点拉取失败 WARNING 降级,回退末位事件 ext_info 快照。
 
         ``do_analysis=True``: INCREMENTALLY IDEMPOTENT — assembles; computes the
         timeline fingerprint (ALL the task's event rows, ``id+gmt_create`` 正序);
@@ -423,7 +464,13 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             trajectory = self._assembler.assemble(task_id)
             self._attach_node_outputs(trajectory)
             records = self._safe_list_records(task_id)
-            self._attach_session_msgs(trajectory, records)
+            # 纯读也实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
+            # merge_last_event_ext_info / backfill_analysis 只在分析路径可达;
+            # 纯读实拉结果仅挂返回的内存轨迹对象)。单节点拉取失败已在 helper 内
+            # WARNING 降级,节点缺席 fresh map → _attach_session_msgs 自然回退
+            # 该子任务末位事件的 ext_info 缓存快照(零额外回退代码)。
+            fresh = await self._live_session_msgs_for_read(task_id)
+            self._attach_session_msgs(trajectory, records, fresh)
             return trajectory
         return await self._do_analysis(task_id, force_analysis=force_analysis)
 
@@ -683,12 +730,14 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         ① **物化(全节点,不管有没有完成)**:对每个带 ``session_id`` 的
            (task_id,node_id) 子任务,取最近 ``limit``(默认 50,内容**不截断**)
            条 session msgs:末位事件 ``ext_info`` 已带 ``session_msgs`` →
-           **缓存命中,不再实际查询 BCS**;否则带持有者 Bearer 拉取 →
+           **缓存命中,不再实际拉取**;否则按 session_id 形态分派读通道实拉
+           (BCS 会话键 → BCS;引擎 key ``agent:main:session:*`` 等 → BaaS
+           Open API,见 ``_fetch_node_session_msgs``)→
            ``repo.merge_last_event_ext_info`` 把 ``session_msgs`` **增量合并**
            进该子任务最后一条事件的 ext_info(只添/更新该键,不覆盖既有其它键)。
 
            ``force_analysis=True``(强制重跑分析):**缓存旁路**——即使已带
-           session_msgs 也重新实际拉取 BCS,并 merge 覆盖该键为最新内容
+           session_msgs 也重新实际拉取,并 merge 覆盖该键为最新内容
            (与 force 语义一致:一切以当下现场为准)。
 
         ② **研判原料(仅未结束节点)``running_sessions``**:状态非终态
@@ -698,46 +747,24 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
            结合会话内容判断是否异常——工具调用报错、执行已结束但一直不主动
            上报结果、长时间无新进展等时间线看不到的问题。
 
-        Guarantees: NEVER raises(逐步降级 + WARNING);graph/bcs 未接线 → None。
+        Guarantees: NEVER raises(逐步降级 + WARNING);graph 未接线或两条读
+        通道(BCS / OpenApiBot)均未接线 → ``(None, {})``。
         """
         logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin")
 
-        if self._graph is None or self._bcs is None:
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or bcs is none")
-            return None, {}  # 探测未接线(轻量 DI / 未部署 BCS)→ 无会话段
-        try:
-            graph = self._graph.query_task_dashboard(task_id)
-        except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
-            logger.warning(
-                "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 探测图读失败 task=%s: %s: %s",
-                task_id, type(ex).__name__, ex,
-            )
+        # 探测门:graph 必须接线;BCS 与 BaaS-OpenAPI 两通道可只接其一
+        # (所缺通道的节点在 _fetch_node_session_msgs 内逐个 WARNING 降级)。
+        if self._graph is None or (self._bcs is None and self._openapi_bot is None):
+            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or no read channel wired")
             return None, {}
-        nodes = [n for n in getattr(graph, "tasks", []) if
-                 (n.run_info.extend_props or {}).get("session_id")]
+        nodes = self._session_bearing_nodes(task_id)
         if not nodes:
             logger.info("[task][trajectory], collect_trajectory_event_session_msgs, no session nodes")
             return None, {}
-        # 已带上 session_id 的全部节点按卡住时长降序:预算/研判优先最"病"的
         now_ms = int(time.time() * 1000)
-        def _elapsed_ms(node) -> int:  # noqa: ANN001  domain node;defensive read
-            st = getattr(node.run_info, "start_time", None)
-            try:
-                return now_ms - int(st) if st is not None else 0
-            except (TypeError, ValueError):
-                return 0
-        nodes.sort(key=_elapsed_ms, reverse=True)
 
         last_ext = self._last_event_ext_by_node(records)
-        limit = _RUNNING_SESSION_DEFAULT_MSG_LIMIT
-        try:
-            limit = int(
-                getattr(self._config, "running_session_message_limit",
-                        _RUNNING_SESSION_DEFAULT_MSG_LIMIT)
-                or _RUNNING_SESSION_DEFAULT_MSG_LIMIT
-            )
-        except (TypeError, ValueError):
-            limit = _RUNNING_SESSION_DEFAULT_MSG_LIMIT
+        limit = self._resolve_msg_limit()
 
         _UNFINISHED = {Status.RUNNING, Status.PENDING, Status.PLANNING,
                        Status.DONE, Status.HUNG}
@@ -758,35 +785,11 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                     task_id, node.node_id, len(cached),
                 )
             else:
-                # 会话历史读口是参与者级 ACL(401 "valid Human identity or Bot
-                # token is required"):服务 HMAC 签名不是会话参与者。带持有者 bot
-                # 的 session_token 做 ``Authorization: Bearer``(同 create_group 的
-                # caller 身份手法);持有者 id 取值序 relay_holder_id → driver_bot_id
-                # → assignee(协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
-                caller_bearer = self._holder_bearer_token(node)
-                try:
-                    logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
-                                "yes" if caller_bearer else "hmac-only")
-                    msgs = await self._bcs.get_session_messages(
-                        sid, limit=limit, caller_bearer=caller_bearer,
-                    )
-                    logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
-                except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
-                    logger.warning(
-                        "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
-                        task_id, node.node_id, sid, type(ex).__name__, ex,
-                    )
-                    continue
-                if not msgs:
-                    continue
-                excerpt = []
-                for m in msgs:
-                    if not isinstance(m, dict):
-                        continue  # 非预期形态 → 跳过该条(防御)
-                    excerpt.append({
-                        "role": str(m.get("role") or ""),
-                        "content": str(m.get("content") or ""),
-                    })  # 内容不截断(已去掉单条/总量字符预算,原文进库喂模型)
+                # 通道分派实拉(BCS / BaaS-OpenAPI);失败已在 helper 内 WARNING
+                # 降级。空列表(拉到但无消息)与旧 `if not msgs: continue` 同义。
+                excerpt = await self._fetch_node_session_msgs(
+                    task_id, node, limit=limit,
+                )
                 if not excerpt:
                     continue
                 # ①物化:增量合并进该子任务最后一条事件的 ext_info(不覆盖既有键)。
@@ -815,7 +818,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 "node_id": node.node_id,
                 "node_status": str(state),
                 "session_id": sid,
-                "elapsed_ms": _elapsed_ms(node),
+                "elapsed_ms": self._node_elapsed_ms(node, now_ms),
                 "message_count": len(excerpt),
                 "messages": list(excerpt),
             })
@@ -826,6 +829,166 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             task_id, len(briefs),
         )
         return briefs, fresh_msgs
+
+    # ------------------------------------------------------------------
+    # 会话明细探测共享件:节点收集/排序、limit 解析、单节点按 sid 分派实拉。
+    # 两条编排路径共用——分析路径(cache-first→物化落库→briefs)与纯读路径
+    # (always-live→不落库→失败回退缓存快照);策略差异留在各编排层,机械件下沉。
+    # ------------------------------------------------------------------
+
+    def _resolve_msg_limit(self) -> int:
+        """每 session 最大消息条数(TrajectoryAnalysisConfig.
+        running_session_message_limit,默认 50;解析失败/未配置回落默认)。"""
+        try:
+            return int(
+                getattr(self._config, "running_session_message_limit",
+                        _RUNNING_SESSION_DEFAULT_MSG_LIMIT)
+                or _RUNNING_SESSION_DEFAULT_MSG_LIMIT
+            )
+        except (TypeError, ValueError):
+            return _RUNNING_SESSION_DEFAULT_MSG_LIMIT
+
+    @staticmethod
+    def _node_elapsed_ms(node, now_ms: int) -> int:  # noqa: ANN001  domain node;防御性读
+        """节点已运行毫秒数(run_info.start_time 防御性读;缺/坏 → 0)。"""
+        try:
+            st = getattr(node.run_info, "start_time", None)
+            return now_ms - int(st) if st is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def _session_bearing_nodes(self, task_id: str) -> "list | None":
+        """带 ``session_id`` 的节点列表,按卡住时长降序(预算/研判优先最"病"的)。
+
+        graph 未接线(轻量 DI)→ ``None``(INFO,探测关闭);图读失败(任务已删 /
+        relay 外部托管等)→ ``None``(WARNING,探测整体降级);无会话节点 → ``[]``。
+        NEVER raises。"""
+        if self._graph is None:
+            logger.info("[task][trajectory] session 探测未接线(graph is none) task=%s", task_id)
+            return None
+        try:
+            graph = self._graph.query_task_dashboard(task_id)
+        except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
+            logger.warning(
+                "[task][trajectory] session 探测图读失败 task=%s: %s: %s",
+                task_id, type(ex).__name__, ex,
+            )
+            return None
+        nodes = [n for n in getattr(graph, "tasks", []) if
+                 (n.run_info.extend_props or {}).get("session_id")]
+        now_ms = int(time.time() * 1000)
+        nodes.sort(key=lambda n: self._node_elapsed_ms(n, now_ms), reverse=True)
+        return nodes
+
+    async def _fetch_node_session_msgs(
+        self, task_id: str, node, *, limit: int,
+    ) -> "list[dict] | None":
+        """单节点会话明细实拉,按 session_id 形态分派读通道:
+
+        * **引擎会话**(``_is_engine_session_id``:``agent:main:session:*`` 等)
+          → ``OpenApiBotPort.get_session_messages``(BaaS Open API;同派发链的
+          api_key,**鉴权面=派发面**——凡任务派发成功的 bot,同 key 读回必过
+          policy gate)。``bot_id`` 复合地址与执行侧同源
+          (``compose_bot_identity(assignee, assignee_owner_id)``,
+          task_executor.py 同式);根节点 main 会话无 assignee → ``None``
+          → BaaS 按 api_key 默认解析,4xx 逐节点降级。
+        * **BCS 会话键**(``bcs-cli:*`` / 协作群)→ 既有 ``get_session_messages``
+          (参与者级 ACL:带持有者 bot 的 Bearer,见 ``_holder_bearer_token``)。
+
+        返回 ``[{role, content}]`` excerpt(内容不截断);``[]``=拉到但无消息;
+        ``None``=失败/通道未接线(已 WARNING)。NEVER raises;**永不落库**
+        (物化 merge 由分析编排层决定,纯读路径不触 DB 写)。
+        """
+        ep = node.run_info.extend_props or {}
+        sid = ep.get("session_id")
+        if not sid or not isinstance(sid, str):
+            return None
+        try:
+            if _is_engine_session_id(sid):
+                if self._openapi_bot is None:
+                    logger.warning(
+                        "[task][trajectory] 引擎会话但 OpenApiBotPort 未接线,跳过"
+                        " task=%s node=%s session=%s",
+                        task_id, getattr(node, "node_id", None), sid,
+                    )
+                    return None
+                # 与执行侧同源身份(单 bot 派发 compose_bot_identity(assignee,
+                # assignee_owner_id));根节点 main 会话无 assignee → None 默认解析。
+                assignee = getattr(node.run_info, "assignee", None)
+                bot_id = compose_bot_identity(assignee, ep.get("assignee_owner_id")) \
+                    if assignee else None
+                logger.info(
+                    "[task][trajectory] session_msgs 引擎通道拉取 begin task=%s node=%s"
+                    " holder_bot=%s", task_id, getattr(node, "node_id", None),
+                    bot_id or "<api-key-default>",
+                )
+                msgs = await self._openapi_bot.get_session_messages(
+                    sid, limit=limit, bot_id=bot_id,
+                )
+                logger.info("[task][trajectory] session_msgs 引擎通道拉取 finish")
+            else:
+                if self._bcs is None:
+                    logger.warning(
+                        "[task][trajectory] BCS 会话但 BcsClientPort 未接线,跳过"
+                        " task=%s node=%s session=%s",
+                        task_id, getattr(node, "node_id", None), sid,
+                    )
+                    return None
+                # BCS 会话历史读口是参与者级 ACL(401 "valid Human identity or
+                # Bot token is required"):带持有者 bot 的 session_token 做
+                # ``Authorization: Bearer``(holder id 取值序 relay_holder_id →
+                # driver_bot_id → assignee,详见 _holder_bearer_token)。
+                caller_bearer = self._holder_bearer_token(node)
+                logger.info(
+                    "[task][trajectory], collect_trajectory_event_session_msgs,"
+                    " begin get bcs msgs holder_bearer=%s",
+                    "yes" if caller_bearer else "hmac-only",
+                )
+                msgs = await self._bcs.get_session_messages(
+                    sid, limit=limit, caller_bearer=caller_bearer,
+                )
+                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
+            excerpt = []
+            for m in msgs or []:
+                if not isinstance(m, dict):
+                    continue  # 非预期形态 → 跳过该条(防御)
+                excerpt.append({
+                    "role": str(m.get("role") or ""),
+                    "content": str(m.get("content") or ""),
+                })  # 内容不截断(已去掉单条/总量字符预算,原文进库/展示)
+            return excerpt
+        except Exception as ex:  # noqa: BLE001  单节点拉取失败 → 跳过,不拖垮其余
+            logger.warning(
+                "[task][trajectory] 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
+                task_id, getattr(node, "node_id", None), sid, type(ex).__name__, ex,
+            )
+            return None
+
+    async def _live_session_msgs_for_read(self, task_id: str) -> "dict[str, list]":
+        """纯读路径的会话明细实拉(REQ-8 不变式:外读内不写,零 DB 写)。
+
+        遍历带 session_id 的节点逐个实拉(既有场景成本:观测页人工访问,
+        每读 1+N 次外部 GET;降级保证永不 raise)。成功且非空的摘录进
+        (node_id → excerpt) map——失败/空(不遮已可见的缓存内容)均缺席,
+        由 ``_attach_session_msgs`` 的 fresh>缓存 覆盖语义自然回退快照。"""
+        nodes = self._session_bearing_nodes(task_id)
+        if not nodes:
+            logger.info(
+                "[task][trajectory], live_session_msgs_for_read, probe off or no session nodes task=%s",
+                task_id,
+            )
+            return {}
+        limit = self._resolve_msg_limit()
+        fresh: dict[str, list] = {}
+        for node in nodes:
+            excerpt = await self._fetch_node_session_msgs(task_id, node, limit=limit)
+            if excerpt:
+                fresh[node.node_id] = excerpt
+        logger.info(
+            "[task][trajectory], live_session_msgs_for_read, 纯读实拉完成 task=%s nodes=%d fetched=%d",
+            task_id, len(nodes), len(fresh),
+        )
+        return fresh
 
     def _safe_list_records(self, task_id: str) -> "list | None":
         """读事件行(读路径富化用);失败 → WARNING + None(富化降级,不影响轨迹本体)。"""

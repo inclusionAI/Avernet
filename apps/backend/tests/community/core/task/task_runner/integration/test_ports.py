@@ -16,6 +16,7 @@ def test_open_api_bot_port_methods():
     assert hasattr(OpenApiBotPort, "ensure_grant")
     assert hasattr(OpenApiBotPort, "send_message")
     assert hasattr(OpenApiBotPort, "get_run")
+    assert hasattr(OpenApiBotPort, "get_session_messages")
     assert hasattr(OpenApiBotPort, "cancel_run")
 
 

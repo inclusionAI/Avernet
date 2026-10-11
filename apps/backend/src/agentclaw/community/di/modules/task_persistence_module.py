@@ -237,6 +237,19 @@ class TaskPersistenceModule(Module):
                 type(exc).__name__, exc,
             )
             bcs_bot_tokens = None
+        # 引擎侧会话(``agent:main:session:*`` 等)读通道:BaaS Open API
+        # (OpenApiBotPort.get_session_messages)。与 tc_bot analyzer 同一端口
+        # 单例(task_runner_integration.openapi_bot_port);鉴权面=派发面
+        # (同 api_key 同 policy gate)。未装配 → 引擎会话节点逐个 WARNING 降级,
+        # BCS 通道与既有行为不受影响。
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001  未装配 runner profile
+            logger.info(
+                "[task-persistence] OpenApiBotPort 未绑定 → 引擎会话明细读取降级:%s: %s",
+                type(exc).__name__, exc,
+            )
+            openapi_bot = None
         return TaskTrajectoryService(
             assembler=injector.get(TaskTrajectoryAssembler),
             repo=injector.get(TaskTrajectoryRepositoryProtocol),
@@ -245,6 +258,7 @@ class TaskPersistenceModule(Module):
             graph=graph,
             bcs=bcs,
             bcs_bot_tokens=bcs_bot_tokens,
+            openapi_bot=openapi_bot,
         )
 
     @singleton

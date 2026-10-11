@@ -36,6 +36,24 @@ class OpenApiBotPort(Protocol):
     ) -> BotSendResult: ...
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
+    async def get_session_messages(
+        self,
+        session_id: str,
+        *,
+        limit: int = 50,
+        bot_id: str | None = None,
+    ) -> list[Any]:
+        """读引擎侧会话(OpenClaw 等)的消息列表。
+
+        BaaS Open API ``GET /openapi/v1/sessions/{session_id}/messages``(Bearer
+        api_key,与 ``send_message`` 同款 base_url+key——会话即该链创建,鉴权面=
+        派发面:同一个 ``validate_policy`` gate,凡派发成功过的 bot 读回必过)。
+        ``bot_id`` 可选 query(复合 ``bot_id:owner_id`` 形态,同 ``send_message``
+        寻址);``None`` → BaaS 按 api_key 默认解析(仅 app_type=bot 的 key)。
+        返回 ``data.messages`` 原始 dict 列表(每条带 role/content,由服务端
+        excerpt builder 统一裁形)。注意 BaaS 对引擎 list 做 head-slice,
+        「最近 N 条」的方向性以引擎实际排序为准(联调验证项)。"""
+        ...
     async def send_and_wait_async(
         self,
         *,

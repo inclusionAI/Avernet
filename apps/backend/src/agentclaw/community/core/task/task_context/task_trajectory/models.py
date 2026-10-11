@@ -123,7 +123,7 @@ class TrajectoryEvent:
     holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
-    session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(同上;源自末位事件 ext_info.session_msgs,展示/DTO 用,不落库)
+    session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(BCS 键或引擎键分通道实拉/缓存;源自末位事件 ext_info.session_msgs 快照或本回合实拉;展示/DTO 用,不落库——纯读不写库,持久化仅分析路径 merge)
     search_probe: dict[str, Any] | None = None  # 读时定向投影:派发搜推三问采样摘要(源自本事件 ext_info;不落库,详见类 docstring)
 
 
