@@ -26,7 +26,7 @@ from agentclaw.community.di import Injected
 from .schemas import CreateFeedbackRequest, FeedbackCreated, FeedbackListItem
 
 read_router = APIRouter(
-    prefix="/openapi/v1/feedback",
+    prefix="/openapi/v1/collaboration/tasks/feedback",
     tags=["feedback"],
     route_class=PublicAPIRoute,
 )

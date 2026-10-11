@@ -1,7 +1,7 @@
 """Public BBS Browse-Loop toggle + reads + manual triggers on the openapi surface.
 
 The join/cancel writes and the per-Bot reads/feed/triggers all share the
-``/openapi/v1/bots/{bot_id}/bbs`` prefix. The whole group is mounted in
+``/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs`` prefix. The whole group is mounted in
 ``_OPEN_SUBGROUPS`` (only ``require_principal`` + base ``ERROR_RESPONSES``):
 the body declares the operator, the path names the addressed Bot, and nothing
 on this group is owner-scoped. This mirrors the internal ``http/bbs/router.py``
@@ -55,7 +55,7 @@ from .schemas import (
 )
 
 browse_open_router = APIRouter(
-    prefix="/openapi/v1/bots/{bot_id}/bbs",
+    prefix="/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs",
     tags=["bbs"],
     route_class=PublicAPIRoute,
 )
@@ -149,7 +149,7 @@ async def delete_bbs_browse_subscription(
 # Public reads + manual triggers — exposed on the openapi surface so the
 # product UI can render per-Bot on/off state and let a user drive a one-shot
 # Browse without a separate internal ticket. These mirror the internal
-# ``/api/v1/bots/{bot_id}/bbs/*`` handlers verbatim (same service/runner calls),
+# ``/api/v1/collaboration/tasks/bots/{bot_id}/bbs/*`` handlers verbatim (same service/runner calls),
 # differing only in the authorisation seam: the public routes require a
 # verified OpenAPI principal and admit OPEN / NoCheck — they name no owner on
 # the wire, so there is no addressed-owner grant to check and no logged-in-user
@@ -207,7 +207,7 @@ async def list_bbs_browse_feed(
 ) -> Envelope[Page[BrowseFeedTopicItem]]:
     """读取该 Bot 待处理的 Topic feed（POLL/NOTICE 已回复则不再出现）。
 
-    Mirrors the internal ``GET /api/v1/bots/{bot_id}/bbs/feed`` — the Feed the
+    Mirrors the internal ``GET /api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed`` — the Feed the
     Browse Loop actor consumes each tick. Exposed on the public surface so a
     collaborator may preview what a Bot will act on without filing an ops ticket.
     """
@@ -240,7 +240,7 @@ async def trigger_bbs_browse_framework(
     """A 模式手动触发：按框架 cron 口径向该 Bot 推送一次「立即逛论坛」。
 
     The addressed subscription must exist with mode=framework. Mirrors the
-    internal ``POST /api/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework``;
+    internal ``POST /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework``;
     exposed on the public surface so the product can independently verify the A
     delivery path is wired.
     """
@@ -265,7 +265,7 @@ async def trigger_bbs_browse_self(
     """B 模式手动触发：按 OpenClaw 自带 cron 口径向该 Bot 推送一次「立即逛论坛」。
 
     The addressed subscription must exist with mode=openclaw. Mirrors the
-    internal ``POST /api/v1/bots/{bot_id}/bbs/browse-loop/trigger-self``;
+    internal ``POST /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self``;
     production is driven by the Bot local */30 cron, this route only verifies
     the Bot can complete one Browse Run on its own.
     """

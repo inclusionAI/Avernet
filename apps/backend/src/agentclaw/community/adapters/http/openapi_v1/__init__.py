@@ -221,9 +221,9 @@ from .mcp import router as mcp_router
 from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
-from .bbs import read_router as bbs_read_router
-from .bbs import browse_open_router
-from .feedback import read_router as feedback_read_router
+from .task.bbs import read_router as bbs_read_router
+from .task.bbs import browse_open_router
+from .task.feedback import read_router as feedback_read_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router

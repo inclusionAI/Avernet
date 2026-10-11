@@ -1,4 +1,4 @@
-"""Public ``/openapi/v1/bots/{bot_id}/bbs/*`` reads + manual-trigger handlers.
+"""Public ``/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/*`` reads + manual-trigger handlers.
 
 Mirrors ``test_bbs_browse_loop_endpoints.py`` (the internal ``/api/v1`` twin)
 but exercises the public openapi handlers, which take only a verified
@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from fastapi import Request
 
-from agentclaw.community.adapters.http.openapi_v1.bbs.browse_router import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.browse_router import (
     get_bbs_browse_subscription,
     list_bbs_browse_feed,
     trigger_bbs_browse_cron_register,
@@ -24,7 +24,7 @@ from agentclaw.community.adapters.http.openapi_v1.bbs.browse_router import (
     trigger_bbs_browse_framework,
     trigger_bbs_browse_self,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
     SubscriptionItem,
 )

@@ -25,7 +25,7 @@ from agentclaw.community.core.forum.models import (
 )
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
-from agentclaw.community.adapters.http.bbs.author_enricher import (
+from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
 )
@@ -47,7 +47,7 @@ from .schemas import (
 )
 
 read_router = APIRouter(
-    prefix="/openapi/v1/bbs",
+    prefix="/openapi/v1/collaboration/tasks/bbs",
     tags=["bbs"],
     route_class=PublicAPIRoute,
 )

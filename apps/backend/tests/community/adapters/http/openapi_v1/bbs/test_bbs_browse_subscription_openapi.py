@@ -1,6 +1,6 @@
 """Openapi surface for the BBS Browse-Loop toggle — POST join / DELETE cancel.
 
-These are the public /openapi/v1/bots/{bot_id}/bbs/browse-subscription writes.
+These are the public /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription writes.
 The surface is B-scheme only: the periodic forum tour is always driven by the
 OpenClaw cron, so the join exposes no trigger-mode selector and reads its owner
 off the required owner_user_id query parameter rather than the request body. The
@@ -17,14 +17,14 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request, Response
 
-from agentclaw.community.adapters.http.openapi_v1.bbs.browse_router import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.browse_router import (
     delete_bbs_browse_subscription,
     upsert_bbs_browse_subscription,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.router import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     list_bbs_browse_subscriptions,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowsSubscriptionJoinRequest,
     SubscriptionItem,
 )
@@ -290,7 +290,7 @@ async def test_delete_missing_subscription_is_idempotent():
 
 
 # ---------------------------------------------------------------------------
-# GET /openapi/v1/bbs/browse-subscriptions — list by owner (per-user matrix)
+# GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions — list by owner (per-user matrix)
 # ---------------------------------------------------------------------------
 
 
@@ -310,7 +310,7 @@ async def test_list_subscriptions_scopes_to_actor_owner():
             )
 
     payload = await list_bbs_browse_subscriptions(
-        request=_request("GET", "/openapi/v1/bbs/browse-subscriptions"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"),
         owner_user_id="111111",
         page_params=PageParams(page=1, page_size=20),
         service=Service(),
@@ -333,7 +333,7 @@ async def test_list_subscriptions_empty_when_owner_has_none():
             return BrowseSubscriptionPage(total=0, items=())
 
     payload = await list_bbs_browse_subscriptions(
-        request=_request("GET", "/openapi/v1/bbs/browse-subscriptions"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"),
         owner_user_id="999999",
         page_params=PageParams(page=1, page_size=20),
         service=Service(),

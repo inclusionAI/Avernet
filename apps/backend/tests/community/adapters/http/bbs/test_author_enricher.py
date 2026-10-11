@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from agentclaw.community.adapters.http.bbs.author_enricher import (
+from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
 )

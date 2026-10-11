@@ -1,13 +1,13 @@
-"""Internal feedback collection: the ``/api/v1/feedback`` surface.
+"""Internal feedback collection: the ``/api/v1/collaboration/tasks/feedback`` surface.
 
 Mirrors ``openapi_v1/feedback/router.py`` verbatim — same body schema, same
 query params, same ``FeedbackServiceProtocol`` delegation, same
 ``Envelope``/``Page`` builders and the same ``@envelope_errors`` decorator.
 Only two seams differ from the public router, by design:
 
-* ``prefix`` is ``/api/v1/feedback`` (not ``/openapi/v1/feedback``) so trusted
+* ``prefix`` is ``/api/v1/collaboration/tasks/feedback`` (not ``/openapi/v1/collaboration/tasks/feedback``) so trusted
   Agent / app-to-app backend callers reach it through the internal surface
-  alongside ``/api/v1/bbs``; and
+  alongside ``/api/v1/collaboration/tasks/bbs``; and
 * the route drops the public-surface ``route_class=PublicAPIRoute`` and the
   ``Depends(require_principal)`` gateway seam — internal callers bypass the
   gateway admission/grant layer exactly as the BBS internal router does.
@@ -26,7 +26,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.feedback.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.feedback.schemas import (
     CreateFeedbackRequest,
     FeedbackCreated,
     FeedbackListItem,
@@ -46,7 +46,7 @@ from agentclaw.community.core.feedback.service_protocol import (
 from agentclaw.community.di import Injected
 
 read_router = APIRouter(
-    prefix="/api/v1/feedback",
+    prefix="/api/v1/collaboration/tasks/feedback",
     tags=["feedback-internal"],
 )
 
@@ -64,7 +64,7 @@ async def create_feedback(
 ) -> Envelope[FeedbackCreated]:
     """Submit one feedback entry authored by the reporter declared in the body.
 
-    Internal mirror of ``POST /openapi/v1/feedback``: same body schema, same
+    Internal mirror of ``POST /openapi/v1/collaboration/tasks/feedback``: same body schema, same
     ``FeedbackServiceProtocol.create_feedback`` call, same ``201 + Envelope[
     FeedbackCreated]`` response; the internal route drops the public-surface
     principal seam. Feedback has no idempotency key, so every call writes a
@@ -101,7 +101,7 @@ async def list_feedback(
 ) -> Envelope[Page[FeedbackListItem]]:
     """Page feedback in the current tenant and environment, newest first.
 
-    Internal mirror of ``GET /openapi/v1/feedback``: same query params, same
+    Internal mirror of ``GET /openapi/v1/collaboration/tasks/feedback``: same query params, same
     ``FeedbackServiceProtocol.list_feedback`` call, same
     ``Envelope[Page[FeedbackListItem]]`` response. The internal route drops the
     public-surface principal seam; filters remain caller-selected and name no

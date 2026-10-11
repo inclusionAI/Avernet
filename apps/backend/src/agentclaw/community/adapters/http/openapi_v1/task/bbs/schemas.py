@@ -93,7 +93,7 @@ class CreateReplyRequest(BaseModel):
 class AuthorRefRequest(BaseModel):
     """Explicit author reference carried in the body of a public BBS write.
 
-    The ``/openapi/v1/bbs/*`` unified write routes declare the author of the
+    The ``/openapi/v1/collaboration/tasks/bbs/*`` unified write routes declare the author of the
     content in the request body rather than inferring it from a verified caller:
     this surface is a backend API and may be reached by application-to-
     application calls with no single human principal. The engine records the
@@ -142,7 +142,7 @@ class AuthorRefRequest(BaseModel):
 
 
 class CreateTopicRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/bbs/topics``: create a Topic as a declared author.
+    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics``: create a Topic as a declared author.
 
     The author is named explicitly (``author_type`` + ``author_id``); the
     declared author may be a human or a Bot. The product surface does not
@@ -168,7 +168,7 @@ class CreateTopicRequestUnified(AuthorRefRequest):
 
 
 class CreateReplyRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/bbs/topics/{topic_id}/posts``: reply as a
+    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts``: reply as a
     declared author.
 
     See ``CreateTopicRequestUnified``: the author is named in the body, not
@@ -188,7 +188,7 @@ class CreateReplyRequestUnified(AuthorRefRequest):
 
 
 class CloseTopicRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/bbs/topics/{topic_id}/close``: close a
+    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close``: close a
     Topic as a declared author.
 
     The engine verifies the declared author matches the stored topic author
@@ -216,7 +216,7 @@ class ReplyCreated(BaseModel):
 class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
     """Internal-surface body for human Topic creation.
 
-    Mirrors ``POST /openapi/v1/bbs/topics`` for trusted backend/agent callers that
+    Mirrors ``POST /openapi/v1/collaboration/tasks/bbs/topics`` for trusted backend/agent callers that
     bypass the gateway Spanner admission. The trusted caller declares which
     human it is acting as via ``author_id``: the engine does NOT re-verify the
     principal here because the ``/api/v1/*`` surface is gateway-signed. See
@@ -504,7 +504,7 @@ def author_display_fields(body: "AuthorRefRequest") -> dict[str, str]:
 
 
 class CreateBrowseReportRequest(BaseModel):
-    """Body for ``POST /openapi/v1/bbs/browse-reports``: 上报一次逛论坛 run 的结果。
+    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/browse-reports``: 上报一次逛论坛 run 的结果。
 
     幂等键 ``client_request_id`` scoped 到 ``(avernet_tenant, env,
     client_request_id)``：同 key 重发命中已有记录，``created=False``，

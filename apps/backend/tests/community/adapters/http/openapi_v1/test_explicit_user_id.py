@@ -284,37 +284,40 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
     # BBS Topics and replies are tenant-wide content. The authenticated
     # principal may be a person, Bot, or application; no end-user axis exists.
-    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics"),
-    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}"),
-    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
     # BBS Browse-Loop per-owner list: filtered by the explicit ``owner_id``
     # query, never by a ``user_id`` axis -- a backend read keyed on the
     # declared owner, so it sits in the no-user-dimension set.
-    ("get", f"{PUBLIC_API_PREFIX}/bbs/browse-subscriptions"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-subscriptions"),
     # BBS Browse-Loop per-Bot reads + writes + manual triggers, exposed on the
     # public surface: they address a bot by path but take only a verified
     # principal (+ the declared owner_user_id query on join); the principal
     # authorises the call and the owner names whose Bot is toggled, neither
     # acts as an end user, so there is no user_id axis on the wire.
-    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("delete", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/feed"),
-    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/trigger-framework"),
-    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/trigger-self"),
-    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/cron-register"),
-    ("post", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/bbs/browse-loop/cron-remove"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("delete", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove"),
     # BBS unified writes name the author in the request body (author_type +
     # author_id); they are backend-API writes reachable by humans, Bots and
     # app-to-app callers, so there is no user_id axis on the wire.
-    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics"),
-    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
-    ("post", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/close"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/posts"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/topics/{{topic_id}}/close"),
+    # BBS Browse-Loop runtime reporting: one bot reports a single Browse Run's
+    # outcome; tenant-wide write, no user-id axis and no bot-id axis.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-reports"),
     # General feedback is tenant-wide; the reporter is declared in the body
     # (POST) or used as an optional caller-selected filter (GET), so there is
     # no user_id axis on the wire.
-    ("get", f"{PUBLIC_API_PREFIX}/feedback"),
-    ("post", f"{PUBLIC_API_PREFIX}/feedback"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/feedback"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/feedback"),
     # The department directory is a tenant-wide catalogue — not the caller's.
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
@@ -517,13 +520,13 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # body -- so they drop from ``query`` and land in ``none`` (query 4 -> 1,
 # none 110 -> 113).
 # BBS browse-subscription addressed-bot toggle (this edit): the two writes
-# under /openapi/v1/bots/{bot_id}/bbs/browse-subscription name the bot in the
+# under /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription name the bot in the
 # path, so ``path`` grows 160 -> 162; ``query`` and ``none`` are unchanged.
 # BBS public per-Bot reads + manual triggers (this edit): six new
 # /bots/{bot_id}/bbs routes (single-bot GET browse-subscription, GET feed,
 # and the four browse-loop triggers) name their bot in the path, so
 # ``path`` grows 162 -> 168; ``query`` and ``none`` are unchanged.
-_BOT_ID_PLACEMENT = {"path": 168, "query": 1, "none": 116}
+_BOT_ID_PLACEMENT = {"path": 172, "query": 1, "none": 124}
 
 
 def _schema() -> dict:
@@ -687,7 +690,7 @@ def test_the_pinned_number_of_operations_take_it():
     # 239 → 240.
     # The BBS unify (this commit) deprecated the three addressed-Bot BBS writes
     # beneath /bots/{bot_id}/bbs and folded the three Human writes into three
-    # unified routes under /openapi/v1/bbs that all declare caller + optional
+    # unified routes under /openapi/v1/collaboration/tasks/bbs that all declare caller + optional
     # bot_id; the user_id seam still names an end user, so the three unified
     # writes stay counted, but the three deprecated routes drop out of
     # _current_operations: 240 -> 237.
@@ -697,16 +700,16 @@ def test_the_pinned_number_of_operations_take_it():
     # of ``taking`` (237 -> 234); they moved to ``_NO_USER_DIMENSION``.
     # BBS legacy removal: the three deprecated /bots/{bot_id}/bbs writes
     # were later deleted entirely from the openapi surface -- every write
-    # now goes through /openapi/v1/bbs/* with the author in the body.
+    # now goes through /openapi/v1/collaboration/tasks/bbs/* with the author in the body.
     # Counts are unchanged here: _current_operations already excluded
     # those routes via ``deprecated=True`` before deletion.
     # General feedback adds two tenant-wide operations (GET/POST /feedback)
     # with no bot_id; they sit in _NO_USER_DIMENSION (no user_id axis), so
     # ``taking`` is unchanged while ``none`` grows 113 -> 115.
     # BBS browse-subscription toggle: the two addressed-Bot writes
-    # /openapi/v1/bots/{bot_id}/bbs/browse-subscription take user_id (UserIdDep)
+    # /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription take user_id (UserIdDep)
     # like the rest of the user-scoped addressed surface, so ``taking`` grows
-    # 234 -> 236. The per-owner list GET /openapi/v1/bbs/browse-subscriptions is
+    # 234 -> 236. The per-owner list GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions is
     # declared (owner_id), not user-scoped, so it does not add to ``taking``.
     # BBS browse-subscription unification (this edit): the two addressed-Bot
     # toggle writes no longer derive the owner from the logged-in caller via
@@ -716,7 +719,7 @@ def test_the_pinned_number_of_operations_take_it():
     # in the body). The owner is named on the wire rather than resolved from the
     # principal, so neither write names an end user and both drop out of
     # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
-    assert len(taking) == 234
+    assert len(taking) == 245
 
 
 def test_the_exempt_operations_take_none():

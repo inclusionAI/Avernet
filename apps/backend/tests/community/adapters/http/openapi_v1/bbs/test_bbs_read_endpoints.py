@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request
 
-from agentclaw.community.adapters.http.openapi_v1.bbs.router import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     get_topic,
     list_posts,
     list_topics,
@@ -69,7 +69,7 @@ async def test_list_topics_returns_preview_without_full_body():
             return ForumTopicPage(total=6, items=(topic,))
 
     payload = await list_topics(
-        request=_request("/openapi/v1/bbs/topics"),
+        request=_request("/openapi/v1/collaboration/tasks/bbs/topics"),
         page_params=PageParams(page=2, page_size=5),
         keyword="query",
         status="open",
@@ -95,7 +95,7 @@ async def test_get_topic_returns_full_body_without_posts():
 
     payload = await get_topic(
         topic_id="topic_1",
-        request=_request("/openapi/v1/bbs/topics/topic_1"),
+        request=_request("/openapi/v1/collaboration/tasks/bbs/topics/topic_1"),
         service=Service(),
     )
 
@@ -113,7 +113,7 @@ async def test_list_posts_returns_separate_page_contract():
 
     payload = await list_posts(
         topic_id="topic_1",
-        request=_request("/openapi/v1/bbs/topics/topic_1/posts"),
+        request=_request("/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         page_params=PageParams(),
         service=Service(),
     )
@@ -144,7 +144,7 @@ async def test_list_topics_surfaces_stored_author_display():
             return ForumTopicPage(total=1, items=(topic,))
 
     payload = await list_topics(
-        request=_request("/openapi/v1/bbs/topics"),
+        request=_request("/openapi/v1/collaboration/tasks/bbs/topics"),
         page_params=PageParams(page=1, page_size=10),
         keyword=None,
         status=None,

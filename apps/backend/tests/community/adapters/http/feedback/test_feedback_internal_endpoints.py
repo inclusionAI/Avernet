@@ -1,10 +1,10 @@
-"""Internal ``/api/v1/feedback`` surface — submit and list general feedback.
+"""Internal ``/api/v1/collaboration/tasks/feedback`` surface — submit and list general feedback.
 
 Mirrors ``openapi_v1/feedback/test_feedback_endpoints.py`` line for line in
 behaviour: same schemas, same service stub, same envelope/page assertions. The
 only difference is the import path — these handlers come from the internal
-``http/feedback`` router — and the request path string is ``/api/v1/feedback``
-rather than ``/openapi/v1/feedback``. Both surfaces share
+``http/feedback`` router — and the request path string is ``/api/v1/collaboration/tasks/feedback``
+rather than ``/openapi/v1/collaboration/tasks/feedback``. Both surfaces share
 ``FeedbackServiceProtocol`` and the same ``Envelope`` builders, so the
 recorded service-call args and the response shape are required to be identical.
 """
@@ -16,11 +16,11 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request, Response
 
-from agentclaw.community.adapters.http.feedback.router import (
+from agentclaw.community.adapters.http.task.feedback.router import (
     create_feedback,
     list_feedback,
 )
-from agentclaw.community.adapters.http.openapi_v1.feedback.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.feedback.schemas import (
     CreateFeedbackRequest,
     FeedbackListItem,
 )
@@ -82,7 +82,7 @@ async def test_create_feedback_returns_201_envelope_with_id():
 
     payload = await create_feedback(
         body=CreateFeedbackRequest(reporter_id="149844", module="bbs", content="hi"),
-        request=_request("POST", "/api/v1/feedback"),
+        request=_request("POST", "/api/v1/collaboration/tasks/feedback"),
         response=Response(),
         service=service,
     )
@@ -100,7 +100,7 @@ async def test_create_feedback_envelope_carries_request_id():
     service = _feedback_service()
     payload = await create_feedback(
         body=CreateFeedbackRequest(reporter_id="u1", module="task", content="ok"),
-        request=_request("POST", "/api/v1/feedback"),
+        request=_request("POST", "/api/v1/collaboration/tasks/feedback"),
         response=Response(),
         service=service,
     )
@@ -113,7 +113,7 @@ async def test_list_feedback_returns_page_envelope_with_items():
     service = _feedback_service()
 
     payload = await list_feedback(
-        request=_request("GET", "/api/v1/feedback"),
+        request=_request("GET", "/api/v1/collaboration/tasks/feedback"),
         page_params=_PageParams(page=1, page_size=20),
         module="bbs",
         reporter_id="149844",
@@ -139,7 +139,7 @@ async def test_list_feedback_passes_none_filters_when_absent():
     service = _feedback_service()
 
     await list_feedback(
-        request=_request("GET", "/api/v1/feedback"),
+        request=_request("GET", "/api/v1/collaboration/tasks/feedback"),
         page_params=_PageParams(page=2, page_size=50),
         module=None,
         reporter_id=None,

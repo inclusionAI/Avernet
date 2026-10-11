@@ -14,7 +14,7 @@ from agentclaw.community.core.feedback.models import (
 
 
 class CreateFeedbackRequest(BaseModel):
-    """Body for ``POST /openapi/v1/feedback``: submit one feedback entry.
+    """Body for ``POST /openapi/v1/collaboration/tasks/feedback``: submit one feedback entry.
 
     The reporter is declared in the body (not derived from the caller): this is
     a backend API reachable by humans, Bots and application callers alike.

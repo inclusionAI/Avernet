@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request, Response
 
-from agentclaw.community.adapters.http.bbs.router import (
+from agentclaw.community.adapters.http.task.bbs.router import (
     delete_subscription_internal,
     get_subscription_internal,
     list_browse_feed_internal,
@@ -26,7 +26,7 @@ from agentclaw.community.adapters.http.bbs.router import (
     trigger_self_browse_internal,
     upsert_subscription_internal,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowsSubscriptionJoinRequest,
     BrowseFeedTopicItem,
     SubscriptionItem,
@@ -272,7 +272,7 @@ async def test_list_browse_feed_delegates_pagination_and_filters():
 
 @pytest.mark.asyncio
 async def test_list_subscriptions_routes_to_owner_user_id_listing():
-    """Mirror public /openapi/v1/bbs/browse-subscriptions: required owner_user_id."""
+    """Mirror public /openapi/v1/collaboration/tasks/bbs/browse-subscriptions: required owner_user_id."""
     class Service:
         def list_subscriptions(self, **kwargs):
             assert kwargs == {
@@ -283,7 +283,7 @@ async def test_list_subscriptions_routes_to_owner_user_id_listing():
             return BrowseSubscriptionPage(total=1, items=(_record(),))
 
     payload = await list_subscriptions_internal(
-        request=_request("GET", "/api/v1/bbs/browse-subscriptions"),
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/browse-subscriptions"),
         page_params=PageParams(),
         owner_user_id="111111",
         service=Service(),

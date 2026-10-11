@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request, Response
 
-from agentclaw.community.adapters.http.openapi_v1.bbs.router import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.router import (
     close_topic_unified,
     create_reply_unified,
     create_topic_unified,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
@@ -104,7 +104,7 @@ async def test_create_topic_unified_records_declared_human_author():
             title="t",
             body="b",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=response,
         service=service,
     )
@@ -135,7 +135,7 @@ async def test_create_topic_unified_records_declared_bot_author():
             title="t",
             body="b",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=Response(),
         service=service,
     )
@@ -166,7 +166,7 @@ async def test_create_topic_unified_passes_author_type_through_verbatim():
             title="t",
             body="b",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=Response(),
         service=service,
     )
@@ -187,7 +187,7 @@ async def test_create_topic_unified_replay_returns_200_with_original_id():
             title="t",
             body="b",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=response,
         service=service,
     )
@@ -214,7 +214,7 @@ async def test_create_reply_unified_records_declared_human_author():
             body="r",
         ),
         topic_id="topic_1",
-        request=_request("POST", "/openapi/v1/bbs/topics/topic_1/posts"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         response=response,
         service=service,
     )
@@ -244,7 +244,7 @@ async def test_create_reply_unified_records_declared_bot_author():
             body="r",
         ),
         topic_id="topic_1",
-        request=_request("POST", "/openapi/v1/bbs/topics/topic_1/posts"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         response=Response(),
         service=service,
     )
@@ -274,7 +274,7 @@ async def test_create_reply_unified_replay_returns_200():
             body="r",
         ),
         topic_id="topic_1",
-        request=_request("POST", "/openapi/v1/bbs/topics/topic_1/posts"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         response=response,
         service=service,
     )
@@ -313,7 +313,7 @@ async def _close(
     payload = await close_topic_unified(
         body=CloseTopicRequestUnified(author_type=author_type, author_id=author_id),
         topic_id="topic_1",
-        request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
         service=service,
     )
     return service, payload
@@ -383,7 +383,7 @@ async def test_close_topic_unified_human_refuses_bot_topic():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -396,7 +396,7 @@ async def test_close_topic_unified_bot_refuses_human_topic():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="BOT", author_id="bot-a"),
             topic_id="topic_1",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -409,7 +409,7 @@ async def test_close_topic_unified_refuses_wrong_human_author():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -422,7 +422,7 @@ async def test_close_topic_unified_refuses_wrong_bot_author():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="BOT", author_id="bot-a"),
             topic_id="topic_1",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -441,7 +441,7 @@ async def test_close_topic_unified_surfaces_not_found():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_missing",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_missing/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_missing/close"),
             service=MissingService(),
         )
 
@@ -456,7 +456,7 @@ async def test_close_topic_unified_surfaces_conflict_when_locked():
         await close_topic_unified(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            request=_request("POST", "/openapi/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [
@@ -479,7 +479,7 @@ async def test_create_topic_unified_passes_optional_author_display_when_supplied
             author_display_name="国科",
             author_avatar_url="https://av/nk",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=Response(),
         service=service,
     )
@@ -510,7 +510,7 @@ async def test_create_topic_unified_omits_author_display_when_not_supplied():
             title="t",
             body="b",
         ),
-        request=_request("POST", "/openapi/v1/bbs/topics"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/bbs/topics"),
         response=Response(),
         service=service,
     )

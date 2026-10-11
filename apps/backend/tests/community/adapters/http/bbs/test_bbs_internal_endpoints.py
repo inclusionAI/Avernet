@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import Request, Response
 
-from agentclaw.community.adapters.http.bbs.router import (
+from agentclaw.community.adapters.http.task.bbs.router import (
     close_topic_internal,
     create_reply_internal,
     create_topic_internal,
@@ -16,7 +16,7 @@ from agentclaw.community.adapters.http.bbs.router import (
     read_router,
     router,
 )
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     CloseTopicRequestUnified,
     CreateReplyRequestUnified,
     CreateTopicRequestUnified,
@@ -76,24 +76,26 @@ def test_internal_router_mirrors_all_bbs_operations():
 
     assert operations == {
         # Content surface (Topic + Post) — reads.
-        ("GET", "/api/v1/bbs/topics"),
-        ("GET", "/api/v1/bbs/topics/{topic_id}"),
-        ("GET", "/api/v1/bbs/topics/{topic_id}/posts"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/topics"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
         # Content surface — unified writes (author declared in the body).
-        ("POST", "/api/v1/bbs/topics"),
-        ("POST", "/api/v1/bbs/topics/{topic_id}/posts"),
-        ("POST", "/api/v1/bbs/topics/{topic_id}/close"),
+        ("POST", "/api/v1/collaboration/tasks/bbs/topics"),
+        ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"),
+        ("POST", "/api/v1/collaboration/tasks/bbs/topics/{topic_id}/close"),
         # BBS Browse Loop — subscription (per Bot) + actor-aware feed.
-        ("GET", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
-        ("DELETE", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
-        ("GET", "/api/v1/bots/{bot_id}/bbs/feed"),
-        ("GET", "/api/v1/bbs/browse-subscriptions"),
+        ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
+        ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
+        ("DELETE", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"),
+        ("GET", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"),
+        ("GET", "/api/v1/collaboration/tasks/bbs/browse-subscriptions"),
         # BBS Browse Loop — manual triggers (A=framework / B=openclaw).
-        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/trigger-framework"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-register"),
-        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"),
+        ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework"),
+        ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"),
+        ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register"),
+        ("POST", "/api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove"),
+        # BBS Browse-Loop — runtime reporting (一个 bot 逛完一次论坛后的上报).
+        ("POST", "/api/v1/collaboration/tasks/bbs/browse-reports"),
     }
 
 
@@ -121,7 +123,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
 
     service = Service()
     topics = await list_topics_internal(
-        request=_request("GET", "/api/v1/bbs/topics"),
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics"),
         page_params=PageParams(page=2, page_size=10),
         keyword="notice",
         status="open",
@@ -131,12 +133,12 @@ async def test_internal_reads_delegate_to_shared_forum_service():
     )
     topic = await get_topic_internal(
         topic_id="topic_1",
-        request=_request("GET", "/api/v1/bbs/topics/topic_1"),
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics/topic_1"),
         service=service,
     )
     posts = await list_posts_internal(
         topic_id="topic_1",
-        request=_request("GET", "/api/v1/bbs/topics/topic_1/posts"),
+        request=_request("GET", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         page_params=PageParams(),
         service=service,
     )
@@ -147,7 +149,7 @@ async def test_internal_reads_delegate_to_shared_forum_service():
 
 
 # ---------------------------------------------------------------------------
-# BBS Unified Writes — internal /api/v1/bbs mirror tests
+# BBS Unified Writes — internal /api/v1/collaboration/tasks/bbs mirror tests
 # ---------------------------------------------------------------------------
 # Mirror of ``test_bbs_unified_write_endpoints.py`` (the public /openapi
 # surface): the internal /api/v1 surface delegates to the same
@@ -178,7 +180,7 @@ async def test_internal_topic_create_passes_body_author_as_bot_author():
             title="Topic title",
             body="Topic description",
         ),
-        request=_request("POST", "/api/v1/bbs/topics"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         response=response,
         service=Service(),
     )
@@ -208,7 +210,7 @@ async def test_internal_topic_create_passes_body_author_as_human_author():
             title=" Topic title ",
             body=" Topic description ",
         ),
-        request=_request("POST", "/api/v1/bbs/topics"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         response=response,
         service=service,
     )
@@ -245,7 +247,7 @@ async def test_internal_topic_create_replay_returns_200_with_original_id():
             title="Topic title",
             body="Topic description",
         ),
-        request=_request("POST", "/api/v1/bbs/topics"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         response=response,
         service=ReplayService(),
     )
@@ -278,7 +280,7 @@ async def test_internal_reply_create_passes_body_author_as_bot_author():
             body="Reply body",
         ),
         topic_id="topic_1",
-        request=_request("POST", "/api/v1/bbs/topics/topic_1/posts"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         response=response,
         service=Service(),
     )
@@ -308,7 +310,7 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
             body=" Reply body ",
         ),
         topic_id="topic_1",
-        request=_request("POST", "/api/v1/bbs/topics/topic_1/posts"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/posts"),
         response=response,
         service=service,
     )
@@ -329,7 +331,7 @@ async def test_internal_reply_create_passes_body_author_as_human_author():
 
 
 # ---------------------------------------------------------------------------
-# BBS Topic close — internal /api/v1/bbs mirror tests
+# BBS Topic close — internal /api/v1/collaboration/tasks/bbs mirror tests
 # ---------------------------------------------------------------------------
 # The unified close route lets the author named in the body close a Topic only
 # if that declared author matches the stored topic author (both kind and id,
@@ -357,7 +359,7 @@ async def test_internal_close_topic_closes_when_declared_author_matches():
     payload = await close_topic_internal(
         body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
         topic_id="topic_1",
-        request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/close"),
         service=service,
     )
 
@@ -389,7 +391,7 @@ async def test_internal_close_topic_refuses_when_author_id_mismatch():
         await close_topic_internal(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -415,7 +417,7 @@ async def test_internal_close_topic_refuses_when_author_kind_mismatch():
         await close_topic_internal(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_1",
-            request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [{"op": "get_topic", "topic_id": "topic_1"}]
@@ -434,7 +436,7 @@ async def test_internal_close_topic_surfaces_not_found_when_topic_missing():
         await close_topic_internal(
             body=CloseTopicRequestUnified(author_type="HUMAN", author_id="user-a"),
             topic_id="topic_missing",
-            request=_request("POST", "/api/v1/bbs/topics/topic_missing/close"),
+            request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_missing/close"),
             service=MissingService(),
         )
 
@@ -458,7 +460,7 @@ async def test_internal_close_topic_surfaces_conflict_when_topic_locked():
         await close_topic_internal(
             body=CloseTopicRequestUnified(author_type="BOT", author_id="bot-a"),
             topic_id="topic_1",
-            request=_request("POST", "/api/v1/bbs/topics/topic_1/close"),
+            request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics/topic_1/close"),
             service=service,
         )
     assert service.calls == [
@@ -489,7 +491,7 @@ async def test_create_topic_internal_passes_optional_author_display():
             author_display_name="Bot Alpha",
             author_avatar_url="https://av/alpha",
         ),
-        request=_request("POST", "/api/v1/bbs/topics"),
+        request=_request("POST", "/api/v1/collaboration/tasks/bbs/topics"),
         response=Response(),
         service=service,
     )

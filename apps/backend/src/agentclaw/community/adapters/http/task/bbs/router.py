@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Path, Query, Request, Response
 
-from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
     BrowseReportCreated,
     CloseTopicRequestUnified,
@@ -55,13 +55,13 @@ from agentclaw.community.core.forum.models import (
 from agentclaw.community.core.errors import Forbidden, NotFound
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
-from agentclaw.community.adapters.http.bbs.author_enricher import (
+from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
     enrich_bot_display_names,
 )
 
-router = APIRouter(prefix="/api/v1/bots/{bot_id}/bbs", tags=["bbs-internal"])
-read_router = APIRouter(prefix="/api/v1/bbs", tags=["bbs-internal"])
+router = APIRouter(prefix="/api/v1/collaboration/tasks/bots/{bot_id}/bbs", tags=["bbs-internal"])
+read_router = APIRouter(prefix="/api/v1/collaboration/tasks/bbs", tags=["bbs-internal"])
 
 BotIdPath = Annotated[
     str,
@@ -163,7 +163,7 @@ async def list_posts_internal(
 
 
 # ---------------------------------------------------------------------------
-# BBS Unified Writes -- mirror of /openapi/v1/bbs/* writes.
+# BBS Unified Writes -- mirror of /openapi/v1/collaboration/tasks/bbs/* writes.
 # ---------------------------------------------------------------------------
 # Same unified body models as the /openapi/v1 surface: author_type + author_id
 # declared in the body (not path / caller). Delegates to the same
@@ -257,8 +257,8 @@ async def upsert_subscription_internal(
             max_length=256,
             description=(
                 "订阅发起人标识（bot owner 工号）。必填 query 参数，与 "
-                "/api/v1/bbs/browse-subscriptions 的 owner_user_id 同义，与对外 "
-                "/openapi/v1/bots/{bot_id}/bbs/browse-subscription 入参一一对齐。"
+                "/api/v1/collaboration/tasks/bbs/browse-subscriptions 的 owner_user_id 同义，与对外 "
+                "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription 入参一一对齐。"
             ),
         ),
     ],
@@ -377,7 +377,7 @@ async def list_subscriptions_internal(
             "Bots to list (work-no). This is a backend API: the owner is "
             "declared as an explicit query parameter, never resolved from or "
             "restricted to the logged-in caller -- mirrors the public "
-            "/openapi/v1/bbs/browse-subscriptions route. The value is the "
+            "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions route. The value is the "
             "same identifier as SubscriptionItem.owner_user_id."
         ),
     ),
@@ -389,7 +389,7 @@ async def list_subscriptions_internal(
     tour on for, so a UI can render the per-Bot on/off matrix. The owner is an
     explicit input, not assumed from the principal: the trusted ``/api/v1``
     callers may query any owner, exactly as the unified BBS writes declare
-    their author. Mirrors the public ``/openapi/v1/bbs/browse-subscriptions``
+    their author. Mirrors the public ``/openapi/v1/collaboration/tasks/bbs/browse-subscriptions``
     route verbatim.
     """
     result = service.list_subscriptions(
@@ -498,7 +498,7 @@ async def submit_browse_report_internal(
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[BrowseReportCreated]:
-    """Internal clone of POST /openapi/v1/bbs/browse-reports.
+    """Internal clone of POST /openapi/v1/collaboration/tasks/bbs/browse-reports.
 
     Trusted ``/api/v1`` callers skip the gateway grant layer the public route
     class adds; write semantics are identical (same idempotent replay habit).
