@@ -75,7 +75,7 @@ def _service(
         else cli_scope_reconciler or MagicMock()
     )
     service = CallerIdentityService(
-        session_authorizer=MagicMock(),
+        session_validator=MagicMock(),
         bot_repository=bot_repository,
         collaborator_repository=collaborator_repository,
         lock_repository=lock_repository,
@@ -1262,7 +1262,7 @@ def test_direct_caller_exchange_validates_and_preserves_original_session_context
         session_key=session_key,
     )
 
-    service._session_authorizer.authorize.assert_called_once_with(
+    service._session_validator.validate.assert_called_once_with(
         bot_id="bot-1", owner_id="owner-1", caller_user_id="caller-1",
         binding_id=19, stage="verify", session_key=session_key,
     )

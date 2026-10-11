@@ -10,13 +10,9 @@ The existing chain is IAM HTTP adapter -> Caller application service -> Caller i
 
 The BaaS PaaS facade already supports session append. No BaaS, Engine, Relay, JIT, Passport, or Bot-type migration is part of this change. Corporate runtime-updater and frontend implementations live outside this source repository and must adopt the compatible parameter when integrating this version.
 
-## Session authorization
+## Session context validation
 
-A session key is untrusted input and is not proof of ownership. Before exchanging a Caller token, inspect the requested session on each authorized fixed TeClaw runtime through the existing device-adapter session-listing contract, scoped to the authenticated user and Bot. Match the original session identifier and owner; never create or register a session to authorize it.
-
-Missing or blank session context is invalid for a TeClaw Caller target. In a multi-runtime refresh, exclude TeClaw targets that explicitly do not own the requested session; at least one TeClaw target must match when TeClaw targets exist. Transport failures remain errors. Keep the existing per-target update aggregation, and distinguish its success from evidence that the actual chat runtime has been updated.
-
-The authorizer is a required dependency of the real Caller services. Community/local implementations preserve their existing no-op or unavailable semantics without installing credentials.
+Revision (2026-10-11): remove the runtime `/api/sessions` ownership lookup and multi-target session matching. Existing Bot permissions and authorized runtime-binding selection remain the access boundary. For TeClaw bindings, require a nonempty session key and forward the original value; do not verify session owner/agent response fields or exclude targets based on a session-list response. A lightweight validator only reads the binding provider and resolves the existing authorized binding when necessary.
 
 ## Outbound contract
 
@@ -24,11 +20,11 @@ Keep the PaaS `device_id@template_id` intact. Use HTTP query parameters to encod
 
 ## Observability
 
-Record stable request, success, and failure events at the IAM, session-lookup, and BaaS append boundaries. Include system, direction, operation, request/operation identity, method/route, full non-sensitive business inputs/outputs, status/result, and duration. Recursively redact credentials and session material, including token rule values, nested errors, encoded credential echoes, and exception URLs. Do not log original session keys, cookies, authorization headers, or raw HTTP exceptions.
+Record existing IAM and BaaS append request/success/failure events. Session keys are diagnostic business identifiers in TeamClaw and must be logged as supplied. Remove `boundary_logging.py`, `redact_boundary`, HTTPX filters and recursive/encoded/oversized-payload protection. Keep a simple mask for the actual IAM token and outbound Caller token rule values; use normal response diagnostics and preserve the existing error contract.
 
 ## Verification
 
-Behavior tests cover parameter propagation across real services and protocols; valid TeClaw sessions; absent/blank/foreign sessions; fixed-runtime ownership; multi-target filtering; special-character query encoding; current-device uniqueness; compatible non-TeClaw and no-Bot requests; unavailable implementations; test-exchange authorization; HTTP/business/transport failures; and request/success/failure logging without plaintext credentials.
+Behavior tests cover parameter propagation across real services and protocols; nonempty TeClaw session keys; absent/blank keys; multi-target updates without ownership filtering; special-character query encoding; current-device uniqueness; compatible non-TeClaw and no-Bot requests; unavailable implementations; test-exchange key validation; HTTP/business/transport failures; and request/success/failure logging with plaintext session keys and masked actual token fields.
 
 Run affected unit and contract tests, architecture/DI checks, unused-import/variable lint, and the complete Backend CI suite. Record actual case counts and coverage denominators. The task requires all cases to pass and changed-line coverage of at least 90%; do not lower repository gates or introduce coverage exclusions. Remote PR checks are independent evidence and remain pending until their actual jobs finish.
 

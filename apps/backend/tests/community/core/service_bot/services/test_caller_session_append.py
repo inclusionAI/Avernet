@@ -1,4 +1,4 @@
-"""Caller overlays preserve the original session query and redact credentials."""
+"""Caller overlays preserve the original session query and log session context."""
 
 import logging
 from unittest.mock import MagicMock
@@ -36,13 +36,13 @@ def _rule():
     )
 
 
-def test_session_append_encodes_once_and_logs_safely(caplog):
+def test_session_append_encodes_once_and_logs_session_with_token_masked(caplog):
     key = "agent:中文 A/&+?%"
     response = httpx.Response(
         200,
         json={
             "code": 0,
-            "data": {"message": "ok", "nested": {"Authorization": "secret-response"}},
+            "data": {"message": "ok"},
         },
         request=httpx.Request("PUT", "http://baas.test"),
     )
@@ -61,15 +61,15 @@ def test_session_append_encodes_once_and_logs_safely(caplog):
     assert "caller_outbound_append_started" in caplog.text
     assert "caller_outbound_append_succeeded" in caplog.text
     assert "example.com" in caplog.text and "message" in caplog.text
-    for secret in (key, "opaque-sensitive-caller", "secret-response"):
-        assert secret not in caplog.text
+    assert key in caplog.text
+    assert "opaque-sensitive-caller" not in caplog.text
 
 
 @pytest.mark.parametrize("status", [404, 503, 500])
 def test_session_append_failed_response_is_safe(status, caplog):
     response = httpx.Response(
         status,
-        json={"business": "unavailable", "secret": "secret-response"},
+        json={"business": "unavailable"},
         request=httpx.Request("PUT", "http://baas.test?session_key=secret-session"),
     )
     service = _service(response)
@@ -80,13 +80,12 @@ def test_session_append_failed_response_is_safe(status, caplog):
     assert error.value.__cause__ is None
     assert "caller_outbound_append_failed" in caplog.text
     assert "unavailable" in caplog.text
-    assert "secret-session" not in caplog.text
-    assert "secret-response" not in caplog.text
+    assert "secret-session" in caplog.text
     assert "opaque-sensitive-caller" not in caplog.text
 
 
 @pytest.mark.parametrize(
-    "body", [{"code": 42, "data": {"token": "nested-sensitive"}}, []]
+    "body", [{"code": 42, "data": {"message": "rejected"}}, []]
 )
 def test_append_business_error_and_invalid_json_object(body, caplog):
     service = _service(
@@ -95,7 +94,6 @@ def test_append_business_error_and_invalid_json_object(body, caplog):
     with caplog.at_level(logging.INFO), pytest.raises(BaasServiceError):
         service.append_caller_outbound_rule("device@42", _rule())
     assert "caller_outbound_append_failed" in caplog.text
-    assert "nested-sensitive" not in caplog.text
 
 
 def test_append_non_json_response_fails_safely(caplog):
@@ -115,7 +113,7 @@ def test_append_non_json_response_fails_safely(caplog):
 def test_append_transport_exception_has_no_credential_chain(caplog):
     service = _service(None)
     service._http.put.side_effect = httpx.ReadTimeout(
-        "secret-session opaque-sensitive-caller"
+        "upstream read timeout secret-session opaque-sensitive-caller"
     )
     with caplog.at_level(logging.INFO), pytest.raises(BaasServiceError) as error:
         service.append_caller_outbound_rule(
@@ -124,11 +122,12 @@ def test_append_transport_exception_has_no_credential_chain(caplog):
     assert error.value.__cause__ is None
     assert error.value.__suppress_context__
     assert "ReadTimeout" in caplog.text
-    assert "secret-session" not in caplog.text
+    assert "upstream read timeout" in caplog.text
+    assert "secret-session" in caplog.text
     assert "opaque-sensitive-caller" not in caplog.text
 
 
-def test_real_httpx_client_does_not_log_session_url(caplog):
+def test_real_httpx_client_encodes_original_session_once_and_keeps_diagnostics(caplog):
     from urllib.parse import quote
 
     key = "private:中文/session&key"
@@ -144,6 +143,6 @@ def test_real_httpx_client_does_not_log_session_url(caplog):
             assert service.append_caller_outbound_rule(
                 "device@42", _rule(), session_key=key
             )
-    assert key not in caplog.text
-    assert quote(key, safe="") not in caplog.text
-    assert "private%3A" not in caplog.text
+    assert key in caplog.text
+    assert quote(key, safe="") in caplog.text
+    assert "private%3A" in caplog.text

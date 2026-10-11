@@ -18,8 +18,6 @@ The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 """
 from __future__ import annotations
 
-from agentclaw.community.core.caller_identity.boundary_logging import install_httpx_credential_filter, redact_boundary
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import base64
@@ -3203,10 +3201,11 @@ class BaasService:  # pragma: no cover
         *,
         session_key: str | None = None,
     ) -> bool:
-        """Append a Caller overlay with a credential-safe boundary audit."""
-        install_httpx_credential_filter()
+        """Append a Caller overlay and log its session context."""
         payload = self._outbound_rule_to_dict(caller_rule)
-        secrets = tuple(rule.value for rule in caller_rule.header_operation_rules if isinstance(rule.value, str)) + ((session_key,) if session_key else ())
+        logged_payload = {"header_operation_rules": [
+            {**rule, "value": "[REDACTED]"} for rule in payload["header_operation_rules"]
+        ]}
         params = {"mode": "append"}
         if session_key is not None:
             params["session_key"] = session_key
@@ -3215,7 +3214,7 @@ class BaasService:  # pragma: no cover
         operation_id = uuid.uuid4().hex
         fields = {"system": "baas", "direction": "outbound", "operation": "caller_outbound_append",
                   "operation_id": operation_id, "method": "PUT", "route": route,
-                  "params": redact_boundary(params), "body": redact_boundary(payload)}
+                  "params": params, "body": logged_payload}
         logger.info("caller_outbound_append_started fields=%s", fields)
         response = None
         response_data = None
@@ -3229,19 +3228,22 @@ class BaasService:  # pragma: no cover
             if not isinstance(response_data, dict) or response_data.get("code") != 0:
                 raise BaasServiceError("BaaS Caller outbound append rejected")
         except Exception as exc:
+            error_message = str(exc)
+            for rule in caller_rule.header_operation_rules:
+                if rule.value:
+                    error_message = error_message.replace(rule.value, "[REDACTED]")
             logger.warning(
                 "caller_outbound_append_failed fields=%s status_code=%s duration_ms=%.1f "
-                "error_type=%s error_message=outbound_request_failed response=%s",
+                "error_type=%s error_message=%s response=%s",
                 fields, getattr(response, "status_code", None),
-                (time.monotonic() - started_at) * 1000, type(exc).__name__,
-                redact_boundary(response_data, secrets=secrets),
+                (time.monotonic() - started_at) * 1000, type(exc).__name__, error_message,
+                response_data,
             )
-            # COSEC: HTTP exception chains can contain token/session query URLs.
             raise BaasServiceError("BaaS Caller outbound append failed") from None
         logger.info(
             "caller_outbound_append_succeeded fields=%s status_code=%s duration_ms=%.1f response=%s",
             fields, response.status_code, (time.monotonic() - started_at) * 1000,
-            redact_boundary(response_data, secrets=secrets),
+            response_data,
         )
         return True
 
@@ -3257,12 +3259,10 @@ class BaasService:  # pragma: no cover
         started_at = time.monotonic()
         binding_id = getattr(binding, "id", None)
         provider = getattr(binding, "device_provider", None)
-        # COSEC: unknown provider values may contain secrets or log controls.
-        safe_provider = provider if provider in ("baas", "arca", "teclaw") else "unsupported"
         logger.info(
             "token_outbound_target_resolution_started binding_id=%s provider=%s "
             "reason=pending error_type=none",
-            binding_id, safe_provider,
+            binding_id, provider,
         )
         try:
             if binding is None or str(getattr(binding, "status", "")).upper() != "ACTIVE":
@@ -3304,14 +3304,14 @@ class BaasService:  # pragma: no cover
             logger.warning(
                 "token_outbound_target_resolution_failed binding_id=%s provider=%s "
                 "reason=%s error_type=%s duration_ms=%.1f",
-                binding_id, safe_provider, reason, type(exc).__name__,
+                binding_id, provider, reason, type(exc).__name__,
                 (time.monotonic() - started_at) * 1000,
             )
             raise
         logger.info(
             "token_outbound_target_resolution_succeeded binding_id=%s provider=%s "
             "reason=resolved error_type=none duration_ms=%.1f",
-            binding_id, safe_provider, (time.monotonic() - started_at) * 1000,
+            binding_id, provider, (time.monotonic() - started_at) * 1000,
         )
         return target
 

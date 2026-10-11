@@ -27,7 +27,7 @@ from agentclaw.community.core.runtime_binding.models import (
     RuntimeBindingTarget,
 )
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
-from agentclaw.community.core.caller_identity.session_authorizer import CallerSessionAuthorizer
+from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -53,9 +53,9 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         runtime_updater: CallerRuntimeUpdaterProtocol,
         runtime_bindings: RuntimeBindingResolutionService,
         lock_repository: BotCollabLockRepositoryProtocol,
-        session_authorizer: CallerSessionAuthorizer,
+        session_validator: CallerSessionValidator,
     ) -> None:
-        self._session_authorizer = session_authorizer
+        self._session_validator = session_validator
         self._caller_identity = caller_identity
         self._auth_plugin = auth_plugin
         self._token_provider = token_provider
@@ -132,26 +132,13 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 actor_user_id=identity.staffId,
                 stage=stage,
             )
-            authorized_targets = []
-            teclaw_matched = False
-            teclaw_denied = False
             for target in targets:
-                try:
-                    is_teclaw = await asyncio.to_thread(
-                        self._session_authorizer.authorize, bot_id=bot_id,
-                        owner_id=context.owner_id, caller_user_id=identity.staffId,
-                        binding_id=target.binding_id, stage=stage.value,
-                        session_key=session_key,
-                    )
-                    teclaw_matched = teclaw_matched or is_teclaw
-                    authorized_targets.append(target)
-                except CallerIdentityPermissionError:
-                    teclaw_denied = True
-                    logger.info("caller_session_target_filtered bot_id=%s binding_id=%s reason=session_not_owned", bot_id, target.binding_id)
-            # COSEC: a non-TeClaw success cannot mask an unauthorized TeClaw session.
-            if teclaw_denied and not teclaw_matched:
-                raise CallerIdentityPermissionError()
-            targets = authorized_targets
+                await asyncio.to_thread(
+                    self._session_validator.validate, bot_id=bot_id,
+                    owner_id=context.owner_id, caller_user_id=identity.staffId,
+                    binding_id=target.binding_id, stage=stage.value,
+                    session_key=session_key,
+                )
             updated_targets = 0
             caller_token = await asyncio.to_thread(
                 self._caller_identity.exchange_caller_token,

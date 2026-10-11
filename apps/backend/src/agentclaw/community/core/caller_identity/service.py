@@ -41,7 +41,7 @@ from agentclaw.community.core.caller_identity.credential import (
     AuthContext,
     CallerToken,
 )
-from agentclaw.community.core.caller_identity.session_authorizer import CallerSessionAuthorizer
+from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
     CallerMcpSyncProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -77,9 +77,9 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         passport_plugin: PassportPlugin | None = None,
         cli_scope_reconciler: CliPassportScopeReconciler | None = None,
         collaborator_service: CollaboratorServiceProtocol | None = None,
-        session_authorizer: CallerSessionAuthorizer,
+        session_validator: CallerSessionValidator,
     ) -> None:
-        self._session_authorizer = session_authorizer
+        self._session_validator = session_validator
         self._bot_repository = bot_repository
         self._collaborator_repository = collaborator_repository
         self._collaborator_service = collaborator_service
@@ -548,7 +548,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         caller_token: CallerToken | None = None,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
-        self._session_authorizer.authorize(bot_id=bot_id, owner_id=owner_user_id, caller_user_id=caller_user_id, binding_id=binding_id, stage=stage, session_key=session_key)
+        self._session_validator.validate(bot_id=bot_id, owner_id=owner_user_id, caller_user_id=caller_user_id, binding_id=binding_id, stage=stage, session_key=session_key)
         token_reused = caller_token is not None
         if caller_token is None:
             caller_token = self.exchange_caller_token(

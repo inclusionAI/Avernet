@@ -81,7 +81,7 @@ def _service(
     )
     return (
         CallerIamTokenService(
-            session_authorizer=MagicMock(),
+            session_validator=MagicMock(),
             caller_identity=identity,
             auth_plugin=auth,
             token_provider=provider,
@@ -370,15 +370,15 @@ def test_unavailable_provider_and_module_provider_fail_closed() -> None:
         caller_identity=MagicMock(), auth_plugin=MagicMock(),
         token_provider=MagicMock(), runtime_updater=MagicMock(),
         runtime_bindings=MagicMock(), lock_repository=MagicMock(),
-        session_authorizer=MagicMock(),
+        session_validator=MagicMock(),
     )
     assert isinstance(service, CallerIamTokenService)
 
 @pytest.mark.asyncio
 async def test_session_preflight_rejects_before_token_exchange():
     service, identity, *_ = _service()
-    service._session_authorizer = MagicMock()
-    service._session_authorizer.authorize.side_effect = CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+    service._session_validator = MagicMock()
+    service._session_validator.validate.side_effect = CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
     result = await service.get_iam_token(iam_token="iam", auth_request=_request(), bot_id="bot-1", stage=CallerIdentityStage.DRAFT,
                                         publish_id=None, entity_id=None, is_test_exchange=False, session_key=" \t")
     assert result.error == CALLER_CREDENTIAL_REQUEST_INVALID
@@ -389,33 +389,21 @@ async def test_session_preflight_rejects_before_token_exchange():
 @pytest.mark.asyncio
 async def test_session_key_passes_to_authorized_refresh():
     service, identity, *_ = _service()
-    service._session_authorizer = MagicMock()
+    service._session_validator = MagicMock()
     result = await service.get_iam_token(iam_token="iam", auth_request=_request(), bot_id="bot-1", stage=CallerIdentityStage.DRAFT,
                                         publish_id=None, entity_id=None, is_test_exchange=False, session_key="original:会话&key")
     assert result.error is None
     assert identity.exchange_caller_identity.call_args.kwargs["session_key"] == "original:会话&key"
-    assert service._session_authorizer.authorize.call_args.kwargs["binding_id"] == 9
+    assert service._session_validator.validate.call_args.kwargs["binding_id"] == 9
 
 @pytest.mark.asyncio
-async def test_session_matches_only_one_of_multiple_teclaw_targets():
+async def test_nonempty_session_updates_all_eligible_targets_without_match_filtering():
     service, identity, *_ = _service(caller_target=ResolvedRuntimeBinding(12, RuntimeBindingSource.CALLER_INSTANCE))
-    service._session_authorizer = MagicMock()
-    service._session_authorizer.authorize.side_effect = [CallerIdentityPermissionError(), True]
     result = await service.get_iam_token(iam_token="iam", auth_request=_request(), bot_id="bot-1", stage=CallerIdentityStage.DRAFT,
-                                        publish_id=None, entity_id=None, is_test_exchange=False, session_key="target-12-session")
+                                        publish_id=None, entity_id=None, is_test_exchange=False, session_key="original-session")
     assert result.error is None
     identity.exchange_caller_token.assert_called_once()
-    identity.exchange_caller_identity.assert_called_once()
-    assert identity.exchange_caller_identity.call_args.kwargs["binding_id"] == 12
-
-
-@pytest.mark.asyncio
-async def test_non_teclaw_target_cannot_mask_session_denial():
-    service, identity, *_ = _service(caller_target=ResolvedRuntimeBinding(12, RuntimeBindingSource.CALLER_INSTANCE))
-    service._session_authorizer = MagicMock()
-    service._session_authorizer.authorize.side_effect = [CallerIdentityPermissionError(), False]
-    result = await service.get_iam_token(iam_token="iam", auth_request=_request(), bot_id="bot-1", stage=CallerIdentityStage.DRAFT,
-                                        publish_id=None, entity_id=None, is_test_exchange=False, session_key="foreign-session")
-    assert result.error == "CALLER_IDENTITY_FORBIDDEN"
-    identity.exchange_caller_token.assert_not_called()
-    identity.exchange_caller_identity.assert_not_called()
+    assert identity.exchange_caller_identity.call_count == 2
+    assert [call.kwargs["binding_id"] for call in identity.exchange_caller_identity.call_args_list] == [9, 12]
+    assert all(call.kwargs["session_key"] == "original-session" for call in identity.exchange_caller_identity.call_args_list)
+    assert service._session_validator.validate.call_count == 2
