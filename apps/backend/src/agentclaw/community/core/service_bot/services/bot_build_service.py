@@ -35,6 +35,7 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
+from agentclaw.community.core.service_bot.services.local_bin_artifact import sync_local_bin_artifact
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
@@ -1309,6 +1310,9 @@ class BotBuildService:
                 # earlier partial artifact, otherwise Pool active roots can
                 # expose the full repository through a stale bridge.
                 "--delete-excluded",
+                # Home CLI snapshots are separate from the engine root. This
+                # also clears stale snapshots when the same version retries.
+                "--exclude=/.local",
                 *excludes,
                 *(f"--exclude=/{path}" for path in build_ignore_paths),
                 f"{source_dir}/",
@@ -1320,6 +1324,16 @@ class BotBuildService:
                 command_name="rsync",
                 error_message="rsync migration failed",
             )
+
+            if is_nas:
+                sync_local_bin_artifact(
+                    source_home=source_dir.parent,
+                    target_dir=target_dir,
+                    device_id=device_id,
+                    version=version_str,
+                    build_ignore_paths=build_ignore_paths,
+                    run_command=self._run_local_command,
+                )
 
             # Device-side fallback for extra-include files that are unreadable
             # on the NAS merge area due to NFS root_squash (uid-1000-owned
@@ -1784,6 +1798,8 @@ class BotBuildService:
         draft_dir.mkdir(parents=True, exist_ok=True)
 
         excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
+        # The CLI snapshot belongs to the home directory, never the engine root.
+        excludes.append("--exclude=/.local")
         # Extra snapshots (for example target/claude -> draft/.claude) are not
         # part of the primary engine root and must not leak into it.
         if build_plan.extra_sync_target_relpath:
