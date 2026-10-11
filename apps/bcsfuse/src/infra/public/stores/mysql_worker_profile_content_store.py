@@ -37,6 +37,9 @@ import threading
 import uuid
 from typing import Optional, List, TYPE_CHECKING
 
+from mysql.connector import Error as MySQLError
+from mysql.connector.errorcode import ER_DUP_FIELDNAME
+
 if TYPE_CHECKING:
     from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
 
@@ -106,6 +109,7 @@ class MySQLWorkerProfileContentStore:
                             worker_id VARCHAR(128) NOT NULL,
                             profile_id VARCHAR(128) NOT NULL DEFAULT 'default',
                             display_name VARCHAR(255),
+                            description MEDIUMTEXT,
                             soul_md MEDIUMTEXT,
                             agents_md MEDIUMTEXT,
                             tools_md MEDIUMTEXT,
@@ -124,6 +128,19 @@ class MySQLWorkerProfileContentStore:
                             INDEX idx_bcsfuse_worker_profile_contents_active (worker_id, is_active)
                         )
                     """)
+                    cursor.execute(
+                        "SHOW COLUMNS FROM bcsfuse_worker_profile_contents LIKE 'description'"
+                    )
+                    if cursor.fetchone() is None:
+                        try:
+                            cursor.execute(
+                                "ALTER TABLE bcsfuse_worker_profile_contents "
+                                "ADD COLUMN description MEDIUMTEXT AFTER display_name"
+                            )
+                        except MySQLError as error:
+                            # Concurrent app startup may have added the column.
+                            if error.errno != ER_DUP_FIELDNAME:
+                                raise
                 finally:
                     cursor.close()
                 conn.commit()
@@ -181,6 +198,7 @@ class MySQLWorkerProfileContentStore:
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
+            description=row["description"],
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -203,6 +221,7 @@ class MySQLWorkerProfileContentStore:
             "worker_id": content.worker_id,
             "profile_id": content.profile_id or "default",
             "display_name": content.display_name,
+            "description": content.description,
             "soul_md": content.soul_md,
             "agents_md": content.agents_md,
             "tools_md": content.tools_md,
@@ -241,6 +260,7 @@ class MySQLWorkerProfileContentStore:
                     cursor.execute("""
                         UPDATE bcsfuse_worker_profile_contents SET
                             display_name = %s,
+                            description = %s,
                             soul_md = %s,
                             agents_md = %s,
                             tools_md = %s,
@@ -255,6 +275,7 @@ class MySQLWorkerProfileContentStore:
                         WHERE worker_id = %s AND profile_id = %s
                     """, (
                         data["display_name"],
+                        data["description"],
                         data["soul_md"],
                         data["agents_md"],
                         data["tools_md"],
@@ -271,16 +292,17 @@ class MySQLWorkerProfileContentStore:
                 else:
                     cursor.execute("""
                         INSERT INTO bcsfuse_worker_profile_contents (
-                            id, worker_id, profile_id, display_name,
+                            id, worker_id, profile_id, display_name, description,
                             soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                             contents, skill_sets, metadata,
                             content_type, is_active, version
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         content_id,
                         data["worker_id"],
                         data["profile_id"],
                         data["display_name"],
+                        data["description"],
                         data["soul_md"],
                         data["agents_md"],
                         data["tools_md"],
@@ -576,6 +598,7 @@ class MySQLWorkerProfileContentStore:
             "worker_id": profile.worker_id,
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
+            "description": profile.description,
             "soul_md": profile.soul_md,
             "agents_md": profile.agents_md,
             "tools_md": profile.tools_md,

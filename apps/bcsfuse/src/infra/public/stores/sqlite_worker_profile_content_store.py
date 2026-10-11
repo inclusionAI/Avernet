@@ -81,6 +81,7 @@ class SQLiteWorkerProfileContentStore(_SQLiteWorkerProfileContentStore):
             "worker_id": profile.worker_id,
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
+            "description": profile.description,
             "soul_md": profile.soul_md,
             "agents_md": profile.agents_md,
             "tools_md": profile.tools_md,

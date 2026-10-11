@@ -266,6 +266,29 @@ write. Updates retain an existing worker's type. With `profile.activate=false`,
 sync saves the profile but preserves the existing active content, binding,
 and worker mirror, including the valid state with no active profile.
 
+For existing Workers and Profiles, sync is presence-aware. `name` is required
+and replaced; omitted mutable Worker fields (`description`, `responsibilities`,
+`domains`, `capabilities`, `skills`, `availability`, `trust_level`) retain their
+stored values. Supplied values replace them, including empty lists or an empty
+description. Omitted `runtime_state` or explicit null preserves the current
+runtime state; new Workers default online. Existing Profile scalar fields,
+`skill_sets`, and generated analysis fields survive omission. Supplied
+`skill_sets` replaces the list, including `[]`. Supplied nonempty `contents`
+and `metadata` maps merge by key; an explicitly empty map clears that map.
+Supplied `profile.summary` replaces `contents.ecb_summary`; null removes it.
+LLM analysis may replace only generated `contents` keys after successful
+analysis. Before writing, it reads the current Profile and skips a stale
+result when that Profile no longer matches the analyzed snapshot. This check
+does not provide cross-process compare-and-swap for a write racing after the
+read. A missing Profile provider returns 503, and
+Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
+than a false success. Worker changes made before such a failure may remain
+committed; repeating the same sync safely completes the Profile step.
+SQLite and MySQL Profile stores add the nullable `description` column on
+startup if an existing table predates this contract; existing rows remain
+readable and new writes persist the Profile description. Deployment requires
+the database role to have `ALTER TABLE` permission for this one-time migration.
+
 With `ENABLE_PROFILE_EMBEDDING_INDEX=true`, successful explicit profile
 activation also refreshes the selected profile's vectors. Other profiles'
 vectors are retained, matching the existing activation policy; activation does

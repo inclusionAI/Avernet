@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS bcsfuse_worker_profile_contents (
     worker_id TEXT NOT NULL,
     profile_id TEXT NOT NULL DEFAULT 'default',
     display_name TEXT,
+    description TEXT,
     soul_md TEXT,
     agents_md TEXT,
     tools_md TEXT,
@@ -82,6 +83,11 @@ class SQLiteWorkerProfileContentStore:
         # 初始化 profile contents 表
         cursor = self._conn.cursor()
         cursor.executescript(CREATE_WORKER_PROFILE_CONTENTS_TABLE)
+        cursor.execute("PRAGMA table_info(bcsfuse_worker_profile_contents)")
+        if "description" not in {row[1] for row in cursor.fetchall()}:
+            cursor.execute(
+                "ALTER TABLE bcsfuse_worker_profile_contents ADD COLUMN description TEXT"
+            )
         self._conn.commit()
 
     def _row_to_content(self, row: sqlite3.Row) -> WorkerProfileContent:
@@ -116,6 +122,7 @@ class SQLiteWorkerProfileContentStore:
             worker_id=row["worker_id"],
             profile_id=row["profile_id"],
             display_name=row["display_name"],
+            description=row["description"],
             soul_md=row["soul_md"],
             agents_md=row["agents_md"],
             tools_md=row["tools_md"],
@@ -157,6 +164,7 @@ class SQLiteWorkerProfileContentStore:
                 """
                 UPDATE bcsfuse_worker_profile_contents SET
                     display_name = ?,
+                    description = ?,
                     soul_md = ?,
                     agents_md = ?,
                     tools_md = ?,
@@ -172,6 +180,7 @@ class SQLiteWorkerProfileContentStore:
                 """,
                 (
                     content.display_name,
+                    content.description,
                     content.soul_md,
                     content.agents_md,
                     content.tools_md,
@@ -193,18 +202,19 @@ class SQLiteWorkerProfileContentStore:
             cursor.execute(
                 """
                 INSERT INTO bcsfuse_worker_profile_contents (
-                    id, worker_id, profile_id, display_name,
+                    id, worker_id, profile_id, display_name, description,
                     soul_md, agents_md, tools_md, boot_md, heartbeat_md,
                     contents, skill_sets, metadata,
                     content_type, is_active,
                     version, gmt_create, gmt_modify
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record_id,
                     content.worker_id,
                     profile_id,
                     content.display_name,
+                    content.description,
                     content.soul_md,
                     content.agents_md,
                     content.tools_md,

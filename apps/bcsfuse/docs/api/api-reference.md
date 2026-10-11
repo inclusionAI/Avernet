@@ -137,7 +137,7 @@ These endpoints are intended for 3rd-party callers such as BCS. They use the `/a
 
 ### POST /api/v1/workers/{worker_id}/sync
 
-**Purpose:** Atomic sync: create/update worker, set online, and upsert profile
+**Purpose:** Create or update a Worker and its Profile. Existing runtime state is preserved when omitted.
 
 **Authentication:** Required
 
@@ -153,19 +153,24 @@ These endpoints are intended for 3rd-party callers such as BCS. They use the `/a
 
 ```json
 {
-  "name": "string (required)",
-  "role": "string (optional)",
-  "description": "string (optional)",
-  "capabilities": ["string"],
-  "visibility": "public|private (default: public)",
+  "name": "My Bot",
+  "availability": "protected",
+  "capabilities": [{"name": "nlp", "level": "expert"}],
   "profile": {
-    "summary": "string",
-    "expertise": ["string"],
-    "scenarios": ["string"],
-    "constraints": ["string"]
+    "profile_id": "default",
+    "soul_md": "Expert in NLP and search",
+    "contents": {"identity": "Assistant"},
+    "skill_sets": [{"name": "search"}]
   }
 }
 ```
+
+`name` and `profile` are required. For an existing Worker/Profile, omitted
+mutable fields retain their stored values. Explicit empty scalar/list values
+replace them; nonempty `contents`/`metadata` objects merge by key, while `{}`
+clears the map. Omitted or null `runtime_state` preserves an existing state;
+new Workers default online. See [External Product API](api-external.md) for
+the full field and retry contract.
 
 **Response:**
 
@@ -173,15 +178,10 @@ These endpoints are intended for 3rd-party callers such as BCS. They use the `/a
 {
   "success": true,
   "worker_id": "my-bot-001",
-  "name": "My Bot",
-  "role": "AI Assistant",
-  "description": "Expert in NLP",
-  "capabilities": ["nlp", "search"],
-  "visibility": "public",
+  "created": false,
   "runtime_state": "online",
-  "profile_uploaded": true,
-  "created_at": "2026-07-06T10:00:00Z",
-  "updated_at": "2026-07-06T10:00:00Z"
+  "profile_id": "default",
+  "profile_activated": true
 }
 ```
 
@@ -191,22 +191,21 @@ These endpoints are intended for 3rd-party callers such as BCS. They use the `/a
 - `400 Bad Request`: Invalid request body
 - `401 Unauthorized`: Missing or invalid token
 - `422 Unprocessable Entity`: Validation error
+- `500 Internal Server Error`: Profile sync failed (`PROFILE_SYNC_FAILED`); retry is safe
+- `503 Service Unavailable`: Required provider unavailable
 
 **Example:**
 
 ```bash
 curl -X POST http://localhost:8765/api/v1/workers/my-bot-001/sync \
-  -H "Authorization: Bearer dev-opencore-token" \
+  -H "Authorization: Bearer <BCSFUSE_AUTH_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Bot",
-    "role": "AI Assistant",
-    "capabilities": ["nlp", "search"],
-    "visibility": "public",
+    "availability": "protected",
     "profile": {
-      "summary": "Expert in NLP and search",
-      "expertise": ["Python", "Machine Learning"],
-      "scenarios": ["question answering", "information retrieval"]
+      "profile_id": "default",
+      "soul_md": "Expert in NLP and search"
     }
   }'
 ```

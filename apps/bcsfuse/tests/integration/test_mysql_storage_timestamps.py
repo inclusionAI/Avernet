@@ -116,6 +116,27 @@ def test_profile_save_update_activate_return_persisted_database_times(pool):
     assert_current(pool, activated.updated_at)
 
 
+def test_profile_description_survives_save_and_legacy_column_migration(pool):
+    store = MySQLWorkerProfileContentStore(pool)
+    store.save(WorkerProfileContent(
+        worker_id="description-test", description="Before migration",
+    ))
+    assert store.get("description-test", "default").description == "Before migration"
+
+    with pool.get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "ALTER TABLE bcsfuse_worker_profile_contents DROP COLUMN description"
+            )
+        conn.commit()
+
+    upgraded = MySQLWorkerProfileContentStore(pool)
+    upgraded.save(WorkerProfileContent(
+        worker_id="description-test", description="After migration",
+    ))
+    assert upgraded.get("description-test", "default").description == "After migration"
+
+
 def test_runtime_state_insert_and_update_use_database_clock(pool):
     store = MySQLWorkerRuntimeStateStore(pool)
     for state in (WorkerRuntimeState.ONLINE, WorkerRuntimeState.OFFLINE):
