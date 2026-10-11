@@ -432,3 +432,26 @@ def test_log_projection_includes_notify_contract_fields_only():
         "notify": {"enabled": True, "user_ids": ["staff"]},
         "sessionKey": "visible",
     }
+
+@pytest.mark.asyncio
+async def test_create_adapter_rejects_non_object_body():
+    import inspect
+    from unittest.mock import AsyncMock, MagicMock
+    from agentclaw.community.adapters.http.cron.router import create_cron
+    from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+
+    request = MagicMock()
+    request.json = AsyncMock(return_value=["not an object"])
+    svc = MagicMock()
+    svc.create_cron = AsyncMock()
+    result = await inspect.unwrap(create_cron)(
+        request=request,
+        user=AuthenticatedUser(
+            id="owner", staffId="owner", nickName="Owner", operatorName="Owner"
+        ),
+        service=svc,
+        bot_service=MagicMock(),
+    )
+    assert result.success is False
+    assert result.error_code == 400
+    svc.create_cron.assert_not_called()

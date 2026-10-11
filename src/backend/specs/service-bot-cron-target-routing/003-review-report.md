@@ -27,3 +27,14 @@ PATH=/opt/homebrew/bin:$PATH PYTHONPATH=apps/backend/src /Users/helloworld/Deskt
 ## ACI独立门禁
 
 PR当前尚未提供实际head对应远端job；casePassRate/lineCoverage/changeLineCoverage分子分母暂无远端证据，全部PENDING。主agent在创建PR后独立核验100% / >=70% / >=90%门禁，不能把本地1682PASS换算为远端ACI PASS。
+
+
+## 全量首次失败修复补充
+
+初轮全量发现3项失败，主agent授权最小测试维护，未修改业务行为或降低门禁。
+- endpoint失败seed原本直接AsyncMock替换service transport，违反真实HTTP测试框架；改为既有DeviceAdapterTransport插件set_response，在外部系统边界返回503，仍执行真实router/领域/DI。
+- 直接unwrap handler的非object body单测移至core/cron/services/test_cron_targeted_operations.py，完整保留原400与禁止service调用断言；endpoint文件保持真实框架场景。
+- IAM provider构造单测移除已不存在的collaborators参数，保留runtime_bindings、session_validator等真实依赖。
+- Claude Code默认排除精确计数31→33，对应本任务新增两个sessions任务文件排除；不放宽断言。
+
+独立复跑no-mock scanner/IAM provider/default exclude计数/实际HTTP targeted_running_failure/非object body单测：51 passed / 1514 deselected。ruff F/E9通过，git diff --check通过。首轮全量状态由主agent记录20582 passed / 3 failed / 43 skipped，修复后全量待主agent重跑，不能将本地51项等同于全量或远端ACI通过。

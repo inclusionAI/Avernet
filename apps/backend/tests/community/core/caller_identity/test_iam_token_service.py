@@ -370,7 +370,7 @@ def test_unavailable_provider_and_module_provider_fail_closed() -> None:
         caller_identity=MagicMock(), auth_plugin=MagicMock(),
         token_provider=MagicMock(), runtime_updater=MagicMock(),
         runtime_bindings=MagicMock(),
-        collaborators=MagicMock(), lock_repository=MagicMock(),
+        lock_repository=MagicMock(),
         session_validator=MagicMock(),
     )
     assert isinstance(service, CallerIamTokenService)
