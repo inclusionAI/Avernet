@@ -151,6 +151,8 @@ def _make_service(*, bot_provider: BotInfoProvider) -> CronRelayService:
     )
 
     return CronRelayService(
+        runtime_bindings=MagicMock(),
+        collaborators=MagicMock(),
         bot_provider=bot_provider,
         device_provider=device_provider,
         transport=transport,

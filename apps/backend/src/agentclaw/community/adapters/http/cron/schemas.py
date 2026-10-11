@@ -2,8 +2,8 @@
 
 Single source of truth for all cron HTTP contracts.
 """
-from typing import Optional, Any, Dict, Union
-from pydantic import BaseModel, Field
+from typing import Optional, Any, Dict, Union, Literal
+from pydantic import BaseModel, Field, StrictStr, model_validator
 
 
 class ApiResponse(BaseModel):
@@ -22,6 +22,10 @@ class CronListApiResponse(ApiResponse):
 
 class CreateCronRequest(BaseModel):
     """创建定时任务请求"""
+    runtime_stage: Literal["draft", "verify", "online"] | None = None
+    device_id: StrictStr | None = None
+    device_uuid: StrictStr | None = None
+    create_by_id: StrictStr | None = None
     bot_id: str = Field(..., description="所属 Bot ID")
     name: str = Field(..., description="任务名称")
     schedule: str = Field(..., description="Cron 表达式")
@@ -93,3 +97,21 @@ class CronStatusData(BaseModel):
     running_count: int = 0
     total_count: int = 0
     last_run_at: Optional[str] = None
+
+
+class CronTargetRequest(BaseModel):
+    """HTTP routing fields; engine job content retains its existing contract."""
+
+    runtime_stage: Literal["draft", "verify", "online"] | None = None
+    device_id: StrictStr | None = Field(None, min_length=1)
+    device_uuid: StrictStr | None = Field(None, min_length=1)
+    create_by_id: StrictStr | None = Field(None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_device_alias(self):
+        if self.device_id and self.device_uuid and self.device_id != self.device_uuid:
+            raise ValueError("device_id and device_uuid must match")
+        self.device_id = self.device_id or self.device_uuid
+        if (self.device_id or self.create_by_id) and not self.runtime_stage:
+            raise ValueError("targeted Cron requests require runtime_stage")
+        return self
