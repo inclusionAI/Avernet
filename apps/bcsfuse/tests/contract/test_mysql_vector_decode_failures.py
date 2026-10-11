@@ -17,6 +17,7 @@ class ReadConnection:
         self.closed_reads = 0
         self.rollbacks = 0
         self.parameters = []
+        self.watermark_read = False
 
     def is_connected(self):
         return True
@@ -25,7 +26,14 @@ class ReadConnection:
         return self
 
     def execute(self, sql, params=None):
+        self.watermark_read = "ORDER BY `gmt_modify` DESC" in sql
         self.parameters.append(params)
+
+    def fetchone(self):
+        if not self.watermark_read or not self.rows:
+            return None
+        row = max(self.rows, key=lambda value: (value[4], value[0]))
+        return (row[4], row[0])
 
     def fetchall(self):
         return self.rows
@@ -63,14 +71,17 @@ def test_failed_decode_keeps_sync_checkpoint_and_retries_complete_batch(
             store.sync_incremental()
         assert store._last_sync_time == 100.0
         assert store.get_vector_ids() == []
-        assert connection.closed_reads == connection.rollbacks == 1
+        assert connection.closed_reads == connection.rollbacks == 2
         connection.rows[1] = ("target", valid, '{"content":"target"}', 0, 102.0)
         assert store.sync_incremental() == {"upserted": 2, "deleted": 1}
-        assert connection.parameters == [(99.0, 100), (99.0, 100)]
+        assert connection.parameters == [
+            (), (99.0, 110.0, 110.0, "later", 100),
+            (), (99.0, 110.0, 110.0, "later", 100),
+        ]
         assert store._last_sync_time == 110.0
         assert set(store.get_vector_ids()) == {"target", "later"}
         assert [hit.id for hit in store.text_search("target", top_k=5)] == ["target"]
-        assert connection.closed_reads == connection.rollbacks == 2
+        assert connection.closed_reads == connection.rollbacks == 4
     finally:
         store.close()
 

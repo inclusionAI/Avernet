@@ -39,6 +39,13 @@ Decode or storage failures must propagate rather than yield a partial page.
 Internal ZDAS and public MySQL providers exclude `is_deleted = 1` rows; SQLite
 has no soft-deletion column.
 
+Each change-feed pass captures the greatest durable `(gmt_modify, id)` key
+before reading its first page and stops at that key. Mutations committed later
+are left for the next pass, so sustained writes cannot keep one rebuild or sync
+open indefinitely. Providers that share a database connection between readers
+and writers must serialize each page read, including transaction cleanup, with
+all writes on that connection.
+
 ## Change-set semantics
 
 `VectorChangeSet` contains:
