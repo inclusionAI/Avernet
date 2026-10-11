@@ -331,7 +331,7 @@ describe('ChatPanel interactive', () => {
     );
     expect(screen.queryByRole('button', { name: '会话文件' })).not.toBeInTheDocument();
   });
-  it('用户消息优先使用顶栏真实用户头像，Bot 消息仍使用 Bot 头像', () => {
+  it('消息区头像 24px：用户用顶栏真实头像、Bot 用 target.avatar（dmore 交付包复测）', () => {
     const userAvatarUrl = 'https://example.test/user-avatar.png';
     const userSender = resolveSingleSender(
       { id: 'u1', role: 'user', content: '你好', status: 'history' } as never,
@@ -349,9 +349,10 @@ describe('ChatPanel interactive', () => {
     const assistantAvatar = render(<>{assistantSender.avatar}</>);
 
     expect(userAvatar.container.querySelector('img')).toHaveAttribute('src', userAvatarUrl);
-    expect(userAvatar.container.querySelector('img')).toHaveClass('shrink-0');
-    expect(assistantAvatar.container.querySelector('img')).toBeNull();
-    expect(assistantAvatar.container.textContent).toContain('B');
+    expect(userAvatar.container.querySelector('img')?.getAttribute('style')).toContain('24');
+    // dmore 005/006/009/013：Bot 消息左侧 24px 头像，取 target.avatar。
+    expect(assistantAvatar.container.querySelector('img')).toHaveAttribute('src', 'B');
+    expect(assistantAvatar.container.querySelector('img')?.getAttribute('style')).toContain('24');
   });
 
   it('按 senderId 匹配认证用户名称，不把 Bot viewer 当作用户发起人', () => {
@@ -498,7 +499,7 @@ describe('ChatPanel interactive', () => {
     expect(screen.queryByTestId('user-message-actions-u2')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '引用消息' })).not.toBeInTheDocument();
     const latestUserActionArea = screen.getByTestId('message-copy-action-u2');
-    expect(latestUserActionArea).toHaveClass('justify-end', 'pr-11');
+    expect(latestUserActionArea).toHaveClass('justify-end');
     fireEvent.click(within(latestUserActionArea).getByRole('button', { name: '编辑消息' }));
     expect(onDraftChange).toHaveBeenCalledWith('最近的问题');
     expect(screen.getByRole('status', { name: '编辑消息状态' })).toBeInTheDocument();
@@ -508,9 +509,9 @@ describe('ChatPanel interactive', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('用户提问右对齐、Bot 回复左对齐，并使用 14px 正文与分组间距', () => {
+  it('用户提问右对齐、Bot 回复左对齐，并使用 13px 正文与分组间距（dmore 实测）', () => {
     mockBubbleRenders.length = 0;
-    render(
+    const { container: panel } = render(
       <ChatPanel
         target={botModeTarget as any}
         viewer={viewer}
@@ -537,11 +538,15 @@ describe('ChatPanel interactive', () => {
     const bubbles = mockBubbleRenders.filter(Boolean);
     expect(bubbles).toHaveLength(2);
     expect(bubbles.map((props) => props.className)).toEqual([
-      'mb-6 message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]',
-      'mb-0 message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]',
+      'message-bubble-compact [--aix-markdown-font-size:13px] [--aix-font-size-base:13px]',
+      'message-bubble-compact [--aix-markdown-font-size:13px] [--aix-font-size-base:13px]',
     ]);
+    // 分组间距(16px 同发送者/24px 切换)落在消息项外壳，操作行得以贴近本条气泡末尾。
+    expect(panel.querySelector('[data-message-id="u1"]')).toHaveClass('mb-6');
+    expect(panel.querySelector('[data-message-id="a1"]')).toHaveClass('mb-0');
     expect(bubbles.map((props) => (props.sender as { align?: string }).align)).toEqual(['right', 'left']);
-    expect((bubbles[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--primary) / 0.1)');
+    // SVG 稿实测：用户气泡 = #F5F5F5 中性灰（原品牌 10% 蓝底已回正），Bot 气泡无底。
+    expect((bubbles[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--muted))');
     expect((bubbles[1].sender as { bubbleColor?: string }).bubbleColor).toBeUndefined();
     const messageMeta = screen.getAllByTestId('message-sender-meta');
     expect(messageMeta).toHaveLength(2);
@@ -589,8 +594,8 @@ describe('ChatPanel interactive', () => {
       />,
     );
 
-    expect(screen.getByTestId('message-copy-action-u-copy')).toHaveClass('justify-end', 'pr-11');
-    expect(screen.getByTestId('message-copy-action-a-copy')).toHaveClass('justify-start', 'pl-11');
+    expect(screen.getByTestId('message-copy-action-u-copy')).toHaveClass('justify-end');
+    expect(screen.getByTestId('message-copy-action-a-copy')).toHaveClass('justify-start');
     expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(2);
     expect(mockBubbleRenders[1].actions).toBeTruthy();
 

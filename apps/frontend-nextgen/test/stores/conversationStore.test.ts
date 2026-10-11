@@ -94,6 +94,21 @@ describe('conversationStore', () => {
     expect(useConversationStore.getState().expandedBotIds).toEqual({});
   });
 
+  it('remembers collapsed sidebar Bot groups independently and dedupes no-op toggles', () => {
+    const store = useConversationStore.getState();
+    store.setBotGroupCollapsed('managed', true);
+    store.setBotGroupCollapsed('friend', true);
+    expect(useConversationStore.getState().collapsedBotGroups).toEqual({ managed: true, friend: true });
+
+    // 重复同值写入不产生新引用(setter 幂等短路)。
+    const before = useConversationStore.getState();
+    store.setBotGroupCollapsed('managed', true);
+    expect(useConversationStore.getState()).toBe(before);
+
+    store.setBotGroupCollapsed('managed', false);
+    expect(useConversationStore.getState().collapsedBotGroups).toEqual({ friend: true });
+  });
+
   it('others switches effective scope to all without erasing remembered mine scope', () => {
     const store = useConversationStore.getState();
     store.setManagedBotScope('bot-a:1', 'favorite');
