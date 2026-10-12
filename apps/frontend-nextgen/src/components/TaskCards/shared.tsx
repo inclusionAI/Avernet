@@ -5,7 +5,15 @@
 import type { TaskCardData, TaskReadyData } from './types';
 
 export function asItems(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  if (typeof value === 'string') {
+    const item = value.trim();
+    return item ? [item] : [];
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,7 +42,9 @@ export function readTaskCardData(params: Record<string, unknown>) {
 }
 
 /**
- * 顶层 task_ready 但未带 task 时用顶层字段补齐；否则沿用 data.task（保持引用，供 execute 携带原对象）。
+ * 顶层 task_ready 但未带 task（或 task 却缺可见字段）时，用顶层字段补齐；
+ * 末端再统一归一化列表字段，防止旧版卡片把列表写成字符串后调用
+ * Array.prototype.join 崩溃。
  */
 export function normalizeReadyTask(data: TaskCardData): TaskReadyData {
   const task = data.task;
@@ -46,15 +56,23 @@ export function normalizeReadyTask(data: TaskCardData): TaskReadyData {
       Array.isArray(task.constraints),
   );
 
-  if (task && hasCompleteVisibleFields) return task;
+  const base: TaskReadyData = task && hasCompleteVisibleFields
+    ? task
+    : {
+        task_type: task?.task_type ?? 'dynamic',
+        workflow_id: task?.workflow_id,
+        goal: task?.goal ?? data.goal,
+        deliverables: task?.deliverables ?? data.deliverables,
+        acceptance_criteria: task?.acceptance_criteria ?? data.acceptance_criteria,
+        constraints: task?.constraints ?? data.constraints,
+        resources: task?.resources ?? data.resources,
+      };
 
   return {
-    task_type: task?.task_type ?? 'dynamic',
-    workflow_id: task?.workflow_id,
-    goal: task?.goal ?? data.goal,
-    deliverables: task?.deliverables ?? data.deliverables,
-    acceptance_criteria: task?.acceptance_criteria ?? data.acceptance_criteria,
-    constraints: task?.constraints ?? data.constraints,
-    resources: task?.resources ?? data.resources,
+    ...base,
+    deliverables: asItems(base.deliverables),
+    acceptance_criteria: asItems(base.acceptance_criteria),
+    constraints: asItems(base.constraints),
+    resources: asItems(base.resources),
   };
 }
