@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import inspect
 
-from agentclaw.community.core.agentcompute.domain.models import BotCreateSpec
+from agentclaw.community.core.agentcompute.domain.models import (
+    BotCreateSpec, BotId, IdempotencyKey,
+)
 from agentclaw.community.core.agentcompute.spi.bot import BotPlatform
 
 
@@ -26,20 +28,23 @@ class TestBotPlatformConformance:
         assert [p.name for p in params] == ["self", "spec", "idempotency_key"]
         assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params[1:])
         assert params[1].annotation is BotCreateSpec
-        assert params[2].annotation is str
-        assert sig.return_annotation is str
+        assert params[2].annotation is IdempotencyKey
+        assert sig.return_annotation is BotId
 
     def test_bot_status_takes_bot_id_returns_str(self):
         sig = _sig("bot_status")
         assert list(sig.parameters) == ["self", "bot_id"]
+        assert sig.parameters["bot_id"].annotation is BotId
         assert sig.return_annotation is str
 
     def test_delete_bot_takes_bot_id_returns_bool(self):
         sig = _sig("delete_bot")
         assert list(sig.parameters) == ["self", "bot_id"]
+        assert sig.parameters["bot_id"].annotation is BotId
         assert sig.return_annotation is bool
 
     def test_chat_takes_bot_id_and_message_returns_str(self):
         sig = _sig("chat")
         assert list(sig.parameters) == ["self", "bot_id", "message"]
+        assert sig.parameters["bot_id"].annotation is BotId
         assert sig.return_annotation is str

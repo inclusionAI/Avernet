@@ -23,29 +23,31 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.agentcompute.domain.models import BotCreateSpec
+from agentclaw.community.core.agentcompute.domain.models import (
+    BotCreateSpec, BotId, IdempotencyKey,
+)
 
 
 @runtime_checkable
 class BotPlatform(Protocol):
 
     def create_bot(self, *, spec: BotCreateSpec,
-                   idempotency_key: str) -> str:
+                   idempotency_key: IdempotencyKey) -> BotId:
         """Provision a transient bot for the persona described by spec;
         returns a non-empty bot_id or raises when the platform cannot
         accept it. The adapter translates spec into the product create
         request and composes the manifest document."""
         ...
 
-    def bot_status(self, bot_id: str) -> str:
+    def bot_status(self, bot_id: BotId) -> str:
         """Current BotState-like status string for the bot."""
         ...
 
-    def delete_bot(self, bot_id: str) -> bool:
+    def delete_bot(self, bot_id: BotId) -> bool:
         """Best-effort removal of the transient bot."""
         ...
 
-    def chat(self, bot_id: str, message: str) -> str:
+    def chat(self, bot_id: BotId, message: str) -> str:
         """Send one objective and return the bot's raw reply text; the
         caller owns parsing. Non-2xx-equivalent failures raise."""
         ...

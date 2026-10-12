@@ -13,8 +13,8 @@ import json
 import time
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpec, BotCreateSpec, BotState, Run, SubagentResult,
-    TaskEnvelope,
+    AgentSpec, BotCreateSpec, BotState, IdempotencyKey, Run,
+    SubagentResult, TaskEnvelope,
 )
 from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
@@ -56,7 +56,8 @@ class AvernetSubagent:
                     model=self._spec.model,
                     metadata=dict(self._spec.metadata),
                 ),
-                idempotency_key=f"{self._run.run_id}:{self._spec.name}",
+                idempotency_key=IdempotencyKey(
+                    f"{self._run.run_id}:{self._spec.name}"),
             )
         except Exception:
             if self._obs is not None:
