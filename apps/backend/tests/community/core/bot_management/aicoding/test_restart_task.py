@@ -221,40 +221,35 @@ async def test_concurrent_submissions_dedup_before_backup(setup):
     import asyncio
 
     s = setup
-    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-
-    results = await asyncio.gather(*[submit(s) for _ in range(12)], return_exceptions=True)
-    accepted = [r for r in results if isinstance(r, dict)]
-    assert accepted
-    for result in results:
-        if not isinstance(result, dict):
-            assert isinstance(result, BotServiceError)
-            assert str(result) == "重启请求正在提交，请稍后重试"
-    assert len({r["restart_operation_id"] for r in accepted}) == 1
+    results = await asyncio.gather(*[submit(s) for _ in range(12)])
+    assert len({r["restart_operation_id"] for r in results}) == 1
     assert len(s.queue.tasks) == 1
     s.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_enqueue_failure_marks_failed_without_executing_backup(setup):
+@pytest.mark.parametrize("original_status", ["ACTIVE", "FAILED", "PENDING"])
+async def test_enqueue_failure_restores_original_status(setup, original_status):
+    setup.repo.bot["status"] = original_status
     setup.queue.fail = True
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await submit(setup)
-    assert setup.repo.bot["status"] == "FAILED"
-    assert journal(setup.repo.bot)["phase"] == "FAILED"
-    assert "任务提交失败" in setup.repo.bot["ext"]["start_message"]
-    assert task(setup) is None
+    assert setup.repo.bot["status"] == original_status
+    assert KEY not in setup.repo.bot["ext"]
     setup.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_initialization_failure_never_enqueues_task(setup):
+async def test_worker_repairs_enqueue_before_journal_crash(setup):
     s = setup
-    s.repo.failed_write = True
-    with pytest.raises(RuntimeError, match="database unavailable"):
-        await submit(s)
-    assert task(s) is None and KEY not in s.repo.bot["ext"]
-    s.service.restart_bot.assert_not_called()
+    with patch.object(s.repo, "compare_and_set_ext", side_effect=RuntimeError("database unavailable")):
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await submit(s)
+    assert task(s) is not None and KEY not in s.repo.bot["ext"]
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+    assert s.repo.bot["status"] == "PENDING"
 
 
 @pytest.mark.asyncio
@@ -801,139 +796,99 @@ async def test_duplicate_during_rebuild_never_starts_another_backup(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bot_type", ["personal", "service"])
-async def test_worker_wakes_inside_enqueue_after_single_pending_write(setup, monkeypatch, bot_type):
-    """Reproduce the HTTP/worker overlap, with affected-row no-op semantics."""
+async def test_immediate_worker_cannot_repeat_pending_or_be_reset_by_admission(setup, monkeypatch):
     s = setup
-    s.repo.bot["bot_type"] = bot_type
-    writes = []
-    original_update = s.repo.update_by_owner
-    original_enqueue = s.queue.enqueue
-
-    def update(bot_id, owner_id, changes):
-        writes.append(deepcopy(changes))
-        if all(s.repo.bot.get(k) == v for k, v in changes.items()):
-            return None
-        return original_update(bot_id, owner_id, changes)
-
-    def enqueue(*args, **kwargs):
-        assert s.repo.bot["status"] == "PENDING"
-        assert journal(s.repo.bot)["phase"] == "QUEUED"
-        accepted = original_enqueue(*args, **kwargs)
-        assert isinstance(s.handler.handle(accepted.record.payload), Reschedule)
-        assert journal(s.repo.bot)["phase"] == "WAITING_READY"
-        # A callback can advance the visible status before HTTP returns.
-        s.repo.bot["status"] = "ACTIVE"
-        return accepted
-
     mock_lifecycle(s)
-    monkeypatch.setattr(s.repo, "update_by_owner", update)
-    monkeypatch.setattr(s.queue, "enqueue", enqueue)
-    result = await submit(s)
+    enqueue = s.queue.enqueue
+    with patch.object(s.repo, "update_by_owner", wraps=s.repo.update_by_owner) as update:
+        def wake_worker(*args, **kwargs):
+            assert s.repo.bot["status"] == "PENDING"
+            result = enqueue(*args, **kwargs)
+            assert isinstance(s.handler.handle(result.record.payload), Reschedule)
+            s.repo.bot["status"] = "ACTIVE"
+            return result
+
+        monkeypatch.setattr(s.queue, "enqueue", wake_worker)
+        result = await submit(s)
     assert result["status"] == "ACTIVE"
-    assert writes == [{"status": "PENDING"}]
-    s.service.restart_bot.assert_called_once()
+    update.assert_called_once_with("b", "o", {"status": "PENDING"})
 
 
 @pytest.mark.asyncio
-async def test_worker_does_not_recreate_missing_admission_journal(setup):
+@pytest.mark.parametrize("write_applied", [False, True])
+async def test_empty_pending_update_requires_confirmed_status(setup, monkeypatch, write_applied):
     s = setup
-    await submit(s)
-    s.repo.bot["ext"].pop(KEY)
-    s.repo.bot["status"] = "ACTIVE"
-    assert isinstance(s.handler.handle(task(s).payload), Complete)
-    assert KEY not in s.repo.bot["ext"]
-    assert s.repo.bot["status"] == "ACTIVE"
+    update = s.repo.update_by_owner
+
+    def empty_result(*args):
+        if write_applied:
+            update(*args)
+        return None
+
+    monkeypatch.setattr(s.repo, "update_by_owner", empty_result)
+    if write_applied:
+        assert (await submit(s))["status"] == "PENDING"
+        assert task(s) is not None
+    else:
+        with pytest.raises(RestartSuperseded, match="not confirmed"):
+            await submit(s)
+        assert task(s) is None
+        assert s.repo.bot["status"] == "ACTIVE"
     s.service.restart_bot.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_none_status_result_is_accepted_only_after_readback_confirms_write(setup, monkeypatch):
+async def test_enqueue_lost_response_keeps_pending_and_worker_recovery(setup, monkeypatch):
     s = setup
-    original = s.repo.update_by_owner
+    enqueue = s.queue.enqueue
 
-    def update(*args):
-        original(*args)
-        return None
+    def lost_response(*args, **kwargs):
+        enqueue(*args, **kwargs)
+        raise ConnectionError("enqueue response lost")
 
-    monkeypatch.setattr(s.repo, "update_by_owner", update)
-    result = await submit(s)
-    assert result["status"] == "PENDING"
+    monkeypatch.setattr(s.queue, "enqueue", lost_response)
+    with pytest.raises(ConnectionError, match="response lost"):
+        await submit(s)
+    assert s.repo.bot["status"] == "PENDING"
+    assert task(s) is not None and KEY not in s.repo.bot["ext"]
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+
+
+@pytest.mark.asyncio
+async def test_retry_after_exit_before_enqueue_is_not_stuck_in_orphan_journal(setup, monkeypatch):
+    s = setup
+    enqueue = s.queue.enqueue
+
+    class AdmissionExit(BaseException):
+        pass
+
+    def process_exit(*args, **kwargs):
+        raise AdmissionExit()
+
+    monkeypatch.setattr(s.queue, "enqueue", process_exit)
+    with pytest.raises(AdmissionExit):
+        await submit(s)
+    assert task(s) is None and KEY not in s.repo.bot["ext"]
+    assert s.repo.bot["status"] == "PENDING"
+    monkeypatch.setattr(s.queue, "enqueue", enqueue)
+    assert (await submit(s))["status"] == "PENDING"
     assert task(s) is not None
 
 
 @pytest.mark.asyncio
-async def test_unconfirmed_pending_write_never_enqueues(setup, monkeypatch):
+async def test_lost_enqueue_response_does_not_undo_completed_task_status(setup, monkeypatch):
     s = setup
-    original = s.repo.update_by_owner
+    enqueue = s.queue.enqueue
 
-    def update(bot_id, owner_id, changes):
-        if changes == {"status": "PENDING"}:
-            return None
-        return original(bot_id, owner_id, changes)
+    def completed_before_response(*args, **kwargs):
+        result = enqueue(*args, **kwargs)
+        result.record.status = TaskStatus.FAILED
+        s.repo.bot["status"] = "FAILED"
+        raise ConnectionError("enqueue response lost")
 
-    monkeypatch.setattr(s.repo, "update_by_owner", update)
-    with pytest.raises(RestartSuperseded, match="not confirmed"):
+    monkeypatch.setattr(s.queue, "enqueue", completed_before_response)
+    with pytest.raises(ConnectionError):
         await submit(s)
-    assert task(s) is None
     assert s.repo.bot["status"] == "FAILED"
-    s.service.restart_bot.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_concurrent_http_cannot_accept_unsubmitted_operation(setup, monkeypatch):
-    import asyncio
-    from threading import Event
-    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-
-    s = setup
-    entered, release = Event(), Event()
-    original = s.repo.update_by_owner
-    writes = []
-
-    def update(bot_id, owner_id, changes):
-        writes.append(deepcopy(changes))
-        if changes == {"status": "PENDING"}:
-            entered.set()
-            assert release.wait(5)
-        return original(bot_id, owner_id, changes)
-
-    monkeypatch.setattr(s.repo, "update_by_owner", update)
-    first = asyncio.create_task(submit(s))
-    try:
-        assert await asyncio.to_thread(entered.wait, 5)
-        with pytest.raises(BotServiceError, match="正在提交"):
-            await submit(s)
-        assert task(s) is None
-    finally:
-        release.set()
-        await first
-    assert writes == [{"status": "PENDING"}]
-    assert len(s.queue.tasks) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("changed", ["binding", "engine", "operation", "phase"])
-async def test_changed_admission_cannot_enqueue_without_confirmed_pending(setup, monkeypatch, changed):
-    s = setup
-    original = s.repo.compare_and_set_ext
-
-    def initialize(**kwargs):
-        result = original(**kwargs)
-        if result is not None and journal(result).get("phase") == "QUEUED":
-            if changed == "binding":
-                s.repo.bot["binding_id"] = 8
-            elif changed == "engine":
-                s.repo.bot["active_engine"] = "openclaw"
-            elif changed == "operation":
-                s.repo.bot["ext"][KEY]["operation_id"] = "replacement"
-            else:
-                s.repo.bot["ext"][KEY]["phase"] = "BACKING_UP"
-        return result
-
-    monkeypatch.setattr(s.repo, "compare_and_set_ext", initialize)
-    with pytest.raises(RestartSuperseded, match="admission changed"):
-        await submit(s)
-    assert task(s) is None
-    assert s.repo.bot["status"] == "ACTIVE"
-    s.service.restart_bot.assert_not_called()

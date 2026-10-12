@@ -20,17 +20,14 @@ prepare_restart_async. No frontend, schema, status-route or device-callback chan
 
 The strategy validates ordinary bound Bot input and joins an existing live task
 before creating a new one. Queue dedup uses tenant/owner/bot. Payload freezes the
-engine, old binding/device/provider, operation ID, timestamp and original status.
+engine, old binding/device/provider, operation ID, timestamp and expected PENDING status.
 Template values use their existing protected storage, not queue payloads.
 
 The original ext-only CAS saves the operation journal and clears old start_*
-errors. Admission writes PENDING through the existing update_by_owner before
-enqueuing the task, without replacing ext. The worker only reads the admitted
-operation and never repeats PENDING initialization. An empty update result is
-accepted only after readback confirms the same operation, phase, target, engine
-and intended status. Concurrent submissions join an enqueued operation or report
-that admission is still in progress; they do not claim an unsubmitted task was
-accepted. Backup and platform mutation run in a worker.
+errors. Synchronous admission writes PENDING before enqueue without replacing ext;
+workers initialize/recover the journal but never write initial PENDING. Queue
+dedup and task_id fencing remain unchanged. Only admission runs in the request
+thread; backup and platform mutation run in a worker.
 The original status endpoints read get_bot and existing error fields unchanged.
 Browser polling remains 3 seconds / 5 minutes; timeout does not cancel the task.
 
@@ -82,12 +79,11 @@ The frontend continues to use the original stored-runtime readiness semantics.
   frontend or /status change is required for this policy.
 - Target checks reject already-observed engine/binding changes. No lifecycle-field
   database CAS exists in the restored Repository interface.
-- Ext and status use separate writes. Initialization/enqueue exceptions propagate
-  and finalize the owned operation as FAILED. Workers can repair incomplete FAILED
-  status writes, but never initialize PENDING. A process exit after journal/status
-  initialization and before enqueue can leave an operation without a task; this
-  bounded fix does not add automatic recovery for that window. Operational
-  reconciliation is needed in that case; repeated admission alone cannot repair it.
+- Ext and status use separate writes. Exceptions propagate; repeat admission or
+  worker ensure can repair incomplete FAILED status and missing journals. A crash
+  before enqueue leaves no journal, so a later request can retry, although the Bot
+  can remain PENDING until then. Repair after permanent queue termination is not
+  guaranteed.
 - Re-reading operation/target before status update does not eliminate races with
   other writers between the read and UPDATE. No unconditional full-ext rewrite
   is used because it could erase the CAS-owned mutation fence.

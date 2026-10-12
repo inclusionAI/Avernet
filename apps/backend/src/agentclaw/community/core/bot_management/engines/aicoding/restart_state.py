@@ -100,70 +100,53 @@ class RestartState:
                 return self._sync_status(updated) if failed else updated
         raise RuntimeError("Restart journal update contention")
 
-    def initialize(
-        self, payload: dict, previous_operation_id: str | None,
-        *, replace_terminal_task: bool = False,
-    ) -> dict:
-        """Claim the journal for synchronous admission, before PENDING and enqueue.
+    def ensure(self, payload: dict, task_id: int) -> dict:
+        """Both submitter and worker can repair an enqueue-before-journal crash.
 
-        A concurrent admission joins the winner without repeating its status write.
-        No worker repairs admission or the process-exit-before-enqueue window.
+        Queue dedup is the admission authority. The monotonic task row ID prevents
+        a delayed submitter overwriting a subsequent operation or its outcome.
+        Admission writes PENDING before enqueue; ensure only repairs the journal
+        and terminal FAILED status, never initializes PENDING.
         """
         for _ in range(12):
             bot = self.read()
             old = journal(bot)
-            if old.get("phase") in IN_PROGRESS and not (
-                replace_terminal_task and old.get("operation_id") == previous_operation_id
-            ):
-                return bot
-            if old.get("operation_id") != previous_operation_id:
+            if old.get("operation_id") == self.operation_id:
+                return self._sync_status(bot)
+            if int(old.get("task_id") or 0) >= task_id:
                 raise RestartSuperseded("A newer restart owns this Bot")
-            if not (
+            matches = (
                 supports(bot)
                 and bot.get("active_engine") == payload["engine"]
                 and bot.get("binding_id") == payload["binding_id"]
                 and bot.get("status") == payload["previous_status"]
-            ):
-                raise RestartSuperseded("Restart target or status changed")
-            ext = deepcopy(bot.get("ext") or {})
-            ext[KEY] = {
+            )
+            record = {
                 "operation_id": self.operation_id,
-                "phase": "QUEUED",
-                "error_message": None,
+                "task_id": task_id,
+                "phase": "QUEUED" if matches else "FAILED",
+                "error_message": None
+                if matches
+                else "重启目标或状态已变化，本次重启未执行",
                 "binding_id": payload["binding_id"],
                 "engine": payload["engine"],
                 "started_at": payload["started_at"],
             }
-            ext.pop("start_status", None)
-            ext.pop("start_message", None)
+            ext = deepcopy(bot.get("ext") or {})
+            ext[KEY] = record
+            if matches:
+                # A previous startup/restart error must not stop the new poll.
+                ext.pop("start_status", None)
+                ext.pop("start_message", None)
             result = self.repository.compare_and_set_ext(
-                bot_id=self.bot_id, owner_id=self.owner_id,
-                expected_ext=bot.get("ext"), ext=ext,
+                bot_id=self.bot_id,
+                owner_id=self.owner_id,
+                expected_ext=bot.get("ext"),
+                ext=ext,
             )
             if result is not None:
-                return result
+                return self._sync_status(result) if matches else result
         raise RuntimeError("Restart journal initialization contention")
-
-    def mark_pending(self, bot: dict) -> None:
-        """Synchronous admission only: confirm PENDING before exposing the task."""
-        updated = self._sync_status(bot)
-        record = journal(updated)
-        if (
-            record.get("operation_id") != self.operation_id
-            or record.get("phase") != "QUEUED"
-            or updated.get("binding_id") != bot.get("binding_id")
-            or updated.get("active_engine") != bot.get("active_engine")
-            or updated.get("status") != "PENDING"
-        ):
-            raise RestartSuperseded("Restart admission changed before enqueue")
-
-    def read_for_task(self) -> dict:
-        """Observe the admitted operation; only failure finalization may write status."""
-        bot = self.read()
-        record = journal(bot)
-        if record.get("operation_id") != self.operation_id:
-            raise RestartSuperseded("Restart task no longer owns the journal")
-        return self._sync_status(bot) if record.get("phase") == "FAILED" else bot
 
     def _sync_status(self, bot: dict) -> dict:
         """Reuse status-only updates without overwriting the CAS-owned journal.
@@ -175,7 +158,7 @@ class RestartState:
         """
         record = journal(bot)
         phase = record.get("phase")
-        if phase not in {"QUEUED", "FAILED"}:
+        if phase != "FAILED":
             return bot
         target = record.get("failed_binding_id", record.get("binding_id"))
         current = self.read()
@@ -188,7 +171,7 @@ class RestartState:
             or current.get("active_engine") != record.get("engine")
         ):
             return current
-        status = "FAILED" if phase == "FAILED" else "PENDING"
+        status = "FAILED"
         # A rejected admission has no matching public failure marker.
         if phase == "FAILED" and (
             (current.get("ext") or {}).get("start_status") != "FAILED"
@@ -202,17 +185,7 @@ class RestartState:
             self.bot_id, self.owner_id, {"status": status}
         )
         if updated is None:
-            current = self.read()
-            record_now = journal(current)
-            if (
-                record_now.get("operation_id") == self.operation_id
-                and record_now.get("phase") == phase
-                and current.get("binding_id") == target
-                and current.get("active_engine") == record.get("engine")
-                and current.get("status") == status
-            ):
-                return current
-            raise RestartSuperseded("Bot status write was not confirmed")
+            raise RestartSuperseded("Bot disappeared while saving restart status")
         return updated
 
     def fail(self, message: str) -> dict:
