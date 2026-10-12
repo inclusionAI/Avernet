@@ -1,0 +1,500 @@
+"""Avernet-kind end-to-end: a real swarm run over the real host platform.
+
+The two existing e2e batteries (test_e2e, test_wire_e2e) drive LLM-kind
+agents only — until the host adapter landed there was nothing to bind, so
+this path had no end-to-end at all. This one exercises every in-process
+hop with exactly two doubles:
+
+- ``BotService.create_bot`` stands in for provisioning (the with-manifest
+  endpoint suite's stand-in: device allocation posts to BaaS, the one
+  collaborator a request cannot drive; it persists the row as ACTIVE, and
+  everything above it is real — engine gates, quota preflight, the local
+  Passport auto-issue, manifest preflight, the storage write).
+- ``grt_chat`` is scripted (the engine WebSocket needs a real container);
+  the adapter's thread bridge runs it exactly as it runs the real service.
+
+Two in-memory stores on purpose: the swarm's ``ac_agent_compute_*`` tables
+under the hand-wired harness (the existing e2e shape), and the platform's
+own tables under the full test-profile injector — the adapter is the only
+bridge, which is the seam's whole point. A pump coroutine drives task-queue
+turns (the endpoint harness's ``_Worker``: claim, dispatch the real
+``BotCreateWithManifestHandler``, settle the row) while the swarm's slice
+loop runs, because creation is asynchronous: the subagent polls
+``bot_status``, the pump completes the job, a later poll sees READY, one
+chat round trips, the shard lands, the orchestrator finishes the run.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import threading
+import time
+import types
+from contextlib import contextmanager
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from tests.community.framework.di_seams import bind_overrides
+from tests.community.framework.world import World
+
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.agentcompute.config.settings import (
+    AgentComputeConfig, AgentComputeOrchestrationConfig, LlmConfig,
+)
+from agentclaw.community.core.agentcompute.domain import models as dm
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
+from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
+    Orchestrator,
+)
+from agentclaw.community.core.agentcompute.orchestration.termination import (
+    TerminationEvaluator,
+)
+from agentclaw.community.core.agentcompute.plugins.agents.factory import (
+    DefaultSubagentFactory,
+)
+from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
+    DecisionParser,
+)
+from agentclaw.community.core.agentcompute.plugins.llm.stub import StubLLMProvider
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.runtime.handler import SwarmRunHandler
+from agentclaw.community.core.agentcompute.runtime.pool import SubagentRuntime
+from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
+from agentclaw.community.core.agentcompute.service import AgentComputeService
+from agentclaw.community.core.agentcompute.service.protocols import (
+    SubmitRunRequest,
+)
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    APPLY_TASK_TYPE,
+)
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    CREATE_JOB_TASK_TYPE,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    BotCreationManifestSeam, CREATE_ON_CONTAINER_TRIGGER,
+)
+from agentclaw.community.core.bot_inventory.protocols import (
+    BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.core.task_queue.types import (
+    Complete, DEFAULT_APP, Fail, Reschedule, TaskStatus,
+)
+from agentclaw.community.plugins.community.agentcompute_platform import (
+    AgentComputePlatformConfig, AvernetBotPlatform,
+)
+from agentclaw.community.utils.env_utils import get_current_env
+
+TENANT = "avernet-e2e-tenant"
+OWNER = "avernet-e2e-owner"
+
+
+class _TestDB:
+    def __init__(self, engine):
+        self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
+@pytest.fixture()
+def swarm_db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    yield _TestDB(engine)
+
+
+@pytest.fixture()
+def world():
+    """The framework world fixture's lean core: the full test-profile DI
+    graph with fresh in-memory tables, minus the HTTP app attachment and
+    the publish poller — neither is ever constructed here."""
+    # registers the process config provider as an import side effect, the
+    # same one the framework fixture relies on — without it every config
+    # read degrades to production defaults (/home/admin, say).
+    from agentclaw.community.adapters.http.app import app  # noqa: F401
+    from agentclaw.community.di import DeployProfile, build_injector
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+    from agentclaw.community.plugins.local import database as db_mod
+
+    injector = build_injector(profile=DeployProfile.detect())
+    asyncio.run(injector.get(DatabasePlugin).bootstrap())
+    try:
+        yield World(injector)
+    finally:
+        if db_mod._engine is not None:
+            db_mod._engine.dispose()
+
+
+def _config() -> AgentComputeConfig:
+    orch = AgentComputeOrchestrationConfig(
+        max_turns=10,
+        slice_max_seconds=5.0,
+        slice_interval=0.0,
+        orchestrator_turn_interval=0.01,
+        subagent_max_attempts=1,
+        batch_size=4,
+    )
+    return AgentComputeConfig(
+        llm=LlmConfig(base_url="stub", api_key="stub", default_model="stub"),
+        orchestration=orch,
+        message_retention_tail=2,
+    )
+
+
+def _build_swarm(db, script, platform):
+    cfg = _config()
+    repos = {
+        "run": RunRepository(db), "agent": AgentRepository(db),
+        "message": MessageRepository(db), "shard": ResultShardRepository(db),
+        "round": RoundRepository(db), "guard": GuardEventRepository(db),
+        "job": JobRepository(db),
+    }
+    llm = StubLLMProvider(script=script)
+    orchestrator = Orchestrator(
+        llm=llm,
+        parser=DecisionParser(),
+        guards=GuardService(
+            max_width=cfg.orchestration.max_width,
+            max_depth=cfg.orchestration.max_depth,
+        ),
+        config=cfg,
+    )
+    runtime = SubagentRuntime(
+        factory=DefaultSubagentFactory(llm=llm, platform=platform),
+        max_width=cfg.orchestration.max_width,
+        max_attempts=cfg.orchestration.subagent_max_attempts,
+        per_task_timeout=cfg.orchestration.per_subagent_timeout,
+        artifact_inline_threshold=cfg.artifact_inline_threshold,
+    )
+    handler = SwarmRunHandler(
+        config=cfg, orchestrator=orchestrator, runtime=runtime,
+        run_repo=repos["run"], agent_repo=repos["agent"],
+        message_repo=repos["message"], shard_repo=repos["shard"],
+        round_repo=repos["round"], guard_repo=repos["guard"],
+        job_repo=repos["job"],
+        termination=TerminationEvaluator(max_turns=cfg.orchestration.max_turns),
+        guards=GuardService(),
+    )
+    worker = AgentComputeWorker(config=cfg, handler=handler, job_repo=repos["job"])
+    service = AgentComputeService(
+        run_repo=repos["run"], job_repo=repos["job"],
+        agent_repo=repos["agent"], message_repo=repos["message"],
+        round_repo=repos["round"], guard_repo=repos["guard"],
+        shard_repo=repos["shard"], config=cfg,
+    )
+    return service, worker, repos
+
+
+def _spawn_decision(*agents: tuple[str, str]) -> str:
+    return json.dumps({
+        "kind": "spawn_agent",
+        "agents": [{"name": n, "objective": o} for n, o in agents],
+    })
+
+
+def _wait_decision(*refs: str) -> str:
+    return json.dumps({"kind": "wait", "refs": list(refs), "mode": "all"})
+
+
+def _finish_decision(answer: str) -> str:
+    return json.dumps({"kind": "finish", "answer": answer})
+
+
+class _ScriptedGrtChat:
+
+    def __init__(self, reply: str):
+        self.reply = reply
+        self.received: list[str] = []
+        self.sandboxes: list[str] = []
+
+    def get_sandbox_id(self, bot_id, owner_id):
+        self.sandboxes.append(bot_id)
+        return f"sb-{bot_id}"
+
+    async def connect_engine_ws(self, sandbox_id):
+        return types.SimpleNamespace(close=_noop_async, closed=False)
+
+    async def chat_send(self, ws, message):
+        self.received.append(message)
+        return types.SimpleNamespace(text=self.reply)
+
+
+async def _noop_async():
+    return None
+
+
+def _stand_in_for_provisioning(world) -> list[dict]:
+    """Persist the row ``create_bot`` would, without allocating a device.
+
+    The one collaborator a request cannot drive: allocation posts to BaaS
+    and the local ``HttpClient`` seam refuses an unstubbed call. Everything
+    above it stays real, and the stand-in keeps the real one's contract —
+    idempotent on a supplied ``bot_id``, so a re-claimed task cannot double.
+    """
+    created: list[dict] = []
+    bot_repo = world.get(BotRepository)
+
+    from agentclaw.community.core.repository.protocols.devices import (
+        DeviceBindingRepository,
+    )
+    from tests.community.factories.access import make_staff_user
+    make_staff_user(world, user_id=OWNER)
+    binding_repo = world.get(DeviceBindingRepository)
+
+    def create_bot(_self, **kwargs):
+        existing = bot_repo.get_by_id_and_entity(
+            kwargs["bot_id"], kwargs.get("entity_id") or kwargs["user_id"]
+        )
+        if existing is not None:
+            return existing
+        # A local (pathlib) device binding: what allocation would have given
+        # the bot — the identity apply resolves it, and its writes land under
+        # the local workspace root the test points at a temp dir.
+        bind_id = binding_repo.insert_binding(
+            entity_id=kwargs.get("entity_id") or kwargs["user_id"],
+            entity_type="staff",
+            device_id=f"dev_{kwargs['bot_id']}",
+            device_provider="local", env="dev", device_props={},
+            status="ACTIVE", apply_reason="e2e stand-in",
+            applied_by=kwargs["user_id"],
+        )
+        record = bot_repo.insert(
+            {
+                "bot_id": kwargs["bot_id"],
+                "bot_name": kwargs.get("bot_name") or kwargs["bot_id"],
+                "bot_desc": kwargs.get("bot_desc"),
+                "owner_id": kwargs["user_id"],
+                "owner_name": kwargs["user_id"],
+                "entity_id": kwargs.get("entity_id") or kwargs["user_id"],
+                "entity_type": kwargs.get("entity_type") or "staff",
+                "creator_id": kwargs["user_id"],
+                "bot_type": kwargs.get("bot_type") or "personal",
+                "status": "ACTIVE",
+                "active_engine": kwargs.get("engine_type") or "openclaw",
+                "binding_id": bind_id,
+            }
+        )
+        created.append(record)
+        return record
+
+    from agentclaw.community.api.bot_service import BotServiceProtocol
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+    bind_overrides(
+        world, BotServiceProtocol, {"create_bot": create_bot},
+        also_bind=(BotService,),
+    )
+    return created
+
+
+class _TaskQueuePump(threading.Thread):
+    """The endpoint suite's ``_Worker`` on its own thread: claim, run the
+    real creation and apply handlers, settle the row. A thread, not a
+    coroutine, because the creation handler and its apply phases bridge
+    their internal async bits with ``asyncio.run`` — legal on a thread
+    with no loop, fatal inside the swarm's already-running one. Reschedules
+    come back immediately — the job's five-second poll delay is latency,
+    not sequencing."""
+
+    _WORKER = "avernet-e2e-worker"
+
+    def __init__(self, world) -> None:
+        super().__init__(daemon=True)
+        self._world = world
+        self._stopped = threading.Event()
+        self._repo = world.get(TaskQueueRepositoryProtocol)
+
+    def _dispatch(self, task):
+        from agentclaw.community.core.bot_config_manifest.create_job import (
+            BotCreateWithManifestHandler,
+        )
+        if task.task_type == CREATE_JOB_TASK_TYPE:
+            return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
+        if task.task_type == APPLY_TASK_TYPE:
+            self._world.get(BotConfigManifestApplyServiceProtocol).run_apply_task(
+                task.payload
+            )
+            return Complete()
+        return None
+
+    def _settle(self, task, outcome) -> None:
+        if outcome is None or isinstance(outcome, Reschedule):
+            self._repo.reschedule(
+                task_id=task.id,
+                worker_id=self._WORKER,
+                delay_seconds=0 if outcome is not None else 3600,
+            )
+        elif isinstance(outcome, Fail):
+            self._repo.fail(task_id=task.id, worker_id=self._WORKER, error=outcome.error)
+        else:
+            self._repo.complete(task_id=task.id, worker_id=self._WORKER)
+
+    def turn(self) -> list:
+        claimed = self._repo.claim_batch(
+            worker_id=self._WORKER,
+            env=get_current_env(),
+            app=DEFAULT_APP,
+            limit=10,
+            lease_seconds=300,
+        )
+        settled = []
+        for task in claimed:
+            outcome = self._dispatch(task)
+            self._settle(task, outcome)
+            settled.append((task.task_type, outcome))
+        return settled
+
+    def run(self):
+        while not self._stopped.is_set():
+            if self.turn():
+                continue
+            time.sleep(0.01)
+
+    def stop_and_join(self, timeout: float = 30):
+        self._stopped.set()
+        self.join(timeout)
+        assert not self.is_alive(), "the task-queue pump thread did not stop"
+
+
+class TestAvernetKindEndToEnd:
+
+    @pytest.mark.asyncio
+    async def test_avernet_agent_runs_a_real_swarm_round(
+            self, world, swarm_db, tmp_path):
+        from agentclaw.community.core.config.provider import load_config
+        load_config().user_config["aidesktop_root"] = str(tmp_path)
+
+        from agentclaw.community.api.bot_service import BotServiceProtocol
+        from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import (
+            SkillSetServiceFactoryProtocol,
+        )
+        from agentclaw.community.plugin_api.passport import PassportPlugin
+
+        created = _stand_in_for_provisioning(world)
+        grt = _ScriptedGrtChat(reply='{"answer": "survey ok"}')
+        platform = AvernetBotPlatform(
+            config=AgentComputePlatformConfig(
+                engine_type="openclaw", cluster_name="ACRA",
+                owner_work_no=OWNER, identity_file="SOUL.md",
+            ),
+            manifest_seam=world.get(ManifestCreationSeam),
+            bot_service=world.get(BotServiceProtocol),
+            passport_plugin=world.get(PassportPlugin),
+            skill_set_factory=world.get(SkillSetServiceFactoryProtocol),
+            bot_repo=world.get(BotRepository),
+            apply_service=world.get(BotConfigManifestApplyServiceProtocol),
+            space_context=world.get(BusinessSpaceContextProtocol),
+            grt_chat=grt,
+        )
+
+        script = [
+            _spawn_decision(("surveyor", "survey the incident")),
+            _wait_decision("surveyor"),
+            _finish_decision("e2e-avernet-done"),
+        ]
+        service, worker, repos = _build_swarm(swarm_db, script, platform)
+        req = SubmitRunRequest(
+            tenant=TENANT,
+            goal="e2e: an avernet-kind agent answers through the platform",
+            agents=(
+                dm.AgentSpec(
+                    name="surveyor", role="swarm surveyor persona",
+                    instructions="Be a concise surveyor.",
+                    kind=dm.AgentKind.AVENET,
+                ),
+            ),
+        )
+        run_id = await service.submit_async(req)
+
+        # The pump thread settles the creation job while the swarm's
+        # slices run on the loop; the subagent's 1s READY poll yields in
+        # between, and a later poll sees READY.
+        pump = _TaskQueuePump(world)
+        pump.start()
+
+        async def _drive():
+            run = None
+            for _ in range(400):
+                await worker.run_once()
+                run = repos["run"].get(dm.RunId(run_id), TENANT)
+                if run is not None and run.status is not dm.RunStatus.RUNNING:
+                    return run
+                await asyncio.sleep(0.01)
+            return run
+
+        try:
+            run = await asyncio.wait_for(_drive(), timeout=60)
+        finally:
+            pump.stop_and_join()
+
+        assert run is not None, "run row vanished"
+        assert run.status is dm.RunStatus.COMPLETED
+        assert run.termination_reason is dm.TerminationReason.FINISH
+        assert run.final_answer == "e2e-avernet-done"
+
+        agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
+        assert [a.name for a in agents] == ["surveyor"]
+        assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
+
+        shards = repos["shard"].list_by_run(dm.RunId(run_id), TENANT)
+        assert len(shards) == 1
+        assert shards[0].payload == {"answer": "survey ok"}
+
+        seam = world.get(ManifestCreationSeam)
+        assert len(created) == 1
+        bot = created[0]
+        expected_id = "ac_" + hashlib.sha1(
+            f"{run_id}:surveyor".encode("utf-8")
+        ).hexdigest()[:16]
+        assert bot["bot_id"] == expected_id
+        assert bot["status"] == "ACTIVE"
+        assert bot["owner_id"] == OWNER
+        assert bot["bot_desc"] == "swarm surveyor persona"
+        assert bot["bot_name"] == f"surveyor-{expected_id[3:11]}"
+
+        job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
+        assert job is not None and job.status is TaskStatus.SUCCEEDED
+
+        report = world.get(BotConfigManifestApplyServiceProtocol).last_apply(
+            entity_id=OWNER, bot_id=expected_id,
+        )
+        assert report is not None
+        assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
+        assert report.status is ApplyStatus.SUCCEEDED
+
+        assert len(grt.received) == 1
+        assert "survey the incident" in grt.received[0]
+        assert grt.sandboxes == [expected_id]
