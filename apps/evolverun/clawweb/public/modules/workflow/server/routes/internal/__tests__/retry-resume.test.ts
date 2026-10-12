@@ -13,7 +13,7 @@ let server: Server;
 let base: string;
 beforeAll(async () => {
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, started_at INTEGER,
-    retry_epoch INTEGER NOT NULL DEFAULT 0,
+    retry_epoch INTEGER DEFAULT NULL,
     completed_at INTEGER, result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, gmt_modified INTEGER,
     total_token_usage INTEGER, succeeded_count INTEGER, failed_count INTEGER, input_json TEXT);
     INSERT INTO flow_runs (flow_id,status,started_at,completed_at,result_json,gmt_modified)

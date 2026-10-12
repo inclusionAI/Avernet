@@ -396,7 +396,7 @@ export class FlowRunRepository {
     const result = await this.db.exec(
       // Legacy TaskGuard sends the retry's running status asynchronously. Its
       // completion may reach this route first while the previous status is failed.
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND retry_epoch = ? AND status NOT IN ('succeeded', 'cancelled', 'canceled')`,
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status NOT IN ('succeeded', 'cancelled', 'canceled')`,
       values,
     );
     return result.affectedRows > 0;
@@ -418,7 +418,7 @@ export class FlowRunRepository {
   }): Promise<boolean> {
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-       WHERE flow_id = ? AND retry_epoch = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
+       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
       [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId, fields.retryEpoch ?? 0],
     );
     return result.affectedRows > 0;
@@ -535,9 +535,9 @@ export class FlowRunRepository {
   ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' } | { status: 'conflict' }> {
     return this.db.transaction(async tx => {
       await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?", [flowId]);
-      const rows = await tx.query<{ status: string; retry_epoch: number }>("SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?", [flowId]);
+      const rows = await tx.query<{ status: string; retry_epoch: number | null }>("SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?", [flowId]);
       if (!rows.length) return { status: 'not_found' };
-      if (rows[0].retry_epoch !== 0) return { status: 'conflict' };
+      if ((rows[0].retry_epoch ?? 0) !== 0) return { status: 'conflict' };
       const resetCount = await resetFailedNodes(tx);
       const now = this.db.dialect.now();
       const result = await tx.exec(
@@ -554,11 +554,11 @@ export class FlowRunRepository {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'running', retry_epoch = ?, completed_at = NULL, gmt_modified = ?
-       WHERE flow_id = ? AND retry_epoch = ? AND status IN ('failed', 'blocked', 'waiting', 'running')`,
+       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status IN ('failed', 'blocked', 'waiting', 'running')`,
       [retryEpoch, now, flowId, retryEpoch - 1],
     );
     if (result.affectedRows > 0) return 'resumed';
-    const rows = await this.db.query<{ status: string; retry_epoch: number }>('SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?', [flowId]);
+    const rows = await this.db.query<{ status: string; retry_epoch: number | null }>('SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?', [flowId]);
     if (!rows.length) return 'not_found';
     // A lost response may replay the same retry; an older or skipped epoch must not reopen it.
     return rows[0].status === 'running' && rows[0].retry_epoch === retryEpoch ? 'resumed' : 'conflict';

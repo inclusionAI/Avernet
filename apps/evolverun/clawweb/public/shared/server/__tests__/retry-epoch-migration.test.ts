@@ -10,6 +10,6 @@ it('adds retry epoch to existing flow runs without changing their generation', (
     expect(migration?.sql).toHaveLength(1);
     raw.exec(migration!.sql[0]);
     expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?').get('old'))
-      .toEqual({ status: 'running', retry_epoch: 0 });
+      .toEqual({ status: 'running', retry_epoch: null });
   } finally { raw.close(); }
 });
