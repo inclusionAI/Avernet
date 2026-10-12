@@ -2,21 +2,21 @@
 
 import logging
 from datetime import datetime
-from fastapi import Request, HTTPException, status
+
+from fastapi import HTTPException, Request, status
+
+from src.application.services.worker_sync_merge import (
+    merge_worker_fields,
+    save_merged_profile,
+)
 from src.interfaces.api.schemas.worker_management_schemas import (
-    WorkerSyncRequest,
-    WorkerSyncResponse,
     Availability,
     TrustLevel,
-)
-from src.application.services.worker_sync_merge import (
-    merge_profile_fields,
-    merge_worker_fields,
+    WorkerSyncRequest,
+    WorkerSyncResponse,
 )
 
-from . import analysis
-from . import common
-from . import vector_sync
+from . import analysis, common, vector_sync
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
     """
     P1: Sync worker and profile without changing omitted runtime state.
 
-    Atomic sync operation aligned with root_original contract:
+    Sync operation aligned with root_original contract:
     - Create or update worker
     - Apply explicit runtime_state; otherwise preserve it (new workers default online)
     - Upsert and activate profile
@@ -59,6 +59,14 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                 "code": "PROVIDER_NOT_AVAILABLE",
                 "message": "worker_registry_store provider not available"
             }
+        )
+    if profile_store is None or not callable(getattr(profile_store, "save_if_version", None)):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "PROVIDER_NOT_AVAILABLE",
+                "message": "worker_profile_content_store versioned save not available",
+            },
         )
 
     # Track created flag for response
@@ -327,12 +335,8 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     f"profile_store_class={type(profile_store).__name__}"
                 )
 
-                stored_profile = profile_store.get(worker_id, profile_id)
-                existing_profile = (
-                    stored_profile.model_dump() if stored_profile is not None else None
-                )
-                profile_data = merge_profile_fields(
-                    existing_profile,
+                profile_data, generated_fallback = save_merged_profile(
+                    profile_store,
                     req.profile.model_dump(),
                     req.profile.model_fields_set,
                     worker_id=worker_id,
@@ -340,30 +344,20 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     worker_name=req.name,
                     description=req.description,
                     description_supplied="description" in req.model_fields_set,
+                    fallback_profile=analysis._generate_fallback_profile(
+                        req, req.profile.contents,
+                    ),
                 )
                 merged_contents = profile_data["contents"]
-
-                # Fallback profile: ensure contents["profile"] exists for high-weight
-                # vector fragment (0.65).  If the caller didn't provide it, generate
-                # a fallback from soul_md / name / description so the vector index
-                # is immediately useful.  LLM analysis will replace it later.
-                if existing_profile is None and "profile" not in merged_contents:
-                    fallback = analysis._generate_fallback_profile(req, merged_contents)
-                    if fallback:
-                        merged_contents["profile"] = fallback
-                        logger.info(
-                            f"[SYNC_FALLBACK_PROFILE] worker_id={worker_id}, "
-                            f"generated fallback profile, len={len(fallback)}"
-                        )
-
-                # Upsert profile
-                stored = profile_store.upsert_profile(worker_id, profile_id, profile_data)
-                if stored is False:
-                    raise RuntimeError("profile store rejected the write")
+                if generated_fallback:
+                    logger.info(
+                        f"[SYNC_FALLBACK_PROFILE] worker_id={worker_id}, "
+                        f"generated fallback profile, len={len(merged_contents['profile'])}"
+                    )
                 logger.info(
                     f"[SYNC_PROFILE_UPSERT] worker_id={worker_id}, profile_id={profile_id}, "
                     f"profile_key={worker_id}:{profile_id}, profile_store_class={type(profile_store).__name__}, "
-                    f"method=upsert_profile, success=True, contents_keys={list(merged_contents.keys())}"
+                    f"method=save_if_version, success=True, contents_keys={list(merged_contents.keys())}"
                 )
 
                 # Activate profile if requested (root_original contract)

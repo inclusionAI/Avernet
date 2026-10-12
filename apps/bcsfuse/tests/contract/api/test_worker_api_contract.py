@@ -82,6 +82,9 @@ class CanonicalOnlyProfileStore:
     def save(self, content):
         return self._delegate.save(content)
 
+    def save_if_version(self, content, expected_version):
+        return self._delegate.save_if_version(content, expected_version)
+
     def get(self, worker_id, profile_id):
         return self._delegate.get(worker_id, profile_id)
 
@@ -287,6 +290,19 @@ def test_composed_profile_routes_accept_canonical_only_provider(monkeypatch):
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["display_name"] == "Canonical Updated"
     assert fetched.json()["is_active"] is True
+
+    synced = client.post(
+        f"/v1/workers/{worker_id}/sync",
+        headers=AUTH_HEADERS,
+        json={
+            "name": "Contract Bot",
+            "profile": {"profile_id": profile_id, "metadata": {"source": "sync"}},
+        },
+    )
+    assert synced.status_code == 200, synced.text
+    persisted = canonical_store.get(worker_id, profile_id)
+    assert persisted.soul_md == "# Updated"
+    assert persisted.metadata == {"source": "sync"}
 
 
 def test_worker_delete_failure_preserves_durable_worker_and_profile(

@@ -35,13 +35,15 @@ import logging
 import os
 import threading
 import uuid
-from typing import Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 from mysql.connector import Error as MySQLError
-from mysql.connector.errorcode import ER_DUP_FIELDNAME
+from mysql.connector.errorcode import ER_DUP_ENTRY, ER_DUP_FIELDNAME
 
 if TYPE_CHECKING:
-    from src.infra.public.database.mysql_connection_pool import MySQLConnectionPoolProvider
+    from src.infra.public.database.mysql_connection_pool import (
+        MySQLConnectionPoolProvider,
+    )
 
 from src.domain.models.worker_profile_content import (
     ProfileContentType,
@@ -319,6 +321,81 @@ class MySQLWorkerProfileContentStore:
                 cursor.execute(
                     "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = %s AND profile_id = %s",
                     (content.worker_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("saved profile could not be read back")
+                saved = content.model_copy(deep=True)
+                saved.created_at = row["gmt_create"]
+                saved.updated_at = row["gmt_modify"]
+                saved.version = row["version"]
+                saved.is_active = bool(row["is_active"])
+                conn.commit()
+                return saved
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Atomically save only when the stored Profile version still matches."""
+        data = self._content_to_dict(content)
+        conn = self._pool.get_connection()
+        try:
+            conn.start_transaction()
+            cursor = conn.cursor(dictionary=True)
+            try:
+                if expected_version is None:
+                    try:
+                        cursor.execute(
+                            """INSERT INTO bcsfuse_worker_profile_contents (
+                                id, worker_id, profile_id, display_name, description,
+                                soul_md, agents_md, tools_md, boot_md, heartbeat_md,
+                                contents, skill_sets, metadata, content_type,
+                                is_active, version
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                      %s, %s, %s, %s, %s, 1)""",
+                            (
+                                data["id"], data["worker_id"], data["profile_id"],
+                                data["display_name"], data["description"], data["soul_md"],
+                                data["agents_md"], data["tools_md"], data["boot_md"],
+                                data["heartbeat_md"], data["contents"], data["skill_sets"],
+                                data["metadata"], data["content_type"], data["is_active"],
+                            ),
+                        )
+                    except MySQLError as error:
+                        if error.errno != ER_DUP_ENTRY:
+                            raise
+                        conn.rollback()
+                        return None
+                else:
+                    cursor.execute(
+                        """UPDATE bcsfuse_worker_profile_contents SET
+                            display_name = %s, description = %s, soul_md = %s,
+                            agents_md = %s, tools_md = %s, boot_md = %s,
+                            heartbeat_md = %s, contents = %s, skill_sets = %s,
+                            metadata = %s, content_type = %s, version = version + 1,
+                            gmt_modify = CURRENT_TIMESTAMP
+                        WHERE worker_id = %s AND profile_id = %s AND version = %s""",
+                        (
+                            data["display_name"], data["description"], data["soul_md"],
+                            data["agents_md"], data["tools_md"], data["boot_md"],
+                            data["heartbeat_md"], data["contents"], data["skill_sets"],
+                            data["metadata"], data["content_type"],
+                            data["worker_id"], data["profile_id"], expected_version,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        conn.rollback()
+                        return None
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = %s AND profile_id = %s",
+                    (data["worker_id"], data["profile_id"]),
                 )
                 row = cursor.fetchone()
                 if row is None:

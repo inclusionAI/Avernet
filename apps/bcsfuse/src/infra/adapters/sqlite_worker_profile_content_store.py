@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from threading import RLock
 from typing import Optional
 
 from src.domain.models.worker_profile_content import (
@@ -23,7 +24,6 @@ from src.domain.models.worker_profile_content import (
     WorkerProfileContentList,
 )
 from src.infra.adapters.sqlite_schema import init_schema
-
 
 # Profile contents 表 Schema（与线上 MySQL 字段名一致）
 CREATE_WORKER_PROFILE_CONTENTS_TABLE = """
@@ -76,6 +76,7 @@ class SQLiteWorkerProfileContentStore:
         self._db_path = db_path
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._write_lock = RLock()
 
         # 初始化基础 schema
         init_schema(self._conn)
@@ -143,6 +144,10 @@ class SQLiteWorkerProfileContentStore:
         return f"profile_{worker_id}_{profile_id}"
 
     def save(self, content: WorkerProfileContent) -> WorkerProfileContent:
+        with self._write_lock:
+            return self._save_unlocked(content)
+
+    def _save_unlocked(self, content: WorkerProfileContent) -> WorkerProfileContent:
         """保存 Profile 内容"""
         now = datetime.utcnow()
         profile_id = content.profile_id or "default"
@@ -239,6 +244,73 @@ class SQLiteWorkerProfileContentStore:
         content.updated_at = now
 
         return content
+
+    def save_if_version(
+        self, content: WorkerProfileContent, expected_version: int | None,
+    ) -> WorkerProfileContent | None:
+        """Atomically insert or replace a Profile only at its expected version."""
+        now = datetime.utcnow().isoformat()
+        profile_id = content.profile_id or "default"
+        with self._write_lock:
+            cursor = self._conn.cursor()
+            try:
+                values = (
+                    content.display_name, content.description, content.soul_md,
+                    content.agents_md, content.tools_md, content.boot_md,
+                    content.heartbeat_md, json.dumps(content.contents),
+                    json.dumps([item.model_dump() for item in content.skill_sets]),
+                    json.dumps(content.metadata), content.content_type.value,
+                )
+                if expected_version is None:
+                    try:
+                        cursor.execute(
+                            """INSERT INTO bcsfuse_worker_profile_contents (
+                                id, worker_id, profile_id, display_name, description,
+                                soul_md, agents_md, tools_md, boot_md, heartbeat_md,
+                                contents, skill_sets, metadata, content_type,
+                                is_active, version, gmt_create, gmt_modify
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                            (
+                                self._generate_id(content.worker_id, profile_id),
+                                content.worker_id, profile_id, *values,
+                                1 if content.is_active else 0, now, now,
+                            ),
+                        )
+                    except sqlite3.IntegrityError as error:
+                        if error.sqlite_errorcode not in (
+                            sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY,
+                            sqlite3.SQLITE_CONSTRAINT_UNIQUE,
+                        ):
+                            raise
+                        self._conn.rollback()
+                        return None
+                else:
+                    cursor.execute(
+                        """UPDATE bcsfuse_worker_profile_contents SET
+                            display_name = ?, description = ?, soul_md = ?,
+                            agents_md = ?, tools_md = ?, boot_md = ?,
+                            heartbeat_md = ?, contents = ?, skill_sets = ?,
+                            metadata = ?, content_type = ?, version = version + 1,
+                            gmt_modify = ?
+                        WHERE worker_id = ? AND profile_id = ? AND version = ?""",
+                        (*values, now, content.worker_id, profile_id, expected_version),
+                    )
+                    if cursor.rowcount != 1:
+                        self._conn.rollback()
+                        return None
+                cursor.execute(
+                    "SELECT * FROM bcsfuse_worker_profile_contents WHERE worker_id = ? AND profile_id = ?",
+                    (content.worker_id, profile_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise RuntimeError("saved profile could not be read back")
+                saved = self._row_to_content(row)
+                self._conn.commit()
+                return saved
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def get(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
         """获取指定 Profile"""

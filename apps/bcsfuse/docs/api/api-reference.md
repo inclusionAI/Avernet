@@ -170,7 +170,9 @@ mutable fields retain their stored values. Explicit empty scalar/list values
 replace them; nonempty `contents`/`metadata` objects merge by key, while `{}`
 clears the map. Omitted or null `runtime_state` preserves an existing state;
 new Workers default online. See [External Product API](api-external.md) for
-the full field and retry contract.
+the full field and retry contract. Concurrent syncs on one Profile retry
+version conflicts; exhausted conflicts return `PROFILE_SYNC_FAILED` rather
+than acknowledge a lost update.
 
 **Response:**
 

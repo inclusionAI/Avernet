@@ -193,6 +193,13 @@ implementations are tested against the same contracts. Storage write and
 cleanup failures propagate to the application service and must not be reported
 as success.
 
+Profile providers implement `save_if_version(content, expected_version)` for
+sparse sync: `None` as the expected version inserts only when absent; an integer
+updates only that stored version. A version mismatch returns `None` without
+writing, while storage failures raise. Composed providers must support this
+operation before serving sync traffic. It allows concurrent syncs on the same
+Profile to re-read and re-merge without silently losing disjoint updates.
+
 ### MySQL storage timestamp compatibility (v1)
 
 MySQL-backed Worker/Profile providers, including injected providers, use the
@@ -276,6 +283,10 @@ runtime state; new Workers default online. Existing Profile scalar fields,
 `skill_sets` replaces the list, including `[]`. Supplied nonempty `contents`
 and `metadata` maps merge by key; an explicitly empty map clears that map.
 Supplied `profile.summary` replaces `contents.ecb_summary`; null removes it.
+Concurrent syncs use Profile versioned writes and retry a stale merge against
+the latest committed Profile up to five times. Exhausted conflicts return 500
+`PROFILE_SYNC_FAILED` so the caller can retry; they are never acknowledged as
+successful writes. This does not make Worker and Profile writes one transaction.
 LLM analysis may replace only generated `contents` keys after successful
 analysis. Before writing, it reads the current Profile and skips a stale
 result when that Profile no longer matches the analyzed snapshot. This check

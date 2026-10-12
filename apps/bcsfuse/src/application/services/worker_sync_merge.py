@@ -4,7 +4,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from src.application.ports.worker_profile_content_store import WorkerProfileContentStore
 from src.domain.models.worker_profile_content import WorkerProfileContent
+
+_PROFILE_SYNC_MAX_ATTEMPTS = 5
 
 
 def merge_worker_fields(
@@ -72,6 +75,48 @@ def merge_profile_fields(
                 key: value for key, value in summary.items() if value is not None
             }
     return merged
+
+
+def save_merged_profile(
+    store: WorkerProfileContentStore,
+    incoming: dict[str, Any],
+    supplied: set[str],
+    *,
+    worker_id: str,
+    profile_id: str,
+    worker_name: str,
+    description: str | None,
+    description_supplied: bool,
+    fallback_profile: str | None,
+) -> tuple[dict[str, Any], bool]:
+    """Retry a sparse merge against the latest committed Profile version."""
+    for _ in range(_PROFILE_SYNC_MAX_ATTEMPTS):
+        current = store.get(worker_id, profile_id)
+        profile_data = merge_profile_fields(
+            current.model_dump() if current is not None else None,
+            incoming,
+            supplied,
+            worker_id=worker_id,
+            profile_id=profile_id,
+            worker_name=worker_name,
+            description=description,
+            description_supplied=description_supplied,
+        )
+        generated_fallback = False
+        if (
+            current is None
+            and "profile" not in profile_data["contents"]
+            and fallback_profile
+        ):
+            profile_data["contents"]["profile"] = fallback_profile
+            generated_fallback = True
+        saved = store.save_if_version(
+            WorkerProfileContent.model_validate(profile_data),
+            current.version if current is not None else None,
+        )
+        if saved is not None:
+            return profile_data, generated_fallback
+    raise RuntimeError("profile changed during sync; retry the request")
 
 
 def profile_analysis_source_matches(

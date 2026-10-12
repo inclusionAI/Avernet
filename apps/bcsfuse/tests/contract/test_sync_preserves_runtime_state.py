@@ -28,6 +28,7 @@ def sync_app(monkeypatch):
     audit = InMemoryWorkerAuditLogStore()
     profiles = MagicMock()
     profiles.get.return_value = None
+    profiles.save_if_version.side_effect = lambda content, _version: content
     app = FastAPI()
     app.state.context = SimpleNamespace(registry={
         "worker_registry_store": workers,
@@ -80,7 +81,7 @@ def test_visibility_sync_preserves_runtime_and_still_updates_profile(sync_app, m
     assert runtime.get_runtime_state("bot:owner") == state
     assert workers.get_by_id("bot:owner").state.runtime_state == state
     assert workers.get_by_id("bot:owner").state.availability.value == availability
-    profiles.upsert_profile.assert_called_once()
+    profiles.save_if_version.assert_called_once()
     availability_sync.assert_called_with("bot:owner", availability)
 
 
@@ -381,13 +382,27 @@ def test_sync_uses_worker_name_when_profile_display_name_is_omitted(sync_app):
     )
 
     assert response.status_code == 200, response.text
-    profile_data = profiles.upsert_profile.call_args.args[2]
+    profile_data = profiles.save_if_version.call_args.args[0].model_dump()
     assert profile_data["display_name"] == "墨韵研发2号"
 
 
 def test_sync_reports_profile_write_failure_instead_of_success(sync_app):
     client, _, _, profiles, _ = sync_app
-    profiles.upsert_profile.side_effect = RuntimeError("profile write failed")
+    profiles.save_if_version.side_effect = RuntimeError("profile write failed")
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "PROFILE_SYNC_FAILED"
+
+
+def test_sync_reports_repeated_profile_version_conflicts(sync_app):
+    client, _, _, profiles, _ = sync_app
+    profiles.save_if_version.side_effect = None
+    profiles.save_if_version.return_value = None
 
     response = client.post(
         "/v1/workers/bot:owner/sync",
@@ -422,6 +437,20 @@ def test_sync_requires_profile_store(sync_app):
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "PROVIDER_NOT_AVAILABLE"
+
+
+def test_sync_rejects_profile_store_without_versioned_save_before_worker_write(sync_app):
+    client, workers, _, profiles, _ = sync_app
+    profiles.save_if_version = None
+
+    response = client.post(
+        "/v1/workers/bot:owner/sync",
+        json={"name": "Bot", "profile": {"profile_id": "default"}},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "PROVIDER_NOT_AVAILABLE"
+    assert workers.get_by_id("bot:owner") is None
 
 
 def test_sparse_sync_uses_preserved_availability_for_analysis(sync_app):
