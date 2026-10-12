@@ -35,7 +35,11 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
-from agentclaw.community.core.service_bot.services.local_bin_artifact import sync_local_bin_artifact
+from agentclaw.community.core.service_bot.services.local_bin_artifact import (
+    HOME_ADMIN_ARTIFACT_ROOT,
+    restore_local_bin_artifact,
+    sync_local_bin_artifact,
+)
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
@@ -1312,7 +1316,7 @@ class BotBuildService:
                 "--delete-excluded",
                 # Home CLI snapshots are separate from the engine root. This
                 # also clears stale snapshots when the same version retries.
-                "--exclude=/.local",
+                f"--exclude=/{HOME_ADMIN_ARTIFACT_ROOT}",
                 *excludes,
                 *(f"--exclude=/{path}" for path in build_ignore_paths),
                 f"{source_dir}/",
@@ -1799,7 +1803,7 @@ class BotBuildService:
 
         excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
         # The CLI snapshot belongs to the home directory, never the engine root.
-        excludes.append("--exclude=/.local")
+        excludes.append(f"--exclude=/{HOME_ADMIN_ARTIFACT_ROOT}")
         # Extra snapshots (for example target/claude -> draft/.claude) are not
         # part of the primary engine root and must not leak into it.
         if build_plan.extra_sync_target_relpath:
@@ -1851,6 +1855,15 @@ class BotBuildService:
                 error_message="restore draft extra workspace failed",
                 timeout_seconds=remaining_timeout(),
             )
+
+        restore_local_bin_artifact(
+            artifact_dir=artifact_dir,
+            target_home=draft_dir.parent,
+            bot_id=bot_id,
+            version=source_version,
+            run_command=self._run_local_command,
+            timeout_seconds=remaining_timeout(),
+        )
 
         return {
             "restore_type": "migration_path",
