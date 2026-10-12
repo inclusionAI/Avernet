@@ -117,6 +117,32 @@ async fn plugin_registration_generates_a_provider_bot_ref_when_none_is_given() {
 }
 
 #[tokio::test]
+async fn desktop_registration_persists_socket_and_rejects_invalid_options_before_network() {
+    let home = tempfile::tempdir().unwrap();
+    let api = Api::new().await;
+    let output = register(home.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop",
+        "--engine-option", "socket=/tmp/codex-desktop.sock"])
+        .output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    let document = saved(home.path());
+    assert_eq!(document["bot"][0]["engine"].as_str(), Some("codex-desktop"));
+    assert_eq!(document["bot"][0]["engine_options"]["socket"].as_str(), Some("/tmp/codex-desktop.sock"));
+    for option in ["socket=relative.sock", "socket=/tmp/a", "unknown=value", "missing-separator"] {
+        let other = tempfile::tempdir().unwrap();
+        let args = if option == "socket=/tmp/a" {
+            vec!["--engine-option", option, "--engine-option", option]
+        } else { vec!["--engine-option", option] };
+        let output = register(other.path(), &["--mode", "plugin", "--api-url", &api.base,
+            "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "codex-desktop"])
+            .args(args).output().await.unwrap();
+        assert!(!output.status.success(), "{option}");
+        assert!(!config_path(other.path()).exists());
+    }
+    assert_eq!(api.calls().len(), 1);
+}
+
+#[tokio::test]
 async fn missing_explicit_inputs_are_rejected_before_registration() {
     let api = Api::new().await;
     for (args, expected) in [

@@ -174,6 +174,10 @@ a kernel that permits `F_SETPIPE_SZ` of at least 8 KiB.
 
 ### Distribution identity discovery
 
+For connections to an existing desktop host, see
+[Codex desktop host integration](docs/codex-desktop.md). The `codex-desktop`
+engine uses the host's Unix WebSocket and requires no engine executable.
+
 `IdentityResolver::registration_ref` receives the selected engine, canonical workspace
 and optional `--provider-bot-ref`. The default preserves the explicit reference;
 distributions can discover an existing local identity. Resolved references are

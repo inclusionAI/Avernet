@@ -62,6 +62,9 @@ pub struct RegisterArgs {
     /// Override the engine executable (default: the engine's executable on PATH)
     #[arg(long)]
     engine_bin: Option<PathBuf>,
+    /// String engine option, e.g. socket=/absolute/path (repeatable)
+    #[arg(long, value_name = "NAME=VALUE")]
+    engine_option: Vec<String>,
 }
 
 /// Registration API rule for `provider_bot_ref` values.
@@ -81,6 +84,19 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
         if args.engine_bin.is_some() { bail!("--engine-bin does not apply to engine '{}'", args.engine); }
         None
     };
+    let mut engine_options = toml::Table::new();
+    for option in &args.engine_option {
+        let (name, value) = option.split_once('=')
+            .filter(|(name, _)| !name.trim().is_empty())
+            .context("--engine-option requires NAME=VALUE")?;
+        if engine_options.insert(name.to_owned(), value.into()).is_some() {
+            bail!("Duplicate --engine-option name");
+        }
+    }
+    if !engine_options.is_empty() || factory.registration_requires_options() {
+        factory.build(engine_bin.clone().unwrap_or_default(), &engine_options)
+            .map_err(|error| anyhow::anyhow!("Invalid engine options: {error}"))?;
+    }
     if args.token.trim().is_empty() || args.bot_name.trim().is_empty() { bail!("Registration token and Bot name must be nonempty"); }
     if args.provider_bot_ref.as_deref().is_some_and(|value| !valid_provider_bot_ref(value)) {
         bail!("--provider-bot-ref must be 1-128 characters of letters, digits, '_', '.', ':' or '-'");
@@ -127,6 +143,7 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     let mut bot = toml::Table::new();
     bot.insert("provider_bot_ref".into(), "pending-identity".into());
     bot.insert("engine".into(), args.engine.clone().into());
+    if !engine_options.is_empty() { bot.insert("engine_options".into(), engine_options.into()); }
     bot.insert("cwd".into(), cwd.to_str().context("Engine working directory must be UTF-8")?.into());
     if let Some(model) = args.model { bot.insert("model".into(), model.into()); }
     if let Some(engine_bin) = engine_bin {
