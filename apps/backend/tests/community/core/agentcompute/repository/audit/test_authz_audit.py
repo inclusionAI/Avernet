@@ -195,9 +195,6 @@ def writer(db_engine) -> AgentComputeAuditWriter:
     return AgentComputeAuditWriter(_TestDB(db_engine))
 
 
-def _utc_now():
-    return datetime.now(timezone.utc)
-
 
 class TestAuditWriter:
 

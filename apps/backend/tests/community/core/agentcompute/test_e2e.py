@@ -233,7 +233,7 @@ def _count_rows(db, model, tenant: str) -> int:
     with db.orm_session() as session:
         return session.execute(
             select(func.count()).select_from(model).where(
-                model.tenant == tenant, model.is_deleted == False,
+                model.tenant == tenant, model.is_deleted.is_(False),
             )
         ).scalar_one()
 

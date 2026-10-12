@@ -43,7 +43,7 @@ class ResultShardRepository(ResultShardRepositoryProtocol):
                     om.AcAgentComputeResultShardModel.run_id == run_id,
                     om.AcAgentComputeResultShardModel.source_agent_id == agent_id,
                     om.AcAgentComputeResultShardModel.tenant == tenant,
-                    om.AcAgentComputeResultShardModel.is_deleted == False,
+                    om.AcAgentComputeResultShardModel.is_deleted.is_(False),
                 )
             ).scalar_one_or_none()
             return self._to_domain(row) if row else None
@@ -54,7 +54,7 @@ class ResultShardRepository(ResultShardRepositoryProtocol):
                 select(om.AcAgentComputeResultShardModel).where(
                     om.AcAgentComputeResultShardModel.run_id == run_id,
                     om.AcAgentComputeResultShardModel.tenant == tenant,
-                    om.AcAgentComputeResultShardModel.is_deleted == False,
+                    om.AcAgentComputeResultShardModel.is_deleted.is_(False),
                 )
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
