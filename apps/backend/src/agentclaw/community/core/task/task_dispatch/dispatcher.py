@@ -20,12 +20,14 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
 
 import dataclasses
 import logging
+from typing import Protocol
 
 from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskNode,
     effective_run_mode,
 )
+from agentclaw.community.core.task.domain.errors import DispatchError
 from agentclaw.community.core.task.task_dispatch.strategies import (
     DirectDispatchStrategy,
     GroupFormation,
@@ -35,6 +37,21 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
 )
 
 logger = logging.getLogger("task.dispatcher")
+
+
+class DispatchModeStrategy(Protocol):
+    async def dispatch(self, dispatcher: "TaskDispatcher", node: TaskNode) -> TaskNode:
+        ...
+
+
+class CentralizedDispatchModeStrategy:
+    async def dispatch(self, dispatcher: "TaskDispatcher", node: TaskNode) -> TaskNode:
+        return await dispatcher._dispatch_centralized_node(node)
+
+
+class RelayHandoffDispatchModeStrategy:
+    async def dispatch(self, dispatcher: "TaskDispatcher", node: TaskNode) -> TaskNode:
+        return await dispatcher._dispatch_relay_node(node)
 
 
 def _is_exec_retry_replay(node: TaskNode) -> bool:
@@ -64,10 +81,14 @@ class TaskDispatcher:
     (拉群归编排核调 runner.form_coop_group 后填 assignee)。
     """
 
-    def __init__(self, graph, *, pool: list[DispatchStrategy] | None = None) -> None:
+    def __init__(self, graph, *, pool: list[DispatchStrategy] | None = None,
+                 runner=None,
+                 mode_strategies: dict[str, DispatchModeStrategy] | None = None) -> None:
         """graph: TaskGraphService(读图级 execution_config 匹配策略用,不写);
         pool: 策略池(构造期注入;省略=内置默认 [DirectDispatch, SearchBased])。"""
         self._graph = graph
+        self._runner = runner
+        self._mode_strategies = dict(mode_strategies or {})
         self._strategies: list[DispatchStrategy] = (
             list(pool)
             if pool is not None
@@ -81,7 +102,57 @@ class TaskDispatcher:
         """(测试覆写用)替换策略池。prod 经构造器 ``pool=`` 注入。"""
         self._strategies = list(strategies)
 
-    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+    async def dispatch(self, node: TaskNode) -> TaskNode:
+        """Select the frozen mode strategy and deliver exactly one node."""
+        if not isinstance(node, TaskNode):
+            raise TypeError("TaskDispatcher.dispatch requires one TaskNode")
+        graph = self._graph.query_task_dashboard(node.task_id)
+        profile = graph.extend_props.get("runtime_profile") or {}
+        strategy_name = str(profile.get("dispatcher_strategy") or "default")
+        strategy = self._mode_strategies.get(strategy_name)
+        if strategy is None:
+            raise DispatchError(f"unknown dispatcher_strategy={strategy_name}")
+        return await strategy.dispatch(self, node)
+
+    async def dispatch_batch(self, nodes: list[TaskNode]) -> list[TaskNode]:
+        """Batch convenience wrapper over the single-node atomic API."""
+        import asyncio as _aio
+
+        return list(await _aio.gather(*(self.dispatch(node) for node in nodes)))
+
+    async def select_batch(self, nodes: list[TaskNode]) -> list[TaskNode]:
+        """Centralized engine compatibility seam for its persisted drain cycle."""
+        return await self._dispatch_batch(nodes)
+
+    async def _dispatch_centralized_node(self, node: TaskNode) -> TaskNode:
+        selected = await self._dispatch_batch([node])
+        selected_node = selected[0]
+        group = selected_node.run_info.extend_props.pop(
+            "pending_group_formation", None
+        )
+        if group is not None:
+            if self._runner is None:
+                raise DispatchError("centralized runner is not configured")
+            selected_node.run_info.assignee = await self._runner.form_coop_group(group)
+        if selected_node.run_info.extend_props.get("miss_events"):
+            raise DispatchError("centralized dispatch did not select an executor")
+        if not selected_node.run_info.run_mode or (
+            selected_node.run_info.run_mode != "bbs"
+            and not selected_node.run_info.assignee
+        ):
+            raise DispatchError("centralized dispatch target is incomplete")
+        if self._runner is None or not await self._runner.start_run(selected_node):
+            raise DispatchError("centralized delivery was not accepted")
+        return selected_node
+
+    async def _dispatch_relay_node(self, node: TaskNode) -> TaskNode:
+        if node.run_info.run_mode != "bbs" and not node.run_info.assignee:
+            raise DispatchError("relay target has no selected assignee")
+        if self._runner is None or not await self._runner.start_run(node):
+            raise DispatchError("relay delivery was not accepted by a real backend")
+        return node
+
+    async def _dispatch_batch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
         """入参=待派发节点;返回=填充执行者信息后的 list[TaskNode](对齐派发文档签名)。
         不写图、不起 run;per node first-match 策略 await apply SearchResult → 填 node.run_info:
         HIT_SINGLE→single_bot/bot_id;HIT_GROUP→coop_group/group_id;
@@ -414,7 +485,12 @@ class TaskDispatcher:
                 )
             )
 
-        dispatched = await self._dispatcher.dispatch(pending)
+        select_batch = getattr(self._dispatcher, "select_batch", None)
+        dispatched = (
+            await select_batch(pending)
+            if select_batch is not None
+            else await self._dispatcher.dispatch(pending)
+        )
         for node in dispatched:
             _handle_node(node)
         if to_run:

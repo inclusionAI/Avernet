@@ -199,17 +199,19 @@ stateDiagram-v2
 - `task_graph_support.py` 仅承载私有 report、状态策略、查询和 TaskContext 投影函数，不构成第二套领域对象。
 - `TaskSpec` 只保存 `context + goal`；`task_id` 属于任务/节点实体，执行指令由业务事实按需投影。
 - `TaskGraphService.report(...)` 是 Planner、Dispatcher、Runner、Harness、BBS 和 Relay 写入图谱事实的统一入口。
-- `GET /api/v1/collaboration/tasks/{task_id}/context` 返回通用
-  `TaskContext(spec, all_done_output, gaps)`。
-- `/search` 只检索候选；`DISPATCH_RESULT` 记录决策和可选 `search_evidence`；`/dispatch` 执行实际投递。
-- Relay 事件结果记录仅用于幂等重放，例如响应丢失后用同一 `event_id` 找回 `PLAN_RESULT.target_node_id`；记录中不得持久化 `relay_turn` 明文，也不得携带 live `TaskNode` 领域对象。`search_evidence` 只作为轨迹诊断字段随 Relay 轨迹事件写入，不进入 TaskNode.run_info。
+- `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` 返回当前棒的只读
+  `TaskContext`；`all_done_output` 只包含已接纳的前序节点事实。
+- Relay Skill 在本地完成 GAP 推理、下一棒规划和执行者决策；`/search` 只检索候选，
+  `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
+- Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
+  `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
 - `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
 
 模式差异：
 
 - 中心化模式已由 Graph 语义事件启动：`PLAN_REQUESTED → DISPATCH_REQUESTED`。规划、派发、投递、结果收敛、恢复和轨迹分别归属 `TaskPlanner`、`TaskDispatcher`、`TaskRunner`、`TaskGraphService`、`TaskHarness` 与 `TaskTrajectoryService`；`static_plan.py` 只保留 Static Plan 定义和纯 Runtime，Static Plan 的编排动作归还上述现有模块；`CentralizedExecutionAdapter` 仅保留模式路由、端口装配和兼容事件入口。
 - Relay 模式由当前 Bot 的 task-loop Skill 计算能力范围和 GAP；每次 `PLAN_RESULT` 最多创建一个下一棒，Graph 生成节点 ID，后续节点不回写前序节点运行事实。
-- Relay Runner 指令只注入 `EXECUTION_RESULT → S6本地next_task_spec（不上报）→ /search → 确定执行者/执行模态 → PLAN_RESULT → DISPATCH_RESULT → /dispatch/BBS` 事件协议；Relay 任务拒绝中心化 `status/output/acceptance_result` 节点终态回投，避免错误协议把节点推成一次性终态。
+- Relay Runner 指令只注入 `S1 读取节点上下文 → S2/S3 本地推理 → EXECUTION_RESULT → S5 本地规划和选人 → PLAN_RESULT → S6 /dispatch` 协议；Relay 任务拒绝中心化 `status/output/acceptance_result` 节点终态回投，避免错误协议把节点推成一次性终态。
 - Relay BBS 是目标节点级认领；认领 Bot 执行同一 Relay 闭环，不进入中心化根节点收敛。
 
 ## 中心化语义事件驱动迁移

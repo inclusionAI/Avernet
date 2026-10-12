@@ -61,23 +61,6 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
 
 
-def test_callback_origin_uses_bcs_task_callback_url_and_ignores_paths():
-    """TaskModule extracts the configured BCS callback origin without profile branches."""
-    assert TaskModule._callback_origin("") == "http://localhost:8888"
-    assert TaskModule._callback_origin("not a url") == "http://localhost:8888"
-    assert TaskModule._callback_origin("http://local:8888") == "http://local:8888"
-    assert (
-        TaskModule._callback_origin(
-            "https://agentclaw-pre.example.test/api/economy/governance/card-callback"
-        )
-        == "https://agentclaw-pre.example.test"
-    )
-    assert (
-        TaskModule._callback_origin("https://be.local:8888/path?x=1")
-        == "https://be.local:8888"
-    )
-
-
 def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
     class _BotPublic:
         def search_catalog_public_bots_by_keyword(self, **_kwargs):
@@ -165,6 +148,9 @@ def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeyp
     )
     monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "0")
     svc = module.TaskModule().task_service(
-        _Graph(), object(), TaskDispatchConfig(), _Injector()
+        _Graph(), object(),
+        TaskDispatchConfig(backend_url="https://backend.example"),
+        _Injector(),
     )
     assert isinstance(svc, module.TaskService)
+    assert svc._api_base_url == "https://backend.example"

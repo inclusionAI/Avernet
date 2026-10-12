@@ -49,28 +49,17 @@ MUST NOT backfill and re-raises (decision #14 waiver is EMISSION-only; the
 on-demand analysis-trigger failure MUST be visible — 504 + no backfill). The
 router maps via ``@envelope_errors`` / ``ENVELOPE_ERRORS``.
 
-Scope boundary: no FastAPI / transport (the router is P5b's other half); no
-``NodeAction`` / ``append_action_event`` / ``task_action_log`` (spec invariant);
-the analyzer is the ONLY bot caller. ``TaskService`` is NOT touched — this is a
-SEPARATE service (spec invariant).
+Scope boundary: no FastAPI / transport (the router is P5b's other half). The
+centralized path keeps its independent trajectory-event stream. Relay reads its
+transactional ``task_action_log`` as an authoritative projection fallback so
+report/search/recovery/delivery facts cannot disappear from the timeline. The
+analyzer is the ONLY bot caller. ``TaskService`` remains a separate service.
 
 Authoritative: ``specs/2026-09-16-task-trajectory-collection-and-analysis/spec.md``
 REQ-8 (the ``/trajectory`` endpoint + ``do_analysis`` two-mode), REQ-10 (merged
 — no separate ``/analysis``), 决策 #10/#11/#13/#14, plan.md Phase 5.
 """
 from __future__ import annotations
-
-from agentclaw.community.core.task.task_runner.centralized_support import (
-    Any,
-    NodeAction,
-    NodeOpResult,
-    PlanResult,
-    Status,
-    TaskNodePatch,
-    _EXEC_ERROR_MSG_MAX,
-    _EXEC_ERROR_ORIGIN_TO_REASON,
-    logger,
-)
 
 import hashlib
 import json
@@ -88,7 +77,6 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisNotConfiguredError,
 )
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
@@ -104,8 +92,14 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TrajectoryActionType,
     TrajectoryEvent,
 )
-from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
-    emit_trajectory_event as _emit_trajectory_event,
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_lifecycle import (
+    TaskTrajectoryLifecycle,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_session_support import (
+    TrajectorySessionSupport,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.relay_action_projection import (
+    merge_relay_action_log,
 )
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
@@ -222,6 +216,26 @@ def _timeline_fingerprint(records: list[TrajectoryEventRecord]) -> str:
         )
         parts.append(f"|{rec.id}:{formatted}")
     return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
+
+
+def _relay_timeline_fingerprint(base: str, trajectory: TaskTrajectory) -> str:
+    """Extend the persisted-event fingerprint with Relay action-log projection."""
+    parts = [base]
+    for event in trajectory.timeline:
+        parts.append(
+            "|".join(
+                (
+                    event.node_id,
+                    event.action_type.value,
+                    str(event.attempt),
+                    str(event.gmt_create),
+                    event.status_from.value if event.status_from else "",
+                    event.status_to.value if event.status_to else "",
+                    event.action_result,
+                )
+            )
+        )
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def _persisted_timeline_version(analysis_json: str | None) -> str | None:
@@ -372,13 +386,17 @@ class TaskTrajectoryServiceProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 
-class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
+class TaskTrajectoryService(
+    TrajectorySessionSupport,
+    TaskTrajectoryLifecycle,
+    TaskTrajectoryServiceProtocol,
+):
     """Service facade combining the assembler + analyzer + repo + config into
     the ``get_trajectory(task_id, *, do_analysis)`` entrypoint (REQ-8, P5b).
 
     SEPARATE from ``TaskService`` (spec invariant — the trajectory service is an
-    independent旁路 consumer; it does NOT touch ``TaskService`` /
-    ``task_action_log`` / ``NodeAction`` / ``append_action_event``).
+    independent旁路 consumer. Centralized collection remains independent;
+    Relay action logs are merged read-only as its durable lifecycle source).
 
     Constructor injection (``@inject``) lets unit tests pass fakes directly and
     DI wire the real deps. The config is optional: a ``None`` config (lightweight
@@ -467,6 +485,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             do_analysis = True
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
+            self._merge_relay_actions(trajectory)
             self._attach_node_outputs(trajectory)
             # session_detail=True 才实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
             # merge_last_event_ext_info / backfill_analysis 只在分析路径可达;
@@ -500,6 +519,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
+        relay_actions_merged = self._merge_relay_actions(trajectory)
         # 1a. 读时富化:每个子任务(task_id+node_id)的最后一条事件挂上该节点的
         #     当前产出(task_execution_graph 查询接口)。旁路,失败降级不抛;两模式
         #     返回的 timeline 同形态(含快路径直接返回的持久化分析)。
@@ -519,6 +539,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             )
             records = None
         fingerprint = _timeline_fingerprint(records) if records is not None else None
+        if fingerprint is not None and relay_actions_merged:
+            fingerprint = _relay_timeline_fingerprint(fingerprint, trajectory)
 
         # 2. Incremental idempotent fast path: head analysis present AND its
         #    persisted ``timeline_version`` equals the freshly computed
@@ -623,6 +645,28 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
     # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
     # ------------------------------------------------------------------
 
+    def _merge_relay_actions(self, trajectory: TaskTrajectory) -> bool:
+        """Project transactionally persisted Relay action logs on read."""
+        if self._graph is None:
+            return False
+        is_relay_task = getattr(self._graph, "is_relay_task", None)
+        if is_relay_task is None:
+            return False
+        try:
+            if not is_relay_task(trajectory.task_id):
+                return False
+            graph = self._graph.query_task_dashboard(trajectory.task_id)
+            self._graph.load_action_logs(graph)
+            return bool(merge_relay_action_log(trajectory, graph))
+        except Exception as ex:  # noqa: BLE001 - observability must not break reads
+            logger.warning(
+                "[task][trajectory] Relay action log projection failed task=%s: %s: %s",
+                trajectory.task_id,
+                type(ex).__name__,
+                ex,
+            )
+            return False
+
     def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
         """把每个子任务(task_id+node_id)的**当前产出**挂到它在 timeline 中的
         **最后一条**事件上。
@@ -701,799 +745,3 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 first.action_input = text
         except Exception:  # noqa: BLE001  展示富化失败 → 保留原 digest
             return
-
-    # ------------------------------------------------------------------
-    # 会话明细物化 + 未结束节点异常研判 — timeline 之外的"执行侧现场"
-    # (决策 #14 精神:观测旁路,逐步降级,永不抛;探测失败绝不影响主分析)。
-    # ------------------------------------------------------------------
-
-    def _last_event_ext_by_node(self, records) -> "dict[str, dict]":
-        """每个 (node_id) 的**最后一条**事件行的 ext_info(解析后 dict;无/损坏 → 空)。
-
-        records 已按 (gmt_create, id) 正序——倒序扫,首见即末位行;解析失败/非 dict
-        视作无 ext_info(缓存判断退化为"未缓存",重新实际查询,不抛)。"""
-        last: dict[str, dict] = {}
-        for rec in reversed(records or []):
-            nid = getattr(rec, "node_id", None)
-            if nid in last:
-                continue
-            raw = getattr(rec, "ext_info", None)
-            if not raw:
-                last[nid] = {}
-                continue
-            try:
-                parsed = json.loads(raw)
-            except (ValueError, TypeError):
-                last[nid] = {}
-                continue
-            last[nid] = parsed if isinstance(parsed, dict) else {}
-        return last
-
-    async def _collect_session_briefs(
-        self, task_id: str, records, *, force_analysis: bool = False,
-    ) -> "tuple[list[dict] | None, dict[str, list]]":
-        """物化每个子任务的会话明细 + 汇集**未结束**节点的大模型研判原料。
-
-        两段式(需求 2026-09-22):
-
-        ① **物化(全节点,不管有没有完成)**:对每个带 ``session_id`` 的
-           (task_id,node_id) 子任务,取最近 ``limit``(默认 50,内容**不截断**)
-           条 session msgs:末位事件 ``ext_info`` 已带 ``session_msgs`` →
-           **缓存命中,不再实际拉取**;否则按 session_id 形态分派读通道实拉
-           (BCS 会话键 → BCS;引擎 key ``agent:main:session:*`` 等 → BaaS
-           Open API,见 ``_fetch_node_session_msgs``)→
-           ``repo.merge_last_event_ext_info`` 把 ``session_msgs`` **增量合并**
-           进该子任务最后一条事件的 ext_info(只添/更新该键,不覆盖既有其它键)。
-
-           ``force_analysis=True``(强制重跑分析):**缓存旁路**——即使已带
-           session_msgs 也重新实际拉取,并 merge 覆盖该键为最新内容
-           (与 force 语义一致:一切以当下现场为准)。
-
-        ② **研判原料(仅未结束节点)``running_sessions``**:状态非终态
-           (非 SUCCESS/FAILED/CANCELLED——含 RUNNING/DONE/HUNG 等未收口态)
-           且有 msgs 的节点,组成 brief(node_id/node_status/session_id/
-           elapsed_ms/message_count/messages——原文,不截断)交给分析大模型:
-           结合会话内容判断是否异常——工具调用报错、执行已结束但一直不主动
-           上报结果、长时间无新进展等时间线看不到的问题。
-
-        Guarantees: NEVER raises(逐步降级 + WARNING);graph 未接线或两条读
-        通道(BCS / OpenApiBot)均未接线 → ``(None, {})``。
-        """
-        logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin")
-
-        # 探测门:graph 必须接线;BCS 与 BaaS-OpenAPI 两通道可只接其一
-        # (所缺通道的节点在 _fetch_node_session_msgs 内逐个 WARNING 降级)。
-        if self._graph is None or (self._bcs is None and self._openapi_bot is None):
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or no read channel wired")
-            return None, {}
-        nodes = self._session_bearing_nodes(task_id)
-        if not nodes:
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, no session nodes")
-            return None, {}
-        now_ms = int(time.time() * 1000)
-
-        last_ext = self._last_event_ext_by_node(records)
-        limit = self._resolve_msg_limit()
-
-        _UNFINISHED = {Status.RUNNING, Status.PENDING, Status.PLANNING,
-                       Status.DONE, Status.HUNG}
-        briefs: list[dict] = []
-        fresh_msgs: dict[str, list] = {}  # 本次实际拉取的 msgs(node_id → 原文摘录),供返回态 session_msgs 富化
-        for node in nodes:
-            ep = node.run_info.extend_props or {}
-            sid = ep.get("session_id")
-            if not sid or not isinstance(sid, str):
-                continue
-            cached = (last_ext.get(node.node_id) or {}).get("session_msgs")
-            state = getattr(node.status, "value", node.status)
-            if isinstance(cached, list) and cached and not force_analysis:
-                excerpt = cached           # ①缓存命中:末位事件 ext_info 已有,不再实际查
-                logger.info(
-                    "[task][trajectory], collect_trajectory_event_session_msgs,"
-                    " session_msgs 缓存命中 task=%s node=%s msgs=%d",
-                    task_id, node.node_id, len(cached),
-                )
-            else:
-                # 通道分派实拉(BCS / BaaS-OpenAPI);失败已在 helper 内 WARNING
-                # 降级。空列表(拉到但无消息)与旧 `if not msgs: continue` 同义。
-                excerpt = await self._fetch_node_session_msgs(
-                    task_id, node, limit=limit,
-                )
-                if not excerpt:
-                    continue
-                # ①物化:增量合并进该子任务最后一条事件的 ext_info(不覆盖既有键)。
-                fresh_msgs[node.node_id] = excerpt  # 本次实拉内容 → 返回态可用
-                try:
-                    merged_ok = self._repo.merge_last_event_ext_info(
-                        task_id, node.node_id, "session_msgs", excerpt,
-                    )
-                    if not merged_ok:
-                        logger.info(
-                            "[task][trajectory] session_msgs 未能合并(该子任务无事件行或 ext_info 不可解析)"
-                            " task=%s node=%s", task_id, node.node_id,
-                        )
-                except Exception as ex:  # noqa: BLE001  物化失败不影响研判
-                    logger.warning(
-                        "[task][trajectory] session_msgs 合并失败(不影响主分析) task=%s node=%s: %s %s",
-                        task_id, node.node_id, type(ex).__name__, ex,
-                    )
-
-            # ②研判原料:仅未结束节点喂模型(msgs 原文)
-            if state not in {s.value for s in _UNFINISHED}:
-                continue
-            if not excerpt:
-                continue
-            briefs.append({
-                "node_id": node.node_id,
-                "node_status": str(state),
-                "session_id": sid,
-                "elapsed_ms": self._node_elapsed_ms(node, now_ms),
-                "message_count": len(excerpt),
-                "messages": list(excerpt),
-            })
-        if not briefs:
-            return None, fresh_msgs
-        logger.info(
-            "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 会话探测完成 task=%s briefs=%d",
-            task_id, len(briefs),
-        )
-        return briefs, fresh_msgs
-
-    # ------------------------------------------------------------------
-    # 会话明细探测共享件:节点收集/排序、limit 解析、单节点按 sid 分派实拉。
-    # 两条编排路径共用——分析路径(cache-first→物化落库→briefs)与纯读路径
-    # (always-live→不落库→失败回退缓存快照);策略差异留在各编排层,机械件下沉。
-    # ------------------------------------------------------------------
-
-    def _resolve_msg_limit(self) -> int:
-        """每 session 最大消息条数(TrajectoryAnalysisConfig.
-        running_session_message_limit,默认 50;解析失败/未配置回落默认)。"""
-        try:
-            return int(
-                getattr(self._config, "running_session_message_limit",
-                        _RUNNING_SESSION_DEFAULT_MSG_LIMIT)
-                or _RUNNING_SESSION_DEFAULT_MSG_LIMIT
-            )
-        except (TypeError, ValueError):
-            return _RUNNING_SESSION_DEFAULT_MSG_LIMIT
-
-    @staticmethod
-    def _node_elapsed_ms(node, now_ms: int) -> int:  # noqa: ANN001  domain node;防御性读
-        """节点已运行毫秒数(run_info.start_time 防御性读;缺/坏 → 0)。"""
-        try:
-            st = getattr(node.run_info, "start_time", None)
-            return now_ms - int(st) if st is not None else 0
-        except (TypeError, ValueError):
-            return 0
-
-    def _session_bearing_nodes(self, task_id: str) -> "list | None":
-        """带 ``session_id`` 的节点列表,按卡住时长降序(预算/研判优先最"病"的)。
-
-        graph 未接线(轻量 DI)→ ``None``(INFO,探测关闭);图读失败(任务已删 /
-        relay 外部托管等)→ ``None``(WARNING,探测整体降级);无会话节点 → ``[]``。
-        NEVER raises。"""
-        if self._graph is None:
-            logger.info("[task][trajectory] session 探测未接线(graph is none) task=%s", task_id)
-            return None
-        try:
-            graph = self._graph.query_task_dashboard(task_id)
-        except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
-            logger.warning(
-                "[task][trajectory] session 探测图读失败 task=%s: %s: %s",
-                task_id, type(ex).__name__, ex,
-            )
-            return None
-        nodes = [n for n in getattr(graph, "tasks", []) if
-                 (n.run_info.extend_props or {}).get("session_id")]
-        now_ms = int(time.time() * 1000)
-        nodes.sort(key=lambda n: self._node_elapsed_ms(n, now_ms), reverse=True)
-        return nodes
-
-    async def _fetch_node_session_msgs(
-        self, task_id: str, node, *, limit: int,
-    ) -> "list[dict] | None":
-        """单节点会话明细实拉,按 session_id 形态分派读通道:
-
-        * **引擎会话**(``_is_engine_session_id``:``agent:main:session:*`` 等)
-          → ``OpenApiBotPort.get_session_messages``(BaaS Open API;同派发链的
-          api_key,**鉴权面=派发面**——凡任务派发成功的 bot,同 key 读回必过
-          policy gate)。``bot_id`` 复合地址与执行侧同源
-          (``compose_bot_identity(assignee, assignee_owner_id)``,
-          task_executor.py 同式);根节点 main 会话无 assignee → ``None``
-          → BaaS 按 api_key 默认解析,4xx 逐节点降级。
-        * **BCS 会话键**(``bcs-cli:*`` / 协作群)→ 既有 ``get_session_messages``
-          (参与者级 ACL:带持有者 bot 的 Bearer,见 ``_holder_bearer_token``)。
-
-        返回 ``[{role, content}]`` excerpt(内容不截断);``[]``=拉到但无消息;
-        ``None``=失败/通道未接线(已 WARNING)。NEVER raises;**永不落库**
-        (物化 merge 由分析编排层决定,纯读路径不触 DB 写)。
-        """
-        ep = node.run_info.extend_props or {}
-        sid = ep.get("session_id")
-        if not sid or not isinstance(sid, str):
-            return None
-        try:
-            if _is_engine_session_id(sid):
-                if self._openapi_bot is None:
-                    logger.warning(
-                        "[task][trajectory] 引擎会话但 OpenApiBotPort 未接线,跳过"
-                        " task=%s node=%s session=%s",
-                        task_id, getattr(node, "node_id", None), sid,
-                    )
-                    return None
-                # 与执行侧同源身份(单 bot 派发 compose_bot_identity(assignee,
-                # assignee_owner_id));根节点 main 会话无 assignee → None 默认解析。
-                assignee = getattr(node.run_info, "assignee", None)
-                bot_id = compose_bot_identity(assignee, ep.get("assignee_owner_id")) \
-                    if assignee else None
-                logger.info(
-                    "[task][trajectory] session_msgs 引擎通道拉取 begin task=%s node=%s"
-                    " holder_bot=%s", task_id, getattr(node, "node_id", None),
-                    bot_id or "<api-key-default>",
-                )
-                msgs = await self._openapi_bot.get_session_messages(
-                    sid, limit=limit, bot_id=bot_id,
-                )
-                logger.info("[task][trajectory] session_msgs 引擎通道拉取 finish")
-            else:
-                if self._bcs is None:
-                    logger.warning(
-                        "[task][trajectory] BCS 会话但 BcsClientPort 未接线,跳过"
-                        " task=%s node=%s session=%s",
-                        task_id, getattr(node, "node_id", None), sid,
-                    )
-                    return None
-                # BCS 会话历史读口是参与者级 ACL(401 "valid Human identity or
-                # Bot token is required"):带持有者 bot 的 session_token 做
-                # ``Authorization: Bearer``(holder id 取值序 relay_holder_id →
-                # driver_bot_id → assignee,详见 _holder_bearer_token)。
-                caller_bearer = self._holder_bearer_token(node)
-                logger.info(
-                    "[task][trajectory], collect_trajectory_event_session_msgs,"
-                    " begin get bcs msgs holder_bearer=%s",
-                    "yes" if caller_bearer else "hmac-only",
-                )
-                msgs = await self._bcs.get_session_messages(
-                    sid, limit=limit, caller_bearer=caller_bearer,
-                )
-                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
-            excerpt = []
-            for m in msgs or []:
-                if not isinstance(m, dict):
-                    continue  # 非预期形态 → 跳过该条(防御)
-                excerpt.append({
-                    "role": str(m.get("role") or ""),
-                    "content": str(m.get("content") or ""),
-                })  # 内容不截断(已去掉单条/总量字符预算,原文进库/展示)
-            return excerpt
-        except Exception as ex:  # noqa: BLE001  单节点拉取失败 → 跳过,不拖垮其余
-            logger.warning(
-                "[task][trajectory] 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
-                task_id, getattr(node, "node_id", None), sid, type(ex).__name__, ex,
-            )
-            return None
-
-    async def _live_session_msgs_for_read(self, task_id: str) -> "dict[str, list]":
-        """纯读路径的会话明细实拉(REQ-8 不变式:外读内不写,零 DB 写)。
-
-        遍历带 session_id 的节点逐个实拉(既有场景成本:观测页人工访问,
-        每读 1+N 次外部 GET;降级保证永不 raise)。成功且非空的摘录进
-        (node_id → excerpt) map——失败/空(不遮已可见的缓存内容)均缺席,
-        由 ``_attach_session_msgs`` 的 fresh>缓存 覆盖语义自然回退快照。"""
-        nodes = self._session_bearing_nodes(task_id)
-        if not nodes:
-            logger.info(
-                "[task][trajectory], live_session_msgs_for_read, probe off or no session nodes task=%s",
-                task_id,
-            )
-            return {}
-        limit = self._resolve_msg_limit()
-        fresh: dict[str, list] = {}
-        for node in nodes:
-            excerpt = await self._fetch_node_session_msgs(task_id, node, limit=limit)
-            if excerpt:
-                fresh[node.node_id] = excerpt
-        logger.info(
-            "[task][trajectory], live_session_msgs_for_read, 纯读实拉完成 task=%s nodes=%d fetched=%d",
-            task_id, len(nodes), len(fresh),
-        )
-        return fresh
-
-    def _safe_list_records(self, task_id: str) -> "list | None":
-        """读事件行(读路径富化用);失败 → WARNING + None(富化降级,不影响轨迹本体)。"""
-        try:
-            return self._repo.list_events_by_task(task_id)
-        except Exception as ex:  # noqa: BLE001  富化读失败 → 返回未富化轨迹
-            logger.warning(
-                "[task][trajectory] session_msgs 富化读事件行失败,跳过 task=%s: %s: %s",
-                task_id, type(ex).__name__, ex,
-            )
-            return None
-
-    def _attach_session_msgs(
-        self, trajectory: TaskTrajectory, records, fresh: "dict[str, list] | None" = None,
-    ) -> None:
-        """把每个子任务 (task_id+node_id) 的**会话消息**挂到它在 timeline 中的
-        **最后一条**事件上(读时富化,展示进 HTML/DTO;不落库——持久态由
-        ``merge_last_event_ext_info`` 的 ``session_msgs`` 键承载)。
-
-        来源优先级:``fresh``(本回合 do_analysis 刚实拉的最新内容) > 事件行快照
-        中该子任务末位事件 ``ext_info.session_msgs``(早前物化的缓存)。均无 →
-        不挂(None,缺字段=无信号)。观测旁路:任何失败不抛,不影响轨迹本体返回。
-        """
-        if not trajectory.timeline:
-            return
-        msgs_by_node: dict[str, list] = {}
-        try:
-            for node_id, ext in self._last_event_ext_by_node(records).items():
-                cached = (ext or {}).get("session_msgs")
-                if isinstance(cached, list) and cached:
-                    msgs_by_node[node_id] = cached
-        except Exception:  # noqa: BLE001  records 为 None(读失败)→ 空映射
-            msgs_by_node = {}
-        if fresh:
-            msgs_by_node.update({k: v for k, v in fresh.items() if isinstance(v, list) and v})
-        if not msgs_by_node:
-            return
-        last_seen: set[str] = set()
-        for ev in reversed(trajectory.timeline):
-            if ev.node_id in last_seen:
-                continue  # 更早的事件不挂(只挂末位)
-            last_seen.add(ev.node_id)
-            msgs = msgs_by_node.get(ev.node_id)
-            if msgs:
-                ev.session_msgs = [dict(m) if isinstance(m, dict) else m for m in msgs]
-
-    def _holder_bearer_token(self, node) -> "str | None":
-        """解析 RUNNING 节点**持有者 bot** 的 BCS session_token(会话历史读取身份)。
-
-        持有者 id 取值序(都是执行链路落在 extend_props/assignee 上的事实字段):
-        ``relay_holder_id``(relay 当前棒持有 bot)→ ``driver_bot_id``(协作群
-        driver)→ ``run_info.assignee``(single_bot 执行 bot;协作群时该值是
-        group_id——交给 provider 解析,自然 None)。经 ``BcsBotTokenProvider``
-        (corp 读 ``bcs_bots.session_token``,带缓存)取 token;未注入 provider /
-        id 缺失 / 解析失败 → ``None``,调用方回退裸 HMAC(BCS 按 401 拒,走
-        既有 WARNING 降级)。全程防御,永不抛。token 不落日志。
-        """
-        if self._bcs_bot_tokens is None:
-            return None
-        try:
-            ep = node.run_info.extend_props or {}
-            holder = (
-                ep.get("relay_holder_id")
-                or ep.get("driver_bot_id")
-                or getattr(node.run_info, "assignee", None)
-            )
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, hold is = %s", holder)
-            if not holder or not isinstance(holder, str):
-                return None
-            return self._bcs_bot_tokens.get_token(holder) or None
-        except Exception:  # noqa: BLE001  身份解析是观测旁路,任何失败回退匿名
-            return None
-
-    # ------------------------------------------------------------------
-    # Config resolution — optional DI; None when unbound (lightweight injectors)
-    # ------------------------------------------------------------------
-
-    def _resolve_analysis_bot_id(self) -> "str | None":
-        """Read the deployment-configured, env-aware ``analysis_bot_id`` (decision #10).
-
-        Mirrors ``openapi_bot.base_url`` env selection (``_env_select(prod,
-        pre)``): pre env → ``analysis_bot_id_pre``, else → ``analysis_bot_id``.
-        The pair is deployment-configured; ``get_current_env()`` normalizes
-        prepub→pre / gray→prod (lazy import to avoid a module-load cycle, same
-        idiom as ``_env_select``). A ``None`` config (lightweight DI that did not
-        bind ``TrajectoryAnalysisConfig``) — or the env-relevant variant being
-        unset — is treated as not-configured: the ``do_analysis=true`` call
-        raises ``TrajectoryAnalysisNotConfiguredError`` (503). The default read
-        path (``do_analysis=false``) never calls this.
-        """
-        if self._config is None:
-            return None
-        from agentclaw.community.utils.env_utils import get_current_env
-        if get_current_env() == "pre":
-            return self._config.analysis_bot_id_pre
-        return self._config.analysis_bot_id
-
-    # ------------------------------------------------------------------
-    # Emit (write) — fire-and-forget event emission (decision #14). The
-    # facade ``TaskContextService`` relays here; external callers never touch
-    # the raw repo. Wraps payloads.emit_* with self._repo; the free funcs keep
-    # the no-op-if-None + swallow+warn semantics unchanged.
-    # ------------------------------------------------------------------
-
-    def emit_trajectory_event(
-        self,
-        task_id: str,
-        node_id: str,
-        action_type: "TrajectoryActionType | str",
-        *,
-        action_result: str,
-        action_input: str | None = None,
-        error_type: "ReasonCatalog | str | None" = None,
-        error_msg: str | None = None,
-        ext_info: "dict[str, Any] | None" = None,
-        status_from: "Status | str | None" = None,
-        status_to: "Status | str | None" = None,
-        attempt: int = 0,
-        boost_reason: str | None = None,
-        now_ms: int | None = None,
-    ) -> None:
-        """Emit one trajectory event via the repo. Fire-and-forget (decision #14):
-        never raises; ``self._repo is None`` (lightweight DI) → no-op."""
-        _emit_trajectory_event(
-            self._repo,
-            task_id,
-            node_id,
-            action_type,
-            action_result=action_result,
-            action_input=action_input,
-            error_type=error_type,
-            error_msg=error_msg,
-            ext_info=ext_info,
-            status_from=status_from,
-            status_to=status_to,
-            attempt=attempt,
-            boost_reason=boost_reason,
-            now_ms=now_ms,
-        )
-
-    def _emit_plan_trajectory(
-        self,
-        task_id: str,
-        target_id: str | None,
-        pr: PlanResult,
-        attempt: int,
-        failure_msg: str | None,
-    ) -> None:
-        """REQ-3 (P3-2) 每次尝试(retry attempt)发射一条 PLAN 轨迹事件。
-
-        additive 旁路:与既有 post-loop ``_log_action(NodeAction.PLAN, ...)`` 在同一
-        闸门位置、互不相干,经 ``emit_trajectory_event`` 独立 direct-INSERT 到
-        ``task_trajectory_events``(不走 ``task_action_log``)。``action_input=pr.prompt_digest``
-        (workflow 策略 → None);失败 mid-row(``gap_detail`` 以 ``plan_`` 开头)带
-        ``error_type=PLAN_FAILURE`` + 截断 ``error_msg`` + ``ext_info={strategy_name,
-        gap_detail, raw_response_digest}``;成功条带 ``ext_info={strategy_name, has_gap,
-        gap_detail, children, raw_response_digest}``、``error_*=None``。
-
-        全程防御:emitter(``emit_trajectory_event``)兜一层 try/except + WARNING
-        (决策 #14);ext_info 装配在当前 PlanResult 形状下不会抛,无独立内层 guard
-        (避免静默 swallow 掉未来的装配 bug —— 决策 #14 要求失败可见:WARNING)。
-        ``repo is None`` 时 emitter 静默 no-op(测试/轻量 DI 取不到协议)。"""
-        if target_id is None:
-            # 无锚定节点(无根/缺图)——不发射,跳过;正常路径下不应发生(根已就绪)。
-            return
-        try:
-            gd = pr.gap_detail or ""
-            is_failure = gd.startswith("plan_")
-            if is_failure:
-                # call_fail  = bot 调用没拿到可用的 COMPLETED 响应(传输/未完成:
-                #   plan_call_fail=planner 抛异常;plan_not_completed=run 非 COMPLETED)
-                # parse_fail = COMPLETED 响应但形态无法用(空 content / 解析失败 /
-                #   形态非预期:plan_parse_fail / plan_shape_unexpected / plan_empty_content)
-                # 对齐 TrajectoryEvent.action_result 词表;analyzer 据此归因 plan_failure 子类。
-                action_result = "parse_fail" if gd in (
-                    "plan_parse_fail", "plan_shape_unexpected", "plan_empty_content",
-                ) else "call_fail"
-                raw_msg = failure_msg or gd
-                error_msg = raw_msg if len(raw_msg) <= 500 else raw_msg[:497] + "..."
-            else:
-                action_result = "success"
-                error_msg = None
-            # ext_info 装配:dict 字面量在当前 PlanResult 形状下不会抛;不做静默 swallow
-            # (决策 #14 要求失败可见:WARNING)。未来的装配 bug 由外层 try/except +
-            # logger.warning 统一捕获可见(此处无独立 guard)。
-            if is_failure:
-                ext_info: dict[str, Any] = {
-                    "strategy_name": pr.strategy_name,
-                    "gap_detail": gd or None,
-                    "raw_response_digest": pr.raw_response_digest,
-                }
-            else:
-                ext_info = {
-                    "strategy_name": pr.strategy_name,
-                    "has_gap": pr.has_gap,
-                    "gap_detail": gd or None,
-                    "children": list(pr.planned_children or []),
-                    "raw_response_digest": pr.raw_response_digest,
-                }
-            self._log_trajectory(
-                task_id,
-                target_id,
-                "plan",  # TrajectoryActionType.PLAN.value(TYPE_CHECKING-only enum;emitter 接受 str)
-                action_result=action_result,
-                action_input=pr.prompt_digest,
-                error_type="plan_failure" if is_failure else None,
-                error_msg=error_msg,
-                ext_info=ext_info,
-                status_from=Status.PLANNING,
-                status_to=Status.PLANNING,
-                attempt=attempt,
-            )
-        except Exception as ex:  # noqa: BLE001  轨迹旁路:吞而不抛 + WARNING(决策 #14)
-            logger.warning(
-                "[task][trajectory][plan] task=%s attempt=%d 发射失败:%s",
-                task_id, attempt, ex,
-            )
-
-    def _log_action(
-        self,
-        task_id: str,
-        node_id: str,
-        action: NodeAction,
-        payload: dict,
-        *,
-        attempt: int | None = None,
-        status_from: Status | None = None,
-        status_to: Status | None = None,
-    ) -> None:
-        """追加节点动作历史快照(append-only;零侵入驱动逻辑)。
-
-        供各逻辑动作(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)完成时调用,
-        纯可观测旁路:不翻态、不读回驱动。``attempt`` 省略时取节点 harness_retries 快照;
-        ``status_from``/``status_to`` 省略时由调用方按动作前/后态传(未翻态可不传)。
-        """
-        if attempt is None:
-            node = next(
-                (
-                    n
-                    for n in self._graph.query_task_dashboard(task_id).tasks
-                    if n.node_id == node_id
-                ),
-                None,
-            )
-            attempt = (
-                int(node.run_info.extend_props.get("harness_retries", 0)) if node else 0
-            )
-        try:
-            self._graph.append_action_event(
-                task_id,
-                node_id,
-                action,
-                payload,
-                attempt=attempt,
-                status_from=status_from,
-                status_to=status_to,
-            )
-        except Exception as ex:  # noqa: BLE001  历史快照写入失败不影响驱动
-            logger.warning(
-                "[task][action-log] task=%s node=%s action=%s 追加失败:%s",
-                task_id,
-                node_id,
-                action.value,
-                ex,
-            )
-
-    def _log_trajectory(
-        self,
-        task_id: str,
-        node_id: str,
-        action_type: "TrajectoryActionType",
-        *,
-        action_result: str,
-        action_input: str | None = None,
-        error_type: "ReasonCatalog | None" = None,
-        error_msg: str | None = None,
-        ext_info: dict[str, Any] | None = None,
-        status_from: Status | None = None,
-        status_to: Status | None = None,
-        attempt: int = 0,
-    ) -> None:
-        """旁路发射一条任务轨迹事件(REQ-11 采集层)。零侵入驱动逻辑:
-
-        - 与 ``_log_action`` 在同一闸门位置调用,但**完全独立**——经
-          ``self._task_context_service.emit_trajectory_event(...)`` 中转到内部
-          ``TaskTrajectoryService`` 直接 INSERT 到 ``task_trajectory_events``,
-          **不**经 ``self._graph.append_action_event``
-          (plan §"Spec clarifications" #2:The trajectory path is independent and
-          direct-INSERT;mirrors only the swallow + no re-raise pattern)。
-        - ``self._task_context_service`` 为 ``None`` 时(测试/轻量 DI 取不到协议)→
-          跳过发射静默 no-op,正向驱动不受影响(内部 repo-None 情形由 emitter 再兜底 no-op)。
-        - 全程 ``try/except Exception`` 吞异常(**不**抛出),失败记 WARNING 日志
-          (已确认决策 #14;AGENTS.md "propagate persistence write failures" 对此
-          fire-and-forget 观测旁路**明示豁免**)——见 ``task_trajectory/payloads.py``。
-
-        线程/调用约定:同步调用,可在各 gate 的锁内/锁外任意位置直接调用。
-        ``action_input`` **不截断**(原文落库);``error_msg`` 由调用方(各 gate)截断后传入。
-        ``now_ms`` 由 emitter 取当前 wall-clock(emitter 内有兜底),故本方法不暴露该参数。
-        """
-        # ``task_context_service is None`` (lightweight DI: trajectory unbound) → no-op;
-        # when present, the service relays to the internal TaskTrajectoryService whose
-        # emitter no-ops + swallows on repo-None (decision #14). The guard keeps the
-        # gate concise regardless.
-        if self._task_context_service is not None:
-            self._task_context_service.emit_trajectory_event(
-                task_id,
-                node_id,
-                action_type,
-                action_result=action_result,
-                action_input=action_input,
-                error_type=error_type,
-                error_msg=error_msg,
-                ext_info=ext_info,
-                status_from=status_from,
-                status_to=status_to,
-                attempt=attempt,
-            )
-
-    @staticmethod
-    def _transition_action_result(status_to: Status | None) -> str:
-        """Map a TRANSITION's ``status_to`` to a trajectory ``action_result``
-        (REQ-1's open-ended ``...`` enumeration). The status_to-derived
-        lowercase name mirrors the ``_log_action`` payload's ``to`` field and
-        is what the analyzer's ``_terminal_status`` keys on (via ``status_to``
-        membership in the terminal set, not ``action_result``). Mapping:
-
-            SUCCESS→"success"   HUNG→"hung"   FAILED→"failed"
-            CANCELLED→"cancelled"   DONE→"done"   RUNNING→"running"
-            PENDING→"pending"   PLANNING→"planning"
-
-        ``None`` (defensive — no status_to on the event) → ``"transition"``.
-        """
-        if status_to is None:
-            return "transition"
-        return str(getattr(status_to, "value", status_to)).lower()
-
-    @staticmethod
-    def _read_exec_error_origin(patch: TaskNodePatch) -> str | None:
-        """Read the surfaced ``_exec_error_origin`` from the patch's
-        ``extend_props_patch`` defensively. Returns ``None`` on any failure
-        (incl. a hostile dict that raises on ``.get``) — the gate's
-        origin read is decision-#14 trajectory-assembly scope (a raise here
-        degrades to ``error_type=None``, NOT a gate failure)."""
-        try:
-            ep = patch.extend_props_patch
-            if isinstance(ep, dict):
-                origin = ep.get("_exec_error_origin")
-                if isinstance(origin, str):
-                    return origin
-        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
-            return None
-        return None
-
-    @staticmethod
-    def _read_interface_error_code(patch: TaskNodePatch) -> str | None:
-        """Read an optional ``interface_error_code`` surfaced on the patch's
-        ``extend_props_patch`` (the bot may set it via ``result._ext_info``).
-        Defensive — ``None`` on any failure / absent key."""
-        try:
-            ep = patch.extend_props_patch
-            if isinstance(ep, dict):
-                code = ep.get("interface_error_code")
-                if code is not None:
-                    return str(code)
-        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
-            return None
-        return None
-
-    def _read_exec_request_input_and_attempt(
-        self, task_id: str, node_id: str
-    ) -> tuple[str | None, int]:
-        """Defensively read, in ONE graph query, the downstream request原文
-        (``node.run_info.extend_props["_exec_request_input"]``) and the harness
-        retries snapshot (``harness_retries``) for the EXECUTE/VERIFY trajectory
-        event (REQ-1/REQ-5). ``action_input`` is the request原文 — **not
-        truncated** — read from the node the executor would have surfaced it on
-        (production surfacing is a separate executor-wire concern; the gate
-        consumes the key defensively, ``None`` when absent). ``attempt`` mirrors
-        ``_log_action``'s default ``harness_retries`` snapshot. Returns
-        ``(None, 0)`` on any failure — decision-#14 trajectory-assembly scope
-        (NOT the gate's main driving logic)."""
-        try:
-            graph = self._graph.query_task_dashboard(task_id)
-            node = next((n for n in graph.tasks if n.node_id == node_id), None)
-            if node is None:
-                return None, 0
-            ri = node.run_info.extend_props
-            req = ri.get("_exec_request_input")
-            req = req if isinstance(req, str) else None
-            attempts = int(ri.get("harness_retries", 0) or 0)
-            return req, attempts
-        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
-            return None, 0
-
-    def _emit_execute_trajectory(
-        self,
-        patch: TaskNodePatch,
-        result: NodeOpResult,
-        *,
-        action_type: str,            # "execute" | "verify"
-        action_result: str,          # "failed" | "success" | "accept_pass" | "accept_fail"
-        is_exec_error: bool = False,  # True only on the exec_error (EXECUTE err) path
-    ) -> None:
-        """REQ-5: fire one EXECUTE/VERIFY trajectory event **additively** to
-        ``_log_action(NodeAction.EXECUTE/VERIFY, ...)`` (alongside, NOT replacing).
-
-        ``error_type`` 按 ``patch.extend_props_patch["_exec_error_origin"]``
-        经 ``_EXEC_ERROR_ORIGIN_TO_REASON`` 映射(``bot_interface→
-        underlying_interface_error`` 等);未映射/无 origin → ``None``。
-        ``error_msg`` = ``patch.exec_error`` 截断 ≤500(仅 ``is_exec_error`` 路径;
-        EXECUTE(ok) / VERIFY 无 error_msg)。
-        ``action_input`` = 下发请求原文(从节点 ``run_info.extend_props
-        ["_exec_request_input"]`` 防御性读取;缺失 ``None``、**不截断**)。
-        ``ext_info={"interface_error_code": <code>}`` 若 patch 透出该 code,否则 ``None``。
-        ``status_from``/``status_to``/``attempt`` 对齐 ``_log_action``。
-
-        决策 #14:全程 ``try/except`` 吞而不抛 + WARNING(轨迹旁路 fire-and-forget,
-        不阻塞闸门主逻辑——本方法只在装配/发射轨迹,不在 swallows 内含任何
-        驱动逻辑)。emitter(``emit_trajectory_event``)另兜一层 try/except + WARNING。
-        ``repo is None`` 时 emitter 静默 no-op。
-        """
-        try:
-            origin = self._read_exec_error_origin(patch)
-            error_type = _EXEC_ERROR_ORIGIN_TO_REASON.get(origin) if origin else None
-            if is_exec_error and patch.exec_error:
-                raw = patch.exec_error
-                error_msg = (
-                    raw if len(raw) <= _EXEC_ERROR_MSG_MAX
-                    else raw[: _EXEC_ERROR_MSG_MAX - 3] + "..."
-                )
-            else:
-                error_msg = None
-            action_input, attempt = self._read_exec_request_input_and_attempt(
-                patch.task_id, patch.node_id
-            )
-            code = self._read_interface_error_code(patch)
-            ext_info = {"interface_error_code": code} if code is not None else None
-            self._log_trajectory(
-                patch.task_id,
-                patch.node_id,
-                action_type,  # TrajectoryActionType.EXECUTE/VERIFY.value (emitter accepts str)
-                action_result=action_result,
-                action_input=action_input,
-                error_type=error_type,
-                error_msg=error_msg,
-                ext_info=ext_info,
-                status_from=result.prev_status,
-                status_to=result.new_status,
-                attempt=attempt,
-            )
-        except Exception as ex:  # noqa: BLE001  轨迹旁路:吞而不抛 + WARNING(决策 #14)
-            logger.warning(
-                "[task][trajectory][%s] task=%s node=%s 发射失败:%s",
-                action_type, patch.task_id, patch.node_id, ex,
-            )
-
-    def _static_runtime(self, task_id: str):
-        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanRuntime
-        cfg = self._graph._execution_config(task_id)
-        # 判据:cfg 含 ``static_plan_id`` 或 ``static_plan_yaml`` 任一即视为预置模板 plan(不依赖 task_type 字符串);
-        # task_type 仍可显式 STATIC_PLAN 兼容旧调用方,但默认 dynamic caller 经 execute 内容路由命中后,
-        # 也会在此处回填 static_plan_id/static_plan_yaml 进入预置 plan runtime。
-        template_id = cfg.get("static_plan_id")
-        yaml_text = cfg.get("static_plan_yaml")
-        if not template_id and not yaml_text and cfg.get("task_type") != "static_plan":
-            return None
-        if not yaml_text and template_id:
-            # 显式只传 task_type/static_plan_id 未带 yaml → 从仓库 plans 懒加载。
-            # plans 仓库固定位于 core/task/task_plan/plans — 本方法被 CentralizedExecutionAdapter
-            # borrow 执行(bbs 重构自 task_center/task_service 同源迁入),锚定 static_plan 模块自身
-            # 定位;沿用 parents[1] 会随宿主文件层级漂移(task_context/task_trajectory 下不再指向
-            # core/task,模板懒加载静默失效 → runtime=None)。
-            from pathlib import Path
-            from agentclaw.community.core.task.task_plan import static_plan as _static_plan_module
-            plans_dir = Path(_static_plan_module.__file__).resolve().parent / "plans"
-            plans_path = plans_dir / f"{template_id}.yaml"
-            if not plans_path.exists():
-                return None
-            yaml_text = plans_path.read_text(encoding="utf-8")
-        try:
-            definition = StaticPlanDefinition.from_yaml(
-                str(yaml_text) if yaml_text else "",
-                bindings=self._bot_bindings.bot_id_by_role if self._bot_bindings else None,
-            )
-            runtime = StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
-        except Exception:
-            logger.exception(
-                "[task][static-plan] runtime init failed task=%s template=%s",
-                task_id,
-                template_id,
-            )
-            raise
-        logger.debug(
-            "[task][static-plan] runtime loaded task=%s template=%s",
-            task_id,
-            template_id or definition.template_id,
-        )
-        return runtime

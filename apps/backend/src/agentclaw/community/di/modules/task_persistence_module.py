@@ -21,11 +21,9 @@ fall back to the in-process default when unbound). Co-located with the
 assembler so the trajectory read + analysis wiring stays in one place.
 """
 
-from injector import Binder, Injector, Module, provider, singleton
-
 import logging
 
-logger = logging.getLogger("task.persistence")
+from injector import Binder, Injector, Module, provider, singleton
 
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
@@ -76,10 +74,13 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_servi
     TaskTrajectoryServiceProtocol,
 )
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
-from agentclaw.community.core.task.task_context.task_graph_service import (  # noqa: E402
+from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
-from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (  # noqa: E402
+from agentclaw.community.core.task.repository.task_intake_repository import (
+    TaskIntakeRepository, TaskIntakeRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
     BcsBotTokenProvider,
 )
 from agentclaw.community.core.task.task_runner.client.ports import (
@@ -89,11 +90,14 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
+logger = logging.getLogger("task.persistence")
+
 
 class TaskPersistenceModule(Module):
     """Bind the 5 task repository contracts to their unified ORM implementations."""
 
     def configure(self, binder: Binder) -> None:
+        binder.bind(TaskIntakeRepositoryProtocol, to=TaskIntakeRepository, scope=singleton)
         binder.bind(
             TaskActionLogRepositoryProtocol, to=TaskActionLogRepository, scope=singleton
         )

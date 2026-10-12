@@ -7,6 +7,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     runtime_status_to_product_status, TaskSettingRequestDTO, TaskSettingStateDTO,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
+from agentclaw.community.adapters.http.task.schemas_node_context import node_context_to_dto
+from agentclaw.community.adapters.http.task.schemas_relay_report import TaskReportCommandDTO
+from agentclaw.community.core.task.domain.models import Context, Goal, TaskContext, TaskSpec
 
 
 def _base(**kw):
@@ -43,11 +46,57 @@ def test_op_result_to_dto_returns_extend_props():
     dto = op_result_to_dto(TaskOpResult(
         task_id="t1",
         success=True,
+        node_id="t1",
         run_id=1,
         extend_props={"group_id": "bcs_grp_1"},
     ))
 
     assert dto.extend_props == {"group_id": "bcs_grp_1"}
+    assert dto.node_id == "t1"
+
+
+def test_node_context_dto_does_not_expose_task_level_gaps() -> None:
+    spec = TaskSpec(context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[]))
+    dto = node_context_to_dto(TaskContext(
+        spec=spec, all_done_output=[], gaps=["legacy graph gap"],
+        task_id="t1", node_id="n1", root_task_spec=spec, current_task_spec=spec,
+    ))
+    assert dto.task_id == "t1" and dto.node_id == "n1"
+    assert "gaps" not in dto.model_dump()
+
+
+def test_plan_report_dto_builds_one_unpersisted_node() -> None:
+    command = TaskReportCommandDTO.model_validate({
+        "task_id": "t1", "node_id": "n1", "event_id": "e1", "relay_token": "generation-1",
+        "event_type": "PLAN_RESULT",
+        "event": {
+            "task_spec": {
+                "context": {"title": "下一棒", "background": ""},
+                "goal": {"objective": "补齐验收", "acceptances": []},
+            },
+            "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
+        },
+    }).to_domain()
+    assert command.event_id == "e1" and command.relay_token == "generation-1"
+    assert command.event.node_id is None
+    assert command.event.task_spec.goal.objective == "补齐验收"
+    assert command.event.run_info.assignee == "bot-2"
+
+
+def test_plan_report_dto_rejects_client_generated_node_id() -> None:
+    with pytest.raises(ValidationError):
+        TaskReportCommandDTO.model_validate({
+            "task_id": "t1", "node_id": "n1", "event_id": "e1", "relay_token": "generation-1",
+            "event_type": "PLAN_RESULT",
+            "event": {
+                "node_id": "client-node",
+                "task_spec": {
+                    "context": {"title": "下一棒"},
+                    "goal": {"objective": "补齐验收"},
+                },
+                "run_info": {"run_mode": "single_bot", "assignee": "bot-2"},
+            },
+        }).to_domain()
 
 
 def test_task_settings_dtos_accept_relay_execution() -> None:

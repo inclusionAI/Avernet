@@ -150,7 +150,7 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
     """BBS submission is independent of the caller's short-lived Harness loop."""
     engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
-    engine._runner.start_run = AsyncMock(return_value=[True])
+    engine._runner.start_run = AsyncMock(return_value=True)
     engine._bot = MagicMock()
     engine._bcs = MagicMock()
     fake_g = MagicMock()
@@ -173,7 +173,7 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
         engine._schedule_bbs_notify("t1", fake_g)
         mock_submit.assert_called_once()
         assert len(engine._bg_tasks) == 1
-        submitted = engine._runner.start_run.call_args.args[0][0]
+        submitted = engine._runner.start_run.call_args.args[0]
         assert submitted is not root
         assert submitted.run_info is not root.run_info
         assert submitted.run_info.run_mode == "bbs"
@@ -203,7 +203,7 @@ def test_engine_background_false_result_is_visible(caplog):
     future = concurrent.futures.Future()
     future._bbs_task_id = "t1"
     engine._bg_tasks.add(future)
-    future.set_result([False])
+    future.set_result(False)
 
     with caplog.at_level("ERROR"):
         engine._on_bg_done(future)
@@ -218,9 +218,8 @@ def test_engine_bbs_survives_caller_loop_shutdown():
     started = threading.Event()
     finished = threading.Event()
 
-    async def start_run(nodes):
-        assert len(nodes) == 1
-        assert nodes[0].run_info.run_mode == "bbs"
+    async def start_run(node):
+        assert node.run_info.run_mode == "bbs"
         started.set()
         await asyncio.sleep(0)
         finished.set()
@@ -277,7 +276,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
         result = _run(submitted["coro"])
         durable_future.set_result(result)
 
-    assert result == [True]
+    assert result is True
     notify.assert_awaited_once()
 
 

@@ -170,7 +170,6 @@ class _FakeGraph:
                 node.run_info.assignee = payload["bot_id"]
                 node.run_info.extend_props.update({
                     "bbs_owner": payload["bot_id"],
-                    "relay_holder_id": payload["bot_id"],
                     "driver_bot_id": payload["bot_id"],
                     "next_relay_bots": [payload["bot_id"]],
                 })
@@ -326,7 +325,7 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
         task_spec=execution_graph.tasks[0].task_spec,
         run_info=RuntimeInfo(
             run_mode="bbs",
-            extend_props={"execution_decision": "ACCEPTED"},
+            extend_props={"execution_decision": "ACCEPTED", "relay_token": "attempt-1"},
         ),
         node_run_graph=None,
     )
@@ -349,11 +348,12 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
     assert bot.sent_messages and bot.sent_messages[0][0] == "A"
 
     relay_msg = bot.sent_messages[0][1]
-    assert "【分布式接力闭环】" in relay_msg
-    assert "loop_task_id=t-relay::relay-bbs-1" in relay_msg
-    assert '"event_type": "EXECUTION_RESULT"' in relay_msg
-    assert "PLAN_RESULT" in relay_msg and "DISPATCH_RESULT" in relay_msg
-    assert "GET http://x/api/v1/collaboration/tasks/t-relay/context" in relay_msg
+    assert "【分布式接力执行 S1-S6】" in relay_msg
+    assert "backend_url=http://x" in relay_msg
+    assert "task_id=t-relay; node_id=relay-bbs-1" in relay_msg
+    assert "event_type=EXECUTION_RESULT" in relay_msg
+    assert "PLAN_RESULT" in relay_msg and "DISPATCH_RESULT" not in relay_msg
+    assert "/api/v1/collaboration/tasks/t-relay/nodes/relay-bbs-1/context" in relay_msg
     assert '"status": "SUCCESS"' not in relay_msg
     assert "执行步骤：1、执行任务 2、通过post接口上报结果" not in relay_msg
 
@@ -367,7 +367,7 @@ def test_notify_relay_empty_roster_keeps_bbs_node_pending_for_square():
         task_id="t-relay-square",
         status=Status.PENDING,
         task_spec=execution_graph.tasks[0].task_spec,
-        run_info=RuntimeInfo(run_mode="bbs"),
+        run_info=RuntimeInfo(run_mode="bbs", extend_props={"relay_token": "attempt-1"}),
         node_run_graph=None,
     )
     execution_graph.tasks.append(relay_node)
@@ -401,7 +401,7 @@ def test_notify_relay_send_failure_releases_current_bbs_node():
         task_id="t-relay-send-failure",
         status=Status.PENDING,
         task_spec=execution_graph.tasks[0].task_spec,
-        run_info=RuntimeInfo(run_mode="bbs"),
+        run_info=RuntimeInfo(run_mode="bbs", extend_props={"relay_token": "attempt-1"}),
         node_run_graph=None,
     )
     execution_graph.tasks.append(relay_node)
@@ -436,7 +436,7 @@ def test_relay_bot_reply_before_callback_keeps_claim_and_records_pending_result(
     relay_node = TaskNode(
         node_id="relay-late", task_id=execution_graph.task_id,
         status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
-        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+        run_info=RuntimeInfo(run_mode="bbs", extend_props={"relay_token": "attempt-1"}), node_run_graph=None,
     )
     execution_graph.tasks.append(relay_node)
     graph.dashboard = execution_graph
@@ -476,7 +476,7 @@ def test_relay_callback_before_chat_reply_does_not_reopen_node():
     relay_node = TaskNode(
         node_id="relay-callback-first", task_id=execution_graph.task_id,
         status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
-        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+        run_info=RuntimeInfo(run_mode="bbs", extend_props={"relay_token": "attempt-1"}), node_run_graph=None,
     )
     execution_graph.tasks.append(relay_node)
     graph.dashboard = execution_graph

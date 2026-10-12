@@ -970,12 +970,11 @@ async def test_do_analysis_fast_path_skips_probe():
 @pytest.mark.unit
 async def test_do_analysis_probe_passes_holder_bearer_token():
     """方案一(401 修复):会话历史读口有参与者级 ACL——探测经 BcsBotTokenProvider
-    解析 RUNNING 节点持有者 bot 的 session_token,以 caller_bearer 传入(BCS HTTP
-    层携带 ``Authorization: Bearer``)。持有者 id 取值序 relay_holder_id →
-    driver_bot_id → assignee。"""
+    解析 RUNNING 节点执行 Bot 的 session_token,以 caller_bearer 传入(BCS HTTP
+    层携带 ``Authorization: Bearer``)。执行 Bot 取值序 driver_bot_id → assignee。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n-relay", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-relay", "relay_holder_id": "bot-holder"},
+                  extend_props={"session_id": "sess-relay", "driver_bot_id": "bot-holder"},
                   start_time=500),
         _FakeNode(node_id="n-group", status=Status.RUNNING,
                   extend_props={"session_id": "sess-group", "driver_bot_id": "bot-driver"},
@@ -1006,7 +1005,7 @@ async def test_do_analysis_probe_passes_holder_bearer_token():
     await svc.get_trajectory("t1", do_analysis=True)
 
     by_sid = {c[0]: c[2] for c in bcs.calls}
-    assert by_sid["sess-relay"] == "tok-holder"   # relay_holder_id 优先
+    assert by_sid["sess-relay"] == "tok-holder"   # driver_bot_id
     assert by_sid["sess-group"] == "tok-driver"   # driver_bot_id 次之
     assert by_sid["sess-single"] == "tok-exec"    # assignee 兜底
     # 请求了全部三个持有者(顺序按卡住时长降序,不按构造序)
@@ -1020,10 +1019,10 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
     传 None(裸 HMAC 尝试,BCS 401 时由既有 WARNING 降级)——检测不抛、不阻断。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n1", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"},
+                  extend_props={"session_id": "sess-1", "driver_bot_id": "bot-x"},
                   start_time=500),
         _FakeNode(node_id="n2", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-2", "relay_holder_id": "bot-y"},
+                  extend_props={"session_id": "sess-2", "driver_bot_id": "bot-y"},
                   start_time=400),
     ])
     bcs = _FakeBcs(messages_by_session={
@@ -1051,7 +1050,7 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
         TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst"),
         graph=_FakeGraph([
             _FakeNode(node_id="n1", status=Status.RUNNING,
-                      extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"}),
+                      extend_props={"session_id": "sess-1", "driver_bot_id": "bot-x"}),
         ]),
         bcs=bcs2,
     )
@@ -1643,10 +1642,10 @@ async def test_claude_code_session_key_dispatches_to_baas():
 @pytest.mark.unit
 async def test_mixed_bcs_and_engine_channels_probed_independently():
     """BCS 键 + 引擎键混合节点:各自分派正确通道;BCS 节点照旧解析持有者
-    Bearer(relay_holder_id),引擎节点走复合 bot_id。"""
+    Bearer(driver_bot_id),引擎节点走复合 bot_id。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n-bcs", status=Status.RUNNING,
-                  extend_props={"session_id": "sess-group", "relay_holder_id": "bot-holder"},
+                  extend_props={"session_id": "sess-group", "driver_bot_id": "bot-holder"},
                   start_time=500),
         _FakeNode(node_id="n-eng", status=Status.RUNNING,
                   extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},

@@ -44,8 +44,8 @@ class _FakeRunner:
     def __init__(self, calls: list[tuple]) -> None:
         self._calls = calls
 
-    async def start_run(self, nodes) -> None:
-        self._calls.append(("start_run", nodes))
+    async def start_run(self, node) -> None:
+        self._calls.append(("start_run", node))
 
 
 class _FakeEngine:
@@ -101,10 +101,8 @@ def test_execute_workflow_dispatches_to_runner():
 
     assert result.success is True and result.task_id == "t1"
     assert len(eng.calls) == 1
-    kind, nodes = eng.calls[0]
+    kind, node = eng.calls[0]
     assert kind == "start_run"
-    assert len(nodes) == 1
-    node = nodes[0]
     assert node.node_id == "t1"
     assert node.run_info.run_mode == "single_bot"
     assert node.run_info.assignee == "b1"
@@ -121,9 +119,9 @@ def test_execute_workflow_accepts_pure_or_composite_owner_bot_id(owner_bot_id):
     )
 
     assert result.success is True
-    _, nodes = eng.calls[0]
-    assert nodes[0].run_info.assignee == "b1"
-    assert nodes[0].task_spec.context.title == "/wf "
+    _, node = eng.calls[0]
+    assert node.run_info.assignee == "b1"
+    assert node.task_spec.context.title == "/wf "
 
 
 def test_execute_yaml_composes_owner_identity_before_forming_group():

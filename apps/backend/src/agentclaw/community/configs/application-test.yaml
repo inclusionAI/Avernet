@@ -5,6 +5,9 @@
 # stand-ins; the test suite mocks the actual endpoints, so only the keys' presence /
 # shape matters, not where they point.
 user_config:
+  task_dispatch:
+    backend_url: "http://localhost:8888"
+
   # Privileged-user allow-lists (admin scopes) — SYNTHETIC ids, tests only. Real
   # employee ids never ship in community source; corp overlays carry production
   # ids. Endpoint tests authorize with "100000" (the doc-example placeholder).

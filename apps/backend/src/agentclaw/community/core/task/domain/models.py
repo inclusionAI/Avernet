@@ -73,6 +73,16 @@ class TaskSourceType(StrEnum):
     API = "api"
 
 
+class TaskReportEventType(StrEnum):
+    EXECUTION_RESULT = "EXECUTION_RESULT"
+    PLAN_RESULT = "PLAN_RESULT"
+
+
+class TaskReportStatus(StrEnum):
+    APPLIED = "APPLIED"
+    PROCESSING = "PROCESSING"
+
+
 class TaskType(StrEnum):
     """任务类型(static-single-workflow / static-group-workflow / dynamic)。"""
 
@@ -166,9 +176,10 @@ class TaskInfo:
 class TaskRuntimeProfile:
     """Task-creation snapshot of governed orchestration strategies and modes."""
 
-    planner_strategy: str = "default"
+    planner_strategy: str | None = "default"
     dispatcher_strategy: str = "default"
     runner_strategy: str = "default"
+    recovery_strategy: str = "centralized"
     allowed_run_modes: tuple[str, ...] = ("single_bot", "coop_group", "bbs")
 
     @classmethod
@@ -182,20 +193,25 @@ class TaskRuntimeProfile:
         normalized = tuple(
             dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
         )
+        relay_mode = config.get("orchestration_mode") == "relay"
         return cls(
-            planner_strategy=str(raw.get("planner_strategy") or "default"),
-            dispatcher_strategy=str(raw.get("dispatcher_strategy") or "default"),
-            runner_strategy=str(raw.get("runner_strategy") or "default"),
+            planner_strategy=None if relay_mode else str(raw.get("planner_strategy") or "default"),
+            dispatcher_strategy=str(raw.get("dispatcher_strategy") or ("relay_handoff" if relay_mode else "default")),
+            runner_strategy=str(raw.get("runner_strategy") or ("relay_prompt" if relay_mode else "default")),
+            recovery_strategy=str(raw.get("recovery_strategy") or ("relay" if relay_mode else "centralized")),
             allowed_run_modes=normalized or cls.allowed_run_modes,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "planner_strategy": self.planner_strategy,
+        profile = {
             "dispatcher_strategy": self.dispatcher_strategy,
             "runner_strategy": self.runner_strategy,
+            "recovery_strategy": self.recovery_strategy,
             "allowed_run_modes": list(self.allowed_run_modes),
         }
+        if self.planner_strategy is not None:
+            profile["planner_strategy"] = self.planner_strategy
+        return profile
 
 
 # ===== 运行态(Runtime Graph)=====
@@ -220,11 +236,21 @@ class DoneOutput:
 
 @dataclass
 class TaskContext:
-    """跨中心化与 Relay 共用的最小任务业务上下文。"""
+    """Graph-projected business context; node-scoped fields are set by S1.
+
+    ``spec``/``gaps`` remain for existing centralized consumers. Relay must use
+    ``root_task_spec`` and ``current_task_spec`` and infer task gaps locally.
+    """
 
     spec: TaskSpec
     all_done_output: list[DoneOutput]
     gaps: list[str]
+    task_id: str | None = None
+    node_id: str | None = None
+    root_task_spec: TaskSpec | None = None
+    current_task_spec: TaskSpec | None = None
+    accepted_execution_patch: TaskNodePatch | None = None
+    accepted_plan_report: TaskReportResult | None = None
 
 
 @dataclass
@@ -296,12 +322,12 @@ def effective_run_mode(node: TaskNode) -> str | None:
 class TaskNode:
     """任务节点。结构归属由 ``graph.relations`` 分解树表达(无 decomposed_by/depends_on)。"""
 
-    node_id: str                  # 节点唯一实例 ID
+    node_id: str | None           # 未落图 Relay 规划节点尚无 ID
     task_id: str                  # 节点所发整体任务 ID(归属键)
-    status: Status
+    status: Status | None
     task_spec: TaskSpec
     run_info: RuntimeInfo
-    node_run_graph: "TaskExecutionGraph"   # 节点所属执行图实例引用
+    node_run_graph: "TaskExecutionGraph | None"   # 未落图节点尚未归属执行图
     # 结构父/结构子查询、验收归属、传播一律从 graph.relations 分解树派生;
     # 无跨兄弟/跨层级直接数据边——数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载
 
@@ -427,6 +453,38 @@ class TaskNodePatch:
     execution_decision: str | None = None                      # ACCEPTED | DECLINED
 
 
+@dataclass(frozen=True)
+class TaskReportCommand:
+    """Bot reports one event for the execution generation it received at dispatch."""
+
+    task_id: str
+    node_id: str
+    event_id: str
+    relay_token: str
+    event_type: TaskReportEventType
+    event: TaskNodePatch | TaskNode | None
+    progress_reason: str = ""
+    failure_reason: str | None = None
+    task_acceptance_result: AcceptanceResult | None = None
+
+
+@dataclass(frozen=True)
+class TaskReportResult:
+    status: TaskReportStatus
+    target_node_id: str | None = None
+    task_completed: bool = False
+    task_hung: bool = False
+    bbs_publish_pending: bool = False
+
+
+@dataclass(frozen=True)
+class BotCandidate:
+    bot_id: str
+    name: str
+    description: str = ""
+    score: float | None = None
+
+
 @dataclass
 class TaskGraphPatch:
     """图级原子写(``update_task_graph_info`` 入参);收口图级终态(图 ``status``/``loop_round``/``output``/``extend_props``)。
@@ -460,6 +518,7 @@ class TaskOpResult:
     error: str | None = None
     run_id: int | None = None
     extend_props: dict | None = None
+    node_id: str | None = None
 
 
 @dataclass

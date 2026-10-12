@@ -908,7 +908,7 @@ class ConfigModule(Module):
     @singleton
     @provider
     def task_dispatch(self) -> cfg.TaskDispatchConfig:
-        """Task dispatch policy.
+        """Task dispatch runtime configuration loaded from deployment YAML.
 
         YAML shape::
 
@@ -923,6 +923,9 @@ class ConfigModule(Module):
         block = _block("task_dispatch")
         defaults = cfg.TaskDispatchConfig()
         return cfg.TaskDispatchConfig(
+            backend_url=_coerce(
+                block, "backend_url", str, defaults.backend_url, "task_dispatch"
+            ).strip(),
             task_search_skill_enabled=_coerce(
                 block,
                 "task_search_skill_enabled",

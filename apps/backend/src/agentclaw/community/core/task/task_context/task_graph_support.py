@@ -13,6 +13,7 @@ from typing import Any
 
 from agentclaw.community.core.task.domain.errors import (
     GraphAlreadyInitializedError,
+    GraphIntegrityError,
     NodeNotFoundError,
     TaskNotFoundError,
     TaskStateError,
@@ -45,55 +46,127 @@ DEFAULT_BBS_MAX_DEPTH = 3
 MAX_GRAPH_VERSION_RETRIES = 3
 
 
+def get_node(graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
+    return next((node for node in graph.tasks if node.node_id == node_id), None)
+
+
+def require_node(graph: TaskExecutionGraph, node_id: str) -> TaskNode:
+    node = get_node(graph, node_id)
+    if node is None:
+        raise NodeNotFoundError(
+            f"node_id={node_id} 不存在于 task_id={graph.tasks[0].task_id if graph.tasks else '?'}"
+        )
+    return node
+
+
+def has_child(graph: TaskExecutionGraph, node_id: str) -> bool:
+    return any(
+        relation.src_id == node_id and relation.type == RelationType.DEPENDENCY
+        for relation in graph.relations
+    )
+
+
+def collect_subtree(graph: TaskExecutionGraph, node_id: str) -> set[str]:
+    """Collect descendants along the graph's structural dependency relation."""
+    subtree = {node_id}
+    frontier = [node_id]
+    while frontier:
+        current = frontier.pop()
+        for relation in graph.relations:
+            if (
+                relation.src_id == current
+                and relation.type == RelationType.DEPENDENCY
+                and relation.dst_id not in subtree
+            ):
+                subtree.add(relation.dst_id)
+                frontier.append(relation.dst_id)
+    return subtree
+
+
 def initialize_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     """Build the first graph frame and persist its root runtime identity."""
     task_id = task_info.task_id
     with self._lock_for(task_id):
         if task_id in self._graphs:
             raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
-        run_id = self._next_run_id()
-        # The graph starts measuring time at task creation. The root remains
-        # PENDING, while its start_time records initialization time.
-        started_at = int(time.time() * 1000)
-        main_session_id = task_info.execution_config.get("main_session_id")
-        root_extend_props: dict[str, Any] = {}
-        if isinstance(main_session_id, str) and main_session_id.strip():
-            root_extend_props["session_id"] = main_session_id
-        root = TaskNode(
-            node_id=task_id,
-            task_id=task_id,
-            status=Status.PENDING,
-            task_spec=task_info.task_spec,
-            run_info=RuntimeInfo(
-                start_time=started_at,
-                extend_props=root_extend_props,
-            ),
-            node_run_graph=None,  # type: ignore[arg-type]
-        )
-        graph = TaskExecutionGraph(
-            run_id=run_id,
-            loop_round=0,
-            status=Status.RUNNING,
-            tasks=[root],
-            relations=[],
-            task_id=task_id,
-        )
-        root.node_run_graph = graph
-        graph.extend_props["execution_config"] = dict(task_info.execution_config)
-        graph.extend_props["runtime_profile"] = (
-            TaskRuntimeProfile.from_execution_config(
-                task_info.execution_config
-            ).to_dict()
-        )
-        graph.extend_props["source_type"] = task_info.source_type
-        graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
-        graph.extend_props["owner_user_id"] = task_info.owner_user_id
-        graph.extend_props["gaps"] = []
-        self._graphs[task_id] = graph
+        graph = _build_initial_graph(self, task_info)
         if self._graph_repo is not None:
             self._graph_versions[task_id] = self._graph_repo.create_graph(
                 graph, runtime_status=Status.PENDING
             )
+        self._graphs[task_id] = graph
+        return graph
+
+
+def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
+    task_id = task_info.task_id
+    run_id = self._next_run_id()
+    # The graph starts measuring time at task creation. The root remains
+    # PENDING, while its start_time records initialization time.
+    started_at = int(time.time() * 1000)
+    main_session_id = task_info.execution_config.get("main_session_id")
+    relay_mode = task_info.execution_config.get("orchestration_mode") == "relay"
+    root_extend_props: dict[str, Any] = {}
+    if isinstance(main_session_id, str) and main_session_id.strip():
+        root_extend_props["session_id"] = main_session_id
+    if relay_mode:
+        root_extend_props["relay_root"] = True
+        root_extend_props["relay_token"] = uuid.uuid4().hex
+    root = TaskNode(
+        node_id=task_id,
+        task_id=task_id,
+        status=Status.RUNNING if relay_mode else Status.PENDING,
+        task_spec=task_info.task_spec,
+        run_info=RuntimeInfo(
+            run_mode="single_bot" if relay_mode else None,
+            assignee=task_info.owner_bot_id if relay_mode else None,
+            start_time=started_at,
+            extend_props=root_extend_props,
+        ),
+        node_run_graph=None,  # type: ignore[arg-type]
+    )
+    graph = TaskExecutionGraph(
+        run_id=run_id,
+        loop_round=0,
+        status=Status.RUNNING,
+        tasks=[root],
+        relations=[],
+        task_id=task_id,
+    )
+    root.node_run_graph = graph
+    graph.extend_props["execution_config"] = dict(task_info.execution_config)
+    graph.extend_props["runtime_profile"] = (
+        TaskRuntimeProfile.from_execution_config(task_info.execution_config).to_dict()
+    )
+    graph.extend_props["source_type"] = task_info.source_type
+    graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
+    graph.extend_props["owner_user_id"] = task_info.owner_user_id
+    graph.extend_props["gaps"] = []
+    return graph
+
+
+def initialize_intake_graph(self, task_info: TaskInfo, session_id: str) -> TaskExecutionGraph:
+    """Atomically create TaskInfo, root graph and root delivery intent."""
+    task_id = task_info.task_id
+    with self._lock_for(task_id):
+        if task_id in self._graphs:
+            raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
+        if self._graph_repo is None:
+            raise TaskStateError("intake task creation requires a durable graph repository")
+        if task_info.execution_config.get("orchestration_mode") != "relay":
+            raise TaskStateError("intake task requires relay orchestration")
+        graph = _build_initial_graph(self, task_info)
+        target = task_info.execution_config.get("initial_target") or {}
+        root = graph.tasks[0]
+        root.run_info.run_mode = (
+            "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
+        )
+        root.run_info.assignee = (
+            str(target.get("target_id") or task_info.owner_bot_id)
+        )
+        version = self._graph_repo.create_intake_graph(task_info, graph, session_id)
+        self._graph_versions[task_id] = version
+        self._graphs[task_id] = graph
         return graph
 
 
@@ -382,29 +455,6 @@ def _dispatch_report(self, data: TaskCallbackData) -> Any:
         if not task_id or not isinstance(edges, list):
             raise TaskStateError("ADD_RELATIONS report requires task_id and edges")
         return self.add_relations(task_id, edges)
-    if report_type == "RELAY_PLAN_RESULT":
-        task_id = str(payload.get("task_id") or "")
-        origin_node_id = str(payload.get("origin_node_id") or "")
-        gaps = payload.get("gaps")
-        next_task_spec = payload.get("next_task_spec")
-        holder_id = str(payload.get("holder_id") or "")
-        max_rounds = int(payload.get("max_rounds") or 3)
-        if (
-            not task_id
-            or not origin_node_id
-            or not holder_id
-            or not isinstance(gaps, list)
-            or (next_task_spec is not None and not isinstance(next_task_spec, TaskSpec))
-        ):
-            raise TaskStateError("RELAY_PLAN_RESULT report payload is invalid")
-        return self.apply_relay_plan_result(
-            task_id=task_id,
-            origin_node_id=origin_node_id,
-            gaps=[str(item).strip() for item in gaps if str(item).strip()],
-            next_task_spec=next_task_spec,
-            holder_id=holder_id,
-            max_rounds=max_rounds,
-        )
     if report_type == "BBS_ATTACH":
         task_id = str(payload.get("task_id") or "")
         parent_node_id = str(payload.get("parent_node_id") or "")
@@ -418,15 +468,6 @@ def _dispatch_report(self, data: TaskCallbackData) -> Any:
         ):
             raise TaskStateError("BBS_ATTACH report payload is invalid")
         return self.attach_bbs_node(task_id, parent_node_id, task_spec, bot_id)
-    if report_type == "RELAY_TURN_EXPIRE":
-        task_id = str(payload.get("task_id") or "")
-        node_id = str(payload.get("node_id") or "")
-        holder_id = str(payload.get("holder_id") or "")
-        if not task_id or not node_id or not holder_id:
-            raise TaskStateError("RELAY_TURN_EXPIRE report payload is invalid")
-        from agentclaw.community.core.task.task_center.relay import RelayCoordinator
-
-        return RelayCoordinator(self).expire_turn(task_id, node_id, holder_id)
     if report_type == "BBS_CLAIM":
         task_id = str(payload.get("task_id") or "")
         bot_id = str(payload.get("bot_id") or "")
@@ -435,40 +476,6 @@ def _dispatch_report(self, data: TaskCallbackData) -> Any:
         if not task_id or not bot_id:
             raise TaskStateError("BBS_CLAIM report requires task_id and bot_id")
         return self.claim_bbs_owner(task_id, bot_id, node_id=node_id, claim_id=claim_id)
-    if report_type.startswith("RELAY_TURN_"):
-        # Lease mutations remain Graph-owned facts. Keep RelayCoordinator
-        # behind this gateway so TaskServiceRelayMixin never mutates the
-        # graph or lease state directly.
-        from agentclaw.community.core.task.task_center.relay import RelayCoordinator
-
-        coordinator = RelayCoordinator(self)
-        task_id = str(payload.get("task_id") or "")
-        node_id = str(payload.get("node_id") or "")
-        holder_id = str(payload.get("holder_id") or "")
-        if not task_id or not node_id or not holder_id:
-            raise TaskStateError(
-                f"{report_type} report requires task_id, node_id and holder_id"
-            )
-        if report_type == "RELAY_TURN_GRANT":
-            return coordinator.grant(
-                task_id,
-                node_id,
-                holder_id,
-                retry_event=bool(payload.get("retry_event", False)),
-            )
-        if report_type == "RELAY_TURN_CONSUME":
-            coordinator.consume(
-                task_id, node_id, holder_id, str(payload.get("token") or "")
-            )
-            return None
-        if report_type == "RELAY_TURN_REOPEN":
-            coordinator.reopen(task_id, holder_id, str(payload.get("token") or ""))
-            return None
-        if report_type == "RELAY_TURN_RENEW_EXPIRED":
-            return coordinator.renew_expired(task_id, node_id, holder_id)
-        if report_type == "RELAY_TURN_MARK_EVENT":
-            coordinator.mark_event(task_id, str(payload.get("event_key") or ""))
-            return None
     raise TaskStateError(f"unsupported graph report_type={report_type}")
 
 
@@ -551,7 +558,6 @@ def claim_bbs_owner(
                         "bbs_owner": bot_id,
                         "bbs_claim_at": int(time.time() * 1000),
                         "bbs_claim_id": claim_id,
-                        "relay_holder_id": bot_id,
                         "driver_bot_id": bot_id,
                         "next_relay_bots": [bot_id],
                     }
@@ -612,112 +618,6 @@ def claim_bbs_owner(
         )
 
 
-def apply_relay_plan_result(
-    self,
-    *,
-    task_id: str,
-    origin_node_id: str,
-    gaps: list[str],
-    next_task_spec: TaskSpec | None,
-    holder_id: str,
-    max_rounds: int,
-) -> dict[str, Any]:
-    """Atomically persist Relay GAP, close the origin and create at most one baton."""
-    now = int(time.time() * 1000)
-
-    def mutation(graph):
-        config = graph.extend_props.get("execution_config", {}) or {}
-        if config.get("orchestration_mode") != "relay":
-            raise TaskStateError(f"task={task_id} is not in relay mode")
-        origin = self._require_node(graph, origin_node_id)
-        if origin.status != Status.RUNNING:
-            raise TaskStateError(
-                f"relay PLAN_RESULT origin must be RUNNING node={origin_node_id} status={origin.status}"
-            )
-        graph.extend_props["gaps"] = list(gaps)
-        if not gaps:
-            if next_task_spec is not None:
-                raise TaskStateError(
-                    "relay PLAN_RESULT with empty gaps cannot create next task"
-                )
-            origin.status = Status.SUCCESS
-            origin.run_info.end_time = now
-            # Relay completion is a read-side graph aggregate. Prior batons are
-            # immutable; only the graph output is populated for the task panel.
-            graph.output = _relay_graph_output(graph)
-            graph.status = Status.DONE
-            return (
-                {
-                    "ok": True,
-                    "completed": True,
-                    "origin_node_id": origin_node_id,
-                    "target_node_id": None,
-                },
-                None,
-                True,
-            )
-        if graph.loop_round >= max_rounds:
-            reason = "达到分布式接力迭代轮次上限"
-            origin.status = Status.HUNG
-            origin.run_info.failure_reason = reason
-            origin.run_info.end_time = now
-            graph.status = Status.HUNG
-            graph.extend_props["hung_reason"] = reason
-            return (
-                {
-                    "ok": True,
-                    "completed": False,
-                    "hung": True,
-                    "failure_reason": reason,
-                },
-                None,
-                True,
-            )
-        if next_task_spec is None:
-            raise TaskStateError("relay PLAN_RESULT with gaps requires next_task_spec")
-        origin.status = Status.DONE
-        origin.run_info.end_time = now
-        # A handed-off origin is DONE, but its successor keeps the Relay graph
-        # RUNNING. Graph status must not mirror the root/origin node.
-        graph.status = Status.RUNNING
-        child_id = f"relay-{uuid.uuid4().hex[:8]}"
-        child = TaskNode(
-            node_id=child_id,
-            task_id=task_id,
-            status=Status.PENDING,
-            task_spec=next_task_spec,
-            run_info=RuntimeInfo(
-                progress_reason="规划生成的下一棒任务",
-                extend_props={
-                    "relay_planned_by": origin_node_id,
-                    "relay_planner": holder_id,
-                },
-            ),
-            node_run_graph=graph,
-        )
-        graph.tasks.append(child)
-        graph.relations.append(
-            Relation(
-                src_id=origin_node_id,
-                dst_id=child_id,
-                type=RelationType.DEPENDENCY,
-            )
-        )
-        graph.loop_round += 1
-        return (
-            {
-                "ok": True,
-                "completed": False,
-                "origin_node_id": origin_node_id,
-                "target_node_id": child_id,
-            },
-            None,
-            True,
-        )
-
-    return self._mutate_with_version_retry(task_id, mutation)
-
-
 def get_task_context(self, task_id: str) -> TaskContext:
     """Project the latest persisted business facts without graph topology."""
     with self._lock_for(task_id):
@@ -750,3 +650,87 @@ def get_task_context(self, task_id: str) -> TaskContext:
             all_done_output=outputs,
             gaps=[str(item) for item in graph.extend_props.get("gaps", [])],
         )
+
+
+def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
+    """Project the baton input from the authoritative graph, without writing it.
+
+    Prior accepted outputs are limited to the unique predecessor chain. The
+    current baton's accepted report is separate, so a retry cannot count its
+    own output as an earlier fact. Task-level gaps are deliberately not read.
+    """
+    with self._lock_for(task_id):
+        # query_task_dashboard revalidates the persisted graph version when a
+        # different Backend worker accepted the preceding report.
+        graph = self.query_task_dashboard(task_id)
+        root = self._require_node(graph, graph.task_id)
+        current = self._require_node(graph, node_id)
+        parent_by_child = {
+            relation.dst_id: relation.src_id for relation in graph.relations
+            if relation.type == RelationType.DEPENDENCY
+        }
+        lineage: list[TaskNode] = []
+        seen = {node_id}
+        predecessor_id = parent_by_child.get(node_id)
+        while predecessor_id is not None:
+            if predecessor_id in seen:
+                raise GraphIntegrityError("relay predecessor chain contains a cycle")
+            seen.add(predecessor_id)
+            lineage.append(self._require_node(graph, predecessor_id))
+            predecessor_id = parent_by_child.get(predecessor_id)
+        lineage.reverse()
+
+        def accepted_output(node: TaskNode) -> DoneOutput | None:
+            runtime = node.run_info
+            if (
+                str(runtime.extend_props.get("execution_decision") or "").upper()
+                != "ACCEPTED"
+                or runtime.acceptance_result is None
+            ):
+                return None
+            return DoneOutput(
+                node_id=node.node_id,
+                actual_goal=runtime.actual_goal or node.task_spec.goal,
+                output=dict(runtime.output),
+                acceptance_result=runtime.acceptance_result,
+            )
+
+        outputs = [fact for node in lineage if (fact := accepted_output(node)) is not None]
+        runtime = current.run_info
+        decision = str(runtime.extend_props.get("execution_decision") or "").upper()
+        receipts = graph.extend_props.get("_relay_report_receipts") or {}
+        if receipts and (
+            f"{node_id}:EXECUTION_RESULT:"
+            f"{int(runtime.extend_props.get('harness_retries', 0) or 0)}"
+        ) not in receipts:
+            decision = ""
+        accepted_patch = None
+        if decision in {"ACCEPTED", "DECLINED"}:
+            accepted_patch = TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                execution_decision=decision,
+                actual_goal=runtime.actual_goal if decision == "ACCEPTED" else None,
+                output_patch=dict(runtime.output) if decision == "ACCEPTED" else {},
+                local_acceptance_result=(
+                    runtime.acceptance_result if decision == "ACCEPTED" else None
+                ),
+                failure_reason=runtime.failure_reason,
+            )
+        return TaskContext(
+            spec=root.task_spec,
+            all_done_output=outputs,
+            gaps=[],
+            task_id=task_id,
+            node_id=node_id,
+            root_task_spec=root.task_spec,
+            current_task_spec=current.task_spec,
+            accepted_execution_patch=accepted_patch,
+            accepted_plan_report=_accepted_plan_report(graph, node_id),
+        )
+
+
+def _accepted_plan_report(graph: TaskExecutionGraph, node_id: str):
+    from agentclaw.community.core.task.task_context.relay_report import accepted_plan_report
+
+    return accepted_plan_report(graph, node_id)

@@ -131,11 +131,12 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 def _accept(verdict: AcceptanceVerdict = AcceptanceVerdict.DONE,
-            gaps: list[str] | None = None) -> AcceptanceResult:
+            gaps: list[str] | None = None,
+            gap_items: list[str] | None = None) -> AcceptanceResult:
     return AcceptanceResult(
         verdict=verdict,
         done_items=[],
-        gap_items=gaps or [],
+        gap_items=gap_items if gap_items is not None else gaps or [],
     )
 
 
@@ -738,7 +739,7 @@ class TestLogActionUnchangedAndAdditive:
         assert len(verify_entries) == 1
         p = verify_entries[0].payload
         assert p["verdict"] == "FAILED"
-        assert p["gaps"] == ["g1"]
+        assert p["gap_items"] == ["g1"]
         # AND the trajectory VERIFY row is additive (one row)
         assert len(_verify_records(repo)) == 1
 

@@ -534,20 +534,6 @@ class TestTaskList:
         assert r.status_code == 400, r.text
 
 
-class TestTaskContext:
-    def test_context_returns_minimal_common_business_shape(self, client):
-        c, _ = client
-        task_id = _execute_and_get_id(c)
-        response = c.get(f"/api/v1/collaboration/tasks/{task_id}/context")
-        assert response.status_code == 200, response.text
-        data = response.json()["data"]
-        assert set(data) == {"spec", "all_done_output", "gaps"}
-        assert set(data["spec"]) == {"context", "goal"}
-        assert "metadata" not in data["spec"]
-        assert "task_id" not in data
-        assert "relay_turn" not in data
-
-
 class TestTaskDashboard:
     def test_dashboard_returns_graph_structure(self, client):
         c, _ = client

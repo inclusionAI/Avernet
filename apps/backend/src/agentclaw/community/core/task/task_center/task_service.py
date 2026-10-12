@@ -76,13 +76,21 @@ from agentclaw.community.core.task.task_context.task_context_service import (
 from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
 )
+from agentclaw.community.core.task.task_center.task_service_delivery import TaskServiceDeliveryMixin
+from agentclaw.community.core.task.task_center.task_service_intake import TaskServiceIntakeMixin
+from agentclaw.community.core.task.task_center.task_recovery import (
+    CentralizedRecoveryStrategy,
+    RelayRecoveryStrategy,
+    TaskRecoveryCoordinator,
+)
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
 logger = logging.getLogger("task.service")
 
 
-class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
+class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
+                  TaskServiceRelayMixin, TaskServiceExecutionMixin):
     """对外 facade;内部持 CentralizedExecutionAdapter 组合处理器 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
@@ -113,6 +121,8 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         notify_messages_provider=None,
         bot_bindings=None,
         task_context_service: "TaskContextServiceProtocol | None" = None,
+        delivery_intents=None,
+        intake_handler=None,
     ) -> None:
         """Build the facade from graph, execution ports and optional repositories.
 
@@ -139,6 +149,8 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         self._bot_bindings = bot_bindings
         # 任务轨迹旁路采集外部入口(可选,REQ-11);None → _log_trajectory 静默 no-op。经实例属性透传(不进 _build_centralized_adapter 签名)。
         self._task_context_service = task_context_service
+        self._delivery_intents = delivery_intents
+        self._intake_handler = intake_handler
         # claim_on JOIN 经 self._task_auth_gate 传入 dispatcher(不进签名,保持覆写 seam)。
         self._centralized_adapter = self._build_centralized_adapter(
             bot=bot, bcs=bcs, discover=discover
@@ -154,7 +166,26 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
                 "discover",
                 getattr(self._centralized_adapter, "_discover", None),
             ),
+            dispatcher=getattr(self._centralized_adapter, "dispatcher", None),
             user_id=str(getattr(self._bcs_identity, "user_id", "") or ""),
+        )
+        recovery_strategies = {}
+        centralized_recovery = getattr(
+            self._centralized_adapter, "on_harness", None
+        )
+        if centralized_recovery is not None:
+            recovery_strategies["centralized"] = CentralizedRecoveryStrategy(
+                centralized_recovery
+            )
+        if self._delivery_intents is not None:
+            recovery_strategies["relay"] = RelayRecoveryStrategy(
+                self._graph,
+                self._delivery_intents,
+                self.dispatch_node,
+            )
+        self._recovery = TaskRecoveryCoordinator(
+            self._graph,
+            recovery_strategies,
         )
         self._wire_semantic_dispatcher()
         # Relay consumes explicit adapter ports; it does not orchestrate through
@@ -170,10 +201,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         )
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
-            self._harness.set_on_harness(self._centralized_adapter.on_harness)
-            self._harness.set_on_relay_turn_expired(self.resume_expired_relay_turn)
-            # relay 零盲区:SLA 超时无执行事实 → 棒回 BBS 广场时同步落 relay/bbs_return 轨迹
-            self._harness.set_on_relay_bbs_return(self._emit_relay_bbs_return)
+            self._harness.set_on_harness(self._recovery.recover)
             import threading as _t
 
             _t.Thread(
@@ -425,7 +453,21 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         self._wire_semantic_dispatcher()
-        request = self._normalize_owner_bot_id(request)
+        intake_session_id = str(request.execution_config.get("intake_session_id") or "").strip()
+        if intake_session_id:
+            if self._task_info_repo is None:
+                raise TaskStateError("intake task creation requires durable TaskInfo storage")
+            previous = self._task_info_repo.get_by_intake_session(intake_session_id)
+            if previous is not None:
+                if previous.owner_user_id != request.owner_user_id:
+                    raise TaskStateError("intake owner mismatch")
+                return TaskOpResult(
+                    task_id=previous.task_id, node_id=previous.task_id, success=True,
+                    run_id=int(previous.graph_run_id or 0),
+                    extend_props={"orchestration_mode": "relay", "root_node_id": previous.task_id},
+                )
+        else:
+            request = self._normalize_owner_bot_id(request)
         requested_orchestration_mode = self._normalize_orchestration_mode(
             request.execution_config.get("orchestration_mode")
         )
@@ -453,7 +495,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
             request.execution_config.get("orchestration_mode"),
         )
         task_info = request.to_task_info(task_id)
-        if self._task_info_repo is not None:
+        if self._task_info_repo is not None and not intake_session_id:
             record = TaskInfoRecord(
                 id=0,
                 task_id=task_id,
@@ -470,16 +512,28 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
                 return TaskOpResult(
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
-        # REQ-6: submit reuses the generic trajectory event entry.
+        if intake_session_id:
+            try:
+                graph = self._graph.initialize_intake_graph(task_info, intake_session_id)
+            except IntegrityError:
+                previous = self._task_info_repo.get_by_intake_session(intake_session_id)
+                if previous is None:
+                    raise
+                return TaskOpResult(
+                    task_id=previous.task_id, node_id=previous.task_id, success=True,
+                    run_id=int(previous.graph_run_id or 0),
+                    extend_props={"orchestration_mode": "relay", "root_node_id": previous.task_id},
+                )
+        else:
+            graph = self._graph.initialize_graph(task_info)
+        # Emit only after durable task/root creation. Observation must never
+        # precede the transaction whose existence it describes.
         if self._task_context_service is not None:
             submitted_at_ms = int(time.time() * 1000)
             self._task_context_service.emit_trajectory_event(
-                task_id,
-                task_id,
-                "submit",
+                task_id, task_id, "submit",
                 **build_submit_trajectory_event_kwargs(task_info, submitted_at_ms),
             )
-        graph = self._graph.initialize_graph(task_info)
         self._enrich_anniversary_trigger_bot_name(request, graph)
         logger.info(
             "[task][execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
@@ -490,9 +544,15 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         )
         task_type = request.execution_config.get("task_type")
         if request.execution_config.get("orchestration_mode") == "relay":
-            result = self._bootstrap_relay(task_id, request.owner_bot_id, graph.run_id)
+            result = TaskOpResult(
+                task_id=task_id, success=True, node_id=task_id, run_id=graph.run_id,
+                extend_props={"orchestration_mode": "relay", "root_node_id": task_id},
+            )
             if self._harness is not None:
                 self._harness.register(task_id)
+            bg = asyncio.create_task(self.dispatch_node(task_id, task_id))
+            self._bg_tasks.add(bg)
+            bg.add_done_callback(self._on_bg_done)
             return result
         if task_type == TaskType.WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
@@ -515,7 +575,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         bg = asyncio.create_task(self._semantic_dispatcher.dispatch_pending(task_id))
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
-        return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
+        return TaskOpResult(task_id=task_id, success=True, node_id=task_id, run_id=graph.run_id)
 
     @staticmethod
     def _normalize_orchestration_mode(value: Any) -> str | None:
@@ -713,6 +773,9 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
     def get_task_context(self, task_id: str) -> TaskContext:
         return task_service_queries.get_task_context(self, task_id)
 
+    def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
+        return self._graph.get_node_context(task_id, node_id)
+
     def get_task_dashboard(
         self,
         task_id: str,
@@ -860,13 +923,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         """
         config = self._graph._execution_config(task_id)
         if config.get("orchestration_mode") == "relay":
-            return await self._report_relay_bbs_result(
-                task_id=task_id,
-                node_id=node_id,
-                bot_id=bot_id,
-                output_patch=output_patch,
-                exec_error=exec_error,
-            )
+            raise TaskStateError("relay BBS results require the unified report protocol")
         patch = TaskNodePatch(
             task_id=task_id,
             node_id=node_id,

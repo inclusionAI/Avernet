@@ -1,7 +1,8 @@
 """任务轨迹采集与根因分析领域模型(REQ-1 / REQ-9)。
 
 纯 dataclass / enum 内存态领域对象 —— **transport/DB-agnostic**:
-不依赖 SQLAlchemy / FastAPI / 任何外部框架,不读不写 ``task_action_log``。
+不依赖 SQLAlchemy / FastAPI / 任何外部框架。领域对象本身不读写存储；
+Service 可将 Relay ``task_action_log`` 只读投影为这些事件。
 ``action_input`` / ``analysis`` / ``error_type`` / ``error_msg`` 等使用 ``... | None``
 均为有意合法域态(``None`` = 未计算 / 成功 / 无输入);``gmt_*`` 沿用本模块 ``int`` 毫秒
 时间戳约定(对齐 ``NodeActionEvent.ts`` / ``RuntimeInfo.start_time``),storage 层在做
@@ -101,9 +102,9 @@ class TrajectoryEvent:
     ``search_probe`` = **读时定向投影**字段(不落库;与 ``holder_id`` 同款白名单
     投影,是 REQ-1 "ext_info 不整体入领域" 边界的定向扩展而非破坏):派发搜推三问
     (关键词/返回结果/最终选择)的可展示摘要,由 assembler 从本事件行 ``ext_info``
-    投影——DISPATCH 事件取 ``_dispatch_rationale``,relay ``action_result="search"``
-    事件取顶层 ``search_sampling``+``candidates``;relay ``DISPATCH_RESULT`` 的
-    ``action_result="hit_single|hit_multi|miss"`` 事件取 ``search_evidence``。
+    投影——DISPATCH 事件取 ``_dispatch_rationale``，Relay 搜索事件取顶层
+    ``search_sampling``+``candidates``。Relay 的执行者决策随唯一的
+    ``PLAN_RESULT`` 一起持久化，不再生成独立派发事件。
     无素材的事件保持 ``None``(缺字段=无信号)。
     """
 

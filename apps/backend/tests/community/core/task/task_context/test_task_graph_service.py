@@ -697,12 +697,11 @@ class TestEffectiveStatus:
 
     def test_relay_effective_status_does_not_mirror_handed_off_root(self, svc):
         graph = self._relay_graph(svc, "tr")
-        svc.add_task_nodes(
-            [_node("baton", "tr")], parent_node_id="tr", mark_parent_planning=False
-        )
         root = next(node for node in graph.tasks if node.node_id == "tr")
-        baton = next(node for node in graph.tasks if node.node_id == "baton")
         root.status = Status.DONE
+        baton = _node("baton", "tr")
+        svc.add_task_nodes([baton], parent_node_id="tr", mark_parent_planning=False)
+        baton = next(node for node in graph.tasks if node.node_id == "baton")
         graph.extend_props["gaps"] = ["补齐研究缺口"]
 
         for baton_status in (Status.PENDING, Status.RUNNING):

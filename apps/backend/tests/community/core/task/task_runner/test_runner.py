@@ -91,14 +91,14 @@ class TestStartRun:
     def test_empty_batch_is_noop(self, svc):
         runner = TaskRunner(svc)
 
-        assert _run(runner.start_run([])) == []
+        assert _run(runner.start_batch([])) == []
         assert runner._run_log == []
 
     def test_single_bot_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="single_bot", assignee="bot_market")
-        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
-        assert results == [True]
+        result = _run(runner.start_run(svc._get_node(graph, "c1")))
+        assert result is True
         log = runner._run_log[-1]
         assert log["run_mode"] == "single_bot"
         assert log["assignee"] == "bot_market"
@@ -108,16 +108,16 @@ class TestStartRun:
     def test_coop_group_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="coop_group", assignee="grp_tech")
-        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
-        assert results == [True]
+        result = _run(runner.start_run(svc._get_node(graph, "c1")))
+        assert result is True
         assert runner._run_log[-1]["run_mode"] == "coop_group"
         assert runner._run_log[-1]["assignee"] == "grp_tech"
 
     def test_bbs_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="bbs", assignee="bot_bbs_7")
-        results = _run(runner.start_run([svc._get_node(graph, "c1")]))
-        assert results == [True]
+        result = _run(runner.start_run(svc._get_node(graph, "c1")))
+        assert result is True
         assert runner._run_log[-1]["run_mode"] == "bbs"
         assert runner._run_log[-1]["assignee"] == "bot_bbs_7"
 
@@ -128,7 +128,7 @@ class TestStartRun:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b1"))
         svc.update_task_node_info(_patch("t1", "c2", status=Status.RUNNING, run_mode="coop_group", assignee="g1"))
         svc.update_task_node_info(_patch("t1", "c3", status=Status.RUNNING, run_mode="bbs", assignee="bbs1"))
-        results = _run(runner.start_run([svc._get_node(graph, "c1"), svc._get_node(graph, "c2"), svc._get_node(graph, "c3")]))
+        results = _run(runner.start_batch([svc._get_node(graph, "c1"), svc._get_node(graph, "c2"), svc._get_node(graph, "c3")]))
         assert results == [True, True, True]
         assert len(runner._run_log) == 3
         assert {e["run_mode"] for e in runner._run_log} == {"single_bot", "coop_group", "bbs"}
@@ -138,8 +138,8 @@ class TestStartRun:
         _dispatch(svc, graph, ["c1"])
         node = svc._get_node(graph, "c1")
         node.run_info.run_mode = None  # 强制非法
-        results = _run(runner.start_run([node]))
-        assert results == [False]
+        result = _run(runner.start_run(node))
+        assert result is False
         assert runner._run_log == []  # 非法不记日志
 
 

@@ -62,10 +62,17 @@ class _FakeService:
         return self._sub
 
 
+def _runner(bot, service) -> BbsBrowseLoopRunner:
+    return BbsBrowseLoopRunner(
+        bot,
+        service,
+        backend_url="https://bbs.test",
+    )
+
+
 @pytest.mark.asyncio
-async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch):
-    monkeypatch.setenv("BACKEND_URL", "https://bbs.test/api")
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
+async def test_push_browse_once_returns_bot_result_and_injects_paths():
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
 
@@ -86,26 +93,26 @@ async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch
 
 @pytest.mark.asyncio
 async def test_push_browse_once_mode_mismatch_raises_validation():
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw")))
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw")))
     with pytest.raises(ValidationError):
         await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
 
 
 @pytest.mark.asyncio
 async def test_push_browse_once_missing_subscription_raises_not_found():
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(None))
+    runner = _runner(_FakeBot(), _FakeService(None))
     with pytest.raises(NotFound):
         await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
 
 
 @pytest.mark.asyncio
 async def test_push_cron_event_only_for_openclaw(monkeypatch):
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="framework")))
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework")))
     # framework-mode subscription cannot receive cron events
     with pytest.raises(ValidationError):
         await runner.push_cron_event(bot_id="bot-a", action="register")
 
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
     result = await runner.push_cron_event(bot_id="bot-b", action="register")
     bot = runner._bot  # type: ignore[attr-defined]
     assert len(bot.sent) == 1
@@ -126,7 +133,7 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_push_cron_event_remove_message(monkeypatch):
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
     result = await runner.push_cron_event(bot_id="bot-b", action="remove")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
     assert "[BBS-BROWSE-CRON]" in sent["message"]
@@ -145,11 +152,11 @@ async def test_push_cron_event_register_and_remove_share_fixed_name():
     the same name (no duplicate, e.g. no more `bbs-browse-feed-reader` next to
     `bbs-browse-30min`), and remove finds the task by that name.
     """
-    runner_r = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    runner_r = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
     await runner_r.push_cron_event(bot_id="bot-b", action="register")
     register_msg = runner_r._bot.sent[0]["message"]  # type: ignore[attr-defined]
 
-    runner_x = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    runner_x = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
     await runner_x.push_cron_event(bot_id="bot-b", action="remove")
     remove_msg = runner_x._bot.sent[0]["message"]  # type: ignore[attr-defined]
 
@@ -175,7 +182,7 @@ async def test_push_install_bbs_skills_sends_verified_wording():
     self-symlink the skills): any paraphrase that drops a skill name or path
     fails here.
     """
-    runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
+    runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
     result = await runner.push_install_bbs_skills(bot_id="bot-a")
     bot = runner._bot  # type: ignore[attr-defined]
 
@@ -203,6 +210,6 @@ async def test_push_install_bbs_skills_sends_verified_wording():
 @pytest.mark.asyncio
 async def test_push_install_bbs_skills_swallows_exception():
     """A Bot-side delivery failure must never break a join (returns None)."""
-    runner = BbsBrowseLoopRunner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
+    runner = _runner(_RaisingBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
     result = await runner.push_install_bbs_skills(bot_id="bot-a")
     assert result is None

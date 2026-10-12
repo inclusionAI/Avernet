@@ -71,8 +71,6 @@ class TaskHarness:
         self._default_pending = default_pending_timeout
         self._interval = interval
         self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
-        self._on_relay_turn_expired_fn: Callable[[str], object] | None = None
-        self._on_relay_bbs_return_fn: Callable[[str, str, str], object] | None = None
         self._registered: set[str] = set()
         self._dispatched_at: dict[
             tuple[str, str], float
@@ -90,19 +88,6 @@ class TaskHarness:
     def set_on_harness(self, fn: Callable[[TaskNodePatch], object]) -> None:
         """组合根(facade)在构造完编排核后回填复位重投入口(编排核 ``on_harness``)。"""
         self._on_harness_fn = fn
-
-    def set_on_relay_turn_expired(self, fn: Callable[[str], object]) -> None:
-        """Set the Relay-specific continuation callback for expired planning turns."""
-        self._on_relay_turn_expired_fn = fn
-
-    def set_on_relay_bbs_return(self, fn: "Callable[[str, str, str], object]") -> None:
-        """Set the trajectory callback fired when a delivered baton is returned
-        to the BBS square on SLA breach with no execution fact
-        (``_recover_relay_without_execution_result`` → ``(task_id, node_id, reason)``).
-        The callback is an OBSERVATIONAL旁路 (relay ``bbs_return`` trajectory row);
-        it must never affect the recovery itself, and an unset/raising callback is
-        swallowed + WARNING here (决策 #14) — the bbs_mode patches above already landed."""
-        self._on_relay_bbs_return_fn = fn
 
     def _report_node_patch(self, patch: TaskNodePatch):
         return self._graph.report(
@@ -123,101 +108,6 @@ class TaskHarness:
                 }
             )
         )
-
-    def _recover_relay_without_execution_result(self, task_id: str, node) -> bool:
-        """Turn a delivered baton back to BBS when no execution fact arrives in SLA.
-
-        This pre-execution recovery is baton-owned: it publishes only the current
-        node and never falls through to centralized parent/root reconciliation.
-        Fires the ``on_relay_bbs_return`` trajectory callback (relay ``bbs_return``
-        row — 零盲区: the timeline otherwise cannot show WHY the baton re-entered
-        the square); the callback is fire-and-forget (决策 #14) and never gates the
-        recovery itself.
-        """
-        try:
-            graph = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001 graph unavailable → keep normal harness semantics
-            return False
-        config = graph.extend_props.get("execution_config", {}) or {}
-        if config.get("orchestration_mode") != "relay":
-            return False
-        graph_terminal = getattr(graph.status, "value", graph.status) in {
-            "DONE",
-            "SUCCESS",
-            "HUNG",
-            "FAILED",
-            "CANCELLED",
-        }
-        if graph_terminal:
-            return False
-        turn = graph.extend_props.get("relay_turn") or {}
-        if str(turn.get("status") or "") == "GRANTED":
-            return False
-        extend_props = node.run_info.extend_props or {}
-        if str(extend_props.get("execution_decision") or "").strip().upper():
-            return False
-        return_reason = "执行超时未上报 EXECUTION_RESULT"
-        self._report_node_patch(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=node.node_id,
-                status=Status.PENDING,
-                run_mode="bbs",
-                assignee=None,
-                progress_reason=f"{return_reason}，当前棒转 BBS 广场",
-                failure_reason=return_reason,
-                extend_props_patch={
-                    "bbs_owner": None,
-                    "bbs_claim_id": None,
-                },
-            )
-        )
-        self._report_graph_patch(
-            task_id,
-            TaskGraphPatch(
-                extend_props_patch={
-                    "bbs_mode": True,
-                    "bbs_node_id": node.node_id,
-                }
-            ),
-        )
-        self._dispatched_at.pop((task_id, node.node_id), None)
-        # 轨迹旁路:棒回广场即录(relay/bbs_return,产生即录——非空亡路径)。回调
-        # 未接线(单测/轻量)静默跳过;回调抛错吞 + WARNING,绝不影响上面的回收补丁。
-        if self._on_relay_bbs_return_fn is not None:
-            try:
-                self._on_relay_bbs_return_fn(task_id, node.node_id, return_reason)
-            except Exception as ex:  # noqa: BLE001  观测旁路:吞 + WARNING(决策 #14)
-                logger.warning(
-                    "[task][relay][trajectory] task=%s node=%s bbs_return 回调失败: %s: %s",
-                    task_id, node.node_id, type(ex).__name__, ex,
-                )
-        return True
-
-    def _resume_expired_relay_turn(self, task_id: str) -> bool:
-        """Resume a stale Relay turn before generic SLA logic can touch its node."""
-        if self._on_relay_turn_expired_fn is None:
-            return False
-        try:
-            graph = self._graph.query_task_dashboard(task_id)
-        except Exception:  # noqa: BLE001
-            return False
-        config = graph.extend_props.get("execution_config", {}) or {}
-        turn = graph.extend_props.get("relay_turn") or {}
-        expired = (
-            config.get("orchestration_mode") == "relay"
-            and turn.get("status") == "GRANTED"
-            and int(turn.get("expires_at_ms", 0)) <= self._wall_clock_ms()
-        )
-        if not expired:
-            return False
-        result = self._on_relay_turn_expired_fn(task_id)
-        if asyncio.iscoroutine(result):
-            asyncio.run(result)
-        # The Relay-specific path owns this expired turn even when wake-up
-        # delivery fails. Generic timeout recovery must not mutate or escalate
-        # the current baton through centralized parent/root semantics.
-        return True
 
     def _sla_timeout(self, task_id: str, node=None) -> float:
         """读节点 RUNNING SLA。
@@ -257,11 +147,8 @@ class TaskHarness:
         with self._lock:
             task_ids = list(self._registered)
         for task_id in task_ids:
-            if self._resume_expired_relay_turn(task_id):
-                # Relay planning is a Skill-owned continuation. Do not fall
-                # through into generic timeout/HUNG/BBS recovery for this turn.
-                continue
             try:
+                task_graph = self._graph.query_task_dashboard(task_id)
                 nodes = self._graph.query_task_nodes(
                     task_id,
                     TaskNodeQueryCriteria(status=Status.RUNNING, has_child_tasks=True),
@@ -282,15 +169,7 @@ class TaskHarness:
                     self._dispatched_at[key] = now  # 首见:记时,本轮不判
                     continue
                 if now - t0 > sla:
-                    if self._recover_relay_without_execution_result(task_id, n):
-                        logger.warning(
-                            "[task][relay] execution result missing task=%s node=%s "
-                            "published current baton to BBS",
-                            task_id,
-                            n.node_id,
-                        )
-                        continue
-                    if effective_run_mode(n) == "bbs":
+                    if effective_run_mode(n) == "bbs" and not task_graph.is_relay:
                         # BBS lease 到期(FR-EXT-06):owner bot 崩溃/挂起导致 RUNNING 超 SLA。
                         # 直写图(self._graph),不走 on_harness_fn:后者复位 RUNNING→PENDING 重派,
                         # 与"标终态不重派"语义相反。① scoped 节点验收 FAIL→DONE(终态);
@@ -594,16 +473,14 @@ class TaskHarness:
             ),
         )
 
-        # ② start_run([delivery_node]) 真实投递给研发 bot；持久化节点保持 bbs 语义。
+        # ② start_run(delivery_node) 真实投递给研发 bot；持久化节点保持 bbs 语义。
 
         ok = False
 
         node.run_info.run_mode = "single_bot"
 
         try:
-            results = await self._runner.start_run([delivery_node])
-
-            ok = bool(results[0]) if results else False
+            ok = bool(await self._runner.start_run(delivery_node))
 
         except Exception as ex:  # noqa: BLE101
             logger.warning(

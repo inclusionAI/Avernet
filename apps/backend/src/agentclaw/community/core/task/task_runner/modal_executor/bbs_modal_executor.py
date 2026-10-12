@@ -301,7 +301,10 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
-    _group_enabled = _singlebot_2_group_switch(graph, task_id)
+    _group_enabled = (
+        not (execution_graph.extend_props.get("execution_config") or {}).get("intake_session_id")
+        and _singlebot_2_group_switch(graph, task_id)
+    )
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
     if target_node_id is not None:
@@ -353,9 +356,9 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         }))
         logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
 
-    # 任务msg:分布式 Relay 的 BBS 认领者仍是一条普通接力棒，只允许接收
-    # 同一的 S1-S8 闭环：S6 本地规划后先 search 决策，再 PLAN_RESULT、DISPATCH_RESULT、dispatch。
-    # 闭环；中心化 legacy BBS 才保留旧的 status/output 一次性上报协议。
+    # Relay BBS winner is an ordinary baton and receives the same S1-S6
+    # protocol: node context, execution report, one plan report, then dispatch.
+    # Centralized BBS retains its independent callback contract.
     relay_inputs = None
     if _relay_mode(execution_graph, target_node_id):
         relay_inputs = _relay_task_inputs(
@@ -822,6 +825,7 @@ def _relay_task_msg(
         executor_bot_ids=[str(bot_id)],
         relay_execution=True,
         relay_blackboard=inputs["relay_blackboard"],
+        relay_token=node.run_info.extend_props.get("relay_token"),
     )
 
 

@@ -1,0 +1,100 @@
+"""Durable Relay handoff methods for the TaskService facade."""
+
+from __future__ import annotations
+
+import logging
+
+from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.models import (
+    NodeAction,
+    Status,
+    TaskNode,
+    TaskNodePatch,
+)
+
+logger = logging.getLogger("task.delivery")
+
+
+class TaskServiceDeliveryMixin:
+    async def dispatch_node(self, task_id: str, node_id: str) -> TaskNode:
+        """S6: claim a persisted intent, dispatch its authoritative node once."""
+        intents = self._delivery_intents
+        if intents is None:
+            raise TaskStateError("durable delivery intents are unavailable")
+        graph = self._graph.query_task_dashboard(task_id)
+        if not graph.is_relay:
+            raise TaskStateError("node dispatch requires relay orchestration")
+        node = next((item for item in graph.tasks if item.node_id == node_id), None)
+        if node is None or node.status not in {Status.PENDING, Status.RUNNING}:
+            raise TaskStateError("relay delivery target is not runnable")
+        initial_status = node.status
+        relay_token = node.run_info.extend_props.get("relay_token")
+        if not relay_token:
+            raise TaskStateError("relay delivery target has no run generation")
+        state, lease_token = intents.claim_delivery_intent(task_id, node_id, relay_token)
+        if state == "DELIVERED":
+            return node
+        if state != "CLAIMED" or lease_token is None:
+            raise TaskStateError(f"relay delivery is not claimable: {state}")
+        try:
+            if node.status == Status.PENDING and node.run_info.run_mode != "bbs":
+                self._report_node_patch(TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node_id,
+                    status=Status.RUNNING,
+                ))
+                graph = self._graph.query_task_dashboard(task_id)
+                node = next(item for item in graph.tasks if item.node_id == node_id)
+            dispatcher = self._relay_adapter.dispatcher
+            if dispatcher is None:
+                raise TaskStateError("relay dispatcher is not configured")
+            delivered = await dispatcher.dispatch(node)
+            if not isinstance(delivered, TaskNode):
+                raise TaskStateError("relay dispatcher did not return one TaskNode")
+            intents.mark_delivery_intent(task_id, node_id, lease_token, delivered=True)
+            self._graph.append_action_event(
+                task_id,
+                node_id,
+                NodeAction.DISPATCH,
+                {
+                    "phase": "delivery",
+                    "action_result": "delivered",
+                    "run_mode": delivered.run_info.run_mode,
+                    "assignee": delivered.run_info.assignee,
+                },
+                status_from=initial_status,
+                status_to=delivered.status,
+            )
+            return delivered
+        except Exception as exc:
+            intents.mark_delivery_intent(
+                task_id, node_id, lease_token, delivered=False, error=str(exc),
+            )
+            self._graph.append_action_event(
+                task_id,
+                node_id,
+                NodeAction.DISPATCH,
+                {
+                    "phase": "delivery",
+                    "action_result": "failed",
+                    "run_mode": node.run_info.run_mode,
+                    "assignee": node.run_info.assignee,
+                    "failure_reason": f"{type(exc).__name__}: {exc}",
+                },
+                status_from=initial_status,
+                status_to=node.status,
+            )
+            raise
+
+    async def dispatch_pending_intents(self, *, limit: int = 100) -> int:
+        intents = self._delivery_intents
+        if intents is None:
+            return 0
+        delivered = 0
+        for task_id, node_id in intents.list_pending_delivery_intents(limit=limit):
+            try:
+                await self.dispatch_node(task_id, node_id)
+                delivered += 1
+            except Exception:
+                logger.exception("relay delivery retry failed task=%s node=%s", task_id, node_id)
+        return delivered

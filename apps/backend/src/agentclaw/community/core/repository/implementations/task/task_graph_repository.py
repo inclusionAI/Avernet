@@ -4,13 +4,14 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from typing import Any
 
 from injector import inject
 from sqlalchemy import and_, case, func, or_
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
-from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
+from agentclaw.community.core.task.domain.errors import GraphVersionConflictError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
     NodeActionEvent,
     Relation,
@@ -18,7 +19,9 @@ from agentclaw.community.core.task.domain.models import (
     Status,
 )
 from agentclaw.community.core.task.repository.models import (
+    TaskDeliveryIntentModel,
     TaskInfoModel,
+    TaskIntakeSessionModel,
     TaskNodeModel,
     TaskNodeRelationModel,
     TaskNodeRunInfoModel,
@@ -190,8 +193,50 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             info.graph_extend_props = self._json(props)
             info.graph_version = max(int(info.graph_version or 0), 1)
             self._upsert_current_rows(db, graph)
+            self._ensure_relay_delivery_intents(db, graph)
             db.flush()
             return info.graph_version
+
+    def create_intake_graph(self, task_info, graph, session_id: str) -> int:
+        """One transaction commits the confirmed source, root and delivery intent.
+
+        The unique ``intake_session_id`` index arbitrates concurrent /start
+        attempts. A loser reads the existing task after rollback in the service.
+        """
+        with self._transaction() as db:
+            intake = db.get(TaskIntakeSessionModel, session_id)
+            if intake is None or intake.status != "CONFIRMED":
+                raise TaskStateError("intake session is not confirmed")
+            if intake.owner_user_id != task_info.owner_user_id:
+                raise TaskStateError("intake owner mismatch")
+            props = dict(graph.extend_props)
+            props[_GRAPH_STATUS_KEY] = graph.status.value
+            db.add(TaskInfoModel(
+                task_id=task_info.task_id,
+                intake_session_id=session_id,
+                source_type=task_info.source_type,
+                owner_user_id=task_info.owner_user_id,
+                owner_bot_id=task_info.owner_bot_id,
+                execution_config=self._json(task_info.execution_config),
+                task_spec=self._json(task_info.task_spec.to_dict()),
+                status=Status.RUNNING.value,
+                graph_run_id=str(graph.run_id),
+                graph_loop_round=graph.loop_round,
+                graph_output=self._json(graph.output),
+                graph_extend_props=self._json(props),
+                graph_version=1,
+            ))
+            db.flush()
+            self._upsert_current_rows(db, graph)
+            db.add(TaskDeliveryIntentModel(
+                task_id=task_info.task_id,
+                node_id=task_info.task_id,
+                relay_token=graph.tasks[0].run_info.extend_props["relay_token"],
+                state="PENDING",
+                attempt=0,
+            ))
+            db.flush()
+        return 1
 
     def save_graph(
         self,
@@ -223,11 +268,142 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             info.lease_owner = instance_id or self._instance_id
             info.heartbeat_at = int(time.time() * 1000)
             self._upsert_current_rows(db, graph)
+            self._ensure_relay_delivery_intents(db, graph)
             self._insert_action_rows(db, graph.task_id, action_events, instance_id)
             if callback_audit is not None:
                 self._upsert_callback_audit(db, callback_audit)
             db.flush()
             return info.graph_version
+
+    def _ensure_relay_delivery_intents(self, db, graph) -> None:
+        if not graph.is_relay:
+            return
+        for node in graph.tasks:
+            if node.status not in {Status.PENDING, Status.RUNNING}:
+                continue
+            if node.run_info.run_mode not in {"single_bot", "coop_group", "bbs"}:
+                continue
+            if node.run_info.run_mode == "bbs" and node.status == Status.RUNNING:
+                # BBS claim rotates the node's execution token and immediately
+                # sends the winner its instruction inside the existing publish
+                # operation. It must not reopen the auction intent.
+                continue
+            if node.run_info.run_mode != "bbs" and not node.run_info.assignee:
+                continue
+            relay_token = node.run_info.extend_props.get("relay_token")
+            if not relay_token:
+                continue
+            existing = db.query(TaskDeliveryIntentModel).filter(
+                TaskDeliveryIntentModel.task_id == graph.task_id,
+                TaskDeliveryIntentModel.node_id == node.node_id,
+            ).with_for_update().first()
+            if existing is None:
+                db.add(TaskDeliveryIntentModel(
+                    task_id=graph.task_id, node_id=node.node_id,
+                    relay_token=relay_token,
+                    state="PENDING", attempt=0,
+                ))
+            elif existing.relay_token != relay_token:
+                # A retry or reassignment is a new run generation of the same
+                # node. The old delivery lease may no longer acknowledge it.
+                existing.relay_token = relay_token
+                existing.state = "PENDING"
+                existing.lease_until_ms = None
+                existing.lease_token = None
+                existing.last_error = None
+
+    def list_pending_delivery_intents(self, *, limit: int = 100) -> list[tuple[str, str]]:
+        now = int(time.time() * 1000)
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(TaskDeliveryIntentModel.task_id, TaskDeliveryIntentModel.node_id)
+                .filter(or_(
+                    TaskDeliveryIntentModel.state == "PENDING",
+                    and_(TaskDeliveryIntentModel.state == "DELIVERING",
+                         TaskDeliveryIntentModel.lease_until_ms < now),
+                ))
+                .order_by(TaskDeliveryIntentModel.id.asc())
+                .limit(max(1, min(limit, 500))).all()
+            )
+            return [(str(row[0]), str(row[1])) for row in rows]
+
+    def claim_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str, *, lease_ms: int = 60000,
+    ) -> tuple[str, str | None]:
+        now = int(time.time() * 1000)
+        token = uuid.uuid4().hex
+        with self._transaction() as db:
+            count = (
+                db.query(TaskDeliveryIntentModel)
+                .filter(
+                    TaskDeliveryIntentModel.task_id == task_id,
+                    TaskDeliveryIntentModel.node_id == node_id,
+                    TaskDeliveryIntentModel.relay_token == relay_token,
+                    or_(
+                        TaskDeliveryIntentModel.state == "PENDING",
+                        and_(TaskDeliveryIntentModel.state == "DELIVERING",
+                             TaskDeliveryIntentModel.lease_until_ms < now),
+                    ),
+                )
+                .update({
+                    "state": "DELIVERING",
+                    "attempt": TaskDeliveryIntentModel.attempt + 1,
+                    "lease_until_ms": now + lease_ms,
+                    "lease_token": token,
+                }, synchronize_session=False)
+            )
+            if count == 1:
+                return "CLAIMED", token
+            row = db.query(TaskDeliveryIntentModel.state, TaskDeliveryIntentModel.relay_token).filter(
+                TaskDeliveryIntentModel.task_id == task_id,
+                TaskDeliveryIntentModel.node_id == node_id,
+            ).first()
+            if row and row[1] != relay_token:
+                return "STALE", None
+            return (str(row[0]) if row else "MISSING"), None
+
+    def mark_delivery_intent(self, task_id: str, node_id: str, lease_token: str, *, delivered: bool,
+                             error: str | None = None) -> None:
+        with self._transaction() as db:
+            count = (
+                db.query(TaskDeliveryIntentModel)
+                .filter(
+                    TaskDeliveryIntentModel.task_id == task_id,
+                    TaskDeliveryIntentModel.node_id == node_id,
+                    TaskDeliveryIntentModel.state == "DELIVERING",
+                    TaskDeliveryIntentModel.lease_token == lease_token,
+                )
+                .update({
+                    "state": "DELIVERED" if delivered else "PENDING",
+                    "lease_until_ms": None,
+                    "lease_token": None,
+                    "last_error": None if delivered else str(error or "delivery_failed")[:1000],
+                }, synchronize_session=False)
+            )
+            if count != 1:
+                raise TaskStateError("delivery intent is not owned by this attempt")
+
+    def requeue_delivery_intent(
+        self, task_id: str, node_id: str, relay_token: str, *, reason: str,
+    ) -> None:
+        """Reopen the same run generation after a delivered instruction stalled."""
+        with self._transaction() as db:
+            count = (
+                db.query(TaskDeliveryIntentModel)
+                .filter(
+                    TaskDeliveryIntentModel.task_id == task_id,
+                    TaskDeliveryIntentModel.node_id == node_id,
+                    TaskDeliveryIntentModel.relay_token == relay_token,
+                )
+                .update({
+                    "state": "PENDING",
+                    "lease_until_ms": None,
+                    "lease_token": None,
+                    "last_error": str(reason or "relay_resume")[:1000],
+                }, synchronize_session=False)
+            )
+            if count != 1:
+                raise TaskStateError("delivery intent cannot be requeued")
 
     def _upsert_callback_audit(self, db, record) -> None:
         """Write the inbound callback audit row with ``process_status='PROCESSED'``
