@@ -40,16 +40,16 @@ export function RenderScreenPanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
         <div>
-          <h2 className="m-0 text-sm font-semibold">副屏组件库</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">维护当前 Bot 可加载的 UMD CDN 映射。</p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight">副屏组件库</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">维护当前 Bot 可加载的 UMD CDN 映射。</p>
         </div>
         <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => start()}>
           新增副屏
         </Button>
       </div>
-      <div className="space-y-3 px-5 py-4">
+      <div className="space-y-3 px-7 py-5">
         {formOpen ? (
           <Card className="grid gap-3 bg-muted/30 p-4 shadow-none">
             <Input

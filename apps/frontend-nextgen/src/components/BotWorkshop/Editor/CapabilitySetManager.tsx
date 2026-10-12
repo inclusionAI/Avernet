@@ -100,10 +100,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   };
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between border-b border-border px-7 py-4">
         <div>
-          <h2 className="m-0 text-sm font-semibold">能力集管理</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
+          <h2 className="m-0 text-base font-semibold">能力集管理</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
           size="sm"
@@ -120,8 +120,8 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
             const open = expanded.includes(set.id);
             const displayName = set.isDefault ? '默认能力集' : set.name;
             return (
-              <section key={set.id} className="border-b border-border px-4 py-1">
-                <div className="group flex items-center gap-2 py-2">
+              <section key={set.id} className="border-b border-border px-7 py-2">
+                <div className="group flex min-h-14 items-center gap-2 py-2">
                   <Button
                     variant="ghost"
                     className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left"
@@ -132,11 +132,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                   >
                     <span className="min-w-0">
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-xs font-semibold">{displayName}</span>
+                        <span className="truncate text-sm font-semibold">{displayName}</span>
                         {!set.active ? <Badge>已禁用</Badge> : null}
                         {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
                       </span>
-                      <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                      <span className="mt-1 block text-xs font-normal text-muted-foreground">
                         {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
                       </span>
                     </span>
@@ -189,7 +189,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                   ) : null}
                 </div>
                 {open ? (
-                  <div className="space-y-4 pb-4 pl-7">
+                  <div className="space-y-5 pb-5 pl-0">
                     <CapabilityMembers
                       kind="skill"
                       items={set.skills}
