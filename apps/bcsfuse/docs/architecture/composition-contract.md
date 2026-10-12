@@ -197,7 +197,9 @@ Worker registry providers must make `update(worker)` atomic with respect to
 `worker.version`: the database write must match that version, increment it
 once, and reject a conflict without writing. Sparse sync retries those
 conflicts against the latest Worker so concurrent updates to different fields
-do not silently overwrite each other.
+do not silently overwrite each other. SQLite Worker/Profile stores also
+serialize all operations on each shared connection; the SQL version predicate
+coordinates writes from separate connections or processes.
 
 Profile providers implement `save_if_version(content, expected_version)` for
 sparse sync: `None` as the expected version inserts only when absent; an integer

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime
+from functools import wraps
 from threading import RLock
 from typing import Optional
 
@@ -24,6 +25,16 @@ from src.domain.models.worker_profile_content import (
     WorkerProfileContentList,
 )
 from src.infra.adapters.sqlite_schema import init_schema
+
+
+def _serialized_connection(method):
+    """Keep reads and writes off a shared SQLite connection during transactions."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._write_lock:
+            return method(self, *args, **kwargs)
+    return locked
+
 
 # Profile contents 表 Schema（与线上 MySQL 字段名一致）
 CREATE_WORKER_PROFILE_CONTENTS_TABLE = """
@@ -319,6 +330,7 @@ class SQLiteWorkerProfileContentStore:
                 self._conn.rollback()
                 raise
 
+    @_serialized_connection
     def get(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
         """获取指定 Profile"""
         profile_id = profile_id or "default"
@@ -335,6 +347,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self._row_to_content(row)
 
+    @_serialized_connection
     def list_by_worker(self, worker_id: str) -> WorkerProfileContentList:
         """列出 Worker 的所有 Profiles"""
         cursor = self._conn.cursor()
@@ -359,6 +372,7 @@ class SQLiteWorkerProfileContentStore:
             active_profile_id=active_profile_id,
         )
 
+    @_serialized_connection
     def delete(self, worker_id: str, profile_id: str) -> bool:
         """删除 Profile"""
         profile_id = profile_id or "default"
@@ -372,6 +386,7 @@ class SQLiteWorkerProfileContentStore:
 
         return cursor.rowcount > 0
 
+    @_serialized_connection
     def activate(self, worker_id: str, profile_id: str) -> Optional[WorkerProfileContent]:
         """设置活跃 Profile"""
         profile_id = profile_id or "default"
@@ -397,6 +412,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self.get(worker_id, profile_id)
 
+    @_serialized_connection
     def get_active(self, worker_id: str) -> Optional[WorkerProfileContent]:
         """获取活跃 Profile"""
         cursor = self._conn.cursor()
@@ -411,6 +427,7 @@ class SQLiteWorkerProfileContentStore:
 
         return self._row_to_content(row)
 
+    @_serialized_connection
     def exists(self, worker_id: str, profile_id: str) -> bool:
         """检查 Profile 是否存在"""
         profile_id = profile_id or "default"
@@ -422,6 +439,7 @@ class SQLiteWorkerProfileContentStore:
         )
         return cursor.fetchone() is not None
 
+    @_serialized_connection
     def count(self, worker_id: Optional[str] = None) -> int:
         """统计 Profile 数量"""
         cursor = self._conn.cursor()
@@ -436,6 +454,7 @@ class SQLiteWorkerProfileContentStore:
 
         return cursor.fetchone()[0]
 
+    @_serialized_connection
     def get_all_active(self) -> list[WorkerProfileContent]:
         """获取所有活跃 Profile"""
         cursor = self._conn.cursor()
@@ -446,6 +465,7 @@ class SQLiteWorkerProfileContentStore:
 
         return [self._row_to_content(row) for row in rows]
 
+    @_serialized_connection
     def close(self) -> None:
         """关闭数据库连接"""
         self._conn.close()

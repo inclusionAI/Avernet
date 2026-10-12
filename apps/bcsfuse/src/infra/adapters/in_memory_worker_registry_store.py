@@ -9,6 +9,8 @@ Stage 1 Phase 1：用于测试和快速验证。
 from __future__ import annotations
 
 from datetime import datetime
+from functools import wraps
+from threading import RLock
 from typing import Optional
 
 from src.domain.models.worker import TrustLevel, Worker
@@ -21,6 +23,15 @@ from src.domain.exceptions import (
 )
 
 
+def _serialized_store(method):
+    """Keep version checks and writes atomic within one in-memory store."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
 class InMemoryWorkerRegistryStore:
     """
     Worker Registry 内存存储
@@ -28,7 +39,7 @@ class InMemoryWorkerRegistryStore:
     Stage 1 Phase 1 实现：
     - 纯内存存储（dict）
     - 无持久化
-    - 非线程安全
+    - 单实例内操作串行化
 
     用于：
     - 测试
@@ -39,7 +50,9 @@ class InMemoryWorkerRegistryStore:
     def __init__(self):
         """初始化空仓库"""
         self._workers: dict[str, Worker] = {}
+        self._lock = RLock()
 
+    @_serialized_store
     def create(self, worker: Worker) -> Worker:
         """
         创建 Worker
@@ -65,6 +78,7 @@ class InMemoryWorkerRegistryStore:
         self._workers[worker.id] = worker.model_copy(deep=True)
         return worker.model_copy(deep=True)
 
+    @_serialized_store
     def get_by_id(self, worker_id: str) -> Optional[Worker]:
         """
         根据 ID 获取 Worker
@@ -80,6 +94,7 @@ class InMemoryWorkerRegistryStore:
             return worker.model_copy(deep=True)
         return None
 
+    @_serialized_store
     def get_by_ids(self, worker_ids: list[str]) -> dict[str, Worker]:
         """根据 ID 列表批量获取 Worker"""
         result: dict[str, Worker] = {}
@@ -89,6 +104,7 @@ class InMemoryWorkerRegistryStore:
                 result[wid] = worker.model_copy(deep=True)
         return result
 
+    @_serialized_store
     def batch_get_configs(self, worker_ids: list[str]) -> tuple[dict[str, WorkerConfig], list[str]]:
         """批量获取 Worker config，仅返回配置，不返回完整 Worker"""
         configs: dict[str, WorkerConfig] = {}
@@ -101,6 +117,7 @@ class InMemoryWorkerRegistryStore:
                 configs[wid] = worker.config.model_copy()
         return configs, not_found
 
+    @_serialized_store
     def list(
         self,
         lifecycle_states: Optional[list[WorkerLifecycleState]] = None,
@@ -156,6 +173,7 @@ class InMemoryWorkerRegistryStore:
         # 返回副本列表
         return [w.model_copy(deep=True) for w in result]
 
+    @_serialized_store
     def update(self, worker: Worker) -> Worker:
         """
         更新 Worker
@@ -191,6 +209,7 @@ class InMemoryWorkerRegistryStore:
         self._workers[worker.id] = updated_worker.model_copy(deep=True)
         return updated_worker.model_copy(deep=True)
 
+    @_serialized_store
     def update_lifecycle_state(
         self,
         worker_id: str,
@@ -228,6 +247,7 @@ class InMemoryWorkerRegistryStore:
         self._workers[worker_id] = worker.model_copy(deep=True)
         return worker.model_copy(deep=True)
 
+    @_serialized_store
     def update_trust_level(
         self,
         worker_id: str,
@@ -240,6 +260,7 @@ class InMemoryWorkerRegistryStore:
         worker.state.trust_level = trust_level
         return self.update(worker)
 
+    @_serialized_store
     def delete(self, worker_id: str) -> bool:
         """
         删除 Worker（硬删除）
@@ -259,6 +280,7 @@ class InMemoryWorkerRegistryStore:
         del self._workers[worker_id]
         return True
 
+    @_serialized_store
     def exists(self, worker_id: str) -> bool:
         """
         检查 Worker 是否存在
@@ -271,6 +293,7 @@ class InMemoryWorkerRegistryStore:
         """
         return worker_id in self._workers
 
+    @_serialized_store
     def count(
         self,
         lifecycle_states: Optional[list[WorkerLifecycleState]] = None,
@@ -292,6 +315,7 @@ class InMemoryWorkerRegistryStore:
             if w.lifecycle_state in lifecycle_states
         )
 
+    @_serialized_store
     def clear(self) -> None:
         """清空仓库（用于测试清理）"""
         self._workers.clear()

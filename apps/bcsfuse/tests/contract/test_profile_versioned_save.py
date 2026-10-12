@@ -1,7 +1,7 @@
 """Profile stores reject stale full-document writes used by sparse sync."""
 
-from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Lock
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from threading import Barrier, Event, Lock
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,6 +53,62 @@ def test_versioned_create_rejects_a_second_insert(tmp_path, backend):
     first = WorkerProfileContent(worker_id="bot:owner", profile_id="default")
     assert store.save_if_version(first, None) is not None
     assert store.save_if_version(first, None) is None
+
+
+def test_same_sqlite_profile_store_serializes_delete_until_versioned_save_commits(tmp_path):
+    store = SQLiteWorkerProfileContentStore(db_path=str(tmp_path / "profiles.sqlite"))
+    initial = store.save(WorkerProfileContent(
+        worker_id="bot:owner", profile_id="default", soul_md="Original",
+    ))
+    changed = initial.model_copy(update={"soul_md": "Updated"})
+    first_updated = Event()
+    release_first = Event()
+    delete_started = Event()
+
+    class PausingCursor:
+        def __init__(self, actual):
+            self.actual = actual
+
+        def execute(self, sql, parameters=()):
+            result = self.actual.execute(sql, parameters)
+            if sql.startswith("UPDATE bcsfuse_worker_profile_contents SET") and not first_updated.is_set():
+                first_updated.set()
+                assert release_first.wait(timeout=5)
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
+    class PausingConnection:
+        def __init__(self, actual):
+            self.actual = actual
+
+        def cursor(self):
+            return PausingCursor(self.actual.cursor())
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
+    store._conn = PausingConnection(store._conn)
+
+    def delete_after_start():
+        delete_started.set()
+        return store.delete("bot:owner", "default")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        saved_result = executor.submit(store.save_if_version, changed, initial.version)
+        assert first_updated.wait(timeout=5)
+        deleted_result = executor.submit(delete_after_start)
+        assert delete_started.wait(timeout=5)
+        try:
+            with pytest.raises(FutureTimeoutError):
+                deleted_result.result(timeout=0.5)
+        finally:
+            release_first.set()
+        assert saved_result.result(timeout=5).soul_md == "Updated"
+        assert deleted_result.result(timeout=5) is True
+
+    assert store.get("bot:owner", "default") is None
 
 
 @pytest.mark.parametrize("backend", ["memory", "sqlite"])
