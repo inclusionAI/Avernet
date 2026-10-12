@@ -988,8 +988,11 @@ class TrajectoryEventDTO(BaseModel):
     session_msgs: list[dict[str, Any]] | None = Field(
         None,
         description="子任务会话消息(最近 running_session_message_limit 条,原文;"
-                    "读时自末位事件 ext_info.session_msgs 富化,仅该 node 最后一条事件携带,"
-                    "未物化/无会话为 None)",
+                    "读时按 session_id 形态分通道实拉(BCS 会话键→BCS 读口;引擎键"
+                    "agent:main:session:*/user:...:session:...:agent:...→BaaS Open API),"
+                    "失败降级末位事件"
+                    " ext_info.session_msgs 快照,仅该 node 最后一条事件携带,"
+                    "未拉到/无会话为 None;纯读实拉不落库)",
     )
     search_probe: dict[str, Any] | None = Field(
         None,

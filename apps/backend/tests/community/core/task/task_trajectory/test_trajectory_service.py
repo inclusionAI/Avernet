@@ -49,6 +49,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_servi
     TaskTrajectoryService,
     _build_ext_info_lookup,
     _event_key,
+    _is_engine_session_id,
     _persisted_timeline_version,
     _timeline_fingerprint,
 )
@@ -743,7 +744,7 @@ class _FakeNode:
 
     def __init__(self, *, node_id: str, status: Status, extend_props: dict | None = None,
                  start_time: int | None = None, output: dict | None = None,
-                 task_spec=None) -> None:
+                 task_spec=None, assignee: str | None = None) -> None:
         self.node_id = node_id
         self.status = status
         self.task_spec = task_spec
@@ -751,6 +752,7 @@ class _FakeNode:
             start_time=start_time,
             output=dict(output or {}),
             extend_props=dict(extend_props or {}),
+            assignee=assignee,
         )
 
 
@@ -801,6 +803,24 @@ class _FakeTokenProvider:
         if self._raise is not None:
             raise self._raise
         return self._tokens.get(bcs_bot_uuid)
+
+
+class _FakeOpenApiBot:
+    """Fake ``OpenApiBotPort.get_session_messages``(引擎会话读通道);可编程
+    per-session payload/异常,记录每次调用 ``(session_id, limit, bot_id)``。"""
+
+    def __init__(self, *, messages_by_session: dict | None = None,
+                 raise_exc: Exception | None = None) -> None:
+        self._messages = messages_by_session or {}
+        self._raise = raise_exc
+        self.calls: list[tuple[str, int, "str | None"]] = []
+
+    async def get_session_messages(self, session_id: str, *, limit: int = 50,
+                                   bot_id: str | None = None) -> list:
+        self.calls.append((session_id, limit, bot_id))
+        if self._raise is not None:
+            raise self._raise
+        return self._messages.get(session_id, [])
 
 
 def _running_probe_setup(**svc_kwargs):
@@ -1392,3 +1412,317 @@ async def test_get_trajectory_output_enrichment_survives_graph_failure():
 
     assert result is traj  # 本体照常返回
     assert result.timeline[0].output is None
+
+
+# ---------------------------------------------------------------------------
+# 会话明细双通道(2026-10-10):纯读实拉 + 引擎会话经 BaaS Open API 分派
+# ---------------------------------------------------------------------------
+
+_ENGINE_SID = "agent:main:session:8ccd0594-032e-4266-a42b-cee2ec833562:user:35983"
+_CC_SID = "user:123:session:9f0b2c77-1111-2222-3333-444455556666:agent:bot9"
+_LIVE_MSGS = [
+    {"role": "user", "content": "run the job"},
+    {"role": "assistant", "content": "tool failed: boom"},
+]
+
+
+@pytest.mark.unit
+def test_is_engine_session_id_matches_engine_namespaces_only():
+    """判别正则:openclaw/base/claude_code 三个引擎变体 + 归一裸形命中;
+    BCS 会话键(bcs-cli:*/协作群)不命中(继续走既有 BCS 读口)。"""
+    assert _is_engine_session_id(_ENGINE_SID)
+    assert _is_engine_session_id("agent:bot7:session:abc-123:user:35983")  # base 引擎
+    assert _is_engine_session_id(_CC_SID)                                   # claude_code
+    assert _is_engine_session_id("session:abc-123:user:35983")              # 归一裸形
+    assert not _is_engine_session_id("sess-1")
+    assert not _is_engine_session_id("bcs-cli:task-20261009190011123-198568")
+    assert not _is_engine_session_id("grp-1:initial")
+    assert not _is_engine_session_id("")
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_pure_read_live_fetches_session_msgs_and_never_persists():
+    """REQ-8 锁:纯读实拉会话明细挂返回对象,但零 DB 写(merge/backfill 均不可达)
+    且零 bot 调用。"""
+    timeline = [_make_event(node_id="n-run", gmt_create=1000)]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-run", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    bcs = _FakeBcs(messages_by_session={"sess-1": _LIVE_MSGS})
+    analyzer = _FakeAnalyzer()
+    repo = _FakeRepo()
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(timeline=timeline)), repo, analyzer, None,
+        graph=graph, bcs=bcs,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert bcs.calls == [("sess-1", 50, None)]   # 实拉,默认 limit 50
+    assert result.timeline[0].session_msgs == _LIVE_MSGS
+    assert repo.merge_calls == []                  # 纯读不写库
+    assert repo.backfill_calls == []
+    assert analyzer.calls == 0                    # 纯读不调 bot
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_pure_read_falls_back_to_cached_snapshot_when_live_fetch_fails():
+    """实拉失败 → WARNING 降级,回退末位事件 ext_info.session_msgs 缓存快照;
+    不抛、不写库。"""
+    timeline = [_make_event(node_id="n-run", gmt_create=1000)]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-run", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    bcs = _FakeBcs(raise_exc=RuntimeError("bcs down"))
+    cached = [{"role": "user", "content": "cached snapshot"}]
+    records = [_make_record(
+        node_id="n-run", ext_info=json.dumps({"session_msgs": cached}),
+    )]
+    analyzer = _FakeAnalyzer()
+    repo = _FakeRepo(events=records)
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(timeline=timeline)), repo, analyzer, None,
+        graph=graph, bcs=bcs,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert bcs.calls  # 实拉确实尝试过
+    assert result.timeline[0].session_msgs == cached  # 回退缓存快照
+    assert repo.merge_calls == []
+    assert repo.backfill_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_pure_read_live_fetch_off_when_graph_unbound():
+    """默认构造(graph 未接线)→ 纯读实拉整体关闭(零副作用);缓存快照照常挂载。
+    存量 e2e 构造方式的回归锁。"""
+    cached = [{"role": "user", "content": "from cache"}]
+    records = [_make_record(
+        node_id="n1", ext_info=json.dumps({"session_msgs": cached}),
+    )]
+    timeline = [_make_event(node_id="n1", gmt_create=1000)]
+    bcs = _FakeBcs()
+    analyzer = _FakeAnalyzer()
+    repo = _FakeRepo(events=records)
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(timeline=timeline)), repo, analyzer, None,
+        bcs=bcs,  # bcs 接了,但 graph 未接 → 探测关闭
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert bcs.calls == []
+    assert result.timeline[0].session_msgs == cached
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_engine_session_id_dispatches_to_baas_channel():
+    """引擎会话(agent:main:session:*)→ OpenApiBotPort(带与执行侧同源的复合
+    bot_id);BCS 不被调;分析路径物化 merge + brief 照旧。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID,
+                                "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=500),
+    ])
+    bcs = _FakeBcs()
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, openapi_bot=openapi,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert bcs.calls == []
+    briefs = analyzer.last_running_sessions
+    assert briefs and briefs[0]["session_id"] == _ENGINE_SID
+    assert briefs[0]["messages"] == _LIVE_MSGS
+    assert [(m[1], m[2]) for m in repo.merge_calls] == [("n-eng", "session_msgs")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist():
+    """纯读遇到引擎会话 → 同样走 BaaS 通道,BCS 不动;结果挂返回对象,不落库。"""
+    timeline = [_make_event(node_id="n-eng", gmt_create=1000)]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID,
+                                "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=500),
+    ])
+    bcs = _FakeBcs()
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer()
+    repo = _FakeRepo()
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(timeline=timeline)), repo, analyzer, None,
+        graph=graph, bcs=bcs, openapi_bot=openapi,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert bcs.calls == []
+    assert result.timeline[0].session_msgs == _LIVE_MSGS
+    assert repo.merge_calls == []
+    assert repo.backfill_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_claude_code_session_key_dispatches_to_baas():
+    """claude_code 引擎变体(user:{u}:session:{r}:agent:{b})同样分派 BaaS 通道。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-cc", status=Status.RUNNING,
+                  extend_props={"session_id": _CC_SID, "assignee_owner_id": "123"},
+                  assignee="bot9", start_time=500),
+    ])
+    bcs = _FakeBcs()
+    openapi = _FakeOpenApiBot(messages_by_session={_CC_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, openapi_bot=openapi,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    assert [c[0] for c in openapi.calls] == [_CC_SID]
+    assert [c[2] for c in openapi.calls] == ["bot9:123"]
+    assert bcs.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_mixed_bcs_and_engine_channels_probed_independently():
+    """BCS 键 + 引擎键混合节点:各自分派正确通道;BCS 节点照旧解析持有者
+    Bearer(relay_holder_id),引擎节点走复合 bot_id。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-bcs", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-group", "relay_holder_id": "bot-holder"},
+                  start_time=500),
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=300),
+    ])
+    bcs = _FakeBcs(messages_by_session={"sess-group": [
+        {"role": "user", "content": "group msg"},
+    ]})
+    tokens = _FakeTokenProvider(tokens={"bot-holder": "tok-holder"})
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, bcs_bot_tokens=tokens, openapi_bot=openapi,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    assert bcs.calls == [("sess-group", 50, "tok-holder")]
+    assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
+    assert {m[1] for m in repo.merge_calls} == {"n-bcs", "n-eng"}
+    assert {b["node_id"] for b in analyzer.last_running_sessions} == {"n-bcs", "n-eng"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_probe_gate_enabled_with_only_openapi_bot():
+    """bcs=None 但 openapi 接线:引擎节点仍探测(门改动);BCS 命名空间节点
+    逐个 WARNING 降级,不影响引擎节点与分析本体。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=500),
+        _FakeNode(node_id="n-bcsns", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=100),
+    ])
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, openapi_bot=openapi,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=True)  # bcs=None
+
+    assert [c[0] for c in openapi.calls] == [_ENGINE_SID]
+    assert {b["node_id"] for b in analyzer.last_running_sessions} == {"n-eng"}  # BCS 键节点被跳过
+    assert result.analysis is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_force_analysis_repulls_cached_engine_session_msgs():
+    """引擎节点 ext_info 已有缓存快照 + force_analysis=True → 缓存旁路,
+    OpenApi 通道重拉并 merge 覆盖。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=500),
+    ])
+    bcs = _FakeBcs()
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    records = [_make_record(
+        node_id="n-eng",
+        ext_info=json.dumps({"session_msgs": [{"role": "user", "content": "stale"}]}),
+    )]
+    repo = _FakeRepo(events=records)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, openapi_bot=openapi,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
+
+    assert [c[0] for c in openapi.calls] == [_ENGINE_SID]  # force:缓存旁路重拉
+    assert repo.merge_calls and repo.merge_calls[0][3] == _LIVE_MSGS  # 覆盖为最新
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_live_fetch_honors_running_session_message_limit_config():
+    """TrajectoryAnalysisConfig.running_session_message_limit=7 → BCS 与引擎
+    两条通道都按 7 实拉。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-bcs", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+        _FakeNode(node_id="n-eng", status=Status.RUNNING,
+                  extend_props={"session_id": _ENGINE_SID, "assignee_owner_id": "35983"},
+                  assignee="20260920_hzzaxnzf", start_time=300),
+    ])
+    bcs = _FakeBcs(messages_by_session={"sess-1": _LIVE_MSGS})
+    openapi = _FakeOpenApiBot(messages_by_session={_ENGINE_SID: _LIVE_MSGS})
+    analyzer = _FakeAnalyzer()
+    repo = _FakeRepo()
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer,
+        TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst",
+                                 running_session_message_limit=7),
+        graph=graph, bcs=bcs, openapi_bot=openapi,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=False)
+
+    assert [c[1] for c in bcs.calls] == [7]
+    assert [c[1] for c in openapi.calls] == [7]
