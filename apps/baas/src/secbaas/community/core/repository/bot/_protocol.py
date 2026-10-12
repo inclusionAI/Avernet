@@ -140,9 +140,11 @@ class BotRepository(Protocol):
         """Clone an existing bot record with a new status.
 
         Copies all fields from the source bot record, overriding status
-        and optionally extra_config/name/template_uuid. Returns the new record ID.
+        and optionally extra_config/name/template_uuid. The clone is a
+        fresh INSERT; previously soft-deleted rows are left untouched.
         Does not guard against concurrent clones — use ``try_insert_pending_bot``
         when the clone must reserve a PENDING slot atomically.
+        Returns the new record ID.
         """
         ...
 
@@ -159,10 +161,15 @@ class BotRepository(Protocol):
     ) -> int:
         """Atomically clone the source bot into a PENDING record.
 
-        Conflict detection and insertion share one transaction. Raises the
-        repository's conflict error when a live PENDING record already exists
-        for the same ``bot_uuid``; the caller must abort rather than delete the
-        incumbent record. Returns the new record ID.
+        Atomicity comes from the unique key, not transaction scope: the
+        repository method session and the nested insert session are
+        separate transactions, and the unique key is the final arbiter.
+        Raises the repository's conflict error when a live PENDING record
+        already exists for the same ``bot_uuid``; the caller must abort
+        rather than delete the incumbent record. A soft-deleted PENDING
+        record occupies a distinct unique-key slot (``is_deleted = bot_id``),
+        so the live slot stays free and the clone is a fresh INSERT;
+        soft-deleted records are left untouched. Returns the new record ID.
         """
         ...
 
