@@ -182,6 +182,7 @@ class AicodingDurableRestartMixin:
                     return self._accepted(result)
                 raise BotServiceError("重启请求正在提交，请稍后重试")
             # PENDING is persisted before the task becomes visible to workers.
+            state.mark_pending(result)
             task, _created = services.task_queue.enqueue(
                 TASK_TYPE, payload, deadline_seconds=TASK_DEADLINE, idempotency_key=key,
             )

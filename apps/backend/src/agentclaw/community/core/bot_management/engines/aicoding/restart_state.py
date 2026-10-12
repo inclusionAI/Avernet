@@ -104,7 +104,7 @@ class RestartState:
         self, payload: dict, previous_operation_id: str | None,
         *, replace_terminal_task: bool = False,
     ) -> dict:
-        """HTTP admission alone claims the journal and writes PENDING before enqueue.
+        """Claim the journal for synchronous admission, before PENDING and enqueue.
 
         A concurrent admission joins the winner without repeating its status write.
         No worker repairs admission or the process-exit-before-enqueue window.
@@ -141,8 +141,21 @@ class RestartState:
                 expected_ext=bot.get("ext"), ext=ext,
             )
             if result is not None:
-                return self._sync_status(result)
+                return result
         raise RuntimeError("Restart journal initialization contention")
+
+    def mark_pending(self, bot: dict) -> None:
+        """Synchronous admission only: confirm PENDING before exposing the task."""
+        updated = self._sync_status(bot)
+        record = journal(updated)
+        if (
+            record.get("operation_id") != self.operation_id
+            or record.get("phase") != "QUEUED"
+            or updated.get("binding_id") != bot.get("binding_id")
+            or updated.get("active_engine") != bot.get("active_engine")
+            or updated.get("status") != "PENDING"
+        ):
+            raise RestartSuperseded("Restart admission changed before enqueue")
 
     def read_for_task(self) -> dict:
         """Observe the admitted operation; only failure finalization may write status."""

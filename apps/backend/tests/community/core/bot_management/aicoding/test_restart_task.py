@@ -910,3 +910,30 @@ async def test_concurrent_http_cannot_accept_unsubmitted_operation(setup, monkey
         await first
     assert writes == [{"status": "PENDING"}]
     assert len(s.queue.tasks) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["binding", "engine", "operation", "phase"])
+async def test_changed_admission_cannot_enqueue_without_confirmed_pending(setup, monkeypatch, changed):
+    s = setup
+    original = s.repo.compare_and_set_ext
+
+    def initialize(**kwargs):
+        result = original(**kwargs)
+        if result is not None and journal(result).get("phase") == "QUEUED":
+            if changed == "binding":
+                s.repo.bot["binding_id"] = 8
+            elif changed == "engine":
+                s.repo.bot["active_engine"] = "openclaw"
+            elif changed == "operation":
+                s.repo.bot["ext"][KEY]["operation_id"] = "replacement"
+            else:
+                s.repo.bot["ext"][KEY]["phase"] = "BACKING_UP"
+        return result
+
+    monkeypatch.setattr(s.repo, "compare_and_set_ext", initialize)
+    with pytest.raises(RestartSuperseded, match="admission changed"):
+        await submit(s)
+    assert task(s) is None
+    assert s.repo.bot["status"] == "ACTIVE"
+    s.service.restart_bot.assert_not_called()

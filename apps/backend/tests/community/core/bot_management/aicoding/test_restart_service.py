@@ -258,18 +258,31 @@ async def test_sync_preflight_failure_does_not_accept_or_stop_runtime(lifecycle)
 
 
 @pytest.mark.asyncio
-async def test_pending_is_written_once_for_successful_baas_restart(lifecycle):
+@pytest.mark.parametrize("engine", ["aicoding", "claude_code"])
+async def test_pending_is_written_once_for_successful_baas_restart(lifecycle, monkeypatch, engine):
     s = lifecycle
+    s.repo.bot.update(active_engine=engine, engine_types=[engine])
     update = s.repo.update_by_owner
     s.repo.update_by_owner = Mock(side_effect=update)
+    enqueue = s.queue.enqueue
+
+    def enqueue_after_pending(*args, **kwargs):
+        if args[0] == TASK_TYPE:
+            assert s.repo.bot["status"] == "PENDING"
+            assert journal(s.repo.bot)["phase"] == "QUEUED"
+            s.repo.update_by_owner.assert_called_once_with("b", "o", {"status": "PENDING"})
+        return enqueue(*args, **kwargs)
+
+    monkeypatch.setattr(s.queue, "enqueue", enqueue_after_pending)
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
+    s.repo.update_by_owner.reset_mock()
     receipt = Mock()
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=receipt):
         assert isinstance(s.handler.handle(task.payload), Reschedule)
-    pending_writes = [c for c in s.repo.update_by_owner.call_args_list
-                      if c.args[2].get("status") == "PENDING"]
-    assert len(pending_writes) == 1
+    # Actual BaaS orchestration, not the task fixture's mocked execute method:
+    # asynchronous backup/submission never initializes Bot PENDING again.
+    s.repo.update_by_owner.assert_not_called()
     assert receipt.call_count == 2
     s.platform.post_bots_api.assert_called_once()
 
