@@ -282,6 +282,35 @@ class TestRetryAndExhaustion:
 
         asyncio.run(main())
 
+    def test_factory_crash_fails_result_not_worker(self):
+        # A factory that raises in create() must degrade to a FAILED
+        # completion (the run's normal failure path) instead of killing
+        # the fire-and-forget worker task, whose exception would never
+        # surface and the run would hang to its slice budget.
+        async def main():
+            class ExplodingFactory(FakeFactory):
+                def create(self, spec, run):
+                    self.creates += 1
+                    raise TypeError("spec malformed")
+
+            factory = ExplodingFactory()
+            rt = SubagentRuntime(factory=factory, max_attempts=3)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope())
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+
+            assert len(results) == 1
+            r = results[0]
+            assert r["status"] == AgentStatus.FAILED
+            assert r["attempts"] == 3
+            assert "spec malformed" in r["error"]
+            assert factory.creates == 3
+
+        asyncio.run(main())
+
     def test_fresh_subagent_instance_per_attempt(self):
         async def main():
             factory = FakeFactory(scripts={

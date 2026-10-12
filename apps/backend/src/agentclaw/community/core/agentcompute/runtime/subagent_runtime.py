@@ -259,8 +259,13 @@ class SubagentRuntime:
                     item, AgentStatus.FAILED, None, "upstream_breaker_open", attempt,
                 )
 
-            subagent = self._factory.create(spec, item.run)
+            subagent = None
             try:
+                # D23 fresh context per attempt; factory construction stays
+                # inside the attempt's guard so a malformed spec degrades to
+                # a FAILED result instead of killing the worker task
+                # (its exception would never surface in a fire-and-forget loop).
+                subagent = self._factory.create(spec, item.run)
                 await subagent.setup()
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
@@ -293,10 +298,11 @@ class SubagentRuntime:
                 self._record_upstream_failure()
                 logger.warning("[agentcompute][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
             finally:
-                try:
-                    await subagent.teardown()
-                except Exception:
-                    pass
+                if subagent is not None:
+                    try:
+                        await subagent.teardown()
+                    except Exception:
+                        pass
 
         self._metrics.observe(
             "agentcompute_subagent_attempts", self._max_attempts,
