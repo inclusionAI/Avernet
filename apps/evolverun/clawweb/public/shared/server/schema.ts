@@ -3305,6 +3305,6 @@ END`,
   {
     version: 140,
     description: "Fence workflow completion and timeout writes by manual retry epoch",
-    sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER DEFAULT NULL`],
+    sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER DEFAULT 0`],
   },
 ];
