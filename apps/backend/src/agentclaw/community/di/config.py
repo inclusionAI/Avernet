@@ -676,8 +676,6 @@ class WorkspaceConfig:
     aicoding_root: str = "/home/admin/.aicoding"
     hermes_root: str = "/home/admin/.hermes"
     deepseek_harness_root: str = "/home/admin/.dsh"
-    # Neutral reserved directory for published Home file snapshots.
-    home_admin_artifact_root: str = "home_admin_root"
 
 
 # ── Creating a bot with its configuration manifest (W13) ─────────────────

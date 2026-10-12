@@ -73,7 +73,6 @@ def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch
         "sudo", "rsync", "-av", "--delete", "--chown=1000:1000"
     ]
     assert "--exclude=agents/*/sessions" in rsync_call
-    assert "--exclude=/home_admin_root" in rsync_call
     assert "--exclude=/.local" not in rsync_call
     assert rsync_call[-2:] == [f"{artifact_dir}/", f"{nas_root / '.openclaw'}/"]
     for command_call in svc._run_local_command.call_args_list:

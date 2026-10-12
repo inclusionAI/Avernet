@@ -263,17 +263,6 @@ class ConfigModule(Module):
 
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
-        artifact_root = block.get("home_admin_artifact_root", defaults.home_admin_artifact_root)
-        # COSEC: this value becomes an artifact-relative directory component,
-        # so reject traversal/absolute paths before it reaches filesystem code.
-        if (
-            not isinstance(artifact_root, str)
-            or not artifact_root.strip()
-            or artifact_root in (".", "..")
-            or any(char in artifact_root for char in ("/", "\\", "*", "?", "[", "]"))
-            or any(ord(char) < 32 or ord(char) == 127 for char in artifact_root)
-        ):
-            raise ValueError("workspace.home_admin_artifact_root must be a single directory name")
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
@@ -291,7 +280,6 @@ class ConfigModule(Module):
             deepseek_harness_root=_expand(
                 block.get("deepseek_harness_root"), defaults.deepseek_harness_root
             ),
-            home_admin_artifact_root=artifact_root,
         )
 
     # ── Access policy ───────────────────────────────────────────────

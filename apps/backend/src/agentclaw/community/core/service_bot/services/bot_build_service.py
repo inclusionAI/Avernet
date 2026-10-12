@@ -36,7 +36,6 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     validate_required_paths,
 )
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
-    HOME_ADMIN_ARTIFACT_ROOT,
     restore_local_bin_artifact,
     sync_local_bin_artifact,
 )
@@ -141,10 +140,6 @@ class BotBuildService:
     通过依赖注入接收 bot_service 和 device_service。
     """
 
-    # Standalone callers retain the neutral layout; DI supplies the deployment
-    # override through the existing workspace configuration boundary.
-    _home_admin_artifact_root: str = HOME_ADMIN_ARTIFACT_ROOT
-
     @inject
     def __init__(
         self,
@@ -161,7 +156,6 @@ class BotBuildService:
         teclaw_template_uuid: str,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         env: str,
-        home_admin_artifact_root: str = HOME_ADMIN_ARTIFACT_ROOT,
     ):
         """初始化 BotBuildService。
 
@@ -187,7 +181,6 @@ class BotBuildService:
         self._baas_template_resolver = baas_template_resolver
         self._build_ignore_repository = build_ignore_repository
         self._env = env
-        self._home_admin_artifact_root = home_admin_artifact_root
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -1320,9 +1313,6 @@ class BotBuildService:
                 # earlier partial artifact, otherwise Pool active roots can
                 # expose the full repository through a stale bridge.
                 "--delete-excluded",
-                # Home CLI snapshots are separate from the engine root. This
-                # also clears stale snapshots when the same version retries.
-                f"--exclude=/{self._home_admin_artifact_root}",
                 *excludes,
                 *(f"--exclude=/{path}" for path in build_ignore_paths),
                 f"{source_dir}/",
@@ -1343,7 +1333,6 @@ class BotBuildService:
                     version=version_str,
                     build_ignore_paths=build_ignore_paths,
                     run_command=self._run_local_command,
-                    artifact_root_name=self._home_admin_artifact_root,
                 )
 
             # Device-side fallback for extra-include files that are unreadable
@@ -1809,8 +1798,6 @@ class BotBuildService:
         draft_dir.mkdir(parents=True, exist_ok=True)
 
         excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
-        # The CLI snapshot belongs to the home directory, never the engine root.
-        excludes.append(f"--exclude=/{self._home_admin_artifact_root}")
         # Extra snapshots (for example target/claude -> draft/.claude) are not
         # part of the primary engine root and must not leak into it.
         if build_plan.extra_sync_target_relpath:
@@ -1870,7 +1857,6 @@ class BotBuildService:
             version=source_version,
             run_command=self._run_local_command,
             timeout_seconds=remaining_timeout(),
-            artifact_root_name=self._home_admin_artifact_root,
         )
 
         return {

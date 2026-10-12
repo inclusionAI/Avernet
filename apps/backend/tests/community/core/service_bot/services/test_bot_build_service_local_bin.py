@@ -13,7 +13,6 @@ from agentclaw.community.core.service_bot.services.bot_build_service import (
 from agentclaw.community.core.service_bot.services import bot_build_service as module
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
 from agentclaw.community.core.service_bot.services.local_bin_artifact import (
-    HOME_ADMIN_ARTIFACT_ROOT,
     restore_local_bin_artifact,
     sync_local_bin_artifact,
 )
@@ -40,8 +39,7 @@ def migration(tmp_path):
 
     service._run_local_command = run_command
 
-    def migrate(rules=(), artifact_root_name=HOME_ADMIN_ARTIFACT_ROOT):
-        service._home_admin_artifact_root = artifact_root_name
+    def migrate(rules=()):
         return service._migrate_bot_instance(
             device_id="device-cli-test",
             source_dir=source,
@@ -71,12 +69,12 @@ def test_migration_copies_only_bin_and_materializes_executable_link(migration, c
 
     assert migrate()
 
-    cli = target / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/cli"
+    cli = target.parent / ".local/bin/cli"
     assert cli.is_file() and not cli.is_symlink()
     assert cli.stat().st_mode & 0o111 == 0o111
     assert subprocess.check_output([str(cli)], text=True) == "cli works"
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/share").exists()
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/credentials").exists()
+    assert not (target.parent / ".local/share").exists()
+    assert not (target.parent / ".local/credentials").exists()
     assert (target / "config.json").read_text() == "{}"
     assert any("-avL" in cmd for cmd in commands)
     for event in ("request", "success"):
@@ -96,10 +94,10 @@ def test_migration_directory_ignore_skips_cli_and_clears_previous_artifact(migra
     source_bin.mkdir(parents=True)
     (source_bin / "cli").write_text("published")
     assert migrate()
-    assert (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/cli").exists()
+    assert (target.parent / ".local/bin/cli").exists()
 
     assert migrate((rule,))
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local").exists()
+    assert not (target.parent / ".local/bin").exists()
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
@@ -111,9 +109,9 @@ def test_migration_child_ignore_omits_only_selected_cli(migration):
     (source_bin / "cli").write_text("keep")
     (source_bin / "skip-cli").write_text("skip")
     assert migrate((".local/bin/private", ".local/bin/skip-cli"))
-    assert (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/cli").read_text() == "keep"
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/private").exists()
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/skip-cli").exists()
+    assert (target.parent / ".local/bin/cli").read_text() == "keep"
+    assert not (target.parent / ".local/bin/private").exists()
+    assert not (target.parent / ".local/bin/skip-cli").exists()
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
@@ -131,7 +129,7 @@ def test_missing_home_bin_never_republishes_stale_engine_snapshot(migration, cap
     engine_bin.mkdir(parents=True)
     (engine_bin / "cli").write_text("stale")
     assert migrate()
-    assert not (target / HOME_ADMIN_ARTIFACT_ROOT / ".local").exists()
+    assert not (target.parent / ".local/bin").exists()
     assert (target / ".local/bin/cli").read_text() == "stale"
     assert "service_bot.local_bin.skip" in caplog.text
     assert "reason=source_missing" in caplog.text
@@ -158,7 +156,7 @@ def test_cli_copy_failure_propagates_with_context(tmp_path, caplog):
     assert "service_bot.local_bin.success" not in caplog.text
 
 
-def _restore_service(monkeypatch, artifact, target_home, artifact_root_name=HOME_ADMIN_ARTIFACT_ROOT):
+def _restore_service(monkeypatch, artifact, target_home):
     plan = EngineBuildPlan(
         engine_type="openclaw",
         source_root_name=".openclaw",
@@ -170,7 +168,6 @@ def _restore_service(monkeypatch, artifact, target_home, artifact_root_name=HOME
         rsync_excludes=[],
     )
     service = BotBuildService.__new__(BotBuildService)
-    service._home_admin_artifact_root = artifact_root_name
     service._resolve_sandbox_provider = MagicMock(
         return_value=MagicMock(get_build_plan=MagicMock(return_value=plan)),
     )
@@ -206,8 +203,7 @@ def _restore_service(monkeypatch, artifact, target_home, artifact_root_name=HOME
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
-@pytest.mark.parametrize("artifact_root_name", [HOME_ADMIN_ARTIFACT_ROOT, "deployment_home_root"])
-def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypatch, tmp_path, caplog, artifact_root_name):
+def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypatch, tmp_path, caplog):
     caplog.set_level("INFO")
     source, artifact, _, migrate = migration
     engine_bin = source / ".local/bin"
@@ -218,13 +214,9 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (source / ".local/engine-data").write_text("engine state")
     (home_bin / "cli").write_text("#!/bin/sh\nprintf 'home-cli'\n")
     (home_bin / "cli").chmod(0o755)
-    # An engine cannot supply the reserved Home metadata root.
-    (source / artifact_root_name / ".local/bin").mkdir(parents=True)
-    (source / artifact_root_name / ".local/bin/forged").write_text("skip")
-    assert migrate(artifact_root_name=artifact_root_name)
+    assert migrate()
     assert (artifact / ".local/bin/cli").read_text() == "engine-cli"
     assert (artifact / ".local/engine-data").read_text() == "engine state"
-    assert not (artifact / artifact_root_name / ".local/bin/forged").exists()
 
     restored_home = tmp_path / "restored-home"
     (restored_home / ".local/bin").mkdir(parents=True)
@@ -232,14 +224,13 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (restored_home / ".local/bin/target-only").write_text("keep target CLI")
     (restored_home / ".local/share").mkdir()
     (restored_home / ".local/share/state").write_text("keep home state")
-    # Only bin can leave the metadata root, even if another directory exists.
-    (artifact / artifact_root_name / ".local/share").mkdir()
-    (artifact / artifact_root_name / ".local/share/state").write_text("do not restore")
-    commands, restore = _restore_service(monkeypatch, artifact, restored_home, artifact_root_name)
+    # Only bin can leave the version root, even if other Home data exists.
+    (artifact.parent / ".local/share").mkdir()
+    (artifact.parent / ".local/share/state").write_text("do not restore")
+    commands, restore = _restore_service(monkeypatch, artifact, restored_home)
     assert restore()["restore_type"] == "migration_path"
     assert (restored_home / ".openclaw/.local/bin/cli").read_text() == "engine-cli"
     assert (restored_home / ".openclaw/.local/engine-data").read_text() == "engine state"
-    assert not (restored_home / ".openclaw" / artifact_root_name).exists()
     assert subprocess.check_output([str(restored_home / ".local/bin/cli")], text=True) == "home-cli"
     assert (restored_home / ".local/bin/target-only").read_text() == "keep target CLI"
     assert (restored_home / ".local/share/state").read_text() == "keep home state"
@@ -266,11 +257,11 @@ def test_restore_old_artifact_leaves_home_cli_untouched(monkeypatch, tmp_path, c
     assert "service_bot.local_bin.restore.skip" in caplog.text
 
 
-@pytest.mark.parametrize("parent", [HOME_ADMIN_ARTIFACT_ROOT, HOME_ADMIN_ARTIFACT_ROOT + "/.local"])
+@pytest.mark.parametrize("parent", [".", ".local"])
 def test_restore_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
     caplog.set_level("INFO")
-    artifact = tmp_path / "artifact"
-    link = artifact / parent
+    artifact = tmp_path / "versions/3/openclaw"
+    link = artifact.parent / parent
     link.parent.mkdir(parents=True)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -289,7 +280,7 @@ def test_restore_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
 def test_restore_copy_failure_propagates_and_logs(tmp_path, caplog):
     caplog.set_level("INFO")
     artifact = tmp_path / "artifact"
-    (artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin").mkdir(parents=True)
+    (artifact.parent / ".local/bin").mkdir(parents=True)
     with pytest.raises(BotBuildMigrationError, match="copy failed"):
         restore_local_bin_artifact(
             artifact_dir=artifact, target_home=tmp_path / "home",
@@ -302,14 +293,12 @@ def test_restore_copy_failure_propagates_and_logs(tmp_path, caplog):
 
 
 @pytest.mark.parametrize("parent", [
-    HOME_ADMIN_ARTIFACT_ROOT,
-    HOME_ADMIN_ARTIFACT_ROOT + "/.local",
-    HOME_ADMIN_ARTIFACT_ROOT + "/.local/bin",
+    ".", ".local", ".local/bin",
 ])
 def test_build_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
     caplog.set_level("INFO")
-    artifact = tmp_path / "artifact"
-    link = artifact / parent
+    artifact = tmp_path / "versions/3/openclaw"
+    link = artifact.parent / parent
     link.parent.mkdir(parents=True)
     link.symlink_to(tmp_path / "outside", target_is_directory=True)
     source_home = tmp_path / "source"
@@ -325,10 +314,10 @@ def test_build_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
     assert "service_bot.local_bin.failure" in caplog.text
 
 
-@pytest.mark.parametrize("parent", [HOME_ADMIN_ARTIFACT_ROOT, HOME_ADMIN_ARTIFACT_ROOT + "/.local"])
+@pytest.mark.parametrize("parent", [".", ".local"])
 def test_restore_rejects_non_directory_artifact_parents(tmp_path, parent):
-    artifact = tmp_path / "artifact"
-    invalid = artifact / parent
+    artifact = tmp_path / "versions/3/openclaw"
+    invalid = artifact.parent / parent
     invalid.parent.mkdir(parents=True)
     invalid.write_text("invalid")
     with pytest.raises(NotADirectoryError):
@@ -342,7 +331,7 @@ def test_restore_rejects_non_directory_artifact_parents(tmp_path, parent):
 def test_restore_rejects_invalid_bin_or_target_parent(tmp_path, invalid, caplog):
     caplog.set_level("INFO")
     artifact = tmp_path / "artifact"
-    source_bin = artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin"
+    source_bin = artifact.parent / ".local/bin"
     source_bin.parent.mkdir(parents=True)
     target_home = tmp_path / "home"
     target_home.mkdir()
@@ -368,13 +357,69 @@ def test_restore_rejects_invalid_bin_or_target_parent(tmp_path, invalid, caplog)
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
 def test_restore_empty_bin_preserves_target_only_cli(monkeypatch, tmp_path):
     artifact = tmp_path / "artifacts/3/openclaw"
-    (artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin").mkdir(parents=True)
+    artifact.mkdir(parents=True)
+    (artifact.parent / ".local/bin").mkdir(parents=True)
     target_home = tmp_path / "home"
     (target_home / ".local/bin").mkdir(parents=True)
     (target_home / ".local/bin/target-only").write_text("preserved")
     _, restore = _restore_service(monkeypatch, artifact, target_home)
     restore()
     assert (target_home / ".local/bin/target-only").read_text() == "preserved"
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_retry_cleans_only_version_bin_and_keeps_other_version_data(migration):
+    source, artifact, commands, migrate = migration
+    source_bin = source.parent / ".local/bin"
+    source_bin.mkdir(parents=True)
+    (source_bin / "old-cli").write_text("old")
+    assert migrate()
+    version_local = artifact.parent / ".local"
+    (version_local / "share").mkdir()
+    (version_local / "share/state").write_text("preserve other version data")
+    (source_bin / "old-cli").unlink()
+    (source_bin / "new-cli").write_text("new")
+    assert migrate()
+    assert not (version_local / "bin/old-cli").exists()
+    assert (version_local / "bin/new-cli").read_text() == "new"
+    assert (version_local / "share/state").read_text() == "preserve other version data"
+    removal = [cmd for cmd in commands if cmd[1] == "rm"]
+    assert removal == [["sudo", "rm", "-rf", "--", str(version_local / "bin")]]
+
+
+def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
+    caplog.set_level("INFO")
+    artifact = tmp_path / "versions/3/openclaw"
+    (artifact.parent / ".local/bin").mkdir(parents=True)
+    source_home = tmp_path / "home"
+    (source_home / ".local/bin").mkdir(parents=True)
+    run = MagicMock(side_effect=BotBuildMigrationError("cleanup failed"))
+    with pytest.raises(BotBuildMigrationError, match="cleanup failed"):
+        sync_local_bin_artifact(
+            source_home=source_home, target_dir=artifact,
+            device_id="device-cli-test", version="3", build_ignore_paths=(),
+            run_command=run,
+        )
+    assert run.call_count == 1
+    assert run.call_args.kwargs["command_name"] == "remove local bin artifact"
+    assert "service_bot.local_bin.failure" in caplog.text
+    assert "service_bot.local_bin.success" not in caplog.text
+
+
+def test_build_rejects_non_directory_version_bin(tmp_path, caplog):
+    caplog.set_level("INFO")
+    artifact = tmp_path / "versions/3/openclaw"
+    (artifact.parent / ".local").mkdir(parents=True)
+    (artifact.parent / ".local/bin").write_text("not a directory")
+    run = MagicMock()
+    with pytest.raises(NotADirectoryError, match="bin"):
+        sync_local_bin_artifact(
+            source_home=tmp_path / "home", target_dir=artifact,
+            device_id="device-cli-test", version="3", build_ignore_paths=(),
+            run_command=run,
+        )
+    run.assert_not_called()
+    assert "service_bot.local_bin.failure" in caplog.text
 
 
 @pytest.mark.parametrize("dangling_link", [False, True])
