@@ -8,7 +8,7 @@ import uuid
 import pytest
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -680,6 +680,27 @@ class TestJobRepository:
         job_repo.request_cancel(run.run_id, TENANT_A)
         assert job_repo.is_cancel_requested(run.run_id, TENANT_A)
 
+    def test_claim_dict_reflects_the_committed_row(self, run_repo, job_repo):
+        # The CAS claim advances epoch/attempts IN the UPDATE, so the dict a
+        # worker receives must equal what the row now says — never the stale
+        # read the racer-API once returned (both pods minting epoch N+1).
+        run = _mk_run()
+        run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        (claim,) = job_repo.claim_batch("w1", None, 5, 60)
+        with db_session(job_repo) as session:  # fresh raw read, same engine
+            from agentclaw.community.core.agentcompute.repository.job import (
+                model as om_job,
+            )
+            row = session.execute(
+                select(om_job.AcAgentComputeJobModel).where(
+                    om_job.AcAgentComputeJobModel.run_id == run.run_id)
+            ).scalar_one()
+            assert row.status == "RUNNING"
+            assert row.claim_epoch == claim["claim_epoch"]
+            assert row.attempts == claim["attempts"]
+        assert job_repo.claim_batch("w2", None, 5, 60) == []  # the race answer
+
     def test_claim_visible_in_batch(self, run_repo, job_repo):
         run_repo.create(_mk_run())
         run_repo.create(_mk_run())
@@ -791,3 +812,7 @@ class TestMandatoryColumns:
         for table_name, cols in ddl_tables.items():
             for required in ("env", "tenant", "is_deleted"):
                 assert required in cols, f"{table_name}: {required} missing in DDL"
+
+def db_session(job_repo):
+    """The fixture DB's orm_session — for raw reads independent of the repo."""
+    return job_repo._db.orm_session()

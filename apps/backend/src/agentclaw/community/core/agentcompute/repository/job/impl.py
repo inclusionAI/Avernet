@@ -63,25 +63,47 @@ class JobRepository(JobRepositoryProtocol):
         lease_until = now + timedelta(seconds=lease_seconds)
         with self._db.orm_session() as session:
             stmt = (
-                select(om.AcAgentComputeJobModel).where(
+                select(om.AcAgentComputeJobModel.id).where(
                     om.AcAgentComputeJobModel.status == TaskQueueStatus.PENDING.value,
                     om.AcAgentComputeJobModel.run_at <= now,
                     om.AcAgentComputeJobModel.is_deleted.is_(False),
-                ).limit(limit)
+                ).order_by(om.AcAgentComputeJobModel.id).limit(limit)
             )
             if tenant_filter:
                 stmt = stmt.where(om.AcAgentComputeJobModel.tenant.in_([str(t) for t in tenant_filter]))
-            rows = session.execute(stmt).scalars().all()
+            candidate_ids = [r[0] for r in session.execute(stmt).all()]
             claimed = []
-            for row in rows:
-                row.status = TaskQueueStatus.RUNNING.value
-                row.claimed_by = worker_id
-                row.claim_epoch = (row.claim_epoch or 0) + 1
-                row.lease_expires_at = lease_until
-                row.attempts = (row.attempts or 0) + 1
+            for id_ in candidate_ids:
+                # Selecting candidates then claiming them per-row is a race by
+                # construction under more than one pod: SELECT-then-flip lets
+                # two workers both see the same PENDING rows, mint the same
+                # next epoch, and both walk away as the owner. The claim is
+                # the UPDATE instead: increments are DB-side, and the stale
+                # predicate (status must STILL be PENDING) means whoever
+                # commits first moves the row; a loser's UPDATE matches
+                # nothing and the job is not theirs.
+                result = session.execute(
+                    update(om.AcAgentComputeJobModel).where(
+                        om.AcAgentComputeJobModel.id == id_,
+                        om.AcAgentComputeJobModel.status == TaskQueueStatus.PENDING.value,
+                        om.AcAgentComputeJobModel.is_deleted.is_(False),
+                    ).values(
+                        status=TaskQueueStatus.RUNNING.value,
+                        claimed_by=worker_id,
+                        claim_epoch=om.AcAgentComputeJobModel.claim_epoch + 1,
+                        lease_expires_at=lease_until,
+                        attempts=om.AcAgentComputeJobModel.attempts + 1,
+                    )
+                )
+                if result.rowcount != 1:
+                    continue  # a racing pod claimed it first: not ours
+                row = session.execute(
+                    select(om.AcAgentComputeJobModel).where(
+                        om.AcAgentComputeJobModel.id == id_)
+                ).scalar_one()
                 claimed.append({
                     "run_id": dm.RunId(row.run_id),
-                    "tenant": dm.TenantId(row.tenant),
+                    "tenant": dm.RunId(row.tenant) if False else dm.TenantId(row.tenant),
                     "claim_epoch": row.claim_epoch,
                     "attempts": row.attempts,
                     "cancel_requested": bool(row.cancel_requested),
@@ -94,24 +116,43 @@ class JobRepository(JobRepositoryProtocol):
 
         Returns claim dicts extended with `reclaims`; the worker applies the
         D40 circuit breaker: `reclaims` > reclaim_max -> run terminal STUCK.
+        The claim is the UPDATE — DB-side increments behind the still-expired
+        predicate — so two reclaimers racing on the same dead pod converge on
+        one owner instead of minting twin epochs.
         """
         now = _utcnow()
         lease_until = now + timedelta(seconds=lease_seconds)
         with self._db.orm_session() as session:
             rows = session.execute(
-                select(om.AcAgentComputeJobModel).where(
+                select(om.AcAgentComputeJobModel.id).where(
                     om.AcAgentComputeJobModel.status == TaskQueueStatus.RUNNING.value,
                     om.AcAgentComputeJobModel.lease_expires_at < now,
                     om.AcAgentComputeJobModel.is_deleted.is_(False),
-                ).limit(limit)
-            ).scalars().all()
+                ).order_by(om.AcAgentComputeJobModel.id).limit(limit)
+            ).all()
             reclaimed = []
-            for row in rows:
-                row.claimed_by = worker_id
-                row.claim_epoch = (row.claim_epoch or 0) + 1
-                row.lease_expires_at = lease_until
-                row.reclaims = (row.reclaims or 0) + 1
-                row.attempts = (row.attempts or 0) + 1
+            for (id_,) in rows:
+                result = session.execute(
+                    update(om.AcAgentComputeJobModel).where(
+                        om.AcAgentComputeJobModel.id == id_,
+                        om.AcAgentComputeJobModel.status == TaskQueueStatus.RUNNING.value,
+                        om.AcAgentComputeJobModel.lease_expires_at < now,
+                        om.AcAgentComputeJobModel.is_deleted.is_(False),
+                    ).values(
+                        claimed_by=worker_id,
+                        claim_epoch=om.AcAgentComputeJobModel.claim_epoch + 1,
+                        lease_expires_at=lease_until,
+                        reclaims=om.AcAgentComputeJobModel.reclaims + 1,
+                        attempts=om.AcAgentComputeJobModel.attempts + 1,
+                    )
+                )
+                if result.rowcount != 1:
+                    continue  # another reclaimer won it; the loser
+                    # re-identifies nothing: lease got rewrote to the future
+                row = session.execute(
+                    select(om.AcAgentComputeJobModel).where(
+                        om.AcAgentComputeJobModel.id == id_)
+                ).scalar_one()
                 reclaimed.append({
                     "run_id": dm.RunId(row.run_id),
                     "tenant": dm.TenantId(row.tenant),

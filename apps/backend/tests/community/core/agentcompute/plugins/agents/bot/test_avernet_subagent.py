@@ -308,6 +308,43 @@ class TestTeardown:
         asyncio.run(main())
 
 
+class TestChatOffloadsLongCalls:
+
+    def test_event_loop_keeps_running_while_chat_waits(self):
+        # The seam is sync; a chat is an engine round trip in seconds. This
+        # pins the asyncio.to_thread offload: while chat sleeps in its
+        # thread, a coroutine on the SAME loop keeps ticking — the lease
+        # heartbeat lives there, and stalling it was the spurious-reclaim
+        # bug (#4).
+        import time as _time
+
+        class _SlowChatPlatform(FakePlatform):
+            def chat(self, bot_id, message):
+                _time.sleep(0.15)
+                return '{"result": "done"}'
+
+        async def main():
+            gw = _SlowChatPlatform()
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            await sub.setup()
+            ticks = 0
+
+            async def _ticker():
+                nonlocal ticks
+                for _ in range(100):
+                    await asyncio.sleep(0.01)
+                    ticks += 1
+
+            ticker = asyncio.create_task(_ticker())
+            result = await sub.run_task(_mk_envelope())
+            await ticker
+            return result, ticks
+
+        result, ticks = asyncio.run(main())
+        assert result.output == {"result": "done"}
+        assert ticks > 1, "the loop was starved by a blocking chat"
+
+
 class TestObservabilityWiring:
 
     def test_success_path_counts_ok(self):

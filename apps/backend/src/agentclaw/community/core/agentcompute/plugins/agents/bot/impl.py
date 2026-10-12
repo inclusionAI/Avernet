@@ -81,7 +81,13 @@ class AvernetSubagent:
             raise RuntimeError("setup not completed")
         prompt = f"objective={envelope.objective!r} boundaries={envelope.boundaries!r}"
         try:
-            text = self._platform.chat(bot_id=self._bot_id, message=prompt)
+            # The seam is sync by contract; the chat leg is an engine round
+            # trip measured in seconds-to-minutes, so awaiting it inline
+            # would stall the loop's slice and starve the lease heartbeat
+            # until a spurious reclaim rips the job away mid-chat (#4):
+            # offload the call to a thread, keep the loop breathing.
+            text = await asyncio.to_thread(
+                self._platform.chat, bot_id=self._bot_id, message=prompt)
         except Exception:
             if self._obs is not None:
                 self._obs.llm_call("exhausted")
