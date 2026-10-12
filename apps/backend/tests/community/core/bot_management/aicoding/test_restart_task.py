@@ -698,7 +698,7 @@ async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup,
     state.update({'QUEUED'}, phase='BACKING_UP')
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartExecution
     execution = RestartExecution(state, payload)
-    token = current_restart.set(execution)
+    context_reset_handle = current_restart.set(execution)
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     runtime.post_bots_api.side_effect = ConnectionError('unavailable')
@@ -718,7 +718,7 @@ async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup,
             s.strategy.before_restart_submission(s.ctx)
         assert not execution.fenced
     finally:
-        current_restart.reset(token)
+        current_restart.reset(context_reset_handle)
 
 
 @pytest.mark.asyncio

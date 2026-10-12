@@ -174,7 +174,7 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
     from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
 
     now = [1498]
-    token = current_restart.set(SimpleNamespace(payload={'started_at': 0}))
+    context_reset_handle = current_restart.set(SimpleNamespace(payload={'started_at': 0}))
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [
         {'provider_device_id': p, 'status': 'ACTIVE'} for p in ('p1', 'p2')]
@@ -191,7 +191,7 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
         assert runtime.post_bots_api.call_args.kwargs['path'].endswith('/p1/commands')
         assert 'reason=timeout' in caplog.text
     finally:
-        current_restart.reset(token)
+        current_restart.reset(context_reset_handle)
 
 
 def test_late_valid_inventory_becomes_baseline_without_starting_backup(caplog):
