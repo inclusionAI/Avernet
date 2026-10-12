@@ -198,3 +198,84 @@ def test_domain_services_are_not_extended_by_runtime_monkey_patch() -> None:
         "TaskGraphService/StaticPlanRuntime behavior must be declared by their owning modules, not "
         f"attached at module import time: {offenders}"
     )
+
+
+_COMMUNITY_SRC_ROOT = (
+    _BACKEND_ROOT / "src" / "agentclaw" / "community"
+)
+_TASK_DOMAIN_REQUIRED_PATHS = (
+    "api/task/forum_service.py",
+    "api/task/feedback_service.py",
+    "core/task/forum/service_protocol.py",
+    "core/task/feedback/service_protocol.py",
+    "core/repository/protocols/task/forum.py",
+    "core/repository/protocols/task/feedback.py",
+    "core/repository/implementations/task/forum/forum_repository.py",
+    "core/repository/implementations/task/feedback/feedback_repository.py",
+)
+_LEGACY_TASK_DOMAIN_PATHS = (
+    "api/forum_service.py",
+    "core/forum/service_protocol.py",
+    "core/feedback/service_protocol.py",
+    "core/repository/protocols/forum.py",
+    "core/repository/protocols/feedback.py",
+    "core/repository/implementations/forum/forum_repository.py",
+    "core/repository/implementations/feedback/feedback_repository.py",
+    "di/modules/forum_module.py",
+    "di/modules/feedback_module.py",
+)
+_LEGACY_TASK_DOMAIN_IMPORTS = frozenset({
+    "agentclaw.community.core.forum",
+    "agentclaw.community.core.feedback",
+    "agentclaw.community.core.repository.protocols.forum",
+    "agentclaw.community.core.repository.protocols.feedback",
+    "agentclaw.community.core.repository.implementations.forum",
+    "agentclaw.community.core.repository.implementations.feedback",
+})
+
+
+@pytest.mark.unit
+def test_bbs_and_feedback_sources_stay_in_the_task_domain() -> None:
+    """BBS content and task feedback are task-domain modules, not side domains.
+
+    The HTTP layer was relocated first; this guard keeps the owning core,
+    repository contracts/implementations, API re-exports, and composition-root
+    files in the same domain instead of drifting back into parallel packages.
+    """
+    missing = [
+        relative
+        for relative in _TASK_DOMAIN_REQUIRED_PATHS
+        if not (_COMMUNITY_SRC_ROOT / relative).is_file()
+    ]
+    restored = [
+        relative
+        for relative in _LEGACY_TASK_DOMAIN_PATHS
+        if (_COMMUNITY_SRC_ROOT / relative).exists()
+    ]
+    assert missing == [], f"Missing task-domain source locations: {missing}"
+    assert restored == [], f"Legacy BBS/feedback task-domain paths restored: {restored}"
+
+
+@pytest.mark.unit
+def test_python_sources_do_not_import_legacy_bbs_feedback_modules() -> None:
+    offenders: list[str] = []
+    for path in sorted(_COMMUNITY_SRC_ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in _LEGACY_TASK_DOMAIN_IMPORTS:
+                        offenders.append(
+                            f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
+                            f"import {alias.name}"
+                        )
+            elif isinstance(node, ast.ImportFrom) and node.module in _LEGACY_TASK_DOMAIN_IMPORTS:
+                offenders.append(
+                    f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
+                    f"from {node.module} import"
+                )
+    assert offenders == [], (
+        "BBS/forum and task-feedback imports must use the task-domain module paths:\n  "
+        + "\n  ".join(offenders)
+    )

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.core.feedback.models import (
+from agentclaw.community.core.task.feedback.models import (
     MAX_CONTENT_LENGTH,
     MAX_MODULE_LENGTH,
     MAX_REPORTER_ID_LENGTH,

@@ -41,19 +41,19 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.models import (
     MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
-from agentclaw.community.core.forum.browsing import BbsBrowseLoopRunner
-from agentclaw.community.core.forum.browsing import BbsBrowseLoopScheduler
-from agentclaw.community.core.forum.browsing.cron_setup import BbsBrowseCronManager
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopScheduler
+from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
 )
 from agentclaw.community.core.errors import Forbidden, NotFound
-from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
+from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,

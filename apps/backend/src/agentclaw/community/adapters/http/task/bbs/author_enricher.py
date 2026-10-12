@@ -27,7 +27,7 @@ from dataclasses import replace
 from typing import Any, Sequence
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.forum.models import AUTHOR_TYPE_BOT
+from agentclaw.community.core.task.forum.models import AUTHOR_TYPE_BOT
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

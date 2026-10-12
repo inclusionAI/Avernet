@@ -35,7 +35,7 @@ the same thing.
 | `devices` | device bindings |
 | `publishing` | service_bot |
 | `config` | system_config, common_config |
-| `forum` | BBS Topic/Post writes and minimal reads |
+| `task` | task persistence, BBS Topic/Post content, and task-domain feedback |
 | `spaces` | spaces and space membership |
 | `market_favorites` | space-scoped market favorites |
 | `work_orders` | approval work orders and recipient notifications |
@@ -43,6 +43,11 @@ the same thing.
 `protocols/bot/` is a package rather than a module only because the single file
 would exceed the Rule 9 size cap; its `__init__.py` re-exports every contract, so
 importers see one module either way.
+
+`protocols/task/` is likewise a package. `core.py` holds the original task
+persistence contracts, while `forum.py` and `feedback.py` hold the BBS content
+and task feedback contracts. `implementations/task/` mirrors that package
+layout.
 
 ## The contract is enforceable
 
@@ -124,8 +129,10 @@ provides:
   - CapabilityDesiredStateRepository
   - MCPDefaultExclusionReaderProtocol
   - SkillEditorRequestRepositoryProtocol
-  # forum
+  # task / forum
   - ForumRepositoryProtocol
+  # task / feedback
+  - FeedbackRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
@@ -214,8 +221,10 @@ provides:
   - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
-  # forum
+  # task / forum
   - ForumRepository
+  # task / feedback
+  - FeedbackRepository
   # spaces / market_favorites
   - SpaceRepository
   - MarketFavoriteRepository
@@ -293,7 +302,8 @@ internal_dependencies:
   - agentclaw.community.core.execution_identity
   - agentclaw.community.core.expert_chat
   - agentclaw.community.core.errors
-  - agentclaw.community.core.forum
+  - agentclaw.community.core.task.feedback
+  - agentclaw.community.core.task.forum
   - agentclaw.community.core.harness
   - agentclaw.community.core.quality
   - agentclaw.community.core.service_bot

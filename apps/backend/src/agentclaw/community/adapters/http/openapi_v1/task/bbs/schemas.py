@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
