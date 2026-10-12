@@ -75,6 +75,7 @@ PLACEHOLDER_RE = re.compile(
     r"(?:changeme|change[-_ ]?me|dummy|example|fake|local(?:[-_ ]?only)?|"
     r"mock|not[-_ ]?a[-_ ]?real(?:[-_ ]?token)?|placeholder|sample|test(?:[-_ ]?token)?|"
     r"your[-_ ]?(?:token|secret|key|password)|"
+    r"generation[-_ ]?\d+|"
     r"(?:dev|provider|bcs|baas|bot|gateway|openclaw|anthropic|e2e)[-_ ]?(?:test|token|secret|key)"
     r"))$")
 
@@ -82,7 +83,7 @@ PLACEHOLDER_RE = re.compile(
 # treated as plaintext credentials by the key/value rule.
 NON_SECRET_VALUE_RE = re.compile(
     r"(?ix)^(?:null|none|true|false|undefined|empty|unset|"
-    r"os\.getenv\([^)]*\)|process\.env\.[A-Z0-9_]+)$"
+    r"\{[A-Za-z_]\w*\}|os\.getenv\([^)]*\)|process\.env\.[A-Z0-9_]+)$"
 )
 
 # These values name entries in the existing secret resolver, not credentials.
@@ -219,6 +220,14 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             return True
         if isinstance(value, ast.Attribute):
             return safe(value.value)
+        if isinstance(value, ast.Subscript):
+            return safe(value.value) and safe(value.slice)
+        if isinstance(value, ast.BoolOp):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, ast.JoinedStr):
+            return all(safe(item) for item in value.values)
+        if isinstance(value, ast.FormattedValue):
+            return safe(value.value)
         if isinstance(value, ast.Call):
             return (safe(value.func) and all(safe(arg) for arg in value.args)
                     and all(safe(arg.value) for arg in value.keywords))
@@ -235,7 +244,10 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             )
         return False
 
-    return isinstance(node, (ast.Name, ast.Attribute, ast.Call)) and safe(node)
+    return isinstance(
+        node,
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr),
+    ) and safe(node)
 
 
 def _findings(diff: str) -> list[Finding]:
