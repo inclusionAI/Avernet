@@ -57,7 +57,7 @@
 并比较任务基线或上一成功候选的文件差异。反馈下一版重新确认选择，但不改变原任务基线。
 取消释放建议占用且保留历史，不能等同于已终止远端 AIS 计算。AIS 明确拒绝派发时可重试同一冻结输入；网络超时或进程中断导致派发结果不确定时禁止盲目重试，需先核对 AIS Job，避免重复生成。
 
-公共 Host 在 `CLAWWEB_AISTUDIO_TOKEN`、`CLAWWEB_REPAIR_AIS_SNAPSHOT_ID`、`CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR` 均配置后装配 AIS/Git 执行提供方；Git 目录须为预先配置了 `origin`、能读取部署 Tag 和修复分支的独立镜像。Token 由 MIST 注入，不写入仓库或日志。缺少配置时仍允许查看、整理和处置，
+公共 Host 在 `CLAWWEB_AISTUDIO_TOKEN`、`CLAWWEB_REPAIR_AIS_SNAPSHOT_ID`、`CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR` 均配置后装配 AIS/Git 执行提供方；Git 目录须为预先配置了 `origin`、能读取部署 Tag 和修复分支的独立镜像。Token 由 MIST 注入，不写入仓库或日志。两个修复专属配置项都未提供时，允许查看、整理和处置；只提供部分配置、Snapshot ID 无效或 Git 镜像不可用时启动失败，避免静默禁用生成。
 不会生成模拟候选，也不显示可点击的发布/灰度操作。复发归因、后续发布和新验证闭环不属于这次页面交付。
 AIS Snapshot 必须运行 TaskGuard 的 Workflow Repair 入口，并具备 ClawFlows 推送权限；ClawWeb 只读镜像必须能从同一 ClawFlows origin 拉取。部署前用测试工作流核对 Tag/`workflow.pack.yaml`/部署历史 `spec_json` 一致，确认 Snapshot ID 和 Git 权限；不能把本地模拟通过等同于预发联调成功。后台每 15 秒轮询；AIS 最多等待 40 分钟，AIS 成功后 Git 结果最多等待 5 分钟。
 

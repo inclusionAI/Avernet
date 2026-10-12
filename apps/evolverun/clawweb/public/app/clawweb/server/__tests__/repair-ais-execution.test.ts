@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { RepairGitStore, createRepairAisExecution } from '../repair-ais-execution.js';
+import { RepairGitStore, createRepairAisExecution, resolveRepairAisConfiguration } from '../repair-ais-execution.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import type { AistudioService } from '@avernet/clawinsight/server/services/aistudio-service';
 import { digestRepairJson } from '@avernet/workflow/server/contracts/repair-batch';
@@ -39,6 +39,21 @@ function fixture() {
 }
 
 describe('Workflow Repair Git-backed AIS execution', () => {
+  it('rejects partial or invalid repair configuration but permits an unconfigured optional provider', async () => {
+    await expect(resolveRepairAisConfiguration('fixture')).resolves.toBeUndefined();
+    await expect(resolveRepairAisConfiguration('fixture', 'not-a-number', '/missing/repair-mirror.git'))
+      .rejects.toThrow('snapshot');
+    await expect(resolveRepairAisConfiguration('fixture', '28720256'))
+      .rejects.toThrow('Git');
+    await expect(resolveRepairAisConfiguration(undefined, '28720256', '/missing/repair-mirror.git'))
+      .rejects.toThrow('token');
+    await expect(resolveRepairAisConfiguration('fixture', '28720256', '/missing/repair-mirror.git'))
+      .rejects.toThrow('Git');
+    const f = fixture();
+    await expect(resolveRepairAisConfiguration('fixture', '28720256', f.reader))
+      .resolves.toMatchObject({ snapshotId: 28720256 });
+  }, 15_000);
+
   it('agrees with the TaskGuard full-draft canonical digest fixture', () => {
     expect(digestRepairJson({ repoId: 'clawflows', branch: 'repair/example/WR-1',
       candidateCommit: 'a'.repeat(40), parentCandidateCommit: 'b'.repeat(40),
@@ -92,7 +107,30 @@ describe('Workflow Repair Git-backed AIS execution', () => {
     expect(await store.result({ ...request, identity: { stepId: 'WR-1-draft-2', attempt: 1,
       executionId: 'WRX-2' }, input: { ...request.input, revision: 2, parentCandidateCommit: candidate } }))
       .toMatchObject({ status: 'succeeded', draft: secondDraft });
+    f.git(f.reader, 'gc', '--prune=now');
+    expect(await store.diff({ workflowId: 'wf', taskId: 'WR-1', revision: 1,
+      baseCommit: f.baseline, candidateCommit: candidate })).toMatchObject({
+        files: [{ path: 'workflows/wf.yaml', status: 'M' }], truncated: false,
+      });
   }, 20_000);
+
+  it('truncates a valid long-path file list instead of exhausting the Git output buffer', async () => {
+    const f = fixture();
+    const directory = join('workflows', 'a'.repeat(220), 'b'.repeat(220), 'c'.repeat(220));
+    mkdirSync(join(f.source, directory), { recursive: true });
+    for (let index = 0; index < 180; index += 1) {
+      writeFileSync(join(f.source, directory, `${'d'.repeat(160)}-${String(index).padStart(3, '0')}.txt`), 'x');
+    }
+    f.git(f.source, 'add', '.');
+    f.git(f.source, 'commit', '-qm', 'many valid paths');
+    const candidate = f.git(f.source, 'rev-parse', 'HEAD');
+    f.git(f.source, 'push', '-q', 'origin', 'HEAD:refs/heads/large-diff');
+    f.git(f.reader, 'fetch', '-q', 'origin', '+refs/heads/large-diff:refs/workflow-repair-fixture/large-diff');
+    const result = await new RepairGitStore(f.reader).diff({ workflowId: 'wf', taskId: 'WR-1',
+      revision: 1, baseCommit: f.baseline, candidateCommit: candidate });
+    expect(result).toMatchObject({ truncated: true });
+    expect(result.files).toHaveLength(20);
+  }, 30_000);
 
   it('dispatches the frozen v2 envelope as one AIS global parameter', async () => {
     const execute = vi.fn().mockResolvedValue('job-1');

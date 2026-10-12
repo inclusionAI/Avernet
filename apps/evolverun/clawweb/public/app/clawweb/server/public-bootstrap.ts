@@ -21,12 +21,15 @@ import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
-import { createRepairAisExecution, RepairGitStore } from "./repair-ais-execution.js";
+import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
 
 export function createClawWebBootstrap(): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+      const aisConfig = resolveAistudioConfig();
+      const repairConfig = await resolveRepairAisConfiguration(aisConfig.token,
+        process.env.CLAWWEB_REPAIR_AIS_SNAPSHOT_ID, process.env.CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR);
       const { db } = await initDatabase();
       if (db.dbType === "noop") throw new Error("Public ClawWeb requires an available database");
       const insight = createInsightRuntime(db);
@@ -61,20 +64,9 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
         });
       });
       app.use("/api/evolve", clawevolve.publicRouter);
-      const aisConfig = resolveAistudioConfig();
-      const repairSnapshotId = Number(process.env.CLAWWEB_REPAIR_AIS_SNAPSHOT_ID);
-      const repairGitDir = process.env.CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR?.trim();
-      let repairExecution: ReturnType<typeof createRepairAisExecution> | undefined;
-      if (aisConfig.token && Number.isSafeInteger(repairSnapshotId) && repairSnapshotId > 0
-        && repairGitDir && existsSync(repairGitDir)) {
-        const gitStore = new RepairGitStore(repairGitDir);
-        try {
-          await gitStore.verify();
-          repairExecution = createRepairAisExecution(db, new AistudioService(aisConfig), gitStore, repairSnapshotId);
-        } catch {
-          console.warn('[clawweb] Workflow Repair Git mirror is invalid; generation is disabled');
-        }
-      }
+      const repairExecution = repairConfig
+        ? createRepairAisExecution(db, new AistudioService(aisConfig), repairConfig.gitStore, repairConfig.snapshotId)
+        : undefined;
       const repairRuntime = createWorkflowRepairRuntime(db, {
         principal: async request => {
           const identity = resolveAuthMeIdentity(request, { environment: context.environment });

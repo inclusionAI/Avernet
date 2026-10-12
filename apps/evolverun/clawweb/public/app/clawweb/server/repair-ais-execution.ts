@@ -1,6 +1,6 @@
 /** Host-owned Workflow Repair AIS and ClawFlows Git adapter. Never trust AIS
  * lifecycle status as a business result; only the checked Git result is read. */
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parse as parseYaml } from 'yaml';
@@ -57,15 +57,12 @@ export class RepairGitStore {
 
   private async fetch(ref: string): Promise<string> {
     if (!ref.startsWith('refs/tags/') && !ref.startsWith('refs/heads/')) throw new Error('Invalid repair Git ref');
-    const temporary = `refs/workflow-repair-read/${randomUUID()}`;
-    try {
-      await this.git(['fetch', '--no-tags', 'origin', `+${ref}:${temporary}`], 64 * 1024);
-      const commit = (await this.git(['rev-parse', `${temporary}^{commit}`])).trim();
-      if (!objectId.test(commit)) throw new Error('Invalid repair Git commit');
-      return commit;
-    } finally {
-      await this.git(['update-ref', '-d', temporary]).catch(() => undefined);
-    }
+    // Keep fetched heads/tags reachable across mirror GC for saved historical diffs.
+    const retained = `refs/workflow-repair-cache/${ref.slice('refs/'.length)}`;
+    await this.git(['fetch', '--no-tags', 'origin', `+${ref}:${retained}`], 64 * 1024);
+    const commit = (await this.git(['rev-parse', `${retained}^{commit}`])).trim();
+    if (!objectId.test(commit)) throw new Error('Invalid repair Git commit');
+    return commit;
   }
 
   async baseline(row: { workflowId: string; packId: string; version: number; deployNumber: number;
@@ -144,7 +141,8 @@ export class RepairGitStore {
 
   async diff(input: { workflowId: string; taskId: string; revision: number; baseCommit: string; candidateCommit: string }) {
     if (!objectId.test(input.baseCommit) || !objectId.test(input.candidateCommit)) throw new Error('Invalid repair diff commits');
-    const fields = (await this.git(['diff', '--name-status', '--no-renames', '-z', input.baseCommit, input.candidateCommit], 128 * 1024))
+    // A valid diff can list up to 2 × 500 paths of up to 1,024 bytes each.
+    const fields = (await this.git(['diff', '--name-status', '--no-renames', '-z', input.baseCommit, input.candidateCommit], MAX_GIT_OUTPUT))
       .split('\0').filter(Boolean);
     if (fields.length % 2 !== 0) throw new Error('Invalid repair Git diff listing');
     const truncated = fields.length / 2 > 20;
@@ -160,6 +158,22 @@ export class RepairGitStore {
     }
     return { baseCommit: input.baseCommit, candidateCommit: input.candidateCommit, files, truncated };
   }
+}
+
+/** A shared AIS token alone does not enable repair; repair-specific settings do. */
+export async function resolveRepairAisConfiguration(aisToken?: string, rawSnapshotId?: string, rawGitDir?: string):
+Promise<{ snapshotId: number; gitStore: RepairGitStore } | undefined> {
+  if (rawSnapshotId === undefined && rawGitDir === undefined) return undefined;
+  if (!aisToken?.trim()) throw new Error('Workflow Repair AIS token is required');
+  const snapshot = rawSnapshotId?.trim();
+  if (!snapshot || !/^[1-9]\d*$/.test(snapshot) || !Number.isSafeInteger(Number(snapshot))) {
+    throw new Error('Workflow Repair snapshot ID must be a positive integer');
+  }
+  const gitDir = rawGitDir?.trim();
+  if (!gitDir) throw new Error('Workflow Repair Git directory is required');
+  const gitStore = new RepairGitStore(gitDir);
+  await gitStore.verify();
+  return { snapshotId: Number(snapshot), gitStore };
 }
 
 export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
