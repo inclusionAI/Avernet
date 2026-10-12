@@ -190,6 +190,7 @@ from .org import router as org_router
 from .channels import router as channels_router
 from .caller_identity import router as caller_identity_router
 from .containers import router as containers_router
+from .desktop_metadata import router as desktop_metadata_router
 from .diagnostics import router as diagnostics_router
 from .dormant import router as dormant_router
 from .editors import router as editors_router
@@ -360,6 +361,7 @@ _SUBGROUPS = [
     # creation/authorization pair remains human-only. Dependencies are declared
     # per route in the local router.
     local_router,
+    desktop_metadata_router,
     # Harness public surface: every route is `{bot_id}`-first under
     # `/bots/{bot_id}/harness/...` and performs its own owner/collaborator
     # check via `HarnessBotAccessDep`, so it joins the plain subgroups with

@@ -17,6 +17,12 @@ from .models_authorization import (
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
         "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
