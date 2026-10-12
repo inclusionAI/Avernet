@@ -164,7 +164,10 @@ class AicodingDurableRestartMixin:
         }
         previous_status = bot["status"]
         if previous_status != "PENDING":
-            self._write_admission_status(services.repository, bot_id, owner_id, "PENDING")
+            if services.repository.update_by_owner(
+                bot_id, owner_id, {"status": "PENDING"}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         try:
             task, _created = services.task_queue.enqueue(
                 TASK_TYPE,
@@ -183,24 +186,14 @@ class AicodingDurableRestartMixin:
                     and accepted.payload.get("operation_id") != payload["operation_id"]
                 )
             ):
-                self._write_admission_status(
-                    services.repository, bot_id, owner_id, previous_status,
+                services.repository.update_by_owner(
+                    bot_id, owner_id, {"status": previous_status},
                 )
             raise
         # A concurrent submit may have won queue dedup. Its payload, never ours,
         # owns the operation/target, even if its HTTP process died before CAS.
         result = _state(services.repository, task.payload).ensure(task.payload, task.id)
         return self._accepted(result)
-
-    @staticmethod
-    def _write_admission_status(repository, bot_id, owner_id, status):
-        updated = repository.update_by_owner(bot_id, owner_id, {"status": status})
-        if updated is None:
-            # A no-change UPDATE can return no entity; verify rather than
-            # treating that result alone as proof the Bot disappeared.
-            updated = repository.get_by_id_and_owner(bot_id, owner_id)
-        if not isinstance(updated, dict) or updated.get("status") != status:
-            raise RestartSuperseded("Bot status write was not confirmed")
 
     @staticmethod
     def _accepted(bot):

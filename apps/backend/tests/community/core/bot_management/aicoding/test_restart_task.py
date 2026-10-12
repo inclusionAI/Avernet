@@ -816,7 +816,9 @@ async def test_immediate_worker_cannot_repeat_pending_or_be_reset_by_admission(s
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("write_applied", [False, True])
-async def test_empty_pending_update_requires_confirmed_status(setup, monkeypatch, write_applied):
+async def test_empty_pending_update_keeps_existing_failure_contract(setup, monkeypatch, write_applied):
+    from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+
     s = setup
     update = s.repo.update_by_owner
 
@@ -826,14 +828,10 @@ async def test_empty_pending_update_requires_confirmed_status(setup, monkeypatch
         return None
 
     monkeypatch.setattr(s.repo, "update_by_owner", empty_result)
-    if write_applied:
-        assert (await submit(s))["status"] == "PENDING"
-        assert task(s) is not None
-    else:
-        with pytest.raises(RestartSuperseded, match="not confirmed"):
-            await submit(s)
-        assert task(s) is None
-        assert s.repo.bot["status"] == "ACTIVE"
+    with pytest.raises(BotServiceError, match="Bot not found while preparing restart: b"):
+        await submit(s)
+    assert task(s) is None
+    assert s.repo.bot["status"] == ("PENDING" if write_applied else "ACTIVE")
     s.service.restart_bot.assert_not_called()
 
 
