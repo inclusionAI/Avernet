@@ -7,6 +7,11 @@ from typing import Mapping
 
 from injector import inject
 
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConflictError,
+    LayoutInitializationConfirmationError,
+    LayoutInitializationEvidenceError,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -21,8 +26,15 @@ from agentclaw.community.core.skills_pool.types import (
 )
 
 
-class PoolNativeLayoutConfirmationError(RuntimeError):
-    """The reported layout cannot safely confirm the persisted selection."""
+PoolNativeLayoutConfirmationError = LayoutInitializationConfirmationError
+
+
+_EVIDENCE_FIELDS = {
+    "actual_engine",
+    "actual_layout",
+    "layout_contract_version",
+    "roots_initialized",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,36 +78,38 @@ class SkillsPoolNativeLayoutConfirmationService:
         evidence: dict[str, object],
     ) -> None:
         scope = BotSkillLayoutScope(env=env, entity_id=entity_id, bot_id=bot_id)
+        if set(evidence) != _EVIDENCE_FIELDS:
+            raise LayoutInitializationEvidenceError(
+                "layout evidence fields do not match the contract"
+            )
         observed = PoolLayoutInitializationEvidence.from_mapping(evidence)
         if expected_engine != "openclaw" or observed.actual_engine != expected_engine:
-            raise PoolNativeLayoutConfirmationError("layout engine does not match Bot")
+            raise LayoutInitializationEvidenceError(
+                "layout engine does not match Bot"
+            )
         if observed.actual_layout != SkillLayout.POOL.value:
-            raise PoolNativeLayoutConfirmationError("reported layout is not pool")
+            raise LayoutInitializationEvidenceError("reported layout is not pool")
         if observed.layout_contract_version != LAYOUT_CONTRACT_VERSION:
-            raise PoolNativeLayoutConfirmationError(
+            raise LayoutInitializationEvidenceError(
                 "layout contract version is unsupported"
             )
         if not observed.roots_initialized:
-            raise PoolNativeLayoutConfirmationError(
+            raise LayoutInitializationEvidenceError(
                 "root-level Pool initialization is incomplete"
             )
 
         state = self._layouts.get(scope)
-        if is_migrated_pool_active_state(
+        migrated_active = is_migrated_pool_active_state(
             state,
             layout_contract_version=observed.layout_contract_version,
-        ):
-            # A steady restart can report the same physical facts.  It must not
-            # rerun or erase the completed migration transaction.
-            return
-        if (
-            not is_pool_native_state(
-                state,
-                layout_contract_version=observed.layout_contract_version,
-                engine_type=expected_engine,
-            )
-        ):
-            raise PoolNativeLayoutConfirmationError(
+        )
+        pool_native = is_pool_native_state(
+            state,
+            layout_contract_version=observed.layout_contract_version,
+            engine_type=expected_engine,
+        )
+        if not migrated_active and not pool_native:
+            raise LayoutInitializationConflictError(
                 "persisted layout is not confirmable Pool-native state"
             )
         if not self._layouts.confirm_pool_initializing(
@@ -104,7 +118,7 @@ class SkillsPoolNativeLayoutConfirmationService:
             binding_id=binding_id,
             startup_identity=startup_identity,
         ):
-            raise PoolNativeLayoutConfirmationError(
+            raise LayoutInitializationConflictError(
                 "Pool-native layout confirmation CAS did not commit"
             )
 

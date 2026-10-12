@@ -117,6 +117,7 @@ class AicodingHostedWorkspaceMixin:
                 bot_id=ctx.bot_id,
                 template_config=template_config,
                 template_type=ctx.template_type,
+                active_engine=ctx.active_engine,
             )
             logger.info(
                 "[hosted_workspace.ensure] persisted dima_space_id=%s for bot %s",

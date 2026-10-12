@@ -79,6 +79,25 @@ def test_matching_native_evidence_uses_repository_cas() -> None:
     )
 
 
+def test_retried_native_callback_accepts_already_active_state() -> None:
+    repository = MagicMock()
+    repository.get.return_value = _state(phase=SkillLayoutPhase.POOL_ACTIVE)
+    repository.confirm_pool_initializing.return_value = True
+    service = SkillsPoolNativeLayoutConfirmationService(repository)
+
+    service.confirm(
+        binding_id=17,
+        startup_identity="startup-1",
+        env="pre",
+        entity_id="staff_1",
+        bot_id="bot-1",
+        expected_engine="openclaw",
+        evidence=_evidence(),
+    )
+
+    repository.confirm_pool_initializing.assert_called_once()
+
+
 def test_migration_identity_cannot_use_native_confirmation() -> None:
     repository = MagicMock()
     repository.get.return_value = _state(
@@ -111,6 +130,7 @@ def test_completed_migration_restart_is_accepted_without_native_cas() -> None:
         preparation_id="preparation-1",
         cutover_committed=True,
     )
+    repository.confirm_pool_initializing.return_value = True
     service = SkillsPoolNativeLayoutConfirmationService(repository)
 
     service.confirm(
@@ -123,7 +143,7 @@ def test_completed_migration_restart_is_accepted_without_native_cas() -> None:
         evidence=_evidence(),
     )
 
-    repository.confirm_pool_initializing.assert_not_called()
+    repository.confirm_pool_initializing.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -142,6 +162,33 @@ def test_mismatched_evidence_fails_closed(field: str, value: object) -> None:
     evidence[field] = value
 
     with pytest.raises(PoolNativeLayoutConfirmationError):
+        service.confirm(
+            binding_id=17,
+            startup_identity="startup-1",
+            env="pre",
+            entity_id="staff_1",
+            bot_id="bot-1",
+            expected_engine="openclaw",
+            evidence=evidence,
+        )
+
+    repository.get.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ("unexpected", None))
+def test_evidence_shape_must_match_contract(field: str | None) -> None:
+    repository = MagicMock()
+    service = SkillsPoolNativeLayoutConfirmationService(repository)
+    evidence = _evidence()
+    if field is None:
+        evidence.pop("roots_initialized")
+    else:
+        evidence[field] = "value"
+
+    with pytest.raises(
+        PoolNativeLayoutConfirmationError,
+        match="fields do not match",
+    ):
         service.confirm(
             binding_id=17,
             startup_identity="startup-1",

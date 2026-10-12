@@ -23,13 +23,24 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service(*, current_bots: int = 0) -> BotService:
     """构造用于 create_bot BCN 注册测试的最小 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None
     svc._repository.exists_by_bot_name.return_value = False
-    svc._repository.insert.side_effect = lambda data: {"id": 1, **data}
+
+    def _insert_with_layout(data, *, layout):
+        record = {"id": 1, **data}
+        svc._repository.get_by_id_and_owner.return_value = record
+        return record
+
+    svc._repository.insert_with_initial_skill_layout.side_effect = _insert_with_layout
+    svc._repository.claim_provisioning.return_value = True
     svc._repository.update_by_owner.return_value = None
     svc._repository.soft_delete_by_owner.return_value = None
 
@@ -179,7 +190,7 @@ class TestCreateBotBcnRegister:
             ext={"service_bot_config": {"device_count": 3}},
         )
 
-        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        inserted_ext = svc._repository.insert_with_initial_skill_layout.call_args.args[0]["ext"]
         assert inserted_ext == {
             "service_bot_config": {"device_count": 3},
             "sbot_use_default_image": True,
@@ -222,7 +233,7 @@ class TestCreateBotBcnRegister:
             },
         )
 
-        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        inserted_ext = svc._repository.insert_with_initial_skill_layout.call_args.args[0]["ext"]
         assert inserted_ext == {"service_bot_config": {"device_count": 3}}
         common_config.get_value.assert_called_once()
 

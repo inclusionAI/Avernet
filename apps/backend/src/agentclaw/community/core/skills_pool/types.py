@@ -52,6 +52,14 @@ class RolloutEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class InitialSkillLayoutSelection:
+    """Creation-time Pool authority persisted atomically with a new Bot."""
+
+    layout_contract_version: str
+    rollout_evidence: RolloutEvidence
+
+
+@dataclass(frozen=True, slots=True)
 class BotSkillLayoutState:
     """Repository 对外返回的 Bot 技能布局状态。"""
 

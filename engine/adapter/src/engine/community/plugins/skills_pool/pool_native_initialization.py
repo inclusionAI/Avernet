@@ -21,6 +21,11 @@ from engine.community.plugins.skills_pool.active_marker_validation import (
 )
 
 
+_TRUSTED_LAYOUT_PHASES = frozenset(
+    {"pool_initializing", "pool_active", "recovery_required"}
+)
+
+
 class PoolNativeInitializationError(RuntimeError):
     """The trusted Pool startup declaration conflicts with filesystem facts."""
 
@@ -135,6 +140,7 @@ def initialize_pool_native(
     engine: str,
     home: Path = Path("/home/admin"),
     steady_state: bool = False,
+    trusted_layout_phase: str | None = None,
 ) -> PoolNativeInitializationEvidence:
     """Establish the minimal Pool roots without Legacy preparation or copying.
 
@@ -150,6 +156,17 @@ def initialize_pool_native(
         raise PoolNativeInitializationError(
             f"Pool-native initialization is unsupported for engine={engine}"
         )
+    if (
+        trusted_layout_phase is not None
+        and trusted_layout_phase not in _TRUSTED_LAYOUT_PHASES
+    ):
+        raise PoolNativeInitializationError(
+            f"unsupported persisted Pool layout phase: {trusted_layout_phase!r}"
+        )
+    if trusted_layout_phase == "recovery_required":
+        raise PoolNativeInitializationError(
+            "persisted Pool layout requires migration recovery"
+        )
     layout = resolve_filesystem_skill_layout(
         LayoutIdentity(engine, LAYOUT_CONTRACT_VERSION),
         RuntimeLayoutContext(home=home),
@@ -157,10 +174,10 @@ def initialize_pool_native(
     marker = _read_active_marker(layout.active_marker)
     if marker is not None:
         _validate_active_marker(marker, engine=engine)
-    elif not steady_state and _path_present(
+    elif _path_present(
         layout.ready_marker,
         description="Pool migration preparation marker",
-    ):
+    ) and not steady_state and trusted_layout_phase != "pool_active":
         raise PoolNativeInitializationError(
             "Pool migration preparation requires recovery before native startup"
         )
@@ -171,7 +188,9 @@ def initialize_pool_native(
                 f"legacy entry conflicts with Pool-native startup: {legacy_entry}"
             )
 
-    create_roots = marker is None and not steady_state
+    create_roots = (
+        marker is None and not steady_state and trusted_layout_phase != "pool_active"
+    )
     _require_directory(layout.active_root, create=create_roots)
     _require_directory(layout.pool_root, create=create_roots)
     _require_directory(layout.pool_local, create=create_roots)
@@ -215,11 +234,16 @@ def main(argv: list[str] | None = None) -> int:
             "repair while preserving historical migration preparation"
         ),
     )
+    parser.add_argument(
+        "--layout-phase",
+        default=os.environ.get("AGENTCLAW_SKILLS_LAYOUT_PHASE", ""),
+    )
     args = parser.parse_args(argv)
     evidence = initialize_pool_native(
         engine=args.engine,
         home=args.home,
         steady_state=args.steady_state,
+        trusted_layout_phase=args.layout_phase or None,
     )
     print(json.dumps(evidence.to_dict(), sort_keys=True, separators=(",", ":")))
     return 0

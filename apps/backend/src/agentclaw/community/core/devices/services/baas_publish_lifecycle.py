@@ -17,6 +17,11 @@ _PUBLISH_POLL_INTERVAL_SECONDS = 5
 _PUBLISH_POLL_TIMEOUT_SECONDS = 600
 
 
+def create_publish_poll_idempotency_key(*, binding_id: int, publish_id: int) -> str:
+    """Return the stable key for one live create-publish poll lifecycle."""
+    return f"baas-create-poll:{binding_id}:{publish_id}"
+
+
 def enqueue_create_publish_poll(
     task_queue_service: Any | None,
     *,
@@ -44,6 +49,10 @@ def enqueue_create_publish_poll(
             started_at_epoch_s=time.time(),
         ),
         deadline_seconds=86400,
+        idempotency_key=create_publish_poll_idempotency_key(
+            binding_id=binding_id,
+            publish_id=publish_id,
+        ),
     )
     return True
 
@@ -165,6 +174,7 @@ def run_start_service_polling(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     callback_token=callback_token,
+                    startup_identity=str(publish_id),
                     admins=admins,
                     codefuse_token=codefuse_token,
                 )

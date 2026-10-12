@@ -12,7 +12,10 @@ from abc import abstractmethod
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+    from agentclaw.community.core.devices.repository.record import (
+        DataInitTriggerClaim,
+        DeviceBindingRecord,
+    )
 
 
 @runtime_checkable
@@ -113,6 +116,18 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def adopt_baas_restart_publish_if_matches(
+        self,
+        *,
+        binding_id: int,
+        request_id: str,
+        workflow_baseline: int,
+        publish_id: int,
+    ) -> bool:
+        """Persist an adopted workflow only for the unchanged restart intent."""
+        ...
+
+    @abstractmethod
     def transition_teclaw_publish_terminal(
         self,
         *,
@@ -130,6 +145,58 @@ class DeviceBindingRepository(Protocol):
         match it updates the expected live bot first, then the binding. A bot
         update that does not match exactly one row raises and rolls back the
         transaction.
+        """
+        ...
+
+    @abstractmethod
+    def transition_baas_restart_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int | str | None,
+        request_id: str | None,
+        status: str,
+        expected_bot_ext: dict[str, Any] | None,
+        bot_ext: dict[str, Any],
+    ) -> bool:
+        """Atomically persist a guarded BaaS restart terminal transition.
+
+        Returns ``False`` without writes when the current Binding restart
+        identity or Bot ext snapshot no longer matches this task. On a match,
+        the Bot status/ext and Binding status advance in one transaction.
+        """
+        ...
+
+    @abstractmethod
+    def clear_baas_restart_intent_if_matches(
+        self,
+        *,
+        binding_id: int,
+        publish_id: int | None,
+        request_id: str | None,
+        keys: tuple[str, ...],
+    ) -> bool:
+        """Clear restart intent keys only while the task identity is current."""
+        ...
+
+    @abstractmethod
+    def prepare_baas_desktop_restart(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        expected_publish_id: str | None,
+        bot_ext_patch: dict[str, Any],
+        binding_props_patch: dict[str, Any],
+    ) -> bool:
+        """Persist an accepted Desktop restart while prior identity is current.
+
+        An explicit user restart may move a ``PENDING``, ``ACTIVE``, or
+        ``FAILED`` BaaS binding to ``PENDING``. Released or stopped bindings
+        remain terminal and must not be revived.
         """
         ...
 
@@ -204,6 +271,85 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def recover_baas_creation_binding_if_matches(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> int | None:
+        """Atomically link an unbound retained Bot to its matching BaaS binding."""
+        ...
+
+    @abstractmethod
+    def detach_released_baas_desktop_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+    ) -> bool:
+        """Detach one retained Bot from its matching released Desktop binding."""
+        ...
+
+    @abstractmethod
+    def recover_baas_desktop_creation_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> bool:
+        """Recover a released or pending orphan from this Desktop create.
+
+        The claimed Bot, ownership scope, environment, provider, status, current
+        links, and persisted Desktop callback credentials are checked atomically.
+        """
+        ...
+
+    @abstractmethod
+    def claim_pool_data_init_trigger_if_ready(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+    ) -> DataInitTriggerClaim | None:
+        """Return a fenced dispatch lease once Binding and Bot are ready."""
+        ...
+
+    @abstractmethod
+    def release_pool_data_init_trigger_if_matches(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+        claim_token: str,
+    ) -> bool:
+        """Release the matching Pool trigger lease after dispatch failure."""
+        ...
+
+    @abstractmethod
     def get_active_engine_by_device_id(self, *, device_id: str) -> str:
         """通过设备ID获取Bot的 active_engine."""
         ...
@@ -224,8 +370,20 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def transition_layout_startup_status_if_matches(
+        self,
+        *,
+        binding_id: int,
+        startup_identity: str,
+        status: str,
+        message: str | None,
+    ) -> bool:
+        """Persist a layout callback only while its startup is current."""
+        ...
+
+    @abstractmethod
     def update_bot_status_on_device_active(self, *, binding_id: int) -> None:
-        """设备变 ACTIVE 时更新关联 Bot 状态为 ACTIVE（仅当 Bot 当前状态为 PENDING 时）."""
+        """设备变 ACTIVE 时将 PENDING/PROVISIONING Bot 更新为 ACTIVE."""
         ...
 
     @abstractmethod
