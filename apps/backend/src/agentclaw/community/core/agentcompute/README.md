@@ -11,7 +11,7 @@ rather than a pre-authored plan (Kimi Agent Swarm model, D1).
 | api/ | `community/api/agentcompute_service.py` | flat re-export of the Service Protocol + DTOs |
 | core/ | `community/core/agentcompute/` | Service Protocol + service, runtime, domain, repository |
 | adapters/http/ | `community/adapters/http/agentcompute/` | thin router + DTOs (Pydantic) |
-| adapters/cli/ | `community/adapters/cli/agentcompute_cli.py` | argparse client over the HTTP surface |
+| adapters/cli/ | `community/adapters/cli/agentcompute/` | argparse client over the HTTP surface |
 | di/modules/ | `community/di/modules/agentcompute_module.py` | composition root |
 
 ## Context Boundary
@@ -187,7 +187,7 @@ guard, so invoke `main` directly):
 
 ```bash
 cd apps/backend && DEPLOY_PROFILE=test PYTHONPATH=src:. .venv/bin/python -c \
-  "from agentclaw.community.adapters.cli.agentcompute_cli import main; raise SystemExit(main(['submit', '--spec', 'spec.json', '--wait']))"
+  "from agentclaw.community.adapters.cli.agentcompute import main; raise SystemExit(main(['submit', '--spec', 'spec.json', '--wait']))"
 ```
 
 `spec.json` carries the submit body above; `--wait` polls until terminal.

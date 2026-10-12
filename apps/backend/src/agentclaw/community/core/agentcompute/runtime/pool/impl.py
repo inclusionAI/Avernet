@@ -13,9 +13,9 @@ from agentclaw.community.core.agentcompute.domain.models import (
 )
 from dataclasses import dataclass
 
-from agentclaw.community.core.agentcompute.spi.subagent_factory import SubagentFactory
-from agentclaw.community.core.agentcompute.spi.artifact_store import ArtifactStore
-from agentclaw.community.core.agentcompute.runtime.upstream_breaker import (
+from agentclaw.community.core.agentcompute.spi.subagent import SubagentFactory
+from agentclaw.community.core.agentcompute.spi.artifact import ArtifactStore
+from agentclaw.community.core.agentcompute.runtime.breaker import (
     UpstreamBreaker,
 )
 from agentclaw.community.log import get_logger

@@ -21,9 +21,8 @@ from agentclaw.community.core.agentcompute.domain.models import (
     CompletionRequest, CompletionResponse, FinishReason, LlmCallKind,
     ModelId, TokenUsage,
 )
-from agentclaw.community.core.agentcompute.plugins.llm.client import (
-    OpenAICompatibleClient, StubLLMProvider,
-)
+from agentclaw.community.core.agentcompute.plugins.llm.openai import OpenAICompatibleClient
+from agentclaw.community.core.agentcompute.plugins.llm.stub import StubLLMProvider
 
 
 def _ok_body(text="Hello world", finish="stop", usage=(1, 2, 3)) -> dict:

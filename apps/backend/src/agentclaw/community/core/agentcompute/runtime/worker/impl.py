@@ -9,7 +9,7 @@ from typing import Any, Iterator
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
-from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
+from agentclaw.community.core.agentcompute.runtime.handler import SwarmRunHandler
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.metrics import MetricsPlugin
 

@@ -22,11 +22,11 @@ from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeDrainConfig, AgentComputeOrchestrationConfig,
 )
-from agentclaw.community.core.agentcompute.runtime.upstream_breaker import (
+from agentclaw.community.core.agentcompute.runtime.breaker import (
     BreakerState, UpstreamBreaker,
 )
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
-from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
+from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
 

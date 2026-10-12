@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 
-from agentclaw.community.core.agentcompute.spi.artifact_store import ArtifactStore
+from agentclaw.community.core.agentcompute.spi.artifact import ArtifactStore
 
 logger = logging.getLogger(__name__)
 

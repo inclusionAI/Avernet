@@ -22,7 +22,7 @@ from agentclaw.community.core.agentcompute.domain.models import (
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
     TerminationReason, TokenUsage,
 )
-from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
+from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
 

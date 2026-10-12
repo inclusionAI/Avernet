@@ -23,10 +23,10 @@ from agentclaw.community.core.agentcompute.config.settings import (
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.repository import registry as om
-from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
+from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
-from agentclaw.community.core.agentcompute.runtime.upstream_breaker import (
+from agentclaw.community.core.agentcompute.runtime.breaker import (
     UpstreamBreaker,
 )
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker

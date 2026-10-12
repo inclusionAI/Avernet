@@ -53,12 +53,11 @@ from agentclaw.community.core.agentcompute.orchestration.termination import (
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
 )
-from agentclaw.community.core.agentcompute.plugins.agents.avernet_subagent import (
+from agentclaw.community.core.agentcompute.plugins.agents.avernet import (
     AvernetSubagent,
 )
-from agentclaw.community.core.agentcompute.plugins.llm.client import (
-    OpenAICompatibleClient, StubLLMProvider,
-)
+from agentclaw.community.core.agentcompute.plugins.llm.openai import OpenAICompatibleClient
+from agentclaw.community.core.agentcompute.plugins.llm.stub import StubLLMProvider
 from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
 from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
@@ -67,12 +66,12 @@ from agentclaw.community.core.agentcompute.repository.message import MessageRepo
 from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentcompute.repository.round import RoundRepository
 from agentclaw.community.core.agentcompute.repository.run import RunRepository
-from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
+from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
-from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
-from agentclaw.community.core.agentcompute.runtime.swarm_store import SliceStore
-from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
+from agentclaw.community.core.agentcompute.runtime.handler import SwarmRunHandler
+from agentclaw.community.core.agentcompute.runtime.store import SliceStore
+from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 from agentclaw.community.di.modules.agentcompute_module import AgentComputeModule
 from agentclaw.community.di.modules.infrastructure.community.metrics import (
     CommunityMetricsModule,

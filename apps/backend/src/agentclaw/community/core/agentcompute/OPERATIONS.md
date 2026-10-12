@@ -52,7 +52,7 @@ without it there is no upper bound to size against.
 
 ## 12.9 Artifact TTL sweeper
 
-`runtime/retention_sweeper.py` (`AgentComputeRetentionSweeper`), store-scoped
+`runtime/retention/` (`AgentComputeRetentionSweeper`), store-scoped
 over `ArtifactStore` via the additive `RetentionScanner` SPI (listing + mtime;
 concrete impl: `FilesystemArtifactStore.retention_scanner()`). Knobs:
 `retention.artifact_ttl_days` (7) and `retention.sweep_interval_seconds`

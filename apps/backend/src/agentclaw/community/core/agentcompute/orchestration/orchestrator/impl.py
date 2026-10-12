@@ -11,12 +11,10 @@ from agentclaw.community.core.agentcompute.domain.models import (
     FinishDecision, GuardEvent, HandoffDecision, LlmCallKind, Run,
     SpawnDecision, TerminationReason, WaitDecision, EpochMillis, EventId, GuardKind,
 )
-from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
+from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import DecisionParser
 from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
-from agentclaw.community.core.agentcompute.orchestration.termination import (
-    RunState,
-)
+from agentclaw.community.core.agentcompute.orchestration.state import RunState
 
 logger = logging.getLogger(__name__)
 

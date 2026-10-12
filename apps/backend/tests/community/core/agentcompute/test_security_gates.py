@@ -31,19 +31,15 @@ from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.runtime.observability import (
     NULL_OBSERVABILITY,
 )
-from agentclaw.community.core.agentcompute.orchestration.termination import (
-    RunState,
-)
-from agentclaw.community.core.agentcompute.plugins.llm.client import (
-    OpenAICompatibleClient,
-)
+from agentclaw.community.core.agentcompute.orchestration.state import RunState
+from agentclaw.community.core.agentcompute.plugins.llm.openai import OpenAICompatibleClient
 from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
 from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentcompute.repository.message import MessageRepository
 from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentcompute.repository.round import RoundRepository
-from agentclaw.community.core.agentcompute.runtime.swarm_store import SliceStore
+from agentclaw.community.core.agentcompute.runtime.store import SliceStore
 from agentclaw.community.core.agentcompute.runtime.security import (
     PiiKind, classify_pii, detect_prompt_injection, redact_pii,
     validate_egress_url,

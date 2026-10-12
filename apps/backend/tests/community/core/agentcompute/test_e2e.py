@@ -39,9 +39,7 @@ from agentclaw.community.core.agentcompute.orchestration.termination import (
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
 )
-from agentclaw.community.core.agentcompute.plugins.llm.client import (
-    StubLLMProvider,
-)
+from agentclaw.community.core.agentcompute.plugins.llm.stub import StubLLMProvider
 from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
 from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
@@ -50,10 +48,10 @@ from agentclaw.community.core.agentcompute.repository.message import MessageRepo
 from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
 from agentclaw.community.core.agentcompute.repository.round import RoundRepository
 from agentclaw.community.core.agentcompute.repository.run import RunRepository
-from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
+from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
-from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
+from agentclaw.community.core.agentcompute.runtime.handler import SwarmRunHandler
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
 from agentclaw.community.core.agentcompute.service import AgentComputeService
 from agentclaw.community.core.agentcompute.service.protocols import SubmitRunRequest

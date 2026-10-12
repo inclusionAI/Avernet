@@ -28,14 +28,12 @@ from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeOrchestrationConfig, LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.plugins.llm.client import (
-    StubLLMProvider,
-)
+from agentclaw.community.core.agentcompute.plugins.llm.stub import StubLLMProvider
 from agentclaw.community.core.agentcompute.runtime.worker import (
     AgentComputeWorker,
 )
 from agentclaw.community.core.agentcompute.service import AgentComputeService
-from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
+from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.agentcompute_module import (
     AgentComputeModule,

@@ -1,28 +1,15 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, Run, TerminationReason,
+    Run, TerminationReason,
 )
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
-
-
-@dataclass
-class RunState:
-    run: Run
-    round_index: int = 0
-    turn_count: int = 0
-    total_agents_spawned: int = 0
-    last_spawn_objectives: list[str] = field(default_factory=list)
-    routed_shard_count: int = 0
-    recent_decision: Any = None
-    active_persona: AgentSpecRaw | None = None
 
 
 class TerminationEvaluator:

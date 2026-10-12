@@ -21,7 +21,7 @@ from agentclaw.community.core.agentcompute.plugins.artifact_store.filesystem imp
     FilesystemArtifactStore,
     FilesystemRetentionScanner,
 )
-from agentclaw.community.core.agentcompute.runtime.retention_sweeper import (
+from agentclaw.community.core.agentcompute.runtime.retention import (
     AgentComputeRetentionSweeper,
 )
 
@@ -237,7 +237,7 @@ class TestFilesystemRetentionScanner:
             scanner.key_mtime("../outside.txt")
 
     def test_scanner_satisfies_the_retention_protocol(self, tmp_path):
-        from agentclaw.community.core.agentcompute.spi.artifact_store import (
+        from agentclaw.community.core.agentcompute.spi.artifact import (
             RetentionScanner,
         )
 

@@ -6,7 +6,7 @@ from agentclaw.community.core.agentcompute.config.settings import LlmConfig
 from agentclaw.community.core.agentcompute.domain.models import AgentSpecRaw, Run
 from agentclaw.community.core.agentcompute.spi.subagent import Subagent
 from agentclaw.community.core.agentcompute.plugins.agents.llm_subagent import LLMBackedSubagent
-from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
+from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 
 
 class DefaultSubagentFactory:
@@ -17,6 +17,6 @@ class DefaultSubagentFactory:
 
     def create(self, spec: AgentSpecRaw, run: Run) -> Subagent:
         if spec.kind.value == "avernet":
-            from agentclaw.community.core.agentcompute.plugins.agents.avernet_subagent import AvernetSubagent
+            from agentclaw.community.core.agentcompute.plugins.agents.avernet import AvernetSubagent
             return AvernetSubagent(spec, run, self._llm, egress=self._egress)
         return LLMBackedSubagent(spec, run, self._llm)

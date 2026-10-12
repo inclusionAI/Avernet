@@ -6,7 +6,7 @@ from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpecRaw, CompletionRequest, LlmCallKind,
     Run, SubagentResult, TaskEnvelope, ModelId,
 )
-from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
+from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
 

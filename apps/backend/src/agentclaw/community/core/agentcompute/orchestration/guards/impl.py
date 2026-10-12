@@ -8,9 +8,7 @@ import uuid
 from agentclaw.community.core.agentcompute.domain.models import (
     EpochMillis, EventId, GuardEvent, GuardKind,
 )
-from agentclaw.community.core.agentcompute.orchestration.termination import (
-    RunState,
-)
+from agentclaw.community.core.agentcompute.orchestration.state import RunState
 
 
 def _now_ms() -> int:

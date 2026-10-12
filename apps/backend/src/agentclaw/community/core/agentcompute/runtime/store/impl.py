@@ -12,7 +12,7 @@ from agentclaw.community.core.agentcompute.domain.models import (
 from agentclaw.community.core.agentcompute.runtime.observability import (
     NULL_OBSERVABILITY, AgentComputeObservability,
 )
-from agentclaw.community.core.agentcompute.orchestration.termination import RunState
+from agentclaw.community.core.agentcompute.orchestration.state import RunState
 from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
 from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentcompute.repository.message import MessageRepository

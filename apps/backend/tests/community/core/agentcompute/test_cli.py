@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentclaw.community.adapters.cli import agentcompute_cli
+from agentclaw.community.adapters.cli import agentcompute
 from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol,
 )
@@ -127,20 +127,20 @@ def client(stub) -> TestClient:
 
 def test_help_exits_zero(capsys):
     with pytest.raises(SystemExit) as exc:
-        agentcompute_cli.build_parser().parse_args(["--help"])
+        agentcompute.build_parser().parse_args(["--help"])
     assert exc.value.code == 0
     assert "agentcompute" in capsys.readouterr().out
 
 
 def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys, monkeypatch):
-    monkeypatch.setenv(agentcompute_cli.TENANT_ENV_VAR, TENANT)
+    monkeypatch.setenv(agentcompute.TENANT_ENV_VAR, TENANT)
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({
         "goal": "ship it",
         "agents": [{"name": "a1", "role": "worker"}],
         "idempotency_key": "cli-1",
     }), encoding="utf-8")
-    rc = agentcompute_cli.main(
+    rc = agentcompute.main(
         ["submit", "--spec", str(spec_path), "--wait", "--interval", "0.01"],
         client=client,
     )
@@ -156,13 +156,13 @@ def test_submit_waits_and_prints_report(client, stub, tmp_path, capsys, monkeypa
 
 
 def test_submit_tenant_flag_beats_env(client, stub, tmp_path, capsys, monkeypatch):
-    monkeypatch.setenv(agentcompute_cli.TENANT_ENV_VAR, "tenant-env")
+    monkeypatch.setenv(agentcompute.TENANT_ENV_VAR, "tenant-env")
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps({
         "goal": "ship it",
         "agents": [{"name": "a1", "role": "worker"}],
     }), encoding="utf-8")
-    rc = agentcompute_cli.main(
+    rc = agentcompute.main(
         ["submit", "--spec", str(spec_path), "--tenant", TENANT],
         client=client,
     )
@@ -179,7 +179,7 @@ def test_legacy_spec_tenant_warns_and_is_dropped(client, stub, tmp_path, capsys)
         "agents": [{"name": "a1", "role": "worker"}],
     }), encoding="utf-8")
     capsys.readouterr()
-    rc = agentcompute_cli.main(
+    rc = agentcompute.main(
         ["submit", "--spec", str(spec_path), "--tenant", TENANT],
         client=client,
     )
@@ -194,7 +194,7 @@ def test_submit_missing_spec_fields_exits_with_message(tmp_path):
     spec_path = tmp_path / "bad.json"
     spec_path.write_text(json.dumps({"tenant": TENANT}), encoding="utf-8")
     with pytest.raises(SystemExit, match="agents"):
-        agentcompute_cli.main(
+        agentcompute.main(
             ["submit", "--spec", str(spec_path)], client=TestClient(FastAPI())
         )
 
@@ -206,7 +206,7 @@ def test_submit_unresolved_tenant_maps_server_400_to_rc1(
         "goal": "ship it",
         "agents": [{"name": "a1", "role": "worker"}],
     }), encoding="utf-8")
-    rc = agentcompute_cli.main(["submit", "--spec", str(spec_path)], client=client)
+    rc = agentcompute.main(["submit", "--spec", str(spec_path)], client=client)
     assert rc == 1
     assert stub.submitted == []
     assert "400" in capsys.readouterr().err

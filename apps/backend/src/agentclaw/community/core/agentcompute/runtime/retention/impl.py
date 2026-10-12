@@ -34,7 +34,7 @@ from typing import Callable
 from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeRetentionConfig,
 )
-from agentclaw.community.core.agentcompute.spi.artifact_store import (
+from agentclaw.community.core.agentcompute.spi.artifact import (
     ArtifactStore,
     RetentionScanner,
 )
