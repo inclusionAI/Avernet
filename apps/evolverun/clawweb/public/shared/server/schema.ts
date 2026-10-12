@@ -3302,4 +3302,9 @@ END`,
     description: "Preserve the selected Bot environment for Skill assets",
     sql: [`ALTER TABLE ce_skill_assets ADD COLUMN bot_env VARCHAR(32) DEFAULT NULL COMMENT '来源Bot环境；历史未记录时为空'`],
   },
+  {
+    version: 140,
+    description: "Fence workflow completion and timeout writes by manual retry epoch",
+    sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER NOT NULL DEFAULT 0`],
+  },
 ];

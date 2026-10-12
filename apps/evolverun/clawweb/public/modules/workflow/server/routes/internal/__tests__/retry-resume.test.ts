@@ -13,6 +13,7 @@ let server: Server;
 let base: string;
 beforeAll(async () => {
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, started_at INTEGER,
+    retry_epoch INTEGER NOT NULL DEFAULT 0,
     completed_at INTEGER, result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, gmt_modified INTEGER,
     total_token_usage INTEGER, succeeded_count INTEGER, failed_count INTEGER, input_json TEXT);
     INSERT INTO flow_runs (flow_id,status,started_at,completed_at,result_json,gmt_modified)
@@ -31,26 +32,29 @@ function put(path: string, body: unknown = {}) {
   return fetch(`${base}/${path}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 
-it('resumes a retry idempotently using existing tables, preserving original start and node history', async () => {
-  expect((await put('missing/retry-resume')).status).toBe(404);
-  expect((await put('flow/retry-resume')).status).toBe(200);
-  expect((await put('flow/retry-resume')).status).toBe(200);
-  expect(raw.prepare('SELECT status, started_at, completed_at FROM flow_runs WHERE flow_id = ?').get('flow'))
-    .toEqual({ status: 'running', started_at: 123, completed_at: null });
+it('resumes a retry idempotently, preserving original start and node history', async () => {
+  expect((await put('missing/retry-resume', { retry_epoch: 1 })).status).toBe(404);
+  expect((await put('flow/retry-resume', { retry_epoch: 1 })).status).toBe(200);
+  expect((await put('flow/retry-resume', { retry_epoch: 1 })).status).toBe(200);
+  expect(raw.prepare('SELECT status, started_at, completed_at, retry_epoch FROM flow_runs WHERE flow_id = ?').get('flow'))
+    .toEqual({ status: 'running', started_at: 123, completed_at: null, retry_epoch: 1 });
   expect(raw.prepare('SELECT status FROM node_executions WHERE flow_id = ?').get('flow')).toEqual({ status: 'failed' });
   expect(raw.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'flow_recovery_%'").all()).toEqual([]);
 });
 
 it('the timeout claim still wins only once', async () => {
-  const first = await (await put('flow/fail-if-running', { reason: 'timeout' })).json();
-  const second = await (await put('flow/fail-if-running', { reason: 'timeout' })).json();
+  const stale = await (await put('flow/fail-if-running', { reason: 'old timeout', retry_epoch: 0 })).json();
+  const first = await (await put('flow/fail-if-running', { reason: 'timeout', retry_epoch: 1 })).json();
+  const second = await (await put('flow/fail-if-running', { reason: 'timeout', retry_epoch: 1 })).json();
+  expect(stale).toEqual({ success: true, data: { claimed: false } });
   expect(first).toEqual({ success: true, data: { claimed: true } });
   expect(second).toEqual({ success: true, data: { claimed: false } });
 });
 
 it('keeps the legacy status endpoint able to resume a failed TaskGuard run', async () => {
-  expect((await put('flow/status', { status: 'running' })).status).toBe(200);
-  expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get('flow'))
+  raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at) VALUES (?, ?, ?)').run('legacy-status', 'failed', 123);
+  expect((await put('legacy-status/status', { status: 'running' })).status).toBe(200);
+  expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get('legacy-status'))
     .toEqual({ status: 'running', started_at: 123 });
 });
 
@@ -58,7 +62,7 @@ it('retries waiting and blocked runs but never reopens a run completed after the
   for (const status of ['waiting', 'blocked', 'succeeded', 'cancelled']) {
     raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at, completed_at) VALUES (?, ?, 123, 456)')
       .run(status, status);
-    const response = await put(`${status}/retry-resume`);
+    const response = await put(`${status}/retry-resume`, { retry_epoch: 1 });
     expect(response.status).toBe(['waiting', 'blocked'].includes(status) ? 200 : 409);
     expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get(status))
       .toEqual({ status: ['waiting', 'blocked'].includes(status) ? 'running' : status, started_at: 123 });
@@ -72,4 +76,13 @@ it('keeps a legacy completion when it arrives before its delayed running status 
   expect((await put('legacy-order/status', { status: 'running' })).status).not.toBe(200);
   expect(raw.prepare('SELECT status, completed_at FROM flow_runs WHERE flow_id = ?').get('legacy-order'))
     .toEqual({ status: 'succeeded', completed_at: 789 });
+});
+
+it('rejects a stale completion without changing the newer retry', async () => {
+  raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at) VALUES (?, ?, ?)').run('late', 'failed', 123);
+  expect((await put('late/retry-resume', { retry_epoch: 1 })).status).toBe(200);
+  expect((await put('late/completion', { status: 'succeeded', retry_epoch: 0 })).status).toBe(409);
+  expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?').get('late'))
+    .toEqual({ status: 'running', retry_epoch: 1 });
+  expect((await put('late/completion', { status: 'succeeded', retry_epoch: 1 })).status).toBe(200);
 });

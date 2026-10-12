@@ -125,7 +125,7 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at } = req.body as {
+      const { status, result_json, input_json, total_duration_ms, total_token_usage, succeeded_count, failed_count, completed_at, retry_epoch } = req.body as {
         status?: string;
         result_json?: string;
         input_json?: string;
@@ -134,13 +134,19 @@ export function createInternalRunsRouter(
         succeeded_count?: number;
         failed_count?: number;
         completed_at?: number;
+        retry_epoch?: number;
       };
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
 
       const completion: import("../../repositories/flow-run-repository.js").FlowRunCompletion = {
         status: status!,
         totalDurationMs: total_duration_ms ?? null,
         totalTokenUsage: total_token_usage ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
+        retryEpoch: retry_epoch,
       };
       // result_json: only set when explicitly provided (undefined = preserve existing value)
       if (result_json !== undefined) {
@@ -157,8 +163,9 @@ export function createInternalRunsRouter(
       }
       const row = await flowRunRepo.updateCompletion(flowId, completion);
       if (!row) {
-        apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 404 });
-        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        const exists = await flowRunRepo.findFullByFlowId(flowId);
+        apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: exists ? 409 : 404 });
+        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a different retry epoch or is terminal` : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 200, newStatus: status });
@@ -184,12 +191,17 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { reason, current_phase, total_duration_ms, completed_at } = req.body as {
+      const { reason, current_phase, total_duration_ms, completed_at, retry_epoch } = req.body as {
         reason?: string;
         current_phase?: string;
         total_duration_ms?: number | null;
         completed_at?: number;
+        retry_epoch?: number;
       };
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
       if (!reason) {
         res.status(400).json({ success: false, error: "Bad Request", message: "reason is required" });
         return;
@@ -199,6 +211,7 @@ export function createInternalRunsRouter(
         currentPhase: current_phase ?? "timeout",
         totalDurationMs: total_duration_ms ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
+        retryEpoch: retry_epoch,
       });
       apiLog("PUT", `/runs/${flowId}/fail-if-running`, { flowId, status: 200, claimed });
       res.json({ success: true, data: { claimed } });
@@ -437,6 +450,10 @@ export function createInternalRunsRouter(
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
+      if (result.status === 'conflict') {
+        res.status(409).json({ success: false, error: "Conflict", message: "This flow uses the retry epoch protocol" });
+        return;
+      }
 
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
       res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
@@ -455,7 +472,12 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const outcome = await flowRunRepo.resumeForRetry(flowId);
+      const retryEpoch = (req.body as { retry_epoch?: unknown })?.retry_epoch;
+      if (!Number.isSafeInteger(retryEpoch) || (retryEpoch as number) < 1) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a positive safe integer" });
+        return;
+      }
+      const outcome = await flowRunRepo.resumeForRetry(flowId, retryEpoch as number);
       if (outcome === 'not_found') {
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
