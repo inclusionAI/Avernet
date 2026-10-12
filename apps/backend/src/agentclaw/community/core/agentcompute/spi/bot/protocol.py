@@ -2,8 +2,12 @@
 
 The subagent's job (provision a transient bot persona, drive it to READY,
 chat one objective, delete it) is platform work this backend cannot do
-itself — chat submission is engine-plane territory and the in-tree
-surfaces are read-only queries. So the swarm defines the seam and the
+itself — the backend's in-process surfaces stop short of full bot
+lifecycle: an engine-transport chat path exists core-side (the grt_chat
+service, its status/teardown counterparts), and a host adapter that binds
+it to this seam is deliberately future work owned with the platform
+modules' maintainers. Until that binding exists, the swarm defines the
+seam and the
 composition root binds the host's in-process BotPlatform adapter; nothing
 in agentcompute opens a socket, and a missing BotPlatform binding means
 avernet-kind spawns fail clear at the factory (the failure mode of the
