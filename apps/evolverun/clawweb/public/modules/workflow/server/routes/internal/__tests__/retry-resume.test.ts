@@ -13,8 +13,10 @@ let server: Server;
 let base: string;
 beforeAll(async () => {
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, started_at INTEGER,
-    completed_at INTEGER, result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, gmt_modified INTEGER);
-    INSERT INTO flow_runs VALUES ('flow','failed',123,456,'old result',NULL,NULL,1);
+    completed_at INTEGER, result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, gmt_modified INTEGER,
+    total_token_usage INTEGER, succeeded_count INTEGER, failed_count INTEGER, input_json TEXT);
+    INSERT INTO flow_runs (flow_id,status,started_at,completed_at,result_json,gmt_modified)
+    VALUES ('flow','failed',123,456,'old result',1);
     CREATE TABLE node_executions (flow_id TEXT, node_id TEXT, status TEXT);
     INSERT INTO node_executions VALUES ('flow','node','failed')`);
   const app = express();
@@ -61,4 +63,13 @@ it('retries waiting and blocked runs but never reopens a run completed after the
     expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get(status))
       .toEqual({ status: ['waiting', 'blocked'].includes(status) ? 'running' : status, started_at: 123 });
   }
+});
+
+it('keeps a legacy completion when it arrives before its delayed running status update', async () => {
+  raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at) VALUES (?, ?, ?)')
+    .run('legacy-order', 'failed', 123);
+  expect((await put('legacy-order/completion', { status: 'succeeded', completed_at: 789 })).status).toBe(200);
+  expect((await put('legacy-order/status', { status: 'running' })).status).not.toBe(200);
+  expect(raw.prepare('SELECT status, completed_at FROM flow_runs WHERE flow_id = ?').get('legacy-order'))
+    .toEqual({ status: 'succeeded', completed_at: 789 });
 });

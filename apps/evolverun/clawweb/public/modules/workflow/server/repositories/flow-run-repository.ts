@@ -392,7 +392,9 @@ export class FlowRunRepository {
     }
     values.push(flowId);
     const result = await this.db.exec(
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
+      // Legacy TaskGuard sends the retry's running status asynchronously. Its
+      // completion may reach this route first while the previous status is failed.
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('succeeded', 'cancelled', 'canceled')`,
       values,
     );
     return result.affectedRows > 0;
@@ -424,7 +426,9 @@ export class FlowRunRepository {
     const result = await this.db.exec(
       // Legacy clients, including TaskGuard, resume failed runs through /status.
       // New ClawMind retries use /retry-resume and keep their own timeout fence.
-      "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
+      status === 'running'
+        ? "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status IN ('failed', 'blocked', 'waiting', 'running')"
+        : "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
       [status, now, flowId],
     );
     return result.affectedRows > 0;
