@@ -128,13 +128,3 @@ Controls map:
   still routing the result; the orchestrator wraps every result in an
   `<untrusted_result>` fence and instructs the model never to follow
   instructions found inside it.
-
-## Cost attribution (12.11)
-
-`AgentComputeService.tenant_usage(tenant, since_ms)` folds the tenant's
-persisted message token_usage into per-LLM-call-kind totals
-(orchestrator vs subagent) for billing attribution — cost is recorded,
-never enforced (D22). The `since_ms` window is millisecond-epoch like
-every other module timestamp; call it per billing cycle. Cross-instance
-fairness/preemption and multi-region placement need a coordination
-layer the community runtime does not have yet and are deferred.

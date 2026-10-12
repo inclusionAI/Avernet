@@ -150,7 +150,3 @@ class AgentComputeServiceProtocol(Protocol):
 
     @abstractmethod
     def content_classification(self, run_id: str, tenant: str) -> dict[str, int] | None: ...
-
-    @abstractmethod
-    def tenant_usage(self, tenant: str,
-                     since_ms: int | None = None) -> dict[str, dict[str, int]]: ...

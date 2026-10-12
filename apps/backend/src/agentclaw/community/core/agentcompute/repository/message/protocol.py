@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentId, Message, RunId, TenantId,
@@ -14,6 +14,4 @@ class MessageRepositoryProtocol(Protocol):
     def list_by_agent(self, run_id: RunId, agent_id: AgentId, tenant: TenantId) -> list[Message]: ...
     def apply_retention(self, run_id: RunId, agent_id: AgentId, tenant: TenantId,
                         tail: int) -> int: ...
-    def aggregate_usage_by_tenant(self, tenant: TenantId,
-                                  since: Any = None) -> dict[str, dict[str, int]]: ...
     def purge_run(self, run_id: RunId, tenant: TenantId) -> int: ...

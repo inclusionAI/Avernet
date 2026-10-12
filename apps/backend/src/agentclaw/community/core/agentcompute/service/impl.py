@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
 import time
 import uuid
 from contextlib import contextmanager
@@ -222,26 +221,3 @@ class AgentComputeService(AgentComputeServiceProtocol):
             for kind in classify_pii(chunk):
                 totals[kind.value] = totals.get(kind.value, 0) + 1
         return totals
-
-    def tenant_usage(self, tenant: str,
-                     since_ms: int | None = None) -> dict[str, dict[str, int]]:
-        # 12.11 attribution: token usage folded per LlmCallKind from the
-        # tenant's persisted messages; the since window is millisecond-epoch
-        # like every other timestamp in the module. Cost enforcement stays
-        # out (D22) — this is a read for billing attribution.
-        since = (
-            datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
-            if since_ms is not None
-            else None
-        )
-        usage = self._message_repo.aggregate_usage_by_tenant(
-            TenantId(tenant), since,
-        )
-        return {
-            kind.value: {
-                "prompt_tokens": tokens.prompt_tokens,
-                "completion_tokens": tokens.completion_tokens,
-                "total_tokens": tokens.total_tokens,
-            }
-            for kind, tokens in usage.items()
-        }
