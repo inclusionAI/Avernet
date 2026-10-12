@@ -40,7 +40,8 @@ def migration(tmp_path):
 
     service._run_local_command = run_command
 
-    def migrate(rules=()):
+    def migrate(rules=(), artifact_root_name=HOME_ADMIN_ARTIFACT_ROOT):
+        service._home_admin_artifact_root = artifact_root_name
         return service._migrate_bot_instance(
             device_id="device-cli-test",
             source_dir=source,
@@ -157,7 +158,7 @@ def test_cli_copy_failure_propagates_with_context(tmp_path, caplog):
     assert "service_bot.local_bin.success" not in caplog.text
 
 
-def _restore_service(monkeypatch, artifact, target_home):
+def _restore_service(monkeypatch, artifact, target_home, artifact_root_name=HOME_ADMIN_ARTIFACT_ROOT):
     plan = EngineBuildPlan(
         engine_type="openclaw",
         source_root_name=".openclaw",
@@ -169,6 +170,7 @@ def _restore_service(monkeypatch, artifact, target_home):
         rsync_excludes=[],
     )
     service = BotBuildService.__new__(BotBuildService)
+    service._home_admin_artifact_root = artifact_root_name
     service._resolve_sandbox_provider = MagicMock(
         return_value=MagicMock(get_build_plan=MagicMock(return_value=plan)),
     )
@@ -204,7 +206,8 @@ def _restore_service(monkeypatch, artifact, target_home):
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
-def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypatch, tmp_path, caplog):
+@pytest.mark.parametrize("artifact_root_name", [HOME_ADMIN_ARTIFACT_ROOT, "deployment_home_root"])
+def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypatch, tmp_path, caplog, artifact_root_name):
     caplog.set_level("INFO")
     source, artifact, _, migrate = migration
     engine_bin = source / ".local/bin"
@@ -216,12 +219,12 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (home_bin / "cli").write_text("#!/bin/sh\nprintf 'home-cli'\n")
     (home_bin / "cli").chmod(0o755)
     # An engine cannot supply the reserved Home metadata root.
-    (source / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin").mkdir(parents=True)
-    (source / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/forged").write_text("skip")
-    assert migrate()
+    (source / artifact_root_name / ".local/bin").mkdir(parents=True)
+    (source / artifact_root_name / ".local/bin/forged").write_text("skip")
+    assert migrate(artifact_root_name=artifact_root_name)
     assert (artifact / ".local/bin/cli").read_text() == "engine-cli"
     assert (artifact / ".local/engine-data").read_text() == "engine state"
-    assert not (artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/bin/forged").exists()
+    assert not (artifact / artifact_root_name / ".local/bin/forged").exists()
 
     restored_home = tmp_path / "restored-home"
     (restored_home / ".local/bin").mkdir(parents=True)
@@ -230,13 +233,13 @@ def test_build_and_restore_keep_engine_and_home_cli_separate(migration, monkeypa
     (restored_home / ".local/share").mkdir()
     (restored_home / ".local/share/state").write_text("keep home state")
     # Only bin can leave the metadata root, even if another directory exists.
-    (artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/share").mkdir()
-    (artifact / HOME_ADMIN_ARTIFACT_ROOT / ".local/share/state").write_text("do not restore")
-    commands, restore = _restore_service(monkeypatch, artifact, restored_home)
+    (artifact / artifact_root_name / ".local/share").mkdir()
+    (artifact / artifact_root_name / ".local/share/state").write_text("do not restore")
+    commands, restore = _restore_service(monkeypatch, artifact, restored_home, artifact_root_name)
     assert restore()["restore_type"] == "migration_path"
     assert (restored_home / ".openclaw/.local/bin/cli").read_text() == "engine-cli"
     assert (restored_home / ".openclaw/.local/engine-data").read_text() == "engine state"
-    assert not (restored_home / ".openclaw" / HOME_ADMIN_ARTIFACT_ROOT).exists()
+    assert not (restored_home / ".openclaw" / artifact_root_name).exists()
     assert subprocess.check_output([str(restored_home / ".local/bin/cli")], text=True) == "home-cli"
     assert (restored_home / ".local/bin/target-only").read_text() == "keep target CLI"
     assert (restored_home / ".local/share/state").read_text() == "keep home state"
