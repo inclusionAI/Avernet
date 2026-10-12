@@ -369,7 +369,8 @@ def test_unavailable_provider_and_module_provider_fail_closed() -> None:
     service = CallerIdentityModule().caller_iam_token_service(
         caller_identity=MagicMock(), auth_plugin=MagicMock(),
         token_provider=MagicMock(), runtime_updater=MagicMock(),
-        runtime_bindings=MagicMock(), lock_repository=MagicMock(),
+        runtime_bindings=MagicMock(),
+        lock_repository=MagicMock(),
         session_validator=MagicMock(),
     )
     assert isinstance(service, CallerIamTokenService)

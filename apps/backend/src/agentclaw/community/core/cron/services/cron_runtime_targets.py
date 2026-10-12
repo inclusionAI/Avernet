@@ -51,6 +51,10 @@ class CronRuntimeTarget:
     publish_id: int | None = None
     publish_status: str | None = None
     device_uuid: str | None = None
+    create_by_id: str | None = None
+    operator_id: str | None = None
+    fixed_binding: bool = False
+    caller_binding: bool = False
 
 
 class CronRuntimeTargetMixin:
@@ -224,6 +228,9 @@ class CronRuntimeTargetMixin:
             item["publish_status"] = target.publish_status
         if target.device_uuid:
             item["device_uuid"] = target.device_uuid
+            item["device_id"] = target.device_uuid
+        if target.create_by_id:
+            item["create_by_id"] = target.create_by_id
 
     def _resolve_runtime_context(self, target: CronRuntimeTarget):
         """根据 target 构造 adapter 连接上下文。"""
@@ -232,7 +239,7 @@ class CronRuntimeTargetMixin:
             kwargs["device_uuid"] = target.device_uuid
 
         # 草稿态跟随 Bot 当前 binding；发布态使用发布记录中的 stage binding。
-        if target.runtime_stage == RUNTIME_STAGE_DRAFT:
+        if target.runtime_stage == RUNTIME_STAGE_DRAFT and not target.fixed_binding:
             return self._resolver.resolve_for_bot(
                 target.bot_id,
                 target.owner_id,
@@ -240,7 +247,7 @@ class CronRuntimeTargetMixin:
             )
         return self._resolver.resolve_for_binding(
             target.binding_id,
-            target.owner_id,
+            (target.operator_id or target.owner_id) if target.caller_binding else target.owner_id,
             bot_id=target.bot_id,
             **kwargs,
         )

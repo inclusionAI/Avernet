@@ -21,6 +21,8 @@ from agentclaw.community.core.cron.services.cron_runtime_targets import (
 
 def _make_service(*, bot_provider=None):
     return CronRelayService(
+        runtime_bindings=MagicMock(),
+        collaborators=MagicMock(),
         bot_provider=bot_provider or MagicMock(),
         device_provider=MagicMock(),
         transport=MagicMock(),
@@ -51,6 +53,7 @@ def _service_with_stage_targets():
         "binding_id": 1,
     }
     svc = _make_service(bot_provider=bot_provider)
+    svc._device_provider.get_device.return_value = {"status": "ACTIVE", "device_provider": "local"}
     svc._build_runtime_targets = MagicMock(
         return_value=(
             [_target(RUNTIME_STAGE_DRAFT, 1), _target(RUNTIME_STAGE_ONLINE, 42)],

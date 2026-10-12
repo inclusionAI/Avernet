@@ -29,3 +29,12 @@ internal_dependencies:
 ### Change impact
 
 Path-layout changes ripple to every consumer (engine, device, skill_center, resources). Versioning the layout is preferable to in-place renames.
+
+## Runtime Cron state
+
+Service Bot artifacts exclude the engine-root `cron/` directory. Claude Code
+and AICoding also exclude legacy `sessions/cron-tasks.json` and
+`sessions/cron-runs.json`; AICoding no longer explicitly includes the task file.
+Cron configuration and history belong to the selected runtime instance. Artifact
+rebuilds remove stale excluded files, while draft restore keeps existing runtime
+tasks. Installation must also reject task state from older artifacts.
