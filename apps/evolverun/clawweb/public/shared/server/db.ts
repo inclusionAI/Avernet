@@ -6,6 +6,7 @@
  * NO dependency on ClawFlow — shares the same database tables only.
  */
 import Database from "better-sqlite3";
+import { SqliteDatabase } from "./db/sqlite-database.js";
 import mysql from "mysql2/promise";
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -428,52 +429,6 @@ class NoOpDatabase implements IDatabase {
 }
 
 // ── SQLite Database ──
-
-class SqliteDatabase implements IDatabase {
-  readonly dbType = "sqlite" as const;
-  readonly dialect = sqliteDialect;
-  private db: Database.Database;
-
-  constructor(db: Database.Database) {
-    this.db = db;
-  }
-
-  async query<T>(sql: string, params?: unknown[]): Promise<T[]> {
-    const stmt = this.db.prepare(sql);
-    const rows = params ? stmt.all(...params) : stmt.all();
-    return rows as T[];
-  }
-
-  async exec(sql: string, params?: unknown[]): Promise<ExecResult> {
-    // When no parameters are supplied the SQL may contain multiple statements
-    // (e.g. a ZDAS-style DDL that the dialect renders into CREATE TABLE plus
-    // several CREATE INDEX statements). better-sqlite3's exec() runs the whole
-    // batch, whereas prepare() only accepts a single statement.
-    if (params === undefined) {
-      this.db.exec(sql);
-      return { affectedRows: 0, insertId: undefined };
-    }
-    const stmt = this.db.prepare(sql);
-    const result = stmt.run(...params);
-    return { affectedRows: result.changes, insertId: result.lastInsertRowid as number | undefined };
-  }
-
-  async transaction<T>(fn: (db: IDatabase) => Promise<T>): Promise<T> {
-    this.db.exec("BEGIN");
-    try {
-      const result = await fn(this);
-      this.db.exec("COMMIT");
-      return result;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  async close(): Promise<void> {
-    this.db.close();
-  }
-}
 
 // ── MySQL Database ──
 

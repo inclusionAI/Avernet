@@ -9,6 +9,9 @@ import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
+import { createRecoveryClockRouter } from "./recovery-clock.js";
+import { isExpectedRecoveryClock, type ExpectedRecoveryClock } from "../../repositories/recovery-clock-repository.js";
+
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
   input: { flowId: string; status: string },
@@ -30,6 +33,7 @@ export function createInternalRunsRouter(
   observers: { onTerminal?: RunTerminalObserver } = {},
 ): Router {
   const router = Router();
+  router.use(createRecoveryClockRouter(flowRunRepo));
 
   /** POST / — insert a flow run */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
@@ -183,18 +187,24 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { reason, current_phase, total_duration_ms, completed_at } = req.body as {
+      const { reason, current_phase, total_duration_ms, completed_at, expectedClock } = req.body as {
         reason?: string;
         current_phase?: string;
         total_duration_ms?: number | null;
         completed_at?: number;
+        expectedClock?: ExpectedRecoveryClock;
       };
+      if (expectedClock !== undefined && !isExpectedRecoveryClock(expectedClock)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "Invalid expectedClock" });
+        return;
+      }
       if (!reason) {
         res.status(400).json({ success: false, error: "Bad Request", message: "reason is required" });
         return;
       }
       const claimed = await flowRunRepo.markFailedIfRunning(flowId, {
         reason,
+        expectedClock,
         currentPhase: current_phase ?? "timeout",
         totalDurationMs: total_duration_ms ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
@@ -325,6 +335,10 @@ export function createInternalRunsRouter(
 
       const ok = await flowRunRepo.resetStartedAt(flowId, Math.floor(startedAt));
       if (!ok) {
+        if (await flowRunRepo.getRecoveryClock(flowId)) {
+          res.status(409).json({ success: false, error: "Conflict", message: "Recovery clock owns the timeout window; started_at is immutable" });
+          return;
+        }
         apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
@@ -429,6 +443,11 @@ export function createInternalRunsRouter(
       return;
     }
     try {
+      if (await flowRunRepo.getRecoveryClock(flowId)) {
+        res.status(409).json({ success: false, error: "Conflict", message: "Use the recovery clock retry protocol" });
+        return;
+      }
+
       const run = await flowRunRepo.findByFlowId(flowId);
       if (!run) {
         apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 404 });

@@ -4,6 +4,8 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
+import { RecoveryClockRepository, type RecoveryClockCommand, type ExpectedRecoveryClock } from "./recovery-clock-repository.js";
+
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("unknown column 'evolution_analysis_status'")
@@ -123,6 +125,12 @@ export type FindWorkflowTypesPageResult = {
 
 export class FlowRunRepository {
   constructor(private db: IDatabase) {}
+
+  getRecoveryClock(flowId: string) { return new RecoveryClockRepository(this.db).get(flowId); }
+
+  putRecoveryClock(flowId: string, input: RecoveryClockCommand) {
+    return new RecoveryClockRepository(this.db).put(flowId, input);
+  }
 
   // ── Read methods ──
 
@@ -350,7 +358,11 @@ export class FlowRunRepository {
   }
 
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
-    try {
+    const clocks = new RecoveryClockRepository(this.db);
+    return clocks.withRun(flowId, async (tx, currentStatus) => {
+      const clock = await clocks.get(flowId, tx);
+      if (clock && (clock.phase === "retry_pending"
+        || ["succeeded", "failed", "cancelled"].includes(currentStatus ?? ""))) return false;
       const now = this.db.dialect.now();
       // Build SET clause dynamically: only include fields when explicitly provided.
       // result_json: undefined = preserve existing (e.g. on success, keep last node result);
@@ -392,16 +404,12 @@ export class FlowRunRepository {
         values.push(flowId);
       }
       values.push(flowId);
-      const result = await this.db.exec(
+      const result = await tx.exec(
         `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
         values,
       );
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateCompletion failed: ${msg}`);
-      return false;
-    }
+    });
   }
 
   /**
@@ -416,34 +424,38 @@ export class FlowRunRepository {
     currentPhase: string;
     totalDurationMs?: number | null;
     completedAt: number;
+    expectedClock?: ExpectedRecoveryClock;
   }): Promise<boolean> {
-    try {
-      const result = await this.db.exec(
+    const clocks = new RecoveryClockRepository(this.db);
+    return clocks.withRun(flowId, async tx => {
+      const clock = await clocks.get(flowId, tx);
+      const expected = fields.expectedClock;
+      if (clock && (!expected || clock.phase !== "active"
+        || clock.ownerInstanceId !== expected.ownerInstanceId || clock.bootId !== expected.bootId
+        || clock.epoch !== expected.epoch || clock.seq !== expected.seq)) return false;
+      if (!clock && expected) return false;
+      const result = await tx.exec(
         `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
          WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
         [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId],
       );
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.markFailedIfRunning failed: ${msg} (dbType=${this.db.dbType}, flowId=${flowId})`);
-      return false;
-    }
+    });
   }
 
   async updateStatus(flowId: string, status: string): Promise<boolean> {
-    try {
+    const clocks = new RecoveryClockRepository(this.db);
+    return clocks.withRun(flowId, async (tx, currentStatus) => {
+      const clock = await clocks.get(flowId, tx);
+      if (clock && (clock.phase === "retry_pending"
+        || ["succeeded", "failed", "cancelled"].includes(currentStatus ?? ""))) return false;
       const now = this.db.dialect.now();
-      const result = await this.db.exec(
+      const result = await tx.exec(
         "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
         [status, now, flowId],
       );
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateStatus failed: ${msg}`);
-      return false;
-    }
+    });
   }
 
   /** Abort a flow run: set status to "cancelled" (user-initiated abort) and record completed_at + result_json. */
@@ -496,24 +508,15 @@ export class FlowRunRepository {
   }
 
   async resetStartedAt(flowId: string, startedAt: number): Promise<boolean> {
-    try {
-      // Do NOT set gmt_modified explicitly — MySQL/ZDAS maintains it via
-      // ON UPDATE CURRENT_TIMESTAMP and SQLite via trg_flow_runs_update.
-      // Every manually assigned variant (epoch int, ISO/UTC string, local
-      // string) was rejected on pre with "Incorrect datetime value for
-      // column 'gmt_modified'"; letting the DB maintain it removes the
-      // whole failure class.
-      const result = await this.db.exec(
+    const clocks = new RecoveryClockRepository(this.db);
+    return clocks.withRun(flowId, async tx => {
+      if (await clocks.get(flowId, tx)) return false;
+      const result = await tx.exec(
         "UPDATE flow_runs SET started_at = ?, completed_at = NULL WHERE flow_id = ?",
         [startedAt, flowId],
       );
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      // Include full context so any recurrence is diagnosable from the log alone.
-      console.warn(`[db] FlowRunRepository.resetStartedAt failed: ${msg} (dbType=${this.db.dbType}, flowId=${flowId}, startedAt=${startedAt})`);
-      return false;
-    }
+    });
   }
 
   /**
@@ -554,18 +557,16 @@ export class FlowRunRepository {
    *  Avoids blindly clearing failed_count to 0 which would erase counts for
    *  other failed nodes that are not being retried. */
   async resetFailedForRetry(flowId: string, resetCount: number): Promise<boolean> {
-    try {
+    const clocks = new RecoveryClockRepository(this.db);
+    return clocks.withRun(flowId, async tx => {
+      if (await clocks.get(flowId, tx)) return false;
       const now = this.db.dialect.now();
-      const result = await this.db.exec(
+      const result = await tx.exec(
         "UPDATE flow_runs SET failed_count = GREATEST(failed_count - ?, 0), status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ?",
         [resetCount, now, flowId],
       );
       return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.resetFailedForRetry failed: ${msg}`);
-      return false;
-    }
+    });
   }
 
   async deleteByFlowId(flowId: string): Promise<boolean> {
