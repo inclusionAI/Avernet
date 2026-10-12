@@ -148,7 +148,11 @@ RegisterPath:
     description: >-
       Anonymous endpoint. The register token is the only credential; BCS verifies
       the HMAC token before creating the Bot. The Bot is onboarded under the
-      human actor encoded in the token, establishing ownership.
+      human actor encoded in the token, establishing initialized ownership:
+      a successful response means the committed first-ownership state exists,
+      and any required persistence failure returns an error instead of a
+      deferred success. Runtime Bot connects without a Human still establish
+      uninitialized (version 0) identities only.
       Mode defaults to plugin (upstream WebSocket/bridge connection), using the
       same plugin/gateway values as Provider administration and Bot storage.
       A v1 token cannot register gateway or Provider
@@ -168,9 +172,10 @@ RegisterPath:
       a downlink credential. Credential-store failures return 500, not a readiness
       error. Provider/ref is unique across modes and retained after soft deletion.
       Any duplicate scoped ref returns 409, including an identical retry.
-      A valid token can register multiple distinct refs. SQL Bot creation and
-      gateway binding creation are atomic; owner-edge failures are returned but
-      may leave an existing Bot requiring operator reconciliation. Registration is not an
+      A valid token can register multiple distinct refs. SQL Bot creation, the
+      gateway binding and the first ownership initialization commit in one
+      atomic transaction; any required write failure fails the whole
+      registration and replays no credentials. Registration is not an
       endpoint-update or mode-migration API. Responses containing tokens must not
       be cached. No bridge process is started by this API.
     x-avernet-security: {}

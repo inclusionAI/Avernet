@@ -103,6 +103,7 @@ async fn persists_route_per_send_restores_abort_and_relay_without_model_leakage(
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: Event::StartSend, now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: Some(prepared.transport_context_json.clone()), deadline_at_ms: Some(i64::MAX),
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
     }).await.unwrap();
     if let bcs_protocol::BcsFrame::Request(frame) = &mut prepared.command.frame { frame.id = started.request_id.clone().unwrap(); }
     preparer.before_send(&started, &prepared.command).await.unwrap();

@@ -44,9 +44,23 @@ paths:
     $ref: ./openapi/manifest.yaml#/ManifestAssetPath
   /api/v1/collaboration/definitions/validate:
     $ref: ./openapi/collaboration-definitions.yaml#/CollaborationDefinitionValidatePath
+  /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}:
+    $ref: ./internal/team-manager-sources.yaml#/TeamManagerSourcesPath
+  /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}/members:
+    $ref: ./internal/team-manager-sources.yaml#/TeamManagerMemberRepairPath
 components:
   securitySchemes:
     AgentIdentityBearer:
       type: http
       scheme: bearer
       description: Agent identity token verified by the injected BCS identity verifier, independent of Bot registration.
+    TeamManagerServiceCredential:
+      type: http
+      scheme: bearer
+      description: >-
+        Trusted platform team-manager service credential (dedicated
+        signed purpose, plan Task 13 / spec §6.1): verified by the
+        injected credential verifier and bound to a service id, env, and
+        the allowed Bot/team/operation scopes. NOT a Human Principal and
+        NOT anonymous; the raw credential never reaches audit rows,
+        business logs, or persisted commands.

@@ -1,0 +1,424 @@
+# Trusted team-manager sources slice (plan Task 13, spec §6.1).
+#
+# The reserved path contract of the trusted platform's team-manager
+# synchronization:
+#   PUT   /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}
+#         — the ONLY normal sync/move entry (one complete snapshot);
+#   POST  .../members — internal operations repair: add ONE user to the
+#         team source;
+#   DELETE .../members?user_id=&Idempotency-Key=... — internal operations
+#         repair: remove ONE user from the team source.
+#
+# The slice is NOT anonymous: it authenticates with the trusted
+# team-manager service credential (Bearer) instead of a Gateway
+# Human/App/Bot Principal; verification binds service id, env, and the
+# allowed Bot/team/operation scopes. No identity or scope may arrive in a
+# body; the raw credential never appears in audit, logs, or persisted
+# commands.
+
+TeamManagerSourcesPath:
+  put:
+    operationId: sync_team_manager_sources
+    tags: ["Internal / Bot Managers"]
+    summary: Replace or move one URL team's manager source snapshot.
+    description: >-
+      Trusted-platform sync entry. operation=sync replaces the complete
+      team/{team_id} manager snapshot with manager_user_ids (an EMPTY
+      array is a validated full revoke of this team's source; duplicates
+      normalize into a set). operation=move atomically stops the URL team
+      and enables new_team_id with the same snapshot inside one
+      Bot-serialized transaction. idempotency_key scopes durable
+      idempotency within (env, service, bot, team): an identical retry
+      replays the original receipt; the same key with a diverged payload
+      is a 409. Same-key delivery ordering across sync/move is the
+      platform's commitment (Gate 0, spec §1.3); no membership_version is
+      accepted. Direct manager sources, ownership-transfer sources, and
+      the owner are never touched by this lane.
+    x-avernet-security: {}
+    security:
+      - TeamManagerServiceCredential: []
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/TeamManagerSyncBody"
+    responses:
+      "200":
+        description: >-
+          The committed receipt (or the replayed original receipt for an
+          identical retry). An empty difference still yields a receipt.
+        content:
+          application/json:
+            schema:
+              $ref: "#/TeamSyncReceiptEnvelope"
+      "400":
+        description: >-
+          Body shape rejected (missing/null/mistyped manager_user_ids, an
+          unknown operation, unknown fields, sync carrying new_team_id,
+          move missing or re-using its target team, blank idempotency_key),
+          or the snapshot is not a resolvable membership snapshot.
+        x-error-codes:
+          - invalid_request
+          - invalid_membership_snapshot
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: The team-manager service credential is missing or blank.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The credential does not verify, or the verified service is not
+          scoped for this Bot/team/operation.
+        x-error-codes:
+          - invalid_manager_sync_source
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: The target Bot does not exist or is deleted.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The idempotency key was already used with a different payload,
+          or the Bot's ownership is not initialized.
+        x-error-codes:
+          - manager_sync_conflict
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+TeamManagerMemberRepairPath:
+  post:
+    operationId: add_team_manager_source_member
+    tags: ["Internal / Bot Managers"]
+    summary: Internal repair — add ONE user to a team manager source.
+    description: >-
+      Operations-repair entry (never the platform's normal sync path):
+      reconciles the team/{team_id} member set by adding exactly one
+      user, with the same source semantics, service-credential lane,
+      audit, and durable idempotency as the snapshot sync. The body is
+      exactly user_id + idempotency_key; no identity or scope may arrive
+      in the body.
+    x-avernet-security: {}
+    security:
+      - TeamManagerServiceCredential: []
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/TeamMemberRepairBody"
+    responses:
+      "200":
+        description: The committed (or replayed) repair receipt.
+        content:
+          application/json:
+            schema:
+              $ref: "#/TeamSyncReceiptEnvelope"
+      "400":
+        description: >-
+          Body shape rejected (missing or blank user_id/idempotency_key,
+          unknown fields), or the reconciled snapshot is not resolvable.
+        x-error-codes:
+          - invalid_request
+          - invalid_membership_snapshot
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: The team-manager service credential is missing or blank.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The credential does not verify, or the verified service is not
+          scoped for this Bot/team.
+        x-error-codes:
+          - invalid_manager_sync_source
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: The target Bot does not exist or is deleted.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The idempotency key was already used with a different payload,
+          or the Bot's ownership is not initialized.
+        x-error-codes:
+          - manager_sync_conflict
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: remove_team_manager_source_member
+    tags: ["Internal / Bot Managers"]
+    summary: Internal repair — remove ONE user from a team manager source.
+    description: >-
+      Operations-repair entry (never the platform's normal sync path):
+      reconciles the team/{team_id} member set by removing exactly one
+      user, under the same credential lane, audit, and durable idempotency
+      as the snapshot sync. user_id rides the query string and the
+      idempotency key the Idempotency-Key header; both are required.
+    x-avernet-security: {}
+    security:
+      - TeamManagerServiceCredential: []
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: team_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: user_id
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    responses:
+      "200":
+        description: The committed (or replayed) repair receipt.
+        content:
+          application/json:
+            schema:
+              $ref: "#/TeamSyncReceiptEnvelope"
+      "400":
+        description: >-
+          The user_id query or the Idempotency-Key header is missing or
+          blank, or the reconciled snapshot is not resolvable.
+        x-error-codes:
+          - invalid_request
+          - invalid_membership_snapshot
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: The team-manager service credential is missing or blank.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The credential does not verify, or the verified service is not
+          scoped for this Bot/team.
+        x-error-codes:
+          - invalid_manager_sync_source
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: The target Bot does not exist or is deleted.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The idempotency key was already used with a different payload,
+          or the Bot's ownership is not initialized.
+        x-error-codes:
+          - manager_sync_conflict
+          - ownership_not_initialized
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+ManagerUserIds:
+  description: >-
+    The RAW complete desired manager snapshot of one team. An EMPTY array
+    is legal (a validated full revoke of this team's source); a missing
+    or null field never decodes into one. Entries are bare trusted user
+    ids; duplicates normalize into a set inside the store transaction.
+  type: array
+  items:
+    type: string
+    minLength: 1
+
+IdempotencyKey:
+  description: >-
+    Durable idempotency key, unique within (env, service, bot, team).
+    Same-key identical payloads replay the original receipt; same-key
+    diverged payloads are a 409.
+  type: string
+  minLength: 1
+
+TeamManagerSyncBody:
+  description: >-
+    Exactly operation + manager_user_ids + idempotency_key, plus
+    new_team_id for operation=move ONLY (additionalProperties false at
+    every branch). The operation is a business-semantic field and never
+    implied by the idempotency key.
+  oneOf:
+    - type: object
+      additionalProperties: false
+      required:
+        - operation
+        - manager_user_ids
+        - idempotency_key
+      properties:
+        operation:
+          type: string
+          const: sync
+        manager_user_ids:
+          $ref: "#/ManagerUserIds"
+        idempotency_key:
+          $ref: "#/IdempotencyKey"
+    - type: object
+      additionalProperties: false
+      required:
+        - operation
+        - new_team_id
+        - manager_user_ids
+        - idempotency_key
+      properties:
+        operation:
+          type: string
+          const: move
+        new_team_id:
+          type: string
+          minLength: 1
+        manager_user_ids:
+          $ref: "#/ManagerUserIds"
+        idempotency_key:
+          $ref: "#/IdempotencyKey"
+
+TeamMemberRepairBody:
+  description: >-
+    The single-member ADD repair body: exactly user_id + idempotency_key
+    (additionalProperties false). No identity, scope, or credential may
+    arrive here.
+  type: object
+  additionalProperties: false
+  required:
+    - user_id
+    - idempotency_key
+  properties:
+    user_id:
+      type: string
+      minLength: 1
+    idempotency_key:
+      $ref: "#/IdempotencyKey"
+
+TeamSyncReceipt:
+  description: >-
+    The durable receipt of one committed team manager operation. A move
+    carries the moved-to team in new_team_id; the committed operation
+    kind is sync or move.
+  type: object
+  additionalProperties: false
+  required:
+    - operation_id
+    - bot_id
+    - team_id
+    - operation
+    - granted_count
+    - revoked_count
+  properties:
+    operation_id:
+      type: string
+      minLength: 1
+    bot_id:
+      type: string
+      minLength: 1
+    team_id:
+      type: string
+      minLength: 1
+    operation:
+      type: string
+      enum:
+        - sync
+        - move
+    new_team_id:
+      type: string
+      minLength: 1
+    granted_count:
+      type: integer
+      minimum: 0
+    revoked_count:
+      type: integer
+      minimum: 0
+
+TeamSyncReceiptEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/TeamSyncReceipt"
+    request_id:
+      type: string

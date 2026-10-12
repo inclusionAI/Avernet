@@ -3,20 +3,21 @@
     reason = "test assertions intentionally fail fast"
 )]
 
+use bcs_service_api::types::BotOperationContext;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
+use bcs_app_bot::{BotAuthorityHookImpl, BotServiceConfig, BotServiceImpl};
 use bcs_bot::{BotControlPlaneCore, BotCore};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
 use bcs_service_api::application::{ConnectService, RequestDirection, RequestsPage};
 use bcs_service_api::application::v1::{
-    ApplicationError, Bot, BotCandidatePurpose, BotCandidateSearchMode, BotDescriptorPatch,
-    BotKind, BotPatch, BotReachability, BotService, BotStatus, BotVisibility,
-    FriendCheckInStrategy, GetBot, ListBotCandidates, ListMyBots, QueryBots,
-    SearchBotCandidates, UpdateBot, UserVisibility,
+    ApplicationError, Bot, BotAuthorityHook, BotCandidatePurpose, BotCandidateSearchMode,
+    BotDescriptorPatch, BotKind, BotPatch, BotReachability, BotService, BotStatus, BotVisibility,
+    FriendCheckInStrategy, GetBot, ListBotCandidates, ListMyBots, QueryBots, SearchBotCandidates,
+    UpdateBot, UserVisibility,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateSearchCoreResult, BotCandidateSearchCoreService,
@@ -107,6 +108,9 @@ impl Fixture {
         let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
             BotControlPlaneCore::new(repo.clone(), providers.clone(), providers.clone()),
         );
+        let authority: Arc<dyn BotAuthorityHook> = Arc::new(BotAuthorityHookImpl::new(Arc::new(
+            bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(repo.clone()),
+        )));
         let env = bcs_config::resolve_env_str();
         let service = BotServiceImpl::new(
             control_plane,
@@ -114,6 +118,7 @@ impl Fixture {
             friends.clone(),
             Arc::new(NoopConnectService),
             Arc::new(RecordingCandidateSearch::empty()),
+            authority,
             BotServiceConfig { env: env.clone() },
         );
         Self {
@@ -149,6 +154,104 @@ impl Fixture {
             .await
             .expect("update actor status");
     }
+
+    /// Initialize `bot_id`'s ownership with `owner` (version 1 + the
+    /// approved owner edge) so the ledger-based tests mirror the
+    /// registration-init contract.
+    async fn seed_owner(&self, bot_id: &str, owner: &str) {
+        self.repo
+            .seed_authority_owned(bot_id, owner)
+            .await
+            .expect("seed approved owner edge");
+    }
+}
+
+/// Authorization double for facade tests that run on control-plane
+/// doubles: it RECORDS every question and answers with a fixed verdict so
+/// the hook is PROVEN to be the only authorization source (never
+/// `created_by`, never the transport body).
+struct RecordingAuthorityHook {
+    manage: Mutex<Vec<(String, String)>>,
+    required_owner: Mutex<Vec<(String, String)>>,
+    verdict: Result<bool, ServiceError>,
+}
+
+impl RecordingAuthorityHook {
+    fn allowing() -> Self {
+        Self {
+            manage: Mutex::new(Vec::new()),
+            required_owner: Mutex::new(Vec::new()),
+            verdict: Ok(true),
+        }
+    }
+
+    fn denying() -> Self {
+        Self {
+            manage: Mutex::new(Vec::new()),
+            required_owner: Mutex::new(Vec::new()),
+            verdict: Ok(false),
+        }
+    }
+
+    fn manage_calls(&self) -> Vec<(String, String)> {
+        self.manage.lock().expect("manage lock").clone()
+    }
+}
+
+#[async_trait]
+impl BotAuthorityHook for RecordingAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        self.manage
+            .lock()
+            .expect("manage lock")
+            .push((user_id.to_string(), bot_id.to_string()));
+        match &self.verdict {
+            Ok(verdict) => Ok(*verdict),
+            Err(error) => Err(clone_test_service_error(error)),
+        }
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        self.required_owner
+            .lock()
+            .expect("require-owner lock")
+            .push((user_id.to_string(), bot_id.to_string()));
+        Ok(())
+    }
+}
+
+fn clone_test_service_error(error: &ServiceError) -> ServiceError {
+    match error {
+        ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { bot_id, env },
+        ) => ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized {
+                bot_id: bot_id.clone(),
+                env: env.clone(),
+            },
+        ),
+        ServiceError::Authority(bcs_service_api::types::error::AuthorityError::CorruptAuthority {
+            bot_id,
+            env,
+            detail,
+        }) => ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::CorruptAuthority {
+                bot_id: bot_id.clone(),
+                env: env.clone(),
+                detail: detail.clone(),
+            },
+        ),
+        other => panic!("unsupported test error shape: {other:?}"),
+    }
+}
+
+/// The production authority chain over one memory repo: the strict Core
+/// implemented by `bcs-edge-permission` over the repo port twin, wrapped
+/// by the application hook — the same wiring bootstrap performs.
+fn repo_authority_hook(repo: &Arc<MemoryBotRepo>) -> Arc<dyn BotAuthorityHook> {
+    Arc::new(BotAuthorityHookImpl::new(Arc::new(
+        bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(repo.clone()),
+    )))
 }
 
 struct RecordingCandidateSearch {
@@ -176,6 +279,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: Option<String>,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<bcs_service_api::application::ConnectResult> {
         unreachable!("not used")
     }
@@ -185,6 +289,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("not used")
     }
@@ -194,11 +299,12 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<String>,
+        _: BotOperationContext,
     ) -> ServiceResult<()> {
         unreachable!("not used")
     }
 
-    async fn cancel(&self, _: &str) -> ServiceResult<()> {
+    async fn cancel(&self, _: &str, _: &str, _: BotOperationContext) -> ServiceResult<()> {
         unreachable!("not used")
     }
 
@@ -214,6 +320,7 @@ impl ConnectService for RecordingConnectService {
         _: &str,
         _: &str,
         _: Option<bcs_service_api::RequestAuthHeaders>,
+        _: BotOperationContext,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("not used")
     }
@@ -305,6 +412,7 @@ impl BotControlPlaneCoreService for RecordingBotControlPlane {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
+        _operation: BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
         unreachable!("not used")
     }
@@ -428,6 +536,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
+        _operation: BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
         unreachable!("not used by authorization-priority test")
     }
@@ -461,12 +570,18 @@ async fn ownership_denial_precedes_provider_hydration() {
             friend_check_in_strategy: Default::default(),
         },
     });
+    // Even though the row still says `created_by = staff-1`, raw creation
+    // provenance authorizes NOTHING after the cutover: the deny verdict of
+    // the authority hook decides, and the row's staff-1 creator is not the
+    // caller at all.
+    let authority = Arc::new(RecordingAuthorityHook::denying());
     let service = BotServiceImpl::new(
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
         Arc::new(NoopConnectService),
         Arc::new(RecordingCandidateSearch::empty()),
+        authority.clone(),
         BotServiceConfig { env },
     );
 
@@ -483,6 +598,12 @@ async fn ownership_denial_precedes_provider_hydration() {
         .expect_err("ownership denial must not hydrate Provider metadata");
 
     assert_eq!(error.code(), "forbidden");
+    assert_eq!(
+        authority.manage_calls(),
+        vec![("staff-2".to_string(), "owned".to_string())],
+        "the update gate must resolve through the authority hook with the \
+         authenticated caller's trusted user id and the exact bot id"
+    );
 }
 
 #[tokio::test]
@@ -513,6 +634,7 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         friends,
         Arc::new(NoopConnectService),
         candidate_search.clone(),
+        repo_authority_hook(&repo),
         BotServiceConfig { env },
     );
 
@@ -539,6 +661,11 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         .await
         .expect("register search bot");
     }
+    // The acting perspective follows CURRENT authority (owner edge), not
+    // the old created_by claim.
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
     repo.register_streaming_connection("recommended-b".to_string())
         .await
         .expect("connect recommended bot");
@@ -646,6 +773,7 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
         Arc::new(FriendCore::memory()),
         Arc::new(NoopConnectService),
         candidate_search.clone(),
+        repo_authority_hook(&repo),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
@@ -662,6 +790,9 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
     )
     .await
     .expect("register acting bot");
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
 
     for query in [None, Some(String::new()), Some("  \t\n ".to_string())] {
         let result = service
@@ -722,6 +853,7 @@ async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enri
         Arc::new(FriendCore::memory()),
         Arc::new(NoopConnectService),
         candidate_search,
+        repo_authority_hook(&repo),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
@@ -748,6 +880,9 @@ async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enri
         .await
         .expect("register fallback bot");
     }
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
 
     let result = service
         .search_candidates(SearchBotCandidates {
@@ -800,6 +935,7 @@ async fn search_candidates_omits_enrichment_for_empty_query_mode() {
         Arc::new(FriendCore::memory()),
         Arc::new(NoopConnectService),
         candidate_search,
+        repo_authority_hook(&repo),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
@@ -826,6 +962,9 @@ async fn search_candidates_omits_enrichment_for_empty_query_mode() {
         .await
         .expect("register empty-mode bot");
     }
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
 
     let result = service
         .search_candidates(SearchBotCandidates {
@@ -868,6 +1007,7 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
         Arc::new(FriendCore::memory()),
         Arc::new(NoopConnectService),
         candidate_search,
+        repo_authority_hook(&repo),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
@@ -884,6 +1024,9 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
     )
     .await
     .expect("register acting bot");
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
     repo.ensure_human_actor("staff-2", "Other Human")
         .await
         .expect("ensure human actor");
@@ -919,6 +1062,7 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
         Arc::new(FriendCore::memory()),
         Arc::new(NoopConnectService),
         candidate_search.clone(),
+        repo_authority_hook(&repo),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },
@@ -935,6 +1079,9 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
     )
     .await
     .expect("register acting bot");
+    repo.seed_authority_owned("acting", "staff-1")
+        .await
+        .expect("seed acting owner edge");
 
     let error = service
         .search_candidates(SearchBotCandidates {
@@ -962,6 +1109,9 @@ async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
     fixture
         .add_bot("acting", "staff-1", "private", ActorStatus::Online)
         .await;
+    // The 'acting' creation source is irrelevant now; the perspective
+    // follows the seeded owner edge.
+    fixture.seed_owner("acting", "staff-1").await;
     fixture
         .repo
         .ensure_human_actor("staff-1", "Human")
@@ -1065,6 +1215,7 @@ async fn collaboration_candidates_include_private_friends_without_status_filteri
     fixture
         .add_bot("acting", "staff-1", "private", ActorStatus::Online)
         .await;
+    fixture.seed_owner("acting", "staff-1").await;
     fixture
         .add_bot("private-friend", "staff-2", "private", ActorStatus::Hidden)
         .await;
@@ -1136,12 +1287,17 @@ async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() 
             kind: ActorKind::Human,
         },
     ]));
+    // The candidate perspective is authorized through the CURRENT
+    // authority hook (allow verdict recorded below), never the row's
+    // created_by.
+    let authority = Arc::new(RecordingAuthorityHook::allowing());
     let service = BotServiceImpl::new(
         control_plane.clone(),
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
         connect,
         Arc::new(RecordingCandidateSearch::empty()),
+        authority.clone(),
         BotServiceConfig { env: env.clone() },
     );
 
@@ -1158,6 +1314,11 @@ async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() 
         .expect("eligible candidates");
 
     assert_eq!(page.total, 0);
+    assert_eq!(
+        authority.manage_calls(),
+        vec![("staff-1".to_string(), "acting".to_string())],
+        "the eligible-candidates perspective resolves through the hook"
+    );
     let queries = control_plane.queries.lock().expect("queries lock");
     let query = queries.first().expect("recorded query");
     assert!(query.friend_ids.contains("bot-friend"));
@@ -1248,11 +1409,16 @@ async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_r
 }
 
 #[tokio::test]
-async fn update_requires_created_by_and_rejects_descriptor_for_human() {
+async fn update_requires_current_control_and_rejects_descriptor_for_human() {
     let fixture = Fixture::new();
     fixture
-        .add_bot("owned", "staff-1", "public", ActorStatus::Online)
+        .add_bot("owned", "staff-2", "public", ActorStatus::Online)
         .await;
+    // Creation provenance stays a historical fact only: 'owned' was
+    // created by staff-2 but CURRENTLY belongs to (and is managed by)
+    // staff-1, so staff-1 patches it and staff-2 — still the creator —
+    // is forbidden (spec §12.2: created_by alone grants nothing).
+    fixture.seed_owner("owned", "staff-1").await;
     fixture
         .repo
         .ensure_human_actor("staff-1", "Human")
@@ -1270,9 +1436,10 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
             },
         })
         .await
-        .expect_err("non-owner update");
+        .expect_err("creator without a current role must not update");
     assert_eq!(error.code(), "forbidden");
 
+    // The caller's own Human self row stays patchable as self identity.
     let error = fixture
         .service
         .update(UpdateBot {
@@ -1344,169 +1511,77 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
     );
     assert!(updated.descriptor.domains.is_empty());
     assert_eq!(updated.descriptor.scopes, vec!["new-scope"]);
-}
 
-#[tokio::test]
-async fn mine_materializes_the_current_human_before_listing() {
-    let fixture = Fixture::new();
-    assert!(fixture.repo.get("human_staff-1").await.is_none());
-
-    let mut caller = human_caller("staff-1");
-    let user = caller.user.as_mut().expect("human caller");
-    user.display_name = Some(" Display Name ".to_string());
-    user.full_name = Some("Full Name".to_string());
-
-    let page = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller,
-            kind: Some(BotKind::Human),
-            name: None,
-            status: None,
-            reachability: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("list mine");
-
-    assert_eq!(page.total, 1);
-    let Bot::Human(human) = &page.items[0] else {
-        panic!("expected human actor");
-    };
-    assert_eq!(human.bot_id, "human_staff-1");
-    assert_eq!(human.name, "Display Name");
-}
-
-#[tokio::test]
-async fn mine_uses_non_empty_identity_name_fallbacks_for_materialized_humans() {
-    let fixture = Fixture::new();
-    let cases = [
-        (
-            "staff-display",
-            Some(" Display "),
-            Some("Full"),
-            "username",
-            "Display",
-        ),
-        (
-            "staff-full",
-            Some("   "),
-            Some(" Full "),
-            "username",
-            "Full",
-        ),
-        (
-            "staff-username",
-            None,
-            Some("   "),
-            " username ",
-            "username",
-        ),
-        ("staff-id", None, None, "   ", "staff-id"),
-    ];
-
-    for (staff_no, display_name, full_name, username, expected_name) in cases {
-        let mut caller = human_caller(staff_no);
-        let user = caller.user.as_mut().expect("human caller");
-        user.display_name = display_name.map(str::to_string);
-        user.full_name = full_name.map(str::to_string);
-        user.username = username.to_string();
-
-        fixture
-            .service
-            .list_mine(ListMyBots {
-                caller,
-                kind: Some(BotKind::Human),
-                name: None,
-                status: None,
-                reachability: None,
-                offset: 0,
-                limit: 20,
-            })
-            .await
-            .expect("list mine");
-
-        let stored = fixture
-            .repo
-            .get(&format!("human_{staff_no}"))
-            .await
-            .expect("materialized human actor");
-        assert_eq!(stored.capabilities.name.as_deref(), Some(expected_name));
-    }
-}
-
-#[tokio::test]
-async fn mine_validates_pagination_before_materializing_the_human() {
-    let fixture = Fixture::new();
-
-    let error = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller: human_caller("invalid"),
-            kind: None,
-            name: None,
-            status: None,
-            reachability: None,
-            offset: 0,
-            limit: 0,
-        })
-        .await
-        .expect_err("invalid pagination must fail");
-
-    assert_eq!(error.code(), "invalid_request");
-    assert!(fixture.repo.get("human_invalid").await.is_none());
-}
-
-#[tokio::test]
-async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
-        .await;
-    fixture
-        .add_bot("unreachable", "staff-1", "public", ActorStatus::Online)
-        .await;
-    fixture
+    // The applied audit row of that Human patch records BOTH identities
+    // (trusted operator user id + the selected effective actor = the
+    // patched Bot), in the same critical section as the update.
+    let audits = fixture
         .repo
-        .register_streaming_connection("reachable".to_string())
+        .bot_action_audit_records()
         .await
-        .expect("connect bot");
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
+        .expect("read memory action audits");
+    let patch_audit = audits
+        .iter()
+        .find(|record| record.resource_id == "owned")
+        .expect("patch audit for the owned bot");
+    assert_eq!(patch_audit.step_key, "update/bot/applied");
+    assert_eq!(patch_audit.operator.operator_kind(), "human");
+    assert_eq!(patch_audit.operator.operator_user_id(), Some("staff-1"));
+    assert_eq!(patch_audit.operator.effective_actor_id(), "owned");
 
-    let mut tenantless_user = human_caller("staff-1");
-    tenantless_user.tenant = None;
-    let page = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller: tenantless_user,
-            kind: None,
-            name: None,
-            status: None,
-            reachability: Some(BotReachability::Reachable),
-            offset: 0,
-            limit: 1,
-        })
-        .await
-        .expect("list mine");
-    assert_eq!(page.total, 1);
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].bot_id(), "reachable");
-
-    let error = fixture
+    // The memory twin's audit failure lever aborts the WHOLE patch: the
+    // staged state is discarded and the record is left untouched.
+    fixture.repo.arm_authority_write_failure();
+    let before = fixture
         .service
         .get(GetBot {
-            caller: bot_only_caller("reachable"),
-            bot_id: "reachable".to_string(),
+            caller: human_caller("staff-1"),
+            bot_id: "owned".to_string(),
         })
         .await
-        .expect_err("caller without User must be rejected");
-    assert_eq!(error.code(), "forbidden");
+        .expect("read bot before rollback attempt");
+    let error = fixture
+        .service
+        .update(UpdateBot {
+            caller: human_caller("staff-1"),
+            bot_id: "owned".to_string(),
+            patch: BotPatch {
+                name: Some("Rolled Back".to_string()),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("injected audit failure must roll the patch back");
+    assert_eq!(error.code(), "internal_error");
+    let after = fixture
+        .service
+        .get(GetBot {
+            caller: human_caller("staff-1"),
+            bot_id: "owned".to_string(),
+        })
+        .await
+        .expect("read bot after rollback attempt");
+    assert_eq!(
+        serde_json::to_value(&before).expect("serialize before"),
+        serde_json::to_value(&after).expect("serialize after"),
+        "the memory twin must not publish a rolled-back patch"
+    );
+    let rolled_back_audits = fixture
+        .repo
+        .bot_action_audit_records()
+        .await
+        .expect("re-read memory action audits");
+    assert_eq!(
+        rolled_back_audits.len(),
+        audits.len(),
+        "a discarded patch produces no audit row"
+    );
 }
+
+// The `mine` union-projection tests (materialization, self-row label,
+// owner/manager union + wire contract, filters, paging) live in
+// `mine_union_projection.rs` (plan Task 9): the mine contract is that
+// suite's single responsibility.
 
 #[tokio::test]
 async fn invalid_application_inputs_use_stable_codes() {
@@ -1535,21 +1610,6 @@ fn human_caller(staff_no: &str) -> bcs_service_api::application::v1::Authenticat
             },
         ),
         bot: None,
-        app: None,
-        access_key: None,
-    }
-}
-
-fn bot_only_caller(bot_uuid: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
-    bcs_service_api::application::v1::AuthenticatedCaller {
-        tenant: Some("tenant-1".into()),
-        user: None,
-        bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
-            bot_uuid: bot_uuid.into(),
-            owner_id: "staff-1".into(),
-            app_id: 1,
-            agent_code: "agent".into(),
-        }),
         app: None,
         access_key: None,
     }

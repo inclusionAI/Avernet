@@ -4,7 +4,8 @@ use bcs_message_store::MemoryMessageRepo;
 use std::time::Duration;
 
 fn admission(id: &str, bot: &str) -> AdmitMessageDeliveries {
-    AdmitMessageDeliveries { display_message: None, message_id: id.into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+    AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"), display_message: None, message_id: id.into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
         now_ms: 1, expire_at_ms: None, event: None,
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group".into(), session_id: "session".into(), sender_id: "human".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
@@ -12,7 +13,8 @@ fn admission(id: &str, bot: &str) -> AdmitMessageDeliveries {
 }
 fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event, now_ms: 2,
-        request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None }
+        request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None ,
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}
 }
 
 #[tokio::test]

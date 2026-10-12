@@ -14,7 +14,7 @@ use bcs_service_api::{
     OrganizationMemberAuth,
     ProviderOrganizationManagementConfig, PutOrganizationMemberCommand, ServiceError, ServiceResult,
 };
-use bcs_bot_store::provider::MemoryProviderStore;
+use bcs_bot_store::provider::{MemoryBotProviderStore, MemoryProviderStore, ProviderBindingProjection};
 use bcs_organization::{OrganizationCore, OrganizationManagement};
 use bcs_organization_store::MemoryOrganizationRepo;
 use bcs_service_api::types::{Organization, OrganizationMember};
@@ -25,33 +25,99 @@ use bcs_bot::{Bot, BotCore, ProviderCore};
 
 struct RegistryFixture {
     registry: Arc<BotCore>,
+    /// The memory bot authority repo behind `registry`, so tests can seed the
+    /// live owner/manager rows the Task-12 mine lane reads (the creation
+    /// fact alone no longer decides `/bots/my`).
+    repo: Arc<MemoryBotRepo>,
     _data_dir: TempDir,
 }
 
 impl RegistryFixture {
     fn new() -> Self {
         let data_dir = tempfile::tempdir().expect("temp data dir");
-        let registry = Arc::new(BotCore::with_base_dir(data_dir.path().to_path_buf()));
+        let repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
+        let registry = Arc::new(BotCore::with_repo(repo.clone()));
         Self {
             registry,
+            repo,
             _data_dir: data_dir,
         }
     }
 
+    /// The live-authority hook over the fixture's own memory authority rows —
+    /// the same validation-then-role composition the production
+    /// `BotAuthorityHookImpl` gets from `BotAuthorityCoreServiceImpl`
+    /// (ownership invariant first, then the caller's role pair).
+    fn authority_hook(&self) -> Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> {
+        Arc::new(RepoAuthorityHook(self.repo.clone()))
+    }
+
+    fn control_plane(&self) -> Arc<dyn bcs_service_api::BotControlPlaneCoreService> {
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            self.repo.clone(),
+            provider_store.clone(),
+        ));
+        let provider_bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Arc::new(
+            bcs_bot::BotControlPlaneCore::new(
+                self.repo.clone(),
+                provider_store,
+                provider_bindings,
+            )
+            .with_bot_provider_repo(bot_providers),
+        )
+    }
+
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_control_plane(self.control_plane())
+            .with_authority(self.authority_hook())
     }
 
     fn service_with_friends(&self, friends: Vec<(&str, &str)>) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
         Bot::new_with_friend(registry, Arc::new(StaticFriendCoreService::new(friends)))
+            .with_control_plane(self.control_plane())
+            .with_authority(self.authority_hook())
+    }
+}
+
+/// Live-authority hook over one `MemoryBotRepo`, mirroring the production
+/// hook's Core composition (spec §12.4): the Bot's ownership invariant is
+/// validated FIRST (fail closed on uninitialized/corrupt authority), then
+/// the caller's role pair answers can_manage / require_owner.
+struct RepoAuthorityHook(Arc<MemoryBotRepo>);
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for RepoAuthorityHook {
+    async fn can_manage(&self, user_id: &str, bot_id: &str) -> ServiceResult<bool> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        self.0.ownership(bot_id).await?;
+        Ok(self.0.role(user_id, bot_id).await?.is_some())
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        match self.0.role(user_id, bot_id).await? {
+            Some(bcs_service_api::types::BotAccessRelation::Owner) => Ok(()),
+            _ => Err(ServiceError::Unauthorized(format!(
+                "user '{user_id}' is not the owner of bot '{bot_id}'"
+            ))),
+        }
     }
 }
 
 struct ProviderRegistryFixture {
     registry: Arc<BotCore>,
     provider: ProviderCore,
+    repo: Arc<MemoryBotRepo>,
     _data_dir: TempDir,
 }
 
@@ -64,7 +130,7 @@ impl ProviderRegistryFixture {
         let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(data_dir.path().to_path_buf()));
         let registry = Arc::new(BotCore::with_provider_repos(
-            bot_repo,
+            bot_repo.clone(),
             provider_repo.clone(),
             provider_credentials.clone(),
             provider_bindings.clone(),
@@ -78,13 +144,33 @@ impl ProviderRegistryFixture {
         Self {
             registry,
             provider,
+            repo: bot_repo,
             _data_dir: data_dir,
         }
     }
 
     fn service(&self) -> Bot {
         let registry: Arc<dyn BotRegistryCoreService> = self.registry.clone();
-        Bot::new(registry).with_bot_core(self.registry.clone())
+        let provider_store = Arc::new(MemoryProviderStore::new());
+        let bot_providers = Arc::new(MemoryBotProviderStore::new(
+            self.repo.clone(),
+            provider_store.clone(),
+        ));
+        let provider_bindings = Arc::new(ProviderBindingProjection::new(
+            provider_store.clone(),
+            bot_providers.clone(),
+            bcs_domain::bot_provider::DownlinkDetectionSource::default(),
+        ));
+        Bot::new(registry)
+            .with_bot_core(self.registry.clone())
+            .with_control_plane(Arc::new(
+                bcs_bot::BotControlPlaneCore::new(
+                    self.repo.clone(),
+                    provider_store,
+                    provider_bindings,
+                )
+                .with_bot_provider_repo(bot_providers),
+            ))
     }
 
     async fn register_provider_bot(&self, owner: &str) -> String {
@@ -548,6 +634,10 @@ async fn provider_http_bot_query_views_are_active_without_ws_connection() {
     let fixture = ProviderRegistryFixture::new();
     let service = fixture.service();
     let bot_id = fixture.register_provider_bot("11111111").await;
+    // Task-12 mine rules: the provider-bot registration owner must hold the
+    // CURRENT owner edge for `/bots/my` (the pure ProviderCore test lane does
+    // not run the v2 registration's ownership-initialization contract).
+    fixture.repo.seed_authority_owned(&bot_id, "11111111").await.unwrap();
 
     assert!(!fixture.registry.is_connected(&bot_id).await);
 
@@ -624,6 +714,12 @@ async fn extended_query_methods_page_creator_and_query_by_ids() {
         Some("alice"),
     )
     .await;
+    // Task-12 mine rules: bob must hold the CURRENT owner edge of his bot.
+    fixture
+        .repo
+        .seed_authority_owned("agent:bob", "bob")
+        .await
+        .unwrap();
     fixture
         .registry
         .register_streaming_connection("agent:alice".to_string())
@@ -691,6 +787,17 @@ async fn my_bots_active_only_filters_runtime_active_and_ignores_hidden() {
         Some("alice"),
     )
     .await;
+    // Task-12 mine rules: alice must hold the CURRENT owner edges.
+    fixture
+        .repo
+        .seed_authority_owned("connected-hidden", "alice")
+        .await
+        .unwrap();
+    fixture
+        .repo
+        .seed_authority_owned("disconnected", "alice")
+        .await
+        .unwrap();
     fixture
         .registry
         .register_streaming_connection("connected-hidden".to_string())
@@ -1724,6 +1831,11 @@ async fn update_status_rejects_caller_mismatch() {
         Some("alice"),
     )
     .await;
+    fixture
+        .repo
+        .seed_authority_owned("status-bot", "alice")
+        .await
+        .expect("seed live owner edge");
 
     let result = service
         .update_status(BotStatusUpdateCommand {
@@ -1738,8 +1850,8 @@ async fn update_status_rejects_caller_mismatch() {
 
     assert!(matches!(
         result,
-        Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+        Err(BotUseCaseError::Forbidden(ref message))
+            if message.contains("owner/manager role")
     ));
 }
 
@@ -1748,6 +1860,9 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    // `created_by` alice + her live approved owner edge (the trusted
+    // first-ownership claim): after the §12.4 cutover the delete lane
+    // resolves this edge, not the creation fact.
     register_bot(
         &fixture.registry,
         "leave-bot",
@@ -1755,6 +1870,11 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
         Some("alice"),
     )
     .await;
+    fixture
+        .repo
+        .seed_authority_owned("leave-bot", "alice")
+        .await
+        .expect("seed live owner edge");
     register_bot(
         &fixture.registry,
         "other-owner-bot",
@@ -1773,7 +1893,7 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
     assert!(matches!(
         non_owner,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the creator")
+            if message.contains("owner/manager role")
     ));
     assert!(fixture.registry.get("leave-bot").await.is_some());
 
@@ -1789,6 +1909,81 @@ async fn leave_bot_allows_owner_soft_delete_for_unmanaged_bot() {
     assert_eq!(left.bot_uuid, "leave-bot");
     assert!(fixture.registry.get("leave-bot").await.is_none());
     assert!(fixture.registry.get("other-owner-bot").await.is_some());
+}
+
+/// CI-red regression (e2e story order `story_user_prepares_agent_network` →
+/// public-API mine): a Human deletes ONE of two owned agents through the
+/// legacy owner-delete lane; the strict mine union for the SURVIVING owned
+/// agent must still answer. The deleted agent's approved owner edge may
+/// never dangle behind its tombstone (plan Task 5 deletion boundary):
+/// `list_controllable` fails the WHOLE read with a typed corruption error
+/// on a dangling role edge, which turned the owner's `mine` into a 500 and
+/// every fail-closed guard lane into 403s in CI.
+#[tokio::test]
+async fn leave_bot_retires_authority_edges_so_mine_stays_strict_green() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    // Trusted first-ownership claim per bot (the onboarding store lane):
+    // register the live Bot, then claim v0 -> 1 with alice's owner edge.
+    for bot_id in ["leave-strict-a", "leave-strict-b"] {
+        register_bot(
+            &fixture.registry,
+            bot_id,
+            caps(Some(bot_id), Some("strict mine survivor"), "public"),
+            None,
+        )
+        .await;
+        fixture
+            .registry
+            .initialize_existing_ownership(
+                bot_id,
+                bcs_service_api::types::OwnershipInitialization {
+                    owner_user_id: "alice".to_string(),
+                    actor: bcs_service_api::types::AuditActor::Human {
+                        user_id: "alice".to_string(),
+                    },
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                },
+            )
+            .await
+            .expect("trusted first-ownership claim");
+        fixture
+            .registry
+            .save_created_by(bot_id, "alice", true)
+            .await
+            .expect("bind created_by for the legacy lane");
+    }
+
+    let left = service
+        .leave_bot(BotLeaveCommand {
+            caller_actor_id: Some("human_alice".to_string()),
+            human_actor_id: Some("human_alice".to_string()),
+            bot_id: "leave-strict-a".to_string(),
+        })
+        .await
+        .expect("owner deletes through the legacy owner-delete lane");
+    assert!(left.left);
+    assert!(fixture.registry.get("leave-strict-a").await.is_none());
+
+    let mine = service
+        .list_my_bots(bcs_service_api::MyBotsCommand {
+            staff_no: "alice".to_string(),
+            offset: 0,
+            limit: 50,
+            active_only: false,
+        })
+        .await
+        .expect("the strict mine union must still answer after the delete");
+    let uuids: Vec<&str> = mine.items.iter().map(|e| e.bot_uuid.as_str()).collect();
+    assert!(
+        uuids.contains(&"leave-strict-b"),
+        "the surviving owned agent stays in mine: {uuids:?}"
+    );
+    assert!(
+        !uuids.contains(&"leave-strict-a"),
+        "the deleted agent left mine: {uuids:?}"
+    );
 }
 
 #[tokio::test]
@@ -1847,6 +2042,206 @@ async fn leave_bot_rejects_bot_token_provider_managed_and_tc_style_deletes() {
     assert!(fixture.registry.get("teamclaw-bot:alice").await.is_some());
 }
 
+/// F1 regression (spec §12.2/§12.4): the leave/status/visibility lanes must
+/// authorize the CURRENT owner (live authority edge), never the historical
+/// `created_by` fact. A Bot created by alice but transferred to bob deletes
+/// for bob; the former creator without a current role is denied.
+#[tokio::test]
+async fn leave_bot_authorizes_current_owner_not_the_former_creator() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    // The historical creation fact says alice; the live owner edge says bob.
+    register_bot(
+        &fixture.registry,
+        "transfer-bot",
+        caps(Some("Transfer"), Some("Former-creator fixture bot"), "public"),
+        Some("alice"),
+    )
+    .await;
+    fixture
+        .repo
+        .seed_authority_owned("transfer-bot", "bob")
+        .await
+        .expect("seed live owner edge");
+
+    let former_creator_delete = service
+        .leave_bot(BotLeaveCommand {
+            caller_actor_id: Some("human_alice".to_string()),
+            human_actor_id: Some("human_alice".to_string()),
+            bot_id: "transfer-bot".to_string(),
+        })
+        .await;
+    assert!(
+        matches!(
+            former_creator_delete,
+            Err(BotUseCaseError::Forbidden(ref message)) if message.contains("owner/manager role"),
+        ),
+        "the former creator must be denied: {former_creator_delete:?}"
+    );
+    assert!(fixture.registry.get("transfer-bot").await.is_some());
+
+    let owner_delete = service
+        .leave_bot(BotLeaveCommand {
+            caller_actor_id: Some("human_bob".to_string()),
+            human_actor_id: Some("human_bob".to_string()),
+            bot_id: "transfer-bot".to_string(),
+        })
+        .await
+        .expect("the CURRENT owner deletes through the live edge");
+    assert!(owner_delete.left);
+    assert!(fixture.registry.get("transfer-bot").await.is_none());
+}
+
+/// F1 regression (spec §1.3/§8.2): a manager is at parity with the owner for
+/// the delete lane (still subject to the TC/provider business conditions), so
+/// a live direct manager may delete the Bot.
+#[tokio::test]
+async fn leave_bot_allows_live_manager_to_delete() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    register_bot(
+        &fixture.registry,
+        "managed-bot",
+        caps(Some("Managed"), Some("Manager-managed fixture bot"), "public"),
+        None,
+    )
+    .await;
+    fixture
+        .repo
+        .seed_authority_owned("managed-bot", "bob")
+        .await
+        .expect("seed live owner edge");
+    fixture
+        .repo
+        .seed_authority_manager_source("managed-bot", "alice", "direct", "manual")
+        .await
+        .expect("seed live manager edge");
+
+    let left = service
+        .leave_bot(BotLeaveCommand {
+            caller_actor_id: Some("human_alice".to_string()),
+            human_actor_id: Some("human_alice".to_string()),
+            bot_id: "managed-bot".to_string(),
+        })
+        .await
+        .expect("a live manager deletes at owner parity");
+    assert!(left.left);
+    assert!(fixture.registry.get("managed-bot").await.is_none());
+}
+
+/// F1 regression: the status and visibility mutation lanes authorize the same
+/// live authority facts — the current owner/manager may change them, a
+/// former creator without a role may not, and the Bot itself stays allowed.
+#[tokio::test]
+async fn status_and_visibility_lanes_authorize_live_roles() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    register_bot(
+        &fixture.registry,
+        "mutate-bot",
+        caps(Some("Mutate"), Some("Status/visibility fixture bot"), "protected"),
+        Some("alice"),
+    )
+    .await;
+    fixture
+        .repo
+        .seed_authority_owned("mutate-bot", "bob")
+        .await
+        .expect("seed live owner edge");
+
+    // The former creator (no live role) may not mutate status or visibility.
+    let former_creator_status = service
+        .update_status(BotStatusUpdateCommand {
+            caller_actor_id: Some("human_alice".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            status: bcs_service_api::BotDynamicStatus {
+                status: "busy".to_string(),
+                ..Default::default()
+            },
+        })
+        .await;
+    assert!(
+        matches!(
+            former_creator_status,
+            Err(BotUseCaseError::Forbidden(ref message)) if message.contains("owner/manager role"),
+        ),
+        "the former creator must not update status: {former_creator_status:?}"
+    );
+    let former_creator_visibility = service
+        .set_visibility(BotVisibilityCommand {
+            caller_actor_id: Some("human_alice".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            visibility: "private".to_string(),
+        })
+        .await;
+    assert!(
+        matches!(
+            former_creator_visibility,
+            Err(BotUseCaseError::Forbidden(ref message)) if message.contains("owner/manager role"),
+        ),
+        "the former creator must not set visibility: {former_creator_visibility:?}"
+    );
+    assert_eq!(
+        fixture
+            .registry
+            .get("mutate-bot")
+            .await
+            .expect("stored bot")
+            .capabilities
+            .visibility,
+        "protected"
+    );
+
+    // The CURRENT owner may mutate both lanes.
+    let owner_status = service
+        .update_status(BotStatusUpdateCommand {
+            caller_actor_id: Some("human_bob".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            status: bcs_service_api::BotDynamicStatus {
+                status: "busy".to_string(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("the current owner updates status");
+    assert!(owner_status.updated);
+
+    let owner_visibility = service
+        .set_visibility(BotVisibilityCommand {
+            caller_actor_id: Some("human_bob".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            visibility: "private".to_string(),
+        })
+        .await
+        .expect("the current owner sets visibility");
+    assert_eq!(owner_visibility.visibility, "private");
+
+    // The Bot itself keeps its self-lane (bot token status/visibility).
+    let self_status = service
+        .update_status(BotStatusUpdateCommand {
+            caller_actor_id: Some("mutate-bot".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            status: bcs_service_api::BotDynamicStatus {
+                status: "idle".to_string(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("bot self lane stays allowed");
+    assert!(self_status.updated);
+    service
+        .set_visibility(BotVisibilityCommand {
+            caller_actor_id: Some("mutate-bot".to_string()),
+            bot_id: "mutate-bot".to_string(),
+            visibility: "public".to_string(),
+        })
+        .await
+        .expect("bot self visibility lane stays allowed");
+}
+
 #[tokio::test]
 async fn set_visibility_rejects_invalid_values() {
     let fixture = RegistryFixture::new();
@@ -1892,6 +2287,11 @@ async fn set_visibility_updates_registry_for_valid_value() {
         Some("alice"),
     )
     .await;
+    fixture
+        .repo
+        .seed_authority_owned("visibility-bot", "alice")
+        .await
+        .expect("seed live owner edge");
 
     let result = service
         .set_visibility(BotVisibilityCommand {
@@ -1925,6 +2325,11 @@ async fn set_visibility_rejects_non_owner_when_owner_is_known() {
         Some("alice"),
     )
     .await;
+    fixture
+        .repo
+        .seed_authority_owned("visibility-bot", "alice")
+        .await
+        .expect("seed live owner edge");
 
     let result = service
         .set_visibility(BotVisibilityCommand {
@@ -1937,7 +2342,7 @@ async fn set_visibility_rejects_non_owner_when_owner_is_known() {
     assert!(matches!(
         result,
         Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+            if message.contains("owner/manager role")
     ));
     let stored = fixture
         .registry
@@ -1980,6 +2385,10 @@ async fn set_visibility_rejects_ownerless_bot_for_non_self_caller() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
+    // A Bot whose ownership is still UNINITIALIZED never falls back to a
+    // permissive legacy allowance: the live lane answers with the typed
+    // ownership_not_initialized branch (spec §12.4) instead of a denial
+    // that could look like a plain permission decision.
     register_bot(
         &fixture.registry,
         "ownerless-bot",
@@ -1998,8 +2407,9 @@ async fn set_visibility_rejects_ownerless_bot_for_non_self_caller() {
 
     assert!(matches!(
         result,
-        Err(BotUseCaseError::Forbidden(message))
-            if message.contains("not the owner")
+        Err(BotUseCaseError::Service(ServiceError::Authority(
+            bcs_service_api::types::error::AuthorityError::OwnershipNotInitialized { .. }
+        )))
     ));
     let stored = fixture
         .registry

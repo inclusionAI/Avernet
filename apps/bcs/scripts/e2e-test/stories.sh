@@ -23,6 +23,7 @@ E2E_TESTS_STORIES=(
     "story_cli_operator_runs_sessions_and_services"
     "story_cli_operator_validates_channel_management"
     "story_session_file_workspace"
+    "story_cli_operator_no_ownership_maintenance_leaf"
 )
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
@@ -258,9 +259,52 @@ story_user_prepares_agent_network() {
     test_actor_search
     test_actor_put_status
     test_bots_my
+    _story_mine_items_carry_access_relation_labels
     test_bots_paged
     test_bots_query
     _story_register_and_onboard_owned_agent || return
+}
+
+# Bot owner/manager plan (Task 9): every /bots/my item now states the
+# caller's live authority over the bot — the label is mandatory on every
+# item and only ever `owner` or `manager`. A missing label here means the
+# wire contract regressed, not that an empty page is legal.
+_story_mine_items_carry_access_relation_labels() {
+    api_get "/bots/my?limit=100"
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        warn "/bots/my returned $HTTP_STATUS; the label assertion is skipped"
+        return
+    fi
+    local unlabeled total
+    unlabeled=$(printf '%s' "$RESPONSE" | python3 -c '
+import json, sys
+try:
+    items = json.load(sys.stdin)["items"]
+    print(sum(1 for item in items if item.get("access_relation") not in ("owner", "manager")))
+except Exception:
+    print("error")
+')
+    total=$(printf '%s' "$RESPONSE" | python3 -c '
+import json, sys
+try:
+    print(len(json.load(sys.stdin)["items"]))
+except Exception:
+    print(0)
+')
+    if [[ "$unlabeled" == "error" ]]; then
+        fail "/bots/my items are not a parseable list"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+    if [[ "$unlabeled" == "0" ]]; then
+        pass "every /bots/my item carries a strict access_relation label (owner/manager, ${total} item(s))"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "$unlabeled /bots/my item(s) lack a strict access_relation label"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
 }
 
 _story_platform_entrypoints() {

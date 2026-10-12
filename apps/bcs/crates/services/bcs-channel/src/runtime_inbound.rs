@@ -93,6 +93,11 @@ impl BcsChannelService {
                 &ctx.group_id,
                 &msg.channel_type,
                 NewSessionParams {
+                    // Task 11 carry re-check (plan Task 12): the inbound IM
+                    // user id is an EXTERNAL channel user, not a BCS-verified
+                    // principal, so the §12.5 audit context stays the honest
+                    // System default (never a forged Human); the channel
+                    // binding context is recorded in meta/caller_principal.
                     session_kind: SessionKind::ServiceInvocation,
                     caller_id: Some(actor_id.to_string()),
                     caller_principal: Some(ctx.caller_principal.clone()),

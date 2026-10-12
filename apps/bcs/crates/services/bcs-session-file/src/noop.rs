@@ -54,6 +54,7 @@ impl SessionFileService for NoopSessionFileService {
         &self,
         _session_id: &str,
         _file_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<SessionFile, SessionFileUseCaseError> {
         Err(SessionFileUseCaseError::Internal(ServiceError::InternalError(
             NOT_SUPPORTED.into(),
@@ -110,6 +111,7 @@ impl SessionFileService for NoopSessionFileService {
         _session_id: &str,
         _file_id: &str,
         _ttl_seconds: u64,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
         Err(SessionFileUseCaseError::Internal(ServiceError::InternalError(
             NOT_SUPPORTED.into(),
@@ -135,7 +137,11 @@ impl SessionFileService for NoopSessionFileService {
         Ok(0)
     }
 
-    async fn delete_all_for_session(&self, _session_id: &str) -> Result<u64, SessionFileUseCaseError> {
+    async fn delete_all_for_session(
+        &self,
+        _session_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
+    ) -> Result<u64, SessionFileUseCaseError> {
         Ok(0)
     }
 }

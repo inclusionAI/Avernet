@@ -16,6 +16,23 @@ fn params(id: &str, sess: &str, created_offset: u64) -> NewSessionFileParams {
         storage_backend: "local".into(),
         object_handle: serde_json::json!({ "expires_at": 1000u64 + created_offset }).to_string(),
         expires_at: 1000 + created_offset,
+        operation: bcs_service_api::types::BotOperationContext {
+            operation_id: format!("conformance-file-store-{}", uuid::Uuid::new_v4()),
+            actor: bcs_service_api::types::BotOperationActor::System {
+                system_id: "conformance-file-store".to_string(),
+                effective_actor_id: "conformance-file-store".to_string(),
+            },
+        },
+    }
+}
+
+fn params_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("conformance-file-test-{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "conformance-file-store".to_string(),
+            effective_actor_id: "conformance-file-store".to_string(),
+        },
     }
 }
 
@@ -49,12 +66,13 @@ async fn insert_get_list_update_delete() {
             r#"{"expires_at":1}"#,
             FileStatus::Ready,
             10,
+            &params_operation(),
         )
         .await
         .unwrap()
         .unwrap();
     assert_eq!(updated.status, FileStatus::Ready);
-    assert!(repo.delete("s1", "f1").await.unwrap());
+    assert!(repo.delete("s1", "f1", &params_operation()).await.unwrap());
     assert!(repo.get("s1", "f1").await.unwrap().is_none());
 }
 
@@ -99,6 +117,7 @@ async fn list_offset_total_and_status_filter() {
         r#"{"expires_at":1}"#,
         FileStatus::Ready,
         10,
+        &params_operation(),
     )
         .await
         .unwrap();

@@ -13,8 +13,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::web::{
-    dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
-    WebWsDispatchError, WorkbenchConnectionAuth,
+    DequeuedDecision, dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome,
+    WebDispatchState, WebWsDispatchError, WorkbenchConnectionAuth, WorkbenchOutbound,
 };
 
 static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -35,7 +35,8 @@ pub async fn handle_client_connection(
 ) {
     let leadership_shutdown = state.frontend_connections.connection_epoch.subscribe();
     let (mut ws_tx, mut ws_rx) = socket.split();
-    let (client_tx, mut client_rx) = mpsc::channel::<String>(256);
+    let (client_tx, mut client_rx) = mpsc::channel::<WorkbenchOutbound>(256);
+    let protected_gate = state.frontend_connections.protected_delivery();
 
     let connected_at = Instant::now();
     let client_id = CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -58,11 +59,36 @@ pub async fn handle_client_connection(
                     None => break,
                 },
             };
-            let close_after_send = is_view_scope_changed_event(&msg);
+            // Position 2 (spec §14.5): every dequeued protected frame is
+            // re-authorized against current committed authority right
+            // before the actual send — the enqueue decision is never a
+            // pass. Break/close paths drop the protected backlog without
+            // flushing sensitive frames; close frames are PublicControl.
+            let (payload, close_after_send) = match msg {
+                WorkbenchOutbound::PublicControl(payload) => {
+                    let close_after_send = is_view_scope_changed_event(&payload);
+                    (payload, close_after_send)
+                }
+                WorkbenchOutbound::Protected {
+                    payload,
+                    context,
+                    binding_id,
+                } => match protected_gate
+                    .authorize_dequeued(binding_id, &context, payload)
+                    .await
+                {
+                    DequeuedDecision::Send(payload) => (payload, false),
+                    // SkipMessage: this frame only. InvalidateBinding or a
+                    // failed read: the gate also invalidated the binding,
+                    // stopping its protected drain. Either way: no send,
+                    // no fallback — continue the loop.
+                    DequeuedDecision::Drop => continue,
+                },
+            };
             let sent = tokio::select! {
                 biased;
                 _ = write_shutdown.cancelled() => break,
-                sent = ws_tx.send(Message::Text(msg.into())) => sent,
+                sent = ws_tx.send(Message::Text(payload.into())) => sent,
             };
             if sent.is_err() {
                 debug!("WebSocket send error, connection likely closed");
@@ -76,7 +102,8 @@ pub async fn handle_client_connection(
         if write_shutdown.is_cancelled() {
             // Drop the receiver first so concurrent senders immediately observe a
             // closed channel instead of enqueuing into a socket that is already
-            // closing for leadership loss.
+            // closing for leadership loss. Queued protected frames are
+            // discarded: closing never flushes the protected backlog.
             drop(client_rx);
             crate::shared::leadership_close::close_for_leadership_change(&mut ws_tx).await;
         } else {
@@ -170,17 +197,20 @@ pub async fn handle_client_connection(
                                         error_kind,
                                     )
                                     .await;
-                                let _ = client_tx.send(
-                                    serde_json::json!({
-                                        "type": "res",
-                                        "id": "error",
-                                        "ok": false,
-                                        "error": {
-                                            "code": "dispatch_error",
-                                            "message": e.to_string()
-                                        }
-                                    }).to_string()
-                                ).await;
+                                let _ = client_tx
+                                    .send(WorkbenchOutbound::PublicControl(
+                                        serde_json::json!({
+                                            "type": "res",
+                                            "id": "error",
+                                            "ok": false,
+                                            "error": {
+                                                "code": "dispatch_error",
+                                                "message": e.to_string()
+                                            }
+                                        })
+                                        .to_string(),
+                                    ))
+                                    .await;
                             }
                         }
                     }
@@ -228,16 +258,19 @@ pub async fn handle_client_connection(
                     timeout_secs = CLIENT_IDLE_TIMEOUT.as_secs(),
                     "Client idle timeout, closing connection"
                 );
-                let _ = client_tx.send(
-                    serde_json::json!({
-                        "type": "event",
-                        "event": "close",
-                        "payload": {
-                            "reason": "idle_timeout",
-                            "message": format!("No activity for {} seconds", CLIENT_IDLE_TIMEOUT.as_secs())
-                        }
-                    }).to_string()
-                ).await;
+                let _ = client_tx
+                    .send(WorkbenchOutbound::PublicControl(
+                        serde_json::json!({
+                            "type": "event",
+                            "event": "close",
+                            "payload": {
+                                "reason": "idle_timeout",
+                                "message": format!("No activity for {} seconds", CLIENT_IDLE_TIMEOUT.as_secs())
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .await;
                 break;
             }
         }
@@ -308,7 +341,7 @@ fn is_ping_frame(text: &str) -> bool {
     }
 }
 
-async fn send_pong(tx: &mpsc::Sender<String>) {
+async fn send_pong(tx: &mpsc::Sender<WorkbenchOutbound>) {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -322,5 +355,7 @@ async fn send_pong(tx: &mpsc::Sender<String>) {
         }
     });
 
-    let _ = tx.send(pong.to_string()).await;
+    let _ = tx
+        .send(WorkbenchOutbound::PublicControl(pong.to_string()))
+        .await;
 }

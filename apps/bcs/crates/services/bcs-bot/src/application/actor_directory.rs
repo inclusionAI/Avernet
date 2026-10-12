@@ -15,32 +15,50 @@ use bcs_service_api::{
     BotRegistryCoreService, DynamicStatusResponse, FriendCoreService, RegisteredBot,
     RelationCoreService, ServiceError, ServiceResult,
 };
+use bcs_service_api::application::v1::BotAuthorityHook;
 
 /// Actor directory service backed by registry, friend, relation, worker-profile,
 /// and candidate-search Core services selected by the composition root.
+///
+/// Cross-actor status writes (plan Task 12, spec §12.2/§12.4) authorize
+/// through the live [`BotAuthorityHook`]: a caller who is not the actor
+/// itself must CURRENTLY own or manage the exact Bot. The former
+/// creator-relation authorization (`edge.is_creator`) is retired from the
+/// permission chain — the historical creation fact no longer grants
+/// control, so a former creator without a current role is denied here (the
+/// legacy 403 keeps its shape; the relation graph keeps only its historical
+/// bookkeeping purposes).
 pub struct ActorDirectory {
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     worker_profiles: Arc<dyn WorkerProfileCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    authority: Option<Arc<dyn BotAuthorityHook>>,
 }
 
 impl ActorDirectory {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Arc<dyn BotRegistryCoreService>,
         friend: Arc<dyn FriendCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         worker_profiles: Arc<dyn WorkerProfileCoreService>,
         candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     ) -> Self {
         Self {
             registry,
             friend,
-            relation,
             worker_profiles,
             candidate_search,
+            authority: None,
         }
+    }
+
+    /// Wire the live authority hook that answers cross-actor status
+    /// authorization. Without it the cross-actor branch fails closed — the
+    /// legacy creator relation is NOT a fallback authority anymore.
+    pub fn with_authority(mut self, authority: Arc<dyn BotAuthorityHook>) -> Self {
+        self.authority = Some(authority);
+        self
     }
 
     async fn friend_set_for(&self, actor_id: &str) -> HashSet<String> {
@@ -210,19 +228,36 @@ impl ActorDirectoryService for ActorDirectory {
         }
 
         if command.caller_actor_id != command.actor_id {
-            let env = bcs_config::resolve_env_str();
-            match self
-                .relation
-                .get_edge(&command.caller_actor_id, &command.actor_id, &env)
-                .await?
-            {
-                Some(edge) if edge.is_creator => {}
-                _ => {
-                    return Err(ServiceError::Unauthorized(format!(
-                        "Caller '{}' is not the actor itself nor a creator of '{}'",
-                        command.caller_actor_id, command.actor_id
-                    )));
-                }
+            let Some(authority) = self.authority.as_ref() else {
+                return Err(ServiceError::Unauthorized(format!(
+                    "Cross-actor status updates require the bot authority service; \
+                     caller '{}' is not the actor itself",
+                    command.caller_actor_id
+                )));
+            };
+            let user_id = command
+                .caller_actor_id
+                .strip_prefix("human_")
+                .unwrap_or(&command.caller_actor_id)
+                .to_string();
+            let allowed = authority
+                .can_manage(&user_id, &command.actor_id)
+                .await
+                .map_err(|error| {
+                    warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        error = %error,
+                        actor_id = %command.actor_id,
+                        caller_actor_id = %command.caller_actor_id,
+                        "actor-directory authority resolution failed"
+                    );
+                    error
+                })?;
+            if !allowed {
+                return Err(ServiceError::Unauthorized(format!(
+                    "Caller '{}' is not the actor itself and holds no current owner/manager role for '{}'",
+                    command.caller_actor_id, command.actor_id
+                )));
             }
         }
 

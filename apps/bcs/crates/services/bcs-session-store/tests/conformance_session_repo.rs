@@ -389,6 +389,7 @@ async fn sqlite_scope_update_with_event_succeeds_on_legacy_participants_bytes() 
                 message_view_scope: MessageViewScope::Participant,
                 mode: None,
                 event: scope_change_event(&session.id, &session.group_id),
+                operation: conformance_operation(),
             },
         )
         .await
@@ -425,6 +426,7 @@ async fn sqlite_mode_and_scope_update_succeeds_on_legacy_participants_bytes() {
             "human-1",
             Some(ParticipantMode::Present),
             MessageViewScope::Participant,
+            &conformance_operation(),
         )
         .await
         .expect("legacy participants bytes must not break the scope CAS");
@@ -512,6 +514,7 @@ async fn sqlite_scope_update_race_reports_clean_conflict() {
                 message_view_scope: MessageViewScope::Participant,
                 mode: None,
                 event: scope_change_event(&session.id, &session.group_id),
+                operation: conformance_operation(),
             },
         )
         .await
@@ -549,7 +552,8 @@ async fn sqlite_add_participant_with_event_succeeds_on_legacy_participants_bytes
             expected_participants: stored.participants.clone(),
             participant: Participant::bot("bot-2", ParticipantRole::Consultant),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect("legacy participants bytes must not break the addition CAS");
 
@@ -581,7 +585,8 @@ async fn sqlite_remove_participant_with_event_succeeds_on_legacy_participants_by
             expected_participants: stored.participants.clone(),
             bot_uuid: "human-1".to_string(),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect("legacy participants bytes must not break the removal CAS");
 
@@ -629,7 +634,8 @@ async fn sqlite_add_participant_with_event_race_reports_clean_conflict() {
             expected_participants: stored.participants.clone(),
             participant: Participant::bot("bot-2", ParticipantRole::Consultant),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect_err("concurrent writer must produce a conflict");
 
@@ -684,7 +690,8 @@ async fn sqlite_remove_participant_with_event_race_reports_clean_conflict() {
             expected_participants: stored.participants.clone(),
             bot_uuid: "human-1".to_string(),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect_err("concurrent writer must produce a conflict");
 
@@ -730,7 +737,8 @@ async fn sqlite_add_participant_with_event_db_failure_maps_to_internal_error() {
             expected_participants: stored.participants.clone(),
             participant: Participant::bot("bot-2", ParticipantRole::Consultant),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect_err("db failure must propagate");
 
@@ -774,7 +782,8 @@ async fn sqlite_remove_participant_with_event_db_failure_maps_to_internal_error(
             expected_participants: stored.participants.clone(),
             bot_uuid: "human-1".to_string(),
             event: scope_change_event(&session.id, &session.group_id),
-        })
+                operation: conformance_operation(),
+            })
         .await
         .expect_err("db failure must propagate");
 
@@ -786,5 +795,16 @@ async fn sqlite_remove_participant_with_event_db_failure_maps_to_internal_error(
             );
         }
         other => panic!("expected InternalError, got {other:?}"),
+    }
+}
+
+
+fn conformance_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("conformance-session-repo-{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "conformance-session-repo".to_string(),
+            effective_actor_id: "conformance-session-repo".to_string(),
+        },
     }
 }

@@ -61,6 +61,8 @@ bcs-app-session = { workspace = true }
 bcs-config = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
+bcs-edge-permission = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-cli = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group-store = { workspace = true }

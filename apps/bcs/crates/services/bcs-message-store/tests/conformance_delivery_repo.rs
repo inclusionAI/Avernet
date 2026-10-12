@@ -114,6 +114,7 @@ async fn batch_initialization_is_atomic_and_preserves_required_contexts() -> Res
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (session_id, group_id, env, participants) VALUES ('batch', 'g', 'dev', '[]')")).await?;
     let repos: Vec<Box<dyn MessageDeliveryRepoPort>> = vec![Box::new(MemoryMessageRepo::new().with_environment("dev".into())), Box::new(MySqlMessageStore::sqlite(db, "dev".into()))];
     let make = |id: &str, kind, required| AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None, message_id: id.into(), flow_kind: DeliveryFlowKind::System, now_ms: 1, expire_at_ms: Some(10), event: None,
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "g".into(), session_id: "batch".into(), sender_id: "system".into(), sender_type: SenderType::System, message_type: "system".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
         targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 2, semantic_projection_json: serde_json::json!({"required_context":required}) }],
@@ -188,6 +189,7 @@ async fn newly_created_session_sequence_uses_transactional_read() -> Result<(), 
     let routed = Arc::new(StaleStandaloneSessionRead { inner: db });
     let repo = MySqlMessageStore::sqlite(routed, "dev".into());
     let result = repo.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None, message_id: "initial-context".into(), flow_kind: DeliveryFlowKind::System,
         now_ms: 1, expire_at_ms: None, event: None,
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
@@ -235,6 +237,7 @@ async fn pooled_file_sqlite_preserves_contract_and_concurrent_capacity() -> Resu
     let repo = MySqlMessageStore::sqlite(db.clone(), "dev".into());
     message_delivery_repo_port_contract_tests(&repo).await?;
     let make = |i: usize, session: String, kind: DeliveryType| AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None, message_id: format!("concurrent-{i}"),
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None,
             group_id: "contract-group".into(), session_id: session,

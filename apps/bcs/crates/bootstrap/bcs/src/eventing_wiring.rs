@@ -82,6 +82,7 @@ pub(crate) async fn build_eventing_runtime(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook>,
     allow_local_test_endpoints: bool,
 ) -> Result<EventingRuntime> {
     config
@@ -111,14 +112,17 @@ pub(crate) async fn build_eventing_runtime(
         BcsError::InvalidConfig(format!("embedded Event Catalog is invalid: {error}"))
     })?);
     let env = crate::env::resolve_env();
+    // Final-review cutover: the Human side of scope management resolves
+    // through the live authority hook, never the created_by listing.
     let authorizer: Arc<dyn EventSubscriptionAuthorizer> = Arc::new(
-        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry),
+        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry, authority.clone()),
     );
     let service_impl = Arc::new(
         EventSubscriptionApplicationService::new(
             repo.clone(),
             delivery.clone(),
             authorizer,
+            authority,
             catalog.clone(),
             EventSubscriptionPolicy::from(&config.eventing),
             env.clone(),

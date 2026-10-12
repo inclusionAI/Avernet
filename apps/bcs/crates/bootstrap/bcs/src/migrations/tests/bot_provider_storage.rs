@@ -6,18 +6,22 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|migration| migration.version)
         .collect::<Vec<_>>();
-    assert_eq!(sqlite, (1..=33).collect::<Vec<_>>());
+    assert_eq!(sqlite, (1..=34).collect::<Vec<_>>());
     assert_eq!(SQLITE_VERSIONED_MIGRATIONS[28].name, "fixed_loop_runtime");
     assert_eq!(
         SQLITE_VERSIONED_MIGRATIONS[29].name,
         "bot_provider_storage"
     );
     // The new Group migration owns SQLite version 31 (Provider storage keeps
-    // version 30).
+    // version 30); the session registry owns version 32, the provider slug
+    // lookup owns version 33, and the bot authority schema owns version 34.
     assert_eq!(
         SQLITE_VERSIONED_MIGRATIONS[30].name,
         "group_human_mention_notify_mode"
     );
+    assert_eq!(SQLITE_VERSIONED_MIGRATIONS[31].name, "session_registry");
+    assert_eq!(SQLITE_VERSIONED_MIGRATIONS[32].name, "provider_slug");
+    assert_eq!(SQLITE_VERSIONED_MIGRATIONS[33].name, "bot_authority");
 
     let directory =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../migrations/mysql");
@@ -34,15 +38,19 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
         .iter()
         .map(|name| name.split('_').next().unwrap().parse::<i64>().unwrap())
         .collect::<Vec<_>>();
-    // MySQL Provider storage remains version 029; the new Group migration is
-    // MySQL version 030.
-    assert_eq!(versions, (1..=32).collect::<Vec<_>>());
+// MySQL Provider storage remains version 029; the Group migration is
+    // MySQL 030, the Session registry owns MySQL 031, the provider slug
+    // lookup owns MySQL 032, and the bot authority schema owns MySQL 033.
+    assert_eq!(versions, (1..=33).collect::<Vec<_>>());
     assert_eq!(mysql[27], "028_fixed_loop_runtime.sql");
     assert_eq!(mysql[28], "029_bot_provider_storage.sql");
     assert_eq!(
         mysql[29],
         "030_group_human_mention_notify_mode.sql"
     );
+    assert_eq!(mysql[30], "031_session_registry.sql");
+    assert_eq!(mysql[31], "032_provider_slug.sql");
+    assert_eq!(mysql[32], "033_bot_authority.sql");
 }
 
 #[tokio::test]
@@ -63,18 +71,21 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     let original_tables = db.query(DbStatement::new(tables_sql)).await?;
     let pending = check_sqlite_migrations(&db).await?.pending_versions;
     // The upgrade path stays focused on Provider storage: pending versions
-    // begin with the Provider storage step (the version-31 Group migration
-    // tail follows, asserted by the final runner assertions below).
+    // begin with the Provider storage step (the version-31 Group migration,
+    // the version-32 Session registry, the version-33 provider slug, and
+    // the version-34 authority migration tails follow, asserted by the
+    // final runner assertions below).
     assert_eq!(
         pending
             .iter()
             .map(|migration| migration.version)
             .collect::<Vec<_>>(),
-        vec![30, 31, 32, 33]
+        vec![30, 31, 32, 33, 34]
     );
 
     run_sqlite_migrations(&db).await?;
-    // The full runner includes the Session registry migration.
+    // The full runner includes the Session registry migration and ends at
+    // the version-34 authority migration.
     assert_eq!(current_sqlite_version(&db, true).await?, Some(sqlite_target_version()));
     let storage = applied_sqlite_migration(&db, 30).await?.unwrap();
     assert_eq!(storage.name, "bot_provider_storage");
@@ -96,8 +107,32 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     );
     run_sqlite_migrations(&db).await?;
     assert_eq!(db.query(DbStatement::new(history_sql)).await?, original);
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'bcs_session_registry' ORDER BY name")).await?;
-    assert_eq!(tables, original_tables);
+    // The Provider storage steps did not churn tables between 29 and the
+    // Session registry; the version-32 Session registry migration adds the
+    // registry table, and the version-34 authority migration adds exactly
+    // the six authority tables.
+    let after_tables = db.query(DbStatement::new(tables_sql)).await?;
+    let before: Vec<String> = original_tables
+        .iter()
+        .map(|row| db_get_column::<String>(row, "name").unwrap())
+        .collect();
+    let added: Vec<String> = after_tables
+        .iter()
+        .map(|row| db_get_column::<String>(row, "name").unwrap())
+        .filter(|name| !before.contains(name))
+        .collect();
+    assert_eq!(
+        added,
+        vec![
+            "bcs_bot_action_audits".to_string(),
+            "bcs_session_registry".to_string(),
+            "bot_manager_changes".to_string(),
+            "bot_manager_sync_operations".to_string(),
+            "bot_ownership_initializations".to_string(),
+            "bot_ownership_transfers".to_string(),
+            "bot_team_manager_sources".to_string(),
+        ]
+    );
     Ok(())
 }
 

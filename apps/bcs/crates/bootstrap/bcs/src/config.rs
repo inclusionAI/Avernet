@@ -26,6 +26,14 @@ pub use bcs_config_api::{
 #[allow(unused_imports)]
 pub use bcs_config_api::{DmPolicy, RedisAuthMode};
 
+// Resolved-runtime module for the trusted team-manager sync slice
+// (plan Task 13, spec §6.1): the section parses via the pure
+// `TeamManagerSyncConfig` contract type, and this module owns the
+// fail-closed material resolution shared by bootstrap wiring.
+pub mod team_manager_sync;
+pub use bcs_config_api::TeamManagerSyncConfig;
+pub use team_manager_sync::{TeamManagerSyncRuntime, resolve_team_manager_sync};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteConfig {
     #[serde(default)]
@@ -659,9 +667,16 @@ pub struct BcsConfig {
     #[serde(default)]
     pub group_session_ws: GroupSessionWsConfig,
 
-    /// Rate limit for bot WebSocket upgrades (`/ws/bot`).
+/// Rate limit for bot WebSocket upgrades (`/ws/bot`).
     #[serde(default)]
     pub bot_ws_admission: crate::bot_ws_admission_config::BotWsAdmissionConfig,
+
+    /// Trusted team-manager synchronization credential boundary (plan
+    /// Task 13, spec §6.1). Disabled (default) keeps the team write
+    /// routes unmounted; an enabled section without resolvable signing-key
+    /// material is a startup configuration error, never an anonymous lane.
+    #[serde(default)]
+    pub team_manager_sync: TeamManagerSyncConfig,
 
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
@@ -1196,7 +1211,8 @@ impl Default for BcsConfig {
             auth_token: None,
             gateway_principal: GatewayPrincipalConfig::default(),
             group_session_ws: GroupSessionWsConfig::default(),
-            bot_ws_admission: Default::default(),
+bot_ws_admission: Default::default(),
+            team_manager_sync: TeamManagerSyncConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
@@ -3405,5 +3421,75 @@ enabled = true
         assert_eq!(config.human_notify.providers.len(), 1);
         assert_eq!(config.human_notify.providers[0].name, "dummy");
         assert!(config.human_notify.providers[0].enabled);
+    }
+
+    #[test]
+    fn team_manager_sync_defaults_to_disabled() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/tmp/bots"
+"#,
+        )
+        .expect("config parses");
+        assert!(!config.team_manager_sync.enabled);
+        // Disabled sections never require signing-key material at
+        // resolution time (fail-closed mount, not fail-closed startup).
+        assert!(
+            crate::config::team_manager_sync::resolve_team_manager_sync(
+                &config.team_manager_sync,
+                None
+            )
+            .expect("disabled section resolves")
+            .is_mounted()
+                == false
+        );
+    }
+
+    #[test]
+    fn team_manager_sync_enabled_section_parses_and_rejects_unknown_keys() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/tmp/bots"
+
+[team_manager_sync]
+enabled = true
+signing_key_env = "BCS_TEAM_KEY"
+"#,
+        )
+        .expect("config parses");
+        assert!(config.team_manager_sync.enabled);
+        assert_eq!(config.team_manager_sync.signing_key_env, "BCS_TEAM_KEY");
+
+        let error = toml::from_str::<BcsConfig>(
+            r#"
+bots_base_dir = "/tmp/bots"
+
+[team_manager_sync]
+enabled = true
+membership_version = true
+"#,
+        );
+        assert!(error.is_err(), "unknown team_manager_sync keys must fail");
+    }
+
+    #[test]
+    fn team_manager_sync_enabled_without_material_is_a_startup_error() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/tmp/bots"
+
+[team_manager_sync]
+enabled = true
+"#,
+        )
+        .expect("config parses");
+        let error = crate::config::team_manager_sync::resolve_team_manager_sync(
+            &config.team_manager_sync,
+            None,
+        )
+        .expect_err("enabled-but-missing material fails at startup");
+        assert!(error.contains("team_manager_sync is enabled"));
+        // The error message must not embed a key reference value.
+        assert!(!error.contains("BCS_TEAM_MANAGER_SYNC_SIGNING_KEY="));
     }
 }

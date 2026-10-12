@@ -109,7 +109,7 @@ impl BotDeliveryPort for MockIo {
                     delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
                     event: DeliveryLifecycleEvent::Completed, now_ms: chrono::Utc::now().timestamp_millis(),
                     request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-                }).await;
+                    operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await;
                 match result {
                     Ok(_) => return,
                     Err(ManagedDeliveryError::Conflict)
@@ -151,6 +151,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
                 let id = format!("message{bot:03}-{session:03}-{n:03}");
                 let now = chrono::Utc::now().timestamp_millis();
                 service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
                     display_message: None,
                     message_id: id.clone(), flow_kind: DeliveryFlowKind::Group, now_ms: now,
                     expire_at_ms: None, event: None,

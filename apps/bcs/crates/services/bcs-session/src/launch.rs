@@ -5,6 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_domain::MessageViewScope;
 use bcs_service_api::port::repo::NewSessionParams;
+use bcs_service_api::application::v1::BotAuthorityHook;
+use bcs_service_api::types::bot_operation::{BotOperationActor, BotOperationContext};
 use bcs_service_api::{
     ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
     CreateOrReactivateCommand, CreateSessionLaunch, DeliveryType, Group, GroupCoreService,
@@ -22,6 +24,10 @@ pub struct SessionLaunchApplication {
     sessions: Arc<dyn SessionManagementService>,
     runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
+    /// Live owner/manager role facts (spec §12.1): launch authorization for a
+    /// Human acting as an EXACT Bot resolves here — never through the old
+    /// `created_by` value or the signed owner_id claim.
+    authority: Arc<dyn BotAuthorityHook>,
 }
 
 struct PreparedLaunch {
@@ -38,12 +44,14 @@ struct BuiltParticipants {
 }
 
 impl SessionLaunchApplication {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         registry: Arc<dyn BotRegistryCoreService>,
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         runtime: Arc<dyn CollaborationRuntimeService>,
         system_message: Arc<dyn SystemMessageService>,
+        authority: Arc<dyn BotAuthorityHook>,
     ) -> Self {
         Self {
             registry,
@@ -51,6 +59,7 @@ impl SessionLaunchApplication {
             sessions,
             runtime,
             system_message,
+            authority,
         }
     }
 
@@ -74,13 +83,26 @@ impl SessionLaunchApplication {
         {
             return Ok(true);
         }
-        let owned = self.registry.try_list_bots_by_creator(owner_id).await?;
-        Ok(owned.iter().any(|bot| {
-            group
-                .participants
-                .iter()
-                .any(|participant| participant.bot_uuid == bot.bot_uuid)
-        }))
+        // Spec §12.2/§12.4 (final-review cutover): the Human qualifies
+        // through a Bot they CURRENTLY own or manage — resolved through the
+        // live authority hook, never the historical `created_by` listing.
+        // A hook failure is a DENY for that pair (fail-closed): it never
+        // grants, and never falls back to a creation-source allowance.
+        for participant in group.participants.iter().filter(|p| p.is_bot()) {
+            match self.authority.can_manage(owner_id, &participant.bot_uuid).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        owner_id,
+                        bot_id = %participant.bot_uuid,
+                        error = %error,
+                        "session launch: live Human→Bot control lookup failed; denying that pair"
+                    );
+                }
+            }
+        }
+        Ok(false)
     }
 
     async fn caller_has_group_access(
@@ -124,13 +146,15 @@ impl SessionLaunchApplication {
                 "caller does not own bot {target}"
             )));
         };
-        let owned = self
-            .registry
-            .try_get(target)
-            .await?
-            .and_then(|bot| bot.created_by)
-            .is_some_and(|created_by| created_by == *owner_id);
-        if !owned {
+        // Spec §12.1(3)/§12.2: the live role facts decide — the Human must
+        // OWN or MANAGE the exact requested Bot. The legacy `created_by`
+        // value no longer confers launch eligibility for a switched bot.
+        let may_act = self
+            .authority
+            .can_manage(owner_id, target)
+            .await
+            .map_err(SessionLaunchError::Internal)?;
+        if !may_act {
             return Err(SessionLaunchError::Forbidden(format!(
                 "caller does not own bot {target}"
             )));
@@ -376,6 +400,30 @@ impl SessionLaunchApplication {
             .await?;
         let caller = request.caller.clone();
         let context_delivery = request.context_delivery;
+        // REQUIRED audit identity (spec §12.5, plan Task 11): the launch
+        // records the VERIFIED operator with the resolved creator as the
+        // effective actor. A mixed Human+Bot caller that the authority
+        // authorized keeps the Human `operator_user_id` (the anti-case of
+        // "only recording the proxied Bot loses the manager identity",
+        // spec §12.1(6)); a Human caller keeps the trusted User ID; a
+        // Bot-only launch records the Bot as itself and never fabricates
+        // a Human.
+        let operation = BotOperationContext {
+            operation_id: format!("session-launch:{}", uuid::Uuid::new_v4()),
+            actor: match (&caller, request.operator_user_id.as_deref()) {
+                (_, Some(user_id)) => BotOperationActor::Human {
+                    user_id: user_id.to_string(),
+                    effective_actor_id: creator.clone(),
+                },
+                (SessionCaller::Human { owner_id, .. }, None) => BotOperationActor::Human {
+                    user_id: owner_id.clone(),
+                    effective_actor_id: creator.clone(),
+                },
+                (SessionCaller::Bot { bot_uuid }, None) => BotOperationActor::Bot {
+                    bot_id: bot_uuid.clone(),
+                },
+            },
+        };
         let params = NewSessionParams {
             session_kind: kind,
             participants: participants.initial,
@@ -385,6 +433,7 @@ impl SessionLaunchApplication {
             created_by: Some(creator),
             session_title: request.title,
             meta: request.meta,
+            operation,
             ..Default::default()
         };
         Ok(PreparedLaunch {
@@ -540,9 +589,11 @@ impl SessionLaunchService for SessionLaunchApplication {
         let created = outcome.created;
         let mut session = outcome.session;
         if created && let Some(participant) = prepared.deferred_after_create.clone() {
+            // The deferred creator materialization belongs to the SAME launch
+            // operation: its audit row reuses the launch's required context.
             session = self
                 .sessions
-                .add_participant(&session.id, participant)
+                .add_participant(&session.id, participant, &prepared.params.operation)
                 .await
                 .map_err(map_session_error)?;
         }

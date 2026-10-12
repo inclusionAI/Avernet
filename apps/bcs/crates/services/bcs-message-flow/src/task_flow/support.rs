@@ -114,7 +114,14 @@ pub(super) async fn complete_session_with_summary(
     };
     let error = (status == "error").then(|| summary.to_string());
     session_management
-        .complete_if_running(session_id, output, error)
+        .complete_if_running(
+            session_id,
+            output,
+            error,
+            // Task-flow completion is a runtime lane with no verified Human
+            // operator: the audit context records the system action itself.
+            &bcs_service_api::types::system_lane_operation("bcs-message-flow-task"),
+        )
         .await
         .map_err(|error| ServiceError::InternalError(error.to_string()))
 }

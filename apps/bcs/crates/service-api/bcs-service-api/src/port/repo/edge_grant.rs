@@ -4,6 +4,7 @@ use bcs_domain::edge_permission::EdgeGrant;
 use bcs_domain::ActorKind;
 
 use crate::core::error::ServiceResult;
+use crate::types::BotOperationContext;
 
 /// Transport-neutral friend query. None includes both actor kinds.
 /// Callers supply limit in 1..=100 and offset <= i64::MAX.
@@ -51,9 +52,27 @@ pub trait EdgeGrantRepoPort: Send + Sync {
         query: FriendListQuery,
     ) -> ServiceResult<FriendIdsPage>;
 
-    async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64>;
+    /// Insert one non-role edge grant with its REQUIRED ordinary-business
+    /// audit context (plan Task 12, spec §12.5): implementations commit the
+    /// edge row and its `bcs_bot_action_audits` record in the SAME
+    /// transaction; an empty operation id (a new command missing its
+    /// context) must be rejected, never recorded as a System operator. Role
+    /// rows never enter this lane (spec §5.1) — implementations keep the
+    /// strict role kind encoding elsewhere.
+    async fn insert_grant(
+        &self,
+        grant: EdgeGrant,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<u64>;
 
-    async fn revoke_grant(&self, edge_id: u64, env: &str) -> ServiceResult<()>;
+    /// Revoke exactly like [`Self::insert_grant`], carrying the REQUIRED
+    /// audit context of the revoking use case.
+    async fn revoke_grant(
+        &self,
+        edge_id: u64,
+        env: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<()>;
 
     /// Cached source for friend-edge discrimination: `(bot_id, env) -> default profile_id`.
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64>;

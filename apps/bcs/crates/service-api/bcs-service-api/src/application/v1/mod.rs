@@ -7,9 +7,12 @@
 pub mod auth;
 pub mod authorization;
 pub mod bot;
+pub mod bot_authority;
+pub mod bot_manager;
 pub mod bot_self;
 pub mod collaboration_definition;
 pub mod collaboration_template;
+pub mod delivery_authorization;
 pub mod error;
 pub mod event_subscription;
 pub mod friendship;
@@ -21,20 +24,25 @@ pub mod internal_bot_attributes;
 pub mod invitation;
 pub mod invite_code;
 pub mod message;
+pub mod ownership_transfer;
 pub mod principal;
 pub mod register;
 pub mod session;
 pub mod session_file;
+pub mod team_manager_sync;
 
 pub use auth::*;
 pub use authorization::{
     Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
-    require_human, select_principal,
+    require_human, resolve_authorized_principal, select_principal,
 };
 pub use bot::*;
+pub use bot_authority::*;
+pub use bot_manager::*;
 pub use bot_self::*;
 pub use collaboration_definition::*;
 pub use collaboration_template::*;
+pub use delivery_authorization::*;
 pub use error::*;
 pub use event_subscription::*;
 pub use friendship::*;
@@ -49,7 +57,9 @@ pub use internal_bot_attributes::*;
 pub use invitation::*;
 pub use invite_code::*;
 pub use message::*;
+pub use ownership_transfer::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
 pub use register::*;
 pub use session::*;
 pub use session_file::*;
+pub use team_manager_sync::*;

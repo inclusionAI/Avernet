@@ -1,8 +1,8 @@
 use bcs_service_api::application::v1::{
-    BotCandidatePurpose, BotDescriptorPatch, BotKind, BotPatch, BotReachability, BotSkill,
-    BotStatus, BotVisibility, FriendCheckInStrategy, UserVisibility,
+    BotAccessRelation, BotCandidatePurpose, BotDescriptorPatch, BotKind, BotPatch, BotReachability,
+    BotSkill, BotStatus, BotVisibility, FriendCheckInStrategy, UserVisibility,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 fn default_limit() -> u64 {
@@ -132,4 +132,21 @@ pub struct ListMyBotsQuery {
     pub offset: u64,
     #[serde(default = "default_limit")]
     pub limit: u64,
+}
+
+/// ONE `GET /bots/mine` item: the Bot fields FLATTENED on the wire plus
+/// the REQUIRED `access_relation` label (spec §7, enum `owner`|`manager`).
+///
+/// Decode-side contract proof for the mine route only — the generic Bot
+/// DTO never carries the label. `access_relation` has NO default: a wire
+/// item missing the label, or carrying anything outside the two-value
+/// enum, FAILS to decode instead of silently defaulting to `owner`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MyBot {
+    /// Flattened Bot projection (all `Bot` fields inline on the wire).
+    #[serde(flatten)]
+    pub bot: bcs_service_api::application::v1::Bot,
+    /// The current Human's highest effective relation on this Bot; never
+    /// omitted and never defaulted.
+    pub access_relation: BotAccessRelation,
 }

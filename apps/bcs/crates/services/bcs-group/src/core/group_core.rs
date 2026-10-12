@@ -124,6 +124,7 @@ impl GroupCoreService for GroupCore {
                 mutated_at_ms,
                 mutation: prepared.mutation,
                 event,
+                operation: command.operation,
             })
             .await
     }
@@ -189,8 +190,13 @@ impl GroupCoreService for GroupCore {
             .await
     }
 
-    async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()> {
-        self.repo.update_workspace(id, workspace).await
+    async fn update_workspace(
+        &self,
+        id: &str,
+        workspace: Workspace,
+        operation: bcs_service_api::types::BotOperationContext,
+    ) -> ServiceResult<()> {
+        self.repo.update_workspace(id, workspace, operation).await
     }
 
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()> {

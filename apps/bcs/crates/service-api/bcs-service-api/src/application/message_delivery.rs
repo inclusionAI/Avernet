@@ -1,6 +1,7 @@
 //! Internal managed-delivery orchestration. Network-facing adapters must first
 //! authorize the caller against the canonical Session; this API is not itself
 //! an unauthenticated HTTP endpoint.
+use crate::types::BotOperationContext;
 use crate::core::message_delivery::DeliveryLifecycleEvent;
 use crate::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionResult};
 use async_trait::async_trait;
@@ -142,6 +143,17 @@ pub struct DeliveryTransitionCommand {
     pub request_id: Option<String>,
     pub actor_id: Option<String>,
     pub reply: Option<AdmitMessageDeliveries>,
+    /// REQUIRED §12.5 operation context (plan Task 12 fix round): every
+    /// externally initiated transition command — chat abort, queued-message
+    /// cancel, manual send-resolution — carries the verified caller identity
+    /// (a Human keeps its trusted user id, a Bot-only caller its Bot id, an
+    /// engine-internal lane an honest System). The managed-delivery layer
+    /// fails a new control command with an EMPTY operation id closed instead
+    /// of recording a forged System operator, and persists the derived
+    /// per-delivery operation ids on the changed rows together with their
+    /// `bcs_bot_action_audits` admitted/applied records in the same store
+    /// transaction.
+    pub operation: BotOperationContext,
     /// Send-time recovery metadata, never credentials. Required by the runtime
     /// before it authorizes I/O; absent for ordinary lifecycle observations.
     pub transport_context_json: Option<serde_json::Value>,

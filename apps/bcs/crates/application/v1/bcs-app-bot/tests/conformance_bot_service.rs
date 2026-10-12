@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
+use bcs_app_bot::{BotAuthorityHookImpl, BotServiceConfig, BotServiceImpl};
 use bcs_bot::BotControlPlaneCore;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_service_api::{
@@ -43,13 +43,19 @@ async fn bot_service_impl_passes_the_v1_bot_service_contract() {
     let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
     let providers = Arc::new(MemoryProviderStore::new());
     let control_plane: Arc<dyn BotControlPlaneCoreService> =
-        Arc::new(BotControlPlaneCore::new(repo, providers.clone(), providers));
+        Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
+    // The authority hook resolves through the strict authority Core over
+    // the same repo, exactly like the bootstrap wiring.
+    let authority = Arc::new(BotAuthorityHookImpl::new(Arc::new(
+        bcs_edge_permission::authority::BotAuthorityCoreServiceImpl::new(repo),
+    )));
     let service = BotServiceImpl::new(
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
         Arc::new(NoopConnectService),
         Arc::new(EmptyCandidateSearch),
+        authority,
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
         },

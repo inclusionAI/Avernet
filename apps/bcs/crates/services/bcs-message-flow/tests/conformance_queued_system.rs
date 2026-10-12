@@ -153,7 +153,8 @@ async fn initialization_is_queued_and_first_group_send_carries_required_context_
     let started = service.transition(DeliveryTransitionCommand { delivery_id:carrier.delivery_id.clone(),
         expected_state_version:carrier.state.state_version, event:Event::StartSend,
         now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
-        transport_context_json:Some(prepared.transport_context_json), deadline_at_ms:Some(i64::MAX) }).await.unwrap();
+        transport_context_json:Some(prepared.transport_context_json), deadline_at_ms:Some(i64::MAX),
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests") }).await.unwrap();
     if let bcs_protocol::BcsFrame::Request(frame) = &mut prepared.command.frame { frame.id = started.request_id.clone().unwrap(); }
     preparer.before_send(&started, &prepared.command).await.unwrap();
     assert!(contexts.get_context(started.run_id.as_deref().unwrap()).await.is_some());
@@ -161,7 +162,8 @@ async fn initialization_is_queued_and_first_group_send_carries_required_context_
     service.transition(DeliveryTransitionCommand { delivery_id:started.delivery_id,
         expected_state_version:started.state.state_version, event:Event::Completed,
         now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None, reply:None,
-        transport_context_json:None, deadline_at_ms:None }).await.unwrap();
+        transport_context_json:None, deadline_at_ms:None,
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests") }).await.unwrap();
     let settled = service.snapshot(None).await.unwrap();
     assert_eq!(settled.iter().find(|r| r.delivery_id == inject.delivery_id).unwrap().state.status, Status::Consumed);
     assert!(support.bot_delivery.frames().await.iter().all(|f| matches!(f, bcs_protocol::BcsFrame::Request(r) if r.method == "chat.send")));

@@ -114,6 +114,12 @@ async fn confirmed_timeout_admits_one_manager_task_result() {
             "cancel_reason":"任务运行已达到设定的超时期限，已按超时规则停止。",
             "task_timeout":true,
         })), deadline_at_ms:Some(chrono::Utc::now().timestamp_millis() + 30_000),
+        // §12.5 REQUIRED derived sub-operation mirroring the runtime
+        // timeout-lane identity for this test-driven transition.
+        operation: bcs_service_api::types::BotOperationContext {
+            operation_id: format!("test-timeout:{}", row.delivery_id),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: row.target_bot_id.clone() },
+        },
     }).await.unwrap();
     assert_eq!(cancelling.state.status, Status::Cancelling);
     let stopped = f.transition(&cancelling, Event::Aborted).await;
@@ -140,6 +146,12 @@ async fn unconfirmed_timeout_atomically_queues_one_system_send_to_manager() {
             "cancel_reason":"任务运行已达到设定的超时期限，已按超时规则停止。",
             "task_timeout":true,
         })), deadline_at_ms:Some(chrono::Utc::now().timestamp_millis() + 30_000),
+        // §12.5 REQUIRED derived sub-operation mirroring the runtime
+        // timeout-lane identity for this test-driven transition.
+        operation: bcs_service_api::types::BotOperationContext {
+            operation_id: format!("test-timeout:{}", row.delivery_id),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: row.target_bot_id.clone() },
+        },
     }).await.unwrap();
     let uncertain = f.transition(&cancelling, Event::AbortUnconfirmed).await;
     assert_eq!(uncertain.state.status, Status::CancelUnknown);
@@ -283,7 +295,8 @@ async fn callback_and_control_race_commit_one_result() {
     let row = f.start(&row).await;
     let command = DeliveryTransitionCommand { delivery_id:row.delivery_id.clone(), expected_state_version:row.state.state_version,
         event:Event::Aborted, now_ms:chrono::Utc::now().timestamp_millis(), request_id:None, actor_id:None,
-        reply:None, transport_context_json:None, deadline_at_ms:None };
+        reply:None, transport_context_json:None, deadline_at_ms:None,
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests") };
     let (_, callback) = tokio::join!(f.service.transition(command), f.flow.handle_bot_event(final_event(&row)));
     callback.unwrap();
     let rows = f.rows().await;

@@ -6,6 +6,14 @@
   `native_mcp`/`mcporter_mcp` profiles. Only explicit V3 negotiation may select
   them; it contains no per-Bot persistence or runtime tool mappings.
 
+- `TeamManagerSyncConfig` (plan Task 13, spec §6.1) declares the trusted
+  team-manager sync boundary: `enabled` (default false, keeps the team write
+  routes unmounted), the signing-key material references
+  (`signing_key_env`, `signing_key_secret`), and `deny_unknown_fields`
+  parsing. An enabled section without resolvable non-blank key material is a
+  bootstrap configuration error, never an anonymous verifier; resolved
+  material is never logged.
+
 - `FixedLoopLimits` defines positive compiler limits for iterations, body nodes,
   expanded nodes and plan bytes. Bootstrap validates and injects the limits;
   configuring them does not enable v2 Run execution.

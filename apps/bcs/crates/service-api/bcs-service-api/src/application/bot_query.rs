@@ -78,6 +78,12 @@ pub struct BotQueryEntry {
     pub friend_check_in_strategy: String,
     #[serde(default)]
     pub is_friend: Option<bool>,
+    /// `mine` access-relation label (spec §7/Task 12): "owner" or "manager",
+    /// computed from the CURRENT authority edges — never from `created_by`.
+    /// `None` on the general directory/search projections that are not the
+    /// mine lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_relation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

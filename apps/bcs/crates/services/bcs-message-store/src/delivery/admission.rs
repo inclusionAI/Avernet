@@ -4,6 +4,15 @@ use super::*;
 pub(crate) fn validate_admission(
     command: &AdmitMessageDeliveries,
 ) -> Result<(), MessageDeliveryRepoError> {
+    // §12.5 required context: a NEW command arriving without its operation
+    // context stops fail-closed here — never a forged System downgrade.
+    // Pre-cutover history rows carry NULL operation ids and stay legal on
+    // reads; this gate applies to newly admitted commands only.
+    if command.operation.operation_id.trim().is_empty() {
+        return Err(MessageDeliveryRepoError::Invalid(
+            "message admission is missing its required BotOperationContext (empty operation id)".into(),
+        ));
+    }
     let direct = command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a;
     if direct && (!command.message.group_id.is_empty() || command.targets.len() != 1
         || command.targets[0].kind != DeliveryType::Send || command.message.run_id.is_empty()
@@ -134,6 +143,8 @@ pub(crate) fn canonical_display(command: &AdmitMessageDeliveries, seq: i64) -> O
 
 /// Plan per-target admission and causal context binding under the writer lock.
 /// The returned changed context rows must commit with the new rows and message.
+/// Plan per-target admission and causal context binding under the writer lock.
+/// The returned changed context rows must commit with the new rows and message.
 pub(crate) fn plan_admission(
     env: &str,
     command: &AdmitMessageDeliveries,
@@ -198,6 +209,7 @@ pub(crate) fn plan_admission(
             accepted_at_ms: None,
             run_deadline_at_ms: None,
             terminal_at_ms: matches!(status, Status::RejectedCapacity | Status::Failed).then_some(command.now_ms),
+            operation_id: Some(command.operation.operation_id.clone()),
             bound_to_delivery_id: None,
             cancel_requested_at_ms: None,
             cancel_requested_by: None,

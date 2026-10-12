@@ -144,11 +144,11 @@ impl EdgeGrantRepoPort for RecordingEdgeGrantRepo {
         self.friends.get(actor).cloned().unwrap_or_default()
     }
 
-    async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<u64> {
+    async fn insert_grant(&self, _: EdgeGrant, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<u64> {
         Ok(1)
     }
 
-    async fn revoke_grant(&self, _: u64, _: &str) -> ServiceResult<()> {
+    async fn revoke_grant(&self, _: u64, _: &str, _: &bcs_service_api::types::BotOperationContext) -> ServiceResult<()> {
         Ok(())
     }
 

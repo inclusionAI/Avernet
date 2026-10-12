@@ -19,6 +19,7 @@ time = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+bcs-test-support = { workspace = true }
 
 [lints]
 workspace = true

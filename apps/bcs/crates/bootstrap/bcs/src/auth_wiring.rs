@@ -380,6 +380,41 @@ pub fn build_oauth_provider(
     }
 }
 
+/// Build the injected team-manager credential verifier from the resolved
+/// signing-key material (plan Task 13, spec §6.1; Gate 0 record in
+/// spec §1.3: bootstrap injects the key, the pure HS256 boundary in
+/// `bcs-jwt` verifies).
+///
+/// Fail-closed: a disabled section yields no verifier (the caller keeps
+/// the team write routes unmounted), and a declared-enabled section with
+/// blank/absent material is a configuration error — never an anonymous
+/// verifier. The resolved key never enters logs.
+pub fn build_team_manager_credential_verifier(
+    config: &bcs_config_api::TeamManagerSyncConfig,
+    material: Option<&str>,
+) -> Result<Arc<dyn bcs_service_api::port::TeamManagerCredentialVerifierPort>, String> {
+    let runtime = crate::config::resolve_team_manager_sync(config, material)?;
+    if !runtime.is_mounted() {
+        return Err(
+            "team-manager sync is not enabled: no verifier is built and the team \
+             write routes stay unmounted"
+                .to_string(),
+        );
+    }
+    let key = runtime
+        .signing_key
+        .and_then(|key| secrecy::ExposeSecret::expose_secret(&key).trim().to_string().into())
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| {
+            "team-manager signing key material disappeared between resolution and \
+             verifier construction"
+                .to_string()
+        })?;
+    let verifier = bcs_jwt::TeamManagerJwtVerifier::new(&key)
+        .map_err(|error| format!("invalid [team_manager_sync] signing key: {error}"))?;
+    Ok(Arc::new(verifier))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +511,66 @@ mod tests {
         };
 
         assert!(error.contains("missing_auth"));
+    }
+
+    #[test]
+    fn team_manager_verifier_fails_closed_when_disabled_or_keyless() {
+        use bcs_config_api::TeamManagerSyncConfig;
+
+        // Disabled section: no verifier, no mount.
+        let error = match build_team_manager_credential_verifier(
+            &TeamManagerSyncConfig::default(),
+            Some("material"),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("disabled section builds no verifier"),
+        };
+        assert!(error.contains("not enabled"));
+
+        // Enabled but material missing: configuration error, not an
+        // anonymous verifier.
+        let enabled = TeamManagerSyncConfig {
+            enabled: true,
+            ..TeamManagerSyncConfig::default()
+        };
+        let error = match build_team_manager_credential_verifier(&enabled, None) {
+            Err(error) => error,
+            Ok(_) => panic!("missing material must be a startup error"),
+        };
+        assert!(error.contains("team_manager_sync is enabled"));
+    }
+
+    #[test]
+    fn team_manager_verifier_implements_the_credential_port() {
+        use bcs_config_api::TeamManagerSyncConfig;
+        use bcs_service_api::port::TeamManagerCredentialVerifierPort as _;
+        use bcs_jwt::team_manager_credential::TeamManagerServiceScopes;
+
+        let enabled = TeamManagerSyncConfig {
+            enabled: true,
+            ..TeamManagerSyncConfig::default()
+        };
+        let verifier = build_team_manager_credential_verifier(&enabled, Some("wired-key"))
+            .expect("verifier builds");
+        let scopes = TeamManagerServiceScopes {
+            service_id: "team-sync-1".to_string(),
+            env: "test-env".to_string(),
+            allowed_bots: None,
+            allowed_teams: None,
+            allowed_operations: None,
+        };
+        // Round-trip through the ACTUAL bcs-jwt boundary proves the wired
+        // verifier is the production verify path.
+        let system_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        let signing = bcs_jwt::TeamManagerJwtVerifier::new("wired-key").expect("signer");
+        let credential = signing
+            .sign_service_credential(&scopes, system_now.saturating_sub(60), 3_600)
+            .expect("credential signs");
+        let verified = verifier.verify(&credential).expect("credential verifies");
+        assert_eq!(verified.service_id, "team-sync-1");
+        assert_eq!(verified.env, "test-env");
     }
 }

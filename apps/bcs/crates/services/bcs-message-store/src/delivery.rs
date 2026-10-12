@@ -1,6 +1,6 @@
 //! Durable managed-delivery transactions shared with canonical message storage.
-//! Session locks serialize managed writes in this process; SQL CAS still
-//! guards against concurrent legacy sequence allocation and stale callbacks.
+//! Session locks serialize managed writes here; SQL CAS guards sequence
+//! allocation and stale callbacks.
 use super::mysql::MySqlMessageStore;
 use async_trait::async_trait;
 use bcs_db_api::{DbError, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep,
@@ -19,9 +19,17 @@ use tracing::Instrument;
 #[derive(Default)]
 pub(crate) struct DeliveryWriterLocks {
     directory: tokio::sync::Mutex<(std::collections::BTreeMap<(u8, String), std::sync::Weak<tokio::sync::Mutex<()>>>, usize)>,
+    #[cfg(test)]
+    directory_size: std::sync::atomic::AtomicUsize,
 }
 
 impl DeliveryWriterLocks {
+    /// Test-only live-entry count mirrored by `acquire`.
+    #[cfg(test)]
+    pub(crate) fn directory_len(&self) -> usize {
+        self.directory_size.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     async fn acquire(&self, keys: BTreeSet<(u8, String)>) -> Vec<tokio::sync::OwnedMutexGuard<()>> {
         let locks = {
             let mut directory = self.directory.lock().await;
@@ -39,44 +47,12 @@ impl DeliveryWriterLocks {
                 }
             }).collect::<Vec<_>>()
         };
+        #[cfg(test)]
+        self.directory_size.store(self.directory.lock().await.0.len(), std::sync::atomic::Ordering::Release);
+
         let mut guards = Vec::with_capacity(locks.len());
         for lock in locks { guards.push(lock.lock_owned().await); }
         guards
-    }
-}
-
-#[cfg(test)]
-mod writer_lock_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn sessions_are_independent_and_capacity_keys_remain_shared() {
-        let locks = DeliveryWriterLocks::default();
-        let a = locks.acquire(BTreeSet::from([(1, "a".into())])).await;
-        let b = locks.acquire(BTreeSet::from([(1, "b".into())]));
-        let _b = tokio::time::timeout(std::time::Duration::from_secs(1), b).await.unwrap();
-        let mut same = Box::pin(locks.acquire(BTreeSet::from([(1, "a".into())])));
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(10), &mut same).await.is_err());
-        drop(a);
-        drop(same.await);
-        let first = locks.acquire(BTreeSet::from([(0, "bot".into()), (1, "c".into())])).await;
-        let mut other_session = Box::pin(locks.acquire(BTreeSet::from([(0, "bot".into()), (1, "d".into())])));
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(10), &mut other_session).await.is_err());
-        drop(first);
-        drop(other_session.await);
-    }
-
-    #[tokio::test]
-    async fn cancelling_multi_key_wait_releases_acquired_locks() {
-        let locks = DeliveryWriterLocks::default();
-        let held = locks.acquire(BTreeSet::from([(1, "b".into())])).await;
-        let mut pending = Box::pin(locks.acquire(BTreeSet::from([(1, "a".into()), (1, "b".into())])));
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(10), &mut pending).await.is_err());
-        drop(pending);
-        drop(locks.acquire(BTreeSet::from([(1, "a".into())])).await);
-        drop(held);
-        for i in 0..512 { drop(locks.acquire(BTreeSet::from([(1, i.to_string())])).await); }
-        assert!(locks.directory.lock().await.0.len() <= 128);
     }
 }
 
@@ -142,6 +118,7 @@ const COLS: &[&str] = &[
     "abort_started_at_ms",
     "cancel_deadline_at_ms",
     "last_error_code",
+    "operation_id",
     "semantic_projection_json",
     "transport_context_json",
     "downstream_run_id",
@@ -158,9 +135,6 @@ pub(crate) fn active(d: &PersistedMessageDelivery) -> bool {
 pub(crate) fn unfinished(d: &PersistedMessageDelivery) -> bool {
     matches!(d.state.status, Status::Queued | Status::Dispatching | Status::Running | Status::Unknown | Status::Cancelling | Status::CancelUnknown | Status::PendingContext | Status::Bound)
 }
-
-
-
 
 
 
@@ -362,6 +336,7 @@ impl MySqlMessageStore {
         &self,
         mut changes: Vec<DeliveryCompareAndSet>,
         admission: Vec<AdmitMessageDeliveries>,
+        control_audits: Vec<DeliveryControlAudit>,
     ) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
         if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id || (w[0].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) != (w[1].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a)) { return Err(MessageDeliveryRepoError::Invalid("batch must share a session".into())); }
         let waiting = WriterTimer::new("repository.writer_wait");
@@ -508,6 +483,14 @@ impl MySqlMessageStore {
             }
             rows.extend(deliveries.clone());
             staged_messages.push(message.clone());
+            // §12.5: one admitted identity snapshot per real admission joins
+            // the SAME transaction as the message/delivery rows (idempotent
+            // duplicates above never reach here, so no phantom events).
+            steps.push(DbTransactionStep::Execute(
+                crate::action_audit::action_audit_insert(&crate::action_audit::admission_audit_record(
+                    &command.operation, &self.env, command.message_id.as_str(),
+                )),
+            ));
             if let Some(event) = command.event.clone().or_else(|| command.display_message.as_ref().and_then(|d| d.event.clone())) { events.push(event); }
             admitted.push(DeliveryAdmissionResult {
                 message,
@@ -522,6 +505,17 @@ impl MySqlMessageStore {
         }
         for change in &changes {
             steps.push(update_delivery(change)?);
+        }
+        // §12.5 (fix round): control-audit rows join the SAME transaction.
+        for carrier in &control_audits {
+            let record = crate::action_audit::control_audit_record(
+                carrier,
+                &self.env,
+                bcs_service_api::types::BotActionKind::Abort,
+            );
+            steps.push(DbTransactionStep::Execute(
+                crate::action_audit::action_audit_insert(&record),
+            ));
         }
         for event in events {
             let plan = bcs_event_store::EventAppendTransactionPlan::build(
@@ -745,7 +739,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             .ok_or_else(|| storage("missing admission result"))
     }
     async fn admit_batch(&self, commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
-        self.delivery_transaction(Vec::new(), commands).await
+        self.delivery_transaction(Vec::new(), commands, Vec::new()).await
     }
     async fn list_deliveries(
         &self,
@@ -773,11 +767,19 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         &self,
         changes: Vec<DeliveryCompareAndSet>,
         reply: Option<AdmitMessageDeliveries>,
+        control_audits: Vec<DeliveryControlAudit>,
     ) -> Result<Option<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
-        Ok(self.delivery_transaction(changes, reply.into_iter().collect()).await?.pop())
+        Ok(self
+            .delivery_transaction(changes, reply.into_iter().collect(), control_audits)
+            .await?
+            .pop())
     }
 }
 
 #[path = "delivery/admission.rs"]
 mod admission;
 pub(crate) use admission::{validate_admission, canonical, canonical_display, plan_admission};
+// Writer-lock cap suite moved off-file (plan Task 12 fix round).
+#[cfg(test)]
+#[path = "delivery_writer_lock_tests.rs"]
+mod writer_lock_tests;

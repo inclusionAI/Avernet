@@ -162,7 +162,9 @@ pub mod leader_election {
 // Re-export env utilities
 pub use env::resolve_env;
 
+pub mod authority_wiring;
 pub mod logging;
+pub mod ownership_migration_wiring;
 
 // Re-exports
 pub use config::{

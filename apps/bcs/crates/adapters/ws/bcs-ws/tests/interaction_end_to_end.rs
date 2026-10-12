@@ -88,8 +88,13 @@ fn requested(interaction_id: &str) -> ProviderInteractionRequestedCommand {
     }
 }
 
-async fn receive_json(rx: &mut mpsc::Receiver<String>) -> Value {
-    serde_json::from_str(&rx.recv().await.expect("WS frame")).expect("JSON WS frame")
+async fn receive_json(rx: &mut mpsc::Receiver<bcs_ws::web::WorkbenchOutbound>) -> Value {
+    let frame = rx.recv().await.expect("WS frame");
+    let payload = match frame {
+        bcs_ws::web::WorkbenchOutbound::PublicControl(payload) => payload,
+        bcs_ws::web::WorkbenchOutbound::Protected { payload, .. } => payload,
+    };
+    serde_json::from_str(&payload).expect("JSON WS frame")
 }
 
 fn requested_via_websocket(interaction_id: &str) -> ProviderInteractionRequestedCommand {

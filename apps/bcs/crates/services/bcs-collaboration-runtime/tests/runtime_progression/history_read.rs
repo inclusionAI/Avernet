@@ -108,11 +108,11 @@ impl SessionManagementService for UnavailableHistorySession {
     async fn count_running_service(&self, _: &str) -> Result<u64, SessionUseCaseError> { panic!("history counted sessions") }
     async fn list_running_service(&self, _: u64, _: u64) -> Result<Vec<Session>, SessionUseCaseError> { panic!("history listed sessions") }
     async fn update_callback_status(&self, _: &str, _: &str) -> Result<(), SessionUseCaseError> { panic!("history mutated session") }
-    async fn complete_if_running(&self, _: &str, _: Option<Value>, _: Option<String>) -> Result<Option<Session>, SessionUseCaseError> { panic!("history mutated session") }
-    async fn add_participant(&self, _: &str, _: Participant) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
-    async fn remove_participant(&self, _: &str, _: &str) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
-    async fn update_participant_mode(&self, _: &str, _: &str, _: ParticipantMode) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
-    async fn update_title(&self, _: &str, _: Option<String>) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn complete_if_running(&self, _: &str, _: Option<Value>, _: Option<String>, _: &bcs_service_api::types::BotOperationContext,) -> Result<Option<Session>, SessionUseCaseError> { panic!("history mutated session") }
+    async fn add_participant(&self, _: &str, _: Participant, _: &bcs_service_api::types::BotOperationContext,) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn remove_participant(&self, _: &str, _: &str, _: &bcs_service_api::types::BotOperationContext,) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn update_participant_mode(&self, _: &str, _: &str, _: ParticipantMode, _: &bcs_service_api::types::BotOperationContext,) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn update_title(&self, _: &str, _: Option<String>, _: &bcs_service_api::types::BotOperationContext,) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
     async fn list_group_ids_by_session_participant(&self, _: &str) -> Result<Vec<String>, SessionUseCaseError> { panic!("history listed groups") }
     async fn delete(&self, _: &str) -> Result<bool, SessionUseCaseError> { panic!("history mutated session") }
 }

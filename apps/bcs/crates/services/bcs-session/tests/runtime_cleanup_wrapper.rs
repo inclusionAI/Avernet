@@ -58,7 +58,7 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
         .unwrap();
     assert!(
         service
-            .complete_if_running("session-1", None, None)
+            .complete_if_running("session-1", None, None, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
             .await
             .unwrap()
             .is_none()
@@ -67,25 +67,25 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
     let participant = Participant::bot("bot-1", ParticipantRole::Worker);
     assert!(
         service
-            .add_participant("session-1", participant)
+            .add_participant("session-1", participant, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
             .await
             .is_err()
     );
     assert!(
         service
-            .remove_participant("session-1", "bot-1")
+            .remove_participant("session-1", "bot-1", &bcs_service_api::types::system_lane_operation("bcs-test-op"))
             .await
             .is_err()
     );
     assert!(
         service
-            .update_participant_mode("session-1", "bot-1", ParticipantMode::Muted)
+            .update_participant_mode("session-1", "bot-1", ParticipantMode::Muted, &bcs_service_api::types::system_lane_operation("bcs-test-op"))
             .await
             .is_err()
     );
     assert!(
         service
-            .update_title("session-1", Some("Renamed".to_string()))
+            .update_title("session-1", Some("Renamed".to_string()), &bcs_service_api::types::system_lane_operation("bcs-test-op"))
             .await
             .is_err()
     );
@@ -96,8 +96,8 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
             .unwrap()
             .is_empty()
     );
-    assert!(service.collect("session-1", "bot-1").await.is_err());
-    assert!(service.uncollect("session-1", "bot-1").await.is_err());
+    assert!(service.collect("session-1", "bot-1", &bcs_service_api::types::system_lane_operation("bcs-test-op")).await.is_err());
+    assert!(service.uncollect("session-1", "bot-1", &bcs_service_api::types::system_lane_operation("bcs-test-op")).await.is_err());
     assert!(
         service
             .list_collected_by_group("group-1", "bot-1", None, None, 0, 20)

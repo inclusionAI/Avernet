@@ -262,6 +262,27 @@ prepare_bcs_runtime_config() {
         log_info "Removed unsupported OpenAPI-v1 block from hybrid BCS runtime config"
     fi
 
+    # Bot owner/manager plan (Task 20): arm the credential-gated
+    # team-manager sources slice in the singlebox runtime config so the
+    # e2e suite really exercises its PUT snapshot sync + POST/DELETE member
+    # repairs and the adapters endpoint-coverage gate can count the slice
+    # (e2e_coverage.sh passes it via --extra-router). THE TRACKED TEMPLATES
+    # STAY UNTOUCHED: a plain `cargo run` keeps the lane unmounted unless
+    # the deployment opts in. The signing key rides the process
+    # environment (`BCS_TEAM_MANAGER_SYNC_SIGNING_KEY`, exported with a
+    # local-only default at launch, below) — the generated config only
+    # names the variable, never the material.
+    for config_file in "$base_config" "$local_config"; do
+        if ! grep -q '^\[team_manager_sync\]' "$config_file"; then
+            cat >> "$config_file" <<'TEAM_MANAGER_SYNC_SECTION'
+
+[team_manager_sync]
+enabled = true
+signing_key_env = "BCS_TEAM_MANAGER_SYNC_SIGNING_KEY"
+TEAM_MANAGER_SYNC_SECTION
+        fi
+    done
+
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 
     BCS_CONFIG_DIR="$config_dir"
@@ -908,6 +929,12 @@ start_bcs_binary() {
         export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
         export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"
     fi
+    # Task 20 (see prepare_bcs_runtime_config): the singlebox runtime config
+    # arms [team_manager_sync], so every singlebox BCS launch MUST provide
+    # non-blank material or the composition root fails closed at startup —
+    # including the dev singlebox profile. Local-only default; real
+    # deployments inject their own secret material, never this value.
+    export BCS_TEAM_MANAGER_SYNC_SIGNING_KEY="${BCS_TEAM_MANAGER_SYNC_SIGNING_KEY:-local-only-bcs-team-manager-sync-signing-key}"
     if [ "${BCS_AUTH_MOCK}" = "1" ] && [ -z "${BCS_MOCK_USER_ID}" ]; then
         log_warn "BCS_AUTH_MOCK=1 but BCS_MOCK_USER_ID is empty; caller identity mock is disabled until configured."
     fi

@@ -1,4 +1,6 @@
-//! Standalone ChatRun table snapshot through SQLite migration 032.
+//! Standalone ChatRun table snapshot through SQLite migration 033
+//! (migration 032 adds the queue linkage columns; the §12.5 authority work
+//! in migration 033 adds the operation_id column).
 //! Used only to create an absent table in repository tests/local standalone use.
 //! Existing databases must be upgraded by the bootstrap migration runner;
 //! never replay ChatRun ALTER statements over this snapshot.
@@ -26,4 +28,5 @@ pub(super) const CREATE_CHAT_RUNS: &str = "CREATE TABLE IF NOT EXISTS bcs_chat_r
             response_mode TEXT NOT NULL,\
             completion_policy TEXT NOT NULL,\
             delivery_ack_at_ms INTEGER,\
+            operation_id TEXT,\
             CONSTRAINT uk_env_run_id UNIQUE (env, run_id))";

@@ -17,6 +17,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-db-local = { workspace = true }
+uuid = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio-test = "0.4"
 sha2 = { workspace = true }

@@ -204,6 +204,7 @@ async fn human_prompt_audience_is_frozen_and_full_view_keeps_existing_shape() {
         .add_participant(
             &run.session_id,
             Participant::human("human_late", ParticipantRole::Observer),
+            &bcs_service_api::types::system_lane_operation("bcs-test-op"),
         )
         .await
         .unwrap();

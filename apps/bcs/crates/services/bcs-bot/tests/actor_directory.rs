@@ -65,7 +65,6 @@ fn directory_with_default_search(
     ActorDirectory::new(
         registry,
         friend,
-        relation,
         worker_profiles,
         candidate_search,
     )
@@ -196,7 +195,6 @@ async fn search_actors_delegates_empty_query_to_core_and_returns_empty_legacy_sh
     let directory = ActorDirectory::new(
         Arc::new(BotCore::memory()),
         Arc::new(NoopFriendCoreService),
-        Arc::new(NoopRelationCoreService),
         Arc::new(NoopWorkerProfileService),
         candidate_search.clone(),
     );
@@ -315,7 +313,6 @@ async fn search_actors_projects_semantic_order_enrichment_context_status_and_dow
     let directory = ActorDirectory::new(
         registry,
         Arc::new(NoopFriendCoreService),
-        Arc::new(NoopRelationCoreService),
         Arc::new(NoopWorkerProfileService),
         candidate_search.clone(),
     );
@@ -397,7 +394,6 @@ async fn candidate_search_is_an_explicit_constructor_dependency() {
     let directory = ActorDirectory::new(
         registry,
         Arc::new(NoopFriendCoreService),
-        Arc::new(NoopRelationCoreService),
         Arc::new(NoopWorkerProfileService),
         candidate_search.clone(),
     );
@@ -459,7 +455,6 @@ async fn search_actors_restores_fallback_score_and_skill_summary() {
     let directory = ActorDirectory::new(
         registry,
         Arc::new(NoopFriendCoreService),
-        Arc::new(NoopRelationCoreService),
         Arc::new(NoopWorkerProfileService),
         candidate_search.clone(),
     );

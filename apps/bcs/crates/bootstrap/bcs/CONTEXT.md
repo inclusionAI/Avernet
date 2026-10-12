@@ -2,6 +2,15 @@
 
 ## Provides
 
+- Task 13 team-manager sync configuration plumbing (spec §6.1):
+  `config/team_manager_sync.rs` resolves the declarative `TeamManagerSyncConfig`
+  fail-closed (disabled stays `is_mounted() = false`; enabled-without-material
+  returns a startup configuration error, never an anonymous lane) and holds the
+  key only as a `secrecy::Secret`. `auth_wiring::build_team_manager_credential_verifier`
+  builds the pure `bcs-jwt` verifier for the injected material so the server
+  composition (plan Task 18) can arm the v1 team slice; the resolved key never
+  enters logs.
+
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
   without a registered verifier fail closed; multiple verifiers fail startup.
@@ -156,6 +165,44 @@ bot_connection_mode). The switch changes reads only; gateway writes remain dual.
 Historical membership correction is a separate deployment work order; no
 dedicated correction executable or DB operation is shipped. Startup applies
 additive schema but never guesses/backfills historical membership.
+
+### Bot authority composition (owner/manager model)
+
+`src/authority_wiring.rs` owns the plan-Task-18 composition order and is the
+ONLY place datasources are selected for the authority lanes:
+
+- **Durable path** (`new_with_infrastructure`): the authority store over the
+  selected `DbPluginKind` resolves as the FIRST datasource consumer —
+  SQLite/MySQL build `DbBotAuthorityStore`, an unmatched plugin kind fails the
+  startup with `BcsError::InvalidConfig` (never a panic, never an unmounted
+  authority). One authority Core over that one store serves the friend lane's
+  authorization, the V1 manager/transfer/team facades, the Session lanes, and
+  the WS protected-delivery service — the old second authority store used by
+  the friend lane was unified onto this lane.
+- **Memory paths** (`BcsServerState::default`, the sync memory constructor):
+  the `MemoryBotRepo` stays both the bot lifecycle store and the authority
+  repo (one critical section), with the same facade bundle over it.
+- **Team sync**: `[team_manager_sync]` resolves at the same startup boundary
+  (process env via `signing_key_env`, then the secret backend via
+  `signing_key_secret`). Disabled stays unmounted (`None`); enabled without
+  resolvable material is a startup configuration error — the lane is never
+  mounted anonymously. The in-memory constructors resolve the section via a
+  dedicated temporary runtime, mirroring the Gateway Principal verifier.
+- **WS protected writer**: every constructor assembles the Task 15
+  `DeliveryAuthorizationServiceImpl` (authority Core + Group/Session snapshot
+  reads) into the `WorkbenchConnectionRegistry` gate. Without this call the
+  registry's fail-closed default answers `InvalidateBinding` for every
+  protected frame; with it enqueue/dequeue re-authorize against live
+  committed authority.
+- **Services container**: the manager/transfer facades are required
+  `Services` slots; the team facade is an `Option` slot whose `None` keeps
+  the credential-gated team write routes unmounted.
+
+Wiring evidence lives in `tests/bot_authority_wiring.rs` (startup failures,
+team gate mounting, v1/legacy relation parity, protected Workbench delivery —
+all through real constructors and real sockets) and
+`tests/conformance_ownership_migration.rs` (shared migration harnesses over
+the real SQL chain).
 
 ## Tests
 

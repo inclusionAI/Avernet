@@ -188,6 +188,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         group_strategy,
         visibility: req.visibility,
         provisioning: false,
+        human_sponsorship: None,
     };
     let mut result = state
         .services

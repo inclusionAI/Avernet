@@ -456,7 +456,11 @@ async fn switch_existing_bot_without_owner_backfills_human_actor_and_owner_edges
 }
 
 #[tokio::test]
-async fn switch_existing_bot_overwrites_created_by_from_provider_ref() {
+async fn switch_existing_bot_never_overwrites_created_by_or_ownership() {
+    // Plan Task 6 (spec 13.3, OT26): a delivery switch is not a trusted
+    // first-registration context. The former unconditional overwrite of
+    // `created_by` from the Provider ref's owner suffix is intentionally
+    // removed; only the legacy Human/relation display bindings are ensured.
     let f = Fixture::new().await;
     let bot_id = f.register_bot("bob").await;
     assert_eq!(
@@ -482,7 +486,11 @@ async fn switch_existing_bot_overwrites_created_by_from_provider_ref() {
         .expect("switch should trust provider_bot_ref owner");
 
     let bot = f.core.get(&bot_id).await.expect("bot should remain registered");
-    assert_eq!(bot.created_by.as_deref(), Some("alice"));
+    assert_eq!(
+        bot.created_by.as_deref(),
+        Some("bob"),
+        "Provider switch must not reset created_by to the ref's owner suffix"
+    );
     let human = f
         .core
         .get("human_alice")
@@ -494,7 +502,7 @@ async fn switch_existing_bot_overwrites_created_by_from_provider_ref() {
         owner_edges
             .iter()
             .any(|(human_id, edge_bot_id, _)| human_id == "human_alice" && edge_bot_id == &bot_id),
-        "expected owner edge for human_alice -> {bot_id}, got {owner_edges:?}",
+        "expected legacy owner edge for human_alice -> {bot_id}, got {owner_edges:?}",
     );
 }
 

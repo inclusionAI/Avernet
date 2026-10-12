@@ -98,6 +98,27 @@ pub async fn assemble() -> (
     .await
     .expect("create bcs_bots");
 
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_bot_action_audits (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                audit_id VARCHAR(128) NOT NULL, \
+                env VARCHAR(32) NOT NULL, \
+                operation_id VARCHAR(64) NOT NULL, \
+                step_key VARCHAR(128) NOT NULL, \
+                operator_kind VARCHAR(16) NOT NULL, \
+                operator_id VARCHAR(256) NOT NULL, \
+                operator_user_id VARCHAR(256), \
+                effective_actor_id VARCHAR(256) NOT NULL, \
+                resource_kind VARCHAR(32) NOT NULL, \
+                resource_id VARCHAR(256) NOT NULL, \
+                action VARCHAR(32) NOT NULL, \
+                phase VARCHAR(16) NOT NULL, \
+                reason_code VARCHAR(64), \
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, \
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+        ))
+        .await
+        .expect("create bcs_bot_action_audits");
     let db_ref = db.clone();
     let edge_grants: Arc<dyn EdgeGrantRepoPort> = Arc::new(DbEdgeGrantStore::sqlite(db.clone()));
     let profiles: Arc<dyn PermissionProfileRepoPort> =

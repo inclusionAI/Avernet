@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 use super::{
     ApplicationError, AuthenticatedCaller, AuthenticatedUser, AuthenticatedUserIdentity, Principal,
+    bot_authority::BotAuthorityHook,
 };
 
 /// Selects which authenticated identity may become the effective Actor for an
@@ -17,6 +18,14 @@ pub enum IdentityPolicy {
     HumanOnly,
     BotOnly,
     HumanOrOwnedBot,
+    /// Mixed-identity parity use cases (spec §8/§12.1): when the Gateway
+    /// authenticated BOTH a User and a Bot, the effective Principal is
+    /// selected by the asynchronous authority Hook — the User must own or
+    /// manage that EXACT Bot per the live role facts, never merely per the
+    /// signed `owner_id` claim. This policy has NO synchronous selection
+    /// path: `select_principal` rejects it fail-closed and callers must use
+    /// [`resolve_authorized_principal`].
+    HumanOrAuthorizedBot,
 }
 
 /// Require the User identity admitted by the current Human-facing V1 APIs.
@@ -75,6 +84,9 @@ pub fn select_principal(
     match policy {
         IdentityPolicy::HumanOnly => require_human(caller),
         IdentityPolicy::BotOnly => require_bot(caller),
+        IdentityPolicy::HumanOrAuthorizedBot => Err(ApplicationError::forbidden(
+            "HumanOrAuthorizedBot requires async authority resolution; call resolve_authorized_principal",
+        )),
         IdentityPolicy::HumanOrOwnedBot => match (&caller.user, &caller.bot) {
             (Some(user), Some(bot)) => {
                 if bot.owner_id != user.id {
@@ -90,6 +102,53 @@ pub fn select_principal(
                 "This operation requires a Human or Bot caller",
             )),
         },
+    }
+}
+
+/// Asynchronous effective-Principal selection for
+/// [`IdentityPolicy::HumanOrAuthorizedBot`] (spec §12.1(2), plan Task 11).
+///
+/// - User + Bot present: the Bot's signed `owner_id` claim is NOT trusted for
+///   authorization here; the live role facts decide. `authority.can_manage`
+///   must confirm the authenticated User owns or manages that exact Bot
+///   (`Err` propagates fail-closed). The effective Principal is the Bot; the
+///   VERIFIED Human caller stays with the caller-side use case so the audit
+///   context records the real Human operator alongside the effective Bot
+///   actor (spec §12.1(6)) — never the Bot alone.
+/// - Bot-only: the Bot represents its own verified identity only.
+/// - Human-only: the projected Human Principal.
+pub async fn resolve_authorized_principal(
+    caller: &AuthenticatedCaller,
+    authority: &dyn BotAuthorityHook,
+) -> Result<Principal, ApplicationError> {
+    match (&caller.user, &caller.bot) {
+        (Some(user), Some(bot)) => {
+            let may_manage = authority
+                .can_manage(&user.id, &bot.bot_uuid)
+                .await
+                .map_err(authority_error)?;
+            if !may_manage {
+                return Err(ApplicationError::forbidden(
+                    "The authenticated User may not act as the authenticated Bot",
+                ));
+            }
+            require_bot(caller)
+        }
+        (None, Some(_)) => require_bot(caller),
+        (Some(_), None) => require_human(caller),
+        (None, None) => Err(ApplicationError::forbidden(
+            "This operation requires a Human or Bot caller",
+        )),
+    }
+}
+
+/// Map a `BotAuthorityHook` resolution failure (spec §12.4, mirrors the
+/// app-group facade): typed authority branches keep their fixed codes;
+/// storage/decode failures stay internal with no SQL leakage.
+fn authority_error(error: crate::core::ServiceError) -> ApplicationError {
+    match error {
+        crate::core::ServiceError::Authority(authority) => ApplicationError::authority(authority),
+        other => ApplicationError::internal(other.to_string()),
     }
 }
 

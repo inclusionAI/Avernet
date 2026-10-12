@@ -2906,6 +2906,30 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     participant.mode = Some(ParticipantMode::Present);
                     participants.push(participant);
                 }
+                // REQUIRED audit identity (spec §12.5): the state-machine
+                // launch records the server-side authenticated Human (if the
+                // run was started by a verified Human) with the materializing
+                // system as its own independent System actor otherwise — a
+                // run without a verified Human never forges one.
+                let run_operation = match authenticated_human.as_ref() {
+                    Some(human) => bcs_service_api::types::BotOperationContext {
+                        operation_id: format!(
+                            "state-machine-run:{}",
+                            Uuid::new_v4()
+                        ),
+                        actor: bcs_service_api::types::BotOperationActor::Human {
+                            user_id: human
+                                .actor_id
+                                .strip_prefix("human_")
+                                .unwrap_or(human.actor_id.as_str())
+                                .to_string(),
+                            effective_actor_id: human.actor_id.clone(),
+                        },
+                    },
+                    None => bcs_service_api::types::system_lane_operation(
+                        "bcs-collaboration-runtime-run",
+                    ),
+                };
                 let outcome = self
                     .sessions
                     .create_or_reactivate(CreateOrReactivateCommand {
@@ -2918,6 +2942,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                             caller_id: cmd.caller_id.clone(),
                             input: Some(cmd.input.clone()),
                             session_title: Some(definition.name.clone()),
+                            operation: run_operation.clone(),
                             ..Default::default()
                         },
                     })
@@ -2949,6 +2974,24 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                             .to_string(),
                     ));
                 }
+                // The audit identity keeps the run's ORIGINAL verified
+                // Human: the later materialization step is part of the same
+                // Human's authorized run, never the runtime impersonating a
+                // system operator.
+                let flip_operation = bcs_service_api::types::BotOperationContext {
+                    operation_id: format!(
+                        "state-machine-human-materialize:{}",
+                        Uuid::new_v4()
+                    ),
+                    actor: bcs_service_api::types::BotOperationActor::Human {
+                        user_id: human
+                            .actor_id
+                            .strip_prefix("human_")
+                            .unwrap_or(human.actor_id.as_str())
+                            .to_string(),
+                        effective_actor_id: human.actor_id.clone(),
+                    },
+                };
                 if existing.is_none() {
                     let mut participant =
                         Participant::human(human.actor_id.clone(), ParticipantRole::Observer);
@@ -2956,7 +2999,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     participant.mode = Some(ParticipantMode::Present);
                     session = self
                         .sessions
-                        .add_participant(&session_id, participant)
+                        .add_participant(&session_id, participant, &flip_operation)
                         .await
                         .map_err(|error| {
                             CollaborationRuntimeError::InvalidRequest(error.to_string())
@@ -2970,6 +3013,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                             &session_id,
                             &human.actor_id,
                             ParticipantMode::Present,
+                            &flip_operation,
                         )
                         .await
                         .map_err(|error| {

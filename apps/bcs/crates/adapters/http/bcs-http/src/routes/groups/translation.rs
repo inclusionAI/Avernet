@@ -201,8 +201,9 @@ pub(crate) async fn extract_human_actor_id(
 /// Resolve the caller bot identity for group member management endpoints.
 ///
 /// Tries bot token first; falls back to human identity (cookie or
-/// X-Mock-User-Id in local/dev mode) and looks up a bot owned by
-/// the human that has coordinator access to the group.
+/// X-Mock-User-Id in local/dev mode) and looks up a bot CURRENTLY
+/// controlled by the human (live owner/manager union) that has coordinator
+/// access to the group.
 pub(crate) async fn resolve_group_member_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -228,19 +229,19 @@ pub(crate) async fn resolve_group_member_caller(
 
     let staff_no = human_id.strip_prefix("human_").unwrap_or(&human_id);
 
-    let owned = state
-        .services
-        .bot_query
-        .list_bots_by_creator(staff_no)
-        .await
-        .map_err(bot_use_case_error_to_http)?;
-    let coordinator = owned.iter().find(|b| {
-        b.bot_uuid == group.driver_bot_id || group.originator.as_deref() == Some(&b.bot_uuid)
+    // Final-review cutover (spec §12.2/§12.4): the Human side resolves
+    // through the CURRENT mine union (live owner/manager role facts via
+    // `list_my_bots` — the same fail-closed helper the session routes use)
+    // — never the retired `created_by` creation listing. A lookup failure
+    // fails closed (no coordinator match → 403), never a legacy allowance.
+    let controlled = crate::routes::sessions::current_controllable_bot_ids(state, staff_no).await;
+    let coordinator = controlled.iter().find(|bot_id| {
+        **bot_id == group.driver_bot_id || group.originator.as_deref() == Some(bot_id)
     });
 
-    coordinator.map(|b| b.bot_uuid.clone()).ok_or_else(|| {
+    coordinator.map(|bot_id| bot_id.clone()).ok_or_else(|| {
         HttpAdapterError::Forbidden(
-            "human caller does not own a coordinator bot in this group".to_string(),
+            "human caller does not control a coordinator bot in this group".to_string(),
         )
     })
 }

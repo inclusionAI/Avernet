@@ -19,6 +19,15 @@ tracing = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 bcs-api-http = { workspace = true }
+bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
+bcs-config = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-relation = { workspace = true }
+bcs-route-security = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true, features = ["util"] }
+uuid = { workspace = true }

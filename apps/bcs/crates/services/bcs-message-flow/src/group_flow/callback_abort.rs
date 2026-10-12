@@ -253,7 +253,11 @@ pub async fn handle_chat_abort(
         bot_id: cmd.bot_id.clone(),
     };
     let mut active = run_context.list_active_runs(&scope).await?;
-    let managed_abort = crate::delivery_abort::select(flow, &cmd, &mut active).await?;
+    // §12.5: ONE operation identity for the whole externally initiated abort
+    // command; every per-delivery cancellation intent and its result settle
+    // under derived sub-operations of this verified caller context.
+    let abort_operation = crate::caller_operation_context(&cmd.caller, "chat-abort");
+    let managed_abort = crate::delivery_abort::select(flow, &cmd, &mut active, &abort_operation).await?;
     if let Some(requested_run_id) = cmd.run_id.as_deref() {
         active.retain(|context| {
             context.canonical_run_id == requested_run_id
@@ -440,7 +444,7 @@ pub async fn handle_chat_abort(
     let mut aborted_run_ids = Vec::new();
     let confirmed_managed: HashSet<_> = confirmed.iter().map(|c| c.canonical_run_id.clone()).collect();
     for (run_id, row) in &managed_abort.owned {
-        if crate::delivery_abort::finish(flow, row, confirmed_managed.contains(run_id)).await? {
+        if crate::delivery_abort::finish(flow, row, confirmed_managed.contains(run_id), &abort_operation).await? {
             aborted_run_ids.push(run_id.clone());
         }
     }

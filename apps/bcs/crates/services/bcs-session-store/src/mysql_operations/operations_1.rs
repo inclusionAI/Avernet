@@ -346,6 +346,15 @@ impl MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `update/session/applied` audit row commits with the completion CAS
+        // and its Event in ONE transaction; any failure rolls all of it back.
+        let audit_record = update_session_audit_record(
+            &command.operation,
+            &self.env,
+            &command.session_id,
+        );
+        steps.push(DbTransactionStep::Execute(session_action_audit_insert(&audit_record)));
         self.db.transaction(steps).await.map_err(|error| {
             ServiceError::Conflict(format!(
                 "Session '{}' changed during completion: {error}",
@@ -578,29 +587,60 @@ impl MySqlSessionStore {
         &self,
         session_id: &str,
         title: Option<String>,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
+        // Existence check via SELECT, NOT affected_rows: the MySQL connection
+        // does not set CLIENT_FOUND_ROWS (see repo_collect), so re-writing the
+        // SAME title reports 0 changed rows and must never be mistaken for a
+        // missing session.
+        let select_cols = self.select_cols();
+        let select_sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? LIMIT 1"
+        );
+        let existing = self
+            .db
+            .query(DbStatement::with_params(
+                &select_sql,
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        if existing.is_empty() {
+            return Err(ServiceError::SessionNotFound(session_id.to_string()));
+        }
         let sql = format!(
             "UPDATE bcs_group_sessions \
              SET session_title = ?, {} \
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
-        let result = self
+        // Same-transaction ordinary-business audit (spec §12.5, plan Task 11):
+        // the `update/session/applied` row commits WITH the title UPDATE or
+        // not at all — the audit never depends on eventing being enabled.
+        let audit_record = update_session_audit_record(operation, &self.env, session_id);
+        if let Err(error) = self
             .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(title.as_deref()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
+            .transaction(vec![
+                DbTransactionStep::Execute(DbStatement::with_params(
+                    &sql,
+                    vec![
+                        DbValue::from(title.as_deref()),
+                        DbValue::from(self.env.as_str()),
+                        DbValue::from(session_id),
+                    ],
+                )),
+                DbTransactionStep::Execute(session_action_audit_insert(&audit_record)),
+            ])
             .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        if result.affected_rows == 0 {
-            return Err(ServiceError::SessionNotFound(session_id.to_string()));
+        {
+            // Identical slot replay: an earlier attempt of the same operation
+            // fully committed the SAME title — fall through to the re-read;
+            // different content under the slot is a Conflict; otherwise the
+            // genuine failure surfaces.
+            self.classify_action_audit_transaction_failure(&audit_record, error)
+                .await?;
         }
-        let select_cols = self.select_cols();
         let select_sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions \
              WHERE env = ? AND session_id = ? LIMIT 1"

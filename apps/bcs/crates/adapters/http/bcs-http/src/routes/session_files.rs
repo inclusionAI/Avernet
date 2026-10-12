@@ -10,6 +10,8 @@
 //! `/files/{file_id}` — axum matchit is static-first by default, and an
 //! explicit regression test guards it.
 
+use crate::routes::sessions::caller_operation_context;
+
 use axum::{
     Json,
     body::{Body, BodyDataStream},
@@ -323,19 +325,18 @@ fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
 
 /// Collect the caller actor_id plus any bots owned by that human (for Humans),
 /// or just the bot_uuid (for Bots). Used to feed mutate-authz into the service.
+/// §12.4 (plan Task 12 fix round): the identities a Human may act for come
+/// from the CURRENT mine union (live owner/manager role facts) through the
+/// application `BotQueryService` — the retired `list_bots_by_creator`
+/// creation listing is no Long an authority answer here either.
 async fn caller_identities(state: &HttpAppState, caller: &GroupChatCaller) -> Vec<String> {
     match caller {
         GroupChatCaller::Bot { bot_uuid } => vec![bot_uuid.clone()],
         GroupChatCaller::Human(h) => {
             let mut ids = vec![h.actor_id.clone()];
-            for b in state
-                .services
-                .registry
-                .list_bots_by_creator(&h.staff_no)
-                .await
-            {
-                ids.push(b.bot_uuid);
-            }
+            ids.extend(
+                super::sessions::current_controllable_bot_ids(state, &h.staff_no).await,
+            );
             ids
         }
     }
@@ -438,6 +439,9 @@ pub async fn prepare_upload(
         size: body.size,
         mime_type: body.mime_type,
         caller: caller_to_actor_ref(&caller),
+        // REQUIRED audit identity (spec §12.5) from the identity this route
+        // actually authenticated (dual identity for a Human caller).
+        operation: caller_operation_context(&caller),
     };
     match state.services.session_files.prepare_upload(cmd).await {
         Ok(r) => {
@@ -554,6 +558,8 @@ pub async fn delete_file(
         caller_identities: caller_identities(&state, &caller).await,
         session_creator,
         driver_bot,
+        // REQUIRED audit identity (spec §12.5).
+        operation: caller_operation_context(&caller),
     };
     match state.services.session_files.delete_file(cmd).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -734,6 +740,8 @@ pub async fn share_mint(
         caller: caller_to_actor_ref(&caller),
         ttl_seconds: body.ttl_seconds,
         caller_identities: caller_identities(&state, &caller).await,
+        // REQUIRED audit identity (spec §12.5).
+        operation: caller_operation_context(&caller),
         session_participants: sess
             .participants
             .iter()
@@ -992,6 +1000,13 @@ mod tests {
                     id: Some(sid.clone()),
                     meta: None,
                     message_visibility_version: 1,
+                    operation: bcs_service_api::types::BotOperationContext {
+                        operation_id: format!("legacy-test-app-{}", uuid::Uuid::new_v4()),
+                        actor: bcs_service_api::types::BotOperationActor::System {
+                            system_id: "bcs-http-test-app".to_string(),
+                            effective_actor_id: "bcs-http-test-app".to_string(),
+                        },
+                    },
                 },
             )
             .await
@@ -1025,12 +1040,21 @@ mod tests {
             Arc::new(SessionFileServiceImpl::new(file_cfg));
 
         let system_messages = Arc::new(RecordingSystemMessage::default());
+        // Fail-closed test double: the legacy test app never exercises
+        // mixed-identity Human+Bot lanes, so live-facts questions deny by
+        // default (never falling back to `created_by`).
+        let authority: Arc<dyn bcs_service_api::application::v1::BotAuthorityHook> =
+            Arc::new(FailClosedAuthorityHook);
         let session_file_application = Arc::new(
             bcs_app_session::SessionFileApplicationServiceImpl::new(
                 session_files.clone(),
                 session_management.clone(),
                 group_core.clone(),
                 registry.clone(),
+                authority,
+                // Noop mine projection: the fixture has no live role facts,
+                // so the Human identity union stays fail-closed.
+                Arc::new(bcs_test_support::NoopBotQueryService),
                 system_messages.clone(),
                 Arc::new(CompletionShareProjector),
             ),
@@ -1682,4 +1706,30 @@ mod tests {
         (file_id, file_status)
     }
 
+}
+
+/// Fail-closed authority double for the legacy HTTP test app (spec §12.4:
+/// answers come from live facts only — none are seeded here, so the hook
+/// denies without ever consulting `created_by`).
+struct FailClosedAuthorityHook;
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for FailClosedAuthorityHook {
+    async fn can_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<bool> {
+        Ok(false)
+    }
+
+    async fn require_owner(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> bcs_service_api::ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Unauthorized(
+            "no authority facts in the legacy test app".to_string(),
+        ))
+    }
 }

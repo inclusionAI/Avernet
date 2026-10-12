@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
 use bcs_relation::RelationCore;
@@ -30,11 +31,17 @@ use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 
 const GROUP_ID: &str = "group-1";
 
+#[path = "common/mod.rs"]
+mod common;
+
 struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
+    bot_repo: Arc<MemoryBotRepo>,
     bots: Arc<BotCore>,
     participant_view_bindings: Arc<RecordingParticipantViewBindings>,
+    /// Keeps the tempdir backing `bot_repo` alive for the whole fixture.
+    _temp: tempfile::TempDir,
 }
 
 #[derive(Default)]
@@ -77,7 +84,10 @@ impl Fixture {
     async fn new() -> Self {
         let group_repo = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        let bots = Arc::new(BotCore::memory());
+        let temp = tempfile::tempdir().expect("temp bot dir");
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
+        let bots = Arc::new(BotCore::with_repo(bot_repo.clone()));
+        let authority = common::repo_authority_hook(&bot_repo);
         let relation = Arc::new(RelationCore::memory());
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -97,7 +107,8 @@ impl Fixture {
                 sessions.clone(),
                 system_message,
             )
-            .for_v1_openapi(),
+            .for_v1_openapi()
+            .with_authority(authority.clone()),
         );
         let service = GroupServiceImpl::new(
             groups.clone(),
@@ -106,6 +117,7 @@ impl Fixture {
             relation.clone(),
             sessions,
             management,
+            authority,
             GroupServiceConfig {
                 relation_env: "dev".to_string(),
             },
@@ -114,12 +126,23 @@ impl Fixture {
         Self {
             service,
             groups,
+            bot_repo,
             bots,
             participant_view_bindings,
+            _temp: temp,
         }
     }
 
     async fn add_public_bot(&self, bot_uuid: &str) {
+        self.add_public_bot_with_owner(bot_uuid, bot_uuid).await;
+    }
+
+    /// Registers the Bot and initializes ownership for `owner_staff_no`
+    /// (Task-5 harness) so facade decisions resolve through the LIVE
+    /// authority hook (spec §12.4), never `created_by`. Ownerless fixture
+    /// bots carry a self-named owner so no test Human can manage them;
+    /// owned bots are seeded EXACTLY once (one approved owner edge).
+    async fn add_public_bot_with_owner(&self, bot_uuid: &str, owner_staff_no: &str) {
         let capabilities = BotCapabilities {
             name: Some(bot_uuid.to_string()),
             visibility: "public".into(),
@@ -129,14 +152,18 @@ impl Fixture {
             .register(bot_uuid.to_string(), capabilities)
             .await
             .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, owner_staff_no, true)
+            .await
+            .expect("assign Bot owner");
+        self.bot_repo
+            .seed_authority_owned(bot_uuid, owner_staff_no)
+            .await
+            .expect("seed test authority owner edge");
     }
 
     async fn add_public_bot_owned_by(&self, bot_uuid: &str, staff_no: &str) {
-        self.add_public_bot(bot_uuid).await;
-        self.bots
-            .save_created_by(bot_uuid, staff_no, true)
-            .await
-            .expect("assign Bot owner");
+        self.add_public_bot_with_owner(bot_uuid, staff_no).await;
     }
 }
 

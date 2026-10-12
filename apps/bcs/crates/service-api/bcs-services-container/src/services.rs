@@ -114,6 +114,14 @@ pub struct Services {
     pub secret: Arc<dyn SecretService>,
     /// Session file workspace application service.
     pub session_files: Arc<dyn SessionFileService>,
+    /// Human-only manager-lane application service (plan Task 13): the
+    /// list/grant/revoke use cases over the current owner/manager edges.
+    pub bot_manager: Arc<dyn bcs_service_api::application::v1::BotManagerService>,
+    /// Human-only ownership-transfer application service (plan Task 14).
+    pub ownership_transfer: Arc<dyn bcs_service_api::application::v1::OwnershipTransferService>,
+    /// Trusted team-manager sync facade (plan Task 13). `None` keeps the
+    /// credential-bound team write routes unmounted (never anonymous).
+    pub team_manager_sync: Option<Arc<dyn bcs_service_api::application::v1::TeamManagerSyncService>>,
 }
 
 impl Services {
@@ -172,6 +180,9 @@ pub struct ServicesBuilder {
     channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
     session_files: Option<Arc<dyn SessionFileService>>,
+    bot_manager: Option<Arc<dyn bcs_service_api::application::v1::BotManagerService>>,
+    ownership_transfer: Option<Arc<dyn bcs_service_api::application::v1::OwnershipTransferService>>,
+    team_manager_sync: Option<Arc<dyn bcs_service_api::application::v1::TeamManagerSyncService>>,
 }
 
 impl ServicesBuilder {
@@ -434,6 +445,34 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the Human-only manager-lane facade (plan Task 13).
+    pub fn bot_manager(
+        mut self,
+        service: Arc<dyn bcs_service_api::application::v1::BotManagerService>,
+    ) -> Self {
+        self.bot_manager = Some(service);
+        self
+    }
+
+    /// Set the Human-only ownership-transfer facade (plan Task 14).
+    pub fn ownership_transfer(
+        mut self,
+        service: Arc<dyn bcs_service_api::application::v1::OwnershipTransferService>,
+    ) -> Self {
+        self.ownership_transfer = Some(service);
+        self
+    }
+
+    /// Set the trusted team-manager sync facade (plan Task 13). `None`
+    /// (the builder default) keeps the team write routes unmounted.
+    pub fn team_manager_sync(
+        mut self,
+        service: Option<Arc<dyn bcs_service_api::application::v1::TeamManagerSyncService>>,
+    ) -> Self {
+        self.team_manager_sync = service;
+        self
+    }
+
     /// Build the services bundle, failing if any required service is unset.
     pub fn build(self) -> Result<Services, BuilderError> {
         Ok(Services {
@@ -484,6 +523,11 @@ impl ServicesBuilder {
             channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
             session_files: required(self.session_files, "session_files")?,
+            bot_manager: required(self.bot_manager, "bot_manager")?,
+            ownership_transfer: required(self.ownership_transfer, "ownership_transfer")?,
+            // Optional by contract: the credential-bound team slice exists
+            // only when the composition root resolved key material.
+            team_manager_sync: self.team_manager_sync,
         })
     }
 
@@ -493,7 +537,8 @@ impl ServicesBuilder {
         use bcs_test_support::{
             NoopA2aChatRunService, NoopA2aChatService, NoopActorDirectoryService,
             NoopBotDeliveryPort, NoopBotDiscoveryService, NoopBotManagementService,
-            NoopBotOnboardingService, NoopBotQueryService, NoopBotRegistryCoreService,
+            NoopBotManagerService, NoopBotOnboardingService, NoopBotOwnershipTransferService,
+            NoopBotQueryService, NoopBotRegistryCoreService,
             NoopBotRunContextPort, NoopBotRuntimeConnectionService, NoopChannelService,
             NoopFriendCoreService, NoopFriendService,
             NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupCoreService,
@@ -626,6 +671,17 @@ impl ServicesBuilder {
             session_files: self
                 .session_files
                 .unwrap_or_else(|| Arc::new(NoopSessionFileService)),
+            // Plan Task 18: the authority facades fail closed in tests —
+            // NoopBotManagerService/NoopOwnershipTransferService answer
+            // Forbidden/NotFound-family errors, never an empty allowance,
+            // and the team facade stays unmounted (None).
+            bot_manager: self
+                .bot_manager
+                .unwrap_or_else(|| Arc::new(NoopBotManagerService)),
+            ownership_transfer: self
+                .ownership_transfer
+                .unwrap_or_else(|| Arc::new(NoopBotOwnershipTransferService)),
+            team_manager_sync: self.team_manager_sync,
         }
     }
 }

@@ -423,6 +423,11 @@ fn bot_query_entry_to_my_json(bot: BotQueryEntry) -> Value {
         "capabilities": caps,
         "visibility": bot.visibility,
         "created_by": bot.created_by,
+        // Plan Task 12: the legacy `/bots/my` items carry the SAME mine
+        // access-relation label vocabulary as the v1 mine projection
+        // ("owner"/"manager", from the CURRENT authority edges). Other lanes
+        // leave the field unset (it is skip-serialized there like before).
+        "access_relation": bot.access_relation,
         "actor_kind": bot.actor_kind,
         "env": bot.env,
         "status": actor_status_to_wire(bot.status),

@@ -106,3 +106,129 @@ fn test_resolved_code_never_returns_delegated() {
         "gone"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Final review (Finding 2): the legacy `/register` route's 500 bodies are
+// sanitized — fixed generic text client-side, the full cause server-side.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod register_sanitization {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        routing::{get, post},
+        Router,
+    };
+    use bcs_domain::{RegisterTokenPayload, register_token_encode};
+    use bcs_services_container::Services;
+    use bcs_http::state::HttpAppState;
+    use futures::FutureExt;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tower::ServiceExt;
+    use tracing::instrument::WithSubscriber;
+
+    fn body_string(response: axum::response::Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .now_or_never()
+            .expect("body read")
+            .expect("body ok");
+        String::from_utf8(bytes.to_vec()).expect("UTF-8 body")
+    }
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn secret() -> Vec<u8> {
+        b"register-sanitization-secret-01".to_vec()
+    }
+
+    fn app() -> Router {
+        // Noop `bot_management` (the test-container default) fails
+        // connect_bot with an internal diagnostic — the exact 500 lane the
+        // sanitization must cover.
+        let state = HttpAppState::new(Services::builder().build_for_test())
+            .with_invite_config(secret(), 86400, None, None, None);
+        Router::new()
+            .route(
+                "/register",
+                post(bcs_http::routes::register::register_bot),
+            )
+            .route(
+                "/register/token",
+                get(bcs_http::routes::register::get_register_token),
+            )
+            .with_state(state)
+    }
+
+    fn valid_token() -> String {
+        let exp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+            + 3600;
+        register_token_encode(
+            &RegisterTokenPayload {
+                v: 1,
+                id: "human_staff-9".to_string(),
+                exp,
+            },
+            &secret(),
+        )
+    }
+
+    #[tokio::test]
+    async fn register_connect_failure_returns_a_sanitized_body_with_the_cause_logged() {
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt().json()
+            .with_writer(move || writer.clone())
+            .finish();
+
+        let app = app();
+        async {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/register?token={}&bot-name=tester", valid_token()))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status().as_u16(), StatusCode::INTERNAL_SERVER_ERROR);
+            let body = body_string(response);
+            assert_eq!(
+                body,
+                r#"{"error":"internal","message":"bot connect failed"}"#,
+                "the client body is a fixed generic text"
+            );
+            assert!(
+                !body.contains("bot management service is not configured"),
+                "the raw internal diagnostic must not reach the client"
+            );
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let text = String::from_utf8(buffer.0.lock().unwrap().clone())
+            .expect("UTF-8 log output");
+        assert!(
+            text.contains("bot management service is not configured"),
+            "the full cause stays in the server-side log"
+        );
+    }
+}

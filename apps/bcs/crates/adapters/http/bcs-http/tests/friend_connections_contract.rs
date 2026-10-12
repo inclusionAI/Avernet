@@ -28,9 +28,14 @@ use tower::ServiceExt;
 struct RecordingConnectService {
     create_commands: Mutex<Vec<(String, String, Option<String>)>>,
     create_request_auths: Mutex<Vec<Option<bcs_service_api::RequestAuthHeaders>>>,
+    create_operations: Mutex<Vec<bcs_service_api::types::BotOperationContext>>,
     approve_commands: Mutex<Vec<(String, String)>>,
     reject_commands: Mutex<Vec<(String, String, Option<String>)>>,
-    cancel_commands: Mutex<Vec<String>>,
+    cancel_commands: Mutex<Vec<(String, String)>>,
+    /// (staff_no, bot_id) pairs the double authorizes for acting-actor
+    /// questions; every question is recorded for delegation assertions.
+    acting_allowed: Mutex<Vec<(String, String)>>,
+    acting_questions: Mutex<Vec<(String, String)>>,
     request_lookup: Mutex<std::collections::HashMap<String, PermissionRequest>>,
     revoke_commands: Mutex<Vec<(String, String)>>,
     list_friends_commands: Mutex<Vec<String>>,
@@ -45,9 +50,12 @@ impl Default for RecordingConnectService {
         Self {
             create_commands: Mutex::new(Vec::new()),
             create_request_auths: Mutex::new(Vec::new()),
+            create_operations: Mutex::new(Vec::new()),
             approve_commands: Mutex::new(Vec::new()),
             reject_commands: Mutex::new(Vec::new()),
             cancel_commands: Mutex::new(Vec::new()),
+            acting_allowed: Mutex::new(Vec::new()),
+            acting_questions: Mutex::new(Vec::new()),
             request_lookup: Mutex::new(std::collections::HashMap::new()),
             revoke_commands: Mutex::new(Vec::new()),
             list_friends_commands: Mutex::new(Vec::new()),
@@ -77,14 +85,33 @@ impl Default for RecordingConnectService {
 
 #[async_trait]
 impl ConnectService for RecordingConnectService {
+    async fn authorize_acting_actor(
+        &self,
+        staff_no: &str,
+        requested_actor_id: &str,
+    ) -> ServiceResult<bool> {
+        self.acting_questions
+            .lock()
+            .await
+            .push((staff_no.to_string(), requested_actor_id.to_string()));
+        Ok(self
+            .acting_allowed
+            .lock()
+            .await
+            .iter()
+            .any(|(user, bot)| user == staff_no && bot == requested_actor_id))
+    }
+
     async fn create_connect(
         &self,
         caller: &str,
         to_bot: &str,
         message: Option<String>,
         request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+        operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<ConnectResult> {
         self.create_request_auths.lock().await.push(request_auth);
+        self.create_operations.lock().await.push(operation);
         self.create_commands
             .lock()
             .await
@@ -92,7 +119,7 @@ impl ConnectService for RecordingConnectService {
         Ok(self.create_result.clone())
     }
 
-    async fn approve(&self, request_id: &str, decider: &str, _request_auth: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> {
+    async fn approve(&self, request_id: &str, decider: &str, _request_auth: Option<bcs_service_api::RequestAuthHeaders>, _operation: bcs_service_api::types::BotOperationContext) -> ServiceResult<Vec<u64>> {
         self.approve_commands
             .lock()
             .await
@@ -105,6 +132,7 @@ impl ConnectService for RecordingConnectService {
         request_id: &str,
         decider: &str,
         reason: Option<String>,
+        _operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<()> {
         self.reject_commands
             .lock()
@@ -113,8 +141,23 @@ impl ConnectService for RecordingConnectService {
         Ok(())
     }
 
-    async fn cancel(&self, request_id: &str) -> ServiceResult<()> {
-        self.cancel_commands.lock().await.push(request_id.to_string());
+    async fn cancel(&self, request_id: &str, operator: &str, _operation: bcs_service_api::types::BotOperationContext) -> ServiceResult<()> {
+        // Mirrors the production service contract: the withdrawer must be
+        // the request's own creator/requester actor (plan Task 12 moved this
+        // verification from the adapter into the service).
+        let request = self
+            .request_lookup
+            .lock()
+            .await
+            .get(request_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))?;
+        if request.created_by != operator && request.from_id != operator {
+            return Err(ServiceError::Forbidden(format!(
+                "actor '{operator}' cannot cancel request '{request_id}'"
+            )));
+        }
+        self.cancel_commands.lock().await.push((request_id.to_string(), operator.to_string()));
         Ok(())
     }
 
@@ -134,6 +177,7 @@ impl ConnectService for RecordingConnectService {
         caller: &str,
         target: &str,
         _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+        _operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Vec<u64>> {
         self.revoke_commands
             .lock()
@@ -428,11 +472,16 @@ async fn friend_connection_request_forwards_whitelisted_auth_headers_to_connect_
 
 #[tokio::test]
 async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
+    // Plan Task 12: acting-actor authorization is answered by the
+    // ConnectService's CURRENT owner/manager role facts (live authority),
+    // not by the adapter's historical `created_by` listing.
     let connect = Arc::new(RecordingConnectService::default());
-    let bot_query = Arc::new(RecordingBotQueryService::with_owned_bot(
-        "bot-owned",
-        "10001",
-    ));
+    connect
+        .acting_allowed
+        .lock()
+        .await
+        .push(("10001".to_string(), "bot-owned".to_string()));
+    let bot_query = Arc::new(RecordingBotQueryService::default());
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
         &temp_dir,
@@ -471,13 +520,23 @@ async fn friend_connection_request_allows_human_to_act_as_owned_bot() {
     assert_eq!(json["data"]["status"], "pending");
     assert_eq!(json["data"]["request_ids"], serde_json::json!(["1"]));
 
+    // The adapter delegated the acting-actor question to the application
+    // service (identity extraction only in the adapter).
+    let questions = connect.acting_questions.lock().await;
+    assert_eq!(
+        questions.as_slice(),
+        &[("10001".to_string(), "bot-owned".to_string())]
+    );
     let calls = connect.create_commands.lock().await;
     assert_eq!(
         calls.as_slice(),
         &[("bot-owned".to_string(), "peer-bot".to_string(), Some("hello".to_string()))]
     );
     let owner_calls = bot_query.list_bots_by_creator_calls.lock().await;
-    assert_eq!(owner_calls.as_slice(), &["10001".to_string()]);
+    // Plan Task 12: the historical creator listing is NOT consulted for
+    // authorization anymore — the acting question went through the
+    // application authority alone.
+    assert!(owner_calls.is_empty());
 }
 
 #[tokio::test]
@@ -869,7 +928,10 @@ async fn friend_connection_request_cancel_and_revoke_delegate_to_service() {
     assert_eq!(revoke_json["data"]["revoked_edges"], serde_json::json!([311]));
 
     let cancel_calls = connect.cancel_commands.lock().await;
-    assert_eq!(cancel_calls.as_slice(), &["99".to_string()]);
+    assert_eq!(
+        cancel_calls.as_slice(),
+        &[("99".to_string(), "caller-bot".to_string())]
+    );
     let revoke_calls = connect.revoke_commands.lock().await;
     assert_eq!(revoke_calls.as_slice(), &[("caller-bot".to_string(), "peer-bot".to_string())]);
 }

@@ -4,8 +4,11 @@
 
 - The OpenAPI V1 `RegisterService` application facade for Human token issuance
   and anonymous registration authenticated solely by the supplied register token.
-- Legacy v1 issuance and ordinary upstream registration, preserving the existing
-  response fields and onboarding-error behavior.
+- Legacy v1 issuance and ordinary upstream registration, preserving the
+  response shape. Since plan Task 6 (bot ownership spec 13.3) a required
+  onboarding/first-ownership write failure fails the registration instead of
+  being warn-swallowed; a successful registration means ownership is
+  initialized.
 - Provider-scoped v2 issuance, signed mode validation and public registration
   metadata projection, with sanitized application errors.
 
@@ -48,7 +51,8 @@ verifies v2 before delegation to preserve unsupported-version errors; the shared
 application facade revalidates the capability and routes it to Provider registration.
 The core owns persistence, Provider/ref uniqueness, owner edges and delivery binding.
 Duplicate scoped refs conflict; no runtime credential is replayed. A valid token
-can create different refs. Owner-edge failures can require operator reconciliation.
+can create different refs. First-ownership initialization is committed in the
+same atomic registration transaction (plan Task 5/6 store lanes).
 The HTTP adapter owns query parsing, status codes, envelopes and no-store headers.
 
 ## Change impact
@@ -61,7 +65,11 @@ registration contract and compatibility tests.
 ## Tests
 
 - `cargo test -p bcs-app-register`
+- `cargo test -p bcs-app-register --test ownership_initialization`
 - `cargo test -p bcs-api-http --test register_routes`
 
 The facade suite includes real HTTP adapter integration with a fake scoped core,
 legacy compatibility, mode and credential rejection, and sanitized error mapping.
+The ownership-initialization suite wires the real facade to the real bcs-bot
+application services, `ProviderRegistrationCore` and the Task 5 store lanes
+(MemoryBotRepo recording levers + a real SQLite `PersistentBotRepo`).

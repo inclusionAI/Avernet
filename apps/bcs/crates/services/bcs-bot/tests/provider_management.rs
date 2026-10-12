@@ -12,12 +12,17 @@ use bcs_service_api::{
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort,
     RegisterProviderBotCommand, RegisterProviderCommand, ServiceError, ServiceResult,
 };
+use bcs_service_api::port::repo::{BotAuthorityRepoPort, BotControlPlaneRepoPort};
+use bcs_service_api::types::{
+    AuditActor, CreateOwnershipTransfer, OwnershipInitialization, TerminalReason, TransferStatus,
+};
 use bcs_test_support::NoopRelationCoreService;
 use tokio::sync::Mutex;
 
 struct TestContext {
     management: ProviderManagement,
     registry: Arc<dyn BotRegistryCoreService>,
+    repo: Arc<MemoryBotRepo>,
     cleanup: Arc<RecordingCleanup>,
     catalog_cleanup: Arc<RecordingCatalogCleanup>,
     _temp_dir: tempfile::TempDir,
@@ -73,7 +78,7 @@ fn test_context() -> TestContext {
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
     let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
-        bot_repo,
+        bot_repo.clone(),
         provider_repo.clone(),
         provider_credentials.clone(),
         provider_bindings.clone(),
@@ -98,6 +103,7 @@ fn test_context() -> TestContext {
     TestContext {
         management,
         registry,
+        repo: bot_repo.clone(),
         cleanup,
         catalog_cleanup,
         _temp_dir: temp_dir,
@@ -139,6 +145,124 @@ async fn unbound_legacy_delete_retries_catalog_cleanup_after_transient_failure()
     assert_eq!(
         ctx.catalog_cleanup.deleted_bot_ids.lock().await.as_slice(),
         &[bot_uuid.to_string()]
+    );
+}
+
+fn named_caps(name: &str) -> BotCapabilities {
+    BotCapabilities {
+        name: Some(name.to_string()),
+        ..BotCapabilities::default()
+    }
+}
+
+#[tokio::test]
+async fn unbound_legacy_delete_retires_role_edges_and_pending_transfers() {
+    // Reviewer scenario: an INITIALIZED legacy (owner-suffixed, unbound)
+    // Bot carries real approved role edges and a PENDING transfer; the
+    // legacy Provider delete lane must retire through the governed
+    // single-transaction deletion boundary — a plain soft delete would
+    // tombstone the Bot but leave its approved edges behind, and the
+    // strict controllable union then fails the WHOLE mine read
+    // (CorruptAuthority dangling edge) while the pending slot survives.
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    let legacy_id = "legacy:11111111";
+    ctx.registry
+        .register_with_owner_and_token(
+            legacy_id.to_string(),
+            named_caps("legacy"),
+            "11111111",
+            "token-legacy",
+        )
+        .await
+        .expect("register legacy bot without provider binding");
+    let init = || OwnershipInitialization {
+        owner_user_id: "11111111".to_string(),
+        actor: AuditActor::Human {
+            user_id: "11111111".to_string(),
+        },
+        operation_id: uuid::Uuid::new_v4().to_string(),
+    };
+    ctx.registry
+        .initialize_existing_ownership(legacy_id, init())
+        .await
+        .expect("initialize the legacy bot's ownership");
+    // A second live Bot of the same Human proves the WHOLE mine union
+    // stays readable after the legacy tombstone.
+    ctx.registry
+        .register_with_owner_and_token(
+            "bot-live".to_string(),
+            named_caps("live"),
+            "11111111",
+            "token-live",
+        )
+        .await
+        .expect("register a second live bot");
+    ctx.registry
+        .initialize_existing_ownership("bot-live", init())
+        .await
+        .expect("initialize the live bot's ownership");
+    ctx.registry
+        .ensure_human_actor("22222222", "user-two")
+        .await
+        .expect("materialize the transfer recipient");
+    let transfer = ctx
+        .repo
+        .create_transfer(CreateOwnershipTransfer {
+            actor_user_id: "11111111".to_string(),
+            bot_id: legacy_id.to_string(),
+            to_user_id: "22222222".to_string(),
+            expected_owner_version: 1,
+            client_request_id: uuid::Uuid::new_v4().to_string(),
+        })
+        .await
+        .expect("seed a pending ownership transfer")
+        .receipt;
+
+    let outcome = ctx
+        .management
+        .delete_provider_bot(DeleteProviderBotCommand {
+            allow_unbound_owner_suffixed_bot: true,
+            ..delete_command(&provider_id, &admin_token, legacy_id)
+        })
+        .await
+        .expect("legacy provider delete");
+
+    assert!(outcome.deleted, "the legacy bot must be deleted");
+    // No dangling edges: the strict mine read still succeeds and shows
+    // the other owned Bot — the whole union is not poisoned.
+    let mine = ctx
+        .repo
+        .list_controllable(bcs_service_api::types::BotControllableQuery {
+            user_id: "11111111".to_string(),
+            env: bcs_config::resolve_env_str(),
+            kind: None,
+            name: None,
+            status: None,
+        })
+        .await
+        .expect("the owner's mine must stay readable after the delete");
+    let ids: Vec<&str> = mine.iter().map(|row| row.record.bot_id.as_str()).collect();
+    assert!(ids.contains(&"bot-live"), "the live Bot must stay listed: {ids:?}");
+    assert!(
+        !ids.contains(&legacy_id),
+        "the retired Bot must not appear anymore"
+    );
+    // The pending transfer terminated under the fixed system marker,
+    // never under the retiring identity — the same shape the governed
+    // retirement boundary commits.
+    let receipt = ctx
+        .repo
+        .get_transfer("11111111", &transfer.transfer_id)
+        .await
+        .expect("terminal receipt re-read");
+    assert_eq!(receipt.status, TransferStatus::Invalidated);
+    assert_eq!(receipt.terminal_reason, Some(TerminalReason::BotDeleted));
+    assert_eq!(
+        receipt.decision_actor,
+        Some(AuditActor::System {
+            name: "ownership-deletion".to_string(),
+        })
     );
 }
 

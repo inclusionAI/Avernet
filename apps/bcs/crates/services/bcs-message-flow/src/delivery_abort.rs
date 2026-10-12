@@ -21,6 +21,7 @@ pub async fn select(
     flow: &BcsMessageFlow,
     command: &ChatAbortCommand,
     active: &mut Vec<ActiveBotRunContext>,
+    operation: &bcs_service_api::types::BotOperationContext,
 ) -> ServiceResult<AbortSelection> {
     let mut selection = AbortSelection {
         owned: BTreeMap::new(),
@@ -110,6 +111,10 @@ pub async fn select(
         }
         let now = chrono::Utc::now().timestamp_millis();
         let mut intent = transition(&row, Event::ScopeAbortRequested, now);
+        // §12.5 (plan Task 12 fix round): the abort is an EXTERNALLY
+        // initiated new command; the verified chat-abort caller is its
+        // operator — required by the managed layer, never forged.
+        intent.operation = operation.for_sub_record(&format!("abort-intent-{}", row.delivery_id));
         intent.transport_context_json = Some(serde_json::json!({"cancel_reason":
             if matches!(&command.caller, bcs_service_api::CallerContext::Human(_)) {
                 "用户中断了本次执行。"
@@ -147,6 +152,9 @@ pub async fn select(
 }
 
 fn transition(row: &PersistedMessageDelivery, event: Event, now: i64) -> DeliveryTransitionCommand {
+    // Placeholder honest System context; the externally initiated abort sites
+    // overwrite it with the verified caller before submitting (the managed
+    // layer enforces the requirement for the control events).
     DeliveryTransitionCommand {
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
@@ -157,6 +165,7 @@ fn transition(row: &PersistedMessageDelivery, event: Event, now: i64) -> Deliver
         reply: None,
         transport_context_json: None,
         deadline_at_ms: Some(now.saturating_add(60_000)),
+        operation: bcs_service_api::types::system_lane_operation("delivery-abort-lane"),
     }
 }
 
@@ -164,6 +173,7 @@ pub async fn finish(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
     confirmed: bool,
+    operation: &bcs_service_api::types::BotOperationContext,
 ) -> ServiceResult<bool> {
     let service = flow
         .managed_deliveries
@@ -194,7 +204,13 @@ pub async fn finish(
         ) {
             return Ok(false);
         }
-        match service.transition(transition(current, if confirmed { Event::Aborted } else { Event::AbortUnconfirmed }, chrono::Utc::now().timestamp_millis())).await {
+        let mut result = transition(current, if confirmed { Event::Aborted } else { Event::AbortUnconfirmed }, chrono::Utc::now().timestamp_millis());
+        // §12.5: the abort result settles the SAME externally initiated
+        // operation (its per-delivery sub-op derived in the managed layer),
+        // so the certified operator identity rides through to the result
+        // record — an honest continuation identity, never a fresh System.
+        result.operation = operation.clone();
+        match service.transition(result).await {
             Ok(updated) => return Ok(updated.state.status == Status::Cancelled),
             Err(bcs_service_api::application::message_delivery::ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_))) => return Err(ServiceError::InternalError("abort result persistence failed".into())),
             Err(_) => continue,

@@ -163,7 +163,7 @@ async fn pre_cutoff_participant_reads_only_classified_durable_history() {
     let mut human = Participant::human("human-1", ParticipantRole::Observer);
     human.message_view_scope = MessageViewScope::Participant;
     sessions
-        .add_participant(&session_id, human)
+        .add_participant(&session_id, human, &session_write_operation())
         .await
         .expect("add participant Human");
     for (sender_id, content, audience, created_at) in [

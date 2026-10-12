@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use crate::types::bot_authority::LegacyCreatorClaim;
 use crate::types::{EnsureOwnerEdgesResult, RelationEdge, ServiceResult};
 
 /// Repository contract for relation graph persistence implementations.
@@ -9,6 +10,22 @@ use crate::types::{EnsureOwnerEdgesResult, RelationEdge, ServiceResult};
 /// graph behavior exposed to application services.
 #[async_trait]
 pub trait RelationRepoPort: Send + Sync {
+    /// Legacy creator claims of the historical-ownership migration
+    /// cross-check (plan Task 17, spec §16.1.2 "对照 legacy creator"): the
+    /// stored `is_creator = 1` rows INTO the listed Bots of one env. The
+    /// claimant keeps the stored ACTOR id shape verbatim (`human_<user_id>`,
+    /// D11); deduplication/normalization belongs to the migration Core. The
+    /// read is bounded by the caller's page (≤ the migration batch limit).
+    async fn list_creator_claims(
+        &self,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<LegacyCreatorClaim>> {
+        let _ = (env, bot_ids);
+        Err(crate::types::ServiceError::InternalError(
+            "legacy creator claim listing is not configured".into(),
+        ))
+    }
     async fn upsert_edge(&self, edge: RelationEdge) -> ServiceResult<()>;
     async fn delete_edge(&self, from_id: &str, to_id: &str, env: &str) -> ServiceResult<()>;
     async fn get_edge(

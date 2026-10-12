@@ -53,6 +53,7 @@ async fn cancel_latest_queued_selects_the_calling_humans_latest_im_message() {
     ] {
         service
             .admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
                 display_message: None,
                 message_id: id.into(),
                 flow_kind: DeliveryFlowKind::Group,
@@ -170,6 +171,7 @@ async fn queue_status_respects_participant_message_audience() {
         ("directed", MessageAudience::directed(["human_1"]).unwrap(), true),
     ] {
         service.admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None, message_id: id.into(), flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
             now_ms: 100, expire_at_ms: None, event: None,
             message: NewMessage { group_id: "group-1".into(), session_id: "group-1:visibility".into(),
@@ -245,7 +247,7 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
         delivery_id: send.delivery_id, expected_state_version: send.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
-    }).await.unwrap();
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),}).await.unwrap();
     assert!(flow.handle_web_send(next).await.unwrap().queue_admission.is_none());
     assert!(!support.bot_delivery.frames().await.is_empty());
     assert!(service.snapshot(None).await.unwrap().iter().any(|row|
@@ -277,7 +279,7 @@ async fn manual_resolution_checks_human_scope_ownership_and_version() {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
         transport_context_json: None, deadline_at_ms: None,
-    };
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),};
     let row = service.transition(transition(&row, Event::StartSend)).await.unwrap();
     let mut command = ResolveMessageDeliveryCommand {
         caller: human, session_id: row.session_id.clone(), message_id: admitted.message_id,
@@ -393,6 +395,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
     assert!(!projection.to_string().contains("请查看文件"));
     let row = service
         .admit(AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
             display_message: None,
             message_id: "queued-source".into(),
             flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
@@ -480,7 +483,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
             reply: None,
             transport_context_json: Some(prepared.transport_context_json),
             deadline_at_ms: Some(i64::MAX),
-        })
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),})
         .await
         .unwrap();
     if let BcsFrame::Request(frame) = &mut prepared.command.frame {
@@ -597,7 +600,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
             reply: None,
             transport_context_json: Some(reply_frame.transport_context_json),
             deadline_at_ms: Some(i64::MAX),
-        })
+            operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),})
         .await
         .unwrap();
     if let BcsFrame::Request(frame) = &mut reply_frame.command.frame {

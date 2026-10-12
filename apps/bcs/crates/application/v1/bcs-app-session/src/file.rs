@@ -13,16 +13,18 @@ use bcs_service_api::application::session_files::{
     SessionFileUseCaseError, ShareMintCommand,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, CompleteSessionFile, DeleteResult, DeleteSessionFile, DownloadSessionFile,
-    DownloadSharedSessionFile, GetSessionFile, IdentityPolicy, ListSessionFiles,
-    PrepareSessionFile, PrepareSessionFileResult, Principal, SessionFileActor,
-    SessionFileActorKind, SessionFileApplicationService, SessionFileContent,
+    resolve_authorized_principal, ApplicationError, BotAuthorityHook, CompleteSessionFile,
+    DeleteResult, DeleteSessionFile, DownloadSessionFile, DownloadSharedSessionFile,
+    GetSessionFile, ListSessionFiles, PrepareSessionFile, PrepareSessionFileResult, Principal,
+    SessionFileActor, SessionFileActorKind, SessionFileApplicationService, SessionFileContent,
     SessionFileInternalContentUrlProjector, SessionFilePage, SessionFileStatus, SessionFileView,
     ShareSessionFile, ShareSessionFileResult, UPLOAD_COMPLETION_SHARE_TTL_SECONDS,
-    UploadSessionFileContent, UploadSessionFileResult, select_principal,
+    UploadSessionFileContent, UploadSessionFileResult,
 };
+use bcs_service_api::types::BotOperationContext;
 use bcs_service_api::{
-    BotRegistryCoreService, GroupCoreService, ServiceError, SystemMessageService,
+    BotQueryService, BotRegistryCoreService, BotUseCaseError, GroupCoreService, MyBotsCommand,
+    ServiceError, SystemMessageService,
 };
 
 pub struct SessionFileApplicationServiceImpl {
@@ -30,16 +32,24 @@ pub struct SessionFileApplicationServiceImpl {
     sessions: Arc<dyn SessionManagementService>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    authority: Arc<dyn BotAuthorityHook>,
+    /// Live mine-union projection (spec §12.4, final-review cutover): the
+    /// identities a Human may act for resolve through `list_my_bots` (live
+    /// owner/manager union) — never the historical `created_by` listing.
+    bot_query: Arc<dyn BotQueryService>,
     system_message: Arc<dyn SystemMessageService>,
     internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
 }
 
 impl SessionFileApplicationServiceImpl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         files: Arc<dyn LegacySessionFileService>,
         sessions: Arc<dyn SessionManagementService>,
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
+        authority: Arc<dyn BotAuthorityHook>,
+        bot_query: Arc<dyn BotQueryService>,
         system_message: Arc<dyn SystemMessageService>,
         internal_content_projector: Arc<dyn SessionFileInternalContentUrlProjector>,
     ) -> Self {
@@ -48,9 +58,26 @@ impl SessionFileApplicationServiceImpl {
             sessions,
             groups,
             registry,
+            authority,
+            bot_query,
             system_message,
             internal_content_projector,
         }
+    }
+
+    /// Build the REQUIRED audit identity (spec §12.5) from the verified
+    /// caller plus the authorized effective Principal — Human operator with
+    /// the (possibly managed) Bot effective actor, a self-acting Human, or a
+    /// Bot-only operator. `authorized_context` is the session facade's
+    /// shared builder; the file facade mirrors its dual-identity contract.
+    async fn authorized_context(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<(Principal, BotOperationContext), ApplicationError> {
+        let (principal, context) = self
+            .authorized_context_shared(caller, self.authority.as_ref())
+            .await?;
+        Ok((principal, context))
     }
 
     async fn load_member(
@@ -58,7 +85,7 @@ impl SessionFileApplicationServiceImpl {
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         session_id: &str,
     ) -> Result<(Principal, Session), ApplicationError> {
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = resolve_authorized_principal(caller, self.authority.as_ref()).await?;
         let session = self
             .sessions
             .get(session_id)
@@ -106,18 +133,31 @@ impl SessionFileApplicationServiceImpl {
         let Principal::Human(human) = principal else {
             return Ok(false);
         };
-        let owned = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .map(|bot| bot.bot_uuid)
-            .collect::<HashSet<_>>();
-        Ok(session
-            .participants
-            .iter()
-            .any(|participant| participant.is_bot() && owned.contains(&participant.bot_uuid)))
+        // Final-review cutover (spec §12.2/§12.4): the Human qualifies
+        // through a participating Bot they CURRENTLY own or manage — the
+        // live authority hook per participant, never the historical
+        // `created_by` creation listing. A hook failure DENIES that pair
+        // (fail-closed): it never grants and never falls back.
+        for participant in session.participants.iter().filter(|participant| participant.is_bot()) {
+            match self
+                .authority
+                .can_manage(&human.subject.id, &participant.bot_uuid)
+                .await
+            {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %session.id,
+                        user_id = %human.subject.id,
+                        bot_id = %participant.bot_uuid,
+                        error = %error,
+                        "session file membership: live control lookup failed; denying that pair"
+                    );
+                }
+            }
+        }
+        Ok(false)
     }
 
     async fn caller_identities(
@@ -127,13 +167,30 @@ impl SessionFileApplicationServiceImpl {
         match principal {
             Principal::Bot(bot) => Ok(vec![bot.bot_uuid.clone()]),
             Principal::Human(human) => {
+                // Final-review cutover (spec §12.4): the identities a
+                // Human may act for are the live mine union (owner/manager
+                // role facts through `list_my_bots`) — never the historical
+                // `created_by` creation listing. A lookup failure is an
+                // error (fail-closed), never a partial legacy allowance.
                 let mut identities = vec![principal.actor_id()];
                 identities.extend(
-                    self.registry
-                        .try_list_bots_by_creator(&human.subject.id)
+                    self.bot_query
+                        .list_my_bots(MyBotsCommand {
+                            staff_no: human.subject.id.clone(),
+                            offset: 0,
+                            limit: 500,
+                            active_only: false,
+                        })
                         .await
-                        .map_err(map_service_error)?
+                        .map_err(|error| match error {
+                            BotUseCaseError::Service(service_error) => {
+                                map_service_error(service_error)
+                            }
+                            other => ApplicationError::internal(other.to_string()),
+                        })?
+                        .items
                         .into_iter()
+                        .filter(|bot| bot.actor_kind == ActorKind::Bot)
                         .map(|bot| bot.bot_uuid),
                 );
                 Ok(identities)
@@ -155,17 +212,54 @@ impl SessionFileApplicationServiceImpl {
         if file.owner.actor_kind != ActorKind::Bot {
             return Err(upload_owner_mismatch());
         }
-        let owned = self
-            .registry
-            .try_get(&file.owner.actor_id)
+        // Spec §8.2: managed bots act with the same eligibility as owned
+        // bots, extended through the LIVE authority predicate (§12.2: a
+        // legacy `created_by` value no longer grants control by itself).
+        let allowed = self
+            .authority
+            .can_manage(&human.subject.id, &file.owner.actor_id)
             .await
-            .map_err(map_service_error)?
-            .is_some_and(|bot| bot.created_by.as_deref() == Some(human.subject.id.as_str()));
-        if owned {
+            .map_err(crate::authorization::map_authority_hook_error)?;
+        if allowed {
             Ok(())
         } else {
             Err(upload_owner_mismatch())
         }
+    }
+
+    /// Build a REQUIRED audit identity for a file mutation from the verified
+    /// caller plus this facade's authorized effective Principal
+    /// (dual-identity contract of spec §12.1(6)).
+    async fn operation_context(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<BotOperationContext, ApplicationError> {
+        let (principal, context) = self.authorized_context(caller).await?;
+        let _ = principal;
+        Ok(context)
+    }
+
+    /// Build the ctx for the upload-completion share mint (same dual-identity
+    /// rule as the outer use case, so the notification mint audits the same
+    /// operator that completed the upload).
+    async fn completion_share_context(
+        &self,
+        principal: &Principal,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<BotOperationContext, ApplicationError> {
+        let _ = principal;
+        self.operation_context(caller).await
+    }
+
+    /// Dual-identity audit builder shared with the session facade: the
+    /// verified Human operator (when present) plus the effective actor the
+    /// async authority selection resolved.
+    async fn authorized_context_shared(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+        authority: &dyn BotAuthorityHook,
+    ) -> Result<(Principal, BotOperationContext), ApplicationError> {
+        crate::authorization::authorized_operation_context(caller, authority).await
     }
 
     async fn authorized_file(
@@ -223,6 +317,7 @@ impl SessionFileApplicationServiceImpl {
     async fn mint_completion_share_url(
         &self,
         principal: &Principal,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         session: &Session,
         file: &SessionFile,
     ) -> Option<String> {
@@ -234,6 +329,18 @@ impl SessionFileApplicationServiceImpl {
                     file_id = %file.file_id,
                     error = %error,
                     "failed to resolve caller identities for upload completion share link",
+                );
+                return None;
+            }
+        };
+        let operation = match self.completion_share_context(principal, caller).await {
+            Ok(operation) => operation,
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session.id,
+                    file_id = %file.file_id,
+                    error = %error,
+                    "failed to build the share audit context for upload completion",
                 );
                 return None;
             }
@@ -251,6 +358,7 @@ impl SessionFileApplicationServiceImpl {
                     .iter()
                     .map(|participant| participant.bot_uuid.clone())
                     .collect(),
+                operation,
             })
             .await
         {
@@ -345,6 +453,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         let (principal, _) = self
             .load_member(&command.caller, &command.session_id)
             .await?;
+        let operation = self.operation_context(&command.caller).await?;
         let result = self
             .files
             .prepare_upload(PrepareUploadCommand {
@@ -353,6 +462,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                 size: command.size,
                 mime_type: command.mime_type,
                 caller: actor_ref(&principal),
+                operation,
             })
             .await
             .map_err(map_file_error)?;
@@ -393,9 +503,10 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         let (principal, session, _) = self
             .authorized_file(&command.caller, &command.session_id, &command.file_id, true)
             .await?;
+        let operation = self.operation_context(&command.caller).await?;
         let file = self
             .files
-            .complete_upload(&command.session_id, &command.file_id)
+            .complete_upload(&command.session_id, &command.file_id, &operation)
             .await
             .map_err(map_file_error)?;
         // The system-message download URL points at a no-auth share link instead
@@ -404,7 +515,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         // upload-completion TTL (15 days). Minting is best-effort: on failure we
         // log and skip the notification rather than advertising a broken link.
         if let Some(share_url) = self
-            .mint_completion_share_url(&principal, &session, &file)
+            .mint_completion_share_url(&principal, &command.caller, &session, &file)
             .await
         {
             self.notify_completed(&principal, &session, &file, &share_url)
@@ -428,6 +539,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                     format!("Group '{}' was not found", session.group_id),
                 )
             })?;
+        let operation = self.operation_context(&command.caller).await?;
         self.files
             .delete_file(DeleteFileCommand {
                 session_id: command.session_id,
@@ -436,6 +548,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                 caller_identities: self.caller_identities(&principal).await?,
                 session_creator: session.created_by,
                 driver_bot: Some(group.driver_bot),
+                operation,
             })
             .await
             .map_err(map_file_error)?;
@@ -491,6 +604,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         let (principal, session) = self
             .load_member(&command.caller, &command.session_id)
             .await?;
+        let operation = self.operation_context(&command.caller).await?;
         let result = self
             .files
             .share_mint(ShareMintCommand {
@@ -504,6 +618,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
                     .iter()
                     .map(|participant| participant.bot_uuid.clone())
                     .collect(),
+                operation,
             })
             .await
             .map_err(map_file_error)?;

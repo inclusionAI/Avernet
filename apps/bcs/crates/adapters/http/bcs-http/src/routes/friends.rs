@@ -6,7 +6,7 @@ use axum::{
 };
 use bcs_protocol::http::friends::{CreateFriendRequestBody, ListRequestsQuery};
 use bcs_service_api::{
-    BotDetailCommand, BotUseCaseError, CreateFriendRequestCommand, FriendRequest,
+    CreateFriendRequestCommand, FriendRequest,
     FriendRequestDecisionCommand, FriendRequestDirection, FriendRequestStatus, FriendUseCaseError,
     ListFriendRequestsCommand, ListFriendsCommand, ServiceError,
 };
@@ -380,6 +380,13 @@ async fn resolve_friends_list_caller(
     }
 }
 
+/// Acting-actor authorization for the legacy `/friends/*` routes (plan Task
+/// 12, spec §12.1(4)/§12.4): this adapter helper resolves the Human IDENTITY
+/// only, then asks the application `ConnectService` — which owns the live
+/// CURRENT-owner/manager role facts — whether the Human may act as
+/// `actor_id`. The former adapter-side `created_by` comparison (including
+/// its `unwrap_or(true)` legacy fall-open) is retired: a former creator
+/// without a current role is denied here too.
 async fn check_actor_ownership(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -396,31 +403,21 @@ async fn check_actor_ownership(
         return Err(ActorOwnershipError::NoUserIdentity);
     };
 
-    match state
-        .services
-        .bot_query
-        .get_bot(BotDetailCommand {
-            caller_actor_id: None,
-            bot_id: actor_id.to_string(),
-        })
-        .await
-    {
-        Ok(bot) => {
-            if bot
-                .created_by
-                .as_deref()
-                .map(|owner| owner == staff_no)
-                .unwrap_or(true)
-            {
-                Ok(())
-            } else {
-                Err(ActorOwnershipError::Denied)
-            }
+    match state.connect.authorize_acting_actor(&staff_no, actor_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ActorOwnershipError::Denied),
+        Err(ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_)) => {
+            Err(ActorOwnershipError::BotNotFound)
         }
-        Err(BotUseCaseError::Service(
-            ServiceError::BotNotFound(_) | ServiceError::BotNotRegistered(_),
-        )) => Err(ActorOwnershipError::BotNotFound),
-        Err(_) => Err(ActorOwnershipError::Denied),
+        Err(error) => {
+            tracing::warn!(
+                request_id = %bcs_observability::CurrentRequestId,
+                error = %error,
+                target_actor = %actor_id,
+                "legacy friends acting-actor authorization failed"
+            );
+            Err(ActorOwnershipError::Denied)
+        }
     }
 }
 

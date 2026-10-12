@@ -30,6 +30,17 @@ impl FriendAuthSyncPort for RecordingSync {
     }
 }
 
+/// Honest test operation context (plan Task 12).
+fn ctx(label: &str) -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("friend-auth-sync-tests-{label}"),
+        actor: bcs_service_api::types::BotOperationActor::Human {
+            user_id: "88123".to_string(),
+            effective_actor_id: "human_88123".to_string(),
+        },
+    }
+}
+
 fn auth(principal: &str) -> RequestAuthHeaders {
     RequestAuthHeaders {
         authorization: None,
@@ -69,7 +80,7 @@ fn assert_command(
 #[tokio::test]
 async fn auto_approved_tc_friend_emits_grant_with_applicant_identity() {
     let (service, sync) = fixture("OPEN").await;
-    let result = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")))
+    let result = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")), ctx("cc-applicant"))
         .await.expect("auto connect");
     assert_eq!(result.status, ConnectStatus::Approved);
     assert!(result.auto_accepted);
@@ -84,7 +95,7 @@ async fn auto_approved_tc_friend_emits_grant_with_applicant_identity() {
 #[tokio::test]
 async fn manual_tc_approval_emits_grant_only_after_approval_with_decider_identity() {
     let (service, sync) = fixture("APPROVAL").await;
-    let pending = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")))
+    let pending = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")), ctx("cc-applicant"))
         .await.expect("pending connect");
     assert_eq!(pending.status, ConnectStatus::Pending);
     assert!(pending.edge_ids.is_empty());
@@ -93,7 +104,7 @@ async fn manual_tc_approval_emits_grant_only_after_approval_with_decider_identit
     assert!(service.list_friends(HUMAN).await.unwrap().is_empty());
 
     let request_id = &pending.request_ids[0];
-    let edges = service.approve(request_id, "85020", Some(auth("owner-decider")))
+    let edges = service.approve(request_id, "85020", Some(auth("owner-decider")), ctx("approve"))
         .await.expect("approve");
     assert_eq!(edges.len(), 1);
     assert_eq!(service.list_friends(HUMAN).await.unwrap()[0].actor_id, BOT);
@@ -106,7 +117,7 @@ async fn manual_tc_approval_emits_grant_only_after_approval_with_decider_identit
 #[tokio::test]
 async fn revoking_tc_friend_emits_revoke_with_current_caller_identity() {
     let (service, sync) = fixture("OPEN").await;
-    let created = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")))
+    let created = service.create_connect(HUMAN, BOT, None, Some(auth("applicant")), ctx("cc-applicant"))
         .await.expect("create friendship");
     assert_eq!(created.status, ConnectStatus::Approved);
     assert_eq!(created.edge_ids.len(), 1);
@@ -117,7 +128,7 @@ async fn revoking_tc_friend_emits_revoke_with_current_caller_identity() {
         assert_command(&commands[0], FriendAuthSyncAction::Grant, Some(&created.request_ids[0]), "applicant");
     }
 
-    let revoked = service.revoke_friend(HUMAN, BOT, Some(auth("unfriend-caller")))
+    let revoked = service.revoke_friend(HUMAN, BOT, Some(auth("unfriend-caller")), ctx("unfriend"))
         .await.expect("revoke friendship");
     assert_eq!(revoked, created.edge_ids);
     assert!(service.list_friends(HUMAN).await.unwrap().is_empty());

@@ -379,6 +379,7 @@ mod tests {
         let seed = ManagedMessageDelivery::new(repo.clone());
         let row = seed
             .admit(AdmitMessageDeliveries {
+            operation: bcs_service_api::types::system_lane_operation("message-flow-test-seed"),
                 display_message: None,
                 message_id: "before-crash".into(),
                 flow_kind: DeliveryFlowKind::Group,
@@ -411,6 +412,7 @@ mod tests {
         seed.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
             event: DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None, reply: None,
             transport_context_json: Some(serde_json::json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"old","downstream_session_key":"old-key"})), deadline_at_ms: Some(i64::MAX),
+            operation: bcs_service_api::types::system_lane_operation("delivery-worker-load"),
         }).await.unwrap();
         let config = crate::BcsConfig::default();
         let make_flow = || {

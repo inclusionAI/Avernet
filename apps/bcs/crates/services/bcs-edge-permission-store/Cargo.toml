@@ -13,6 +13,7 @@ bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -21,6 +22,25 @@ tracing = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+# tests/authority_transaction_capability.rs pulls bootstrap migrations.rs in
+# via #[path] (same pattern as bcs-message-store); it needs sha2/hex to
+# compile (same versions as the bcs crate that owns the file). sha2 is a
+# regular dependency above.
+hex = { workspace = true }
+# tests/conformance_bot_authority.rs drives the shared authority contract:
+# the SQL driver (DbBotAuthorityStore), the in-memory MemoryBotRepo driver,
+# and the production Core over both.
+bcs-edge-permission = { workspace = true }
+bcs-bot-store = { workspace = true }
+tempfile = { workspace = true }
+# tests/team_manager_sync.rs drives the shared team-sync contract: the
+# Memory driver resolves its bound env through bcs-config, and the
+# #[ignore]d MySQL concurrency contracts (BCS_TEST_MYSQL_URL) use the
+# MySQL plugin (same pattern as bcs-event-store's conformance tests).
+bcs-config = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
 
 [lints]
 workspace = true

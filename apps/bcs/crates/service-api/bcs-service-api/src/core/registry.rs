@@ -81,6 +81,56 @@ pub trait BotRegistryCoreService: Send + Sync {
         Err(ServiceError::InternalError("atomic registration creation is not configured".into()))
     }
 
+    /// Governed first-ownership initialization of an EXISTING live Bot whose
+    /// authority is still uninitialized (`ownership_version = 0`), consuming
+    /// the trusted [`crate::types::OwnershipInitialization`] (plan Task 5
+    /// store lane; spec §13.3). The Bot/Provider creation itself goes through
+    /// [`create_registration_if_absent`](Self::create_registration_if_absent)
+    /// and the Provider membership ports; this is the claim entry for trusted
+    /// first-registration contexts whose Bot already exists.
+    ///
+    /// Branches: a missing or soft-deleted Bot is `BotNotFound`; an already
+    /// initialized Bot is `ServiceError::Authority(AuthorityError::Conflict)`
+    /// — callers must treat that as "already initialized, never re-claim",
+    /// not as a failure to propagate. Any step failure rolls the whole claim
+    /// back and must fail the surrounding registration (spec §13.3: no 2xx
+    /// "fix later").
+    async fn initialize_existing_ownership(
+        &self,
+        _bot_id: &str,
+        _initialization: crate::types::OwnershipInitialization,
+    ) -> ServiceResult<bcs_domain::OwnershipState> {
+        let _ = (_bot_id, _initialization);
+        Err(ServiceError::InternalError(
+            "governed ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// Atomic Bot retirement (plan Task 5 deletion boundary): soft-delete the
+    /// Bot row AND withdraw every approved authority role edge it is the
+    /// target of (owner and manager, all management sources), terminate its
+    /// PENDING ownership transfers and append the `delete/bot/applied`
+    /// lifecycle audit row in ONE commit — the audit failure rolls the
+    /// tombstone back. A plain soft delete would leave dangling role edges,
+    /// and the strict Task 3 authority reads fail the WHOLE query on them
+    /// (the retired Bot poisons its FORMER owner's mine union).
+    ///
+    /// Branches: `Ok(true)` when this call retired the Bot; `Ok(false)` for a
+    /// missing, already-retired or Human row (Human actors use the guarded
+    /// `delete_human_actor` lane). Callers that only need process-local
+    /// cleanup (caches after a durable tombstone committed elsewhere) keep
+    /// using [`soft_delete`](Self::soft_delete).
+    async fn retire_bot_lifecycle(
+        &self,
+        _bot_id: &str,
+        _operation: crate::types::BotOperationContext,
+    ) -> ServiceResult<bool> {
+        let _ = (_bot_id, _operation);
+        Err(ServiceError::InternalError(
+            "atomic bot authority retirement is not configured".into(),
+        ))
+    }
+
     /// Register or update a bot.
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 

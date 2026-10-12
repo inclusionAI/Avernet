@@ -111,6 +111,17 @@ impl A2aChat {
             completion_policy,
         );
         record.original_request = original_request;
+        // §12.5 REQUIRED operation context of the create command: the
+        // Direct Chat lane is authenticated as the sending Bot (its verified
+        // bot token resolved `from_bot_id`), so the operator is that Bot —
+        // the external HTTP delivery follows only AFTER the admitted
+        // snapshot commits with the run row.
+        record.operation = Some(bcs_service_api::types::BotOperationContext {
+            operation_id: format!("direct-chat-create:{run_id}"),
+            actor: bcs_service_api::types::BotOperationActor::Bot {
+                bot_id: from_bot_id.clone(),
+            },
+        });
         if let Err(err) = bcs_observability::observe_result("chat.run.create", self.run_store.create(record)).await {
             let reason = err.direct_chat_reason();
             let event = if reason == DirectChatRunReason::StoreCapacity {

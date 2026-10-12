@@ -1,22 +1,22 @@
 //! Event Subscription application service.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_config_api::{EventingConfig, PrivateEndpointAllowlistEntryConfig};
 use bcs_service_api::application::v1::{
-    ApplicationError, CreateEventSubscription, CursorPage, DeleteEventSubscription,
-    EventDeliveryAttemptResult, EventDeliveryAttemptSummary, EventDeliveryDetail,
-    EventDeliverySummary, EventSinkInput, EventSinkView, EventSubscription,
-    EventSubscriptionDesiredStatus, EventSubscriptionService, EventSubscriptionTestResult,
-    EventWebhookEndpointView, GetEventDelivery, GetEventSubscription,
-    GroupEventSubscriptionProvisioner, IdentityPolicy, InlineGroupEventSubscriptionRequest,
-    ListEventDeliveries, ListEventSubscriptions, PatchEventSinkInput, PatchEventSubscription,
-    PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, Principal, ReplayEventDelivery,
-    ReplayEventDeliveryResult, SkipEventDelivery, SkipEventDeliveryResult, TestEventSubscription,
-    select_principal,
+    ApplicationError, AuthenticatedUser, BotAuthorityHook,
+    CreateEventSubscription, CursorPage, DeleteEventSubscription, EventDeliveryAttemptResult,
+    EventDeliveryAttemptSummary, EventDeliveryDetail, EventDeliverySummary, EventSinkInput,
+    EventSinkView, EventSubscription, EventSubscriptionDesiredStatus, EventSubscriptionService,
+    EventSubscriptionTestResult, EventWebhookEndpointView, GetEventDelivery, GetEventSubscription,
+    GroupEventSubscriptionProvisioner, InlineGroupEventSubscriptionRequest, ListEventDeliveries,
+    ListEventSubscriptions, PatchEventSinkInput, PatchEventSubscription,
+    PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, Principal,
+    ReplayEventDelivery, ReplayEventDeliveryResult, SkipEventDelivery, SkipEventDeliveryResult,
+    TestEventSubscription,
 };
 use bcs_service_api::port::repo::{
     AppendEventRecord, CancelPendingEventSubscriptions, CreateEventReplayTarget,
@@ -92,6 +92,11 @@ pub struct EventSubscriptionApplicationService {
     repo: Arc<dyn EventRepoPort>,
     delivery: Arc<dyn EventDeliveryPort>,
     authorizer: Arc<dyn EventSubscriptionAuthorizer>,
+    /// Live Human→Bot authority for effective-Principal selection during
+    /// Group Event Subscription provisioning (review F8): mixed-identity
+    /// callers resolve through `can_manage`, never the signed `owner_id`
+    /// claim.
+    authority: Arc<dyn BotAuthorityHook>,
     catalog: Arc<EventCatalog>,
     policy: EventSubscriptionPolicy,
     env: String,
@@ -112,6 +117,7 @@ impl EventSubscriptionApplicationService {
         repo: Arc<dyn EventRepoPort>,
         delivery: Arc<dyn EventDeliveryPort>,
         authorizer: Arc<dyn EventSubscriptionAuthorizer>,
+        authority: Arc<dyn BotAuthorityHook>,
         catalog: Arc<EventCatalog>,
         policy: EventSubscriptionPolicy,
         env: impl Into<String>,
@@ -120,6 +126,7 @@ impl EventSubscriptionApplicationService {
             repo,
             delivery,
             authorizer,
+            authority,
             catalog,
             policy,
             env: env.into(),
@@ -159,6 +166,77 @@ impl EventSubscriptionApplicationService {
                 "eventing_disabled",
                 "Event subscriptions are disabled",
             ))
+        }
+    }
+
+    /// Live-authority effective-Principal selection for Group Event
+    /// Subscription provisioning (review finding F8).
+    ///
+    /// Mirrors the app-session `resolve_authorized_principal` pattern
+    /// (spec §12.1(2)) with per-branch semantics equivalent to it, inlined
+    /// here so denials keep the typed `event_subscription_forbidden` shape
+    /// and bcs-eventing stays independent of bcs-app-session:
+    ///
+    /// - Human-only → the projected Human Principal;
+    /// - Bot-only → the Bot Principal (tenant required, as before);
+    /// - Mixed Human+Bot → the Bot acts for the Human ONLY while the LIVE
+    ///   authority hook resolves `can_manage(user.id, bot.bot_uuid)` to
+    ///   `Ok(true)`. The SIGNED `owner_id` claim is never consulted:
+    ///   `Ok(false)` denies fail-closed, and a hook failure warns and
+    ///   denies the same way (F7 fail-closed parity).
+    async fn resolve_live_principal(
+        &self,
+        caller: &bcs_service_api::application::v1::AuthenticatedCaller,
+    ) -> Result<Principal, ApplicationError> {
+        match (&caller.user, &caller.bot) {
+            (Some(user), Some(bot)) => {
+                match self.authority.can_manage(&user.id, &bot.bot_uuid).await {
+                    Ok(true) => {
+                        let tenant = caller.tenant.clone().ok_or_else(|| {
+                            ApplicationError::forbidden("The Bot caller requires a tenant")
+                        })?;
+                        Ok(Principal::bot(
+                            bot.bot_uuid.clone(),
+                            tenant,
+                            BTreeSet::new(),
+                        ))
+                    }
+                    Ok(false) => Err(ApplicationError::event_subscription_forbidden(
+                        "The authenticated User may not act as the authenticated Bot",
+                    )),
+                    Err(error) => {
+                        tracing::warn!(
+                            user_id = %user.id,
+                            bot_id = %bot.bot_uuid,
+                            error = %error,
+                            "event subscription provisioning: live control lookup failed; denying fail-closed"
+                        );
+                        Err(ApplicationError::event_subscription_forbidden(
+                            "The authenticated User may not act as the authenticated Bot",
+                        ))
+                    }
+                }
+            }
+            (None, Some(bot)) => {
+                let tenant = caller
+                    .tenant
+                    .clone()
+                    .ok_or_else(|| ApplicationError::forbidden("The Bot caller requires a tenant"))?;
+                Ok(Principal::bot(bot.bot_uuid.clone(), tenant, BTreeSet::new()))
+            }
+            (Some(user), None) => Ok(Principal::human(
+                AuthenticatedUser {
+                    id: user.id.clone(),
+                    username: user.username.clone(),
+                    display_name: user.display_name.clone(),
+                    full_name: user.full_name.clone(),
+                },
+                caller.tenant.clone(),
+                BTreeSet::new(),
+            )),
+            (None, None) => Err(ApplicationError::forbidden(
+                "This operation requires a Human or Bot caller",
+            )),
         }
     }
 
@@ -844,7 +922,7 @@ impl GroupEventSubscriptionProvisioner for EventSubscriptionApplicationService {
         requests: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<PreparedGroupEventSubscriptions, ApplicationError> {
         self.ensure_enabled()?;
-        let principal = select_principal(caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_live_principal(caller).await?;
         let actor = match principal {
             Principal::Human(human) => EventActor {
                 actor_type: EventActorType::Human,

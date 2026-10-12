@@ -67,3 +67,8 @@ authorization or token policy.
 
 - `cargo test --package bcs-app-session --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-app-session --all-targets --manifest-path src/bcs/Cargo.toml`
+- R25 conformance driver: `tests/conformance_delivery_authorization.rs`
+  registers `DeliveryAuthorizationServiceImpl` against the shared
+  `delivery_authorization_service_contract_tests` harness (renamed from the
+  plan-Task-15 driver file; both drivers — the real memory authority stack
+  and the application map double — are unchanged).

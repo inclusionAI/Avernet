@@ -27,3 +27,32 @@ schema path such as `principals[0].tenant`, but must not log any compact-JWT
 segment, decoded payload, signature, signing key, credential, or claim value.
 
 This contract is preparatory: BCS V1 is not production-mounted by this change.
+
+## Authority-mounted consumer routes
+
+The Bot owner/manager model consumes the User Principal through the
+following mounted surfaces:
+
+- The manager, ownership and transfer route families under
+  `/openapi/v1/collaboration/bots/...` (`mine`, `{bot_id}/managers[/{user_id}]`,
+  `{bot_id}/ownership[/-transfers...]`) accept ONLY a Human Principal. A
+  Bot/App/AccessKey-only Principal set is rejected `403` without an
+  authority read; a User Principal is necessary but NOT sufficient —
+  management rights resolve from the CURRENT role facts (the approved owner
+  edge or an active manager source) in the server's authority store,
+  re-verified per request. No `created_by`, legacy `is_creator`, Bot-id
+  suffix, or signed owner claim substitutes for that live decision.
+- The trusted-platform team-manager slice
+  (`PUT /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}` and its
+  member-repair routes) does NOT authenticate a Gateway Principal at all:
+  it requires the platform's service credential (`Authorization: Bearer`
+  of a purpose-bound `team_manager_sync` credential) and exists only when
+  the deployment's `[team_manager_sync]` section resolved its signing key
+  at startup. Missing credentials answer `401`, unverifiable or
+  out-of-scope credentials answer `403 invalid_manager_sync_source`.
+- The Workbench WebSocket (cookie identity) and the group-session
+  connection-token router bind the verified Human to the selected view;
+  every protected frame re-authorizes that binding against the live
+  authority facts at enqueue time and again immediately before the socket
+  send. A revoked binding drops its protected backlog without closing the
+  connection's public control lane.

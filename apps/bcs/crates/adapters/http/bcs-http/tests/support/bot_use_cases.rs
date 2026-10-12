@@ -328,5 +328,8 @@ fn clone_service_error(error: &ServiceError) -> ServiceError {
                 bots: bots.clone(),
             }
         }
+        ServiceError::Authority(error) => {
+            ServiceError::Authority(error.clone())
+        }
     }
 }

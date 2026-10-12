@@ -8,6 +8,48 @@ All notable BCS changes are documented here. Items follow
 
 ### Added
 
+- **Explicit Bot owner/manager authority model.** Bots now carry an explicit
+  ownership state (`ownership_version`) with an approved owner edge plus
+  manager sources (`direct`/`manual`, `team/<team_id>`,
+  `ownership_transfer/<transfer_id>`). New Human-only APIs:
+  `GET /openapi/v1/collaboration/bots/mine` and the legacy `/bots/my` return
+  the owner∪manager union with `access_relation: owner|manager`;
+  `GET/PUT/DELETE /openapi/v1/collaboration/bots/{bot_id}/managers/{user_id}`
+  (manager list/grant/revoke), the ownership view and confirmation-based
+  transfer family under `/openapi/v1/collaboration/bots/{bot_id}/ownership*`
+  (pending-transfer creation, party-scoped listings, accept/reject/cancel),
+  and the credential-gated trusted-platform team slice
+  `PUT /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}` with its
+  member-repair lane. The team slice mounts ONLY when the new
+  `[team_manager_sync]` section resolves real HMAC key material (process env
+  or secret backend); enabled-without-material is a startup configuration
+  error and the lane is never mounted anonymously. A `bcs-ownership-migrate`
+  maintenance binary governs the one-shot historical backfill
+  (`--maintenance inspect/apply`, bounded batches, batch-id replay recovery,
+  governed conflict report); see `docs/runbooks/bot-authority-cutover.md`.
+- **Composition root wiring of the authority lanes.** The bootstrap
+  constructor assembles the authority store as the FIRST datasource consumer
+  over the selected database; an unmatched datasource now fails the startup
+  with a configuration error instead of panicking. The manager, transfer and
+  team facades, the Session connection authorization, the Workbench protected
+  delivery gate and the friend lane all consume the one authority lane.
+
+### Changed
+
+- Registration is now honest about ownership initialization: a successful
+  register/onboard implies the first owner edge committed (the legacy
+  swallow-on-error behavior is gone), while a failed initialization returns
+  an error and leaves the pre-existing runtime Bot untouched.
+- A Provider switch no longer rewrites `created_by`; re-onboarding,
+  ensure-human repairs and reconnects can never re-claim or overwrite the
+  current owner/manager facts (`created_by` remains historical origin only).
+- Workbench protected frames are continuously re-authorized at both queue
+  positions (enqueue AND dequeue; replay counts as a new dispatch). A
+  revoked binding drops its protected backlog with no further authority
+  reads; `SkipMessage` skips only the frame; connection and binding stay.
+  An assembly that never wires the authorization service answers
+  `InvalidateBinding` for every protected frame (fail-closed default).
+
 - **Bot WebSocket V3 canonical uplink events.** V3 Bot connections now use
   the Provider Run Event envelope for `agent` and `chat` events, with required
   `runId`, `sessionId`, `seq`, and `ts`. BCS validates the event against its
@@ -32,6 +74,23 @@ All notable BCS changes are documented here. Items follow
   `start_initial_run` applies only when an initial Session is created.
 
 ### Breaking
+
+- **Legacy creator facts no longer authorize current control.** `created_by`,
+  the legacy `is_creator` edge, Bot-id suffixes and signed Gateway owner
+  claims are no longer permission answers: every "may this Human manage this
+  Bot" decision resolves through the live Bot authority store (owner edge /
+  manager sources) via the centralized authority hook or the owner∪manager
+  mine projection, on every HTTP entry (v1 and legacy) — including the group
+  invite minting, member removal, group-visibility and event-subscription
+  scope lanes — the Session connection/launch lanes, the session-file
+  membership/identity lanes and the Workbench protected delivery. Deployments
+  with historical bots must run the
+  `bcs-ownership-migrate` cutover (see the runbook) before relying on manager
+  abilities; version-0 (uninitialized) Bots answer
+  `ownership_not_initialized` on the ownership-dependent Human surfaces.
+  Legacy 500 bodies no longer carry internal authority/store diagnostics:
+  the full cause is logged server-side and the client sees a fixed generic
+  error text.
 
 - Rename `collaboration.experimental_fixed_loop_execution` to
   `collaboration.loop_execution_enabled`. Update existing configuration files;

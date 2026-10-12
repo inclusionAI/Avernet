@@ -139,6 +139,7 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
+            operation: bcs_service_api::types::BotOperationContext { operation_id: format!("op-group-human-notify-contract"), actor: bcs_service_api::types::BotOperationActor::System { system_id: "group-human-notify-contract".to_string(), effective_actor_id: "group-human-notify-contract".to_string() } },
         })
         .await
         .expect("eventful mode patch");
@@ -167,6 +168,17 @@ pub async fn group_human_notify_contract(
                 ..Default::default()
             }),
             event: None,
+            // §12.5 slot ruling (plan Task 1 carry): one operation slot
+            // covers ONE logical step. A STALE patch is a distinct logical
+            // command with a fresh operation identity — reusing the committed
+            // patch's id would classify this as its idempotent replay.
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("op-group-human-notify-contract-stale"),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "group-human-notify-contract".to_string(),
+                    effective_actor_id: "group-human-notify-contract".to_string()
+                }
+            },
         })
         .await;
     assert!(

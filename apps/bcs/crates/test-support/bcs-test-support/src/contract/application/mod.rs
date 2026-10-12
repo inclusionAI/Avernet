@@ -1,7 +1,12 @@
 //! Application service contract harnesses.
 
+pub mod bot_manager;
+pub mod delivery_authorization;
 pub mod message_delivery;
+pub mod ownership_migration;
+pub mod ownership_transfer;
 pub mod queued_task;
+pub mod team_manager_sync;
 
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, CreateEventSubscription,

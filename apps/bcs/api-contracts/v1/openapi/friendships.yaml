@@ -1,3 +1,10 @@
+# Plan Task 12 (BCS bot owner/manager authority cutover): every
+# friendships endpoint authorizes the authenticated Human through the CURRENT
+# live owner/manager role of the exact Bot (`created_by` is only a historical
+# creation fact, never an authority answer — a former creator without a role
+# is denied). Friend-connect writes carry the required §12.5 operator audit
+# context; approvals are addressed to the current owner. The friend relation
+# and channel-add semantics themselves are unchanged.
 CreateFriendRequestRequest:
   type: object
   additionalProperties: false
@@ -56,7 +63,10 @@ ListFriendshipsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the target Bot identity.
+        description: >-
+          Principal cannot manage the target Bot identity. Resolved from the
+          CURRENT live owner/manager role of the exact Bot (plan Task 12):
+          the historical creator fact never substitutes for the role.
         x-error-codes:
           - forbidden
         content:
@@ -168,7 +178,10 @@ BotFriendRequestsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the target Bot identity.
+        description: >-
+          Principal cannot manage the target Bot identity. Resolved from the
+          CURRENT live owner/manager role of the exact Bot (plan Task 12):
+          the historical creator fact never substitutes for the role.
         x-error-codes:
           - forbidden
         content:
@@ -252,7 +265,10 @@ BotFriendRequestsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the target Bot identity.
+        description: >-
+          Principal cannot manage the target Bot identity. Resolved from the
+          CURRENT live owner/manager role of the exact Bot (plan Task 12):
+          the historical creator fact never substitutes for the role.
         x-error-codes:
           - forbidden
         content:

@@ -135,6 +135,25 @@ def parse_router(router_path: str) -> list:
     return endpoints
 
 
+def parse_nested_router(router_path: str, prefix: str) -> list:
+    """Parse a router file whose routes are additionally NESTED under a
+    mount prefix (axum `.nest("...", router())`), e.g. the credential-gated
+    team-manager sources slice mounted at `/api/v1/bots`. The structured
+    access log records the MatchedPath WITH the prefix, so hits on those
+    routes only match templates carrying the full mount path.
+
+    Discovery stays with the parser: the endpoints come from the same
+    `.route(...)` scan, only the path gains the prefix — nothing is
+    hand-annotated and nothing is dropped from any denominator.
+    """
+    prefix = "/" + prefix.strip("/")
+    endpoints = []
+    for endpoint in parse_router(router_path):
+        path = prefix + ("/" + endpoint.path.strip("/") if endpoint.path.strip("/") else "")
+        endpoints.append(Endpoint(endpoint.method, path, endpoint.handler, endpoint.line))
+    return endpoints
+
+
 def _matching_paren(s, open_idx):
     """Return index of the ')' matching '(' at open_idx, respecting strings."""
     depth = 0
@@ -462,6 +481,17 @@ def main():
         bcs, "crates/adapters/http/bcs-http/src/router.rs"),
         help="path to bcs-http router.rs")
     ap.add_argument("--log", help="path to singlebox bcs.log with BCS_DEBUG hits")
+    ap.add_argument(
+        "--extra-router",
+        action="append",
+        default=[],
+        metavar="PREFIX:FILE",
+        help="additionally count router endpoints from FILE nested under the "
+             "mount PREFIX (e.g. /api/v1/bots:crates/adapters/http/bcs-api-http/"
+             "src/v1/internal/routes/team_manager_sources.rs). Paths parse from "
+             "the same .route scan; the prefix matches the access log's "
+             "MatchedPath. Repeatable. The default gate denominator is "
+             "unchanged unless this is passed.")
     ap.add_argument("--out-txt", help="write full text report (with per-endpoint detail) here")
     ap.add_argument("--out-xml", help="write structured XML report here")
     ap.add_argument("--probe", action="store_true",
@@ -479,6 +509,17 @@ def main():
     if not endpoints:
         sys.stderr.write("ERROR: parsed 0 endpoints from %s\n" % args.router)
         sys.exit(2)
+
+    for extra in args.extra_router:
+        prefix, _, router_file = extra.partition(":")
+        if not router_file:
+            sys.stderr.write("ERROR: --extra-router wants PREFIX:FILE\n")
+            sys.exit(2)
+        extra_endpoints = parse_nested_router(router_file, prefix)
+        if not extra_endpoints:
+            sys.stderr.write("ERROR: parsed 0 endpoints from %s\n" % router_file)
+            sys.exit(2)
+        endpoints.extend(extra_endpoints)
 
     if args.probe:
         endpoints, fake = probe_overcount(endpoints, args.probe_base, verbose=True)

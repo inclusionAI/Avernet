@@ -15,6 +15,7 @@ bcs-db-api = { workspace = true }
 bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -24,6 +25,13 @@ uuid = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 tokio-test = "0.4"
+# tests/ownership_lifecycle.rs (ignored MySQL conformance): parses
+# BCS_TEST_MYSQL_URL the same way the event-store and bootstrap authority
+# contracts do. No MySQL server is reachable in this dev environment; CI
+# runs the ignored test against its MySQL service.
+bcs-config-api = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
 
 [lints]
 workspace = true

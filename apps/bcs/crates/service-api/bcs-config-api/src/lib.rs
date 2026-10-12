@@ -19,6 +19,7 @@ pub mod queued_provider_headers;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;
+pub mod team_manager_sync;
 pub mod uplink;
 pub use uplink::{UplinkConfig, UplinkProfile};
 
@@ -30,6 +31,7 @@ pub use redis::{
     RedisPluginConfig, RedisRoutingConfig,
 };
 pub use redis_route_type::RedisRouteType;
+pub use team_manager_sync::{DEFAULT_TEAM_MANAGER_SYNC_SIGNING_KEY_ENV, TeamManagerSyncConfig};
 
 mod eventing;
 mod logging;

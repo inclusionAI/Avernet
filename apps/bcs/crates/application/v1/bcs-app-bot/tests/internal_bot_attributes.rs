@@ -208,6 +208,7 @@ impl BotControlPlaneCoreService for FailingControlPlane {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
+        _operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
         Err(ServiceError::InternalError("store unavailable".to_string()))
     }

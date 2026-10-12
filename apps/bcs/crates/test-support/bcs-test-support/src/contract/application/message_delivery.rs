@@ -39,6 +39,7 @@ pub async fn managed_message_delivery_service_contract_tests<
 ) -> Result<(), ManagedDeliveryError> {
     let admitted = service
         .admit(AdmitMessageDeliveries {
+            operation: bcs_service_api::types::system_lane_operation("message-flow-test-seed"),
             display_message: None,
             message_id: "application-contract".into(),
             flow_kind: DeliveryFlowKind::Group,
@@ -79,6 +80,9 @@ pub async fn managed_message_delivery_service_contract_tests<
         reply: None,
         transport_context_json: None,
         deadline_at_ms: None,
+        // §12.5: queued cancel is externally initiated — the contract double
+        // supplies an honest test operation (the managed layer requires it).
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
     };
     let cancelled = service.transition(command.clone()).await?;
     assert_eq!(cancelled.state.status, MessageDeliveryStatus::Cancelled);

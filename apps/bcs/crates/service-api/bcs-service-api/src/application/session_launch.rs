@@ -86,6 +86,12 @@ pub struct SessionLaunchRequest {
     /// when Session creation inserts or inherits that Human participant.
     pub human_message_view_scope: Option<MessageViewScope>,
     pub context_delivery: Option<DeliveryType>,
+    /// The VERIFIED Human operator behind this launch (spec §12.1(6)),
+    /// present for pure-Human callers and for mixed Human+Bot callers that
+    /// the async authority authorized to act as the Bot. `None` means a
+    /// Bot-only (or untracked legacy) lane; the launch audit never forges
+    /// a Human here and never compensates from `created_by`.
+    pub operator_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

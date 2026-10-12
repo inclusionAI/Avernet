@@ -109,10 +109,19 @@ pub(crate) async fn command(flow: &BcsMessageFlow, group: &Group, session: &str,
     if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
     let message_id = uuid::Uuid::new_v4().to_string();
     let event = crate::queued_admission::prepare_message_event(flow, &message_id, &message)?;
+    let dispatch_operation = bcs_service_api::types::BotOperationContext {
+        operation_id: format!("task-dispatch:{message_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: sender.clone(),
+        },
+    };
     Ok(AdmitMessageDeliveries { display_message:None, message_id, message, flow_kind:DeliveryFlowKind::Task,
         targets:vec![DeliveryAdmissionTarget { rejection:None, target_bot_id:target.clone(), kind:DeliveryType::Send,
             max_queued:policy.as_ref().map_or(100, |p| p.policy.bot(target).max_queued), semantic_projection_json:projection }],
-        now_ms:now, expire_at_ms:policy.as_ref().and_then(|p| p.policy.queue_ttl_ms).map(|ttl| now.saturating_add(ttl as i64)), event })
+        now_ms:now, expire_at_ms:policy.as_ref().and_then(|p| p.policy.queue_ttl_ms).map(|ttl| now.saturating_add(ttl as i64)), event,
+        // §12.5: the task dispatch is the sender bot's own user-visible
+        // command admission (verified flow actor).
+        operation:dispatch_operation })
 }
 
 pub(crate) async fn admit(flow: &BcsMessageFlow, command: AdmitMessageDeliveries) -> ServiceResult<PersistedMessageDelivery> {

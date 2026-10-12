@@ -109,6 +109,11 @@ pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::messag
         None, &task.worker, bcs_domain::SenderType::Bot, "chat", None)?;
     Ok(Some(AdmitMessageDeliveries {
         message_id:crate::queued_task_terminal::result_message_id(&task.task_id), event:None, display_message:None,
+        // §12.5: failure projection admitted by the WORKER bot of the failed task.
+        operation:bcs_service_api::types::BotOperationContext {
+            operation_id: format!("task-failure:{:?}", task.task_id),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: task.worker.clone() },
+        },
         message:bcs_domain::NewMessage { group_id:row.group_id.clone(), session_id:row.session_id.clone(),
             sender_id:task.worker.clone(), sender_type:bcs_domain::SenderType::Bot, message_type:"run_reply".into(),
             content:serde_json::json!({"task_result_text":text, "text":"", "task_state":if timed_out { "timed_out" } else if cancelled { "cancelled" } else { "failed" }}),
@@ -137,6 +142,10 @@ fn timeout_unknown_notice(row: &PersistedMessageDelivery, now: i64) -> ServiceRe
     Ok(AdmitMessageDeliveries {
         message_id:format!("task-timeout-unknown:{}", task.task_id), event:None,
         display_message:None,
+        // §12.5: this diagnostic is authored by the platform's timeout
+        // reconciliation itself (no Worker reported it), so the audit lane
+        // carries the honest system identity — never a forged Bot/Human.
+        operation: bcs_service_api::types::system_lane_operation("task-timeout-unknown-notice"),
         message:bcs_domain::NewMessage { group_id:row.group_id.clone(), session_id:row.session_id.clone(),
             sender_id:"system".into(), sender_type:bcs_domain::SenderType::System,
             message_type:"system".into(), content:serde_json::json!({"text":message}),

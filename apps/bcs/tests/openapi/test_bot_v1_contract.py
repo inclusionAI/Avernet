@@ -376,13 +376,29 @@ def test_mine_filters_both_kinds_without_an_all_enum_value() -> None:
     assert parameters["kind"]["schema"]["enum"] == ["bot", "human"]
     assert "default" not in parameters["kind"]["schema"]
     assert parameters["limit"]["schema"]["maximum"] == 100
+    # Task 9 (commit 25c2383122) moved `mine` from the legacy
+    # created_by-equality contract to the owner ∪ manager union over the
+    # CURRENT authority edges; the owner projects into the per-item
+    # access_relation label instead of a whole-endpoint owner field.
     assert operation["x-avernet-behavior"] == {
-        "owner_field": "created_by",
-        "owner_value": "current_staff_no",
+        "ownership_source": "current_owner_manager_union",
+        "deduplicate": "per_bot_owner_priority",
+        "human_self_row": "explicit_owner_compat_projection",
         "omitted_kind": "all",
         "reachability_applies_to": "bot",
+        "strictness": "fail_closed_on_uninitialized_or_corrupt_authority",
         "ordering": ["created_at_desc", "bot_id_asc"],
     }
 
     data = _success_data(operation)
-    assert data["properties"]["items"]["items"]["discriminator"]["propertyName"] == "kind"
+    # The union item: the kind-discriminated Bot shape PLUS the required
+    # per-item access_relation (owner|manager) label computed from the
+    # CURRENT authority edges (spec §7.1).
+    item = data["properties"]["items"]["items"]
+    assert item["allOf"][0]["discriminator"]["propertyName"] == "kind"
+    assert item["allOf"][0]["discriminator"]["mapping"] == {
+        "bot": "#/PhysicalBot",
+        "human": "#/HumanBot",
+    }
+    assert item["allOf"][1]["required"] == ["access_relation"]
+    assert item["allOf"][1]["properties"]["access_relation"]["enum"] == ["owner", "manager"]

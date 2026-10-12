@@ -231,3 +231,31 @@ CREATE TABLE IF NOT EXISTS `bcs_messages` (
   KEY `idx_session_sender_created` (`session_id`, `sender_id`, `created_at`),
   KEY `idx_session_type_created` (`session_id`, `message_type`, `created_at`)
 ) DEFAULT CHARSET = utf8mb4;
+
+-- Business action audits (added with the bot-owner/manager authority change):
+-- session create/mutation transactions write one Applied audit row into
+-- bcs_bot_action_audits in the same commit, so the hand-rolled contract
+-- fixture schema needs the same table the versioned chain creates in
+-- migrations/mysql/033_bot_authority.sql (kept byte-identical in shape).
+CREATE TABLE IF NOT EXISTS `bcs_bot_action_audits` (
+  `id`                    BIGINT       NOT NULL AUTO_INCREMENT,
+  `gmt_create`            TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `gmt_modified`          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `audit_id`              VARCHAR(512) NOT NULL,
+  `env`                   VARCHAR(64)  NOT NULL,
+  `operation_id`          VARCHAR(256) NOT NULL,
+  `step_key`              VARCHAR(96)  NOT NULL,
+  `operator_kind`         VARCHAR(16)  NOT NULL,
+  `operator_id`           VARCHAR(256) NOT NULL,
+  `operator_user_id`      VARCHAR(256) DEFAULT NULL,
+  `effective_actor_id`    VARCHAR(256) NOT NULL,
+  `resource_kind`         VARCHAR(32)  NOT NULL,
+  `resource_id`           VARCHAR(512) NOT NULL,
+  `action`                VARCHAR(32)  NOT NULL,
+  `phase`                 VARCHAR(16)  NOT NULL,
+  `reason_code`           VARCHAR(64)  DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_bot_action_audit_id` (`audit_id`),
+  UNIQUE KEY `uk_bot_action_audit_slot` (`env`, `operation_id`, `step_key`),
+  KEY `idx_bot_action_audit_resource` (`env`, `resource_kind`, `resource_id`, `gmt_create`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

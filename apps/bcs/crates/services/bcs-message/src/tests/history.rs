@@ -58,7 +58,7 @@ async fn manager_worker_pending_history_reuses_durable_owner_visibility() {
     let mut participant_human = Participant::human("human-1", ParticipantRole::Observer);
     participant_human.message_view_scope = MessageViewScope::Participant;
     _sessions
-        .add_participant(&session_id, participant_human)
+        .add_participant(&session_id, participant_human, &session_write_operation())
         .await
         .expect("add participant Human");
     let participant_history = service
@@ -172,7 +172,7 @@ async fn public_state_machine_panel_round_trips_for_participant_chat_history() {
     let mut human = Participant::human("human-1", ParticipantRole::Observer);
     human.message_view_scope = MessageViewScope::Participant;
     sessions
-        .add_participant(&session_id, human)
+        .add_participant(&session_id, human, &session_write_operation())
         .await
         .expect("add participant Human");
     let run_id = "sm-run-1";
@@ -238,7 +238,7 @@ async fn directed_human_input_prompt_round_trips_through_manager_worker_history(
     let mut human = Participant::human("human_1001", ParticipantRole::Observer);
     human.message_view_scope = MessageViewScope::Participant;
     sessions
-        .add_participant(&session_id, human)
+        .add_participant(&session_id, human, &session_write_operation())
         .await
         .expect("add assigned Human participant");
     let stable_message_id = "sm-run-1:review:1:human-input-prompt";
@@ -303,7 +303,7 @@ async fn directed_human_input_response_round_trips_as_user_message() {
     let mut human = Participant::human("human_1001", ParticipantRole::Observer);
     human.message_view_scope = MessageViewScope::Participant;
     sessions
-        .add_participant(&session_id, human)
+        .add_participant(&session_id, human, &session_write_operation())
         .await
         .expect("add responding Human participant");
     let stable_message_id = "sm-run-1:review:0:1-output";

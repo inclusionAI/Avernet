@@ -4,17 +4,25 @@
 //! and `port` contracts without creating reverse dependencies between those
 //! layers.
 
+pub mod bot_authority;
 pub mod bot_control_plane;
+pub mod bot_operation;
 pub mod agent_registration;
 pub mod error;
 pub mod event;
+pub mod ownership_transfer;
 pub mod provider_registration;
+pub mod team_manager_sync;
 
 pub use bcs_domain::*;
+pub use bot_authority::*;
 pub use bot_control_plane::*;
+pub use bot_operation::*;
 pub use agent_registration::*;
 pub use error::{ServiceError, ServiceResult};
 pub use event::*;
+pub use ownership_transfer::*;
+pub use team_manager_sync::*;
 
 /// Mutable fields exposed by the BCN OpenAPI v1 Group PATCH operation.
 ///

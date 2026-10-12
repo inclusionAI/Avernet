@@ -6,8 +6,8 @@ use async_trait::async_trait;
 
 use crate::core::ServiceError;
 use crate::types::{
-    MessageViewScope, Participant, ParticipantMode, ServiceResult, Session, SessionKind,
-    SessionStatus,
+    BotOperationContext, MessageViewScope, Participant, ParticipantMode, ServiceResult, Session,
+    SessionKind, SessionStatus,
 };
 
 use super::AppendEventRecord;
@@ -24,9 +24,19 @@ pub struct NewSessionParams {
     pub input: Option<serde_json::Value>,
     pub created_by: Option<String>,
     pub session_title: Option<String>,
-    /// 显式指定 session_id；不传则由实现层生成原生 `{group_id}:{8_hex}` ID。
+    /// 显式指定 session_id；不传则由实现层生成原生 `{group_id}:{8_hex}`	ID。
     pub id: Option<String>,
     pub meta: Option<serde_json::Value>,
+    /// REQUIRED ordinary-business audit identity (spec §12.5, plan Task 11):
+    /// the owning Session store commits the `create/session/applied` audit
+    /// row in the SAME transaction as the Session INSERT. Human-facing
+    /// launch lanes build this from the authenticated caller + effective
+    /// actor; internal/system lanes pass an honest System actor. There is
+    /// deliberately NO `Option` — a new command never silently skips the
+    /// audit (the `Default` below is for direct store seeding by
+    /// unauthenticated internals/tests only and names an explicit System
+    /// actor, never a forged Human).
+    pub operation: BotOperationContext,
 }
 
 impl Default for NewSessionParams {
@@ -45,6 +55,23 @@ impl Default for NewSessionParams {
             session_title: None,
             id: None,
             meta: None,
+            // Honest unattributed System default: ONLY for direct store
+            // seeding by unauthenticated internals/tests. Production
+            // Human/Bot lanes must set an explicit context (see field doc).
+            // The operation id is unique PER default() call so two
+            // independent seeds never collide in the audit's
+            // `(env, operation_id, step_key)` slot (each create is its own
+            // logical operation).
+            operation: BotOperationContext {
+                operation_id: format!(
+                    "session-unattributed:{}",
+                    uuid::Uuid::new_v4()
+                ),
+                actor: crate::types::BotOperationActor::System {
+                    system_id: "bcs-session-unattributed".to_string(),
+                    effective_actor_id: "bcs-session-unattributed".to_string(),
+                },
+            },
         }
     }
 }
@@ -63,6 +90,9 @@ pub struct CompleteSessionWithEvent {
     pub output: Option<serde_json::Value>,
     pub error: Option<String>,
     pub event: AppendEventRecord,
+    /// REQUIRED audit identity (spec §12.5, plan Task 11): applied audit
+    /// committed with the status mutation in one transaction.
+    pub operation: BotOperationContext,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +124,9 @@ pub struct AddSessionParticipantWithEvent {
     pub expected_participants: Vec<Participant>,
     pub participant: Participant,
     pub event: AppendEventRecord,
+    /// REQUIRED audit identity (spec §12.5, plan Task 11): applied audit
+    /// committed with the participant mutation in one transaction.
+    pub operation: BotOperationContext,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +135,9 @@ pub struct RemoveSessionParticipantWithEvent {
     pub expected_participants: Vec<Participant>,
     pub bot_uuid: String,
     pub event: AppendEventRecord,
+    /// REQUIRED audit identity (spec §12.5, plan Task 11): applied audit
+    /// committed with the participant mutation in one transaction.
+    pub operation: BotOperationContext,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +148,9 @@ pub struct UpdateSessionParticipantMessageViewScopeWithEvent {
     pub message_view_scope: MessageViewScope,
     pub mode: Option<ParticipantMode>,
     pub event: AppendEventRecord,
+    /// REQUIRED audit identity (spec §12.5, plan Task 11): applied audit
+    /// committed with the participant mutation in one transaction.
+    pub operation: BotOperationContext,
 }
 
 /// Session 持久化 port。
@@ -299,10 +338,16 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Adds one participant WITHOUT an Event. REQUIRES the ordinary-business
+    /// audit identity (spec §12.5, plan Task 11, PR #2568 review F4): the
+    /// owning store commits the `create_participant/session/applied` row in
+    /// the SAME transaction as the membership write — the audit never depends
+    /// on eventing being enabled.
     async fn add_participant(
         &self,
         session_id: &str,
         participant: Participant,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session>;
     async fn add_participant_with_event(
         &self,
@@ -314,7 +359,15 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session>;
+    /// Removes one participant WITHOUT an Event. REQUIRES the audit identity
+    /// (see `add_participant`): `delete/session/applied` commits with the
+    /// removal in ONE transaction.
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session>;
     async fn remove_participant_with_event(
         &self,
         command: RemoveSessionParticipantWithEvent,
@@ -325,19 +378,26 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Updates one participant's mode. REQUIRES the audit identity (see
+    /// `add_participant`): `update/session/applied` commits with the mode
+    /// write in ONE transaction, independent of eventing.
     async fn update_participant_mode(
         &self,
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session>;
+    /// Updates one participant's message-view scope. REQUIRES the audit
+    /// identity (see `add_participant`).
     async fn update_participant_message_view_scope(
         &self,
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
-        let _ = (session_id, actor_id, message_view_scope);
+        let _ = (session_id, actor_id, message_view_scope, operation);
         Err(ServiceError::InvalidOperation {
             message: "Session participant scope updates are not configured".to_string(),
             request_id: None,
@@ -349,16 +409,18 @@ pub trait SessionRepoPort: Send + Sync {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
+        operation: &BotOperationContext,
     ) -> ServiceResult<Session> {
         let updated = self
             .update_participant_message_view_scope(
                 session_id,
                 actor_id,
                 message_view_scope,
+                operation,
             )
             .await?;
         if let Some(mode) = mode {
-            self.update_participant_mode(session_id, actor_id, mode).await
+            self.update_participant_mode(session_id, actor_id, mode, operation).await
         } else {
             Ok(updated)
         }
@@ -389,8 +451,16 @@ pub trait SessionRepoPort: Send + Sync {
             request_id: None,
         })
     }
-    async fn update_title(&self, session_id: &str, title: Option<String>)
-    -> ServiceResult<Session>;
+    /// Updates the Session title. REQUIRES the audit identity (see
+    /// `add_participant`): `update/session/applied` commits with the title
+    /// write in ONE transaction — `let _ = operation` on this port was a
+    /// review finding (PR #2568 F4) and is gone.
+    async fn update_title(
+        &self,
+        session_id: &str,
+        title: Option<String>,
+        operation: &BotOperationContext,
+    ) -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;
     async fn try_list_group_ids_by_session_participant(
         &self,
@@ -403,12 +473,28 @@ pub trait SessionRepoPort: Send + Sync {
     // ── session collection (收藏) ──────────────────────────────
     // Default impls keep existing test mocks compiling; real impls in
     // mysql + memory override these (see bcs-session-store).
-    async fn collect(&self, _session_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+    //
+    // The REQUIRED BotOperationContext (spec §12.5, plan Task 11) is the
+    // same-transaction audit identity: real stores commit the
+    // `collect/session/applied` audit row WITH the conditional collect
+    // UPDATE in ONE transaction; an idempotent no-change collect writes no
+    // audit row.
+    async fn collect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
         Err(ServiceError::InternalError(
             "collect not implemented for this SessionRepoPort".into(),
         ))
     }
-    async fn uncollect(&self, _session_id: &str, _bot_uuid: &str) -> ServiceResult<()> {
+    async fn uncollect(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _operation: &BotOperationContext,
+    ) -> ServiceResult<()> {
         Err(ServiceError::InternalError(
             "uncollect not implemented for this SessionRepoPort".into(),
         ))

@@ -228,9 +228,17 @@ async fn handle_session_complete(
         BotWsDispatchError::InvalidFrameFormat(format!("invalid session.complete params: {e}"))
     })?;
 
+    // The WS session.complete frame is a Bot-originated runtime control
+    // message; there is no verified Human operator here, so the audit context
+    // records the dispatcher lane itself (spec §12.5 honesty rules).
     match state
         .session_management
-        .complete_if_running(&params.session_id, params.output, params.error)
+        .complete_if_running(
+            &params.session_id,
+            params.output,
+            params.error,
+            &bcs_service_api::types::system_lane_operation("bcs-ws-session-complete"),
+        )
         .await
     {
         Ok(Some(session)) => {

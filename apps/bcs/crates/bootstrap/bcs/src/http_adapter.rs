@@ -269,6 +269,12 @@ impl HealthPort for BootstrapHealthPort {
             "version": health_version(),
             "is_leader": is_leader,
             "pod_ip": bcs_leader_election::get_local_ip(),
+            // The assembled environment the authority lanes compare against:
+            // external trust anchors (e.g. the team-manager platform
+            // credential's env claim) must bind to THIS env, and management
+            // tooling can read it here instead of re-deriving it from
+            // ambient env vars whose export visibility differs per wrapper.
+            "env": bcs_config::resolve_env_str(),
             "leader_info": leader_info.map(|m| serde_json::json!({
                 "pod_ip": m.node_id,
                 "elected_at": m.elected_at_ms / 1_000,

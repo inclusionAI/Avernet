@@ -22,6 +22,14 @@ bcs-db-api = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-edge-permission-store = { workspace = true }
 bcs-test-support = { workspace = true }
+bcs-message-store = { workspace = true }
+bcs-message-flow = { workspace = true }
+bcs-chat-run-store = { workspace = true }
+# tests/role_runtime_isolation.rs and tests/acting_operation_audit.rs pull
+# bootstrap migrations.rs in via #[path] (same pattern as the edge store
+# tests); they need sha2/hex to compile the moved module.
+sha2 = { workspace = true }
+hex = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

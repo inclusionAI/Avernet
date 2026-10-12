@@ -27,6 +27,12 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         None, &task.worker, bcs_domain::SenderType::Bot, "chat", None)?;
     let reply = bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries {
         display_message:None, message_id:result_message_id(&task.task_id), event:None,
+        // §12.5: the task result projection is admitted by the WORKER bot whose
+        // terminal event produced it (verified bot lane).
+        operation:bcs_service_api::types::BotOperationContext {
+            operation_id: format!("task-terminal:{:?}", task.task_id),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: task.worker.clone() },
+        },
         message:bcs_domain::NewMessage { group_id:row.group_id.clone(), session_id:row.session_id.clone(),
             sender_id:task.worker.clone(), sender_type:bcs_domain::SenderType::Bot, message_type:"run_reply".into(),
             content:serde_json::json!({}), client_msg_id:None, owner_bot_id:None, visibility_domain, audience,
@@ -50,7 +56,14 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
     for _ in 0..3 {
         let transition = DeliveryTransitionCommand { delivery_id:current.delivery_id.clone(), expected_state_version:current.state.state_version,
             event:match cmd.state { ChatEventState::Final => Event::Completed, ChatEventState::Aborted => Event::Aborted, _ => Event::Failed },
-            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None };
+            now_ms:reply.now_ms, request_id:None, actor_id:None, reply:Some(reply.clone()), transport_context_json:None, deadline_at_ms:None,
+            // §12.5: the task terminal settles as the WORKER Bot's own
+            // verified event lane (same operator as the companion reply
+            // admission built in this function).
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("task-terminal:{}:{}", task.task_id, uuid::Uuid::new_v4()),
+                actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: task.worker.clone() },
+            } };
         match crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "task_terminal_commit",
             crate::storage_retry::managed_storage, || service.transition(transition.clone())).await {
             Ok(committed) => { queued_task::restore(flow, &committed).await?; return Ok(()); }

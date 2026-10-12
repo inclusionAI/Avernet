@@ -29,6 +29,14 @@ impl DbPlugin for ReadOnlyHistoryDb {
     async fn transaction(&self, _: Vec<DbTransactionStep>) -> DbResult<Vec<DbTransactionStepResult>> { panic!("history opened a write transaction") }
     async fn health_check(&self) -> DbResult<DbHealth> { self.inner.health_check().await }
 }
+struct DenyAllAuthorityHook;
+#[async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for DenyAllAuthorityHook {
+    async fn can_manage(&self, _: &str, _: &str) -> Result<bool, ServiceError> { Ok(false) }
+    async fn require_owner(&self, _: &str, _: &str) -> Result<(), ServiceError> {
+        Err(ServiceError::Forbidden("no authority in this read-only fixture".to_string()))
+    }
+}
 struct UnusedPorts;
 #[async_trait]
 impl JudgeEvaluatorPort for UnusedPorts {
@@ -80,15 +88,20 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         services.session_files.clone(), Arc::new(UnusedPorts), 0, 0, 100, 50, 100, 600,
     ).with_persisted_state_machine_history(true, cutoff));
     let facade = Arc::new(SessionServiceImpl::new(services.session_launch.clone(), services.session_management.clone(),
-        services.group.clone(), services.registry.clone(), services.friend.clone(), services.relation.clone(), session_repo,
-        services.group_message_history.clone(), services.collaboration_runtime.clone(), services.system_message.clone(),
-        SessionServiceConfig { relation_env: env.into() }));
+        services.group.clone(), services.registry.clone(), services.friend.clone(), Arc::new(DenyAllAuthorityHook),
+        session_repo, services.group_message_history.clone(), services.collaboration_runtime.clone(),
+        services.system_message.clone(), SessionServiceConfig {}));
     let group = Arc::new(bcs_app_group::GroupServiceImpl::new(services.group.clone(), services.registry.clone(),
         services.friend.clone(), services.relation.clone(), services.session_management.clone(), services.group_management.clone(),
+        Arc::new(DenyAllAuthorityHook),
         bcs_app_group::GroupServiceConfig { relation_env: env.into() }));
     let invite = Arc::new(bcs_group::application::invite::InviteServiceImpl {
         registry: services.registry.clone(), group: services.group.clone(), session: services.session_management.clone(),
-        system_message: services.system_message.clone(), token_secret: Vec::new(), default_ttl_seconds: 60,
+        system_message: services.system_message.clone(),
+        // Noop mine projection: this fixture never resolves Human control,
+        // so the invite lanes deny that side fail-closed.
+        bot_query: services.bot_query.clone(),
+        token_secret: Vec::new(), default_ttl_seconds: 60,
         base_url: None, group_link_url: None, session_link_url: None,
     });
     let invitations = Arc::new(bcs_app_invitation::InvitationFriendshipServiceImpl::new(services.friend.clone(),

@@ -123,11 +123,7 @@ fn session_service_is_object_safe() {
 fn session_commands_carry_caller_and_no_raw_credentials() {
     let caller = human_caller();
     let create = CreateSession {
-        caller: SessionCaller::Human {
-            actor_id: "human_staff-1".into(),
-            owner_id: "staff-1".into(),
-            display_name: None,
-        },
+        caller: caller.clone(),
         group_id: "g1".into(),
         title: Some("plan".into()),
         kind: None,

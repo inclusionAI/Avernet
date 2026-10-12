@@ -8,6 +8,7 @@ use bcs_bot::{
     ActorDirectory, Bot, BotCandidateSearchCore, BotOnboarding, BotCore,
     EmptyWorkerProfileCoreService, HumanActor,
 };
+use bcs_bot_store::MemoryBotRepo;
 use bcs_group::{GroupManagement, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_session::SessionManagementServiceImpl;
@@ -243,7 +244,6 @@ fn actor_directory_use_cases(
     Arc::new(ActorDirectory::new(
         registry,
         friend,
-        noop_relation(),
         worker_profiles,
         candidate_search,
     ))
@@ -261,6 +261,55 @@ fn bot_onboarding_use_cases(
 
 fn services_builder_with_bot_use_cases(registry: Arc<BotCore>) -> ServicesBuilder {
     services_builder_with_bot_use_cases_and_friend(registry, Arc::new(NoopFriendCoreService))
+}
+
+/// Live-authority hook over one `MemoryBotRepo` — the same
+/// validation-then-role composition the production
+/// `BotAuthorityHookImpl` gets from `BotAuthorityCoreServiceImpl`, so the
+/// delete/status/visibility lanes resolve the LIVE owner/manager facts.
+struct RepoAuthorityHook(Arc<MemoryBotRepo>);
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for RepoAuthorityHook {
+    async fn can_manage(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> ServiceResult<bool> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        self.0.ownership(bot_id).await?;
+        Ok(self.0.role(user_id, bot_id).await?.is_some())
+    }
+
+    async fn require_owner(&self, user_id: &str, bot_id: &str) -> ServiceResult<()> {
+        use bcs_service_api::port::repo::BotAuthorityRepoPort;
+        match self.0.role(user_id, bot_id).await? {
+            Some(bcs_service_api::types::BotAccessRelation::Owner) => Ok(()),
+            _ => Err(bcs_service_api::ServiceError::Unauthorized(format!(
+                "user '{user_id}' is not the owner of bot '{bot_id}'"
+            ))),
+        }
+    }
+}
+
+fn services_builder_with_bot_use_cases_and_authority(
+    repo: Arc<MemoryBotRepo>,
+    registry: Arc<BotCore>,
+) -> ServicesBuilder {
+    let registry_service: Arc<dyn BotRegistryCoreService> = registry;
+    let bot_use_cases = Arc::new(
+        Bot::new_with_friend(
+            registry_service.clone(),
+            Arc::new(NoopFriendCoreService),
+        )
+        .with_authority(Arc::new(RepoAuthorityHook(repo))),
+    );
+    Services::builder()
+        .registry(registry_service)
+        .friend(Arc::new(NoopFriendCoreService))
+        .bot_query(bot_use_cases.clone())
+        .bot_management(bot_use_cases.clone())
+        .bot_discovery(bot_use_cases)
 }
 
 fn services_builder_with_bot_use_cases_and_friend(
@@ -657,7 +706,11 @@ async fn leave_bot_route_rejects_bot_token_without_human_identity() {
 #[tokio::test]
 async fn leave_bot_route_soft_deletes_owner_bot() {
     let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    // The live authority lane (review F1, spec §12.2/§12.4): the delete
+    // resolves alice's CURRENT approved owner edge, never the bare
+    // `created_by` creation fact.
+    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+    let registry = Arc::new(BotCore::with_repo(repo.clone()));
     registry
         .register("bot-leave".to_string(), BotCapabilities::default())
         .await
@@ -666,7 +719,11 @@ async fn leave_bot_route_soft_deletes_owner_bot() {
         .save_created_by("bot-leave", "alice", true)
         .await
         .unwrap();
-    let services = services_builder_with_bot_use_cases(registry.clone()).build_for_test();
+    repo.seed_authority_owned("bot-leave", "alice")
+        .await
+        .unwrap();
+    let services = services_builder_with_bot_use_cases_and_authority(repo, registry.clone())
+        .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
     let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
         ChainUserIdentityPort::new(chain),
@@ -1169,66 +1226,11 @@ async fn bot_status_route_accepts_payload_without_retaining_it() {
     assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
 }
 
-#[tokio::test]
-async fn my_bots_route_uses_mock_user_identity_and_creator_filter() {
-    let temp_dir = TempDir::new().unwrap();
-    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    for bot_id in ["bot-owned", "bot-other"] {
-        registry
-            .register(
-                bot_id.to_string(),
-                BotCapabilities {
-                    name: Some(bot_id.to_string()),
-                    summary: Some("Test bot".to_string()),
-                    skills: vec![Skill::new("ops")],
-                    visibility: "protected".to_string(),
-                    ..BotCapabilities::default()
-                },
-            )
-            .await
-            .unwrap();
-    }
-    registry
-        .save_created_by("bot-owned", "alice", true)
-        .await
-        .unwrap();
-    registry
-        .save_created_by("bot-other", "bob", true)
-        .await
-        .unwrap();
-    registry
-        .register_streaming_connection("bot-owned".to_string())
-        .await
-        .unwrap();
-    let services = services_builder_with_bot_use_cases(registry).build_for_test();
-    let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/bots/my?offset=0&limit=10")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["total"], 1);
-    assert_eq!(json["items"][0]["bot_uuid"], "bot-owned");
-    assert_eq!(json["items"][0]["created_by"], "alice");
-    assert_eq!(json["items"][0]["visibility"], "protected");
-    assert_eq!(
-        json["items"][0]["capabilities"]["skills"],
-        serde_json::json!(["ops"])
-    );
-    assert_eq!(json["items"][0]["dynamic_status"]["status"], "active");
-}
+// Plan Task 12: the former `my_bots_route_uses_mock_user_identity_and_
+// creator_filter` test pinned the retired creator-only mine semantics. Its
+// successor coverage lives in `tests/current_authority.rs`, which drives
+// the REAL authority union over `/bots/my` (mine labels, `active_only`
+// filter and the [active-first, id ASC] sort on a live authority store).
 
 #[tokio::test]
 async fn me_route_returns_mock_user_identity() {

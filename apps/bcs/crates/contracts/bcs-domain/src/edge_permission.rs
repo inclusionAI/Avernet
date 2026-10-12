@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::actor::ActorKind;
+use crate::bot_authority::{
+    BotAccessRelation, ManagementSource, NON_ROLE_SOURCE_ID, NON_ROLE_SOURCE_KIND,
+    ROLE_GRANT_REF_ID,
+};
 
 /// Kind of authorization carried by an edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +22,13 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
+    /// Explicit owner role edge (Human → physical Bot), spec §5.1.
+    /// Fixed source encoding `owner/owner`; never an A2A runtime grant.
+    Owner,
+    /// Explicit manager role edge (Human → physical Bot), spec §5.1.
+    /// Carries a fixed non-nullable management source; never an A2A
+    /// runtime grant.
+    Manager,
 }
 
 /// Lifecycle status of an edge grant.
@@ -72,6 +83,105 @@ pub struct EdgeGrant {
     pub originator_policy_type: OriginatorPolicyType,
     #[serde(default)]
     pub originator_policy_data: Option<Value>,
+    /// Fixed non-nullable source encoding
+    /// (`management_source_kind` column, spec §5.1).
+    ///
+    /// No serde default: a stored role edge whose source fields are
+    /// missing must fail to decode, never silently become a valid
+    /// source. Non-role edges carry the fixed `none/none` encoding.
+    pub management_source_kind: String,
+    /// See [`EdgeGrant::management_source_kind`].
+    pub management_source_id: String,
+}
+
+impl EdgeGrant {
+    /// Typed constructor for a NON-role edge (`PermissionProfile` or
+    /// `Rules`, including the friend edge carried by the target's
+    /// default profile). Fills the fixed `none/none` source encoding
+    /// (spec §5.1); unknown/missing role sources must never be
+    /// auto-defaulted to `direct`.
+    pub fn new_non_role(
+        edge_id: u64,
+        env: impl Into<String>,
+        from_id: impl Into<String>,
+        to_id: impl Into<String>,
+        grant_kind: GrantKind,
+        grant_ref_id: u64,
+        rules: Option<Value>,
+    ) -> Self {
+        debug_assert!(
+            matches!(grant_kind, GrantKind::PermissionProfile | GrantKind::Rules),
+            "non-role edges cannot carry role kinds"
+        );
+        Self {
+            edge_id,
+            env: env.into(),
+            from_id: from_id.into(),
+            to_id: to_id.into(),
+            grant_kind,
+            grant_ref_id,
+            rules,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::Any,
+            originator_policy_data: None,
+            management_source_kind: NON_ROLE_SOURCE_KIND.to_string(),
+            management_source_id: NON_ROLE_SOURCE_ID.to_string(),
+        }
+    }
+
+    /// Typed constructor for a ROLE edge (Owner/Manager, always
+    /// Human → physical Bot; spec §5.1).
+    ///
+    /// The fixed role shape is filled here and is not caller-choosable:
+    /// `grant_ref_id = 0`, `rules = None`,
+    /// `originator_policy_type = SameAsFrom`, `status = approved`.
+    /// The source encoding is fixed per role: Owner always encodes the
+    /// fixed `owner/owner` pair (the manager-source argument is
+    /// ignored); Manager encodes the given management source
+    /// (`team`/`ownership_transfer` ids must be non-empty — construct
+    /// them via their typed constructors).
+    pub fn new_role(
+        edge_id: u64,
+        env: impl Into<String>,
+        from_id: impl Into<String>,
+        to_id: impl Into<String>,
+        relation: BotAccessRelation,
+        management_source: &ManagementSource,
+    ) -> Self {
+        let (source_kind, source_id) = relation.source_parts(management_source);
+        Self {
+            edge_id,
+            env: env.into(),
+            from_id: from_id.into(),
+            to_id: to_id.into(),
+            grant_kind: relation.grant_kind(),
+            grant_ref_id: ROLE_GRANT_REF_ID,
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::SameAsFrom,
+            originator_policy_data: None,
+            management_source_kind: source_kind.to_string(),
+            management_source_id: source_id.to_string(),
+        }
+    }
+
+    /// The `(management_source_kind, management_source_id)` parts of
+    /// this edge's fixed non-nullable source encoding.
+    pub fn management_source_parts(&self) -> (&str, &str) {
+        (
+            self.management_source_kind.as_str(),
+            self.management_source_id.as_str(),
+        )
+    }
+
+    /// Whether this edge uses the fixed non-role `none/none` encoding
+    /// (every `PermissionProfile`/`Rules` edge, including friend edges).
+    pub fn is_non_role(&self) -> bool {
+        crate::bot_authority::is_non_role_source(
+            &self.management_source_kind,
+            &self.management_source_id,
+        )
+    }
 }
 
 /// Status of a permission profile.
@@ -356,13 +466,16 @@ mod tests {
             rules: None, status: EdgeStatus::Approved,
             originator_policy_type: OriginatorPolicyType::Any,
             originator_policy_data: None,
+            management_source_kind: "none".into(),
+            management_source_id: "none".into(),
         };
         let s = serde_json::to_string(&g).unwrap();
         let back: EdgeGrant = serde_json::from_str(&s).unwrap();
         assert_eq!(g, back);
         assert_eq!(back.status, EdgeStatus::Approved);
         let def: EdgeGrant = serde_json::from_str(
-            r#"{"edge_id":1,"env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":2}"#,
+            r#"{"edge_id":1,"env":"prod","from_id":"a","to_id":"b","grant_kind":"permission_profile","grant_ref_id":2,
+                "management_source_kind":"none","management_source_id":"none"}"#,
         ).unwrap();
         assert_eq!(def.status, EdgeStatus::Approved);
         assert_eq!(def.originator_policy_type, OriginatorPolicyType::Any);

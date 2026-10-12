@@ -4,6 +4,7 @@ pub mod coordination_intent;
 pub mod bot_terminal_observer;
 pub mod human_notify;
 pub mod metrics;
+pub mod team_manager_credential;
 
 use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::port::{

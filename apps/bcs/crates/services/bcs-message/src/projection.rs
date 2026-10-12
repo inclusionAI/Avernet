@@ -244,9 +244,15 @@ pub(super) async fn enrich_message_attachments(
     let Some(atts) = msg.attachments.as_mut() else {
         return;
     };
+    // The history echo mints share links server-side while a member reads
+    // history; this enrichment lane carries no per-reader payload, so the
+    // audit records the honest independent system echo actor (spec §12.5)
+    // with a per-call operation. The file's ORIGINAL upload audit keeps the
+    // real operator identity from its own creation row.
+    let operation = bcs_service_api::types::system_lane_operation("bcs-message-history-echo");
     for att in atts.iter_mut() {
         match svc
-            .share_mint_for_history(session_id, &att.attachment_id, ttl)
+            .share_mint_for_history(session_id, &att.attachment_id, ttl, &operation)
             .await
         {
             Ok(minted) => {

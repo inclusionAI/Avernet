@@ -126,6 +126,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     },
     SqliteMigration { version: 32, name: "session_registry" },
     SqliteMigration { version: 33, name: "provider_slug" },
+    SqliteMigration {
+        version: 34,
+        name: "bot_authority",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -388,7 +392,7 @@ async fn apply_sqlite_migration_body(
             .await?;
             Ok(())
         }
-        32 => {
+32 => {
             let steps = include_str!("../../../../migrations/sqlite/032_session_registry.sql")
                 .split(';').map(str::trim).filter(|sql| !sql.is_empty())
                 .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
@@ -402,8 +406,194 @@ async fn apply_sqlite_migration_body(
             db.transaction(steps).await?;
             Ok(())
         }
+        34 => apply_sqlite_bot_authority_schema(db).await,
         _ => Ok(()),
     }
+}
+
+/// Version 34 — complete bot authority schema (plan Task 2, spec
+/// docs/superpowers/specs/2026-09-18-bot-manage-permission-design.md §5,
+/// §5.2, §5.3, §5.4, §12.5, §13.3). The migration is frozen after release:
+/// no later migration may backfill its columns.
+///
+/// The body is ordered:
+/// 1. rebuild a legacy `edge_grants` table into the canonical new shape
+///    (source columns + kind/source CHECK), preserving every row and original
+///    ID. The CANONICAL new-shape DDL lives in
+///    migrations/sqlite/034_bot_authority.sql so the CHECK literals have one
+///    textual definition, locked to the shared `bcs_domain` constants by the
+///    bootstrap test `sql_files_share_the_domain_source_encoding_constants`.
+/// 2. idempotent column additions for existing tables (SQLite accepts an
+///    ADD COLUMN exactly once, so each is guarded by a PRAGMA check).
+/// 3. execute the migration file's statements (all directly executable
+///    CREATE ... IF NOT EXISTS DDL, including the rebuilt edge table's
+///    replacement unique key, the approved-owner partial unique slot, and
+///    the six new authority tables).
+async fn apply_sqlite_bot_authority_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    rebuild_sqlite_edge_grants_with_authority_columns(db).await?;
+    ensure_sqlite_column(
+        db,
+        "bcs_bots",
+        "ownership_version",
+        "ALTER TABLE bcs_bots ADD COLUMN ownership_version INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+    if table_exists(db, "bcs_message_deliveries").await? {
+        ensure_sqlite_column(
+            db,
+            "bcs_message_deliveries",
+            "operation_id",
+            "ALTER TABLE bcs_message_deliveries ADD COLUMN operation_id TEXT DEFAULT NULL",
+        )
+        .await?;
+    }
+    if table_exists(db, "bcs_chat_runs").await? {
+        ensure_sqlite_column(
+            db,
+            "bcs_chat_runs",
+            "operation_id",
+            "ALTER TABLE bcs_chat_runs ADD COLUMN operation_id TEXT DEFAULT NULL",
+        )
+        .await?;
+    }
+    // No semicolons occur inside the file's strings or comments, so a plain
+    // split covers every statement.
+    for sql in include_str!("../../../../migrations/sqlite/034_bot_authority.sql")
+        .split(';')
+        .map(str::trim)
+        .filter(|sql| !sql.is_empty())
+    {
+        db.execute(DbStatement::new(sql)).await?;
+    }
+    Ok(())
+}
+
+/// Add one column to an existing SQLite table unless it is already present.
+///
+/// SQLite has no idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+/// syntax: a repeated ADD COLUMN is a hard error. Guarded ensures are the
+/// migration chain's idempotent ALTER pattern (see migrations 11/13/14).
+async fn ensure_sqlite_column(
+    db: &dyn DbPlugin,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> DbResult<()> {
+    let columns = sqlite_table_columns(db, table).await?;
+    if columns.iter().any(|present| present == column) {
+        return Ok(());
+    }
+    db.execute(DbStatement::new(alter_sql)).await?;
+    Ok(())
+}
+
+/// Rebuild a legacy `edge_grants` table into the authority shape via a shadow
+/// copy (binary rebuild: create shadow, copy all present columns with their
+/// original IDs, drop old, rename), mirroring the audit-column rebuild used
+/// by migration 13. SQLite cannot ADD a CHECK constraint to an existing
+/// table, so the shape cannot land without the rebuild.
+///
+/// Backfill rule: every healthy legacy row is a non-role edge and adopts the
+/// shared `none/none` encoding; a legacy `owner`-kind row adopts the fixed
+/// `owner/owner` encoding (its form is determined by the kind alone). A
+/// legacy `manager` row has unknown provenance — no source value can be
+/// truthfully assigned, so the CHECK makes the copy FAIL the migration
+/// loudly (data error requiring governance) instead of silently persisting
+/// a half role edge (spec §4.2.6).
+async fn rebuild_sqlite_edge_grants_with_authority_columns(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "edge_grants").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "edge_grants").await?;
+    if columns
+        .iter()
+        .any(|present| present == "management_source_kind")
+    {
+        return Ok(());
+    }
+
+    // The canonical new-shape DDL is the same file the migration body later
+    // executes; extract its edge_grants table statement for the shadow
+    // rebuild so the CHECK has exactly one textual source.
+    let authority_sql = include_str!("../../../../migrations/sqlite/034_bot_authority.sql");
+    // Comment headers share the chunk with the statement that follows them,
+    // so strip `--` lines before matching the chunk's real head.
+    let canonical_edge_table = authority_sql
+        .split(';')
+        .map(|sql| {
+            sql.lines()
+                .filter(|line| !line.trim_start().starts_with("--"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string()
+        })
+        .find(|sql| sql.starts_with("CREATE TABLE IF NOT EXISTS edge_grants"))
+        .ok_or_else(|| {
+            DbError::InvalidInput(
+                "034 bot_authority migration must define the new-shape edge_grants table".into(),
+            )
+        })?;
+    let create_rebuild = canonical_edge_table.replacen(
+        "CREATE TABLE IF NOT EXISTS edge_grants",
+        "CREATE TABLE edge_grants__authority_rebuild",
+        1,
+    );
+
+    // Copy every legacy column that actually exists (pre-13 tables kept the
+    // same core set), in the authoritative order; the rebuild carries the
+    // original IDs.
+    let legacy_data_columns = [
+        "id",
+        "env",
+        "from_id",
+        "to_id",
+        "grant_kind",
+        "grant_ref_id",
+        "rules",
+        "status",
+        "originator_policy_type",
+        "originator_policy_data",
+        "gmt_create",
+        "gmt_modified",
+    ];
+    let present: Vec<&str> = legacy_data_columns
+        .iter()
+        .copied()
+        .filter(|column| columns.iter().any(|existing| existing == column))
+        .collect();
+    let copy_list = present.join(", ");
+    // Backfill encodings. The literals are inlined on purpose: this module is
+    // pulled into many store crates' test binaries via #[path], so it must
+    // stay dependency-free and cannot import the bcs_domain constants
+    // directly. Coherence with the single shared definitions is enforced by
+    // tests, not trusted: sql_files_share_the_domain_source_encoding_constants
+    // locks the table CHECK literals to the bcs_domain constants (including
+    // that the GrantKind::Owner wire encoding IS the owner source kind
+    // string), and legacy_edge_table_rebuild_preserves_friend_and_ref_rows
+    // reads the real backfilled rows back and compares them against those
+    // same compiled constants through bcs_db_api column assertions.
+    let insert_copy = format!(
+        "INSERT INTO edge_grants__authority_rebuild ({copy_list}, management_source_kind, management_source_id) \
+         SELECT {copy_list}, \
+           CASE WHEN grant_kind = 'owner' THEN 'owner' ELSE 'none' END, \
+           CASE WHEN grant_kind = 'owner' THEN 'owner' ELSE 'none' END \
+         FROM edge_grants",
+    );
+
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE IF EXISTS edge_grants__authority_rebuild",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(create_rebuild)),
+        DbTransactionStep::Execute(DbStatement::new(insert_copy)),
+        DbTransactionStep::Execute(DbStatement::new("DROP TABLE edge_grants")),
+        DbTransactionStep::Execute(DbStatement::new(
+            "ALTER TABLE edge_grants__authority_rebuild RENAME TO edge_grants",
+        )),
+    ])
+    .await?;
+    Ok(())
 }
 
 #[derive(Debug)]

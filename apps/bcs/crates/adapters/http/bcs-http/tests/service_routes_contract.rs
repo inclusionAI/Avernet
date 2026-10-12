@@ -328,6 +328,7 @@ impl SessionManagementService for RecordingSessionManagement {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -336,6 +337,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -344,6 +346,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -353,6 +356,7 @@ impl SessionManagementService for RecordingSessionManagement {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -361,6 +365,7 @@ impl SessionManagementService for RecordingSessionManagement {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
@@ -585,6 +590,7 @@ impl SessionManagementService for StaticSessionStore {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -593,6 +599,7 @@ impl SessionManagementService for StaticSessionStore {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -601,6 +608,7 @@ impl SessionManagementService for StaticSessionStore {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -610,6 +618,7 @@ impl SessionManagementService for StaticSessionStore {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -618,6 +627,7 @@ impl SessionManagementService for StaticSessionStore {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -823,6 +833,7 @@ impl SessionManagementService for ReactivateConflictSessions {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -831,6 +842,7 @@ impl SessionManagementService for ReactivateConflictSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -839,6 +851,7 @@ impl SessionManagementService for ReactivateConflictSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -848,6 +861,7 @@ impl SessionManagementService for ReactivateConflictSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -856,6 +870,7 @@ impl SessionManagementService for ReactivateConflictSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -1025,6 +1040,7 @@ impl SessionManagementService for ContractMismatchSessions {
         _session_id: &str,
         _output: Option<serde_json::Value>,
         _error: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Option<Session>, SessionUseCaseError> {
         Ok(None)
     }
@@ -1033,6 +1049,7 @@ impl SessionManagementService for ContractMismatchSessions {
         &self,
         _session_id: &str,
         _participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -1041,6 +1058,7 @@ impl SessionManagementService for ContractMismatchSessions {
         &self,
         _session_id: &str,
         _bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -1050,6 +1068,7 @@ impl SessionManagementService for ContractMismatchSessions {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }
@@ -1058,6 +1077,7 @@ impl SessionManagementService for ContractMismatchSessions {
         &self,
         _session_id: &str,
         _title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<Session, SessionUseCaseError> {
         unimplemented!()
     }

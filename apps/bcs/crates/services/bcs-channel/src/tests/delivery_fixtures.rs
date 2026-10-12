@@ -159,6 +159,7 @@ impl SessionRepoPort for RecordingSessionRepo {
         &self,
         session_id: &str,
         participant: Participant,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         if let Some(error) = self.fail_add_participant.lock().await.clone() {
             return Err(ServiceError::InternalError(error));
@@ -185,6 +186,7 @@ impl SessionRepoPort for RecordingSessionRepo {
         &self,
         session_id: &str,
         bot_uuid: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(session_id) else {
@@ -201,6 +203,7 @@ impl SessionRepoPort for RecordingSessionRepo {
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(session_id) else {
@@ -231,6 +234,7 @@ impl SessionRepoPort for RecordingSessionRepo {
         &self,
         session_id: &str,
         title: Option<String>,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Session> {
         let mut sessions = self.sessions.lock().await;
         let Some(session) = sessions.get_mut(session_id) else {

@@ -17,6 +17,14 @@ fn record(run_id: &str, version: u64) -> ChatRunRecord {
         ChatRunCompletionPolicy::WaitForFinal,
     );
     record.version = version;
+    // §12.5: every new create command carries an honest operation context
+    // (a verified Bot in these persisted-run fixtures).
+    record.operation = Some(bcs_service_api::types::BotOperationContext {
+        operation_id: format!("chat-run-tests:{run_id}"),
+        actor: bcs_service_api::types::BotOperationActor::Bot {
+            bot_id: "from".to_string(),
+        },
+    });
     record
 }
 

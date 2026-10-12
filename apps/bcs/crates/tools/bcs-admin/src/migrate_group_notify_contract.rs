@@ -99,6 +99,17 @@ where
                 ..Default::default()
             }),
             event: None,
+            // Carry-forward ruling (plan Task 11): the migration binary is an
+            // independent system action, so it carries an honest System actor —
+            // never a forged Human and never a `None` that silently skips the
+            // applied audit row the store now commits with the mutation.
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: format!("migrate-group-notify-{}", eventful_group.id),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "bcs-admin-migrate-group-notify".to_string(),
+                    effective_actor_id: "bcs-admin-migrate-group-notify".to_string(),
+                },
+            },
         })
         .await
         .context("eventful mode patch")?;
@@ -167,6 +178,13 @@ where
                 ..Default::default()
             }),
             event: None,
+            operation: bcs_service_api::types::BotOperationContext {
+                operation_id: "migrate-group-notify-stale-probe".to_string(),
+                actor: bcs_service_api::types::BotOperationActor::System {
+                    system_id: "bcs-admin-migrate-group-notify".to_string(),
+                    effective_actor_id: "bcs-admin-migrate-group-notify".to_string(),
+                },
+            },
         })
         .await
         .expect_err("stale expected_version must conflict");

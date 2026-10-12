@@ -10,6 +10,7 @@ fn accepts_object_safe_service(_: Arc<dyn SessionLaunchService>) {}
 #[test]
 fn neutral_command_carries_no_transport_identity() {
     let request = SessionLaunchRequest {
+        operator_user_id: Some("alice".into()),
         caller: SessionCaller::Human {
             actor_id: "human_alice".into(),
             owner_id: "alice".into(),

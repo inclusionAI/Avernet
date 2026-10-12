@@ -4,6 +4,7 @@
 //! upload pipeline, delete routing, share-token mint/consume, and the Pending sweep
 //! for the BCS session shared file workspace.
 
+pub mod audit;
 pub mod authz;
 pub mod noop;
 pub mod service;

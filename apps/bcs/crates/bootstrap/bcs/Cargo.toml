@@ -11,6 +11,13 @@ version     = { workspace = true }
 name = "bcs"
 path = "src/main.rs"
 
+# Governed ownership cutover maintenance binary (plan Task 17). Registered
+# on the SAME crate (composition entry `bcs::ownership_migration_wiring`), so
+# the integration tests exercise the real binary through CARGO_BIN_EXE_*.
+[[bin]]
+name = "bcs-ownership-migrate"
+path = "src/bin/bcs-ownership-migrate.rs"
+
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
@@ -213,3 +220,6 @@ bcs-test-support = { workspace = true }
 serial_test = "3"
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }
+# tests/bot_authority_mysql.rs: the ignored MySQL conformance test parses
+# BCS_TEST_MYSQL_URL the same way the event-store contract does.
+mysql_async = { workspace = true }

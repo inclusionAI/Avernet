@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 use bcs_service_api::{EnsureOwnerEdgesResult, RelationEdge, RelationRepoPort, ServiceResult};
+use bcs_service_api::types::bot_authority::LegacyCreatorClaim;
 
 type EdgeKey = (String, String, String);
 
@@ -169,6 +170,31 @@ impl RelationRepoPort for MemoryRelationRepo {
         Self::insert_if_absent_locked(&mut edges, Self::empty_friend_edge(a, b, env, false));
         Self::insert_if_absent_locked(&mut edges, Self::empty_friend_edge(b, a, env, false));
         Ok(())
+    }
+
+    async fn list_creator_claims(
+        &self,
+        env: &str,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<LegacyCreatorClaim>> {
+        let wanted: std::collections::HashSet<&String> = bot_ids.iter().collect();
+        let edges = self.edges.read().await;
+        let mut claims = Vec::new();
+        for edge in edges.values() {
+            if edge.is_creator
+                && edge.env == env
+                && wanted.contains(&edge.to_id)
+            {
+                claims.push(LegacyCreatorClaim {
+                    env: edge.env.clone(),
+                    bot_id: edge.to_id.clone(),
+                    // Stored actor id shape verbatim (human_<user_id>).
+                    claimant_actor_id: edge.from_id.clone(),
+                });
+            }
+        }
+        claims.sort_by(|a, b| (&a.bot_id, &a.claimant_actor_id).cmp(&(&b.bot_id, &b.claimant_actor_id)));
+        Ok(claims)
     }
 
     async fn remove_friend_edges(&self, a: &str, b: &str, env: &str) -> ServiceResult<()> {

@@ -1,6 +1,7 @@
 //! Core service contract harnesses.
 
 pub mod message_delivery;
+pub mod ownership_migration;
 
 use std::collections::BTreeMap;
 

@@ -84,6 +84,10 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
     let admitted = service.admit(AdmitMessageDeliveries {
         display_message: None, message_id: "initial-context".into(), flow_kind,
         now_ms: 100, expire_at_ms: None, event: None,
+        operation: bcs_service_api::types::BotOperationContext {
+            operation_id: "test-admit:initial-context".to_string(),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: "bot-driver".into() },
+        },
         targets: ["bot-driver", "bot-observer"].into_iter().map(|target| DeliveryAdmissionTarget {
             rejection: None, target_bot_id: target.into(), kind, max_queued: 10,
             semantic_projection_json: json!({"version":1}),
@@ -99,6 +103,10 @@ async fn check_notice(flow_kind: DeliveryFlowKind, strategy: GroupStrategy, priv
     let command = |row: &bcs_domain::message_delivery::PersistedMessageDelivery, event| DeliveryTransitionCommand {
         delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
         now_ms: 200, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+        operation: bcs_service_api::types::BotOperationContext {
+            operation_id: format!("test-transition:{}", row.delivery_id),
+            actor: bcs_service_api::types::BotOperationActor::Bot { bot_id: row.target_bot_id.clone() },
+        },
     };
     let mut deliveries = admitted.deliveries.iter().collect::<Vec<_>>();
     deliveries.sort_by_key(|row| &row.target_bot_id);

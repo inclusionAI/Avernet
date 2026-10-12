@@ -145,7 +145,7 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
     }
     async fn admit(&self, _: bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries) -> Result<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { unreachable!() }
     async fn list_deliveries(&self, _: Option<&str>) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { unreachable!() }
-    async fn commit_transition(&self, _: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>, _: Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>) -> Result<Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { unreachable!() }
+    async fn commit_transition(&self, _: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>, _: Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>, _: Vec<bcs_service_api::port::repo::message_delivery::DeliveryControlAudit>) -> Result<Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { unreachable!() }
 }
 
 #[tokio::test]

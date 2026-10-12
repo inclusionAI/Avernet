@@ -9,6 +9,20 @@
   by noop tests and the bootstrap Prometheus adapter's rendered-series tests.
 
 - Shared contract-test harnesses for BCS service and plugin boundaries.
+- Plan-Task-13/14/17/18 authority-lane shared harnesses
+  (`bot_manager_service_contract_tests`,
+  `team_manager_sync_service_contract_tests`,
+  `ownership_transfer_service_contract_tests`,
+  `ownership_migration_service_contract_tests`,
+  `ownership_migration_core_service_contract_tests`,
+  `team_manager_credential_verifier_port_contract_tests`) plus the
+  fail-closed Noops those lanes register (`NoopBotManagerService`,
+  `NoopBotOwnershipTransferService`, `NoopTeamManagerSyncService`) and the
+  recording doubles (`RecordingBotAuthorityHook`,
+  `CountingBotAuthorityCore`) the conformance drivers construct production
+  facades over. Noop evolution is explicit: answers stay fail-closed
+  (Forbidden / fixed-code deny), and inherited trait defaults never stand in
+  for a required Noop method.
 - Bot-owned Provider metadata, binding-projection and authorized deletion
   contracts; consumers supply Memory/SQL repositories or Core implementations.
 - Reusable fixtures and helpers for local conformance testing.

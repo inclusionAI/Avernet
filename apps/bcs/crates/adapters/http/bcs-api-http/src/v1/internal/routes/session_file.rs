@@ -12,7 +12,7 @@ use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, CompleteSessionFile, DeleteSessionFile,
     DownloadSessionFile, DownloadSharedSessionFile, GetSessionFile, IdentityPolicy,
     ListSessionFiles, PrepareSessionFile, SessionFileApplicationService, SessionFileContent,
-    ShareSessionFile, UploadSessionFileContent, select_principal,
+    ShareSessionFile, UploadSessionFileContent,
 };
 use bcs_storage_api::{ByteStream, ByteStreamTrait};
 use bytes::Bytes;
@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, IdentityPolicyMethodRouterExt, RequestId,
-    RouteIdentityPolicy, application_error_response, invalid_request,
+    application_error_response, invalid_request,
 };
 use crate::v1::openapi::dto::session_file::{
     ListSessionFilesQuery, PrepareSessionFileRequest, ProtectedFileContentQuery,
@@ -50,7 +50,12 @@ impl Stream for RequestBodyStream {
 impl ByteStreamTrait for RequestBodyStream {}
 
 pub fn protected_router() -> Router<ApiState> {
-    let policy = IdentityPolicy::HumanOrOwnedBot;
+    // Review F5 (spec §12.1): the mixed-identity selection runs INSIDE the
+    // application layer (`load_member` -> `resolve_authorized_principal`,
+    // plan Task 11) against the LIVE authority facts. The route annotation
+    // documents that contract; the adapter no longer re-runs the deprecated
+    // synchronous `HumanOrOwnedBot` claim check in front of it.
+    let policy = IdentityPolicy::HumanOrAuthorizedBot;
     Router::new()
         .route(
             "/sessions/{session_id}/files",
@@ -99,13 +104,6 @@ fn projector(state: &ApiState) -> Result<&SessionFileUrlProjector, ApplicationEr
         .ok_or_else(|| ApplicationError::internal("V1 Session File URL projector is not configured"))
 }
 
-fn authorize_identity(
-    caller: &AuthenticatedCaller,
-    policy: IdentityPolicy,
-) -> Result<(), ApplicationError> {
-    select_principal(caller, policy).map(|_| ())
-}
-
 fn error(request_id: &RequestId, error: ApplicationError) -> ErrorResponse {
     application_error_response(request_id, error)
 }
@@ -113,12 +111,10 @@ fn error(request_id: &RequestId, error: ApplicationError) -> ErrorResponse {
 async fn prepare_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     body: Result<Json<PrepareSessionFileRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path(session_id) = path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let Json(body) = body.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let result = service(&state)
@@ -153,12 +149,10 @@ async fn prepare_file(
 async fn list_files(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListSessionFilesQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path(session_id) = path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let Query(query) = query.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let result = service(&state)
@@ -183,11 +177,9 @@ async fn list_files(
 async fn get_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let result = service(&state)
@@ -209,11 +201,9 @@ async fn get_file(
 async fn delete_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let result = service(&state)
@@ -235,14 +225,12 @@ async fn delete_file(
 async fn upload_content(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<UploadSessionFileQuery>, QueryRejection>,
     headers: HeaderMap,
     body: Body,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let Query(query) = query.map_err(|e| invalid_request(&request_id, e.body_text()))?;
@@ -273,11 +261,9 @@ async fn upload_content(
 async fn complete_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let result = service(&state)
@@ -299,12 +285,10 @@ async fn complete_file(
 async fn share_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     body: Result<Json<ShareSessionFileRequest>, JsonRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let Json(body) = body.map_err(|e| invalid_request(&request_id, e.body_text()))?;
@@ -335,12 +319,10 @@ async fn share_file(
 async fn download_file(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
-    RouteIdentityPolicy(policy): RouteIdentityPolicy,
     Extension(request_id): Extension<RequestId>,
     path: Result<Path<(String, String)>, PathRejection>,
     query: Result<Query<ProtectedFileContentQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
-    authorize_identity(&caller, policy).map_err(|e| error(&request_id, e))?;
     let Path((session_id, file_id)) =
         path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
     let Query(query) = query.map_err(|e| invalid_request(&request_id, e.body_text()))?;

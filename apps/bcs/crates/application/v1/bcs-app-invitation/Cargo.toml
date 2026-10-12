@@ -15,6 +15,7 @@ async-trait = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }

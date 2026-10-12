@@ -4,9 +4,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
-    ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
+    ActorKind, BotCandidateReadQuery, BotControllableQuery, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotSearchCandidateQuery, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneProvider, BotControlPlaneRecord,
+    BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery, ControllableBotView,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
@@ -170,6 +171,31 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         ))
     }
 
+    async fn list_controllable(
+        &self,
+        query: BotControllableQuery,
+    ) -> ServiceResult<Vec<ControllableBotView>> {
+        let records = self.control_plane.list_controllable(query).await?;
+        // ONE batched Provider hydration for the whole page; the access
+        // relation labels ride along from the same union read and are
+        // re-attached positionally — never re-queried per Bot.
+        let relations = records
+            .iter()
+            .map(|record| record.access_relation)
+            .collect::<Vec<_>>();
+        let views = self
+            .hydrate(records.into_iter().map(|record| record.record).collect())
+            .await?;
+        Ok(views
+            .into_iter()
+            .zip(relations)
+            .map(|(bot, access_relation)| ControllableBotView {
+                bot,
+                access_relation,
+            })
+            .collect())
+    }
+
     async fn list_by_creator(
         &self,
         query: BotControlPlaneOwnedQuery,
@@ -197,10 +223,11 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         bot_id: &str,
         env: &str,
         patch: BotControlPlanePatch,
+        operation: bcs_service_api::types::BotOperationContext,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
         let Some(record) = self
             .control_plane
-            .patch_control_plane(bot_id, env, patch)
+            .patch_control_plane(bot_id, env, patch, operation)
             .await?
         else {
             return Ok(None);

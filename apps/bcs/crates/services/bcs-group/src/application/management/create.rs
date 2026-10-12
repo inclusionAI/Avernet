@@ -52,6 +52,18 @@ impl GroupManagement {
 
         let is_human_originator = originator.starts_with("human_");
 
+// Spec §8.3: the Human sponsorship credential belongs to Human-originated
+// collaboration only. A Bot originator must never inherit it — same input,
+// bot originator → error, without falling back on friendship either.
+if self.v1_openapi_create_policy
+    && !is_human_originator
+    && cmd.human_sponsorship.is_some()
+{
+    return Err(GroupUseCaseError::Forbidden(
+        "Bot-originated group creation does not accept a Human sponsorship credential".to_string(),
+    ));
+}
+
         let group_id = cmd
             .group_id
             .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
@@ -95,21 +107,38 @@ impl GroupManagement {
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
-                    // Originator-anchored (aligned with legacy): every Bot
-                    // participant except the originator itself — including the
-                    // driver when it differs from the originator — must be
-                    // reachable from the originator. A Human originator reaches
-                    // a bot via public visibility or ownership (`created_by`);
-                    // a Bot originator reaches it via public visibility or
-                    // friendship.
+                    // Originator-anchored, with the Human-sponsorship
+                    // qualification of spec §8.3 (plan Task 10):
+                    //   human sponsor = not hidden AND (public OR
+                    //     authority.can_manage(human, bot))
+                    //   bot sponsor   = not hidden AND existing
+                    //     public/friendship (ensure_v1_reachable)
+                    // The Human branch re-verifies CURRENT qualification via
+                    // the trusted sponsorship credential, never `created_by`,
+                    // and creates no Bot↔Bot friend edges.
                     if bot_id != originator {
                         if is_human_originator {
                             let staff_no = originator.trim_start_matches("human_");
+                            let sponsor = cmd.human_sponsorship.as_ref().ok_or_else(|| {
+                                GroupUseCaseError::Forbidden(format!(
+                                    "Human-originated group creation requires a verified \
+                                     Human sponsorship credential for human '{staff_no}'"
+                                ))
+                            })?;
+                            self.verify_sponsorship_identity(sponsor, staff_no)?;
+                            if bot.status == ActorStatus::Hidden {
+                                return Err(GroupUseCaseError::Forbidden(format!(
+                                    "Bot '{}' is hidden (offline) and cannot be invited into a group",
+                                    bot_id
+                                )));
+                            }
                             if bot.capabilities.visibility != "public"
-                                && bot.created_by.as_deref() != Some(staff_no)
+                                && !self
+                                    .human_can_manage_bot(&sponsor.user_id, &bot_id)
+                                    .await?
                             {
                                 return Err(GroupUseCaseError::Forbidden(format!(
-                                    "Bot '{}' is neither public nor owned by human '{}'",
+                                    "Bot '{}' is neither public nor sponsored by human '{}'",
                                     bot_id, staff_no
                                 )));
                             }

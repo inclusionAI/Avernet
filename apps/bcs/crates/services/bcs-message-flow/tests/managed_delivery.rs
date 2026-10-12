@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 fn admit(id: &str, kind: DeliveryType) -> AdmitMessageDeliveries {
     AdmitMessageDeliveries {
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
         display_message: None,
         message_id: id.into(),
         flow_kind: DeliveryFlowKind::Group,
@@ -55,6 +56,7 @@ fn transition(
         reply: None,
         transport_context_json: None,
         deadline_at_ms: None,
+        operation: bcs_service_api::types::system_lane_operation("message-flow-tests"),
     }
 }
 

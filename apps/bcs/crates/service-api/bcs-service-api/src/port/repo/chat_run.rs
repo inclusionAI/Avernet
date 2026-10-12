@@ -94,6 +94,14 @@ pub struct ChatRunRecord {
     /// `original_request` column directly (the repo's `get` returns it empty).
     #[serde(skip)]
     pub original_request: String,
+    /// REQUIRED §12.5 operation context of the NEW command that creates this
+    /// run: stores persist `operation_id` on the row and append the
+    /// `launch/message/admitted` business-audit record in the SAME
+    /// transaction. `None` means a PRE-cutover history row (legal on reads)
+    /// — new creations without a context are rejected by the store, never
+    /// downgraded to a forged System actor.
+    #[serde(skip, default)]
+    pub operation: Option<crate::types::BotOperationContext>,
 }
 
 fn default_completion_policy() -> ChatRunCompletionPolicy {
@@ -133,6 +141,7 @@ impl ChatRunRecord {
             completion_policy,
             delivery_ack_at_ms: None,
             original_request: String::new(),
+            operation: None,
         }
     }
 }

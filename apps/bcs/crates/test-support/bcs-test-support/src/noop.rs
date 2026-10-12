@@ -984,7 +984,12 @@ impl GroupCoreService for NoopGroupCoreService {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
-    async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
+    async fn update_workspace(
+        &self,
+        id: &str,
+        _workspace: Workspace,
+        _operation: types::BotOperationContext,
+    ) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 

@@ -9,6 +9,7 @@ pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineC
 pub mod bot;
 pub mod bot_provider;
 pub mod bot_actor_config;
+pub mod bot_authority;
 pub mod bot_control_plane;
 pub mod channel;
 pub mod chat_run;
@@ -59,6 +60,7 @@ pub use collaboration::{
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use edge_grant::EdgeGrantRepoPort;
+pub use bot_authority::{BotAuthorityRepoPort, human_actor_id, user_id_from_actor};
 pub use event::*;
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::{

@@ -146,6 +146,7 @@ impl Fixture {
             sessions.clone(),
             services.collaboration_runtime.clone(),
             notifications.clone(),
+            Arc::new(FailClosedLaunchAuthorityHook),
         ));
         let mut state = HttpAppState::new(services);
         state.botchat_url = Some("https://example.com".to_string());
@@ -535,4 +536,27 @@ async fn sessionless_state_machine_still_validates_yaml_before_persistence() {
             .contains("invalid collaboration_definition_yaml")
     );
     assert!(fixture.groups.get("new-group").await.is_none());
+}
+
+struct FailClosedLaunchAuthorityHook;
+
+#[async_trait::async_trait]
+impl bcs_service_api::application::v1::BotAuthorityHook for FailClosedLaunchAuthorityHook {
+    async fn can_manage(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(false)
+    }
+
+    async fn require_owner(
+        &self,
+        _user_id: &str,
+        _bot_id: &str,
+    ) -> ServiceResult<()> {
+        Err(bcs_service_api::ServiceError::Unauthorized(
+            "no authority facts in this integration test".to_string(),
+        ))
+    }
 }

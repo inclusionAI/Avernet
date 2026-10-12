@@ -209,7 +209,12 @@ impl WorkbenchSessionService for GroupManagement {
                 let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
                     continue;
                 };
-                if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no)
+                if self
+                    .human_may_operate_bot(staff_no, &participant.bot_uuid, bot.created_by.as_deref())
+                    .await
+                    .map_err(|error| {
+                        WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
+                    })?
                 {
                     may_operate_session = true;
                     break;
@@ -265,7 +270,10 @@ impl CanResolveInteraction for GroupManagement {
             let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
                 continue;
             };
-            if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no) {
+            if self
+                .human_may_operate_bot(staff_no, &participant.bot_uuid, bot.created_by.as_deref())
+                .await?
+            {
                 return Ok(true);
             }
         }

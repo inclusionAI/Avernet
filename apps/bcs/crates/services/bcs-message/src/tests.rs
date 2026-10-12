@@ -77,6 +77,7 @@ impl SessionFileService for MintMock {
         &self,
         _session_id: &str,
         _file_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<bcs_domain::SessionFile, SessionFileUseCaseError> {
         unimplemented!()
     }
@@ -134,6 +135,7 @@ impl SessionFileService for MintMock {
     async fn delete_all_for_session(
         &self,
         _session_id: &str,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<u64, SessionFileUseCaseError> {
         unimplemented!()
     }
@@ -142,6 +144,7 @@ impl SessionFileService for MintMock {
         _session_id: &str,
         _file_id: &str,
         _ttl_seconds: u64,
+        _operation: &bcs_service_api::types::BotOperationContext,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
         if self.ok {
             Ok(ShareMintResult {
@@ -579,6 +582,18 @@ mod attachment_parse_tests {
         assert_eq!(message.content, "回复失败");
         assert_eq!(message.metadata.unwrap()["terminal_state"], "error");
         assert!(message.attachments.is_none());
+    }
+}
+
+/// Honest System identity for the test-only Session membership writes
+/// (spec §12.5): no verified Human operator on this lane.
+fn session_write_operation() -> bcs_service_api::types::BotOperationContext {
+    bcs_service_api::types::BotOperationContext {
+        operation_id: format!("bcs-message-test-write:{}", uuid::Uuid::new_v4()),
+        actor: bcs_service_api::types::BotOperationActor::System {
+            system_id: "bcs-message-test-write".to_string(),
+            effective_actor_id: "bcs-message-test-write".to_string(),
+        },
     }
 }
 

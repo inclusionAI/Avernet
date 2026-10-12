@@ -34,6 +34,8 @@ bcs-telemetry   = { workspace = true }
 bcs-observability = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-route-security = { workspace = true }
+# Trusted deployment env resolution for protected-delivery bindings (Task 16).
+bcs-config      = { workspace = true }
 
 [dev-dependencies]
 tokio-test  = "0.4"
