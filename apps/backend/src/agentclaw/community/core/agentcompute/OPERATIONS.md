@@ -123,10 +123,17 @@ Controls map:
   client construction - fail clear at boot. The avernet subagent talks to
   the host platform through the in-process `BotPlatform` seam —
   provision requests cross as a `BotCreateSpec` (name, description,
-  instructions, model, metadata) and the platform-side adapter composes
-  the create request and manifest document; the subagent opens no socket
-  and holds no egress surface, and a blank provisioned bot id fails fast
-  instead of polling to the deadline.
+  instructions, model, metadata) and the host adapter
+  (`plugins/community/agentcompute_platform.py`, bound in the community
+  and singlebox columns) composes the create request and manifest
+  document; the subagent opens no socket and holds no egress surface,
+  and a blank provisioned bot id fails fast instead of polling to the
+  deadline. Operational preconditions of the binding: the
+  `task_queue_worker` must run (creations complete only as its durable
+  jobs), the chat leg needs a functional `SandboxRuntimeClient` binding
+  for the profile's environment, and `agentcompute_platform.owner_work_no`
+  names the account swarm-created bots belong to (required, no
+  service-account fallback).
 - Prompt injection: subagent output is untrusted data. `SliceStore`
   records `prompt_injection` guard events for detected markers while
   still routing the result; the orchestrator wraps every result in an

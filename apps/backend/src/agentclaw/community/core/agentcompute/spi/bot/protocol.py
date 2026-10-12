@@ -2,12 +2,14 @@
 
 The subagent's job (provision a transient bot persona, drive it to READY,
 chat one objective, delete it) is platform work this backend cannot do
-itself — the backend's in-process surfaces stop short of full bot
-lifecycle: an engine-transport chat path exists core-side (the grt_chat
-service, its status/teardown counterparts), and a host adapter that binds
-it to this seam is deliberately future work owned with the platform
-modules' maintainers. Until that binding exists, the swarm defines the
-seam and the
+itself — the binding lives host-side, not here: the community host
+adapter (``plugins/community/agentcompute_platform.py`` — the
+create-with-manifest flow for provisioning, the grt_chat engine
+transport for the chat leg) is bound by ``CommunityAgentComputePlatformModule``
+in the community column and the singlebox branch of the profile
+composition. Profiles whose column does not install the binding keep the
+designed failure — avernet-kind spawns fail clear at the factory — and
+the swarm defines the seam and the
 composition root binds the host's in-process BotPlatform adapter; nothing
 in agentcompute opens a socket, and a missing BotPlatform binding means
 avernet-kind spawns fail clear at the factory (the failure mode of the
