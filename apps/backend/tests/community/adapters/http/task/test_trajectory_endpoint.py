@@ -69,13 +69,13 @@ class _StubTrajectoryService:
     ) -> None:
         self._trajectory = trajectory
         self._raise_exc = raise_exc
-        self.calls: list[tuple[str, bool, bool]] = []
+        self.calls: list[tuple[str, bool, bool, bool]] = []
 
     async def get_trajectory(
         self, task_id: str, *, do_analysis: bool = False,
-        force_analysis: bool = False,
+        force_analysis: bool = False, session_detail: bool = False,
     ) -> TaskTrajectory:
-        self.calls.append((task_id, do_analysis, force_analysis))
+        self.calls.append((task_id, do_analysis, force_analysis, session_detail))
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._trajectory
@@ -191,7 +191,19 @@ def test_trajectory_default_read_returns_dto_with_null_analysis(client, stub_ser
     assert data["timeline"][0]["action_type"] == "submit"
     assert data["timeline"][1]["action_type"] == "dispatch"
     # stub received do_analysis=False (default)
-    assert stub_service.calls == [("t1", False, False)]
+    assert stub_service.calls == [("t1", False, False, False)]
+
+
+@pytest.mark.unit
+def test_trajectory_session_detail_param_passthrough(client, stub_service):
+    """``?session_detail=true`` 查询参经路由透传到 service;缺省默认 False
+    (纯读不实拉会话明细)。内部路由镜像同理(改其一须同步)。"""
+    r = client.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "session_detail": "true"},
+    )
+    assert r.status_code == 200
+    assert stub_service.calls[-1] == ("t1", False, False, True)
 
 
 @pytest.mark.unit
@@ -203,7 +215,7 @@ def test_trajectory_force_analysis_param_passthrough(client, stub_service):
         params={"task_id": "t1", "do_analysis": "true", "force_analysis": "true"},
     )
     assert r.status_code == 200
-    assert stub_service.calls[-1] == ("t1", True, True)
+    assert stub_service.calls[-1] == ("t1", True, True, False)
 
     # 不带参数 → 两参默认 False
     r2 = client.get(
@@ -211,7 +223,7 @@ def test_trajectory_force_analysis_param_passthrough(client, stub_service):
         params={"task_id": "t1"},
     )
     assert r2.status_code == 200
-    assert stub_service.calls[-1] == ("t1", False, False)
+    assert stub_service.calls[-1] == ("t1", False, False, False)
 
 
 @pytest.mark.unit
@@ -223,7 +235,7 @@ def test_trajectory_explicit_do_analysis_false(client, stub_service):
     )
     assert r.status_code == 200
     assert r.json()["data"]["analysis"] is None
-    assert stub_service.calls == [("t1", False, False)]
+    assert stub_service.calls == [("t1", False, False, False)]
 
 
 @pytest.mark.unit
@@ -261,7 +273,7 @@ def test_trajectory_do_analysis_true_returns_fresh_analysis():
     parsed = json.loads(data["analysis"])
     assert parsed["analysis_type"] == "tc_bot"
     assert parsed["analysis_executor"] == "bot-traj-analyst"
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +294,7 @@ def test_trajectory_do_analysis_true_bot_failure_returns_504():
         params={"task_id": "t1", "do_analysis": "true"},
     )
     assert r.status_code == 504
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 @pytest.mark.unit
@@ -318,7 +330,7 @@ def test_trajectory_do_analysis_true_not_configured_returns_503():
         params={"task_id": "t1", "do_analysis": "true"},
     )
     assert r.status_code == 503
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +353,7 @@ def test_internal_trajectory_mirror_returns_same_dto_shape():
     data = r.json()["data"]
     assert data["task_id"] == "t1"
     assert json.loads(data["analysis"])["analysis_type"] == "tc_bot"
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 @pytest.mark.unit
@@ -354,7 +366,7 @@ def test_internal_trajectory_default_read():
     )
     assert r.status_code == 200
     assert r.json()["data"]["analysis"] is None
-    assert svc.calls == [("t1", False, False)]
+    assert svc.calls == [("t1", False, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +427,7 @@ def test_trajectory_display_html_returns_html_page():
     assert "策略=search 选中=botA(hit_single)" in body
     assert "推进理由" in body                     # analysis section label
     # the service still received do_analysis=False (display does not toggle analysis)
-    assert svc.calls == [("t1", False, False)]
+    assert svc.calls == [("t1", False, False, False)]
 
 
 @pytest.mark.unit
@@ -875,8 +887,9 @@ def test_trajectory_dto_passes_through_search_probe():
 
 @pytest.mark.unit
 def test_trajectory_display_html_renders_search_probe():
-    """HTML 页在携带采样的派发事件下渲染可折叠的「搜推采样」块(三问:
-    关键词命中 / 返回候选 / 最终选择)。"""
+    """HTML 页在携带采样的派发事件下渲染可折叠的「搜推明细」块:分词关键词 /
+    关键词命中 / 候选打分 / 最终匹配结果 + 失败词与截断依据(旧形态:分数直接
+    挂在 candidates 上,无 candidate_evaluations —— 兜得住)。"""
     ev = TrajectoryEvent(
         task_id="t1", node_id="n1", action_type=TrajectoryActionType.DISPATCH,
         action_result="hit_single", attempt=0, gmt_create=1000, gmt_modified=1000,
@@ -910,12 +923,75 @@ def test_trajectory_display_html_renders_search_probe():
     )
     assert r.status_code == 200
     text = r.text
-    assert "搜推采样 · rule" in text
-    # 三问逐项可见:关键词 / 返回结果 / 最终选择 + 失败词与截断依据
-    assert "关键词: 存储, 检索" in text
+    assert "搜推明细 · rule" in text
+    # 逐项可见:分词关键词 / 关键词命中 / 候选打分 / 最终匹配 + 失败词与截断依据
+    assert "分词关键词: 存储, 检索" in text
+    assert "关键词命中:" in text
+    assert "存储: 命中 2: a:o, b:o" in text
     assert "失败关键词: 检索" in text
-    assert "返回结果(1 个候选)" in text
+    assert "候选者打分(1 个):" in text
     assert "存储专家" in text
-    assert "最终选择: rule-a:1" in text
+    assert "(score=0.9)" in text
+    assert "最终匹配结果: rule-a:1" in text
     assert "截断丢弃: rule-b:2" in text
     assert "hit_single_takes_first" in text
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_search_probe_evaluations():
+    """新形态 relay_dispatch 搜推明细:整体搜索词 + candidate_evaluations
+    打分评估(score/score_reason/选中决策)按 bot_id 合并候选逐项呈现。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.DISPATCH,
+        action_result="hit_single", attempt=0, gmt_create=1000, gmt_modified=1000,
+        search_probe={
+            "decision_mode": "relay_dispatch",
+            "query": "寻找能够产出存储行业尽调报告的专业研究 Bot",
+            "origin_node_id": "node-a",
+            "tokens": ["寻找", "存储", "行业", "尽调", "报告"],
+            "keywords": [
+                {"keyword": "存储", "item_count": 1,
+                 "bot_ids": ["bot1:146836"], "failed": False},
+                {"keyword": "行业", "item_count": 1,
+                 "bot_ids": ["bot1:146836"], "failed": False},
+            ],
+            "raw_item_count": 2,
+            "failed_keywords": [],
+            "candidates": [
+                {"bot_uuid": "bot1:146836", "bot_name": "存储行业调研Bot",
+                 "bot_desc": "存储行业调研Bot", "bot_type": "personal",
+                 "status": "ACTIVE"},
+            ],
+            "candidate_evaluations": [
+                {"bot_id": "bot1:146836", "score": 92,
+                 "score_reason": "Bot名称直接匹配存储行业调研领域",
+                 "selected": True, "decision": "selected_as_driver",
+                 "reject_reason": None},
+            ],
+            "selected_bot_ids": ["bot1:146836"],
+            "dropped_bot_ids": [],
+        },
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    text = r.text
+    assert "搜推明细 · relay_dispatch" in text
+    # 整体搜索词可见
+    assert "整体搜索词: 寻找能够产出存储行业尽调报告的专业研究 Bot" in text
+    # 每个关键词的命中 bot 列表
+    assert "存储: 命中 1: bot1:146836" in text
+    assert "行业: 命中 1: bot1:146836" in text
+    # 候选打分结果及原因(evaluations 的 score 覆盖 candidates 自身)
+    assert "bot1:146836 · 存储行业调研Bot (score=92)" in text
+    assert "最终选中 ✓ · selected_as_driver" in text
+    assert "打分原因: Bot名称直接匹配存储行业调研领域" in text
+    # 最终匹配结果
+    assert "最终匹配结果: bot1:146836" in text

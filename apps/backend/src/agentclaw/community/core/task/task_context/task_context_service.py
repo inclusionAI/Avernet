@@ -106,10 +106,12 @@ class TaskContextServiceProtocol(Protocol):
         *,
         do_analysis: bool = False,
         force_analysis: bool = False,
+        session_detail: bool = False,
     ) -> TaskTrajectory:
         """Read the trajectory for ``task_id``; optionally trigger bot analysis
         (503/504 propagate from the inner service unchanged; ``force_analysis``
-        强制重跑,跳过 timeline 版本幂等)."""
+        强制重跑,跳过 timeline 版本幂等;``session_detail=True`` 纯读时实拉
+        会话明细,默认 false 不携带——仅读路径生效)."""
         ...
 
     def emit_trajectory_event(
@@ -154,9 +156,11 @@ class TaskContextService(TaskContextServiceProtocol):
         *,
         do_analysis: bool = False,
         force_analysis: bool = False,
+        session_detail: bool = False,
     ) -> TaskTrajectory:
         return await self._ts.get_trajectory(
             task_id, do_analysis=do_analysis, force_analysis=force_analysis,
+            session_detail=session_detail,
         )
 
     def emit_trajectory_event(

@@ -8,8 +8,8 @@
 所有动态文本经 ``html.escape``(防 XSS:``action_input``/``error_msg`` 等来自外部 bot/请求)。
 ``analysis`` 是 ``TrajectoryAnalysis`` JSON 字符串(执行者多源,DTO 层保持 string 透出),这里
 解析出 boost_reason / failure_reason / analysis_output 等做人类可读呈现,解析失败则降级显示原文。
-``ext_info`` 不整体进入 DTO(REQ-1),页面仅展示定向投影的 ``holder_id``，不展示候选/JOIN
-丢因等其他附加素材。
+``ext_info`` 不整体进入 DTO(REQ-1),页面仅展示定向投影的 ``holder_id`` 与 ``search_probe``
+(搜推明细:整体搜索词/关键词命中/候选打分评估/最终匹配),不展示其他附加素材。
 """
 from __future__ import annotations
 
@@ -204,14 +204,19 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(lines)}</pre>")
         parts.append("</details>")
 
-    # 搜推采样(读时定向投影;dispatch / relay search 事件携带,可折叠)——三问
-    # 结构化呈现:关键词命中 / 返回候选 / 最终选择。
+    # 搜推明细(读时定向投影;dispatch / relay search 事件携带,可折叠)——结构化呈现:
+    # 整体搜索词 / 分词关键词 / 每个关键词的命中 bot 列表 / 候选打分评估
+    # (score + score_reason + 选中决策/reject_reason) / 最终匹配结果。
     probe = getattr(ev, "search_probe", None)
     if probe:
         lines: list[str] = []
+        if probe.get("query"):
+            lines.append("整体搜索词: " + str(probe["query"]))
         tokens = probe.get("tokens") or []
         if tokens:
-            lines.append("关键词: " + ", ".join(str(t) for t in tokens))
+            lines.append("分词关键词: " + ", ".join(str(t) for t in tokens))
+        if probe.get("keywords"):
+            lines.append("关键词命中:")
         for k in probe.get("keywords") or []:
             if not isinstance(k, dict):
                 continue
@@ -225,23 +230,42 @@ def _render_event(ev: "object") -> str:
         failed = probe.get("failed_keywords") or []
         if failed:
             lines.append("失败关键词: " + ", ".join(str(f) for f in failed))
+        # 候选与打分评估按 bot_id 合并呈现:新形态分数在 candidate_evaluations
+        # (score/score_reason/selected/decision/reject_reason),旧形态分数
+        # 直接挂在 candidates 上(recommend_score/score)——两形态都兜住。
+        evals_by_bot: dict[str, dict] = {}
+        for e in probe.get("candidate_evaluations") or []:
+            if isinstance(e, dict) and e.get("bot_id") is not None:
+                evals_by_bot[str(e["bot_id"])] = e
         candidates = probe.get("candidates") or []
-        lines.append(f"返回结果({len(candidates)} 个候选):")
+        lines.append(f"候选者打分({len(candidates)} 个):")
         for c in candidates:
             if not isinstance(c, dict):
                 continue
             bid = c.get("bot_id") or c.get("bot_uuid")
             name = c.get("bot_name")
-            score = c.get("recommend_score", c.get("score"))
+            item = evals_by_bot.get(str(bid)) if bid is not None else None
+            score = (item or {}).get(
+                "score", c.get("recommend_score", c.get("score"))
+            )
             entry = f"  - {bid}"
             if name:
                 entry += f" · {name}"
             if score is not None:
                 entry += f" (score={score})"
             lines.append(entry)
+            if item:
+                if item.get("selected"):
+                    lines.append(f"      最终选中 ✓ · {item.get('decision') or 'selected'}")
+                else:
+                    lines.append(f"      未选中 ✗ · {item.get('decision') or 'not-selected'}")
+                    if item.get("reject_reason"):
+                        lines.append(f"      拒因: {item['reject_reason']}")
+                if item.get("score_reason"):
+                    lines.append(f"      打分原因: {item['score_reason']}")
         selected = probe.get("selected_bot_ids") or []
         if selected:
-            lines.append("最终选择: " + ", ".join(str(s) for s in selected))
+            lines.append("最终匹配结果: " + ", ".join(str(s) for s in selected))
         dropped = probe.get("dropped_bot_ids") or []
         if dropped:
             lines.append("截断丢弃: " + ", ".join(str(d) for d in dropped))
@@ -253,7 +277,7 @@ def _render_event(ev: "object") -> str:
         if excerpt:
             lines.append("skill 决策回包:")
             lines.append(str(excerpt))
-        label = "搜推采样" + (
+        label = "搜推明细" + (
             f" · {probe['decision_mode']}" if probe.get("decision_mode") else ""
         )
         parts.append('<details class="ev-input">')

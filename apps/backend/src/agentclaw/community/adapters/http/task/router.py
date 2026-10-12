@@ -189,6 +189,11 @@ async def get_task_trajectory_internal(
         Query(description="强制重跑分析,默认 false:忽略 timeline 版本号幂等判断,"
                           "即使版本未变也重新调 bot 并回填(do_analysis 的前门旁路)"),
     ] = False,
+    session_detail: Annotated[
+        bool,
+        Query(description="是否查询会话明细并挂到各子任务末位事件(默认 false:返回不携带"
+                          " session_msgs,零外部读);仅读路径生效,do_analysis=true 时不起作用"),
+    ] = False,
     display: Annotated[
         str | None,
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
@@ -198,13 +203,16 @@ async def get_task_trajectory_internal(
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 
     do_analysis=false(默认,纯读):返回 TaskTrajectory,analysis 取已落库值或 None,不写库不调 bot;
-    do_analysis=true:调 DI 注入 bot 做总体分析→ 覆盖回填 analysis+gmt_modified→ 返回同形态 TaskTrajectory。
+    session_detail=false(默认)纯读不携带 session_msgs;session_detail=true 才实拉会话明细挂末位事件。
+    do_analysis=true:调 DI 注入 bot 做总体分析→ 覆盖回填 analysis+gmt_modified→ 返回同形态 TaskTrajectory
+    (该路径不受 session_detail 影响,会话明细照其内部逻辑物化/研判)。
     bot 未配置→503;bot 失败/超时→504 且不回填(决策 #10/#14)。原 /analysis 端点已并入此入口(决策 #10)。
 
     display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
     序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。"""
     trajectory = await service.get_trajectory(
-        task_id, do_analysis=do_analysis, force_analysis=force_analysis
+        task_id, do_analysis=do_analysis, force_analysis=force_analysis,
+        session_detail=session_detail,
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
