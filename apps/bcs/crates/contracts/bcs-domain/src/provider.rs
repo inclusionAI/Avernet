@@ -56,6 +56,9 @@ impl std::str::FromStr for ProviderBotConnectionMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRecord {
     pub provider_id: String,
+    /// Optional environment-unique discovery key; legacy records have no slug.
+    #[serde(default)]
+    pub slug: Option<String>,
     pub name: String,
     /// JSON string stored in MEDIUMTEXT. Core service owns schema validation.
     pub config: String,

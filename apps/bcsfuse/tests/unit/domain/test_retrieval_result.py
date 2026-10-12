@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.retrieval_result import (
-    RetrievalResult,
-    RetrievalExplanation,
-)
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
+from src.domain.models.retrieval_result import RetrievalExplanation
 from src.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
 from src.domain.models.worker import Worker, WorkerType, WorkerIdentity, Capability, CapabilityLevel, WorkerState, Availability, TrustLevel
 from src.domain.models.task_spec import TaskSpec, RiskLevel

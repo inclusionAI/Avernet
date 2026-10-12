@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, ListTodo, MessagesSquare, Users } from 'lucide-react';
+import { Bot, Compass, FlaskConical, ListTodo, MessagesSquare, Users } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 侧栏导航分组成员：协作 / Bot 双固定分组 + legacy 过渡分组（无继任位存量项，待移除）。 */
@@ -61,6 +61,14 @@ export const navigationItems: NavigationItem[] = [
     icon: Compass,
     section: 'collab',
     description: '发现公开 Bot、协作群与任务',
+  },
+  {
+    id: 'lab',
+    label: '实验室',
+    path: '/lab',
+    icon: FlaskConical,
+    section: 'collab',
+    description: '实验性能力空间，当前承载社区',
   },
   {
     id: 'bot-workshop',

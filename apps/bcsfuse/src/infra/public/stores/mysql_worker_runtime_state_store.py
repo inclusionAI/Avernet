@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -151,7 +150,6 @@ class MySQLWorkerRuntimeStateStore:
             updated_by: Who updated this state
         """
         state_value = self._resolve_state_value(runtime_state)
-        now = datetime.utcnow()
 
         conn = self._pool.get_connection()
         try:
@@ -159,19 +157,17 @@ class MySQLWorkerRuntimeStateStore:
             try:
                 cursor.execute("""
                     INSERT INTO bcsfuse_worker_runtime_states
-                        (worker_id, runtime_state, updated_by, gmt_create, gmt_modify)
-                    VALUES (%s, %s, %s, %s, %s)
+                        (worker_id, runtime_state, updated_by)
+                    VALUES (%s, %s, %s)
                     AS new_rts
                     ON DUPLICATE KEY UPDATE
                         runtime_state = new_rts.runtime_state,
                         updated_by = new_rts.updated_by,
-                        gmt_modify = new_rts.gmt_modify
+                        gmt_modify = CURRENT_TIMESTAMP
                 """, (
                     worker_id,
                     state_value,
                     updated_by,
-                    now,
-                    now,
                 ))
                 conn.commit()
 

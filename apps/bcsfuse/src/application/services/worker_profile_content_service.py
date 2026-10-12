@@ -85,6 +85,12 @@ class WorkerProfileContentService:
             raise RuntimeError("profile vector cleanup provider is unavailable")
         return self._vector_indexer.delete_by_profile(f"{worker_id}:{profile_id}")
 
+    def delete_worker_vectors(self, worker_id: str) -> int:
+        """Clean derived vectors not represented by a profile content row too."""
+        if self._vector_indexer is None:
+            raise RuntimeError("profile vector cleanup provider is unavailable")
+        return self._vector_indexer.delete_by_worker(worker_id)
+
     def register_or_update_profile(
         self,
         worker_id: str,

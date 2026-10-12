@@ -30,9 +30,11 @@ class TestVerifyExecutorExecute:
             bcn_chat_base_url="https://bcn.example.com",
             bcn_chat_token="test-token",
             timeout=10,
+            probe_delay_seconds=0,
         )
 
         mock_resp = AsyncMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda: None
         mock_resp.json = lambda: {"response": {"content": "I can code"}}
 
@@ -53,9 +55,11 @@ class TestVerifyExecutorExecute:
             bcn_chat_base_url="https://bcn.example.com",
             bcn_chat_token="test-token",
             timeout=10,
+            probe_delay_seconds=0,
         )
 
         mock_resp = AsyncMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda: None
         mock_resp.json = lambda: {"response": {"content": ""}}
 
@@ -76,6 +80,7 @@ class TestVerifyExecutorExecute:
             bcn_chat_base_url="https://bcn.example.com",
             bcn_chat_token="test-token",
             timeout=10,
+            probe_delay_seconds=0,
         )
 
         mock_client = AsyncMock()
@@ -140,9 +145,11 @@ class TestVerifyExecutorAuthError:
             bcn_chat_base_url="https://bcn.example.com",
             bcn_chat_token="bad-token",
             timeout=10,
+            probe_delay_seconds=0,
         )
 
         mock_resp = AsyncMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda: None
         mock_resp.json = lambda: {
             "buserviceErrorCode": "USER_NOT_LOGIN",
@@ -167,9 +174,11 @@ class TestVerifyExecutorAuthError:
             bcn_chat_base_url="https://bcn.example.com",
             bcn_chat_token="test-token",
             timeout=10,
+            probe_delay_seconds=0,
         )
 
         mock_resp = AsyncMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = lambda: None
         mock_resp.json = lambda: {"data": {"content": "data field response"}}
 
@@ -191,6 +200,7 @@ class TestVerifyExecutorAuthError:
             bcn_chat_base_url="",
             bcn_chat_token="",
             timeout=10,
+            probe_delay_seconds=0,
         )
         results = await executor.execute("w1", _make_probes())
         assert len(results) == 3

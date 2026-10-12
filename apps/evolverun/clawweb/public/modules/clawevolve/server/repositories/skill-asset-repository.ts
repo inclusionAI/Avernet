@@ -156,6 +156,16 @@ export class SkillAssetRepository {
     ))[0] ?? null;
   }
 
+  async updateSpace(assetId: string, ownerUserId: string, space: {
+    spaceId: string | null; spaceType: "PERSONAL" | "TEAM" | null; spaceName: string | null;
+  }): Promise<void> {
+    await this.db.exec(
+      `UPDATE ce_skill_assets SET space_id = ?, space_type = ?, space_name = ?, gmt_modified = ?
+       WHERE asset_id = ? AND owner_user_id = ?`,
+      [space.spaceId, space.spaceType, space.spaceName, this.db.dialect.now(), assetId, ownerUserId],
+    );
+  }
+
   async findByExternalSkill(ownerUserId: string, botId: string, externalSkillId: string): Promise<SkillAssetRow | null> {
     return (await this.db.query<SkillAssetRow>(
       `${skillAssetProjection}

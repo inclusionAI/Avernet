@@ -22,9 +22,13 @@ class TestWorkerAuditAction:
         assert WorkerAuditAction.RUNTIME_STATE_CHANGED.value == "runtime_state_changed"
         assert WorkerAuditAction.DELETED.value == "deleted"
 
-    def test_audit_action_count(self):
-        """测试审计动作数量"""
-        assert len(WorkerAuditAction) == 6
+    @pytest.mark.parametrize("action", ["availability_changed", "config_changed"])
+    def test_configuration_actions_round_trip(self, action):
+        """可见性和配置变化审计可以持久化后恢复。"""
+        log = WorkerAuditLog(worker_id="worker:owner", action=action)
+        restored = WorkerAuditLog.model_validate_json(log.model_dump_json())
+        assert restored.action.value == action
+        assert restored.worker_id == "worker:owner"
 
 
 class TestWorkerAuditLog:

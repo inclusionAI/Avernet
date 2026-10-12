@@ -669,7 +669,21 @@ async def update_outbound_operation_rule(
     outbound_operation_rule: OutBoundOperationRule,
     mode: Annotated[
         OutBoundOperationRuleUpdatedMode | None,
-        Query(description="更新模式：replace(默认) 或 append。不传时默认 replace"),
+        Query(
+            description=(
+                "更新模式：replace(默认) 或 append。"
+                "TeClaw 下 append 必须携带 session_key"
+            )
+        ),
+    ] = None,
+    session_key: Annotated[
+        str | None,
+        Query(
+            description=(
+                "会话 key；TeClaw 下 mode=append 时必填，"
+                "用于 session 维度 append，默认不传"
+            )
+        ),
     ] = None,
     facade: PaasServiceFacade = Depends(
         Provide[ApplicationContainer.services.paas_facade]
@@ -701,6 +715,7 @@ async def update_outbound_operation_rule(
             paas_device_id=paas_device_id,
             outbound_operation_rule=outbound_operation_rule,
             mode=mode,
+            session_key=session_key,
         )
         logger.info("Outbound operation rule updated successfully: %s", paas_device_id)
         return ApiResponse(

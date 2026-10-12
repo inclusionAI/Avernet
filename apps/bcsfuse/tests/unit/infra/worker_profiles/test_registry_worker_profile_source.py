@@ -47,7 +47,7 @@ def create_test_worker(
             for cap in (capabilities or ["general"])
         ],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.GUARDED,
             runtime_state=runtime_state,
         ),
@@ -93,6 +93,17 @@ class MockRuntimeStateStore:
 
 class TestRegistryWorkerProfileSource:
     """Tests for RegistryWorkerProfileSource"""
+
+    def test_scan_preserves_compound_worker_id_and_active_profile_id(self):
+        worker = create_test_worker("bot:12345", "Bot")
+        worker.active_profile_key = "bot:12345:custom"
+        source = RegistryWorkerProfileSource(MockRegistryStore([worker]))
+
+        profile = source.scan().profiles[0]
+
+        assert profile.staff_id == "bot:12345"
+        assert profile.profile_id == "custom"
+        assert profile.profile_key == "bot:12345:custom"
 
     def test_scan_empty_registry(self):
         """测试空 Registry 返回空结果"""
@@ -247,7 +258,7 @@ class TestRegistryWorkerProfileSource:
             responsibilities=["general"],
             capabilities=[Capability(name="general", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.GUARDED,
                 runtime_state=WorkerRuntimeState.ONLINE,
             ),
@@ -260,7 +271,7 @@ class TestRegistryWorkerProfileSource:
             responsibilities=["general"],
             capabilities=[Capability(name="general", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.GUARDED,
                 runtime_state=WorkerRuntimeState.ONLINE,
             ),

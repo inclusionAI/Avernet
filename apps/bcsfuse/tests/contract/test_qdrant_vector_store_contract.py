@@ -28,14 +28,25 @@ class TestQdrantVectorStoreContract:
 
     def test_module_imports_without_server(self):
         """Test that the module can be imported without Qdrant server connection."""
-        import importlib
-        import src.infra.public.vectorstores.qdrant_local_vector_store as store_module
+        import subprocess
+        from pathlib import Path
 
-        # Reload to ensure no connection happens on import
-        importlib.reload(store_module)
-
-        # No exception should be raised
-        assert True
+        # Import in a fresh process: reloading here replaces the class identity
+        # retained by other collected tests and breaks their isinstance checks.
+        result = subprocess.run(
+            [sys.executable, "-c", (
+                "from unittest.mock import patch; "
+                "guard = patch('qdrant_client.QdrantClient', "
+                "side_effect=AssertionError('client created during import')); "
+                "guard.start(); "
+                "import src.infra.public.vectorstores.qdrant_local_vector_store"
+            )],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
 
     def test_store_constructs_without_connecting(self):
         """Test that the store can be constructed without Qdrant server connection."""

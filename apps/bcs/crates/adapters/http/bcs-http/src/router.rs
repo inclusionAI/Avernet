@@ -64,6 +64,7 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::bots::get_bot).delete(routes::bots::leave_bot),
         )
         .route("/providers", post(routes::providers::register_provider))
+        .route("/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route(
             "/providers/agentpass/resolve",
             post(routes::providers::resolve_agentpass_bot),

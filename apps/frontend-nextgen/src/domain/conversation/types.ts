@@ -1,21 +1,28 @@
 // Conversation 领域类型(设计依据:docs/specs/2026-09-24-workspace-conversation-navigation-refactor.md §7)。
-// 仅为纯类型模块:不包含运行时逻辑,依赖方向为 Service → 本模块,禁止反向。
+// 领域类型与纯 section 判定；依赖方向为 Service → 本模块,禁止反向运行时依赖。
 // View 类型来自现有 Bot 单聊 Service 领域视图(仅 type 依赖,不引入运行时耦合)。
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { ChatMessage } from '@tc-chat/core';
 
 export type ConversationOrigin = 'mine' | 'others';
 export type ConversationSessionScope = 'all' | 'favorite';
-export type ConversationBotSection = 'managed' | 'friend';
+export type ConversationBotSection = 'managed' | 'team' | 'friend';
+
+/** 团队 Bot 与管理 Bot 共用来源/范围及只读他人会话能力；friend 不参与。 */
+export function isManagedConversationSection(
+  section: ConversationBotSection | null | undefined,
+): section is 'managed' | 'team' {
+  return section === 'managed' || section === 'team';
+}
 
 export interface ConversationRouteState {
-  /** 缺省表示尚未选择 Bot;选中后由 section + botId 区分管理 Bot 和好友 Bot。 */
+  /** 缺省表示尚未选择 Bot;选中后由 section + botId 区分管理 / 团队 / 好友 Bot。 */
   botId?: string;
   /** 缺省表示 section 尚未解析,由 Hook 的目录匹配推导;规范 URL 必须写出。 */
   section?: ConversationBotSection;
-  /** 只对管理 Bot 生效;缺省按 mine 处理;好友 Bot URL 不携带该字段。 */
+  /** 只对管理 / 团队 Bot 生效;缺省按 mine 处理;好友 Bot URL 不携带该字段。 */
   origin?: ConversationOrigin;
-  /** 只对管理 Bot 的 origin=mine 生效;缺省按 all 处理;others 强制按 all 处理。 */
+  /** 只对管理 / 团队 Bot 的 origin=mine 生效;缺省按 all 处理;others 强制按 all 处理。 */
   scope?: ConversationSessionScope;
   /** 纯用户 ID(归一化移除 human_ 前缀);仅 origin=others 使用。 */
   friendUserId?: string;

@@ -34,6 +34,7 @@ from agentclaw.community.core.mcp.config_flow import (
 from agentclaw.community.core.mcp.scoped_config_contract import (
     HeaderGroup,
     ScopedMCPConfig,
+    URLRule,
 )
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
@@ -238,6 +239,10 @@ def _scoped_config_data(config: ScopedMCPConfig) -> MCPScopedConfigData:
             {"key": group.key, "value": group.value, "bots": list(group.bots)}
             for group in config.params
         ],
+        url_rules=[
+            {"url": rule.url, "bots": list(rule.bots)}
+            for rule in config.url_rules
+        ],
         sync_results=list(config.sync_results) if config.sync_results is not None else None,
         sync_summary=config.sync_summary,
     )
@@ -268,6 +273,10 @@ async def update_mcp_config_groups(
             params=tuple(
                 HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
                 for group in request.params
+            ),
+            url_rules=(
+                tuple(URLRule(url=rule.url, bots=tuple(rule.bots)) for rule in request.url_rules)
+                if "url_rules" in request.model_fields_set else None
             ),
         )
     except McpServerNotFoundError as exc:

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from src.domain.services.retriever import Retriever
 from src.domain.models.retrieval_input import RetrievalInput
-from src.domain.models.retrieval_result import RetrievalResult
+from src.domain.models.candidate_retrieval_result import CandidateRetrievalResult as RetrievalResult
 
 
 class RetrievalService:

@@ -183,7 +183,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
                               }
                             }}
                           >
-                            Bot 工坊
+                            Bot 管理
                           </a>
                           <span> 使用</span>
                         </TooltipContent>

@@ -7,12 +7,16 @@ Fragment Reranker Service
 from __future__ import annotations
 
 import logging
+import math
+from time import perf_counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
 from src.domain.models.profile_fragment import FragmentMatch
+from src.domain.services.retrieval_logging import log_stage, log_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,7 @@ Original Score: {score:.3f}
             logger.warning("[FragmentReranker] Reranker not available, degrading")
             return self._handle_failure(request)
 
+        started = perf_counter()
         try:
             # 准备 reranker 输入
             reranker_candidates = self._prepare_candidates(request.candidates)
@@ -153,15 +158,20 @@ Original Score: {score:.3f}
 
             # 如果超过限制，使用分批 rerank
             if total_chars + query_len > self.MAX_CONTEXT_CHARS or num_candidates > self.MAX_BATCH_SIZE:
-                logger.info(
+                logger.debug(
                     "[FragmentReranker] Using batch rerank: chars=%d (limit=%d), candidates=%d (limit=%d)",
                     total_chars + query_len, self.MAX_CONTEXT_CHARS,
                     num_candidates, self.MAX_BATCH_SIZE
                 )
-                return self._batch_rerank(request.query, reranker_candidates, request.candidates, request.top_k)
+                results = self._batch_rerank(request.query, reranker_candidates, request.candidates, request.top_k)
+            else:
+                results = self._single_rerank(request.query, reranker_candidates, request.candidates, request.top_k)
 
-            # 单批次 rerank
-            return self._single_rerank(request.query, reranker_candidates, request.candidates, request.top_k)
+            log_stage(logger, "reranker", input_count=num_candidates, output_count=len(results),
+                      duration_ms=round((perf_counter() - started) * 1000, 2),
+                      degraded_count=sum(bool(r.rerank_metadata.get("degraded")) for r in results))
+            log_candidates(logger, "reranker_output", ((r.profile_key, r.final_score) for r in results))
+            return results
 
         except Exception as e:
             logger.error("[FragmentReranker] failed: %s", e)
@@ -188,6 +198,10 @@ Original Score: {score:.3f}
         )
 
         results = self._convert_results(reranker_results, original_candidates)
+        if len(results) != min(top_k, len(original_candidates)) or len({r.profile_key for r in results}) != len(results):
+            raise ValueError("incomplete reranker response")
+        if any(isinstance(r.final_score, bool) or not math.isfinite(r.final_score) for r in results):
+            raise ValueError("non-finite reranker score")
 
         logger.debug(
             "[FragmentReranker] single batch done | input=%d, output=%d",
@@ -262,7 +276,7 @@ Original Score: {score:.3f}
                         score = rr.score
                     elif isinstance(rr, dict):
                         candidate_id = rr.get("candidate_id") or rr.get("id")
-                        score = rr.get("score", 0.0)
+                        score = rr["score"]
                     else:
                         continue
 
@@ -283,6 +297,10 @@ Original Score: {score:.3f}
                         "failed": True,
                     })
 
+            if (len(batch_results) != len(batch)
+                    or {r["profile_key"] for r in batch_results} != {c["id"] for c in batch}
+                    or any(isinstance(r["score"], bool) or not math.isfinite(r["score"]) for r in batch_results)):
+                raise ValueError("incomplete or invalid reranker batch")
             return batch_idx, batch_results
 
         # 使用 ThreadPoolExecutor 并行执行所有批次
@@ -292,7 +310,7 @@ Original Score: {score:.3f}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交所有任务
             future_to_idx = {
-                executor.submit(_rerank_one_batch, (i, batch)): i
+                executor.submit(copy_context().run, _rerank_one_batch, (i, batch)): i
                 for i, batch in enumerate(batches)
             }
 
@@ -306,7 +324,9 @@ Original Score: {score:.3f}
                 )
 
         # 按分数排序，取 top_k
-        all_results.sort(key=lambda x: x["score"], reverse=True)
+        if any(result.get("failed") for result in all_results):
+            raise RuntimeError("reranker batch failed; discard all partial scores")
+        all_results.sort(key=lambda x: (-x["score"], x["profile_key"]))
         top_results = all_results[:top_k]
 
         # 构建最终 RerankResult 列表
@@ -319,8 +339,8 @@ Original Score: {score:.3f}
             original = candidate_map.get(profile_key)
 
             if original:
-                # 如果 rerank 返回 0 或失败，使用原始聚合分数
-                final_score = original.aggregated_score if score == 0.0 or result.get("failed") else score
+                # A failed batch has already triggered whole-request fallback.
+                final_score = score
 
                 final_results.append(RerankResult(
                     profile_key=profile_key,
@@ -331,7 +351,7 @@ Original Score: {score:.3f}
                         "reranker_model": self._reranker_model or "unknown",
                         "fragment_count": len(original.fragments),
                         "batch": result.get("batch", 0),
-                        "degraded": result.get("failed", False) or score == 0.0,
+                        "degraded": False,
                     },
                 ))
 
@@ -353,26 +373,6 @@ Original Score: {score:.3f}
         """
         reranker_candidates = []
 
-        # DIAGNOSTIC: Log first candidate details
-        if candidates:
-            first_cand = candidates[0]
-            logger.info(
-                "[RERANKER-CANDIDATE] first_candidate | profile_key=%s | fragments_count=%d | "
-                "metadata_keys=%s | aggregated_score=%.4f",
-                first_cand.profile_key,
-                len(first_cand.fragments),
-                list(first_cand.metadata.keys()) if first_cand.metadata else [],
-                first_cand.aggregated_score
-            )
-            if first_cand.fragments:
-                logger.info(
-                    "[RERANKER-CANDIDATE] first_fragment | fragment_type=%s | has_content=%s | "
-                    "content_preview=%s",
-                    first_cand.fragments[0].fragment_type,
-                    bool(first_cand.fragments[0].content),
-                    first_cand.fragments[0].content[:100] if first_cand.fragments[0].content else "EMPTY"
-                )
-
         for cand in candidates:
             # 提取 fragment 类型
             fragment_types = [f.fragment_type for f in cand.fragments]
@@ -383,15 +383,6 @@ Original Score: {score:.3f}
 
             # 构造描述文本（使用完整内容）
             description = self._extract_description(cand)
-
-            # DIAGNOSTIC: Log description extraction
-            if len(reranker_candidates) == 0:
-                logger.info(
-                    "[RERANKER-DESCRIPTION] profile_key=%s | description_length=%d | description_preview=%s",
-                    cand.profile_key,
-                    len(description),
-                    description[:150] if len(description) > 150 else description
-                )
 
             # 构造完整文本（不再截断 description，由分批逻辑控制）
             text = self.PROFILE_SUMMARY_TEMPLATE.format(
@@ -407,15 +398,10 @@ Original Score: {score:.3f}
                 "text": text,
             })
 
-            # DIAGNOSTIC: Log first 2 candidates text
-            if len(reranker_candidates) <= 2:
-                logger.info(
-                    "[RERANKER-INPUT] candidate[%d] | profile_key=%s | text_length=%d | text_preview=%s",
-                    len(reranker_candidates) - 1,
-                    cand.profile_key,
-                    len(text),
-                    text[:200] if len(text) > 200 else text
-                )
+            logger.debug(
+                "[RERANKER-INPUT] profile_key=%r text_length=%d fragment_types=%r",
+                cand.profile_key, len(text), fragment_types,
+            )
 
         return reranker_candidates
 
@@ -463,16 +449,13 @@ Original Score: {score:.3f}
         # 构建原始 candidate 查找表
         candidate_map = {c.profile_key: c for c in original_candidates}
 
-        # 检测是否为降级结果（所有分数为0）
+        # Zero is a valid model score, not an implicit failure signal.
         all_scores_zero = all(
             (getattr(rr, 'score', 0.0) if hasattr(rr, 'score') else rr.get('score', 0.0)) == 0.0
             for rr in reranker_results
         )
-        if all_scores_zero and reranker_results:
-            logger.warning("[FragmentReranker] Detected all-zero scores, using original aggregated scores")
-
         # DIAGNOSTIC: Log incoming reranker results
-        logger.info(
+        logger.debug(
             "[RERANKER-CONVERT] Incoming reranker_results count=%d | all_scores_zero=%s",
             len(reranker_results),
             all_scores_zero
@@ -483,10 +466,10 @@ Original Score: {score:.3f}
                 score = rr.score
             elif isinstance(rr, dict):
                 cid = rr.get("candidate_id") or rr.get("id")
-                score = rr.get("score", 0.0)
+                score = rr["score"]
             else:
                 continue
-            logger.info(
+            logger.debug(
                 "[RERANKER-CONVERT] reranker_result[%d] | candidate_id=%s | reranker_score=%.4f",
                 i, cid, score
             )
@@ -500,19 +483,19 @@ Original Score: {score:.3f}
                 score = rr.score
             elif isinstance(rr, dict):
                 candidate_id = rr.get("candidate_id") or rr.get("id")
-                score = rr.get("score", 0.0)
+                score = rr["score"]
             else:
                 logger.warning(f"Unknown reranker result format: {type(rr)}")
                 continue
 
             original = candidate_map.get(candidate_id)
             if original:
-                # 如果 Reranker 返回 0，使用原始聚合分数
-                final_score = original.aggregated_score if score == 0.0 else score
+                # Preserve the model score, including zero.
+                final_score = score
 
                 # DIAGNOSTIC: Log conversion for top 3
                 if rank <= 3:
-                    logger.info(
+                    logger.debug(
                         "[RERANKER-CONVERT] result[%d] | profile_key=%s | reranker_score=%.4f | "
                         "original_score=%.4f | final_score=%.4f",
                         rank, candidate_id, score, original.aggregated_score, final_score
@@ -526,7 +509,7 @@ Original Score: {score:.3f}
                     rerank_metadata={
                         "reranker_model": self._reranker_model or "unknown",
                         "fragment_count": len(original.fragments),
-                        "degraded": score == 0.0,
+                        "degraded": False,
                     },
                 ))
 

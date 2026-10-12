@@ -19,7 +19,7 @@ export type {
 } from '@/domain/conversation';
 
 export interface ConversationState {
-  /** UI 同步状态:允许多个 Bot 同时展开。 */
+  /** UI 同步状态:管理/团队/好友 Bot 共用，同一时刻至多展开一个 Bot。 */
   expandedBotIds: Record<string, true>;
   /** 按管理 Bot 记忆的发起归属;页面会话内记忆,不持久化。 */
   originByManagedBotId: Record<string, ConversationOrigin>;

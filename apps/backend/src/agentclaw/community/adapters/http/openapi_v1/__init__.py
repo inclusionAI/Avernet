@@ -178,6 +178,7 @@ from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
+from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .bots.engine_config import router as engine_config_router
 from .bots.cli_tools import router as cli_tools_router
@@ -342,6 +343,7 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    collaborating_bots_router,
     # The user-level delegation, `/openapi/v1/bots/authorized-apps`: a
     # top-level literal like `authorized`, and depends on this order for the
     # same reason — `/openapi/v1/bots/{bot_id}` would otherwise claim it.

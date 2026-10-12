@@ -24,6 +24,8 @@ export interface BotTableProps {
   onEdit?: (bot: BotDomain) => void;
   onConversation?: (bot: BotDomain) => void;
   canOpenConversation?: (bot: BotDomain) => boolean;
+  /** 无详情权限时，整行及查看按钮仅打开基础信息，不进入编辑页。 */
+  canEnterDetail?: (bot: BotDomain) => boolean;
   onOpenLogs?: (bot: BotDomain) => void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
@@ -51,6 +53,7 @@ const BotTable: React.FC<BotTableProps> = ({
   onEdit,
   onConversation,
   canOpenConversation,
+  canEnterDetail,
   onOpenLogs,
   onHealthCheck,
   onChangeSpace,
@@ -211,13 +214,17 @@ const BotTable: React.FC<BotTableProps> = ({
       }
       // Coding Bot：点击整行与「去使用」一致，直接进入对话（跳转 coding-chat）；
       // 其它引擎仍进详情页。对话不可用时回退详情，避免整行点不开。
+      if (canEnterDetail && !canEnterDetail(bot)) {
+        onView(bot);
+        return;
+      }
       if (bot.runtime.isAgentCodingBot && onConversation && (canOpenConversation?.(bot) ?? true)) {
         onConversation(bot);
         return;
       }
       onView(bot);
     },
-    [onRowClick, onView, onConversation, canOpenConversation],
+    [onRowClick, onView, onConversation, canOpenConversation, canEnterDetail],
   );
 
   return (
@@ -226,7 +233,7 @@ const BotTable: React.FC<BotTableProps> = ({
       rows={bots}
       getRowKey={(bot) => bot.cardId ?? bot.entityKey}
       onRowClick={handleRowClick}
-      isRowClickable={(bot) => getBotEntryAvailability(bot).enabled}
+      isRowClickable={(bot) => (canEnterDetail && !canEnterDetail(bot)) || getBotEntryAvailability(bot).enabled}
       renderExpandedRow={(bot) =>
         bot.deployment === 'local' &&
         ['deploying', 'failed'].includes(bot.lifecycle) &&

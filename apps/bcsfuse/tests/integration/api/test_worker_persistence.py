@@ -91,7 +91,7 @@ class TestWorkerPersistence:
             "identity": {"name": "Persistent Bot", "handle": "@persistent-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         # 关闭连接
@@ -138,7 +138,7 @@ class TestWorkerPersistence:
             "identity": {"name": "Runtime Persist Bot", "handle": "@runtime-persist"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         # 设置为在线
@@ -180,7 +180,7 @@ class TestWorkerPersistence:
             "identity": {"name": "Audit Persist Bot", "handle": "@audit-persist"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         # 关闭连接
@@ -217,7 +217,7 @@ class TestWorkerPersistence:
             "responsibilities": ["persistence"],
             "domains": ["testing"],
             "capabilities": [{"name": "persistence", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         # 验证返回的 Worker
@@ -270,7 +270,7 @@ class TestOnlineOfflinePersistence:
             "identity": {"name": "Switch Bot", "handle": "@switch-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         # 设为在线

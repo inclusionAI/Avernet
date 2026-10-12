@@ -2,6 +2,13 @@
 
 ## Provides
 
+- Shared V1 normal-Group responses include `driver_bot_name` on both `/groups`
+  and `/public-groups` summaries, and `driver_bot_owner` / `driver_bot_owner_name`
+  on detail responses (create/get/update). Missing values serialize as JSON
+  null, not omitted keys; old payloads without the additive fields remain
+  deserializable. Owner is the driver's Human actor ID, not the requesting
+  User. DM response shapes and Gateway/resource authorization are unchanged.
+
 - Internal-only `GET /api/v1/collaboration/bots/me`, outside Gateway Principal
   and invite-code middleware. It passes only a parsed Bearer token to
   `BotSelfService`, which requires Agent identity authentication. Success and error

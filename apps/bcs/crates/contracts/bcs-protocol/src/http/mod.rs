@@ -50,7 +50,7 @@ pub use provider::{
     BCN_TRANSPORT_HEADER, PatchProviderBotRequest, PatchProviderRequest, ProviderAbortResponse,
     ProviderAckResponse, ProviderAuthDto, ProviderAuthModeDto, ProviderBotConnectionModeDto,
     ProviderCoordinationConfigDto, ProviderCoordinationModeDto,
-    ProviderHistoryResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
+    ProviderHistoryResponse, ProviderBasicInfoResponse, ProviderInfoResponse, ProviderOrganizationManagementConfigDto,
     ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender,
     RegisterProviderBotRequest, RegisterProviderBotResponse, RegisterProviderRequest,
     RegisterProviderResponse,

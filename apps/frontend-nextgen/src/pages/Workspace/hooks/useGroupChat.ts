@@ -18,10 +18,9 @@ import {
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
-import { useGroupChatAbort } from './useGroupChatAbort';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
-import { useHumanOnlyChatRequests } from './useHumanOnlyChatRequests';
+import { useGroupChatRunControl } from './useGroupChatRunControl';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
 import { useWsReconnectNonce } from './useWsReconnectNonce';
@@ -64,10 +63,9 @@ export function useGroupChat(session: SessionView | null) {
     if (!sessionId || !groupId || !identityId) return null;
     return createGroupChatProvider({ sessionId, groupId, identityId, wsOrigin: resolveGroupWsOrigin() });
   }, [sessionId, groupId, identityId]);
-  const { abortBot, abortingBotIds, unsupportedAbortBotId, dismissAbortUnsupported } = useGroupChatAbort(
-    provider,
-    sessionId,
-  );
+  // 终止（abort）+ 投递队列（deliveries）组合为运行控制，控制本文件体积（门禁 250 行）。
+  const runControl = useGroupChatRunControl(provider, sessionId);
+
   const chat = useChat({
     // provider 为 null 时 Hook 仍需调用 useChat 以保持 Hook 数量稳定；这里以 never 兜底，
     // 实际当 provider 为 null 时 sendMessage 等命令不会触发（调用方不应渲染对话面板）。
@@ -85,7 +83,6 @@ export function useGroupChat(session: SessionView | null) {
     rawStatus: connectionStatus,
     messages: chat.messages,
   });
-  const { isSendBlocked, markRequest } = useHumanOnlyChatRequests(chat, session?.participants ?? []);
   const groupBootstrapProcessing = useGroupBootstrapProcessing({
     groupId,
     sessionId,
@@ -136,12 +133,13 @@ export function useGroupChat(session: SessionView | null) {
   const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
     const hasText = text.trim().length > 0;
     const hasAttachments = !!attachments && attachments.length > 0;
-    if (!sessionId || (!hasText && !hasAttachments) || isSendBlocked()) return;
+    // 输出中不阻塞发送：SDK 经 supportsConcurrentRequests 直发 provider.request，
+    // 消息进入后端投递队列依次消费（拥塞控制归属后端）。
+    if (!sessionId || (!hasText && !hasAttachments)) return;
     const trimmed = text.trim();
     // 本地回显附件：share_url 用于跨端/免鉴权分发，`<img>` 本地回显改走会话内容地址避免分享域名/CORS 加载失败。
     // 与桥路径 buildGroupChatBridgeRequest 共用 buildEchoAttachments/buildGroupUserMessageExtra（O3 回显一致）。
     const echoAttachments = buildEchoAttachments(sessionId, attachments);
-    markRequest(mentions);
     chat.onRequest({
       content: trimmed,
       sessionId,
@@ -232,10 +230,6 @@ export function useGroupChat(session: SessionView | null) {
     supportState,
     connectionStatus: displayStatus.status,
     send,
-    abortBot,
-    abortingBotIds,
-    unsupportedAbortBotId,
-    dismissAbortUnsupported,
     submitPanelMessage,
     submitTaskExecutionMessage,
     appendAssistantMessage,
@@ -246,5 +240,6 @@ export function useGroupChat(session: SessionView | null) {
     isLoadingMoreHistory,
     loadMoreHistory,
     groupBootstrapProcessing,
+    ...runControl,
   };
 }

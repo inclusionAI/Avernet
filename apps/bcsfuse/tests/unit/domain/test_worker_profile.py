@@ -210,7 +210,7 @@ class TestWorkerProfile:
             profile_type=ProfileType.DEFAULT,
             source_root="/data/bolt_data",
         )
-        assert profile.profile_key == "staff_260065:default"
+        assert profile.profile_key == "260065:default"
 
         # BOT 类型
         profile = WorkerProfile(
@@ -219,7 +219,7 @@ class TestWorkerProfile:
             profile_type=ProfileType.BOT,
             source_root="/data/bolt_data",
         )
-        assert profile.profile_key == "staff_260065:20260319_qjmzo9k6"
+        assert profile.profile_key == "260065:20260319_qjmzo9k6"
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""

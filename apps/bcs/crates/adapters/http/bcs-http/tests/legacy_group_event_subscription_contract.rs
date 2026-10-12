@@ -111,6 +111,8 @@ fn group_detail() -> GroupDetail {
             message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         driver_bot_uuid: "driver-bot".into(),
+        driver_bot_owner: None,
+        driver_bot_owner_name: None,
         collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
             delivery_policy: GroupDeliveryPolicy {
                 bot_final_delivery: BotFinalDelivery::SendToDriver,

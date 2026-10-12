@@ -131,12 +131,17 @@ class CreateWorkOrderEventRequest(BaseModel):
     )
     approver_user_ids: list[str] = Field(
         default_factory=list,
-        description="MANUAL approvers; AUTO uses no human approver rows.",
+        description=(
+            "MANUAL: required human approvers. Trusted internal AUTO: required nonempty "
+            "result recipients after trimming/deduplication; no human approval rights "
+            "or tasks are created. Public endpoints reject AUTO."
+        ),
     )
     recipient_user_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "Recipients for notice events and trusted internal AUTO approval results."
+            "Recipients for notice events. Ignored for trusted internal AUTO; "
+            "AUTO result recipients come only from approver_user_ids."
         ),
     )
     title: str = Field(
@@ -185,9 +190,17 @@ class WorkOrderQueryType(_DocumentedEnum):
     PROCESSED_BY_ME = "PROCESSED_BY_ME"
 
     __descriptions__ = {
-        "PENDING_FOR_ME": "Pending work orders awaiting the current user's review.",
-        "INITIATED_BY_ME": "Work orders submitted by the current user.",
-        "PROCESSED_BY_ME": "Completed approvals and informational notices already read by the current user.",
+        "PENDING_FOR_ME": (
+            "Pending approval tasks and unread notices without a terminal work order."
+        ),
+        "INITIATED_BY_ME": (
+            "ALL/APPROVAL returns unique initiated work orders without notification IDs; "
+            "NOTICE returns associated notices addressed to the current user."
+        ),
+        "PROCESSED_BY_ME": (
+            "Completed approvals, read notices, and notices for APPROVED/REJECTED/FAILED "
+            "work orders even when unread. Reading does not change work-order status."
+        ),
     }
 
 

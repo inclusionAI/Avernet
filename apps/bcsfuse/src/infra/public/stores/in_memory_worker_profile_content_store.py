@@ -43,7 +43,10 @@ class InMemoryWorkerProfileContentStore:
 
     def upsert_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:
         """Legacy dict write used by existing HTTP response adapters."""
-        self._store[(worker_id, profile_id)] = dict(content)
+        stored = dict(content)
+        if self._active_profiles.get(worker_id) == profile_id:
+            stored["is_active"] = True
+        self._store[(worker_id, profile_id)] = stored
         return True
 
     def create_profile(self, worker_id: str, profile_id: str, content: dict) -> bool:

@@ -26,6 +26,26 @@ export function getMessageTime(message: ChatMessage): string | undefined {
   return formatChatTime(message.createdAt);
 }
 
+/**
+ * 判定气泡是否按流式渲染（…动画/光标）。
+ *
+ * 多 Bot 并发输出时每条流式消息各自展示，streaming 态按消息自身 status 判定；
+ * isLastMessage && isRequesting 仅兜底「最后一条消息 status 尚未进入 streaming」
+ * 的时序间隙——占位消息由 useChat 以 status: 'pending' 创建，故兜底只认 pending。
+ * 终态（done/error/aborted/history）不得兜底：abort 后 SDK 在仍有其他未完成
+ * run（allDone=false）时不会触发 onComplete，isRequesting 滞留为 true，若终态
+ * 消息仍按流式渲染，已终止的空气泡会一直显示「…」。
+ */
+export function isStreamingAssistantMessage(
+  message: ChatMessage,
+  isLastMessage: boolean,
+  isRequesting: boolean,
+): boolean {
+  if (message.role !== 'assistant') return false;
+  if (message.status === 'streaming') return true;
+  return isLastMessage && isRequesting && message.status === 'pending';
+}
+
 /** 根据发送者身份生成统一的头像节点。 */
 function renderCurrentUserAvatar(name: string, avatarUrl?: string): ReactNode {
   return <Avatar name={name} src={avatarUrl} size={32} />;

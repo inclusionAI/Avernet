@@ -6,41 +6,23 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import { botHealthCheckService } from '@/services/botHealthCheck';
 import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
-import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
+import {
+  botWorkshopService,
+  canEnterBotDetail,
+  getBotActionAvailability,
+  getInventoryActionAvailability,
+} from '@/services/botWorkshop';
+import { botManagementActionService } from '@/services/botWorkshop/botManagementActionService';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
-import { localBotService } from '@/services/botWorkshop/localBotService';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { useAgentCodingTemplates } from './useAgentCodingTemplates';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
-
-/** 动作名即路由键：新增动词时补一行 runner/toast，漏补会在编译期报错而非静默无操作。 */
-const RUN_ACTION_RUNNER: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
-  open_folder: async (bot) => {
-    await localBotService.openFolder(bot.id);
-  },
-  delete: (bot) => botWorkshopService.remove(bot),
-  restart: (bot) => botWorkshopService.restart(bot),
-  engine_restart: (bot) =>
-    bot.deployment === 'local' ? botWorkshopService.restart(bot) : botWorkshopService.restartEngine(bot.id),
-  upgrade: (bot) => botWorkshopService.enableService(bot.id),
-  restart_publish: (bot) => botWorkshopService.restartPublish(bot),
-};
-
-const RUN_ACTION_SUCCESS_TOAST: Record<BotManagementVerb, string> = {
-  open_folder: '打开目录请求已提交',
-  delete: 'Bot 已删除',
-  restart: '重启请求已提交',
-  engine_restart: '重启请求已提交',
-  upgrade: '已开启服务化',
-  restart_publish: '重启发布已提交',
-};
 
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
@@ -54,10 +36,6 @@ export function useBotWorkshop() {
   const spaceId = currentSpaceId === undefined ? '' : String(currentSpaceId);
   const loadSequence = useRef(0);
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
-  const canUseAgentCoding = getCapabilities()
-    .getBotEngineOptions()
-    .value.some(({ value }) => value === 'aicoding');
-  const agentCodingTemplates = useAgentCodingTemplates(state.createScenario === 'cloud' && canUseAgentCoding);
   const navigation = useBotWorkshopNavigation();
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
   const currentOpenApiUserId = currentUser.status === 'available' ? currentUser.value?.trim() || undefined : undefined;
@@ -146,7 +124,7 @@ export function useBotWorkshop() {
       try {
         if (bot.runtime?.engine === 'teclaw' && ['restart', 'engine_restart', 'restart_publish'].includes(action))
           throw new Error('TeClaw 暂不支持重启操作');
-        await RUN_ACTION_RUNNER[action](bot);
+        await botManagementActionService.run(action, bot);
         if (action === 'delete' && bot.deployment === 'local') {
           useWorkspaceStore.setState((workspace) => {
             const expandedBotIds = { ...workspace.expandedBotIds };
@@ -168,7 +146,7 @@ export function useBotWorkshop() {
             };
           });
         }
-        toast.success(RUN_ACTION_SUCCESS_TOAST[action]);
+        toast.success(botManagementActionService.successMessage(action));
         await load();
       } catch (error) {
         const fallback = action === 'delete' ? 'Bot 删除失败，请稍后重试' : '操作失败';
@@ -179,11 +157,16 @@ export function useBotWorkshop() {
     [load],
   );
   const locks = useBotWorkshopLocks(load);
+  const canEnterDetail = useCallback(
+    (bot: BotDomain) => canEnterBotDetail(bot, currentOpenApiUserId),
+    [currentOpenApiUserId],
+  );
   return {
     ...state,
     spaceId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
     canOpenConversation: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
+    canEnterDetail,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
     retry: load,
@@ -198,10 +181,6 @@ export function useBotWorkshop() {
     },
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,
-    agentCodingTemplates: agentCodingTemplates.templates,
-    agentCodingTemplatesLoading: agentCodingTemplates.loading,
-    agentCodingTemplatesError: agentCodingTemplates.error,
-    retryAgentCodingTemplates: agentCodingTemplates.retry,
     createSpaces: state.createScenario
       ? botWorkshopService.getCreateSpaces(
           state.createScenario,
@@ -243,6 +222,11 @@ export function useBotWorkshop() {
     ...accessControl,
     logActionFor: (bot: BotDomain) =>
       getBotActionAvailability(bot, { apiReady: { logs: true } }).find((action) => action.action === 'logs'),
-    inventoryActionFor: getInventoryActionAvailability,
+    inventoryActionFor: (bot: BotDomain, action: Parameters<typeof getInventoryActionAvailability>[1]) => {
+      if (action === 'view' && !canEnterDetail(bot)) {
+        return { action: 'view' as const, visible: true, enabled: true };
+      }
+      return getInventoryActionAvailability(bot, action);
+    },
   };
 }

@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from secbaas.community.api.device_manage import DeviceCallbackContext
+from secbaas.community.api.device_manage import (
+    DeviceCallbackContext,
+    ErrorCode,
+    OutBoundOperationRuleUpdatedMode,
+    PaasError,
+)
 from secbaas.community.plugins.bot.teclaw._stub import StubTeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
     BotAsyncTaskResult,
@@ -235,6 +240,65 @@ class TestStubUpdateBotAsync:
 
 
 class TestStubUpdateOutboundRule:
+    @pytest.mark.asyncio
+    async def test_append_session_outbound_rule_keeps_session_dimension(
+        self, stub_plugin
+    ):
+        """Session rules append independently per session key."""
+        rule = {"header_name": "x-caller-token", "value": "token-1"}
+
+        result = await stub_plugin.append_session_outbound_rule("session-key", rule)
+
+        assert result is True
+        assert stub_plugin._session_outbound_rules["session-key"] == [rule]
+
+    @pytest.mark.asyncio
+    async def test_append_mode_stores_rules_in_session_dimension(self, stub_plugin):
+        """``mode=append`` updates session rules and leaves bot rules untouched."""
+        rules = {
+            "header_operation_rules": [
+                {
+                    "domains": ["mcp.example.com"],
+                    "action": "set",
+                    "header_name": "x-caller-token",
+                    "value": "token-1",
+                    "placeholder": None,
+                    "separator": None,
+                }
+            ]
+        }
+
+        result = await stub_plugin.update_outbound_rule(
+            "bot-1",
+            rules,
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            session_key="session-key",
+        )
+
+        assert result is True
+        assert stub_plugin._session_outbound_rules["session-key"] == [
+            {
+                "domains": ["mcp.example.com"],
+                "action": "set",
+                "header_name": "x-caller-token",
+                "value": "token-1",
+                "placeholder": "",
+                "separator": "",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_append_mode_requires_session_key(self, stub_plugin):
+        """A stub plugin also fails closed for append without a session key."""
+        with pytest.raises(PaasError) as exc_info:
+            await stub_plugin.update_outbound_rule(
+                "bot-1",
+                {"header_operation_rules": []},
+                mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            )
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+
     @pytest.mark.asyncio
     async def test_stores_and_retrieves_outbound_rule(self, stub_plugin):
         """Create -> update rule -> get_bot round-trip."""

@@ -40,7 +40,7 @@ class TestWorkerModelEnhanced:
                 Capability(name="test", level=CapabilityLevel.EXPERT)
             ],
             "state": WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
         }
@@ -66,7 +66,7 @@ class TestWorkerModelEnhanced:
 
         # 指定 runtime_state
         base_worker_data["state"] = WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             runtime_state=WorkerRuntimeState.ONLINE,
         )

@@ -774,8 +774,14 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
 
             raise LocalSkillNotFoundError()
         if actor_id != owner_id:
+            # Uploading installs executable content on someone's Bot: the
+            # edit/operations domain, where the Space-synthesized MEMBER has
+            # no say (its openapi twin rows carry Check … explicit=True; a
+            # space member could upload but not delete — the split-between
+            # -writes wart the review caught).
             permission = self._collaborators.check_collaborator_permission(
-                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+                bot_id, owner_id, actor_id, PermissionLevel.MEMBER,
+                explicit=True
             )
             if not permission.get("has_permission"):
                 from agentclaw.community.core.skill_center.errors import (

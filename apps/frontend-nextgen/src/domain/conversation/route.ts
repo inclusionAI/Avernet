@@ -4,6 +4,7 @@
 //   managed/others: section=managed&bot={bot}&origin=others&friend={friend}[&session={session}]
 //   friend Bot:     section=friend&bot={bot}[&session={session}]
 // 不依赖 React / Store / Router。
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import type {
   ConversationBotSection,
   ConversationOrigin,
@@ -11,7 +12,7 @@ import type {
   ConversationSessionScope,
 } from './types';
 
-const SECTIONS: readonly ConversationBotSection[] = ['managed', 'friend'];
+const SECTIONS: readonly ConversationBotSection[] = ['managed', 'team', 'friend'];
 const ORIGINS: readonly ConversationOrigin[] = ['mine', 'others'];
 const SCOPES: readonly ConversationSessionScope[] = ['all', 'favorite'];
 
@@ -54,9 +55,9 @@ export function serializeConversationRoute(route: ConversationRouteState): strin
     if (route.sessionId) params.set('session', route.sessionId);
     return params.toString();
   }
-  if (route.section === 'managed') {
+  if (isManagedConversationSection(route.section)) {
     const origin: ConversationOrigin = route.origin ?? 'mine';
-    params.set('section', 'managed');
+    params.set('section', route.section);
     if (route.botId) params.set('bot', route.botId);
     params.set('origin', origin);
     if (origin === 'others') {

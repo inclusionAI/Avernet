@@ -377,7 +377,7 @@ class TestFailureCapabilityMismatch:
                     Capability(name="SQL优化", level=CapabilityLevel.EXPERT),
                 ],
                 state=WorkerState(
-                    availability=Availability.AVAILABLE,
+                    availability=Availability.PUBLIC,
                     trust_level=TrustLevel.TRUSTED,
                 ),
             ),

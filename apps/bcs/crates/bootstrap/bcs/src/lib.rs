@@ -127,6 +127,7 @@ pub use bcs_routing::MessageRouter;
 
 // Server modules
 pub mod auth_wiring;
+mod bot_ws_admission_config;
 mod config;
 mod config_loader;
 pub mod callback_recovery_scanner;

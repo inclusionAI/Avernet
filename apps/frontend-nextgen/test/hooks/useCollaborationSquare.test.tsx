@@ -426,6 +426,143 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
+  test('成员弹窗同一次请求回填 Owner，切群清空且旧响应不能覆盖新群', async () => {
+    const first = resultGroup('g1');
+    const second = resultGroup('g2');
+    jest.spyOn(collaborationSquareGroupService, 'listGroupPage').mockResolvedValue(groupPage([first, second]));
+    const pending: Array<(detail: { ownerUserName: string; members: [] }) => void> = [];
+    const fetchDetail = jest.spyOn(collaborationSquareGroupService, 'listGroupMembers').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const { result, unmount } = renderHook(() => useCollaborationSquare('group'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    act(() => {
+      void result.current.openGroupMembers(first);
+    });
+    await act(async () => {
+      pending[0]({ ownerUserName: 'Owner A', members: [] });
+    });
+    expect(result.current.groupOwnerUserName).toBe('Owner A');
+    act(() => {
+      void result.current.openGroupMembers(first);
+    });
+    act(() => {
+      void result.current.openGroupMembers(second);
+    });
+    expect(result.current.groupOwnerUserName).toBeNull();
+    await act(async () => {
+      pending[2]({ ownerUserName: 'Owner B', members: [] });
+    });
+    await act(async () => {
+      pending[1]({ ownerUserName: '过期 Owner A', members: [] });
+    });
+    expect(result.current.groupOwnerUserName).toBe('Owner B');
+    expect(result.current.selectedGroupId).toBe('g2');
+    expect(result.current.detailLoading).toBe(false);
+    expect(fetchDetail).toHaveBeenCalledTimes(3);
+    unmount();
+  });
+
+  test.each(['close', 'unmount', 'identity'] as const)('成员请求在 %s 后返回不回填 Owner 或成员', async (action) => {
+    const group = resultGroup('g1');
+    jest.spyOn(collaborationSquareGroupService, 'listGroupPage').mockResolvedValue(groupPage([group]));
+    let finish!: (detail: { ownerUserName: string; members: [] }) => void;
+    jest.spyOn(collaborationSquareGroupService, 'listGroupMembers').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result, rerender, unmount } = renderHook(() => useCollaborationSquare('group'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    act(() => {
+      void result.current.openGroupMembers(group);
+    });
+    if (action === 'close')
+      act(() => {
+        result.current.closeGroupMembers();
+      });
+    if (action === 'unmount') unmount();
+    if (action === 'identity') {
+      mockedUseHumanIdentity.mockReturnValue({ identity: null, status: 'loading' });
+      rerender();
+    }
+    await act(async () => {
+      finish({ ownerUserName: '过期用户', members: [] });
+    });
+    expect(useCollaborationSquareStore.getState().groupOwnerUserName).toBeNull();
+    expect(useCollaborationSquareStore.getState().groupMembers).toEqual([]);
+    if (action !== 'unmount') unmount();
+  });
+
+  test('旧群详情失败不关闭新群、不提前结束新请求加载，也不弹过期错误', async () => {
+    const first = resultGroup('g1');
+    const second = resultGroup('g2');
+    jest.spyOn(collaborationSquareGroupService, 'listGroupPage').mockResolvedValue(groupPage([first, second]));
+    let failFirst!: (error: Error) => void;
+    let finishSecond!: (detail: { ownerUserName: string; members: [] }) => void;
+    jest
+      .spyOn(collaborationSquareGroupService, 'listGroupMembers')
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failFirst = reject;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSecond = resolve;
+          }),
+      );
+    const { result, unmount } = renderHook(() => useCollaborationSquare('group'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    act(() => {
+      void result.current.openGroupMembers(first);
+    });
+    act(() => {
+      void result.current.openGroupMembers(second);
+    });
+    await act(async () => {
+      failFirst(new CollaborationSquareError('target_invalid', '旧群失效'));
+    });
+    expect(result.current.selectedGroupId).toBe('g2');
+    expect(result.current.detailLoading).toBe(true);
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    await act(async () => {
+      finishSecond({ ownerUserName: 'Owner B', members: [] });
+    });
+    expect(result.current.groupOwnerUserName).toBe('Owner B');
+    expect(result.current.detailLoading).toBe(false);
+    unmount();
+  });
+
+  test('当前群详情失败维持错误提示且不展示目录里的 Owner', async () => {
+    const group = resultGroup('g1');
+    jest.spyOn(collaborationSquareGroupService, 'listGroupPage').mockResolvedValue(groupPage([group]));
+    jest.spyOn(collaborationSquareGroupService, 'listGroupMembers').mockRejectedValue(new Error('详情不可用'));
+    const { result, unmount } = renderHook(() => useCollaborationSquare('group'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      await result.current.openGroupMembers(group);
+    });
+    expect(mockedNotifyError).toHaveBeenCalled();
+    expect(result.current.groupOwnerUserName).toBeNull();
+    expect(result.current.detailLoading).toBe(false);
+    unmount();
+  });
+
   test('公开群首次加载和名称搜索调用真实 Group List，详情仍保留原 Service 链路', async () => {
     const group: PublicGroup = {
       id: 'group-real-1',
@@ -442,7 +579,9 @@ describe('useCollaborationSquare Bot Search', () => {
       .spyOn(collaborationSquareGroupService, 'listGroupPage')
       .mockResolvedValue(groupPage([group]));
     const realMembers = jest.spyOn(collaborationSquareGroupService, 'listGroupMembers');
-    const legacyMembers = jest.spyOn(collaborationSquareService, 'listGroupMembers').mockResolvedValue([]);
+    const legacyMembers = jest
+      .spyOn(collaborationSquareService, 'listGroupMembers')
+      .mockResolvedValue({ members: [], ownerUserName: '未公开' });
     const { result, unmount } = renderHook(() => useCollaborationSquare('group'));
 
     await act(async () => {

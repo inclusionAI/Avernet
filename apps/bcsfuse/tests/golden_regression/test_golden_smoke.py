@@ -37,7 +37,7 @@ class TestGoldenStartup:
         response = client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "healthy"}
+        assert response.json()["status"] == "healthy"
 
     def test_app_basic_structure(self):
         """验证应用基础结构完整"""

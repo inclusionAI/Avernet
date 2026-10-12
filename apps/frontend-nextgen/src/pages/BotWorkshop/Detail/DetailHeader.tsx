@@ -20,7 +20,7 @@ export function DetailHeader({
       <Button
         variant="ghost"
         size="icon"
-        aria-label="返回 Bot 工坊"
+        aria-label="返回 Bot 管理"
         onClick={onBack}
         leftIcon={<ArrowLeft className="size-4" />}
       />

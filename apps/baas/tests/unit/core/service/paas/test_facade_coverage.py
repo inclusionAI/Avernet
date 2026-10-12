@@ -1149,7 +1149,23 @@ class TestUpdateOutboundOperationRule:
         result = await f.update_outbound_operation_rule("dev@42", rule)
         assert result is True
         mock_svc.update_outbound_operation_rule.assert_awaited_once_with(
-            "dev", rule, mode=None
+            "dev", rule, mode=None, session_key=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_update_rule_passes_session_key(self):
+        f, tpl_svc, factory = _make_facade()
+        mock_svc = _make_mock_service()
+        factory.create.return_value = mock_svc
+        rule = MagicMock()
+
+        result = await f.update_outbound_operation_rule(
+            "dev@42", rule, session_key="session-key"
+        )
+
+        assert result is True
+        mock_svc.update_outbound_operation_rule.assert_awaited_once_with(
+            "dev", rule, mode=None, session_key="session-key"
         )
 
     @pytest.mark.asyncio

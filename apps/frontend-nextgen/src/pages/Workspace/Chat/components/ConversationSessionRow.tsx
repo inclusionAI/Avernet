@@ -1,12 +1,15 @@
 // 会话行:只读(origin=others 的他人会话)与交互式(我发起 / 好友 Bot)共用一行结构。
 // 只读形态不渲染任何写操作入口(收藏 / 更多 / 新建),仅打开只读历史;
 // 交互式行通过 Hook 回调(选中 / 加载更多)委托既有会话操作,不在行内写业务规则。
-import { Badge, Button, IconButton } from '@/components/ui';
+import { Badge, Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { MessageSquare, Star } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import React from 'react';
+import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
+import { ConversationSessionActions } from './ConversationSessionActions';
+import { ConversationSessionMeta } from './ConversationSessionMeta';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
@@ -16,6 +19,7 @@ export interface ConversationSessionRowProps {
   onSelect(): void;
   onToggleFavorite?(): void;
   favoritePending?: boolean;
+  actions?: ConversationSessionRowActions;
 }
 
 export const ConversationSessionRow = React.memo(function ConversationSessionRow({
@@ -25,6 +29,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   onSelect,
   onToggleFavorite,
   favoritePending = false,
+  actions,
 }: ConversationSessionRowProps) {
   return (
     <div
@@ -58,47 +63,15 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         >
           {session.title}
         </span>
-        {readOnly ? (
+        {readOnly && (
           <Badge tone="neutral" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
             只读
           </Badge>
-        ) : !onToggleFavorite ? (
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {session.messageCount > 0 ? `${session.messageCount} 条` : null}
-          </span>
-        ) : null}
+        )}
       </Button>
-      {!readOnly && onToggleFavorite && (
-        <IconButton
-          label={
-            session.favorite === undefined
-              ? '收藏状态暂不可用，请重新加载会话列表'
-              : session.favorite
-              ? '取消收藏'
-              : '收藏会话'
-          }
-          ariaLabel={session.favorite ? '取消收藏' : '收藏会话'}
-          size="sm"
-          icon={
-            <Star className={cn('h-4 w-4', session.favorite ? 'fill-warning text-warning' : 'text-muted-foreground')} />
-          }
-          disabled={favoritePending || session.favorite === undefined}
-          aria-busy={favoritePending}
-          className={cn(
-            'ml-1',
-            !session.favorite &&
-              !selected &&
-              'opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
-          )}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleFavorite();
-          }}
-        />
-      )}
-      {!readOnly && onToggleFavorite && (
-        // 固定条数列，零条也占位，避免数字位数变化导致左侧收藏星标错列。
-        <span className="ml-2 flex w-14 shrink-0 justify-end">
+      {!readOnly && (
+        // 固定条数列，零条也占位；右侧时间/更多互换时不挤动标题。
+        <span data-session-message-count className="ml-2 flex w-14 shrink-0 justify-end">
           {session.messageCount > 0 && (
             <TooltipProvider>
               <Tooltip>
@@ -117,6 +90,20 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             </TooltipProvider>
           )}
         </span>
+      )}
+      {!readOnly && (actions || onToggleFavorite) ? (
+        <ConversationSessionActions
+          title={session.title}
+          createdAt={session.gmtCreate}
+          actions={actions}
+          favorite={
+            onToggleFavorite
+              ? { value: session.favorite, pending: favoritePending, toggle: onToggleFavorite }
+              : undefined
+          }
+        />
+      ) : (
+        <ConversationSessionMeta createdAt={session.gmtCreate} />
       )}
     </div>
   );

@@ -592,10 +592,11 @@ class TestConflictAnalysisPrompt:
             perspectives_formatted="测试",
         )
 
-        assert "立场识别" in prompt
-        assert "冲突检测" in prompt
-        assert "对齐点识别" in prompt
-        assert "整体研判" in prompt
+        output_template = json.loads(prompt[prompt.index("{"):])
+        assert output_template["stance_analysis"][0]["participant_id"]
+        assert output_template["conflicts"][0]["parties"]
+        assert output_template["alignment_points"][0]["participants"]
+        assert output_template["conclusion"]["resolution_strategy"]
 
     def test_prompt_contains_output_format(self):
         """测试Prompt包含输出格式"""

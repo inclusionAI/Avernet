@@ -74,6 +74,8 @@ impl GroupServiceImpl {
             }
         };
 
+        let (driver_bot_owner, driver_bot_owner_name) =
+            self.resolve_driver_bot_owner(&group.driver_bot).await;
         Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
             group_id: common.group_id,
             version: common.version,
@@ -85,11 +87,34 @@ impl GroupServiceImpl {
             originator_actor_id: common.originator_actor_id,
             participants: common.participants,
             driver_bot_uuid: group.driver_bot,
+            driver_bot_owner,
+            driver_bot_owner_name,
             collaboration,
             human_mention_notify_mode: common.human_mention_notify_mode,
             created_at: common.created_at,
             updated_at: common.updated_at,
         }))
+    }
+
+    // Best-effort display metadata, matching the legacy detail response. These
+    // lookups do not authorize the caller or change the Group's persisted owner.
+    async fn resolve_driver_bot_owner(&self, driver_bot_id: &str) -> (Option<String>, Option<String>) {
+        if driver_bot_id.is_empty() {
+            return (None, None);
+        }
+        let Some(driver) = self.registry.get(driver_bot_id).await else {
+            return (None, None);
+        };
+        let Some(owner) = driver.created_by.filter(|owner| !owner.is_empty()) else {
+            return (None, None);
+        };
+        let human_id = format!("human_{owner}");
+        let owner_name = self
+            .registry
+            .get(&human_id)
+            .await
+            .and_then(|human| human.capabilities.name);
+        (Some(human_id), owner_name)
     }
 
     pub(crate) async fn project_detail(&self, group: DomainGroup) -> Result<GroupDetail, ApplicationError> {
@@ -176,6 +201,13 @@ impl GroupServiceImpl {
             }));
         }
 
+        let driver_bot_name = group
+            .participants
+            .iter()
+            .find(|participant| {
+                !group.driver_bot.is_empty() && participant.bot_uuid == group.driver_bot
+            })
+            .and_then(|participant| participant.bot_name.clone());
         Ok(GroupSummary::Normal(NormalGroupSummary {
             group_id: group.id,
             version: group.version,
@@ -187,6 +219,7 @@ impl GroupServiceImpl {
             originator_actor_id,
             participant_count: group.participants.len(),
             driver_bot_uuid: group.driver_bot,
+            driver_bot_name,
             strategy: project_strategy(group.group_strategy),
             human_mention_notify_mode: group.human_mention_notify_mode,
             created_at: group.created_at,

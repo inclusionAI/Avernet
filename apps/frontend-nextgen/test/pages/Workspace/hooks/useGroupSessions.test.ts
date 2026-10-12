@@ -585,3 +585,37 @@ it('退出会话登记「已知退出」：陈旧选中再指向它时不反查�
   const sCallsAfter = ss.getSessionDetail.mock.calls.filter((c: unknown[]) => c[0] === 'S').length;
   expect(sCallsAfter).toBe(sCallsBefore);
 });
+
+it('pinned session beyond the first page stays selected without stale fallback', async () => {
+  const pinned = session('pinned', 'g1', '目标会话');
+  useWorkspaceStore.setState({ selectedGroupId: 'g1', selectedSessionId: 'pinned' });
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('other', 'g1', '其他')] });
+  const { result } = renderHook(() => useGroupSessions('g1', [], pinned));
+  await waitFor(() => expect(result.current.isSessionsLoading).toBe(false));
+  expect(result.current.selectedSession?.sessionId).toBe('pinned');
+  expect(useWorkspaceStore.getState().selectedSessionId).toBe('pinned');
+});
+it('pinned session removal never renders or auto-selects another session', async () => {
+  const pinned = session('removed-pinned', 'g1', '目标会话');
+  useWorkspaceStore.setState({ selectedGroupId: 'g1', selectedSessionId: pinned.sessionId });
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [pinned, session('other', 'g1', '其他')] });
+  ss.deleteSession.mockResolvedValue({ ok: true, data: null });
+  const { result } = renderHook(() => useGroupSessions('g1', [], pinned));
+  await waitFor(() => expect(result.current.sessions).toHaveLength(2));
+  await act(async () => {
+    await result.current.deleteSession(pinned.sessionId);
+  });
+  expect(result.current.selectedSession).toBeNull();
+  act(() => useWorkspaceStore.getState().selectSession(null));
+  expect(result.current.selectedSession).toBeNull();
+  expect(useWorkspaceStore.getState().selectedSessionId).toBeNull();
+});
+
+it('does not show a pinned session under a different group', async () => {
+  const pinned = session('pin-wrong-group', 'g1', '目标');
+  useWorkspaceStore.setState({ selectedGroupId: 'other', selectedSessionId: pinned.sessionId });
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [] });
+  const { result } = renderHook(() => useGroupSessions('other', [], pinned));
+  await waitFor(() => expect(result.current.isSessionsLoading).toBe(false));
+  expect(result.current.selectedSession).toBeNull();
+});

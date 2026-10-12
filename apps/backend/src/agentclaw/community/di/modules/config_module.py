@@ -350,6 +350,13 @@ class ConfigModule(Module):
             provider_admin_token=block.get(
                 "provider_admin_token", defaults.provider_admin_token
             ),
+            provider_registration_enabled=_coerce(
+                block,
+                "provider_registration_enabled",
+                _as_bool,
+                defaults.provider_registration_enabled,
+                "user_config.bcn",
+            ),
         )
 
     @singleton

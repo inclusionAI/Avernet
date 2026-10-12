@@ -237,6 +237,7 @@ async fn provider_read_and_write_failures_report_the_operation_and_keep_the_erro
     let (_, events) = capture_request_logs(REQUEST_ID, async {
         storage_error(store.insert_provider(ProviderRecord {
             provider_id: "provider-17".into(),
+            slug: None,
             name: "Diagnostic Provider".into(),
             config: "{}".into(),
             created_by: "owner-17".into(),

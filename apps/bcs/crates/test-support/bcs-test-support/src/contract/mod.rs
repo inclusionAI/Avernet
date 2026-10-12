@@ -13,5 +13,6 @@ pub mod repo;
 pub mod provider_registration_core;
 pub mod bot_registration_create;
 pub mod bot_provider;
+pub mod provider_slug;
 pub mod bot_self;
 pub mod group_human_notify;

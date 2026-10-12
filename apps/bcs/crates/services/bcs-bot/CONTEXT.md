@@ -2,6 +2,12 @@
 
 ## Provides
 
+ProviderCore validates optional slugs and returns a credential-free
+ProviderBasicInfo projection for public discovery, including disabled Providers.
+ProviderManagement consumes this through its core contract. Additive slug-aware
+registration/update methods preserve old core callers; writes keep existing
+Provider admin and Human owner checks. Corrupt discovery config remains an error.
+
 - `BotCore::find_agent_registration` exposes the repository's authoritative,
   fallible Agent registration projection without runtime hydration or writes.
   The V1 self facade calls it only after trusted Agent identity verification.

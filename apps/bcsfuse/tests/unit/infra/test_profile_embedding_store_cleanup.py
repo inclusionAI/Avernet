@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
 from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
 from src.infra.public.vectorstores.qdrant_local_vector_store import (
@@ -37,4 +39,53 @@ def test_profile_cleanup_removes_qdrant_exact_and_fragment_ids(tmp_path):
         assert vector_store.get(retained_id) is not None
     finally:
         vector_store.clear()
+        vector_store.close()
+
+
+def test_replacement_cleanup_skips_retained_vectors_and_removes_legacy_id(
+    tmp_path, monkeypatch
+):
+    vector_store = QdrantLocalVectorStore(
+        collection_name="replacement_cleanup",
+        path=str(tmp_path / "vectors"),
+        dimension=2,
+    )
+    profile_store = ProfileEmbeddingStore(dimension=2, vector_store=vector_store)
+    try:
+        vector_store.upsert("worker:default", [1.0, 0.0], {})
+        vector_store.upsert("worker:default:full", [1.0, 0.0], {})
+        original_get = vector_store.get
+
+        def get_obsolete_only(vector_id):
+            if vector_id == "worker:default:full":
+                pytest.fail("cleanup must not reload retained embeddings")
+            return original_get(vector_id)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(vector_store, "get", get_obsolete_only)
+            profile_store.delete_stale_fragments(
+                "worker:default", {"worker:default:full"}, "worker"
+            )
+        assert vector_store.get("worker:default") is None
+        assert vector_store.get("worker:default:full") is not None
+    finally:
+        vector_store.close()
+
+
+@pytest.mark.parametrize("metadata", [{}, {"worker_id": "a"}, {"profile_key": "a:b"}])
+def test_replacement_cleanup_requires_explicit_prefix_ownership(tmp_path, metadata):
+    vector_store = QdrantLocalVectorStore(
+        collection_name="ownership_cleanup", path=str(tmp_path / "vectors"), dimension=2,
+    )
+    profile_store = ProfileEmbeddingStore(dimension=2, vector_store=vector_store)
+    try:
+        # Worker a/profile b shares a prefix with worker a:b/profile default.
+        vector_store.upsert("a:b:default", [1.0, 0.0], metadata)
+        vector_store.upsert("a:b:skills:0", [1.0, 0.0], {"worker_id": "a", "profile_key": "a:b"})
+        vector_store.upsert("a:b", [1.0, 0.0], {})
+        profile_store.delete_stale_fragments("a:b", {"a:b:full"}, "a")
+        assert vector_store.get("a:b:default") is not None
+        assert vector_store.get("a:b:skills:0") is None
+        assert vector_store.get("a:b") is None
+    finally:
         vector_store.close()

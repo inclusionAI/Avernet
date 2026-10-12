@@ -175,9 +175,20 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
     },
     requestAccess: async (reason: string) => {
       if (!access.bot) return;
-      await botManagementService.requestAccess(access.bot, reason);
-      toast.success('操作权限申请已提交');
-      setAccess({ spaces: [], members: [], loading: false });
+      setAccess((value) => ({ ...value, operation: 'request' }));
+      try {
+        const result = await botManagementService.requestAccess(access.bot, reason);
+        if (result.status === 'approved') {
+          toast.success('编辑权限已自动通过，你现在可以编辑该 Bot');
+          await reload();
+        } else {
+          toast.success('操作权限申请已提交，等待 Owner 审批');
+        }
+        setAccess({ spaces: [], members: [], loading: false });
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '操作权限申请失败');
+        setAccess((value) => ({ ...value, operation: undefined }));
+      }
     },
   };
 }

@@ -11,7 +11,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 KEY = "coding_restart"
@@ -19,8 +19,10 @@ TASK_TYPE = "aicoding.bot.restart"
 ENGINES = frozenset({"aicoding", "claude_code"})
 IN_PROGRESS = frozenset({"QUEUED", "BACKING_UP", "RESTARTING", "WAITING_READY"})
 TERMINAL = frozenset({"SUCCEEDED", "FAILED"})
-# Independent from the unchanged five-minute browser polling window.
-BUSINESS_TIMEOUT = 7200
+# Ordinary restart budget: original 25-minute backup plus the existing ten-minute
+# provider observation window. Queue retention is not the business timeout.
+BACKUP_TIMEOUT = 1500
+BUSINESS_TIMEOUT = BACKUP_TIMEOUT + 600
 TASK_DEADLINE = 86400
 
 
@@ -200,6 +202,7 @@ class RestartExecution:
     # An in-memory flag distinguishes a known pre-side-effect error from a lost
     # response after the durable mutation fence. It is never used for recovery.
     fenced: bool = False
+    verify_backup: Callable[[], None] | None = None
 
     @property
     def operation_id(self) -> str:

@@ -4,6 +4,7 @@ import type {
   PublicBotProfile,
   PublicGroup,
   PublicGroupMember,
+  PublicGroupMembersDetail,
   PublicTask,
   TaskStatusFilter,
 } from '@/domain/collaborationSquare/types';
@@ -15,6 +16,7 @@ export interface CollaborationSquareState {
   groups: PublicGroup[];
   botProfile: PublicBotProfile | null;
   groupMembers: PublicGroupMember[];
+  groupOwnerUserName: string | null;
   loading: boolean;
   detailLoading: boolean;
   error: string | null;
@@ -35,6 +37,7 @@ export interface CollaborationSquareState {
   appendGroups: (groups: PublicGroup[]) => void;
   setBotProfile: (profile: PublicBotProfile | null) => void;
   setGroupMembers: (members: PublicGroupMember[]) => void;
+  setGroupMembersDetail: (detail: PublicGroupMembersDetail) => void;
   setLoading: (loading: boolean) => void;
   setDetailLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -62,6 +65,7 @@ const initialState = {
   groups: [],
   botProfile: null,
   groupMembers: [],
+  groupOwnerUserName: null,
   loading: true,
   detailLoading: false,
   error: null,
@@ -94,6 +98,8 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
     }),
   setBotProfile: (botProfile) => set({ botProfile }),
   setGroupMembers: (groupMembers) => set({ groupMembers }),
+  setGroupMembersDetail: ({ members, ownerUserName }) =>
+    set({ groupMembers: members, groupOwnerUserName: ownerUserName }),
   setLoading: (loading) => set({ loading }),
   setDetailLoading: (detailLoading) => set({ detailLoading }),
   setError: (error) => set({ error }),
@@ -101,7 +107,7 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
   setBotSearchMode: (botSearchMode) =>
     set((state) => (state.botSearchMode === botSearchMode ? { botSearchMode } : { botSearchMode, botQuery: '' })),
   setSelectedBotId: (selectedBotId) => set({ selectedBotId, botProfile: null }),
-  setSelectedGroupId: (selectedGroupId) => set({ selectedGroupId, groupMembers: [] }),
+  setSelectedGroupId: (selectedGroupId) => set({ selectedGroupId, groupMembers: [], groupOwnerUserName: null }),
   setBusy: (key, busy) =>
     set((state) => ({
       busyKeys: busy ? [...new Set([...state.busyKeys, key])] : state.busyKeys.filter((item) => item !== key),
@@ -121,6 +127,7 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
       groups: state.groups.filter((group) => group.id !== id),
       selectedGroupId: state.selectedGroupId === id ? null : state.selectedGroupId,
       groupMembers: state.selectedGroupId === id ? [] : state.groupMembers,
+      groupOwnerUserName: state.selectedGroupId === id ? null : state.groupOwnerUserName,
     })),
   setTasks: (tasks) => set({ tasks }),
   appendTasks: (tasks) =>

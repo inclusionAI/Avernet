@@ -31,16 +31,60 @@ function managedView(botId: string, partial: Partial<ManagedBotConversationView>
 describe('conversationStore', () => {
   beforeEach(() => useConversationStore.getState().reset());
 
-  it('allows multiple managed Bots to stay expanded with independent filters', () => {
+  it('expands only the latest Bot while retaining independent filters', () => {
     const store = useConversationStore.getState();
     store.setExpandedBot('bot-a:1', true);
     store.setExpandedBot('bot-b:2', true);
     store.setManagedBotOrigin('bot-a:1', 'others');
     store.setManagedBotScope('bot-b:2', 'favorite');
 
-    expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-a:1': true, 'bot-b:2': true });
+    expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-b:2': true });
     expect(useConversationStore.getState().originByManagedBotId['bot-a:1']).toBe('others');
     expect(useConversationStore.getState().scopeByManagedBotId['bot-b:2']).toBe('favorite');
+  });
+
+  it('expansion across managed/friend Bots preserves all caches, friend expansion and selection', () => {
+    const store = useConversationStore.getState();
+    const managed = managedView('bot-a:1');
+    const friend = sessionList({ total: 12, page: 2 });
+    store.setManagedBotCache('bot-a:1', managed);
+    store.setFriendBotSessions('friend:2', friend);
+    store.setExpandedFriend('bot-a:1', 'user', true);
+    store.selectConversation({
+      botId: 'bot-a:1',
+      section: 'managed',
+      origin: 'mine',
+      scope: 'all',
+      friendUserId: null,
+      sessionId: 's1',
+    });
+    store.setExpandedBot('bot-a:1', true);
+    store.setExpandedBot('friend:2', true);
+    const state = useConversationStore.getState();
+    expect(state.expandedBotIds).toEqual({ 'friend:2': true });
+    expect(state.selectedBotId).toBe('bot-a:1');
+    expect(state.selectedSessionId).toBe('s1');
+    expect(state.sessionsByBotId['bot-a:1']).toBe(managed);
+    expect(state.friendBotSessionsByBotId['friend:2']).toBe(friend);
+    expect(state.expandedFriendUserIdsByBotId['bot-a:1']).toEqual({ user: true });
+    store.setExpandedBot('bot-a:1', true);
+    expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-a:1': true });
+  });
+
+  it('same-Bot expand and collapsing an unrelated Bot are no-ops', () => {
+    const store = useConversationStore.getState();
+    store.setExpandedBot('bot-a:1', true);
+    const state = useConversationStore.getState();
+    store.setExpandedBot('bot-a:1', true);
+    expect(useConversationStore.getState()).toBe(state);
+    store.setExpandedBot('not-open', false);
+    expect(useConversationStore.getState()).toBe(state);
+  });
+
+  it('normalizes an existing multiple-expanded snapshot when the target is already expanded', () => {
+    useConversationStore.setState({ expandedBotIds: { a: true, b: true } });
+    useConversationStore.getState().setExpandedBot('b', true);
+    expect(useConversationStore.getState().expandedBotIds).toEqual({ b: true });
   });
 
   it('collapses a Bot by removing its expansion key', () => {

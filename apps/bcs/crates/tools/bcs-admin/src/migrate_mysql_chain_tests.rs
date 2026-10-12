@@ -113,7 +113,11 @@ async fn sqlite_migration_chain_backs_the_group_notify_contract() -> Result<()> 
     group_notify_contract::verify(Arc::clone(&db), |db, env| {
         ChainMySqlGroupStore::sqlite(Arc::clone(db), env.to_string())
     })
-    .await
+    .await?;
+    bcs_test_support::contract::provider_slug::provider_repo_port_contract_tests(
+        &bcs_bot_store::provider::DbProviderStore::sqlite(db),
+    ).await;
+    Ok(())
 }
 
 async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArgs) -> Result<()> {
@@ -126,9 +130,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=31\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=32\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=31).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=32).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
         assert_history_lookup_plans(db).await?;
@@ -143,6 +147,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
             bcs_group_store::MySqlGroupStore::new(Arc::clone(db), env.to_string())
         })
         .await?;
+        bcs_test_support::contract::provider_slug::provider_repo_port_contract_tests(
+            &bcs_bot_store::provider::DbProviderStore::mysql(migrated_db.clone()),
+        ).await;
 
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;
@@ -165,7 +172,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=11\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=12\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_chain_columns(db).await?;
         assert_direct_queue_indexes(db).await?;
@@ -218,6 +225,7 @@ async fn chain_history(db: &dyn DbPlugin) -> Result<Vec<(i64, String)>> {
 
 async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
     for (table, columns) in [
+        ("bcs_providers", vec!["env", "provider_id", "slug"]),
         ("bcs_session_registry", vec!["env", "session_id", "session_type", "current_msg_seq"]),
         ("bcs_chat_runs", vec!["delivery_id", "source_message_id"]),
         ("bcs_messages", vec!["owner_bot_id", "visibility_domain", "audience_kind", "audience_actor_ids_json"]),
@@ -267,6 +275,7 @@ async fn assert_history_lookup_plans(db: &dyn DbPlugin) -> Result<()> {
 
 async fn assert_direct_queue_indexes(db: &dyn DbPlugin) -> Result<()> {
     for (table, index, non_unique, columns) in [
+        ("bcs_providers", "uk_bcs_providers_env_slug", 0, vec!["env", "slug"]),
         ("bcs_session_registry", "uk_session_registry", 0, vec!["env", "session_id"]),
         ("bcs_messages", "uk_session_seq", 0, vec!["env", "session_id", "session_seq"]),
         ("bcs_chat_runs", "idx_env_delivery", 1, vec!["env", "delivery_id"]),

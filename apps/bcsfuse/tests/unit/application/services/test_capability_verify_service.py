@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.application.services.capability_verify_service import CapabilityVerifyService
@@ -14,6 +16,14 @@ from src.domain.models.verify_dto import (
     VerifyData,
 )
 from src.domain.models.worker import Capability, CapabilityLevel, TrustLevel, Worker
+
+
+@pytest.fixture(autouse=True)
+def isolate_verify_debug_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
+        str(tmp_path),
+    )
 
 
 class FakePromptComposer:
@@ -32,7 +42,10 @@ class FakePromptComposer:
 
 
 class FakeExecutor:
-    async def execute(self, worker_id: str, probes: list[CapabilityProbes]) -> list[DimensionResult]:
+    async def send_intro(self, worker_id: str) -> str:
+        return ""
+
+    async def execute(self, worker_id: str, probes: list[CapabilityProbes], bot_intro: str = "") -> list[DimensionResult]:
         results = []
         for cp in probes:
             for dim in cp.dimensions:
@@ -128,7 +141,7 @@ class TestCapabilityVerifyServiceMapTrustLevel:
         assert self.service._map_trust_level(judgments) == TrustLevel.TRUSTED
 
     def test_medium_confidence_returns_guarded(self) -> None:
-        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.55)]
+        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.65)]
         assert self.service._map_trust_level(judgments) == TrustLevel.GUARDED
 
     def test_low_confidence_returns_sandbox_only(self) -> None:
@@ -139,16 +152,16 @@ class TestCapabilityVerifyServiceMapTrustLevel:
         judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.8)]
         assert self.service._map_trust_level(judgments) == TrustLevel.TRUSTED
 
-    def test_boundary_0_5_returns_guarded(self) -> None:
-        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.5)]
+    def test_boundary_0_6_returns_guarded(self) -> None:
+        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.6)]
         assert self.service._map_trust_level(judgments) == TrustLevel.GUARDED
 
     def test_just_below_0_8_returns_guarded(self) -> None:
         judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.79)]
         assert self.service._map_trust_level(judgments) == TrustLevel.GUARDED
 
-    def test_just_below_0_5_returns_sandbox(self) -> None:
-        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.49)]
+    def test_just_below_0_6_returns_sandbox(self) -> None:
+        judgments = [DimensionJudgment(capability_name="c", dimension="d", confidence=0.59)]
         assert self.service._map_trust_level(judgments) == TrustLevel.SANDBOX_ONLY
 
     def test_multi_domain_averaging(self) -> None:
@@ -189,7 +202,12 @@ class TestCapabilityVerifyServiceVerify:
         )
 
         event = WorkerProfileCreatedEvent(worker_id="w1")
-        await service.on_worker_profile_created(event)
+        await service.start()
+        try:
+            await service.on_worker_profile_created(event)
+            await asyncio.wait_for(service._queue.join(), timeout=2)
+        finally:
+            await service.stop()
         assert repo._trust_levels.get("w1") == TrustLevel.TRUSTED
 
     @pytest.mark.asyncio

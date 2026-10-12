@@ -11,7 +11,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
-from secbaas.community.api.device_manage import DeviceCallbackContext
+from secbaas.community.api.device_manage import (
+    DeviceCallbackContext,
+    ErrorCode,
+    OutBoundOperationRuleUpdatedMode,
+    PaasError,
+)
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot.teclaw import (
     BotAsyncTaskResult,
@@ -38,6 +43,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         self, endpoint: str | None = None, timeout: float | None = None
     ) -> None:
         self._bots: dict[str, dict[str, Any]] = {}
+        self._session_outbound_rules: dict[str, list[dict[str, Any]]] = {}
         # Storage keys ("bot_config", "status", "outbound_rule") align with TeClaw API v2 response field names
 
     async def create_bot(
@@ -186,7 +192,13 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             teclaw_bot_config=bot_config,
         )
 
-    async def update_outbound_rule(self, bot_id: str, rules: dict[str, Any]) -> bool:
+    async def update_outbound_rule(
+        self,
+        bot_id: str,
+        rules: dict[str, Any],
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
+    ) -> bool:
         """Store outbound operation rules for a bot in the in-memory store.
 
         Creates the bot entry with all known keys if ``bot_id`` does not
@@ -197,16 +209,68 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             bot_id: The teclaw_bot_id for the target device.
             rules: Dict in TeClaw API JSON format, e.g.
                 ``{"header_operation_rules": [...]}``.
+            mode: ``APPEND`` stores each rule in the session dimension.
+            ``REPLACE``/``None`` stores the bot-level rule payload.
+            session_key: Raw session key used when ``mode`` is ``APPEND``.
 
         Returns:
             True after successful storage.
         """
+        resolved_mode = mode or OutBoundOperationRuleUpdatedMode.REPLACE
+        if resolved_mode == OutBoundOperationRuleUpdatedMode.APPEND and not session_key:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "mode=append requires a non-empty session_key",
+            )
+        if (
+            resolved_mode != OutBoundOperationRuleUpdatedMode.APPEND
+            and session_key is not None
+        ):
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "session_key is only supported when mode=append",
+            )
+
+        if resolved_mode == OutBoundOperationRuleUpdatedMode.APPEND:
+            for rule in rules.get("header_operation_rules", []):
+                session_rule = {
+                    "domains": rule.get("domains", []),
+                    "action": rule.get("action", ""),
+                    "header_name": rule.get("header_name", ""),
+                    "value": rule.get("value", ""),
+                    "placeholder": rule.get("placeholder") or "",
+                    "separator": rule.get("separator") or "",
+                }
+                await self.append_session_outbound_rule(session_key, session_rule)
+            return True
+
         self._bots.setdefault(
             bot_id,
             {"bot_config": {}, "status": "UNKNOWN", "outbound_rule": None},
         )
         self._bots[bot_id]["outbound_rule"] = rules
         logger.info("[stub-teclaw] outbound rule updated bot_id=%s", bot_id)
+        return True
+
+    async def append_session_outbound_rule(
+        self, session_key: str, rule: dict[str, Any]
+    ) -> bool:
+        """Append a session-scoped rule in the in-memory store.
+
+        Args:
+            session_key: Raw session key used as the storage dimension.
+            rule: Single header operation rule in TeClaw session API format.
+
+        Returns:
+            True after appending the rule.
+        """
+        if not session_key:
+            raise ValueError("session_key must not be empty")
+        self._session_outbound_rules.setdefault(session_key, []).append(rule)
+        logger.info(
+            "[stub-teclaw] session outbound rule appended session_key=%s",
+            session_key,
+        )
         return True
 
     async def restart_bot(

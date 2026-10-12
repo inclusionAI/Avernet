@@ -183,13 +183,18 @@ export interface PublicGroup {
   name: string;
   ownerBotName: string;
   ownerUserName: string;
-  /** 群主 Bot 的 driver_bot_uuid。公开群目录响应无 participants，需用此 uuid 经 bots/query 反查群主名。 */
+  /** 群主 Bot 的 driver_bot_uuid。用于群主名称旁展示；旧接口缺少名称时经 bots/query 反查。 */
   driverBotUuid?: string;
   typeLabel: string;
   memberCount: number;
   goal: string;
   memberListVisibility: MemberListVisibility;
   canCreateSession: boolean;
+}
+
+export interface PublicGroupMembersDetail {
+  members: PublicGroupMember[];
+  ownerUserName: string;
 }
 
 export interface PublicGroupMember {

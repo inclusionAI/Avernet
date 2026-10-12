@@ -2,6 +2,7 @@
 import { useConversationDirectory } from '@/pages/Workspace/Chat/hooks/useConversationDirectory';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
+import { teamBotConversationService } from '@/services/workspace/teamBotConversationService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
@@ -19,6 +20,11 @@ jest.mock('@/services/workspace/botSessionService', () => ({
 jest.mock('@/services/workspace/collaborationCandidateService', () => ({
   collaborationCandidateService: { listFriends: require('jest-mock').fn() },
 }));
+
+jest.mock('@/services/workspace/teamBotConversationService', () => ({
+  teamBotConversationService: { listBots: jest.fn() },
+}));
+const listTeam = jest.mocked(teamBotConversationService.listBots);
 
 const listOwnedBotsWithMeta = botSessionService.listOwnedBotsWithMeta as unknown as jest.Mock;
 const listFriends = collaborationCandidateService.listFriends as unknown as jest.Mock;
@@ -60,6 +66,7 @@ const deferred = <T,>() => {
 
 beforeEach(() => {
   // require('jest-mock').fn() 的 mock 不归全局 clearAllMocks 管,逐个 reset。
+  listTeam.mockReset().mockResolvedValue({ ok: true, data: [] });
   listOwnedBotsWithMeta.mockReset();
   listFriends.mockReset();
   useWorkspaceStore.setState({ activeIdentityId: 'bot-someone-else' });
@@ -77,7 +84,7 @@ describe('useConversationDirectory', () => {
     expect(listFriends).toHaveBeenCalledWith('327325', { actorType: 'human', offset: 0, limit: 100 });
   });
 
-  it('maps directory sections and the agent-coding flag', async () => {
+  it('maps all managed sections including AgentCoding Bots and friend sections', async () => {
     listOwnedBotsWithMeta.mockResolvedValue(okOwned);
     listFriends.mockResolvedValue(okFriends);
 
@@ -87,7 +94,6 @@ describe('useConversationDirectory', () => {
     await waitFor(() => expect(result.current.managedLoading).toBe(false));
     expect(result.current.managedBots).toEqual([{ bot: ownedBot, section: 'managed' }]);
     expect(result.current.friendBots[0]).toMatchObject({ bot: { botId: 'friend-bot:777' }, section: 'friend' });
-    expect(result.current.hasAgentCodingBots).toBe(true);
     expect(result.current.managedError).toBeNull();
     expect(result.current.friendError).toBeNull();
   });
@@ -172,4 +178,20 @@ describe('useConversationDirectory', () => {
     expect(result.current.managedError).toBeNull();
     expect(result.current.friendError).toBeNull();
   });
+});
+
+it('团队加载独立：失败不影响管理/好友，可单独重试且按 canonical id 去重', async () => {
+  listOwnedBotsWithMeta.mockResolvedValue(okOwned);
+  listFriends.mockResolvedValue(okFriends);
+  const teamBot = { ...ownedBot, botId: 'shared:team', realBotId: 'shared', ownerId: 'team' };
+  listTeam
+    .mockResolvedValueOnce({ ok: false, error: { code: 'FAILED', friendlyMessage: '团队失败', canRetry: true } })
+    .mockResolvedValue({ ok: true, data: [ownedBot, teamBot] });
+  const { result } = renderHook(() => useConversationDirectory('327325'));
+  await waitFor(() => expect(result.current.teamError).toBe('团队失败'));
+  expect(result.current.managedBots).toHaveLength(1);
+  expect(result.current.friendBots).toHaveLength(1);
+  act(() => result.current.retryTeam());
+  await waitFor(() => expect(result.current.teamBots).toEqual([{ section: 'team', bot: teamBot }]));
+  expect(listOwnedBotsWithMeta).toHaveBeenCalledTimes(1);
 });

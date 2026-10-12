@@ -120,7 +120,9 @@ export function BotAccessModal(props: Props) {
           </div>
         ) : mode === 'request' ? (
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">请说明申请原因，将生成待 Owner 审批的工单。</p>
+            <p className="text-sm text-muted-foreground">
+              请说明申请原因。Owner 已开启自动通过时权限将立即生效，否则进入审批。
+            </p>
             <Input
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -251,13 +253,15 @@ export function BotAccessModal(props: Props) {
           </div>
         )}
         <ModalFooter>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={operation === 'request'} onClick={onClose}>
             {mode === 'authorize' ? '完成' : '取消'}
           </Button>
           {mode !== 'authorize' ? (
             <Button
+              loading={operation === 'request'}
               disabled={
                 loading ||
+                Boolean(operation) ||
                 (mode === 'space' ? (spaceMode === 'existing' ? !spaceId : !teamName.trim()) : !reason.trim())
               }
               onClick={() =>
@@ -268,7 +272,7 @@ export function BotAccessModal(props: Props) {
                   : props.onRequestAccess(reason.trim()))
               }
             >
-              {loading ? '处理中…' : '确认'}
+              {loading || operation === 'request' ? '处理中…' : '确认'}
             </Button>
           ) : null}
         </ModalFooter>

@@ -212,6 +212,16 @@ def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
             return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
 
     class _Collaborators:
+        # The operator ladder resolves explicitly now; these doubles'
+        # operators ARE explicit collaborators, so both ladders agree.
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
+            return self.get_operable_permission_level(
+                bot={"bot_id": bot.get("bot_id", "?"),
+                     "owner_id": bot.get("owner_id", "?")},
+                user_id=user_id,
+                env=env,
+            )
+
         def get_operable_permission_level(self, *, bot, user_id, env=None):
             key = (str(bot["bot_id"]), str(bot["owner_id"]), user_id)
             return (

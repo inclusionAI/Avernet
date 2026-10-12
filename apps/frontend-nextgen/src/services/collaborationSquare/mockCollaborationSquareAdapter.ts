@@ -110,12 +110,13 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
   async listGroupMembers(groupId: string, signal?: AbortSignal) {
     if (!this.groups.some((item) => item.id === groupId))
       throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
-    return mapGroupMembersTransport(
+    const members = mapGroupMembersTransport(
       await readJson<PublicGroupMemberTransport[]>(
         `/api/mock/collaboration-square/groups/${encodeURIComponent(groupId)}/members`,
         signal,
       ),
     );
+    return { members, ownerUserName: this.groups.find((group) => group.id === groupId)?.ownerUserName || '未公开' };
   }
 
   async createGroupSession(groupId: string): Promise<CreateSessionResult> {

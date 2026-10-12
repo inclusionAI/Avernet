@@ -124,7 +124,12 @@ class _AutoApprovalWorkOrderRepository:
             )
 
     def apply_auto_skill_editor_request(
-        self, *, work_order_id: int, source_event_type: str, env: str
+        self,
+        *,
+        work_order_id: int,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
     ) -> list[int]:
         """Atomically grant Skill access and complete its AUTO work order."""
         with self._db.transactional_orm_session() as db:
@@ -155,40 +160,11 @@ class _AutoApprovalWorkOrderRepository:
                 session=db, work_order_id=work_order_id, env=env
             )
 
-            now = db.execute(select(func.now())).scalar_one()
-            updated = (
-                db.query(self._WorkOrder)
-                .filter(
-                    self._WorkOrder.id == work_order_id,
-                    self._WorkOrder.env == env,
-                    self._WorkOrder.biz_type
-                    == WorkOrderBizType.SKILL_COLLABORATOR.value,
-                    self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
-                    self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
-                )
-                .update(
-                    {
-                        self._WorkOrder.status: WorkOrderStatus.APPROVED.value,
-                        self._WorkOrder.reviewer_user_id: SYSTEM_REVIEWER_USER_ID,
-                        self._WorkOrder.review_remark: None,
-                        self._WorkOrder.reviewed_at: now,
-                        self._WorkOrder.gmt_modified: now,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            if updated != 1:
-                raise WorkOrderAlreadyProcessedError(
-                    "AUTO Skill work order is not processing"
-                )
-
-            return self._insert_auto_result_notifications(
+            return self._finish_auto_approval_in_session(
                 db,
                 order=order,
-                recipient_user_ids=[order.applicant_user_id],
+                recipient_user_ids=recipient_user_ids,
                 source_event_type=source_event_type,
-                status=WorkOrderStatus.APPROVED,
-                review_remark=None,
                 env=env,
             )
 
@@ -225,21 +201,59 @@ class _AutoApprovalWorkOrderRepository:
                 raise WorkOrderAccessDeniedError(
                     "AUTO business effect is not supported for this work order"
                 )
-            now = db.execute(select(func.now())).scalar_one()
-            order.status = WorkOrderStatus.APPROVED.value
-            order.reviewer_user_id = SYSTEM_REVIEWER_USER_ID
-            order.review_remark = None
-            order.reviewed_at = now
-            order.gmt_modified = now
-            return self._insert_auto_result_notifications(
+            return self._finish_auto_approval_in_session(
                 db,
                 order=order,
                 recipient_user_ids=recipient_user_ids,
                 source_event_type=source_event_type,
-                status=WorkOrderStatus.APPROVED,
-                review_remark=None,
                 env=env,
             )
+
+    def _finish_auto_approval_in_session(
+        self,
+        session: Session,
+        *,
+        order: WorkOrderModel,
+        recipient_user_ids: list[str],
+        source_event_type: str,
+        env: str,
+    ) -> list[int]:
+        """Finish a locked AUTO row in the caller's business transaction.
+
+        Callers must lock and validate AUTO/PROCESSING before any business write.
+        This helper neither commits nor invokes business callbacks.
+        """
+        now = session.execute(select(func.now())).scalar_one()
+        updated = (
+            session.query(self._WorkOrder)
+            .filter(
+                self._WorkOrder.id == order.id,
+                self._WorkOrder.env == env,
+                self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
+                self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
+            )
+            .update(
+                {
+                    self._WorkOrder.status: WorkOrderStatus.APPROVED.value,
+                    self._WorkOrder.reviewer_user_id: SYSTEM_REVIEWER_USER_ID,
+                    self._WorkOrder.review_remark: None,
+                    self._WorkOrder.reviewed_at: now,
+                    self._WorkOrder.gmt_modified: now,
+                },
+                synchronize_session="fetch",
+            )
+        )
+        if updated != 1:
+            raise WorkOrderAlreadyProcessedError("AUTO work order is not processing")
+        return self._insert_auto_result_notifications(
+            session,
+            order=order,
+            recipient_user_ids=recipient_user_ids,
+            source_event_type=source_event_type,
+            status=WorkOrderStatus.APPROVED,
+            review_remark=None,
+            env=env,
+        )
 
     def fail_auto_approval(
         self,

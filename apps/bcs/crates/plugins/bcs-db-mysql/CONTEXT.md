@@ -35,6 +35,12 @@
 
 The crate owns remote DB transport and driver integration. It does not own service-level SQL or business persistence semantics.
 
+String-valued columns with text character sets decode as `DbValue::String`,
+including case-sensitive `_bin` collations. MySQL's `BINARY_FLAG` also marks
+such text, so binary payloads are identified by the binary character set
+(collation ID 63); geometry remains bytes. BINARY/VARBINARY/BLOB values retain
+`DbValue::Bytes` even when their contents are valid UTF-8.
+
 ## Tests
 
 - `cargo test --package bcs-db-mysql --manifest-path src/bcs/Cargo.toml`

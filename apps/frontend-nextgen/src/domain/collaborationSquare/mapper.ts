@@ -83,6 +83,7 @@ export interface CollaborationGroupDetailTransport {
   status?: string;
   originator_actor_id?: string;
   driver_bot_uuid?: string;
+  driver_bot_name?: string;
   name?: string;
   group_name?: string;
   owner_bot_name?: string;
@@ -190,7 +191,7 @@ export function mapPublicGroupCatalogDto(value: CollaborationGroupDetailTranspor
   return {
     id,
     name: nonEmpty(value.name, value.group_name) || '未命名协作群',
-    ownerBotName: nonEmpty(ownerBot?.name, value.owner_bot_name) || '未公开',
+    ownerBotName: nonEmpty(value.driver_bot_name, ownerBot?.name, value.owner_bot_name) || '未公开',
     ownerUserName: nonEmpty(ownerUser?.name, value.owner_user_name) || '未公开',
     driverBotUuid: value.driver_bot_uuid ?? '',
     typeLabel,

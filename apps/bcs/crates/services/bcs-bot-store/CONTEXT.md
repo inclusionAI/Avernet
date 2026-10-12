@@ -2,6 +2,13 @@
 
 ## Provides
 
+Provider slug is optional and unique within environment, including disabled rows.
+Memory and SQL share the slug conformance harness. SQL discovery performs one
+indexed, environment-scoped SELECT with LIMIT 1 and no cache, credentials or writes.
+Metadata updates atomically include slug/name/config; duplicate writes conflict
+and preserve the previous values. SQLite 033 / MySQL 032 add the nullable column
+and unique `(env, slug)` index without rewriting historical migrations.
+
 `find_agent_registration` reads current-environment nondeleted Bot rows directly,
 independent of cache, heartbeat and enabled state. One query returns at most two
 rows; ambiguity is a conflict and read/decoding failures remain errors. Bot

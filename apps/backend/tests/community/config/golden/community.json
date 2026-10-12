@@ -186,7 +186,8 @@
     "bcn": {
       "base_url": "${BCS_URL}",
       "provider_admin_token": "${BCS_ADMIN_TOKEN}",
-      "provider_id": "${BCS_PROVIDER_ID}"
+      "provider_id": "${BCS_PROVIDER_ID}",
+      "provider_registration_enabled": false
     },
     "bcsfuse": {
       "base_url": "${BCS_FUSE_URL:-}",

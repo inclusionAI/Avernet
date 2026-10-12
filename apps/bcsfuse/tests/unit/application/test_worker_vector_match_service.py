@@ -11,7 +11,10 @@ WorkerVectorMatchService 职责：
 - embedding 生成
 
 ==================================================
-行为约定（必须在实现中严格遵守）：
+纯 metadata 查询路径的单元测试约定：
+本文件隔离默认 visibility 注入，以验证 metadata provider 自身的过滤。
+带默认 visibility 的实际 Qdrant 委托路径由
+tests/contract/test_vector_metadata_filter_contract.py 覆盖。
 ==================================================
 
 1. filters 语义：
@@ -43,6 +46,7 @@ WorkerVectorMatchService 职责：
 """
 
 import tempfile
+import hashlib
 from unittest.mock import Mock
 
 import numpy as np
@@ -51,6 +55,7 @@ import pytest
 from src.application.services.worker_vector_match_service import (
     WorkerVectorMatchService,
     MatchResult,
+    FragmentRetrievalConfig,
 )
 from src.domain.models.metadata_record import MetadataRecord
 from src.domain.models.vector_point import VectorPoint
@@ -69,8 +74,11 @@ class FakeEmbeddingGenerator:
 
     def generate(self, text: str) -> list[float]:
         """Generate a deterministic embedding from text."""
-        np.random.seed(hash(text) % (2**32))
-        vector = np.random.randn(self._dimension).astype(np.float32)
+        seed = int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "big")
+        # Positive, stable vectors keep these filter tests above the cutoff.
+        # Randomized Python hashes/negative similarities made them pass or fail
+        # depending on the process seed before reaching the asserted behavior.
+        vector = np.random.default_rng(seed).random(self._dimension).astype(np.float32)
         # Normalize for cosine similarity
         norm = np.linalg.norm(vector)
         if norm > 0:
@@ -112,12 +120,15 @@ class TestWorkerVectorMatchService:
         return FakeEmbeddingGenerator(dimension)
 
     @pytest.fixture
-    def service(self, vector_store, metadata_store):
-        """Create a WorkerVectorMatchService for testing."""
-        return WorkerVectorMatchService(
+    def service(self, vector_store, metadata_store, monkeypatch):
+        """Isolate the metadata-only path from default payload-filter injection."""
+        service = WorkerVectorMatchService(
             vector_store=vector_store,
             metadata_store=metadata_store,
+            fragment_config=FragmentRetrievalConfig(enable_fragment_embedding=False),
         )
+        monkeypatch.setattr(service, "_inject_default_visibility_filters", lambda filters: filters)
+        return service
 
     @pytest.fixture
     def indexed_data(self, vector_store, metadata_store, embedding_gen):

@@ -35,7 +35,7 @@ export function useBotChats() {
     const params = new URLSearchParams(location.search);
     const botId = params.get('bot_id')?.trim();
     if (!botId) {
-      setInitializationError('缺少 bot_id，请从 Bot 工坊重新进入日志页。');
+      setInitializationError('缺少 bot_id，请从 Bot 管理重新进入日志页。');
       useBotChatStore.getState().reset();
       return;
     }

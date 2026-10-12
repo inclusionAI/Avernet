@@ -6,6 +6,7 @@ using IndexFlatIP (inner product) for similarity search with normalized vectors.
 
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -460,6 +461,17 @@ class FaissVectorStoreAdapter:
                 payload.update(payload_updates)
                 count += 1
         return count
+
+    def get(self, id: str) -> VectorPoint | None:
+        """Read the latest live point, with the normalized indexed vector."""
+        row = self._id_to_row.get(id)
+        if row is None or id in self._deleted_ids or self._index is None:
+            return None
+        return VectorPoint(
+            id=id,
+            vector=self._index.reconstruct(row).tolist(),
+            payload=deepcopy(self._id_to_payload.get(id, {})),
+        )
 
     def get_vector_ids(self) -> list[str]:
         """

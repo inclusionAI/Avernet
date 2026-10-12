@@ -6,6 +6,15 @@ export interface BotPolicyContext {
   canView?: boolean;
   apiReady?: Partial<Record<BotAction, boolean>>;
 }
+
+/**
+ * 进入编辑/查询详情页必须是 Owner 或后端明确授予 edit 的协作者。
+ * 单独的 view action 只允许查看列表基础信息，不能触发详情页的子资源请求。
+ */
+export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boolean {
+  if (!currentUserId) return false;
+  return bot.ownerId === currentUserId || bot.actions.includes('edit');
+}
 const actions: BotAction[] = [
   'view',
   'edit',

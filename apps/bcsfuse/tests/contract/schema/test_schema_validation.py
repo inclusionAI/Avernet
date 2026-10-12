@@ -56,6 +56,25 @@ class TestSchemaLoader:
 class TestWorkerSchemaValidation:
     """Worker Schema 校验测试"""
 
+    @pytest.mark.parametrize("worker_id", ["wrk_test", "bot:12345"])
+    @pytest.mark.parametrize("availability", ["private", "protected", "public"])
+    def test_current_worker_identifier_and_visibility_contract(self, schema_store, worker_id, availability):
+        from jsonschema import validate
+
+        properties = schema_store["Worker.json"]["properties"]
+        validate(worker_id, properties["id"])
+        validate(availability, properties["state"]["properties"]["availability"])
+
+    def test_empty_identifier_and_runtime_values_are_not_visibility(self, schema_store):
+        from jsonschema import ValidationError, validate
+
+        properties = schema_store["Worker.json"]["properties"]
+        with pytest.raises(ValidationError):
+            validate("", properties["id"])
+        for value in ("available", "busy", "offline", "degraded"):
+            with pytest.raises(ValidationError):
+                validate(value, properties["state"]["properties"]["availability"])
+
     def test_sample_worker_matches_schema(self, fixtures_dir, schema_store):
         """验证 sample_worker.json 符合 Worker Schema"""
         from src.infra.schema_loader import validate_with_store
@@ -81,7 +100,7 @@ class TestWorkerSchemaValidation:
             constraints=[],
             skills=[],
             resources=[],
-            state={"availability": "available", "trust_level": "trusted"}
+            state={"availability": "public", "trust_level": "trusted"}
         )
 
         # Pydantic 模型转 dict 进行 Schema 校验

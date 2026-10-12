@@ -65,3 +65,11 @@ test('变更归属空间支持创建新团队', () => {
 
   expect(baseProps.onCreateTeamAndChangeSpace).toHaveBeenCalledWith('研发团队');
 });
+
+test('申请编辑权限时说明自动通过分支并防止重复提交', () => {
+  render(<BotAccessModal {...baseProps} mode="request" operation="request" />);
+
+  expect(screen.getByText(/Owner 已开启自动通过/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '处理中…' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '取消' })).toBeDisabled();
+});

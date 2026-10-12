@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.work_orders.errors import WorkOrderLocalFinalizeError
+
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderApprovalMode,
@@ -27,8 +29,8 @@ def _auto_request(service, biz_type, event_type, biz_id):
         biz_id=biz_id,
         event_type=event_type,
         applicant_user_id="actor",
-        approver_user_ids=[],
-        recipient_user_ids=["notify-user"],
+        approver_user_ids=['notify-user'],
+        recipient_user_ids=[],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -47,7 +49,7 @@ def test_auto_space_join_service_finalizes_and_notifies_after_callback():
         work_order_id=17,
         work_order_no="WO-17",
         notification_ids=[],
-        status=WorkOrderEventStatus.PENDING,
+        status=WorkOrderEventStatus.PROCESSING,
     )
 
     result = _auto_request(
@@ -77,7 +79,7 @@ def test_auto_callback_exception_marks_failed_and_sends_failure_result():
         work_order_id=18,
         work_order_no="WO-18",
         notification_ids=[],
-        status=WorkOrderEventStatus.PENDING,
+        status=WorkOrderEventStatus.PROCESSING,
     )
     repo.get_approval_context.return_value.model_copy.return_value = object()
     callbacks.dispatch.side_effect = WorkOrderCallbackError("callback broke")
@@ -92,7 +94,7 @@ def test_auto_callback_exception_marks_failed_and_sends_failure_result():
 
     assert result.status is WorkOrderEventStatus.FAILED
     repo.fail_auto_approval.assert_called_once()
-    assert "callback broke" in repo.fail_auto_approval.call_args.kwargs["review_remark"]
+    assert "WorkOrderCallbackError" in repo.fail_auto_approval.call_args.kwargs["review_remark"]
     assert repo.fail_auto_approval.call_args.kwargs["recipient_user_ids"] == [
         "notify-user"
     ]
@@ -109,12 +111,12 @@ def test_successful_external_callback_is_not_later_reported_as_failed():
         work_order_id=21,
         work_order_no="WO-21",
         notification_ids=[],
-        status=WorkOrderEventStatus.PENDING,
+        status=WorkOrderEventStatus.PROCESSING,
     )
     repo.get_approval_context.return_value.model_copy.return_value = object()
     repo.complete_auto_approval.side_effect = RuntimeError("database unavailable")
 
-    with pytest.raises(RuntimeError, match="database unavailable"):
+    with pytest.raises(WorkOrderLocalFinalizeError):
         _auto_request(
             service,
             WorkOrderBizType.BOT_FRIEND.value,
@@ -134,7 +136,7 @@ def test_auto_skill_uses_atomic_work_order_repository_path():
         work_order_id=19,
         work_order_no="WO-19",
         notification_ids=[],
-        status=WorkOrderEventStatus.PENDING,
+        status=WorkOrderEventStatus.PROCESSING,
     )
 
     result = _auto_request(
@@ -147,6 +149,7 @@ def test_auto_skill_uses_atomic_work_order_repository_path():
     assert result.status is WorkOrderEventStatus.APPROVED
     repo.apply_auto_skill_editor_request.assert_called_once_with(
         work_order_id=19,
+        recipient_user_ids=["notify-user"],
         source_event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         env="dev",
     )

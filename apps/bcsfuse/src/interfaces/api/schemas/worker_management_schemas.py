@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -141,7 +141,7 @@ class WorkerSyncRequest(BaseModel):
 
     Aligned with original root contract (worker_routes.py::SyncWorkerRequest).
     """
-    type: str = Field(
+    type: Literal["human", "bot"] = Field(
         default="bot",
         description="Worker type",
     )

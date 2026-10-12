@@ -593,6 +593,7 @@ mod tests {
     fn provider_with_config(config: &str) -> ProviderRecord {
         ProviderRecord {
             provider_id: "provider-a".to_string(),
+            slug: None,
             name: "Provider A".to_string(),
             config: config.to_string(),
             created_by: "admin".to_string(),

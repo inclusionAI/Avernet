@@ -747,6 +747,7 @@ mod tests {
         let v1_state = BcsServerState::default_for_test();
         let credentials: Arc<dyn ProviderCredentialRepoPort> =
             Arc::new(MemoryProviderStore::new());
+        let bot_ws_admission = config.bot_ws_admission.build();
         Arc::new(BcsServerState {
             config,
             services: Services::noop(),
@@ -768,6 +769,7 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            bot_ws_admission,
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),
             group_session_secret_access: v1_state.group_session_secret_access.clone(),

@@ -1,6 +1,7 @@
 """Bot Public Router.
 
 提供 Bot 相关接口：
+- GET /api/public/bots/{bot_id}/binding - 获取架构师 bot 绑定详情
 - GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots
 - PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段）
 """
@@ -90,7 +91,64 @@ def _scrub_sensitive(value: Any) -> Any:
     return value
 
 
+def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
+    """构造架构 Bot 公开详情，不暴露模板配置或 token 等敏感信息。"""
+    scrubbed = _scrub_sensitive(bot)
+    if not isinstance(scrubbed, dict):
+        return {}
+    scrubbed.pop("template_config", None)
+    for field in ("device_id", "binding_id"):
+        if field in bot:
+            scrubbed[field] = bot[field]
+    return scrubbed
+
+
 # ==================== Public Endpoints ====================
+
+
+@router.get("/{bot_id}/binding", response_model=ApiResponse)
+async def get_bot_binding_public(
+    bot_id: str = Path(..., description="Bot ID"),
+    bot_repo: BotRepository = Injected(BotRepository),
+) -> ApiResponse:
+    """获取架构师 bot 绑定详情。
+
+    GET /api/public/bots/{bot_id}/binding
+
+    返回架构师 Bot 详情，不包含 template_config；保留 device_id 和 binding_id，
+    并递归去除 token 类敏感字段。
+    """
+    try:
+        _total, items = bot_repo.list_by_conditions(
+            bot_id=bot_id, page=1, page_size=1
+        )
+        if not items:
+            return ApiResponse(
+                success=False,
+                message=f"Bot不存在: {bot_id}",
+                error_code=404,
+                data=None,
+            )
+
+        scrubbed = _public_bot_detail(items[0])
+        logger.info("[public_noauth.get_bot_binding] bot_id=%s", bot_id)
+        return ApiResponse(success=True, data=scrubbed)
+    except BotServiceError as e:
+        logger.error("[public_noauth.get_bot_binding] Service error: %s", e)
+        return ApiResponse(
+            success=False,
+            message=f"获取Bot失败: {str(e)}",
+            error_code=500,
+            data=None,
+        )
+    except Exception as e:
+        logger.error("[public_noauth.get_bot_binding] Unexpected error: %s", e)
+        return ApiResponse(
+            success=False,
+            message=f"获取Bot失败: {str(e)}",
+            error_code=500,
+            data=None,
+        )
 
 
 @router.get("/{bot_id}/appcoding-bots", response_model=ApiResponse)

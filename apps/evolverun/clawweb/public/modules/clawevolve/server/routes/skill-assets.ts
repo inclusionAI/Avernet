@@ -263,6 +263,22 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     res.status(201).json(assetView(created, metadata.get(botId), requestIdentity.userId));
   }));
 
+  router.patch("/skill-assets/:assetId", asyncHandler(async (req, res) => {
+    const requestIdentity = identity(req);
+    if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
+    const asset = await input.repo.findAsset(String(req.params.assetId));
+    if (!asset || asset.owner_user_id !== requestIdentity.userId || !await readable(asset, requestIdentity)) {
+      res.status(404).json({ error: "Skill 不存在" }); return;
+    }
+    if (!req.body || Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, "spaceId")) {
+      res.status(400).json({ error: "请仅提供所属空间 spaceId，可用 null 表示无空间" }); return;
+    }
+    const space = await registrationSpace(input.hostSpaces, requestIdentity, req.body.spaceId);
+    const ownership = spaceColumns(space);
+    await input.repo.updateSpace(asset.asset_id, requestIdentity.userId, ownership);
+    res.json(ownership);
+  }));
+
   router.post("/skill-assets/:assetId/versions", versionUpload.single("package"), asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));

@@ -14,6 +14,34 @@ const makeTask = (id: string): PublicTask => ({
 describe('collaboration square store', () => {
   beforeEach(() => useCollaborationSquareStore.getState().reset());
 
+  test('成员详情原子保存 Owner，切换/关闭/删除群与 reset 清空 Owner 和成员', () => {
+    const store = useCollaborationSquareStore.getState();
+    const detail = {
+      ownerUserName: '群主用户',
+      members: [{ id: 'b1', displayName: 'Bot', type: 'bot' as const, role: 'driver' }],
+    };
+    store.setSelectedGroupId('g1');
+    store.setGroupMembersDetail(detail);
+    expect(useCollaborationSquareStore.getState()).toMatchObject({
+      groupOwnerUserName: '群主用户',
+      groupMembers: detail.members,
+    });
+    store.setSelectedGroupId('g2');
+    expect(useCollaborationSquareStore.getState()).toMatchObject({ groupOwnerUserName: null, groupMembers: [] });
+    store.setGroupMembersDetail(detail);
+    store.setSelectedGroupId(null);
+    expect(useCollaborationSquareStore.getState().groupOwnerUserName).toBeNull();
+    store.setSelectedGroupId('g1');
+    store.setGroupMembersDetail(detail);
+    store.removeGroup('g2');
+    expect(useCollaborationSquareStore.getState().groupOwnerUserName).toBe('群主用户');
+    store.removeGroup('g1');
+    expect(useCollaborationSquareStore.getState()).toMatchObject({ groupOwnerUserName: null, groupMembers: [] });
+    store.setGroupMembersDetail(detail);
+    store.reset();
+    expect(useCollaborationSquareStore.getState().groupOwnerUserName).toBeNull();
+  });
+
   test('分别保存目录、查询和目标级 busy 状态', () => {
     const store = useCollaborationSquareStore.getState();
     store.setBots([

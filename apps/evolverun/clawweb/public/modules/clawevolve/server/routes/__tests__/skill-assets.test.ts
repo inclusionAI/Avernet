@@ -14,6 +14,7 @@ import { FilesystemObjectStore } from "../../services/object-storage/filesystem-
 import { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { applySkillVersion } from "../../services/evolve/skill-application.js";
+import { spaceAccessErrorHandler } from "../../services/evolve/space-access.js";
 
 let server: ReturnType<express.Application["listen"]> | undefined;
 let artifactRoot: string | undefined;
@@ -62,6 +63,7 @@ async function startRouter(realRepository = false, spaces?: Array<{ id: string; 
     artifactStore: store,
     ...(dedicated ? { skillPackages: new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages", store: packageStore }, store) } : {}),
   }));
+  app.use(spaceAccessErrorHandler);
   app.use((_error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: "Internal Server Error" });
   });
@@ -733,4 +735,66 @@ describe("durable manual Skill application", () => {
   const first = await (await request()).json();
   expect(await (await request()).json()).toMatchObject({ assetId: first.assetId, botEnv: 'prod', existing: true });
   expect(await test.repo.listAssets('owner-1')).toHaveLength(1);
+});
+
+
+describe("Skill space editing", () => {
+  async function editable() {
+    const test = await startRouter(true, [{ id: "t1", name: "Team", type: "TEAM", role: "MEMBER" }]);
+    await test.repo.createAsset({
+      assetId: "EDITABLE", versionId: "VERSION-1", ownerUserId: "owner-1", botId: "bot-1",
+      externalSkillId: "47", displayName: "Editable Skill", packageRef: "oss://clawevolve-artifacts/manual/v1.zip",
+      packageSha256: "sha256:baseline",
+    });
+    const patch = (body: unknown, userId = "owner-1") => fetch(`${test.baseUrl}/skill-assets/EDITABLE`, {
+      method: "PATCH", headers: { "X-User-Id": userId, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { ...test, patch };
+  }
+
+  it("moves an owned asset to an accessible space and back without creating a version or calling the Bot", async () => {
+    const test = await editable();
+    const response = await test.patch({ spaceId: "t1" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ spaceId: "t1", spaceType: "TEAM", spaceName: "Team" });
+    expect(await test.repo.findAsset("EDITABLE")).toMatchObject({ space_id: "t1", space_type: "TEAM", space_name: "Team" });
+    expect((await test.repo.listAssets("collaborator", ["t1"])).map(row => row.asset_id)).toEqual(["EDITABLE"]);
+    const cleared = await test.patch({ spaceId: null });
+    expect(cleared.status).toBe(200);
+    expect(await test.repo.findAsset("EDITABLE")).toMatchObject({ space_id: null, space_type: null, space_name: null, current_version_no: 1 });
+    expect(await test.repo.listAssets("collaborator", ["t1"])).toEqual([]);
+    expect(await test.repo.listVersions("EDITABLE")).toHaveLength(1);
+    expect(test.exportLocalSkill).not.toHaveBeenCalled();
+    expect(test.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it("rejects other owners, inaccessible spaces and unrelated metadata fields without changing ownership", async () => {
+    const test = await editable();
+    expect((await test.patch({ spaceId: "t1" }, "other-owner")).status).toBe(404);
+    expect((await test.patch({ spaceId: "missing" })).status).toBe(403);
+    expect((await test.patch({})).status).toBe(400);
+    expect((await test.patch({ spaceId: "t1", ownerUserId: "other-owner" })).status).toBe(400);
+    expect((await test.patch({ spaceId: {} })).status).toBe(400);
+    expect((await test.patch({ spaceId: null }, "")).status).toBe(401);
+    expect(await test.repo.findAsset("EDITABLE")).toMatchObject({ owner_user_id: "owner-1", space_id: null });
+  });
+
+  it("keeps no-space editing available without a host directory", async () => {
+    const test = await startRouter(true);
+    await test.repo.createAsset({ assetId: "EDITABLE", versionId: "VERSION-1", ownerUserId: "owner-1", botId: "bot-1",
+      externalSkillId: "47", displayName: "Skill", packageRef: "unused", packageSha256: "sha256:baseline" });
+    const response = await fetch(`${test.baseUrl}/skill-assets/EDITABLE`, {
+      method: "PATCH", headers: { "X-User-Id": "owner-1", "Content-Type": "application/json" }, body: '{"spaceId":null}',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ spaceId: null, spaceType: null, spaceName: null });
+  });
+
+  it("propagates persistence failure instead of reporting a successful edit", async () => {
+    const test = await editable();
+    vi.spyOn(test.repo, "updateSpace").mockRejectedValueOnce(new Error("Database unavailable"));
+    expect((await test.patch({ spaceId: "t1" })).status).toBe(500);
+    expect((await test.repo.findAsset("EDITABLE"))?.space_id).toBeNull();
+  });
 });

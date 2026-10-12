@@ -132,7 +132,7 @@ class TestWorkerVectorIndexService:
         """Test that indexing creates correct metadata records."""
         service.index_profiles(sample_profiles, sample_embeddings)
 
-        record = service.metadata_store.get("staff_123:default")
+        record = service.metadata_store.get("123:default")
 
         assert record is not None
         assert record.staff_id == "123"
@@ -148,8 +148,8 @@ class TestWorkerVectorIndexService:
         service.index_profiles(sample_profiles, sample_embeddings)
 
         # Get metadata records
-        record1 = service.metadata_store.get("staff_123:default")
-        record2 = service.metadata_store.get("staff_456:default")
+        record1 = service.metadata_store.get("123:default")
+        record2 = service.metadata_store.get("456:default")
 
         assert record1 is not None
         assert record1.vector_id is not None
@@ -205,7 +205,7 @@ class TestWorkerVectorIndexService:
 
         assert result.indexed_count == 1
 
-        record = service.metadata_store.get("staff_123:default")
+        record = service.metadata_store.get("123:default")
         assert "backend" in record.domains
         assert "devops" in record.domains
 
@@ -223,7 +223,7 @@ class TestWorkerVectorIndexService:
 
         assert len(results) == 2
         assert isinstance(results[0], SearchResult)
-        assert results[0].profile_key == "staff_123:default"
+        assert results[0].profile_key == "123:default"
         assert results[0].score > 0.0
         assert results[0].metadata is not None
 
@@ -304,7 +304,7 @@ class TestWorkerVectorIndexService:
         """Test getting metadata by profile_key."""
         service.index_profiles(sample_profiles, sample_embeddings)
 
-        record = service.get_metadata("staff_123:default")
+        record = service.get_metadata("123:default")
 
         assert record is not None
         assert record.staff_id == "123"
@@ -319,10 +319,10 @@ class TestWorkerVectorIndexService:
         """Test deleting a profile."""
         service.index_profiles(sample_profiles, sample_embeddings)
 
-        service.delete_profiles(["staff_123:default"])
+        service.delete_profiles(["123:default"])
 
         # Verify metadata deleted
-        assert service.metadata_store.get("staff_123:default") is None
+        assert service.metadata_store.get("123:default") is None
         assert service.metadata_store.size() == 1
 
         # Verify vector deleted
@@ -410,7 +410,7 @@ class TestWorkerVectorIndexService:
         result = service.index_profiles([profile], embedding)
 
         assert result.indexed_count == 1
-        record = service.metadata_store.get("staff_123:default")
+        record = service.metadata_store.get("123:default")
         assert record.active_skill_names == []
 
     def test_index_same_profile_twice_updates(self, service):

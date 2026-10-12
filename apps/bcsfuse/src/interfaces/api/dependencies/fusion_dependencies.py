@@ -150,6 +150,18 @@ def get_app_context() -> Optional["ApplicationContext"]:
     return _app_context
 
 
+def set_fused_profile_storage_service(storage_service) -> None:
+    """Replace composed G9 storage and invalidate services that captured it."""
+    global _fused_profile_storage_service
+    global _profile_merge_service, _fusion_expert_chat_service
+    global _group_fusion_service
+
+    _fused_profile_storage_service = storage_service
+    _profile_merge_service = None
+    _fusion_expert_chat_service = None
+    _group_fusion_service = None
+
+
 # =============================================================================
 # Configuration Functions
 # =============================================================================
@@ -823,6 +835,10 @@ def _get_embedding_generator():
         RealEmbeddingProvider 或 None
     """
     global _embedding_generator
+    context = get_app_context()
+    if context is not None:
+        _embedding_generator = context.registry.get("embedding_provider")
+        return _embedding_generator
     if _embedding_generator is None:
         try:
             from src.infra.embedding.config.embedding_settings import EmbeddingSettings

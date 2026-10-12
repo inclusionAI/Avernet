@@ -22,6 +22,9 @@ export const routes = [
       { path: '/workspace', redirect: '/workspace/chat' },
       { path: '/workspace/chat', component: '@/pages/Workspace/Chat' },
       { path: '/workspace/collaboration', component: '@/pages/Workspace/Collaboration' },
+      { path: '/workspace/collaboration-only', component: '@/pages/Workspace/Collaboration/Focused' },
+      { path: '/workspace/collaboration/group', component: '@/pages/Workspace/Collaboration/Focused' },
+      { path: '/workspace/collaboration/session', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
@@ -29,7 +32,12 @@ export const routes = [
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
-      { path: '/collaboration-square/tasks', component: '@/pages/CollaborationSquare/Tasks' },
+      // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。
+      { path: '/collaboration-square/community', redirect: '/lab/community' },
+      { path: '/collaboration-square/tasks', redirect: '/lab/community' },
+      // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
+      { path: '/lab', component: '@/pages/Lab' },
+      { path: '/lab/community', component: '@/pages/Lab/Community' },
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },

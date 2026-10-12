@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import Mock
+from src.domain.models.llm_response import LLMResponse, FinishReason
 
 from src.domain.models.fusion_result import Perspective, FusionResult
 from src.domain.models.worker_profile import WorkerProfile, ProfileType
@@ -37,7 +38,7 @@ from src.application.services.expert_diagnosis_service import ExpertDiagnosisSer
 def sample_profile():
     """创建示例 WorkerProfile"""
     return WorkerProfile(
-        staff_id="001",
+        staff_id="staff_001",
         profile_id="default",
         profile_type=ProfileType.DEFAULT,
         source_root="/path/to/profiles",
@@ -61,14 +62,18 @@ def sample_profile():
 
 
 @pytest.fixture
-def sample_digest():
+def sample_digest(sample_profile):
     """创建示例 WorkerContextDigest"""
     return WorkerContextDigest(
         profile_key="staff_001:default",
         mode=RetrievalMode.EXPERT_DIAGNOSIS,
         question="How to design an API?",
-        relevant_fragments=[],
-        relevant_skills=[],
+        relevant_fragments=sample_profile.context_fragments,
+        relevant_skills=sample_profile.active_skills,
+        total_fragments=1,
+        selected_fragments=1,
+        total_skills=1,
+        selected_skills=1,
         context_summary="Expert in Python and API design",
     )
 
@@ -77,7 +82,8 @@ def sample_digest():
 def fake_gateway():
     """创建 fake LLM Gateway"""
     gateway = Mock()
-    gateway.generate.return_value = Mock(
+    gateway.generate.return_value = LLMResponse(
+        provider_id="fake", model_id="fake", latency_ms=0, finish_reason=FinishReason.STOP,
         parse_success=True,
         structured_data={
             "summary": "Based on the expert profile, I recommend using RESTful principles for API design.",

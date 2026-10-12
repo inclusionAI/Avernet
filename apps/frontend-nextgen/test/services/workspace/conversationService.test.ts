@@ -56,7 +56,7 @@ beforeEach(() => {
 });
 
 describe('conversationService.listDirectory', () => {
-  it('returns non-agent-coding managed Bots, agent-coding flag and friend Bots', async () => {
+  it('returns managed and AgentCoding Bots in the managed section plus friend Bots', async () => {
     botMocked.listBots.mockResolvedValue({
       code: 200000,
       data: {
@@ -112,8 +112,13 @@ describe('conversationService.listDirectory', () => {
         ownerId: '2088',
         displayName: 'Bot A',
       }),
+      expect.objectContaining({
+        botId: 'application:1',
+        displayName: '应用实例',
+        isAgentCodingBot: true,
+        templateType: 'applicationCoding',
+      }),
     ]);
-    expect(result.data.hasAgentCodingBots).toBe(true);
     expect(result.data.friendBots).toEqual([
       expect.objectContaining({
         botId: 'bot-b:327325',

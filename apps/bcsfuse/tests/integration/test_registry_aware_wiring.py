@@ -21,6 +21,9 @@ Stage 1 Phase 4.5: Production Wiring Verification
 import os
 import tempfile
 import pytest
+from tests.fixtures.registry_recommendation import registry_recommendation_service
+from src.infra.config.feature_flags import FeatureFlags
+
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
 
@@ -49,6 +52,13 @@ from src.application.services.group_fusion_service import GroupFusionService
 from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
 
 
+@pytest.fixture(autouse=True)
+def enable_registry_filtering(monkeypatch):
+    """Exercise the filtering policy independently of deployment defaults."""
+    monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
+    monkeypatch.setattr(FeatureFlags, "is_real_embedding_enabled", lambda: True)
+
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -75,7 +85,7 @@ def create_test_worker(
         domains=["testing"],
         capabilities=caps,
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PRIVATE,
             trust_level=TrustLevel.TRUSTED,
             runtime_state=runtime_state,
         ),
@@ -91,11 +101,10 @@ def create_test_profile(
     skills: list[str] | None = None,
 ) -> WorkerProfile:
     """创建测试用的 WorkerProfile"""
-    # Parse profile_key: "staff_XXX:default" -> staff_id=XXX, profile_id=default
+    # The staff identifier is preserved verbatim in profile_key.
     parts = profile_key.split(":")
     if len(parts) == 2:
-        # Remove "staff_" prefix if present
-        staff_id = parts[0].replace("staff_", "")
+        staff_id = parts[0]
         profile_id = parts[1]
     else:
         staff_id = profile_key
@@ -351,9 +360,8 @@ class TestRecommendationFiltering:
             profile_filter=profile_filter,
         )
 
-        recommendation_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_service,
-            min_experts=2,
+        recommendation_service = registry_recommendation_service(
+            retrieval_service, profile_filter, [online_profile, offline_profile], min_experts=2,
         )
 
         # 调用 recommendation
@@ -427,8 +435,8 @@ class TestG5MainFlowFiltering:
             profile_filter=profile_filter,
         )
 
-        recommendation_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_service,
+        recommendation_service = registry_recommendation_service(
+            retrieval_service, profile_filter, [online_profile, offline_profile],
         )
 
         expert_diagnosis_service = ExpertDiagnosisService(
@@ -646,8 +654,8 @@ class TestPhase45Summary:
             profile_filter=profile_filter,
         )
 
-        recommendation_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_service,
+        recommendation_service = registry_recommendation_service(
+            retrieval_service, profile_filter, profiles,
         )
 
         expert_diagnosis_service = ExpertDiagnosisService(

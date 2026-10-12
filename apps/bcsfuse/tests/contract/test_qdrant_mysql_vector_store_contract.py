@@ -391,11 +391,9 @@ class TestQdrantMySQLVectorStoreIntegration:
         result = vector_store.rebuild_from_mysql(batch_size=2)
 
         # 3. Verify rebuild result
-        assert result["success"] is True
-        assert result["mysql_loaded"] >= 5
-        assert result["qdrant_inserted"] >= 5
-        assert result["qdrant_count"] >= 5
-        assert result["batches"] >= 3  # 5 points / 2 per batch = 3 batches
+        assert result["loaded_count"] >= 5
+        assert result["indexed_count"] >= 5
+        assert result["qdrant_size"] >= 5
 
         # 4. Search after rebuild
         query_vector = [0.1] * dimension
@@ -404,8 +402,8 @@ class TestQdrantMySQLVectorStoreIntegration:
         assert len(results) >= 1
         # Results should contain logical IDs (external IDs)
         for result in results:
-            assert "id" in result
-            assert "score" in result
+            assert result.id
+            assert isinstance(result.score, float)
 
         # Cleanup
         vector_store.delete([p.id for p in points])
@@ -432,7 +430,7 @@ class TestQdrantMySQLVectorStoreIntegration:
         results = vector_store.search(query_vector, top_k=1)
 
         assert len(results) >= 1
-        assert results[0]["id"] == "write_test_1"
+        assert results[0].id == "write_test_1"
 
         # Cleanup
         vector_store.delete(["write_test_1"])
@@ -463,7 +461,7 @@ class TestQdrantMySQLVectorStoreIntegration:
         results = vector_store.search(query_vector, top_k=10)
 
         # Should not find deleted vectors
-        result_ids = [r["id"] for r in results]
+        result_ids = [result.id for result in results]
         assert "delete_test_0" not in result_ids
         assert "delete_test_1" not in result_ids
         assert "delete_test_2" in result_ids  # This one should still be there

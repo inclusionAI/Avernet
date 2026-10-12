@@ -913,11 +913,11 @@ describe('BotSessionSidebar', () => {
       screen.getByRole('button', { name: '示例用户管理的 Bot (2)' }),
     );
     await userEvent.setup().hover(hintButton);
-    const workshopLink = await screen.findByRole('link', { name: 'Bot 工坊' });
+    const workshopLink = await screen.findByRole('link', { name: 'Bot 管理' });
     expect(workshopLink).toHaveAttribute('href', '/bot-workshop');
-    expect(workshopLink.parentElement).toHaveTextContent('AgentCoding Bot 请前往 Bot 工坊 使用');
+    expect(workshopLink.parentElement).toHaveTextContent('AgentCoding Bot 请前往 Bot 管理 使用');
     fireEvent.click(workshopLink);
     expect(onOpenBotWorkshop).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('button', { name: 'AgentCoding Bot 请前往 Bot 工坊使用' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'AgentCoding Bot 请前往 Bot 管理使用' })).not.toBeInTheDocument();
   });
 });

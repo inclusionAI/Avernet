@@ -12,7 +12,7 @@ import type {
   PublicBotProfile,
   PublicBotSearchQuery,
   PublicGroup,
-  PublicGroupMember,
+  PublicGroupMembersDetail,
   PublicGroupSearchQuery,
   PublicTask,
   PublicTaskPage,
@@ -45,7 +45,7 @@ export interface CollaborationSquareGateway {
   ): Promise<OpenBotConversationResult>;
   listGroupPage(query?: PublicGroupSearchQuery, signal?: AbortSignal): Promise<CollaborationSquarePage<PublicGroup>>;
   listGroups(query?: PublicGroupSearchQuery, signal?: AbortSignal): Promise<PublicGroup[]>;
-  listGroupMembers(groupId: string, signal?: AbortSignal): Promise<PublicGroupMember[]>;
+  listGroupMembers(groupId: string, signal?: AbortSignal): Promise<PublicGroupMembersDetail>;
   createGroupSession(
     groupId: string,
     context?: HumanBotActionContext,

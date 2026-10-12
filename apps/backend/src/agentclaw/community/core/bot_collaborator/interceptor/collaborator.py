@@ -93,6 +93,9 @@ class CollaboratorPermissionInterceptor:
         audit_excluded_params: set[str] | frozenset[str] | None = None,
         # 锁检查控制
         skip_lock_check: bool = False,
+        # 编辑/操作域：权限必须立足于显式协作者行或所有权，空间成员
+        # 身份合成的 MEMBER 不算
+        explicit: bool = False,
     ):
         """初始化拦截器。
 
@@ -108,6 +111,9 @@ class CollaboratorPermissionInterceptor:
             audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
+            explicit: 编辑/操作域置 True —— 权限判定走显式阶梯，只认所
+                有权与显式协作者行（迭代11 编辑权限申请审批策略 §3.1），
+                Space 身份合成的 MEMBER 在该域没有发言权。读类面保持默认。
         """
         self.required_level = required_level
         self.bot_id_expr = bot_id
@@ -117,6 +123,7 @@ class CollaboratorPermissionInterceptor:
         self.persist_audit_log = persist_audit_log
         self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
+        self.explicit = explicit
         self.resolver = ExpressionResolver()
 
         # 简单模式的提取器
@@ -293,6 +300,7 @@ class CollaboratorPermissionInterceptor:
                                     owner_id=params.owner_id,
                                     user_id=user_id,
                                     required_level=self.required_level,
+                                    explicit=self.explicit,
                                 )
                                 if not result["has_permission"]:
                                     ctx.response = InterceptedResponse(
@@ -358,6 +366,7 @@ class CollaboratorPermissionInterceptor:
                                 owner_id=params.owner_id,
                                 user_id=user_id,
                                 required_level=self.required_level,
+                                explicit=self.explicit,
                             )
                             if not result["has_permission"]:
                                 ctx.response = InterceptedResponse(
@@ -586,6 +595,7 @@ class CollaboratorPermissionInterceptor:
                 owner_id=params.owner_id,
                 user_id=user_id,
                 required_level=self.required_level,
+                explicit=self.explicit,
             )
         except Exception:
             # Bot 不存在等——按无授予处理，让业务层回答更具体的错误。

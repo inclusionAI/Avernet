@@ -25,20 +25,24 @@ Phase C: G1 Semantic Rerank V2
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
 
 from src.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
+from src.domain.services.retrieval_logging import log_stage
 from src.domain.models.domain_coverage import DomainCoverage
 from src.domain.models.retrieval_mode import RetrievalMode
 from src.domain.services.participants_sufficiency_checker import (
     ParticipantsSufficiencyChecker,
 )
 from src.infra.config.feature_flags import FeatureFlags
+from src.application.services.candidate_recommendation_projection import build_recommendation_from_metadata
 
 if TYPE_CHECKING:
+    from src.domain.services.participants_sufficiency_checker import SufficiencyCheckResult
     from src.domain.models.profile_match_score import ProfileMatchScore
     from src.domain.models.worker_profile import WorkerProfile
     from src.domain.services.worker_profile_retrieval_service import (
@@ -172,7 +176,7 @@ class WorkerCandidateRecommendationImpl:
                 default_visibility_filters["availability"]
             )
 
-        logger.info(
+        logger.debug(
             "[VISIBILITY-TRACE] stage=final_filters, endpoint=recommend, user_filters=%s, "
             "default_filters=%s, merged_filters=%s",
             filters,
@@ -317,6 +321,9 @@ class WorkerCandidateRecommendationImpl:
                 "reranker_called": reranker_called_from_vector_match,  # R43: 实际是否调用了 reranker
                 "expand_factor": runtime_config.get("expand_factor", 2) if runtime_config else 2,
             }
+            metadata.update(runtime_config.get("_retrieval", {}) if runtime_config else {})
+            if metadata.get("keyword_search_used"):
+                metadata["candidate_source"] = "hybrid"
 
             return CandidateRecommendationResponse(
                 recommendations=all_recommendations,
@@ -553,14 +560,14 @@ class WorkerCandidateRecommendationImpl:
             vector_min_score = min_score
             rerank_min_score = min_score
 
-        logger.info(
+        logger.debug(
             "[CandidateRec-Supplement] START | "
             f"mode={mode.value}, max_supplements={max_supplements}, "
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
         )
 
         if max_supplements <= 0:
-            logger.info("[CandidateRec-Supplement] SKIP | max_supplements <= 0")
+            logger.debug("[CandidateRec-Supplement] SKIP | max_supplements <= 0")
             return []
 
         # 检查 vector-aware recommendation 是否启用
@@ -575,7 +582,7 @@ class WorkerCandidateRecommendationImpl:
         # G5-first: 使用向量匹配
         if mode == RetrievalMode.EXPERT_DIAGNOSIS:
             if self._vector_match_service is not None:
-                logger.info(
+                logger.debug(
                     "[CandidateRec-Supplement] USING_VECTOR_MATCH | "
                     "mode=EXPERT_DIAGNOSIS, vector_match_service available, calling _try_vector_match"
                 )
@@ -590,7 +597,7 @@ class WorkerCandidateRecommendationImpl:
                 )
                 if result:
                     recommendations, reranker_called = result
-                    logger.info(
+                    logger.debug(
                         "[CandidateRec-Supplement] VECTOR_SUCCESS | "
                         f"got {len(recommendations)} recommendations from vector match, "
                         f"reranker_called={reranker_called}"
@@ -652,7 +659,7 @@ class WorkerCandidateRecommendationImpl:
             vector_min_score = min_score
             rerank_min_score = min_score
 
-        logger.info(
+        logger.debug(
             "[VectorMatch-Try] START | "
             f"question_len={len(question)}, top_k={top_k}, "
             f"exclude_count={len(exclude_profile_keys)}, vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
@@ -674,7 +681,7 @@ class WorkerCandidateRecommendationImpl:
             )
             return None
 
-        logger.info(
+        logger.debug(
             "[VectorMatch-Try] SERVICES_OK | "
             f"has_embedding_gen=True, has_vector_match=True, "
             f"real_embedding_flag={real_embedding_enabled}"
@@ -682,19 +689,17 @@ class WorkerCandidateRecommendationImpl:
 
         try:
             # 生成查询向量
-            logger.info("[VectorMatch-Try] GENERATING_EMBEDDING | question_length=%d", len(question))
+            logger.debug("[VectorMatch-Try] GENERATING_EMBEDDING | question_length=%d", len(question))
+            embedding_started = perf_counter()
             query_embedding = self._embedding_generator.embed(question)
-            logger.info(
-                "[VectorMatch-Try] EMBEDDING_GENERATED | "
-                f"dimension={len(query_embedding)}, "
-                f"first_3_values=[{query_embedding[0]:.4f}, {query_embedding[1]:.4f}, {query_embedding[2]:.4f}]"
-            )
+            log_stage(logger, "embedding", dimension=len(query_embedding),
+                      duration_ms=round((perf_counter() - embedding_started) * 1000, 2))
 
             # 执行向量匹配（传入运行时配置和阈值）
             # Phase B: 传递两个独立的阈值
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] CALLING_MATCH | "
-                f"runtime_config={runtime_config}, filters={filters}, "
+                f"filter_fields={sorted(filters or {})}, "
                 f"vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
             )
             match_results = self._vector_match_service.match(
@@ -709,15 +714,10 @@ class WorkerCandidateRecommendationImpl:
             )
 
             if not match_results:
-                logger.warning(
-                    "[VectorMatch-Try] NO_RESULTS | "
-                    "vector_match_service.match() returned empty list. "
-                    "This could mean: (1) vector store is empty, "
-                    "(2) no profiles match filters, or (3) min_score too high."
-                )
+                logger.debug("[VectorMatch-Try] NO_RESULTS | see retrieval stage counts for cause")
                 return None
 
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] GOT_RESULTS | "
                 f"match_count={len(match_results)}, "
                 f"top_scores=[{', '.join([f'{r.score:.4f}' for r in match_results[:3]])}]"
@@ -725,7 +725,7 @@ class WorkerCandidateRecommendationImpl:
 
             # 直接使用 MatchResult.metadata 中的 payload 数据构建推荐
             # 避免调用 retrieval service，大幅提升性能
-            logger.info("[VectorMatch-Try] BUILDING_RECOMMENDATIONS | from metadata payload")
+            logger.debug("[VectorMatch-Try] BUILDING_RECOMMENDATIONS | from metadata payload")
 
             recommendations = []
             for result in match_results:
@@ -743,7 +743,7 @@ class WorkerCandidateRecommendationImpl:
             # R43: 检查是否有任何结果经过 rerank
             reranker_called = any(r.is_reranked for r in match_results) if match_results else False
 
-            logger.info(
+            logger.debug(
                 "[VectorMatch-Try] SUCCESS | "
                 f"built {len(recommendations)} recommendations, "
                 f"reranker_called={reranker_called}, "
@@ -807,70 +807,9 @@ class WorkerCandidateRecommendationImpl:
         fragment_matches: list[Any] | None = None,
         aggregated_score: float | None = None,
     ) -> CandidateRecommendation | None:
-        """
-        从 MetadataRecord 直接构建推荐（优化：避免 retrieval 查询）
-
-        Args:
-            metadata: MetadataRecord，包含 profile_key, staff_id, domains, active_skill_names 等
-            score: 推荐分数
-            is_supplement: 是否为补充推荐
-            fragment_matches: Fragment 匹配详情列表（可选）
-            aggregated_score: 聚合分数（可选）
-
-        Returns:
-            CandidateRecommendation | None: 推荐结果，失败返回 None
-        """
-        try:
-            # 从 metadata 提取字段
-            profile_key = metadata.profile_key
-            worker_id = metadata.staff_id
-            domains = metadata.domains or []
-            active_skills = metadata.active_skill_names or []
-            short_profile = getattr(metadata, 'short_profile', '')  # 新增：精简画像
-            logger.debug("[CandidateRec-Build] profile_key=%s: short_profile='%s' from metadata", profile_key, short_profile)
-
-            # 推断领域（使用 metadata 中的 domains）
-            domain = domains[0] if domains else "general"
-
-            # 构建推荐理由
-            reasons: list[Union[str, dict[str, Any]]] = []
-
-            # 添加技能信息
-            if active_skills:
-                reasons.append(f"Relevant skills: {', '.join(active_skills[:3])}")
-
-            # 添加结构化 fragment 得分详情
-            if fragment_matches:
-                fragments_data = [
-                    {
-                        "type": fm.fragment_type,
-                        "score": round(fm.score, 4),
-                        "weighted": round(fm.weighted_score, 4),
-                    }
-                    for fm in fragment_matches
-                ]
-                fragment_info: dict[str, Any] = {
-                    "fragments": fragments_data,
-                    "aggregated_score": round(aggregated_score, 4) if aggregated_score else round(score, 4),
-                    "final_score": round(score, 4),
-                }
-                reasons.append(fragment_info)
-
-            return CandidateRecommendation(
-                profile_key=profile_key,
-                worker_id=worker_id,
-                score=score,
-                reasons=reasons,
-                domain=domain,
-                domain_confidence=0.7 if active_skills else 0.5,
-                matched_skills=active_skills,
-                matched_contexts=[],  # metadata 中无此字段
-                is_supplement=is_supplement,
-                short_profile=short_profile,  # 新增：精简画像
-            )
-        except Exception as e:
-            logger.warning(f"Failed to build recommendation from metadata: {e}")
-            return None
+        return build_recommendation_from_metadata(
+            metadata, score, is_supplement, fragment_matches, aggregated_score,
+        )
 
     def _build_recommendation_from_profile(
         self,

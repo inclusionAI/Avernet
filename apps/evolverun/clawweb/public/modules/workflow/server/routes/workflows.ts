@@ -79,18 +79,12 @@ import type { WorkflowDeployHistoryRepository } from "../repositories/workflow-d
 import type { HttpCallbackConfigRepository, HttpCallbackConfigRow } from "../repositories/http-callback-config-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { validateSpec, validateYaml, type ValidationResult } from "../validators/workflow-validator.js";
-import { ApiCache } from "../cache.js";
+import { registerWorkflowListRoutes, workflowsCache } from "./workflows-list.js";
 import {
   hasWorkflowAccess,
   requireWorkflowAccess,
   resolveWorkflowActorId,
 } from "@avernet/clawweb-shared/server/services/workflow-access";
-
-const workflowsCache = new ApiCache<unknown[]>({
-  ttlMs: 2 * 60 * 1000,
-  maxSize: 100,
-  keyPrefix: "workflows",
-});
 
 export function createWorkflowsRouter(
   workflowSpecRepo: WorkflowSpecRepository | null,
@@ -228,8 +222,9 @@ export function createWorkflowsRouter(
         await facadeRepo.deleteByWorkflowId(workflowId);
       }
 
-      // Persist bot permission if botOwnerId is available
-      if (botPermRepo && resolvedBotOwnerId) {
+      // Only creation grants permissions. Editing must not turn inherited access
+      // into a permanent user grant that survives removal from a collaborative Bot.
+      if (!isUpdate && botPermRepo && resolvedBotOwnerId) {
         try {
           await botPermRepo.upsert({
             bot_id: resolvedBotId || null,
@@ -328,136 +323,7 @@ export function createWorkflowsRouter(
     res.json(result);
   }));
 
-  /** GET /list — paginated list of workflow specs, filtered by view permission */
-  router.get("/list", asyncHandler(async (req: Request, res: Response) => {
-    try {
-      if (!workflowSpecRepo) {
-        res.json({ data: [], pagination: { page: 1, pageSize: 10, total: 0, totalPages: 0 } });
-        return;
-      }
-
-      const page = Math.max(1, Number(req.query.page) || 1);
-      const pageSize = Math.min(100, Math.max(10, Number(req.query.pageSize) || 10));
-      const search = typeof req.query.search === "string" ? req.query.search : undefined;
-
-      const { rows, total } = await workflowSpecRepo.findPage({ page, pageSize, search });
-
-      // Apply permission filtering
-      const queryBotOwnerId = req.query.botOwnerId as string | undefined;
-      const headerUserId = req.headers["x-user-id"] as string | undefined;
-      const queryBotId = req.query.botId as string | undefined;
-      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || resolveWorkflowActorId(req) || "";
-      const botId = queryBotId?.trim() || undefined;
-
-      // Require an authenticated identity; reject anonymous callers.
-      if (!botOwnerId && !req.isAdmin) {
-        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
-        return;
-      }
-
-      type ViewPerm = { restrictedIds: Set<string>; viewableIds: Set<string> } | null;
-      let viewPerm: ViewPerm = null;
-      if (!req.isAdmin && botPermRepo && botOwnerId) {
-        viewPerm = await botPermRepo.getViewByIdsForOwner(botOwnerId, botId);
-      } else if (!req.isAdmin && botPermRepo && !botOwnerId) {
-        viewPerm = { restrictedIds: new Set(), viewableIds: new Set() };
-      }
-
-      const filteredRows = viewPerm === null
-        ? rows
-        : rows.filter((r) => {
-            if (!viewPerm!.restrictedIds.has(r.workflow_id)) return false;
-            return viewPerm!.viewableIds.has(r.workflow_id);
-          });
-
-      const data = filteredRows.map((r) => ({
-        workflowId: r.workflow_id,
-        title: r.title ?? r.workflow_id,
-        packId: r.pack_id,
-        updatedAt: toEpochMs(r.gmt_modified),
-        ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
-      }));
-      res.json({
-        data,
-        pagination: {
-          page,
-          pageSize,
-          total,
-          totalPages: Math.ceil(total / pageSize),
-        },
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
-    }
-  }));
-
-  /** GET / — list all saved workflow specs from database, filtered by view permission */
-  router.get("/", asyncHandler(async (req: Request, res: Response) => {
-    try {
-      if (!workflowSpecRepo) {
-        res.json([]);
-        return;
-      }
-
-      const queryBotOwnerId = req.query.botOwnerId as string | undefined;
-      const headerUserId = req.headers["x-user-id"] as string | undefined;
-      const queryBotId = req.query.botId as string | undefined;
-      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || resolveWorkflowActorId(req) || "";
-      const botId = queryBotId?.trim() || undefined;
-
-      // Require an authenticated identity; reject anonymous callers.
-      if (!botOwnerId && !req.isAdmin) {
-        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
-        return;
-      }
-
-      res.set("Cache-Control", "private, max-age=60, must-revalidate");
-
-      const cacheKey = `list:${botOwnerId}:${botId ?? ""}:${req.isAdmin ? "admin" : "user"}`;
-
-      const cached = workflowsCache.get(cacheKey);
-      if (cached) {
-        res.json(cached);
-        return;
-      }
-
-      const rows = await workflowSpecRepo.listSummaries();
-
-      type ViewPerm = { restrictedIds: Set<string>; viewableIds: Set<string> } | null;
-      let viewPerm: ViewPerm = null;
-      if (req.isAdmin) {
-        viewPerm = null;
-      } else if (botPermRepo && botOwnerId) {
-        viewPerm = await botPermRepo.getViewByIdsForOwner(botOwnerId, botId);
-      } else if (!botPermRepo) {
-        // No permission table configured: allow all (isolated/read-only deployments).
-        viewPerm = null;
-      } else {
-        // Has permission table but no owner id: show nothing.
-        viewPerm = { restrictedIds: new Set(), viewableIds: new Set() };
-      }
-
-      const result = rows
-        .filter((r) => {
-          if (viewPerm === null) return true;
-          if (!viewPerm.restrictedIds.has(r.workflow_id)) return false;
-          return viewPerm.viewableIds.has(r.workflow_id);
-        })
-        .map((r) => ({
-          workflowId: r.workflow_id,
-          title: r.title ?? r.workflow_id,
-          packId: r.pack_id,
-          updatedAt: toEpochMs(r.gmt_modified),
-          ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
-        }));
-      workflowsCache.set(cacheKey, result);
-      res.json(result);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
-    }
-  }));
+  registerWorkflowListRoutes(router, workflowSpecRepo, botPermRepo, toEpochMs);
 
   /** GET /:workflowId/history — deploy history list (no spec_json) */
   router.get("/:workflowId/history", asyncHandler(async (req: Request, res: Response) => {

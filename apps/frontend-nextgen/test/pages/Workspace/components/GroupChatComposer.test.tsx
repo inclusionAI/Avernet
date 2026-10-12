@@ -20,6 +20,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
       (
         _props: {
           className?: string;
+          disabled?: boolean;
           fileChip?: unknown;
           imageUpload?: { enabled?: boolean };
           onPasteFile?: (files: File[]) => void;
@@ -43,6 +44,7 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
           <div
             data-testid="sender"
             className={_props.className}
+            data-disabled={_props.disabled ? 'true' : 'false'}
             data-file-chip={_props.fileChip ? 'enabled' : 'disabled'}
             data-image-upload={_props.imageUpload?.enabled ? 'enabled' : 'disabled'}
           >
@@ -140,7 +142,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
-        isRequesting={false}
         connectionStatus="connected"
         mentionConfig={undefined}
         showReconnectToolbar={false}
@@ -155,11 +156,42 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     expect(sender).not.toHaveClass('max-w-4xl');
   });
 
+  it('会话就绪时输入区保持可用（不再随输出中状态禁用，排队由后端拥塞控制兜底）', () => {
+    render(
+      <GroupChatComposer
+        session={session}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        showReconnectToolbar={false}
+        onSend={() => {}}
+        onReconnect={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-disabled', 'false');
+  });
+
+  it('无会话时输入区禁用', () => {
+    render(
+      <GroupChatComposer
+        session={null}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        showReconnectToolbar={false}
+        onSend={() => {}}
+        onReconnect={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-disabled', 'true');
+  });
+
   it('粘贴图片时将图片文件加入当前消息的待发送列表', () => {
     render(
       <GroupChatComposer
         session={session}
-        isRequesting={false}
         connectionStatus="connected"
         mentionConfig={undefined}
         showReconnectToolbar={false}
@@ -181,7 +213,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
-        isRequesting={false}
         connectionStatus="connected"
         mentionConfig={undefined}
         showReconnectToolbar={false}
@@ -203,7 +234,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
-        isRequesting={false}
         connectionStatus="connected"
         mentionConfig={undefined}
         showReconnectToolbar={false}
@@ -227,7 +257,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
-        isRequesting={false}
         connectionStatus="connected"
         mentionConfig={undefined}
         showReconnectToolbar={false}

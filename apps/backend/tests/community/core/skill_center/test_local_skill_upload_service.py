@@ -380,7 +380,9 @@ async def test_package_storage_copy_to_rejects_failed_target_verification():
 
 
 class _Collaborators:
-    def check_collaborator_permission(self, *args):
+    # ``**kwargs`` absorbs the seam's newer levers (``explicit``) without
+    # this double caring which ladder adjudicated.
+    def check_collaborator_permission(self, *args, **kwargs):
         return {"has_permission": True}
 
 
@@ -1098,7 +1100,7 @@ async def test_not_ready_and_storage_failure_leave_no_public_skill():
 
 
 class _Denied:
-    def check_collaborator_permission(self, *args):
+    def check_collaborator_permission(self, *args, **kwargs):
         return {"has_permission": False}
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
@@ -34,11 +34,20 @@ from src.domain.models.worker import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_verify_debug_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
+        str(tmp_path),
+    )
+
+
 def _make_worker(
     worker_id: str = "wrk_test",
     name: str = "Test Bot",
     capabilities: list[str] | None = None,
     external_id: str = "bot-test-uuid",
+    trust_level: TrustLevel = TrustLevel.UNVERIFIED,
 ) -> Worker:
     caps = [
         Capability(name=n, level=CapabilityLevel.INTERMEDIATE)
@@ -50,7 +59,7 @@ def _make_worker(
         identity=WorkerIdentity(name=name, handle=name.lower().replace(" ", "_")),
         responsibilities=["测试"],
         capabilities=caps,
-        state=WorkerState(availability=Availability.PUBLIC, trust_level=TrustLevel.UNVERIFIED),
+        state=WorkerState(availability=Availability.PUBLIC, trust_level=trust_level),
         lifecycle_state=WorkerLifecycleState.ACTIVE,
         source_type=WorkerSourceType.API,
         external_id=external_id,
@@ -75,7 +84,7 @@ def _make_recommendation_response(
     recs = []
     for r in recommendations:
         recs.append(CandidateRecommendation(
-            profile_key=r.get("profile_key", f"profile_{r['worker_id']}"),
+            profile_key=r.get("profile_key", f"{r['worker_id']}:default"),
             worker_id=r["worker_id"],
             score=r.get("score", 0.9),
             reasons=r.get("reasons", []),
@@ -92,6 +101,20 @@ def _make_recommendation_response(
 
 class TestFindPeerReviewers:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("trust_level", [TrustLevel.UNVERIFIED, TrustLevel.GUARDED, TrustLevel.SANDBOX_ONLY])
+    async def test_non_trusted_candidate_is_excluded(self, trust_level):
+        tested = _make_worker()
+        peer = _make_worker(worker_id="peer:owner", trust_level=trust_level)
+        repo = MagicMock()
+        repo.get_by_id.return_value = peer
+        recommendations = MagicMock()
+        recommendations.recommend.return_value = _make_recommendation_response([
+            {"worker_id": "peer:owner", "score": 0.99},
+        ])
+        service = PeerReviewService(AsyncMock(), repo, recommendations)
+        assert await service.find_peer_reviewers(tested) == []
+
+    @pytest.mark.asyncio
     async def test_high_score_returns_reviewer(self) -> None:
         """score >= min_similarity 的推荐应被选为 peer reviewer。"""
         tested = _make_worker(capabilities=["数据库运维", "故障排查"])
@@ -104,7 +127,7 @@ class TestFindPeerReviewers:
 
         # Mock worker_repo for external_id lookup
         mock_repo = MagicMock()
-        peer_worker = _make_worker(worker_id="wrk_peer1", capabilities=["数据库运维"], external_id="bot-peer1")
+        peer_worker = _make_worker(worker_id="wrk_peer1", capabilities=["数据库运维"], external_id="bot-peer1", trust_level=TrustLevel.TRUSTED)
         mock_repo.get_by_id.return_value = peer_worker
 
         service = PeerReviewService(
@@ -163,8 +186,8 @@ class TestFindPeerReviewers:
         assert len(result) == 0
 
     @pytest.mark.asyncio
-    async def test_excludes_workers_without_external_id(self) -> None:
-        """没有 external_id 的 worker 不能做 peer reviewer。"""
+    async def test_trusted_worker_without_external_id_uses_worker_id(self) -> None:
+        """可信 worker 未配置 external_id 时使用其注册 ID。"""
         tested = _make_worker(capabilities=["数据库运维"])
 
         mock_rec_service = MagicMock()
@@ -173,7 +196,7 @@ class TestFindPeerReviewers:
         ])
 
         mock_repo = MagicMock()
-        peer_worker = _make_worker(worker_id="wrk_peer1", capabilities=["数据库运维"], external_id="")
+        peer_worker = _make_worker(worker_id="wrk_peer1", capabilities=["数据库运维"], external_id="", trust_level=TrustLevel.TRUSTED)
         mock_repo.get_by_id.return_value = peer_worker
 
         service = PeerReviewService(
@@ -185,7 +208,8 @@ class TestFindPeerReviewers:
         )
 
         result = await service.find_peer_reviewers(tested)
-        assert len(result) == 0
+        assert len(result) == 1
+        assert result[0].bot_uuid == "wrk_peer1"
 
     @pytest.mark.asyncio
     async def test_returns_top_k(self) -> None:
@@ -199,7 +223,7 @@ class TestFindPeerReviewers:
 
         mock_repo = MagicMock()
         def get_worker(wid):
-            return _make_worker(worker_id=wid, capabilities=["数据库运维"], external_id=f"bot-{wid}")
+            return _make_worker(worker_id=wid, capabilities=["数据库运维"], external_id=f"bot-{wid}", trust_level=TrustLevel.TRUSTED)
         mock_repo.get_by_id.side_effect = get_worker
 
         service = PeerReviewService(
@@ -538,6 +562,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
         ]
 
         mock_judge = AsyncMock()
+        mock_judge._llm = None
         mock_judge.judge.return_value = [
             DimensionJudgment(capability_name="数据库运维", dimension="syntax", confidence=0.9, reasoning="Good"),
             DimensionJudgment(capability_name="数据库运维", dimension="debug", confidence=0.8, reasoning="OK"),
@@ -586,7 +611,10 @@ class TestCapabilityVerifyServiceWithPeerReview:
 
         mock_peer_service.find_peer_reviewers.assert_called_once()
         mock_peer_service.conduct_peer_review.assert_called_once()
-        mock_worker_repo.update_trust_level.assert_called_once()
+        assert mock_worker_repo.update_trust_level.call_args_list == [
+            call("wrk_test", TrustLevel.VERIFYING),
+            call("wrk_test", TrustLevel.TRUSTED),
+        ]
 
     @pytest.mark.asyncio
     async def test_fallback_when_no_peer_reviewers(self) -> None:
@@ -614,6 +642,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
         ]
 
         mock_judge = AsyncMock()
+        mock_judge._llm = None
         mock_judge.judge.return_value = [
             DimensionJudgment(capability_name="数据库运维", dimension="syntax", confidence=0.9, reasoning="Good"),
             DimensionJudgment(capability_name="数据库运维", dimension="debug", confidence=0.8, reasoning="OK"),
@@ -646,4 +675,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
         mock_peer_service.find_peer_reviewers.assert_called_once()
         mock_peer_service.conduct_peer_review.assert_not_called()
         mock_judge.judge.assert_called_once()
-        mock_worker_repo.update_trust_level.assert_called_once()
+        assert mock_worker_repo.update_trust_level.call_args_list == [
+            call("wrk_test", TrustLevel.VERIFYING),
+            call("wrk_test", TrustLevel.TRUSTED),
+        ]

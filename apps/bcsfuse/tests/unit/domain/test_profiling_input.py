@@ -379,8 +379,8 @@ class TestProfilingInput:
 
         assert "documents" in str(exc_info.value).lower()
 
-    def test_profiling_input_invalid_worker_id_raises_error(self):
-        """测试无效 Worker ID 格式抛出错误"""
+    def test_profiling_input_empty_worker_id_raises_error(self):
+        """Worker ID 必须非空，但不要求应用专用前缀。"""
         from src.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
@@ -394,7 +394,7 @@ class TestProfilingInput:
 
         with pytest.raises(ValidationError):
             ProfilingInput(
-                worker_id="invalid_id",  # 缺少 wrk_ 前缀
+                worker_id="",
                 documents=[doc],
             )
 

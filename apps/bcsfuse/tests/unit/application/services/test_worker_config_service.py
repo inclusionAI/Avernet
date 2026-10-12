@@ -42,12 +42,17 @@ class TestWorkerConfigModel:
         config = WorkerConfig(fusion_enable=True)
         assert config.fusion_enable is True
 
-    def test_extra_field_forbidden(self):
-        """extra='forbid' 禁止未知字段"""
+    def test_extra_fields_round_trip_and_known_fields_validate(self):
+        """Provider 配置扩展保留，已知字段仍然校验类型。"""
         from src.domain.models.worker_config import WorkerConfig
         from pydantic import ValidationError
-        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            WorkerConfig(unknown_field=1)
+        config = WorkerConfig(fusion_enable=True, provider_options={"mode": "local"})
+        restored = WorkerConfig.model_validate(config.model_dump())
+        assert restored.model_dump() == {
+            "fusion_enable": True, "provider_options": {"mode": "local"},
+        }
+        with pytest.raises(ValidationError):
+            WorkerConfig(fusion_enable="invalid")
 
     def test_model_dump_round_trip(self):
         from src.domain.models.worker_config import WorkerConfig

@@ -5,6 +5,7 @@ import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { scopeGroup } from '../../../mocks/collaborationScope';
 
 // auto-mock（不带 factory），避免 hoisted factory 内引用 jest.fn() 触发 @jest/globals 的 TDZ。
 // auto-mock 会把 groupService 上的方法替换为 jest.fn()，下面通过 gs 强取并在 beforeEach 设默认实现。
@@ -251,4 +252,28 @@ describe('useGroupWorkspace', () => {
     toastError.mockRestore();
     useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
   });
+});
+
+it('scoped group ignores saved filters, loads no other groups and rejects cross-group selection', async () => {
+  useWorkspaceStore.setState({ selectedGroupId: 'g', groupSearchText: '不匹配', groupKindFilter: 'task_dag' });
+  gs.loadGroupDetailOrBcs.mockResolvedValue({ ok: true, data: scopeGroup });
+  const { result } = renderHook(() => useGroupWorkspace(scopeGroup));
+  await waitFor(() => expect(result.current.groups).toHaveLength(1));
+  expect(result.current.groups[0].groupId).toBe('g');
+  expect(gs.loadGroups).not.toHaveBeenCalled();
+  act(() => result.current.onSelectGroup('other'));
+  expect(useWorkspaceStore.getState().selectedGroupId).toBe('g');
+});
+
+it('a scoped group refresh cannot retain a dissolved or mismatched group', async () => {
+  useWorkspaceStore.setState({ selectedGroupId: 'g' });
+  gs.loadGroupDetailOrBcs.mockResolvedValue({ ok: true, data: { ...scopeGroup, status: 'dissolved' } });
+  const { result } = renderHook(() => useGroupWorkspace(scopeGroup));
+  await act(async () => {
+    await result.current.retryGroups();
+  });
+  expect(result.current.groups).toEqual([]);
+  expect(result.current.selectedGroup).toBeNull();
+  expect(result.current.groupsError).toContain('协作群');
+  expect(gs.loadGroups).not.toHaveBeenCalled();
 });

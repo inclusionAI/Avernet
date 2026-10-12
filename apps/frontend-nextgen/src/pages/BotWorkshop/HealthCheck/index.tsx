@@ -49,8 +49,8 @@ const BotHealthCheckPage: React.FC = () => {
     return (
       <Empty
         title="缺少 Bot 标识"
-        description="请从 Bot 工坊重新进入。"
-        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 工坊</Button>}
+        description="请从 Bot 管理重新进入。"
+        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 管理</Button>}
       />
     );
   }
@@ -61,7 +61,7 @@ const BotHealthCheckPage: React.FC = () => {
       <Empty
         title="无法加载用户身份"
         description={requestIdentity.error}
-        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 工坊</Button>}
+        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 管理</Button>}
       />
     );
   if (detail.loading) return <Spin tip="加载 Bot 配置…" />;
@@ -70,7 +70,7 @@ const BotHealthCheckPage: React.FC = () => {
       <Empty
         title="无法查看 Bot"
         description={detail.error ?? 'Bot 不存在或无权访问'}
-        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 工坊</Button>}
+        action={<Button onClick={() => history.push('/bot-workshop')}>返回 Bot 管理</Button>}
       />
     );
 
@@ -80,7 +80,7 @@ const BotHealthCheckPage: React.FC = () => {
         <Button
           variant="ghost"
           size="icon"
-          aria-label="返回 Bot 工坊"
+          aria-label="返回 Bot 管理"
           onClick={() => history.push('/bot-workshop')}
           leftIcon={<ArrowLeft className="size-4" />}
         />

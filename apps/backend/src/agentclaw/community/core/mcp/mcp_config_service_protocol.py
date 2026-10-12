@@ -92,4 +92,5 @@ class MCPConfigServiceProtocol(Protocol):
         transport_protocol: str | None = None,
         engine_type: str | None = None,
         bot_override: dict[str, Any] | None = None,
+        user_config_snapshot: dict[str, Any] | None = None,
     ) -> tuple[str | None, dict[str, str], str, str | None]: ...

@@ -325,6 +325,7 @@ class PaasServiceFacade(Protocol):
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
         mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Update outbound operation rule for a device."""
         ...

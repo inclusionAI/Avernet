@@ -131,7 +131,7 @@ class TestFuseOptions:
 
         options = FuseOptions()
 
-        assert options.timeout_ms == 15000
+        assert options.timeout_ms == 120000
         assert options.parallel is True
         assert options.include_recommendation is True
         assert options.include_transcript is False
@@ -165,13 +165,13 @@ class TestFuseOptions:
         """测试 timeout_ms 最大值（FuseOptions 层不限，由 FusionRequest 动态校验）"""
         from src.domain.models.fusion_request import FuseOptions
 
-        # FuseOptions 层现在允许最大 300000ms，实际校验在 FusionRequest 层
+        # FuseOptions 层现在允许最大 600000ms，实际校验在 FusionRequest 层
         options = FuseOptions(timeout_ms=150000)  # 在新的范围内
         assert options.timeout_ms == 150000
 
-        # 超过 300000ms 仍然无效
+        # 超过 600000ms 仍然无效
         with pytest.raises(ValidationError):
-            FuseOptions(timeout_ms=350000)  # 超过最大值 300000
+            FuseOptions(timeout_ms=600001)  # 超过最大值 600000
 
 
 class TestFuseMetadata:
@@ -258,38 +258,38 @@ class TestFusionRequestValidation:
             )
 
     def test_timeout_ms_dynamic_validation_g1_g2(self):
-        """测试 G1/G2 模式 timeout_ms 最大 120000ms"""
+        """测试 G1/G2 模式 timeout_ms 最大 600000ms"""
         from src.domain.models.fusion_request import FusionRequest, FuseOptions
 
-        # G1 模式下超过 120000ms 应该失败
+        # G1 模式下超过 600000ms 应该失败
         with pytest.raises(ValidationError):
             FusionRequest(
                 question="测试问题",
                 participants=["zhangsan"],
                 fusion_mode="agent",
-                options=FuseOptions(timeout_ms=150000),
+                options=FuseOptions(timeout_ms=600001),
             )
 
-        # G2 模式下超过 120000ms 应该失败
+        # G2 模式下超过 600000ms 应该失败
         with pytest.raises(ValidationError):
             FusionRequest(
                 question="测试问题",
                 participants=["zhangsan"],
                 fusion_mode="conflict_alignment",
-                options=FuseOptions(timeout_ms=150000),
+                options=FuseOptions(timeout_ms=600001),
             )
 
-        # G1/G2 模式下 120000ms 应该成功
+        # G1/G2 模式下 600000ms 应该成功
         request = FusionRequest(
             question="测试问题",
             participants=["zhangsan"],
             fusion_mode="agent",
-            options=FuseOptions(timeout_ms=120000),
+            options=FuseOptions(timeout_ms=600000),
         )
-        assert request.options.timeout_ms == 120000
+        assert request.options.timeout_ms == 600000
 
     def test_timeout_ms_dynamic_validation_g5(self):
-        """测试 G5 expert_diagnosis 模式 timeout_ms 最大 300000ms"""
+        """测试 G5 expert_diagnosis 模式 timeout_ms 最大 600000ms"""
         from src.domain.models.fusion_request import FusionRequest, FuseOptions
 
         # G5 模式下 180000ms 应该成功
@@ -301,22 +301,22 @@ class TestFusionRequestValidation:
         )
         assert request.options.timeout_ms == 180000
 
-        # G5 模式下 300000ms 应该成功
+        # G5 模式下 600000ms 应该成功
         request = FusionRequest(
             question="测试问题",
             participants=["zhangsan"],
             fusion_mode="expert_diagnosis",
-            options=FuseOptions(timeout_ms=300000),
+            options=FuseOptions(timeout_ms=600000),
         )
-        assert request.options.timeout_ms == 300000
+        assert request.options.timeout_ms == 600000
 
-        # G5 模式下超过 300000ms 应该失败
+        # G5 模式下超过 600000ms 应该失败
         with pytest.raises(ValidationError):
             FusionRequest(
                 question="测试问题",
                 participants=["zhangsan"],
                 fusion_mode="expert_diagnosis",
-                options=FuseOptions(timeout_ms=350000),
+                options=FuseOptions(timeout_ms=600001),
             )
 
 

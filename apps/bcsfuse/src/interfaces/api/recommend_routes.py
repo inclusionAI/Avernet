@@ -11,6 +11,13 @@ Bot 推荐接口,根据问题自动推荐最合适的 Bot 列表。
 - 返回推荐的 Bot 列表
 - 用户可基于推荐结果调用 G1/G2/G5 进行融合决策
 
+当前搜索边界（2026-10-09）：
+- 本接口固定使用 EXPERT_DIAGNOSIS 场景标记，不提供四选一的搜索模式。
+- 正常主链路由 WorkerVectorMatchService 执行片段向量/关键词召回、
+  RRF 合并及可选精排；标记不意味着使用旧 ModeAwareScorer 决定主链路排序。
+- 已移除的旧 AGENT 混合检索实验不是本接口的搜索实现；融合业务模式
+  与搜索算法分开维护，本接口历史兼容/降级行为不因该清理而改变。
+
 群组上下文增强:
 - 当提供 group_id 时,系统会获取群组最近消息并用 LLM 改写问题
 - 改写后的问题更具上下文完整性,能提升推荐准确性
@@ -25,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+from time import perf_counter
 
 from fastapi import APIRouter, status
 
@@ -40,6 +48,8 @@ from src.interfaces.api.dependencies.fusion_dependencies import (
 )
 from src.infra.trace_context import get_trace_id
 from src.application.utils.drm_config_helper import get_recommend_min_score
+
+from src.domain.services.retrieval_logging import log_stage, log_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +134,7 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
         BotRecommendationResponse: 包含推荐的 Bot 列表
     """
     trace_id = get_trace_id()  # 从中间件设置的 contextvars 读取，用于传递给响应
+    started = perf_counter()
 
     # ========================================================================
     # Phase F: min_score Backward Compatibility
@@ -197,24 +208,19 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
 
     effective_min_score = vector_min_score
 
-    logger.info(
-        f"[RECOMMEND][{trace_id}] request | "
-        f"question={request.question}, topK={request.topK}, type={request.type}, "
-        f"min_score={request.min_score}, group_id={request.group_id}, "
-        f"expand_factor={request.expand_factor}, enable_rerank={enable_rerank}, "
-        f"vector_min_score={vector_min_score}, rerank_min_score={rerank_min_score}"
-    )
+    log_stage(logger, "request", question_length=len(request.question), top_k=request.topK,
+              rerank_requested=enable_rerank, expand_factor=request.expand_factor)
 
     # 兼容性诊断日志
-    logger.info(
+    logger.debug(
         f"[RECOMMEND][{trace_id}] COMPAT | "
         f"explicit_min_score_provided={explicit_min_score_provided}, "
         f"min_score_source={min_score_source}, "
         f"compat_mode={min_score_compat_mode}, "
         f"stage={min_score_stage}, "
         f"drm_legacy_min_score={drm_legacy_min_score}, "
-        f"drm_vector_min_score={drm_vector_min_score}, "
-        f"drm_rerank_min_score={drm_rerank_min_score}"
+        f"env_vector_min_score={drm_vector_min_score}, "
+        f"env_rerank_min_score={drm_rerank_min_score}"
     )
 
     # 确定用于推荐的问题
@@ -239,7 +245,7 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
     has_vector_match = candidate_service._vector_match_service is not None
     has_embedding_gen = candidate_service._embedding_generator is not None
 
-    logger.info(
+    logger.debug(
         f"[RECOMMEND][{trace_id}] DIAGNOSTIC | "
         f"route=recommend_routes.py (REAL VECTOR ROUTE), "
         f"vector_aware_flag={vector_aware_enabled}, "
@@ -266,17 +272,17 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
     if filters is None:
         filters = {"availability": ["protected", "public"]}
 
-    logger.info(
+    logger.debug(
         f"[RECOMMEND][{trace_id}] config | "
         f"enable_rerank_requested={enable_rerank}, "
         f"reranker_model={runtime_config.get('reranker_model')}, "
         f"expand_factor={runtime_config.get('expand_factor')}, "
-        f"filters={filters}"
+        f"filter_fields={sorted(filters)}"
     )
 
     # 核心:复用现有服务,participants=None 触发全库推荐
     # Phase B: 传递两个独立的阈值
-    logger.info(
+    logger.debug(
         f"[RECOMMEND][{trace_id}] CALLING SERVICE | "
         f"service=WorkerCandidateRecommendationImpl.recommend, "
         f"mode=EXPERT_DIAGNOSIS, "
@@ -288,24 +294,13 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
 
     candidate_response = candidate_service.recommend(
         question=rewrite_question,
-        mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 使用专家诊断模式进行检索
+        mode=RetrievalMode.EXPERT_DIAGNOSIS,  # 兼容场景标记，非切换到旧评分算法
         participants=None,  # 关键:不传 participants,触发全库推荐
         max_candidates=request.topK,
         runtime_config=runtime_config if runtime_config else None,
         filters=filters,
         vector_min_score=vector_min_score,  # Phase B: 向量召回阈值
         rerank_min_score=rerank_min_score,  # Phase B: rerank 后质量阈值
-    )
-
-    # DIAGNOSTIC: 记录响应详情
-    logger.info(
-        f"[RECOMMEND][{trace_id}] SERVICE RESPONSE | "
-        f"recommendations_count={len(candidate_response.recommendations)}, "
-        f"total_candidates={candidate_response.total_candidates}, "
-        f"selected_candidates={candidate_response.selected_candidates}, "
-        f"mode={candidate_response.mode}, "
-        f"retrieval_source={getattr(candidate_response, 'retrieval_source', 'unknown')}, "
-        f"metadata={getattr(candidate_response, 'metadata', {})}"
     )
 
     # Phase D: 构建响应 metadata（在创建响应之前）
@@ -352,41 +347,14 @@ async def recommend_bots(request: BotRecommendationRequest) -> BotRecommendation
     # 从 Worker Registry 补充 trust_level
     _enrich_trust_level(response)
 
-    # Phase D: 输出诊断 metadata
-    logger.info(
-        f"[RECOMMEND][{trace_id}] DIAGNOSTIC_METADATA | "
-        f"candidate_source={metadata.get('candidate_source', 'unknown')}, "
-        f"vector_search_used={metadata.get('vector_search_used', False)}, "
-        f"fragment_embedding_enabled={metadata.get('fragment_embedding_enabled', False)}, "
-        f"content_reload_enabled={metadata.get('content_reload_enabled', False)}, "
-        f"content_reload_source={metadata.get('content_reload_source', 'none')}, "
-        f"vector_min_score={metadata.get('vector_min_score', 'N/A')}, "
-        f"rerank_min_score={metadata.get('rerank_min_score', 'N/A')}, "
-        f"enable_rerank={metadata.get('enable_rerank', False)}, "
-        f"reranker_model={metadata.get('reranker_model', 'none')}, "
-        f"expand_factor={metadata.get('expand_factor', 2)}, "
-        f"explicit_min_score_provided={metadata.get('explicit_min_score_provided', False)}, "
-        f"min_score_source={metadata.get('min_score_source', 'unknown')}, "
-        f"min_score_compat_mode={metadata.get('min_score_compat_mode', 'unknown')}, "
-        f"min_score_stage={metadata.get('min_score_stage', 'unknown')}"
-    )
-
-    # DIAGNOSTIC: 记录最终响应摘要
+    # Response metadata describes configuration, not proof a stage ran.
+    # Use the real stage counters for execution diagnostics.
     top_rec = response.recommendations[0] if response.recommendations else None
-    logger.info(
-        f"[RECOMMEND][{trace_id}] FINAL RESPONSE | "
-        f"recommendations_count={len(response.recommendations)}, "
-        f"driver_bot_id={response.driver_bot_id}, "
-        f"top_score={top_rec.score if top_rec else 'N/A'}, "
-        f"top_profile_key={top_rec.profile_key if top_rec else 'N/A'}, "
-        f"top_reasons={top_rec.reasons if top_rec else 'N/A'}"
-    )
-
-    # 详细日志（仅在 debug 模式）
-    logger.debug(
-        f"[RECOMMEND][{trace_id}] FULL RESPONSE | %s",
-        response.model_dump()
-    )
+    log_stage(logger, "response", recommendations_count=len(response.recommendations),
+              duration_ms=round((perf_counter() - started) * 1000, 2),
+              top_profile_key=top_rec.profile_key if top_rec else None,
+              top_score=top_rec.score if top_rec else None)
+    log_candidates(logger, "response", ((r.profile_key, r.score) for r in response.recommendations))
 
     return response
 
@@ -424,7 +392,7 @@ async def _rewrite_with_group_context(question: str, group_id: str, trace_id: st
 
         logger.info(
             f"[RECOMMEND][{trace_id}] 问题已改写: "
-            f"original='{question}' -> rewritten='{result.rewritten_question}'"
+            f"original_length={len(question)}, rewritten_length={len(result.rewritten_question)}"
         )
         return result.rewritten_question
 

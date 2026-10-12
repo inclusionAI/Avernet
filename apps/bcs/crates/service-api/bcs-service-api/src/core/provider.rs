@@ -7,6 +7,19 @@ use bcs_domain::{
 
 use crate::{ServiceError, ServiceResult};
 
+/// Public discovery projection. Never contains Provider configuration or credentials.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBasicInfo {
+    pub provider_id: String,
+    pub slug: String,
+    pub name: String,
+    pub auth_mode: ProviderAuthMode,
+    pub enabled: bool,
+    pub protocol_version: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
 /// Outcome of updating a provider-managed bot's capabilities in place.
 ///
 /// Carries the (unchanged) binding alongside the merged `BotCapabilities` so
@@ -52,6 +65,49 @@ pub struct RegisterProviderBotParams {
 
 #[async_trait]
 pub trait ProviderCoreService: Send + Sync {
+    /// Unauthenticated discovery, including disabled Providers. None means absent.
+    async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderBasicInfo>> {
+        let _ = slug;
+        Err(ServiceError::InvalidOperation {
+            message: "provider slug lookup is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    /// Additive registration entry point preserving callers of register_provider.
+    async fn register_provider_with_slug(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if slug.is_some() || admin_callback_url.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "provider slug registration is not configured".to_string(),
+                request_id: None,
+            });
+        }
+        self.register_provider(name, webhook_url, auth_mode, created_by, protocol_version, coordination).await
+    }
+
+    /// Slug omission preserves it; all supplied metadata is updated atomically.
+    async fn update_provider_with_slug(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>,
+    ) -> ServiceResult<ProviderRecord> {
+        if slug.is_some() || admin_callback_url.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "provider slug updates are not configured".to_string(),
+                request_id: None,
+            });
+        }
+        self.update_provider(provider_id, provider_admin_token, authenticated_staff_id, name,
+            webhook_url, protocol_version, coordination, organization_management).await
+    }
+
     async fn register_provider(
         &self,
         name: String,

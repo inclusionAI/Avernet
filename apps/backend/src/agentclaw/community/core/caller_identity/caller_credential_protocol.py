@@ -74,6 +74,7 @@ class CallerRuntimeUpdater(Protocol):
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
+        session_key: str | None = None,
     ) -> None:
         """Append the Caller overlay to the exact runtime device."""
         ...

@@ -2,6 +2,10 @@
 
 Status: approved design; implementation in progress. Target: `dev`. Issue: #2498.
 
+The custom-URL Header exclusion described below is superseded by
+[ADR 0016](../../adr/0016-mcp-url-and-explicit-headers-are-independent.md)
+and the [scoped URL extension](../2026-10-09-mcp-scoped-url-rules/spec.md).
+
 ## Problem and authority
 
 The MCP detail page currently saves one user-level Header map. A user needs to declare a Header value for all owned Bots or override that Header on selected Bots, without installing an MCP or changing Bot URL/API-key settings. [ADR 0015](../../adr/0015-merge-user-and-bot-mcp-headers-per-key.md) is the domain decision. The existing user-only config routes retain their contracts.

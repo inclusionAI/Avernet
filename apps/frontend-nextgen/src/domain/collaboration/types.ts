@@ -106,3 +106,77 @@ export interface InvitationView {
   groupName?: string;
   expiresAt?: number;
 }
+
+// ── 消息投递（拥塞控制）领域类型 ──────────────────────────────────────────────
+
+/** 消息投递状态机（与后端 MessageDeliveryStatus 对齐）。 */
+export type DeliveryStatus =
+  | 'queued'
+  | 'dispatching'
+  | 'running'
+  | 'unknown'
+  | 'cancelling'
+  | 'cancel_unknown'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired'
+  | 'rejected_capacity'
+  | 'pending_context'
+  | 'bound'
+  | 'consumed'
+  | 'discarded_context';
+
+/** 排队等待原因（与后端 DeliveryWaitReason 对齐）。 */
+export type DeliveryWaitReason =
+  | 'prior_message_running'
+  | 'bot_capacity'
+  | 'rate_limited'
+  | 'bot_offline'
+  | 'retry_backoff'
+  | 'paused';
+
+/** 投递流类型（与后端 DeliveryFlowKind 对齐）。 */
+export type DeliveryFlowKind = 'group' | 'direct_a2a' | 'task' | 'system' | 'state_machine';
+
+/** 投递类型（与后端 DeliveryType 对齐）。 */
+export type DeliveryType = 'send' | 'inject';
+
+/** 后端推送的投递状态视图（message.delivery.updated 载荷）。 */
+export interface DeliveryStatusView {
+  delivery_id: string;
+  message_id: string;
+  target_bot_id: string;
+  flow_kind: DeliveryFlowKind;
+  kind: DeliveryType;
+  status: DeliveryStatus;
+  state_version: number;
+  run_id: string | null;
+  wait_reason: DeliveryWaitReason | null;
+  admission_error: string | null;
+  /** 消息正文预览（截断至前 200 字符），供前端排队列表展示。 */
+  content_preview?: string | null;
+}
+
+/** 判断投递是否处于活跃（非终态）。 */
+export function isActiveDelivery(status: DeliveryStatus): boolean {
+  return ![
+    'completed',
+    'failed',
+    'cancelled',
+    'expired',
+    'rejected_capacity',
+    'consumed',
+    'discarded_context',
+  ].includes(status);
+}
+
+/** 判断投递是否处于排队中（可取消）。 */
+export function isQueuedDelivery(status: DeliveryStatus): boolean {
+  return status === 'queued' || status === 'dispatching';
+}
+
+/** 判断投递是否处于处理中（可终止）。 */
+export function isProcessingDelivery(status: DeliveryStatus): boolean {
+  return status === 'running';
+}

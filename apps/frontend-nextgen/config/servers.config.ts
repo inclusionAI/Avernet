@@ -19,7 +19,7 @@ export interface ServerConfig {
   LEGACY_AGENTCLAW?: string;
   /** PrivateChat 会话代理，承载 /proxypass/** 与 WebSocket。 */
   PRIVATE_CHAT_SESSION: string;
-  /** AIX Harness / 模板工厂，承载 /template-factory/**（可选，缺失时回退 localhost:8888）。 */
+  /** ACM 模板工厂，承载 /template-factory/**（保留 AIXHARNESS 键以兼容本地 override）。 */
   AIXHARNESS?: string;
   /** ASF aixcore API，承载 /aixcore/** 系统接口（可选，缺失时回退 localhost:8888）。 */
   AIXCORE?: string;

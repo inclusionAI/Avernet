@@ -90,6 +90,26 @@ def test_in_memory_profile_save_preserves_active_state():
     assert store.get_active(saved.worker_id).display_name == "After Update"
 
 
+def test_in_memory_legacy_upsert_preserves_active_state():
+    store = InMemoryWorkerProfileContentStore()
+    saved = store.save(
+        WorkerProfileContent(
+            worker_id="wrk_legacy_profile_update",
+            profile_id="default",
+            display_name="Before Legacy Update",
+        )
+    )
+    store.activate(saved.worker_id, saved.profile_id)
+    legacy_update = saved.model_copy(
+        update={"display_name": "After Legacy Update", "is_active": False}
+    ).model_dump()
+
+    store.upsert_profile(saved.worker_id, saved.profile_id, legacy_update)
+
+    assert store.get(saved.worker_id, saved.profile_id).is_active is True
+    assert store.get_active(saved.worker_id).display_name == "After Legacy Update"
+
+
 def test_profile_route_compatibility_adapter_uses_only_typed_port():
     typed_store = InMemoryWorkerProfileContentStore()
     adapter = WorkerProfileContentStoreCompatibilityAdapter(typed_store)

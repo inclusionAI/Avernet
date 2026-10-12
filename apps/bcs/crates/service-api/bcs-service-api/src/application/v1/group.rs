@@ -129,6 +129,9 @@ pub struct NormalGroupSummary {
     pub originator_actor_id: String,
     pub participant_count: usize,
     pub driver_bot_uuid: String,
+    /// Display name from the driver participant, or null when unavailable.
+    #[serde(default)]
+    pub driver_bot_name: Option<String>,
     pub strategy: GroupStrategy,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
@@ -225,6 +228,12 @@ pub struct CollaborationGroupDetail {
     pub originator_actor_id: String,
     pub participants: Vec<Participant>,
     pub driver_bot_uuid: String,
+    /// Human actor ID of the driver owner, matching the legacy Group detail.
+    #[serde(default)]
+    pub driver_bot_owner: Option<String>,
+    /// Owner display name, or null when the Human registration has no name.
+    #[serde(default)]
+    pub driver_bot_owner_name: Option<String>,
     pub collaboration: CollaborationConfiguration,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,

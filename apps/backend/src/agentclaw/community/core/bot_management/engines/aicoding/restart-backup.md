@@ -46,7 +46,8 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   returns device groups in descending Bot record ID order (excluding deleted
   records); the existing client selects the first/current group, not historical
   groups. It supplies status and physical provider ID without health probes.
-  Empty/malformed inventories and lookup failures block replacement. No change
+  Empty inventories require terminal-state confirmation as described below;
+  malformed inventories and lookup failures block replacement. No change
   to the shared `get_bot` contract or non-coding restart flow is required.
 - BaaS inventory identifies every live physical target. Commands use the
   existing public `post_bots_api` API and existing PaaS command endpoint, pinned
@@ -58,8 +59,19 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   Missing identity and transport errors are not treated as successful backup.
 - A non-empty BaaS inventory whose devices are all explicitly `STOPPED`/`RELEASED`
   is a confirmed no-live-target case: no container backup is attempted, and the
-  inventory is rechecked immediately before replacement. An actually empty or
-  malformed inventory remains fail-closed.
+  inventory is rechecked immediately before replacement. An empty inventory is
+  allowed only after `get_bot` confirms BaaS `FAILED`
+  with the matching `bot_uuid`, or `RELEASED` (including the client's existing
+  not-found contract), and a second inventory read is still empty. An explicitly mismatched Bot
+  UUID is rejected even for RELEASED. If a device appears during confirmation,
+  abort without running backup against the newly observed container. The same
+  confirmation is repeated by the verifier before replacement. Local Bot
+  `FAILED` alone is not sufficient; durable admission may already have changed
+  it to `PENDING`. Active/pending/unknown BaaS states, malformed inventories and
+  lookup failures remain fail-closed. Non-empty inventories always retain the
+  physical-target backup checks, even for FAILED Bots. This coding-only policy
+  also applies to published/caller instance preconditions; shared BaaS APIs,
+  direct ARCA restarts and other engine policies are unchanged by this change.
 
 ## Runtime contract
 

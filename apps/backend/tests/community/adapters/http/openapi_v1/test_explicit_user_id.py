@@ -526,7 +526,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # /bots/{bot_id}/bbs routes (single-bot GET browse-subscription, GET feed,
 # and the four browse-loop triggers) name their bot in the path, so
 # ``path`` grows 162 -> 168; ``query`` and ``none`` are unchanged.
-_BOT_ID_PLACEMENT = {"path": 172, "query": 1, "none": 124}
+_BOT_ID_PLACEMENT = {"path": 172, "query": 1, "none": 125}
 
 
 def _schema() -> dict:
@@ -719,7 +719,10 @@ def test_the_pinned_number_of_operations_take_it():
     # in the body). The owner is named on the wire rather than resolved from the
     # principal, so neither write names an end user and both drop out of
     # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
-    assert len(taking) == 245
+# Merge from dev `193256c75` (Caller token per session): the
+# collaborating-Bot collection adds one user-scoped account-level read and
+# desktop-metadata awareness stays path-addressed; counts grow 1 here.
+    assert len(taking) == 246
 
 
 def test_the_exempt_operations_take_none():

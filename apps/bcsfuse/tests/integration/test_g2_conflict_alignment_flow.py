@@ -390,8 +390,9 @@ class TestG2ErrorScenarios:
 
         assert response.status_code == 422
 
-    def test_invalid_group_id(self, client: TestClient):
-        """测试无效的 group_id"""
+    def test_external_group_id(self, client: TestClient, g2_consensus_provider):
+        """G2 preserves external identifiers without requiring a grp_ prefix."""
+        set_provider(g2_consensus_provider)
         response = client.post(
             "/api/v1/groups/invalid-group-id/fuse",
             json={
@@ -401,8 +402,8 @@ class TestG2ErrorScenarios:
             },
         )
 
-        # FastAPI Path 参数校验返回 422
-        assert response.status_code in [400, 422]
+        assert response.status_code == 200
+        assert response.json()["group_id"] == "invalid-group-id"
 
 
 class TestG2ResponseStructure:

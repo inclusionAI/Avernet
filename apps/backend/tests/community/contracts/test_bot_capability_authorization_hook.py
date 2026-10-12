@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
     CollaboratorBotCapabilityAuthorizationHook,
@@ -15,8 +16,10 @@ class _Collaborators:
         self.allowed = allowed
         self.calls: list[tuple] = []
 
-    def check_collaborator_permission(self, *args):
-        self.calls.append(args)
+    def check_collaborator_permission(self, *args, explicit: bool = False):
+        # The edit-domain seam: capability mutations key off the explicit
+        # ladder, so the contract records the flag the hook requests.
+        self.calls.append((*args, explicit))
         return {"has_permission": self.allowed}
 
 
@@ -45,7 +48,7 @@ def test_collaborator_decision_is_delegated_to_registered_policy(
     assert hook.can_manage_bot(
         bot_id="bot-1", owner_id="owner", actor_id="manager"
     )
-    assert policy.calls == [("bot-1", "owner", "manager", 1)]
+    assert policy.calls == [("bot-1", "owner", "manager", PermissionLevel.MEMBER, True)]
 
 
 def test_denied_collaborator_fails_closed() -> None:
@@ -57,4 +60,4 @@ def test_denied_collaborator_fails_closed() -> None:
     assert not hook.can_manage_bot(
         bot_id="bot-1", owner_id="owner", actor_id="stranger"
     )
-    assert policy.calls == [("bot-1", "owner", "stranger", 1)]
+    assert policy.calls == [("bot-1", "owner", "stranger", PermissionLevel.MEMBER, True)]

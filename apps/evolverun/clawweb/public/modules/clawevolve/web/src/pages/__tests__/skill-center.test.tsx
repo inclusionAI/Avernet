@@ -8,7 +8,7 @@ import SkillDetail from '../SkillDetail'
 import SkillEventLog from '../../components/SkillEventLog'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../../features/evolve/admin-scope'
 
-const api = vi.hoisted(() => ({ evolve: { adminOwners: vi.fn(), listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(), createSkillVersion: vi.fn(), uploadSkillVersion: vi.fn() }, bots: { list: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: { adminOwners: vi.fn(), listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(), createSkillVersion: vi.fn(), uploadSkillVersion: vi.fn(), updateSkillAsset: vi.fn() }, bots: { list: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
 const auth = vi.hoisted(() => ({ user: { userId: 'viewer' } as { userId: string; isClawEvolveAdmin?: boolean } | null }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: auth.user }) }))
@@ -422,3 +422,54 @@ describe('server-provided Skill Bot metadata', () => {
     expect(screen.getByText('Evidence Bot')).toBeTruthy()
   })
 })
+
+
+it('edits only the Skill space from the detail action row and refreshes the displayed ownership', async () => {
+  api.evolve.getSkillAsset.mockResolvedValue({ ...asset, canEdit: true, spaceId: null });
+  api.evolve.getSkillVersionContent.mockResolvedValue({ files: [], selected: null });
+  api.evolve.getSkillVersionDiff.mockResolvedValue({ files: [] });
+  api.evolve.listSpaces.mockResolvedValue({ items: [{ id: 't1', type: 'TEAM', name: 'Team', role: 'MEMBER' }] });
+  api.evolve.updateSkillAsset.mockResolvedValue({ spaceId: 't1', spaceType: 'TEAM', spaceName: 'Team' });
+  render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1']}><SkillDetail /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑', exact: true }));
+  const dialog = screen.getByRole('dialog', { name: '编辑 Skill' });
+  await within(dialog).findByRole('option', { name: '团队空间 · Team' });
+  expect(within(dialog).getAllByRole('combobox')).toHaveLength(1);
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '所属空间' }), { target: { value: 't1' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(api.evolve.updateSkillAsset).toHaveBeenCalledWith('ASSET-1', { spaceId: 't1' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(screen.getByText('团队空间 · Team')).toBeTruthy();
+  expect(api.evolve.createSkillVersion).not.toHaveBeenCalled();
+});
+
+it('hides metadata editing on a read-only Skill detail', async () => {
+  api.evolve.getSkillAsset.mockResolvedValue({ ...asset, canEdit: false });
+  api.evolve.getSkillVersionContent.mockResolvedValue({ files: [], selected: null });
+  api.evolve.getSkillVersionDiff.mockResolvedValue({ files: [] });
+  render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1']}><SkillDetail /></MemoryRouter>);
+  await screen.findByText('Evidence Skill');
+  expect(screen.queryByRole('button', { name: '编辑', exact: true })).toBeNull();
+});
+
+
+it('keeps the edit dialog and selection on save failure and allows retrying without a space', async () => {
+  api.evolve.getSkillAsset.mockResolvedValue({ ...asset, canEdit: true, spaceId: 't1', spaceType: 'TEAM', spaceName: 'Team' });
+  api.evolve.getSkillVersionContent.mockResolvedValue({ files: [], selected: null });
+  api.evolve.getSkillVersionDiff.mockResolvedValue({ files: [] });
+  api.evolve.listSpaces.mockRejectedValue(new Error('Directory unavailable'));
+  api.evolve.updateSkillAsset.mockRejectedValueOnce(new Error('Save failed'))
+    .mockResolvedValueOnce({ spaceId: null, spaceType: null, spaceName: null });
+  render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1']}><SkillDetail /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole('button', { name: '编辑', exact: true }));
+  const dialog = screen.getByRole('dialog', { name: '编辑 Skill' });
+  expect((within(dialog).getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).value).toBe('t1');
+  fireEvent.change(within(dialog).getByRole('combobox', { name: '所属空间' }), { target: { value: '' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  await within(dialog).findByText('Save failed');
+  expect(screen.getByText('团队空间 · Team')).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(api.evolve.updateSkillAsset).toHaveBeenLastCalledWith('ASSET-1', { spaceId: null });
+  expect(screen.getByText('无空间')).toBeTruthy();
+});

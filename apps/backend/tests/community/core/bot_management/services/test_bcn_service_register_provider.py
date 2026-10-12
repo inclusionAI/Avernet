@@ -65,7 +65,7 @@ def _raise(exc: Exception) -> Callable[..., object]:
 
 
 class TestRegisterProviderBotEnvSelection:
-    """env=dev 时跳过, env=pre/prod 走真实 HTTP 路径."""
+    """env=dev 默认跳过; 显式 local-k8s 开关和 pre/prod 走真实 HTTP 路径."""
 
     @patch(
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
@@ -82,6 +82,68 @@ class TestRegisterProviderBotEnvSelection:
         assert result["skipped"] is True
         assert result["provider_bot_ref"] == "20260502_1cjjh1ik:100000"
         assert result["bot_runtime_token"] == ""
+        assert http.calls_to("post") == []
+
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="dev",
+    )
+    def test_dev_env_uses_standard_provider_when_enabled(self, _mock_env, http):
+        config = BcnConfig(
+            base_url="http://fake-bcn:21000",
+            provider_id="prv_simulator_agentclaw",
+            provider_admin_token="test-bcn-token",
+            provider_registration_enabled=True,
+        )
+        service = BcnService(http_client=http, config=config, timeout=5.0)
+        http.set_response("post", _ok_response(200, {
+            "bot_uuid": "bot-uuid:123",
+            "provider_id": "prv_simulator_agentclaw",
+            "provider_bot_ref": "bot-uuid:123",
+        }))
+
+        result = service.register_provider_bot(
+            teamclaw_bot_uuid="bot-uuid",
+            owner_workno="123",
+            name="Simulator Bot",
+            summary="simulator bot",
+        )
+
+        call = http.calls_to("post")[0]
+        assert call.args[0] == "/providers/prv_simulator_agentclaw/bots"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-bcn-token"
+        assert call.kwargs["headers"]["Content-Type"] == "application/json"
+        assert call.kwargs["json"] == {
+            "name": "Simulator Bot",
+            "summary": "simulator bot",
+            "owners": ["123"],
+            "provider_bot_ref": "bot-uuid:123",
+        }
+        assert result["provider_id"] == "prv_simulator_agentclaw"
+        assert result["provider_bot_ref"] == "bot-uuid:123"
+        assert "skipped" not in result
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="dev",
+    )
+    def test_dev_env_with_enabled_gate_but_missing_token_skips(self, _mock_env, http):
+        config = BcnConfig(
+            base_url="http://fake-bcn:21000",
+            provider_id="prv_simulator_agentclaw",
+            provider_registration_enabled=True,
+        )
+        service = BcnService(http_client=http, config=config, timeout=5.0)
+
+        result = service.register_provider_bot(
+            teamclaw_bot_uuid="bot-uuid",
+            owner_workno="123",
+            name="Bot",
+            summary="",
+        )
+
+        assert result["skipped"] is True
         assert http.calls_to("post") == []
 
     @patch(

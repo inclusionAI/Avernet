@@ -61,7 +61,7 @@ describe('botSessionService', () => {
     chatable: true,
   };
 
-  it('listOwnedBots 过滤 AgentCoding Bot，但保留普通 CC', async () => {
+  it('listOwnedBots 保留 AgentCoding Bot，并保留普通 CC', async () => {
     ownedMocked.listBots.mockResolvedValue({
       data: {
         items: [
@@ -112,6 +112,16 @@ describe('botSessionService', () => {
     expect(res.ok).toBe(true);
     expect(res.ok && res.data).toEqual([
       expect.objectContaining({
+        displayName: '应用实例',
+        isAgentCodingBot: true,
+        templateType: 'applicationCoding',
+      }),
+      expect.objectContaining({
+        displayName: '个人实例',
+        isAgentCodingBot: true,
+        templateType: 'personalCoding',
+      }),
+      expect.objectContaining({
         displayName: '普通 CC',
         isAgentCodingBot: false,
         templateType: 'normalCC',
@@ -120,6 +130,11 @@ describe('botSessionService', () => {
         displayName: '无模板 CC',
         isAgentCodingBot: false,
         templateType: undefined,
+      }),
+      expect.objectContaining({
+        displayName: 'General Coding Bot',
+        isAgentCodingBot: true,
+        templateType: 'generalCC',
       }),
     ]);
   });

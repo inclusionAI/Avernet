@@ -17,6 +17,7 @@ import type {
   PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
+  RuntimeEnvironment,
   ShellVisibility,
   TaskClaimGrantStrategy,
   UserProfilePresentation,
@@ -133,12 +134,20 @@ export const defaultCapabilities: AppCapabilities = {
   getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
   getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  // Open Core 默认按构建变量识别运行环境；变量缺失时沿用 PRE，不在公开源码写入部署域名。
+  getRuntimeEnvironment: (): CapabilityResult<RuntimeEnvironment> => ({
+    status: 'available',
+    value: typeof TEAMCLAW_DEV_ENV !== 'undefined' ? TEAMCLAW_DEV_ENV : 'PRE',
+  }),
   // Open Core（=阿里云外部生产形态）默认激活邀请码门禁——gate 为产品对外准入控制（登录后未绑码则弹不可关闭输入弹窗）。
   // internal overlay 覆盖为 'disabled'（员工形态，ACE 后端无邀请码端点）。门禁生效性由 getLoginStrategy + 本 capability 双门控。
   getInviteCodeGatePolicy: (): CapabilityResult<InviteCodeGatePolicy> => ({ status: 'available', value: 'enabled' }),
   // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
   // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
   getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
+  // 社区 BBS 预发阶段走内部 /api Unified 面 /api/v1/bbs/topics（agentclawengine-pre 已发布；teamclawgw-pre 网关未合并 /openapi/v1/bbs 转发，故 dev 直连 engine）。
+  // Open Core 默认同为 /api/v1/bbs/topics。内容/逛论坛订阅列表均在 /api/v1/bbs 下；逛论坛 §3.1/§3.2 走 /api/v1/bots/{id}/bbs/browse-subscription。
+  getBbsApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/api/v1/bbs/topics' }),
   // Open Core / 开源部署:api-key 直发消息,无 secbaas per-bot 授权闭环 → grant/revoke 短路 no-op,开关只写 BCS task_claim_mode。
   // internal overlay 覆盖为 'secbaas-relay'(经 secbaas 透传人类 Cookie 授权 api-key 调某 bot)。
   getTaskClaimGrantStrategy: (): CapabilityResult<TaskClaimGrantStrategy> => ({ status: 'available', value: 'skip' }),

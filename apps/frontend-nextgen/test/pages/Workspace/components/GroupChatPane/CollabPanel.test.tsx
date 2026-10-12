@@ -93,3 +93,11 @@ describe('CollabPanel', () => {
     expect(screen.getByTestId('collab-panel')).toContainElement(screen.getByRole('button', { name: '终止甲输出' }));
   });
 });
+
+it('locked bot view keeps Bot controls without human identity-switch actions', () => {
+  render(<CollabPanel panel={makePanel({ identityLocked: true })} />);
+  expect(screen.getByText('Bot 自主发言中')).toBeInTheDocument();
+  expect(screen.queryByText('用户协作')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '去发言' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '加入当前会话' })).not.toBeInTheDocument();
+});

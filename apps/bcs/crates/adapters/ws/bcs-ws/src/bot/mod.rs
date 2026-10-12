@@ -1,3 +1,4 @@
+pub mod admission;
 pub mod connection_registry;
 pub mod dispatcher;
 pub mod handler;
@@ -6,6 +7,7 @@ mod run_event_v3;
 pub const BOT_WS_ENDPOINT: &str = "/ws/bot";
 
 pub(crate) use connection_registry::normalize_client_kind;
+pub use admission::{BotWsAdmission, bot_ws_rate_limited_response};
 pub use connection_registry::{BotConnectionProtocol, BotConnectionRegistry};
 pub use dispatcher::{
     dispatch_frame, BotDispatchOutcome, BotDispatchState, BotWsDispatchError, TaskCallbackHook,

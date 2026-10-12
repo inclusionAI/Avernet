@@ -4,6 +4,11 @@
 
 ## Provides
 
+Provider registration/PATCH DTOs accept optional slug. The public
+ProviderBasicInfoResponse contains only the discovery projection; authenticated
+ProviderInfoResponse adds nullable slug and protocol_version. Missing fields in
+legacy admin responses deserialize with null slug and version 1.0.
+
 - External wire DTOs, protocol frames, and compatibility-facing payload models for BCS.
 - Stable request and response shapes shared by adapters and external callers.
 - Versionable protocol contract types.

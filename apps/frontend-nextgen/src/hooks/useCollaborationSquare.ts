@@ -5,7 +5,6 @@ import {
   getPublicBotTargetId,
   resolvePublicBotPrimaryAction,
   type PublicBot,
-  type PublicGroup,
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquareActorContext } from '@/hooks/useCollaborationSquareActorContext';
@@ -13,10 +12,10 @@ import { useCollaborationSquareClipboardActions } from '@/hooks/useCollaboration
 import { useCollaborationSquareList } from '@/hooks/useCollaborationSquareList';
 import { useCollaborationSquareTask } from '@/hooks/useCollaborationSquareTask';
 import { useSquareDeepLink } from '@/hooks/useSquareDeepLink';
+import { useSquareGroupMembers } from '@/hooks/useSquareGroupMembers';
 import {
   CollaborationSquareError,
   collaborationSquareBotService,
-  collaborationSquareGroupService,
   collaborationSquareService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
@@ -60,8 +59,8 @@ export function useCollaborationSquare(resource: SquareResource) {
   }, [store.setBotProfile, store.setSelectedBotId]);
   const closeGroupMembers = useCallback(() => {
     store.setSelectedGroupId(null);
-    store.setGroupMembers([]);
-  }, [store.setGroupMembers, store.setSelectedGroupId]);
+    store.setDetailLoading(false);
+  }, [store.setDetailLoading, store.setSelectedGroupId]);
 
   const handleTargetInvalid = useCallback(
     (targetResource: SquareResource, id: string) => {
@@ -103,22 +102,9 @@ export function useCollaborationSquare(resource: SquareResource) {
     },
     [store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
   );
-  const openGroupMembers = useCallback(
-    async (group: PublicGroup) => {
-      store.setSelectedGroupId(group.id);
-      store.setDetailLoading(true);
-      try {
-        // 公开群成员经群详情 participants 取得（见 adapter.listGroupMembers）。
-        store.setGroupMembers(await collaborationSquareGroupService.listGroupMembers(group.id));
-      } catch (error) {
-        if (error instanceof CollaborationSquareError && error.code === 'target_invalid')
-          handleTargetInvalid('group', group.id);
-        else notifyError(getCollaborationSquareErrorMessage(error));
-      } finally {
-        store.setDetailLoading(false);
-      }
-    },
-    [handleTargetInvalid, store.setDetailLoading, store.setGroupMembers, store.setSelectedGroupId],
+  const openGroupMembers = useSquareGroupMembers(
+    handleTargetInvalid,
+    `${resource}:${humanBotContext?.userId ?? ''}:${humanBotContext?.actorId ?? ''}`,
   );
 
   useSquareDeepLink({

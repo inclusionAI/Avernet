@@ -40,7 +40,7 @@ class TestInMemoryWorkerRegistryStore:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.ACTIVE,
@@ -95,7 +95,7 @@ class TestInMemoryWorkerRegistryStore:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.INACTIVE,
@@ -127,7 +127,7 @@ class TestInMemoryWorkerRegistryStore:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             source_type=WorkerSourceType.FILE,
@@ -163,7 +163,7 @@ class TestInMemoryWorkerRegistryStore:
                 responsibilities=["testing"],
                 capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
                 state=WorkerState(
-                    availability=Availability.AVAILABLE,
+                    availability=Availability.PUBLIC,
                     trust_level=TrustLevel.TRUSTED,
                 ),
             )
@@ -250,7 +250,7 @@ class TestInMemoryWorkerRegistryStore:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.INACTIVE,

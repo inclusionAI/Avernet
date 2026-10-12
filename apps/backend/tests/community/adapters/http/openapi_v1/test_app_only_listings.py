@@ -31,6 +31,9 @@ from agentclaw.community.adapters.http.openapi_v1.authorized_apps import (
     app_view_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots import router as bots_router
+from agentclaw.community.adapters.http.openapi_v1.collaborating_bots import (
+    router as collaborating_bots_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.local import router as local_router
 from agentclaw.community.adapters.http.openapi_v1.routines.owner_router import (
     router as routines_owner_router,
@@ -54,6 +57,7 @@ from agentclaw.community.api.local_bot_workflow_service import (
 )
 from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -265,6 +269,7 @@ def make_client(bots):
                 binder.bind(SpaceSkillVersionQueryServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
+                binder.bind(CollaboratorServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
                 binder.bind(
@@ -288,6 +293,7 @@ def make_client(bots):
         # Same rule for the owner-routines literal: ``routines`` is not a bot id.
         app.include_router(routines_owner_router)
         app.include_router(local_router)
+        app.include_router(collaborating_bots_router)
         app.include_router(bots_router)
         app.include_router(spaces_router)
         app.include_router(space_skill_router)
@@ -725,6 +731,12 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots"): {
         "request": lambda client: client.get("/openapi/v1/bots"),
+        "assert_starved": lambda response: (
+            _data(response)["items"] == [] and _data(response)["total"] == 0
+        ),
+    },
+    ("GET", "/openapi/v1/bots/collaborations"): {
+        "request": lambda client: client.get("/openapi/v1/bots/collaborations"),
         "assert_starved": lambda response: (
             _data(response)["items"] == [] and _data(response)["total"] == 0
         ),

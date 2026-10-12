@@ -15,12 +15,10 @@ import { conversationFavoriteService } from './conversationFavoriteService';
 import type { DomainResult } from './identityService';
 
 export interface ConversationDirectoryResult {
-  /** 当前用户管理的可直接单聊 Bot(AgentCoding Bot 已剔除)。 */
+  /** 当前用户管理的 Bot;包含 AgentCoding Bot,行点击走专用 coding-chat 入口。 */
   managedBots: ChatBotView[];
   /** Human→Bot 好友 Bot,统一带 isFriendBot 标记。 */
   friendBots: ChatBotView[];
-  /** 是否存在独立入口消费的 AgentCoding Bot(供入口降级展示)。 */
-  hasAgentCodingBots: boolean;
 }
 
 function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
@@ -58,7 +56,6 @@ export const conversationService = {
       data: {
         managedBots: ownedResult.data.bots,
         friendBots: friendsResult.ok ? friendsResult.data.items.map(toConversationFriendBotView) : [],
-        hasAgentCodingBots: ownedResult.data.hasAgentCodingBots,
       },
     };
   },

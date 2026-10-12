@@ -272,6 +272,20 @@ class ActingCaller:
             if not owned_by_delegator or record.owner_id == self.user_id
         )
 
+    def granted_bot_owner_pairs(self) -> frozenset[tuple[str, str]] | None:
+        """Exact Bot identities to which an application has been delegated.
+
+        A bare ``bot_id`` is insufficient for collaborator listings because
+        legacy ids such as ``default`` may exist under more than one owner.
+        ``None`` keeps the human-caller meaning: no application filter applies.
+        """
+        if self.app_id is None:
+            return None
+        if self.grants is None:
+            return frozenset()
+        records = self.grants.list_for_app(app_id=self.app_id, user_id=self.user_id)
+        return frozenset((record.bot_id, record.owner_id) for record in records)
+
 
 __all__ = [
     "ADMISSION",

@@ -13,6 +13,8 @@ export interface RouteMeta {
   /** 对应侧栏导航项 id；不占导航位的路由（如 /space-admin、/ticket-center）缺省。 */
   navKey?: string;
   openCore: boolean;
+  /** 精简协作入口保留 boot 与权限，只隐藏全局导航。 */
+  navigationVisibility?: 'hidden';
 }
 
 // Open Core 基线 route meta。内部专属路由已剥离，
@@ -35,6 +37,27 @@ export const routeMetaList: RouteMeta[] = [
     section: 'collab',
     navKey: 'collaboration',
     openCore: true,
+  },
+  {
+    path: '/workspace/collaboration-only',
+    title: '协作群',
+    section: 'collab',
+    openCore: true,
+    navigationVisibility: 'hidden',
+  },
+  {
+    path: '/workspace/collaboration/group',
+    title: '协作群',
+    section: 'collab',
+    openCore: true,
+    navigationVisibility: 'hidden',
+  },
+  {
+    path: '/workspace/collaboration/session',
+    title: '协作群',
+    section: 'collab',
+    openCore: true,
+    navigationVisibility: 'hidden',
   },
   // /workspace 仅重定向到 /workspace/chat（重定向注册在 config/routes.ts，见 plan Task 8），
   // 不占导航位（无 navKey）；重定向落地前存量 /workspace 子路由（invite / bcn chat detail）
@@ -79,6 +102,21 @@ export const routeMetaList: RouteMeta[] = [
     title: '发现任务',
     section: 'collab',
     navKey: 'collaboration-square',
+    openCore: true,
+  },
+  // 实验室一级导航：落地页 (/lab) 为功能卡网格，社区为实验室下首个内容 (/lab/community)。
+  {
+    path: '/lab',
+    title: '实验室',
+    section: 'collab',
+    navKey: 'lab',
+    openCore: true,
+  },
+  {
+    path: '/lab/community',
+    title: '社区',
+    section: 'collab',
+    navKey: 'lab',
     openCore: true,
   },
   {

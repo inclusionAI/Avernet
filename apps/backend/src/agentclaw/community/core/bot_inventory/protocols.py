@@ -108,6 +108,25 @@ class BotInventoryAccessPort(Protocol):
         env: str | None = None,
     ) -> dict[int, PermissionLevel]: ...
 
+    def has_explicit_membership(
+        self,
+        *,
+        bots: Sequence[Mapping[str, Any]],
+        user_id: str,
+        env: str | None = None,
+    ) -> frozenset[int]:
+        """Bot pks whose standing rests on an explicit collaborator row or ownership.
+
+        The complement of the Space-synthesized answer in
+        :meth:`get_operable_permission_levels`: a member of the Bot's Space
+        reads cards at MEMBER there, but the edit/operations actions stay
+        with the editors the Owner granted or approved (the product rule of
+        迭代11 编辑权限申请审批策略 §3.1), and the inventory needs to tell
+        the two origins apart to honour that. Owners are always in the set —
+        ownership is the most explicit relation there is.
+        """
+        ...
+
 
 @runtime_checkable
 class BotInventoryTemplatePort(Protocol):

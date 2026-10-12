@@ -105,6 +105,7 @@ def sample_candidate_recommendation():
     """创建示例候选人推荐"""
     return CandidateRecommendation(
         profile_key="staff_recommended_001:default",
+        worker_id='staff_recommended_001',
         score=0.85,
         reasons=["Relevant skills: Security"],
         domain="security",
@@ -123,6 +124,7 @@ def sample_recommendation_response(sample_candidate_recommendation):
             sample_candidate_recommendation,
             CandidateRecommendation(
                 profile_key="staff_recommended_002:default",
+                worker_id='staff_recommended_002',
                 score=0.80,
                 reasons=["Relevant skills: Database"],
                 domain="database",
@@ -260,6 +262,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
             recommendations=[
                 CandidateRecommendation(
                     profile_key="staff_001:default",
+                    worker_id='staff_001',
                     score=0.9,
                     reasons=["Explicit participant"],
                     domain="security",
@@ -270,6 +273,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
                 ),
                 CandidateRecommendation(
                     profile_key="staff_002:default",
+                    worker_id='staff_002',
                     score=0.9,
                     reasons=["Explicit participant"],
                     domain="legal",
@@ -280,6 +284,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
                 ),
                 CandidateRecommendation(
                     profile_key="staff_003:default",
+                    worker_id='staff_003',
                     score=0.9,
                     reasons=["Explicit participant"],
                     domain="database",
@@ -345,6 +350,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
                 # 显式 participant
                 CandidateRecommendation(
                     profile_key="staff_001:default",
+                    worker_id='staff_001',
                     score=0.9,
                     reasons=["Explicit participant"],
                     domain="security",
@@ -356,6 +362,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
                 # 补充推荐
                 CandidateRecommendation(
                     profile_key="staff_supp_001:default",
+                    worker_id='staff_supp_001',
                     score=0.85,
                     reasons=["Recommended for security expertise"],
                     domain="security",
@@ -366,6 +373,7 @@ class TestExpertDiagnosisServiceWithCandidateRecommendation:
                 ),
                 CandidateRecommendation(
                     profile_key="staff_supp_002:default",
+                    worker_id='staff_supp_002',
                     score=0.80,
                     reasons=["Recommended for database expertise"],
                     domain="database",

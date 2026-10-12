@@ -3,9 +3,10 @@ import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { DomainError, DomainResult } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import type { UseGroupSessionsResult } from './useGroupSessions.types';
+import { useGroupSessionSelection } from './useGroupSessionSelection';
 import { useSessionMutations } from './useSessionLeave';
 import { useSessionMap } from './useSessionMap';
 import { useSessionMemberSync } from './useSessionMemberSync';
@@ -26,13 +27,15 @@ function errOf(res: { ok: false; error: DomainError }): DomainError {
  *
  * 层级约束：Hook 调用 Service（groupService / sessionService），
  * 不直接读 DTO 字段；session 列表数据由本 Hook 以 groupId 键控的局部 state 持有
- * （支持多个群同时展开展示各自会话），
- * Store 只承载 selection/tab/search/收藏标记。
  *
  * @param groupId 当前选中群（chat pane 的数据面，选中群切换必重拉）
  * @param expandedGroupIds 侧栏当前展开的群 id（未缓存的展开群会静默加载一次，之后复用缓存）
  */
-export function useGroupSessions(groupId: string | null, expandedGroupIds: string[] = []): UseGroupSessionsResult {
+export function useGroupSessions(
+  groupId: string | null,
+  expandedGroupIds: string[] = [],
+  pinnedSession?: SessionView,
+): UseGroupSessionsResult {
   const selectedSessionId = useWorkspaceStore((s) => s.selectedSessionId);
   const sessionSearchText = useWorkspaceStore((s) => s.sessionSearchText);
   const activeIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
@@ -54,13 +57,14 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     rawByGroupIdRef,
   } = useSessionMap(groupId, expandedGroupIds, activeIdentityId);
 
-  // 会话成员详情补齐与 mode 更新(从本 Hook 拆出以控体积,详见 useSessionMemberSync)。
-  // 注意：useSessionMemberSync 需要选中会话的 participants 长度作为依赖，
-  // 但 selectedSession 在下方推导，此处先占位，推导后立即调用。
   const selectSession = useWorkspaceStore((s) => s.selectSession);
   const setSessionSearchText = useWorkspaceStore((s) => s.setSessionSearchText);
 
-  const { deleteSession, leaveSession } = useSessionMutations(applyMapUpdate, selectSession);
+  const selectAfterRemoval = useCallback(
+    (id: string | null) => selectSession(pinnedSession ? null : id),
+    [pinnedSession, selectSession],
+  );
+  const { deleteSession, leaveSession } = useSessionMutations(applyMapUpdate, selectAfterRemoval);
 
   const EMPTY_SESSIONS: SessionView[] = useMemo(() => [], []);
 
@@ -69,17 +73,6 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     () => (groupId ? rawByGroupId[groupId] ?? EMPTY_SESSIONS : EMPTY_SESSIONS),
     [rawByGroupId, groupId, EMPTY_SESSIONS],
   );
-
-  // 自动选中首条会话：当 groupId 存在、列表非空、且未选中任何会话时。
-  useEffect(() => {
-    if (!groupId || sessionViews.length === 0) return;
-    if (useWorkspaceStore.getState().selectedSessionId) return;
-    // 以 ref 为准消费最新缓存：点击群 tab 触发的重拉会在同一 commit 内先清掉陈旧缓存
-    //（ref 同步更新、state 下一帧才到），闭包里的 sessionViews 可能仍是旧列表，
-    // 直接消费会自动选中当前角色已离开的会话，导致右栏对其发起请求而报错。
-    const first = (rawByGroupIdRef.current[groupId] ?? [])[0];
-    if (first) selectSession(first.sessionId);
-  }, [groupId, rawByGroupIdRef, sessionViews, selectSession]);
 
   // 收藏状态来源于后端 sessions 列表返回的 collected 字段（映射为 SessionView.favorite）。
   // 收藏过滤已下沉到 GroupItem（每群独立 tab），这里仅暴露收藏 ID 给组件层。
@@ -110,20 +103,31 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
 
   const sessions = groupId ? sessionsByGroupId[groupId] ?? EMPTY_SESSIONS : EMPTY_SESSIONS;
 
-  const selectedSession = useMemo(
-    () => sessionViews.find((s) => s.sessionId === selectedSessionId) ?? null,
-    [sessionViews, selectedSessionId],
+  const selectedSession = useGroupSessionSelection(
+    groupId,
+    sessionViews,
+    rawByGroupIdRef,
+    selectSession,
+    updateGroupSessions,
+    pinnedSession,
   );
 
   const { updateMemberMode, updateMemberScope, applySessionUpdate } = useSessionMemberSync(
-    selectedSessionId,
+    pinnedSession ? selectedSession?.sessionId ?? null : selectedSessionId,
     applyMapUpdate,
     selectedSession?.participants.length ?? 0,
     rawByGroupId,
   );
 
   // 陈旧选中兜底（拆出以控体积，详见 useStaleSessionFallback）。
-  useStaleSessionFallback(groupId, isLoading, rawByGroupId, applyMapUpdate, selectSession, identityEpochRef);
+  useStaleSessionFallback(
+    pinnedSession ? null : groupId,
+    isLoading,
+    rawByGroupId,
+    applyMapUpdate,
+    selectSession,
+    identityEpochRef,
+  );
 
   const createSessionIn = useCallback(
     async (

@@ -11,16 +11,16 @@ use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
 };
-use mysql_async::{Column as MysqlColumn, Row as MysqlRow, Value as MysqlValue};
+use mysql_async::{consts::ColumnFlags, Column as MysqlColumn, Row as MysqlRow, Value as MysqlValue};
 
 mod manager;
 
 pub use bcs_config_api::{DataSourceConfig, MysqlDbConfig, StatementProtocol};
 pub use manager::{AsyncMysqlDbManager, MysqlDbManager, MysqlExecuteResult, MysqlTransaction};
 
-// mysql_common::constants::ColumnFlags::BINARY_FLAG. The flag type is not
-// re-exported through mysql_async, so keep the bit value local and documented.
-const MYSQL_BINARY_FLAG_BITS: u16 = 128;
+// MySQL collation ID 63 denotes the binary character set. BINARY_FLAG also
+// applies to text with a _bin collation, so it cannot identify binary values.
+const MYSQL_BINARY_CHARSET_ID: u16 = 63;
 
 #[derive(Clone)]
 pub struct MysqlDbPlugin {
@@ -222,8 +222,12 @@ fn mysql_bytes_to_db_value(value: Vec<u8>, column: &MysqlColumn) -> DbValue {
     if column.column_type().is_numeric_type() {
         return numeric_text_bytes_to_db_value(value);
     }
-    if column.flags().bits() & MYSQL_BINARY_FLAG_BITS != 0
-        || column.column_type().is_geometry_type()
+    let binary = if column.column_type().is_character_type() {
+        column.character_set() == MYSQL_BINARY_CHARSET_ID
+    } else {
+        column.flags().contains(ColumnFlags::BINARY_FLAG)
+    };
+    if binary || column.column_type().is_geometry_type()
     {
         return DbValue::Bytes(value);
     }
@@ -293,6 +297,51 @@ mod tests {
             mysql_value_to_db_value(MysqlValue::Bytes(b"hello".to_vec())),
             DbValue::String("hello".to_string())
         );
+    }
+
+    #[test]
+    fn binary_collation_text_columns_decode_as_strings() {
+        use mysql_async::consts::{ColumnFlags, ColumnType};
+        for (column_type, charset) in [
+            (ColumnType::MYSQL_TYPE_VARCHAR, 65), // ascii_bin
+            (ColumnType::MYSQL_TYPE_VAR_STRING, 46), // utf8mb4_bin
+            (ColumnType::MYSQL_TYPE_BLOB, 46), // TEXT with utf8mb4_bin
+        ] {
+            let column = MysqlColumn::new(column_type)
+                .with_character_set(charset).with_flags(ColumnFlags::BINARY_FLAG);
+            assert_eq!(mysql_value_to_db_value_for_column(
+                MysqlValue::Bytes(b"first".to_vec()), &column,
+            ), DbValue::String("first".to_string()), "{column_type:?}");
+        }
+    }
+
+    #[test]
+    fn binary_charset_columns_preserve_utf8_bytes() {
+        use mysql_async::consts::{ColumnFlags, ColumnType};
+        for column_type in [ColumnType::MYSQL_TYPE_STRING,
+            ColumnType::MYSQL_TYPE_VAR_STRING, ColumnType::MYSQL_TYPE_BLOB] {
+            let column = MysqlColumn::new(column_type)
+                .with_character_set(63).with_flags(ColumnFlags::BINARY_FLAG);
+            assert_eq!(mysql_value_to_db_value_for_column(
+                MysqlValue::Bytes(b"first".to_vec()), &column,
+            ), DbValue::Bytes(b"first".to_vec()), "{column_type:?}");
+        }
+    }
+
+    #[test]
+    fn text_protocol_temporal_columns_keep_string_values() {
+        use mysql_async::consts::ColumnType;
+        for (column_type, text) in [
+            (ColumnType::MYSQL_TYPE_DATE, "2026-10-09"),
+            (ColumnType::MYSQL_TYPE_TIME, "12:34:56"),
+            (ColumnType::MYSQL_TYPE_DATETIME, "2026-10-09 12:34:56"),
+            (ColumnType::MYSQL_TYPE_TIMESTAMP, "2026-10-09 12:34:56"),
+        ] {
+            let column = MysqlColumn::new(column_type).with_character_set(63);
+            assert_eq!(mysql_value_to_db_value_for_column(
+                MysqlValue::Bytes(text.as_bytes().to_vec()), &column,
+            ), DbValue::String(text.into()), "{column_type:?}");
+        }
     }
 
     #[test]

@@ -123,7 +123,7 @@ def sample_candidate_bundle() -> CandidateBundle:
         capabilities=[Capability(name="coding", level=CapabilityLevel.ADVANCED)],
         domains=["development"],
         state=WorkerState(
-            availability=Availability.AVAILABLE,
+            availability=Availability.PUBLIC,
             trust_level=TrustLevel.TRUSTED,
             current_load=0.0,
         ),

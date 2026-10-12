@@ -77,11 +77,11 @@ def _install_test_hook(developer: Path) -> Path:
     hook.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HOOK_PATH, hook)
     hook.chmod(0o755)
-    scanner = developer / "singlebox/ci/check_secrets.py"
+    scanner = developer / "devops/hook/check_secrets.py"
     scanner.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO_ROOT / "singlebox/ci/check_secrets.py", scanner)
+    shutil.copy2(REPO_ROOT / "devops/hook/check_secrets.py", scanner)
     scanner.chmod(0o755)
-    dispatcher = developer / "singlebox/ci/pre_push.sh"
+    dispatcher = developer / "devops/hook/pre_push.sh"
     dispatcher.parent.mkdir(parents=True, exist_ok=True)
     dispatcher.write_text(
         """#!/usr/bin/env bash

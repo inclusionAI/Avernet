@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"cc-sess-1"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"正在"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"分析"}}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}}
+{"type":"result","subtype":"success","result":"完成了","session_id":"cc-sess-1"}

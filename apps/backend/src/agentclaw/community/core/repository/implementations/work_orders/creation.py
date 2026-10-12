@@ -85,7 +85,6 @@ class _WorkOrderCreationRepository:
         recipients = (
             approver_user_ids
             if event_category is NotificationCategory.APPROVAL
-            and approval_mode is WorkOrderApprovalMode.MANUAL
             else recipient_user_ids
         )
         if not recipients:
@@ -115,7 +114,11 @@ class _WorkOrderCreationRepository:
                 is_auto = approval_mode is WorkOrderApprovalMode.AUTO
                 # AUTO is claimed in this creation transaction. Its business
                 # effect and result notice are completed by the service later.
-                result_status = WorkOrderEventStatus.PENDING
+                result_status = (
+                    WorkOrderEventStatus.PROCESSING
+                    if is_auto
+                    else WorkOrderEventStatus.PENDING
+                )
                 row = self._WorkOrder(
                     work_order_no=self._new_no(),
                     biz_type=biz_type,

@@ -13,7 +13,7 @@ class TestProjectStructure:
         """验证 pyproject.toml 存在"""
         from pathlib import Path
 
-        pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
         assert pyproject_path.exists(), f"pyproject.toml not found: {pyproject_path}"
 
 
@@ -52,13 +52,13 @@ class TestLayerImports:
 
     def test_adapters_layer_importable(self):
         """验证 adapters 层可导入"""
-        from src import adapters
+        from src.domain.services import adapters
         assert adapters is not None
 
-    def test_openclaw_adapter_importable(self):
-        """验证 openclaw adapter 可导入"""
-        from src.adapters import openclaw
-        assert openclaw is not None
+    def test_openclaw_adapter_contract_importable(self):
+        """验证共享 OpenClaw 契约可导入，不依赖旧的空骨架包。"""
+        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
+        assert OpenClawAdapter is not None
 
 
 class TestSchemaLoading:
@@ -68,7 +68,7 @@ class TestSchemaLoading:
         """验证 schemas 目录存在"""
         from pathlib import Path
 
-        schema_dir = Path(__file__).resolve().parents[1] / "schemas"
+        schema_dir = Path(__file__).resolve().parents[2] / "schemas"
         assert schema_dir.exists(), f"Schema directory not found: {schema_dir}"
 
     def test_worker_schema_loadable(self):
@@ -76,7 +76,7 @@ class TestSchemaLoading:
         from pathlib import Path
         import json
 
-        schema_dir = Path(__file__).resolve().parents[1] / "schemas"
+        schema_dir = Path(__file__).resolve().parents[2] / "schemas"
         worker_schema_path = schema_dir / "Worker.json"
         assert worker_schema_path.exists(), f"Worker.json not found: {worker_schema_path}"
 
@@ -87,7 +87,7 @@ class TestSchemaLoading:
         """验证所有必需的 Schema 文件存在"""
         from pathlib import Path
 
-        schema_dir = Path(__file__).resolve().parents[1] / "schemas"
+        schema_dir = Path(__file__).resolve().parents[2] / "schemas"
         required_schemas = [
             "Worker.json",
             "TaskSpec.json",

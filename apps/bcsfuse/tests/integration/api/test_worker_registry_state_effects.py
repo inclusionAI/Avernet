@@ -19,6 +19,9 @@ Stage 1 Phase 4.5: Production Wiring Verification
 import os
 import tempfile
 import pytest
+from tests.fixtures.registry_recommendation import registry_recommendation_service
+from src.infra.config.feature_flags import FeatureFlags
+
 from fastapi.testclient import TestClient
 
 from src.interfaces.api.app import app
@@ -35,6 +38,13 @@ from src.infra.adapters.sqlite_worker_audit_log_store import SQLiteWorkerAuditLo
 from src.interfaces.api.dependencies import fusion_dependencies
 from src.domain.models.worker_profile import WorkerProfile, ProfileType, WorkerProfileScanResult
 from src.domain.models.skill_profile import SkillProfile
+
+
+@pytest.fixture(autouse=True)
+def enable_registry_filtering(monkeypatch):
+    """Exercise the filtering policy independently of deployment defaults."""
+    monkeypatch.setattr(FeatureFlags, "is_registry_aware_filtering_enabled", lambda: True)
+    monkeypatch.setattr(FeatureFlags, "is_real_embedding_enabled", lambda: True)
 
 
 @pytest.fixture
@@ -76,10 +86,12 @@ def persistent_stores(temp_db_path):
 
 
 @pytest.fixture
-def client(persistent_stores):
+def client(persistent_stores, monkeypatch):
     """创建测试客户端"""
     # 重置 fusion services 以使用新的 stores
     fusion_dependencies.reset_fusion_services()
+    from src.interfaces.api.dependencies import worker_dependencies
+    monkeypatch.setattr(worker_dependencies, "_get_profile_embedding_store", lambda: None)
 
     with TestClient(app) as c:
         yield c
@@ -93,11 +105,10 @@ def create_test_profile(
     skills: list[str] | None = None,
 ) -> WorkerProfile:
     """创建测试用的 WorkerProfile"""
-    # Parse profile_key: "staff_XXX:default" -> staff_id=XXX, profile_id=default
+    # The staff identifier is preserved verbatim in profile_key.
     parts = profile_key.split(":")
     if len(parts) == 2:
-        # Remove "staff_" prefix if present
-        staff_id = parts[0].replace("staff_", "")
+        staff_id = parts[0]
         profile_id = parts[1]
     else:
         staff_id = profile_key
@@ -243,7 +254,7 @@ class TestWorkerRegistryStateAPIEffects:
             "identity": {"name": "Persist Test Bot", "handle": "@persist-test"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "public", "trust_level": "trusted"},
         })
 
         runtime_service = WorkerRuntimeStateService(
@@ -436,9 +447,8 @@ class TestRegistryStateAffectsRecommendation:
             profile_filter=profile_filter,
         )
 
-        recommendation_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_service,
-            min_experts=2,
+        recommendation_service = registry_recommendation_service(
+            retrieval_service, profile_filter, [online_profile, offline_profile], min_experts=2,
         )
 
         # 调用 recommendation
@@ -533,8 +543,8 @@ class TestPhase45ProductionWiringSummary:
             profile_filter=profile_filter,  # 关键：filter 注入
         )
 
-        recommendation_service = WorkerCandidateRecommendationImpl(
-            retrieval_service=retrieval_service,
+        recommendation_service = registry_recommendation_service(
+            retrieval_service, profile_filter, [online_profile, offline_profile],
         )
 
         expert_diagnosis_service = ExpertDiagnosisService(

@@ -83,6 +83,7 @@ def mock_service():
     mock.update_outbound_operation_rule = AsyncMock()
     mock.update_device_ttl = AsyncMock()
     mock.restart_device = AsyncMock()
+    mock.close = AsyncMock()
     return mock
 
 
@@ -1282,7 +1283,104 @@ class TestUpdateOutboundOperationRule:
             template_id=42
         )
         mock_service.update_outbound_operation_rule.assert_called_once_with(
-            "sandbox-abc123", rule, mode=None
+            "sandbox-abc123", rule, mode=None, session_key=None
+        )
+        mock_service.close.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_update_outbound_rule_closes_service_on_paas_error(
+        self, facade, mock_service
+    ):
+        """The request-scoped service is closed when the operation fails."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.__class__.__name__ = "TeClawPaasService"
+        mock_service.update_outbound_operation_rule = AsyncMock(
+            side_effect=PaasError(ErrorCode.CONFIG_INVALID, "Invalid session key")
+        )
+
+        with pytest.raises(DeviceFacadeException):
+            await facade.update_outbound_operation_rule(
+                "sandbox-abc123@42", MagicMock()
+            )
+
+        mock_service.close.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_update_outbound_rule_close_failure_does_not_mask_success(
+        self, facade, mock_service
+    ):
+        """Cleanup errors are logged and do not replace the operation result."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.update_outbound_operation_rule = AsyncMock(return_value=True)
+        mock_service.close = AsyncMock(side_effect=RuntimeError("close failed"))
+
+        from secbaas.community.api.device_manage import OutBoundOperationRule
+
+        rule = OutBoundOperationRule(header_operation_rules=[])
+
+        assert (
+            await facade.update_outbound_operation_rule("sandbox-abc123@42", rule)
+            is True
+        )
+        mock_service.close.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_update_outbound_rule_close_failure_does_not_mask_error(
+        self, facade, mock_service
+    ):
+        """Cleanup errors do not replace the original PaasError."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.__class__.__name__ = "TeClawPaasService"
+        paas_error = PaasError(ErrorCode.DEVICE_UNAVAILABLE, "Device unavailable")
+        mock_service.update_outbound_operation_rule = AsyncMock(side_effect=paas_error)
+        mock_service.close = AsyncMock(side_effect=RuntimeError("close failed"))
+
+        with pytest.raises(DeviceFacadeException) as exc_info:
+            await facade.update_outbound_operation_rule(
+                "sandbox-abc123@42", MagicMock()
+            )
+
+        assert exc_info.value.original_error is paas_error
+        mock_service.close.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_update_outbound_rule_passes_session_key(self, facade, mock_service):
+        """TeClaw session-scoped append receives the raw session key."""
+        facade._device_template_service.get_by_template_id.return_value = (
+            make_mock_template()
+        )
+        facade._factory.create.return_value = mock_service
+        mock_service.update_outbound_operation_rule = AsyncMock(return_value=True)
+
+        from secbaas.community.api.device_manage import (
+            OutBoundOperationRule,
+            OutBoundOperationRuleUpdatedMode,
+        )
+
+        rule = OutBoundOperationRule(header_operation_rules=[])
+
+        result = await facade.update_outbound_operation_rule(
+            "sandbox-abc123@42",
+            rule,
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            session_key="session-key",
+        )
+
+        assert result is True
+        mock_service.update_outbound_operation_rule.assert_called_once_with(
+            "sandbox-abc123",
+            rule,
+            mode=OutBoundOperationRuleUpdatedMode.APPEND,
+            session_key="session-key",
         )
 
     @pytest.mark.asyncio

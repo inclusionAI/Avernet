@@ -659,6 +659,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub group_session_ws: GroupSessionWsConfig,
 
+    /// Rate limit for bot WebSocket upgrades (`/ws/bot`).
+    #[serde(default)]
+    pub bot_ws_admission: crate::bot_ws_admission_config::BotWsAdmissionConfig,
+
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
     #[serde(default)]
@@ -1192,6 +1196,7 @@ impl Default for BcsConfig {
             auth_token: None,
             gateway_principal: GatewayPrincipalConfig::default(),
             group_session_ws: GroupSessionWsConfig::default(),
+            bot_ws_admission: Default::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
@@ -1675,6 +1680,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
             as Box<dyn std::error::Error>
     })?;
     config.group_session_ws.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
+    config.bot_ws_admission.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;

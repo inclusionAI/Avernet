@@ -115,3 +115,17 @@ it('hides every scope option and its indicator when favorites are unsupported', 
   expect(screen.queryByText('仅看已收藏')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '发起归属' })).not.toHaveClass('bg-primary/10');
 });
+
+it('团队他人来源显示开发中且原生禁用，鼠标/键盘不触发选择；我的来源仍可选', () => {
+  const handlers = callbacks();
+  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" othersDisabled {...handlers} />);
+  const others = screen.getByRole('radio', { name: '他人发起的（开发中）' });
+  expect(others).toBeDisabled();
+  expect(others).toHaveClass('text-muted-foreground');
+  fireEvent.click(others);
+  fireEvent.keyDown(others, { key: 'Enter' });
+  fireEvent.keyDown(others, { key: ' ' });
+  expect(handlers.onOriginChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('radio', { name: '我发起的' }));
+  expect(handlers.onOriginChange).toHaveBeenCalledWith('mine');
+});

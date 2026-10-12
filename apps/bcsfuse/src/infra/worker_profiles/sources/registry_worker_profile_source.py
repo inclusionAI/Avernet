@@ -189,7 +189,7 @@ class RegistryWorkerProfileSource:
 
         # 确定 profile_id：优先使用 worker.active_profile_key 中的 profile_id
         profile_id = (
-            worker.active_profile_key.split(":")[1]
+            worker.active_profile_key.rsplit(":", 1)[1]
             if worker.active_profile_key and ":" in worker.active_profile_key
             else "default"
         )

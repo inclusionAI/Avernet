@@ -30,6 +30,7 @@ from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionIn
 from secbaas.community.api.device_manage import (
     DeviceCallbackContext,
     ErrorCode,
+    OutBoundOperationRuleUpdatedMode,
     PaasError,
     TeClawCreateConfig,
     TeClawCreationResult,
@@ -48,7 +49,6 @@ from ._paas_service import PaasService
 if TYPE_CHECKING:
     from secbaas.community.api.device_manage import (
         OutBoundOperationRule,
-        OutBoundOperationRuleUpdatedMode,
     )
     from secbaas.community.api.health_check.bot import TTLInfo
 
@@ -341,12 +341,13 @@ class TeClawPaasService(PaasService):
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
         mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
-        """Update outbound operation rule via plugin.update_outbound_rule.
+        """Update outbound operation rules via the TeClaw plugin.
 
         Converts Arca SDK OutBoundOperationRule -> dict at the service boundary
         per D-03 (domain->primitive conversion pattern), then delegates to the
-        plugin for HTTP execution.
+        plugin for append/replace dispatch and HTTP execution.
         """
         rules_list: list[dict[str, Any]] = []
         if (
@@ -356,14 +357,34 @@ class TeClawPaasService(PaasService):
             rules_list = [
                 r.model_dump() for r in outbound_operation_rule.header_operation_rules
             ]
+        resolved_mode = mode or OutBoundOperationRuleUpdatedMode.REPLACE
+        if resolved_mode == OutBoundOperationRuleUpdatedMode.APPEND and not session_key:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "mode=append requires a non-empty session_key",
+            )
+        if (
+            resolved_mode != OutBoundOperationRuleUpdatedMode.APPEND
+            and session_key is not None
+        ):
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "session_key is only supported when mode=append",
+            )
+
         rules_dict: dict[str, Any] = {"header_operation_rules": rules_list}
-        result = await self._plugin.update_outbound_rule(paas_device_id, rules_dict)
+        result = await self._plugin.update_outbound_rule(
+            paas_device_id,
+            rules_dict,
+            mode=resolved_mode,
+            session_key=session_key,
+        )
         self._logger.info(
             "TeClaw outbound rule updated: teclaw_bot_id=%s result=%s",
             paas_device_id,
             result,
         )
-        return result
+        return bool(result)
 
     async def update_device_ttl(self, paas_device_id: str) -> TTLInfo:
         raise NotImplementedError("TeClaw platform does not support TTL renewal")

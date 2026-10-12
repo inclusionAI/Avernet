@@ -2,6 +2,12 @@
 
 ## Provides
 
+ProviderManagementService and ProviderCoreService expose public slug discovery
+as `Option<ProviderBasicInfo>`, excluding complete config and credentials.
+Slug-aware core mutation methods preserve legacy callers, while ProviderRepoPort
+owns environment uniqueness and atomic slug/name/config updates. Existing
+Provider admin/owner authorization remains on mutations.
+
 - Internal `BotSelfService` authenticates Agent identity tokens through `AgentIdentityPort`
   before `BotRegistryCoreService::find_agent_registration`. The identity port
   exposes only verified `agent_code` and closed credential-free errors. The

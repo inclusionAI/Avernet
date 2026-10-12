@@ -1,5 +1,6 @@
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import type { ConversationBotSection, ConversationBotView, ConversationSessionListState } from '@/domain/conversation';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import { conversationFavoriteService } from '@/services/workspace/conversationFavoriteService';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,7 +26,10 @@ function currentList(botId: string, section: ConversationBotSection): Conversati
 function favoriteListLoading(botId: string, section: ConversationBotSection): boolean {
   const cache = useConversationStore.getState().sessionsByBotId[botId];
   return (
-    section === 'managed' && cache?.origin === 'mine' && cache.scope === 'favorite' && cache.sessions.isLoadingMore
+    isManagedConversationSection(section) &&
+    cache?.origin === 'mine' &&
+    cache.scope === 'favorite' &&
+    cache.sessions.isLoadingMore
   );
 }
 
@@ -52,7 +56,9 @@ export function useConversationFavorites(options: {
 
   const toggleFavorite = useCallback(
     async (botId: string, section: ConversationBotSection, sessionId: string) => {
-      const view = (section === 'managed' ? managedBots : friendBots).find((item) => item.bot.botId === botId);
+      const view = (isManagedConversationSection(section) ? managedBots : friendBots).find(
+        (item) => item.bot.botId === botId,
+      );
       const current = currentList(botId, section)?.items.find((item) => item.sessionId === sessionId);
       const key = keyOf(botId, section, sessionId);
       if (
@@ -80,7 +86,7 @@ export function useConversationFavorites(options: {
         const list = currentList(botId, section);
         if (!list?.items.some((item) => item.sessionId === sessionId)) return true;
         const cache = store.sessionsByBotId[botId];
-        const remove = section === 'managed' && cache?.scope === 'favorite' && !result.data;
+        const remove = isManagedConversationSection(section) && cache?.scope === 'favorite' && !result.data;
         const next = {
           ...list,
           items: remove
@@ -88,7 +94,7 @@ export function useConversationFavorites(options: {
             : list.items.map((item) => (item.sessionId === sessionId ? { ...item, favorite: result.data } : item)),
           total: remove ? Math.max(0, list.total - 1) : list.total,
         };
-        if (section === 'managed') store.setManagedBotCache(botId, { ...cache, sessions: next });
+        if (isManagedConversationSection(section)) store.setManagedBotCache(botId, { ...cache, sessions: next });
         else store.setFriendBotSessions(botId, next);
         if (
           remove &&

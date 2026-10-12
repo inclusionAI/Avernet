@@ -52,6 +52,6 @@ jest.mock('@/services/botHealthCheck', () => ({
 it('以编辑页一致的头像、名称、返回按钮渲染健康检查页', () => {
   render(<BotHealthCheckPage />);
 
-  expect(screen.getByLabelText('返回 Bot 工坊')).toBeInTheDocument();
+  expect(screen.getByLabelText('返回 Bot 管理')).toBeInTheDocument();
   expect(screen.getByText('测试 Bot')).toBeInTheDocument();
 });

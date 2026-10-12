@@ -42,6 +42,8 @@ export interface ChatBotView {
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
+  /** 团队 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
+  isTeamBot?: boolean;
 }
 
 export interface BotChatSessionView {
@@ -91,16 +93,17 @@ export function resolveUserId(userId: string): string {
   return resolveOpenApiUserId(userId);
 }
 
+/** 好友请求补 f_user_id；团队请求仅补实体 owner_id，不混入好友身份。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string }>(
   bot: ChatBotView,
   userId: string,
   params: T,
 ): T & { f_user_id?: string } {
-  if (!bot.isFriendBot) return params;
+  if (!bot.isFriendBot && !bot.isTeamBot) return params;
   return {
     ...params,
     ...(bot.ownerId ? { owner_id: bot.ownerId } : {}),
-    f_user_id: resolveUserId(userId),
+    ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
 }
 
@@ -244,13 +247,13 @@ async function fetchOwnedBots(
 ): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
   try {
     const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
+    // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
+    // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
     const items = (resp.data?.items ?? []).map(toOwnedBotView);
-    // 对话协作的「已管理 Bot」只展示可直接走普通单聊的 Bot；AgentCoding
-    // Bot 有独立消费入口，不应在这里抢占右侧对话面板。普通 CC 仍由运行时分类保留。
     return {
       ok: true,
       data: {
-        bots: items.filter((bot) => !bot.isAgentCodingBot),
+        bots: items,
         hasAgentCodingBots: items.some((bot) => bot.isAgentCodingBot),
       },
     };

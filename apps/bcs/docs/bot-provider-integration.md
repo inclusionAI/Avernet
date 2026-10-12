@@ -64,6 +64,44 @@ them into the repository, image, or public configuration examples. A deployment
 may also use its own bot identity system; that is a deployment-side extension
 and does not change the HTTP Provider baseline protocol described here.
 
+## Provider slug discovery
+
+`POST /providers` accepts an optional `slug`, for example
+`"slug": "coding-provider"`. With the existing Provider admin authentication and
+Human owner checks, `PATCH /providers/{provider_id}` can set or rename it.
+Omission or null preserves the existing slug. Legacy Providers may have no slug.
+
+A slug is 1–64 lowercase ASCII letters, digits or hyphens, beginning and ending
+with a letter or digit. It is unique within the current environment, including
+disabled Providers. Invalid input returns HTTP 400; a duplicate returns 409
+without changing the supplied name/config/slug. Renaming retires the old key.
+
+`GET /providers/by-slug/{slug}` requires no authentication and returns only:
+
+```json
+{
+  "slug": "coding-provider",
+  "provider_id": "prv_example",
+  "name": "Coding Provider",
+  "auth_mode": "static_bearer",
+  "enabled": true,
+  "protocol_version": "2.0",
+  "created_at": 1791532800000,
+  "updated_at": 1791532800000
+}
+```
+
+`enabled` reflects Provider status, independently of downlink configuration.
+Disabled Providers remain visible with `enabled: false`. A missing key returns
+404; an invalid slug returns 400; storage/configuration failures return 500.
+Timestamps use epoch milliseconds and an absent legacy protocol version resolves
+to `1.0`. The response excludes tokens, config, owners and webhook/callback URLs.
+Authenticated Provider information also adds nullable `slug` and
+`protocol_version`. Existing registration response credentials are unchanged.
+
+Apply MySQL migration 032 before upgrading BCS; SQLite startup applies migration
+033. Historical rows retain null slug. See the [Provider slug spec](../specs/2026-10-09-provider-slug/spec.md).
+
 ## Per-Bot webhook addresses
 
 The Provider integration program registers Bots directly with BCS. A platform

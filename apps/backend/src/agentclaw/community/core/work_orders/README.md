@@ -73,8 +73,12 @@ request checks. Skill result NOTICE events remain available through generic
 delivery. This is a user-facing ingress rule, not a Skill qualification rule
 inside the generic WorkOrder Service. A qualified
 business module may call `WorkOrderService.create_work_order_event` in-process
-with `approval_mode=AUTO`, `approver_user_ids=[]`, and explicit
-`recipient_user_ids`. AUTO creates no human approver row. For Skill requests,
+with `approval_mode=AUTO` and nonempty `approver_user_ids`. The service trims,
+removes blanks and deduplicates these IDs; an empty result is rejected even if
+`recipient_user_ids` is populated. AUTO ignores `recipient_user_ids` and uses
+only the approver-derived list for both success and failure notices (including
+Skill). These recipients have no manual approval rights or tasks. AUTO creates
+no human approver row. For Skill requests,
 the creation transaction calls Skill-owned admission while holding the binding
 lock; it rejects an existing active Grant or PENDING/PROCESSING request before
 inserting the order. WorkOrder then creates the order as PROCESSING and completes
@@ -173,13 +177,29 @@ the associated work-order status selects the approved or rejected template.
 
 ## Notification inbox and badge semantics
 
-- `PENDING_FOR_ME` contains pending approval notifications and unread notices.
-- `PROCESSED_BY_ME` contains approved/rejected approval notifications and read notices.
+- `PENDING_FOR_ME` contains pending approval notifications and unread notices
+  whose associated order is not terminal (or which have no associated order).
+- `PROCESSED_BY_ME` contains terminal approval notifications and notices that
+  are read **or** belong to a terminal order. APPROVED, REJECTED and FAILED are
+  terminal; PROCESSING is not. An unread result notice remains unread here.
+- `INITIATED_BY_ME` with ALL/APPROVAL is an order projection: one row per order,
+  sorted by the order's modification time and ID, with no attached notification.
+  The existing applicant / legacy AUTO reviewer visibility predicate is retained.
+  The HTTP adapter consequently emits `WORK_ORDER_<id>`, APPROVAL, no notification
+  ID/read state, and `can_approve=false`. Receiving/reading result notices cannot
+  hide, duplicate or reorder an initiated order. NOTICE retains the existing
+  recipient-scoped associated-notification projection.
+- Compatibility: these are deliberate list-membership changes, not a schema
+  migration. Consumers of initiated ALL must use work-order IDs for detail,
+  rather than assuming every row has a notification ID. No frontend/BCN change
+  is included. Finished result notices move to processed even before reading.
 - `pending_approval_count` counts distinct pending work orders for which the
   recipient has a `PENDING` approver record.
 - `unread_notice_count` counts unread `NOTICE` notifications only.
 - `badge_count` is `pending_approval_count + unread_notice_count`; notification
-  read state never removes a still-actionable approval from the badge.
+  read state never removes a still-actionable approval from the badge. It is a
+  reminder count, not the size of PENDING_FOR_ME; unread processed results still
+  contribute to it.
 - `unread_count` retains the historical count of all unread notifications for
   compatibility and is not used to calculate `badge_count`.
 
@@ -216,3 +236,82 @@ The numeric codes and fixed messages are enums in
 `responses.py` mapping binds those values to concrete domain exceptions.
 Changing either value is an OpenAPI contract change rather than an internal
 refactor.
+
+### AUTO completion and failure boundaries
+
+- Repository creation returns PROCESSING, matching the stored row. The service
+  does not claim that row again. The event-status PROCESSING value is internal;
+  public event routes still reject AUTO and their response enum is unchanged.
+- Skill and non-Skill wrappers lock and validate the row before business writes,
+  then share `_finish_auto_approval_in_session` for APPROVED/SYSTEM/timestamps
+  and result notices. It uses the caller's transaction, does not commit, and
+  contains no business callback or external message delivery.
+- A registered friend callback must succeed before local completion. Confirmed
+  callback success followed by a persistence error propagates without marking
+  FAILED or dispatching again. AlreadyProcessed also propagates without a
+  failure transition. Other execution failures retain the existing FAILED flow;
+  a failed failure-record write propagates rather than fabricating success.
+- Failure remarks contain a bounded exception-class summary, not raw external
+  responses or credentials. No new exception column or schema migration is added.
+- No new recovery job, request-level deduplication or distributed transaction is
+  introduced. A crash after creation can leave PROCESSING. A remote success with
+  a lost response may still be reported FAILED by the existing callback contract;
+  a database commit error may have an uncertain outcome. Do not blindly retry
+  an external callback on these errors. Notification rows do not prove delivery
+  to an external messaging channel.
+
+## Execution diagnostics and partial failure
+
+Bot collaboration synchronization runs **after** the local transaction commits.
+Generic AUTO, dedicated Bot policy AUTO, and manual approval use the same
+best-effort post-commit hook: synchronization failure is logged but does not
+replace the committed APPROVED response with an error. Database write errors
+still propagate; this hook never owns persistence. There is no durable retry
+queue or guarantee of eventual synchronization in this change.
+
+A confirmed external decision followed by a local persistence failure raises
+`WorkOrderLocalFinalizeError` (public HTTP 500, business code `500201`, fixed
+message: external decision completed; local persistence failed; reconcile before
+retrying). It retains the work-order ID and original cause internally. A known
+transaction rollback leaves MANUAL PENDING or AUTO PROCESSING; a commit error
+can have an uncertain outcome and must be checked, not assumed rolled back.
+No FAILED transition or second remote call is attempted in this branch.
+Already-processed conflicts retain their existing error semantics.
+
+AUTO callback timeout still records FAILED per the existing local contract, but
+the failure remark/notice explicitly says the external outcome may need
+reconciliation. It does not claim the remote request was rejected. Retrying a
+MANUAL order after remote success/local rollback can repeat the remote call:
+BCN idempotency/state reconciliation must be confirmed separately.
+
+Structured phase logs include `work_order_id` (null before creation), `phase`,
+`outcome`, `env`, `duration_ms`, and exception class on failures. Relevant phases
+are `event_create`, `auto_callback`, `auto_finalize`, `auto_failure_record`,
+`manual_review`, `manual_callback`, `manual_finalize`, `bot_request_create`, and
+`bot_post_commit_sync`. Creation completion logs supply the newly allocated ID;
+confirmed remote/local failures carry `remote_confirmed=true`, and failed Bot
+sync carries `local_committed=true`. Completion logs describe database/API
+phases, **not** external message delivery. Callbacks additionally log the remote
+request ID and HTTP/business codes, but not response bodies, messages, review
+reason bodies, credentials, or raw exception text in their diagnostic records.
+
+Reproduce with `tests/community/core/repository/implementations/test_work_order_sqlite_journeys.py`:
+real application services and repositories, per-test file-backed SQLite, only
+external boundaries mocked. This is not a production-database concurrency test
+or live BCN integration test.
+
+
+List regression journeys: `tests/community/core/repository/implementations/test_work_order_sqlite_listing.py`
+exercise real file SQLite, service listing and the HTTP list converter together,
+including recipients, initiated orders, terminal/unread results, read transitions,
+independent notices, pagination and environment isolation. External BCN execution
+is simulated, not proof of remote delivery or remote idempotency.
+
+The title converter now renders PROCESSING/FAILED explicitly (for example,
+`好友申请处理中（自动审批）` / `好友申请处理失败（自动审批）`) rather than
+falling back to `新的系统通知`. It uses the persisted approval mode; it does not
+infer AUTO from a free-form remark or notification payload. The separate Bot
+editor policy path's legacy mode-marker inconsistency remains excluded from this
+list-only change and is captured by a characterization test.
+
+See `SQLITE_VERIFICATION.md` for the end-to-end matrix and remaining failure risks.

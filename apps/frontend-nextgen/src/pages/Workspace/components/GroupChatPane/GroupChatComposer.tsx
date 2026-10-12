@@ -21,7 +21,6 @@ import { UploadFilesModal } from './UploadFilesModal';
 
 interface GroupChatComposerProps {
   session: SessionView | null;
-  isRequesting: boolean;
   connectionStatus: ProviderConnectionStatus;
   mentionConfig: MentionConfig | undefined;
   showReconnectToolbar: boolean;
@@ -90,7 +89,6 @@ function ChatFileUploadModal({
 
 export function GroupChatComposer({
   session,
-  isRequesting,
   connectionStatus,
   mentionConfig,
   showReconnectToolbar,
@@ -158,7 +156,8 @@ export function GroupChatComposer({
     async (content: string, context?: SubmitContext) => {
       const hasText = content.trim().length > 0;
       const hasImages = images.images.length > 0;
-      if ((!hasText && !hasImages) || isRequesting || images.isProcessing || images.isUploading) return;
+      // 输出中不阻塞发送：消息进入后端投递队列依次消费（拥塞控制归属后端）。
+      if ((!hasText && !hasImages) || images.isProcessing || images.isUploading) return;
       const quotedContent = quote ? `${buildQuotePrompt(quote.senderName, quote.text)}\n\n${content}` : content;
       // 任务选中态：构造 /task 指令消息发到群聊，由 bot/skill 解析触发任务。
       if (execution && (execution.selectedWorkflow || execution.pendingDynamic)) {
@@ -179,17 +178,17 @@ export function GroupChatComposer({
       }
       onSend(quotedContent, mentions, attachments && attachments.length > 0 ? attachments : undefined);
     },
-    [images, isRequesting, onSend, session?.participants, session?.sessionId, execution, onDraftChange, quote],
+    [images, onSend, session?.participants, session?.sessionId, execution, onDraftChange, quote],
   );
 
   const submitImageOnlyOnEnter = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key !== 'Enter' || event.shiftKey || draft.trim() || images.images.length === 0) return;
-      if (isRequesting || images.isProcessing || images.isUploading) return;
+      if (images.isProcessing || images.isUploading) return;
       event.preventDefault();
       void submit('', { mentions: [], commands: [] });
     },
-    [draft, images.images.length, images.isProcessing, images.isUploading, isRequesting, submit],
+    [draft, images.images.length, images.isProcessing, images.isUploading, submit],
   );
 
   return (
@@ -207,7 +206,7 @@ export function GroupChatComposer({
         onKeyDown={submitImageOnlyOnEnter}
         onPasteFile={handlePasteFiles}
         loading={images.isProcessing || images.isUploading}
-        disabled={!session || isRequesting}
+        disabled={!session}
         submitType="enter"
         mention={mentionConfig}
         fileChip={fileChip}
@@ -253,7 +252,7 @@ export function GroupChatComposer({
                   onUpload={() => setUploadFilesOpen(true)}
                   onAddImage={triggerImagePicker}
                   enableWorkflow={false}
-                  disabled={!session || isRequesting}
+                  disabled={!session}
                   selectedWorkflow={execution.selectedWorkflow}
                   pendingDynamic={execution.pendingDynamic}
                   onWorkflowSelected={execution.selectWorkflow}

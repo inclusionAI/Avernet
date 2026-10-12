@@ -314,3 +314,17 @@ it('未注入 updateMemberScope 时 setViewScope 返回 false 且不调用', asy
   expect(updateMemberMode).not.toHaveBeenCalled();
   expect(useWorkspaceStore.getState().wsReconnectNonce).toBe(before);
 });
+
+it('locked bot view cannot switch identity through go-speak or join-session actions', async () => {
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '用户', role: 'member', mode: 'absent' }]);
+  const { result } = renderHook(() =>
+    useCollabPanel(session, botIdentity, updateMemberMode, undefined, undefined, undefined, true),
+  );
+  expect(result.current.canSwitchToHuman).toBe(false);
+  act(() => result.current.switchToHuman());
+  await act(async () => {
+    expect(await result.current.joinSession()).toBe(false);
+  });
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe(botIdentity.id);
+  expect(updateMemberMode).not.toHaveBeenCalled();
+});

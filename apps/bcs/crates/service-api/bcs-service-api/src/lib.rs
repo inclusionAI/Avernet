@@ -293,7 +293,7 @@ pub use core::{
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy,
     HumanMentionNotifyMode, MessageRole,
     Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
-    ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
+    ProviderBasicInfo, ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
     RegisteredProvider, UpdateProviderBotCoreResult, AuthorizedOrganizationPair,
     OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
     OrganizationCandidatePageQuery, OrganizationCandidateQuery,

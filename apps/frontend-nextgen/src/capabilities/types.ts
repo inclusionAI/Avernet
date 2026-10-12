@@ -21,6 +21,12 @@ export interface CurrentUserContext {
 }
 
 /**
+ * 应用运行环境语义。用于运行时按部署形态切换公开/内部行为；具体识别规则由 capability 注入。
+ * Open Core 无需感知内部域名，internal overlay 可以安全实现平台级识别。
+ */
+export type RuntimeEnvironment = 'LOCAL' | 'DEV' | 'PRE' | 'PROD';
+
+/**
  * 当前登录 human 用户身份。由 `getHumanIdentity` 契约解析，AccountBadge 等只读消费。
  * - userId：OpenAPI user_id（去 human_ 前缀，对齐 resolveOpenApiUserId）
  * - displayName：花名/昵称（用于展示）
@@ -296,6 +302,12 @@ export interface AppCapabilities {
    */
   getLoginStrategy: () => CapabilityResult<LoginStrategy>;
   /**
+   * 当前运行环境。开发/预发/内部部署的识别规则可能依赖平台细节，统一通过 capability 承载。
+   * Open Core 默认按公开构建变量读取，变量缺失时回落 PRE；internal overlay 可注入真实 hostname 判断。
+   * 同步签名，不发请求。
+   */
+  getRuntimeEnvironment: () => CapabilityResult<RuntimeEnvironment>;
+  /**
    * 邀请码门禁策略（见 `InviteCodeGatePolicy`）：Open Core 默认 `enabled`（=阿里云外部形态）；
    * internal overlay 覆盖为 `disabled`（员工形态）。`ace-gateway` 策略下门禁完全不激活（与 capability 双门控）。
    * 同步签名，不发请求；门禁生效性经 `getLoginStrategy()` + 本 capability 双门控，禁止散落 `if(isInternal)`。
@@ -308,6 +320,13 @@ export interface AppCapabilities {
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
+  /**
+   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
+   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
+   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
+   */
+  getBbsApiBase: () => CapabilityResult<string>;
   /**
    * 任务认领授权策略（见 `TaskClaimGrantStrategy`）。
    * Open Core 默认 `skip`（api-key 直发,grant/revoke 短路 no-op）；internal overlay 覆盖为 `secbaas-relay`（经 secbaas 透传人类 Cookie 授权）。

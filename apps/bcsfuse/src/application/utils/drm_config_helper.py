@@ -10,7 +10,7 @@ from environment variables and YAML config files.
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.infra.public.config.drm_config_provider import DrmConfigProvider
@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 # Cached DRM config instance
 _drm_config_cache: Optional["DrmConfigProvider"] = None
+
+
+def set_drm_config(provider: Any) -> None:
+    """Bind the DRM provider selected by the application composition root."""
+    global _drm_config_cache, profile_prompt_template
+    _drm_config_cache = provider
+    profile_prompt_template = provider.get_profile_prompt_template()
 
 
 def get_drm_config() -> "DrmConfigProvider":
@@ -65,6 +72,11 @@ def get_judge_prompt_template() -> Optional[str]:
         Judge prompt template string, or None if not configured
     """
     return get_drm_config().get_judge_prompt_template()
+
+
+def get_profile_prompt_template() -> Optional[str]:
+    """Get the current profile prompt from the composed DRM provider."""
+    return get_drm_config().get_profile_prompt_template()
 
 
 def get_peer_min_similarity() -> Optional[float]:

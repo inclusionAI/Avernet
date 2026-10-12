@@ -205,6 +205,31 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             return "DOCKER"
         return "UNKNOWN"
 
+    async def _close_paas_service(self, service: Any) -> None:
+        """Close a request-scoped PaasService without masking its result.
+
+        A factory creates a service for each facade operation. TeClaw and
+        Poolab services can lazily own plugin HTTP sessions, so they must be
+        released after the operation. Cleanup is optional and defensive to
+        support legacy services and test doubles without a close method.
+        """
+        if service is None:
+            return
+
+        close = getattr(service, "close", None)
+        if not callable(close):
+            return
+
+        try:
+            await close()
+        except Exception as exc:
+            # Cleanup is best-effort; never replace the operation result/error.
+            self._logger.warning(
+                "Failed to close PaasService after operation: service=%s error=%s",
+                type(service).__name__,
+                exc,
+            )
+
     # Allowed override fields for detail_config (CreateConfig part only)
     # Credentials fields (tenant_name, base_url, api_key, etc.) are NOT allowed
     # Note: arca_template_id maps to ArcaCreateConfig.template_id
@@ -1213,6 +1238,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
         mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Update outbound operation rule for a device.
 
@@ -1226,6 +1252,9 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
             paas_device_id: Device ID with optional @template_id suffix
                           (e.g., "sandbox-abc123@42" or "legacy-device")
             outbound_operation_rule: New outbound operation rule to apply.
+            session_key: Optional session key. TeClaw requires it when
+                ``mode=append`` and appends session-scoped rules; other
+                implementations ignore it.
 
         Returns:
             True if successful.
@@ -1270,7 +1299,10 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
 
             # Update outbound operation rule using raw_paas_device_id (without @template_id suffix)
             result = await service.update_outbound_operation_rule(
-                raw_paas_device_id, outbound_operation_rule, mode=mode
+                raw_paas_device_id,
+                outbound_operation_rule,
+                mode=mode,
+                session_key=session_key,
             )
 
             self._logger.info(
@@ -1307,6 +1339,8 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                 paas_device_id=paas_device_id,
                 original_error=e,
             ) from e
+        finally:
+            await self._close_paas_service(service)
 
     async def update_device_ttl(self, paas_device_id: str) -> TTLInfo:
         """Extend device TTL - each platform decides its own extension strategy.

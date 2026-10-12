@@ -25,7 +25,6 @@ from agentclaw.community.plugin_api.http_client import HttpClient
 
 
 logger = get_logger()
-_RESPONSE_BODY_LOG_LIMIT = 16 * 1024
 
 # The forwarded identity header, lowercased for the case-insensitive comparisons
 # below — HTTP header names are case-insensitive and the inbound spelling is
@@ -180,19 +179,15 @@ class FriendDecisionCallbackHandler:
                     "friend work-order BCN callback credential could not be "
                     "re-addressed: work_order_id=%s "
                     "source_principal_fingerprint=%s "
-                    "exception_type=%s reason=%s",
+                    "exception_type=%s",
                     work_order_id,
                     _principal_fingerprint(headers),
                     type(exc).__name__,
-                    exc,
                     extra={
                         "work_order_id": work_order_id,
-                        "source_principal_fingerprint": _principal_fingerprint(
-                            headers
-                        ),
+                        "source_principal_fingerprint": _principal_fingerprint(headers),
                         "exception_type": type(exc).__name__,
                     },
-                    exc_info=True,
                 )
                 raise WorkOrderCallbackError(
                     "BCN callback credential could not be re-addressed"
@@ -265,7 +260,7 @@ class FriendDecisionCallbackHandler:
                 "request_id": request_id,
                 "action": action,
                 "callback_path": path,
-                "request_body": body,
+                "has_review_remark": review_remark is not None,
                 "has_authorization": has_authorization,
                 "has_x_avernet_principal": has_principal,
                 "principal_header_count": principal_header_count,
@@ -288,11 +283,6 @@ class FriendDecisionCallbackHandler:
                 timeout=self._timeout,
             )
             response_body_raw = response.text
-            logged_response_body = response_body_raw
-            if len(logged_response_body) > _RESPONSE_BODY_LOG_LIMIT:
-                logged_response_body = (
-                    logged_response_body[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
-                )
             try:
                 parsed = json.loads(response_body_raw)
             except (json.JSONDecodeError, TypeError):
@@ -301,9 +291,6 @@ class FriendDecisionCallbackHandler:
                 response_payload = parsed
             duration_ms = (time.perf_counter() - callback_started) * 1000
             response_code = response_payload.get("code") if response_payload else None
-            response_message = (
-                response_payload.get("message") if response_payload else None
-            )
             response_request_id = (
                 response_payload.get("request_id") if response_payload else None
             )
@@ -316,10 +303,9 @@ class FriendDecisionCallbackHandler:
                     "action": action,
                     "http_status": response.status_code,
                     "response_code": response_code,
-                    "response_message": response_message,
                     "response_request_id": response_request_id,
                     "duration_ms": duration_ms,
-                    "response_body_raw": logged_response_body,
+                    "response_body_length": len(response_body_raw),
                 },
             )
             response.raise_for_status()
@@ -329,16 +315,8 @@ class FriendDecisionCallbackHandler:
             failure_duration_ms = (time.perf_counter() - callback_started) * 1000
             http_status = response.status_code if response is not None else None
             response_code = response_payload.get("code") if response_payload else None
-            response_message = (
-                response_payload.get("message") if response_payload else None
-            )
             response_request_id = (
                 response_payload.get("request_id") if response_payload else None
-            )
-            logged_failure_body = (
-                response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
-                if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
-                else response_body_raw
             )
             logger.warning(
                 "friend work-order decision callback failed",
@@ -349,7 +327,6 @@ class FriendDecisionCallbackHandler:
                     "action": action,
                     "http_status": http_status,
                     "response_code": response_code,
-                    "response_message": response_message,
                     "response_request_id": response_request_id,
                     "principal_header_count": principal_header_count,
                     "principal_fingerprint": principal_fingerprint,
@@ -357,9 +334,8 @@ class FriendDecisionCallbackHandler:
                     "principal_length": principal_length,
                     "duration_ms": failure_duration_ms,
                     "exception_type": type(exc).__name__,
-                    "response_body_raw": logged_failure_body,
+                    "response_body_length": len(response_body_raw),
                 },
-                exc_info=True,
             )
             raise WorkOrderCallbackError("BCN callback failed") from exc
 

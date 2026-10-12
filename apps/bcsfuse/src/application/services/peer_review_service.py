@@ -180,11 +180,11 @@ class PeerReviewService:
                 continue
 
             # 非 TRUSTED 级别的 peer 不能参与 review
-            if candidate.trust_level != TrustLevel.TRUSTED:
+            if candidate.state.trust_level != TrustLevel.TRUSTED:
                 logger.info(
                     "[PeerReview] 候选 %s trust_level=%s 非 TRUSTED，跳过",
                     lookup_id,
-                    candidate.trust_level,
+                    candidate.state.trust_level,
                 )
                 continue
 

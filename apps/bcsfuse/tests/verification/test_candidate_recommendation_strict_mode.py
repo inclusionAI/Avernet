@@ -11,6 +11,7 @@ Candidate Recommendation Service strict_participants测试
 
 import pytest
 from unittest.mock import MagicMock
+from tests.fixtures.recommendation_dependencies import vector_dependencies
 from src.application.services.worker_candidate_recommendation_impl import WorkerCandidateRecommendationImpl
 from src.domain.models.retrieval_mode import RetrievalMode
 from src.domain.models.worker_profile import WorkerProfile, ProfileType, SourceType
@@ -56,6 +57,7 @@ class TestCandidateRecommendationStrictMode:
         service = WorkerCandidateRecommendationImpl(
             retrieval_service=mock_retrieval,
             min_experts=3,
+            **vector_dependencies([create_mock_profile("wrk_other")]),
         )
 
         result = service.recommend(
@@ -96,6 +98,7 @@ class TestCandidateRecommendationStrictMode:
         service = WorkerCandidateRecommendationImpl(
             retrieval_service=mock_retrieval,
             min_experts=3,
+            **vector_dependencies([existing_profile]),
         )
 
         result = service.recommend(
@@ -108,8 +111,8 @@ class TestCandidateRecommendationStrictMode:
         # 应该返回补充推荐
         assert len(result.recommendations) == 1
         assert result.recommendations[0].is_supplement == True
-        # 应该调用两次（显式 + 补充）
-        assert mock_retrieval.retrieve.call_count == 2
+        # 显式参与者走 retrieval，补充候选来自 vector matcher。
+        assert mock_retrieval.retrieve.call_count == 1
 
     def test_strict_mode_returns_found_explicit_participants_only(self):
         """
@@ -134,6 +137,7 @@ class TestCandidateRecommendationStrictMode:
         service = WorkerCandidateRecommendationImpl(
             retrieval_service=mock_retrieval,
             min_experts=3,
+            **vector_dependencies([create_mock_profile("wrk_other")]),
         )
 
         result = service.recommend(
@@ -145,7 +149,7 @@ class TestCandidateRecommendationStrictMode:
 
         # 应该只返回找到的
         assert len(result.recommendations) == 1
-        assert result.recommendations[0].profile_key == 'staff_wrk_existing:default'
+        assert result.recommendations[0].profile_key == 'wrk_existing:default'
         assert result.recommendations[0].is_supplement == False
 
     def test_strict_mode_with_no_participants_allows_full_db_search(self):
@@ -173,6 +177,7 @@ class TestCandidateRecommendationStrictMode:
         service = WorkerCandidateRecommendationImpl(
             retrieval_service=mock_retrieval,
             min_experts=3,
+            **vector_dependencies([profile1, profile2]),
         )
 
         result = service.recommend(
@@ -220,7 +225,7 @@ class TestCandidateRecommendationStrictModeIntegration:
 
         # 应该找到显式 participant
         assert len(result.recommendations) == 1
-        assert result.recommendations[0].profile_key == 'staff_wrk_test:default'
+        assert result.recommendations[0].profile_key == 'wrk_test:default'
         assert result.recommendations[0].is_supplement == False
 
     def test_strict_mode_parameter_propagated_correctly(self):

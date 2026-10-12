@@ -73,7 +73,7 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
             "handle": "@test-no-binding",
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "availability": "available",
+            "availability": "public",
             "trust_level": "trusted",
             # 注意：不提供 profile_key
         }
@@ -132,7 +132,7 @@ class TestParticipantAvailabilityCheckerRegistryConsistency:
             "handle": "@test-with-profile",
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "availability": "available",
+            "availability": "public",
             "trust_level": "trusted",
             "profile_key": profile_key,  # 提供了 profile_key
         }
@@ -200,7 +200,7 @@ class TestOnlineStatePersistenceAndConsistency:
             "handle": "@online-persist",
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "availability": "available",
+            "availability": "public",
             "trust_level": "trusted",
         }
 
@@ -248,7 +248,7 @@ class TestOnlineStatePersistenceAndConsistency:
                 "handle": f"@{wid}",
                 "responsibilities": ["testing"],
                 "capabilities": [{"name": "testing", "level": "expert"}],
-                "availability": "available",
+                "availability": "public",
                 "trust_level": "trusted",
             })
             assert resp.status_code == 201
@@ -292,7 +292,7 @@ class TestOnlineStatePersistenceAndConsistency:
             "handle": "@full-flow",
             "responsibilities": ["testing"],
             "capabilities": [{"name": "testing", "level": "expert"}],
-            "availability": "available",
+            "availability": "public",
             "trust_level": "trusted",
         }
 
@@ -364,7 +364,7 @@ class TestFusionEndToEnd:
                 "handle": f"@{wid}",
                 "responsibilities": ["testing"],
                 "capabilities": [{"name": "testing", "level": "expert"}],
-                "availability": "available",
+                "availability": "public",
                 "trust_level": "trusted",
             })
             client.put(f"/v1/workers/{wid}/online")
@@ -436,7 +436,7 @@ class TestParticipantAvailabilityCheckerDirect:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.ACTIVE,

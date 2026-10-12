@@ -88,7 +88,7 @@ it('从独立页面参数初始化日志上下文并查询真实 Service', async
   expect(useBotChatStore.getState().context).toBeUndefined();
 });
 
-it('缺少 bot_id 时不查询并可返回 Bot 工坊', async () => {
+it('缺少 bot_id 时不查询并可返回 Bot 管理', async () => {
   mockedUseLocation.mockReturnValue({
     pathname: '/bot-workshop/logs',
     search: '?user_id=user-demo',

@@ -340,8 +340,9 @@ class TestWorkerProfileContentService:
 class TestApiWorkerProfileSource:
     """API Profile Source 与检索系统集成测试"""
 
-    def test_convert_to_worker_profile(self, store):
+    def test_convert_to_worker_profile(self, store, monkeypatch):
         """测试转换为 WorkerProfile"""
+        monkeypatch.setenv("CONTENT_EMBEDDING_FIELDS", "soul,agents")
         # 准备数据
         service = WorkerProfileContentService(store)
         service.register_or_update_profile(
@@ -373,8 +374,9 @@ class TestApiWorkerProfileSource:
         assert len(profile.active_skills) == 1
         assert profile.searchable_text != ""
 
-    def test_get_profile_by_staff(self, store):
+    def test_get_profile_by_staff(self, store, monkeypatch):
         """测试按 staff_id 获取 Profile"""
+        monkeypatch.setenv("CONTENT_EMBEDDING_FIELDS", "soul")
         service = WorkerProfileContentService(store)
         service.register_or_update_profile(
             worker_id="wrk_test",

@@ -10,7 +10,7 @@ import type { ConversationState } from '@/stores/conversationStoreState';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: () => ({
@@ -72,25 +72,30 @@ const emptyList = () => ({
 });
 
 const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): ConversationDirectoryModel => ({
+  teamBots: [],
+  teamLoading: false,
+  teamError: null,
+  retryTeam: jest.fn(),
   managedBots: [managedBotA],
   friendBots: [friendBot],
   managedLoading: false,
   friendLoading: false,
   managedError: null,
   friendError: null,
-  hasAgentCodingBots: false,
   retryManaged: jest.fn(),
   retryFriend: jest.fn(),
   ...over,
 });
 
 const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): ConversationSessionsModel => ({
+  actions: { run: jest.fn(async () => true), isPending: jest.fn(() => false) },
   favorites: { toggleFavorite: jest.fn(async () => true), isPending: jest.fn(() => false) },
   openBotIds: {},
   toggleBot: jest.fn(),
   selectMineSession: jest.fn(),
   selectFriendBotSession: jest.fn(),
   createSession: jest.fn(),
+  retrySessions: jest.fn(),
   loadMoreSessions: jest.fn(),
   ...over,
 });
@@ -111,6 +116,7 @@ function seedStore(apply: (store: ConversationState) => void): ConversationState
 
 function sidebarProps(over: Partial<ConversationSidebarProps> = {}): ConversationSidebarProps {
   return {
+    teamBots: [],
     managedBots: [managedBotA],
     friendBots: [friendBot],
     store: seedStore(() => {}),
@@ -119,7 +125,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     others: othersModel(),
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
-    onOpenBotWorkshop: jest.fn(),
+    onOpenAgentCodingBot: jest.fn(),
     ...over,
   };
 }
@@ -127,11 +133,11 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
 const modelWithManagedAndFriendBots = sidebarProps();
 
 describe('ConversationSidebar', () => {
-  it('renders only managed and friend Bot groups, not team Bots', () => {
+  it('renders managed, team and friend Bot groups', () => {
     render(<ConversationSidebar {...modelWithManagedAndFriendBots} />);
     expect(screen.getByText('张三管理的 Bot')).toBeInTheDocument();
     expect(screen.getByText('张三的好友 Bot')).toBeInTheDocument();
-    expect(screen.queryByText('我的团队 Bot')).not.toBeInTheDocument();
+    expect(screen.getByText('张三的团队 Bot')).toBeInTheDocument();
   });
 
   it('filters both Bot groups by search and shows a search-empty state', () => {
@@ -144,7 +150,7 @@ describe('ConversationSidebar', () => {
     expect(screen.getByText('未找到匹配的 Bot')).toBeInTheDocument();
   });
 
-  it('toggles managed Bot expansion through the sessions model and allows multiple open', () => {
+  it('toggles managed Bot expansion through the sessions model and shows only the latest list', () => {
     const sessions = sessionsModel();
     const first = render(
       <ConversationSidebar {...sidebarProps({ managedBots: [managedBotA, managedBotB], sessions })} />,
@@ -174,9 +180,9 @@ describe('ConversationSidebar', () => {
       });
     });
     render(<ConversationSidebar {...sidebarProps({ managedBots: [managedBotA, managedBotB], store })} />);
-    expect(screen.getByRole('button', { name: '管理 Bot A' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: '管理 Bot A' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: '管理 Bot B' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('会话 s-a')).toBeInTheDocument();
+    expect(screen.queryByText('会话 s-a')).not.toBeInTheDocument();
     expect(screen.getByText('会话 s-b')).toBeInTheDocument();
   });
 
@@ -451,15 +457,45 @@ describe('ConversationSidebar', () => {
     expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
   });
 
-  it('links to the Bot workshop when AgentCoding Bots exist', () => {
-    const onOpenBotWorkshop = jest.fn();
+  it('shows AgentCoding Bots in the managed list and opens the coding chat directly', () => {
+    const sessions = sessionsModel();
+    const onOpenAgentCodingBot = jest.fn();
+    const agentCodingBot: ConversationBotView = {
+      bot: {
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        ownerId: '2088',
+        displayName: 'AgentCoding Bot',
+        online: true,
+        chatable: true,
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+        templateName: '应用 Bot',
+        spaceId: '73',
+        spaceName: '测试空间',
+      },
+      section: 'managed',
+    };
+
     render(
       <ConversationSidebar
-        {...sidebarProps({ directory: directoryModel({ hasAgentCodingBots: true }), onOpenBotWorkshop })}
+        {...sidebarProps({
+          managedBots: [agentCodingBot, managedBotA],
+          sessions,
+          friendBots: [],
+          directory: directoryModel({ managedBots: [agentCodingBot, managedBotA], friendBots: [] }),
+          onOpenAgentCodingBot,
+        })}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Bot 工坊' }));
-    expect(onOpenBotWorkshop).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('AgentCoding Bot')).toBeInTheDocument();
+    expect(screen.getByText('应用 Bot')).toBeInTheDocument();
+    expect(screen.queryByText('AgentCoding Bot 请前往')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'AgentCoding Bot' }));
+    expect(onOpenAgentCodingBot).toHaveBeenCalledWith(agentCodingBot.bot);
+    expect(sessions.toggleBot).not.toHaveBeenCalled();
+    const agentCodingRow = screen.getByRole('button', { name: 'AgentCoding Bot' }).closest('div');
+    expect(within(agentCodingRow as HTMLElement).queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
   });
   it.each(['mine', 'others'] as const)('ends the %s session tree before pagination and errors', (origin) => {
     const list = {
@@ -497,7 +533,7 @@ describe('ConversationSidebar', () => {
   });
 });
 
-it.each(['managed', 'friend'] as const)('wires %s session favorites without selecting a session', (section) => {
+it.each(['managed', 'friend'] as const)('wires %s session favorites without selecting a session', async (section) => {
   const botId = section === 'managed' ? managedBotA.bot.botId : friendBot.bot.botId;
   const store = seedStore((s) => {
     s.setExpandedBot(botId, true);
@@ -515,22 +551,24 @@ it.each(['managed', 'friend'] as const)('wires %s session favorites without sele
   });
   const sessions = sessionsModel();
   render(<ConversationSidebar {...sidebarProps({ store, sessions })} />);
-  fireEvent.click(screen.getByRole('button', { name: '收藏会话' }));
+  fireEvent.click(screen.getByRole('button', { name: '会话更多操作' }));
+  fireEvent.click(await screen.findByRole('button', { name: '收藏会话' }));
   expect(sessions.favorites.toggleFavorite).toHaveBeenCalledWith(botId, section, 'fav');
   expect(sessions.selectMineSession).not.toHaveBeenCalled();
   expect(sessions.selectFriendBotSession).not.toHaveBeenCalled();
 });
 
-it.each(['managed', 'friend'] as const)('hides TEClaw favorites and scope filters for %s Bots', (section) => {
-  const view = {
-    ...(section === 'managed' ? managedBotA : friendBot),
-    bot: { ...(section === 'managed' ? managedBotA.bot : friendBot.bot), engine: 'TEClaw' },
+it.each(['managed', 'team', 'friend'] as const)('hides TEClaw favorites and scope filters for %s Bots', (section) => {
+  const view: ConversationBotView = {
+    ...(section !== 'friend' ? managedBotA : friendBot),
+    section,
+    bot: { ...(section !== 'friend' ? managedBotA.bot : friendBot.bot), engine: 'TEClaw' },
   };
   const botId = view.bot.botId;
   const store = seedStore((s) => {
     s.setExpandedBot(botId, true);
     const sessions = { ...emptyList(), items: [{ ...sessionOf('s1', botId), favorite: false }] };
-    if (section === 'managed')
+    if (section !== 'friend')
       s.setManagedBotCache(botId, {
         botId,
         origin: 'mine',
@@ -546,16 +584,111 @@ it.each(['managed', 'friend'] as const)('hides TEClaw favorites and scope filter
       {...sidebarProps({
         store,
         managedBots: section === 'managed' ? [view] : [],
+        teamBots: section === 'team' ? [view] : [],
         friendBots: section === 'friend' ? [view] : [],
       })}
     />,
   );
+  fireEvent.click(screen.getByRole('button', { name: '会话更多操作' }));
+  expect(screen.getByRole('button', { name: '编辑标题' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '收藏会话' })).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('button', { name: '编辑标题' }), { key: 'Escape' });
   expect(screen.queryByText('全部会话')).not.toBeInTheDocument();
   expect(screen.queryByText('仅看已收藏')).not.toBeInTheDocument();
-  if (section === 'managed') {
+  if (section !== 'friend') {
     fireEvent.click(screen.getByRole('button', { name: '发起归属' }));
   }
-  expect(Boolean(screen.queryByRole('radio', { name: '我发起的' }))).toBe(section === 'managed');
-  expect(Boolean(screen.queryByRole('radio', { name: '他人发起的' }))).toBe(section === 'managed');
+  expect(Boolean(screen.queryByRole('radio', { name: '我发起的' }))).toBe(section !== 'friend');
+  expect(
+    Boolean(screen.queryByRole('radio', { name: section === 'team' ? '他人发起的（开发中）' : '他人发起的' })),
+  ).toBe(section !== 'friend');
+});
+
+it.each(['managed', 'friend'] as const)(
+  'restores %s session actions including TEClaw, without selecting the row',
+  async (section) => {
+    const source = section === 'managed' ? managedBotA : friendBot;
+    const bot = { ...source, bot: { ...source.bot, engine: 'TEClaw' } };
+    const botId = bot.bot.botId;
+    const store = seedStore((s) => {
+      s.setExpandedBot(botId, true);
+      const list = { ...emptyList(), total: 1, items: [sessionOf('edit', botId)] };
+      if (section === 'managed')
+        s.setManagedBotCache(botId, {
+          botId,
+          origin: 'mine',
+          scope: 'all',
+          sessions: list,
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        });
+      else s.setFriendBotSessions(botId, list);
+    });
+    const model = sessionsModel();
+    render(
+      <ConversationSidebar
+        {...sidebarProps({
+          store,
+          sessions: model,
+          managedBots: section === 'managed' ? [bot] : [],
+          friendBots: section === 'friend' ? [bot] : [],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '会话更多操作' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标题' }));
+    fireEvent.change(await screen.findByRole('textbox', { name: '会话标题' }), { target: { value: '新名称' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() =>
+      expect(model.actions.run).toHaveBeenCalledWith(botId, section, 'edit', { type: 'rename', title: '新名称' }),
+    );
+    expect(model.selectMineSession).not.toHaveBeenCalled();
+    expect(model.selectFriendBotSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '收藏会话' })).not.toBeInTheDocument();
+  },
+);
+
+it('团队位于管理与好友之间，搜索可命中，展开回调携带 team', () => {
+  const team: ConversationBotView = { ...botOf('shared:entity', '团队助手'), section: 'team' };
+  const sessions = sessionsModel();
+  render(<ConversationSidebar {...sidebarProps({ teamBots: [team], sessions })} />);
+  const managed = screen.getByRole('group', { name: '张三管理的 Bot' });
+  const teamGroup = screen.getByRole('group', { name: '张三的团队 Bot' });
+  const friend = screen.getByRole('group', { name: '张三的好友 Bot' });
+  expect(managed.compareDocumentPosition(teamGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(teamGroup.compareDocumentPosition(friend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索 Bot' }), { target: { value: '团队助手' } });
+  fireEvent.click(screen.getByRole('button', { name: '团队助手' }));
+  expect(sessions.toggleBot).toHaveBeenCalledWith('shared:entity', 'team');
+  expect(screen.queryByText('未找到匹配的 Bot')).not.toBeInTheDocument();
+});
+
+it('团队空态没有误导的添加好友入口；团队错误可单独重试', () => {
+  const retry = jest.fn();
+  const view = render(<ConversationSidebar {...sidebarProps({ teamBots: [] })} />);
+  expect(
+    within(screen.getByRole('group', { name: '张三的团队 Bot' })).queryByRole('button', { name: '前往公开 Bot' }),
+  ).not.toBeInTheDocument();
+  view.rerender(
+    <ConversationSidebar
+      {...sidebarProps({ teamBots: [], directory: directoryModel({ teamError: '团队加载失败', retryTeam: retry }) })}
+    />,
+  );
+  const teamGroup = screen.getByRole('group', { name: '张三的团队 Bot' });
+  expect(within(teamGroup).getByText('团队加载失败')).toBeInTheDocument();
+  fireEvent.click(within(teamGroup).getByRole('button'));
+  expect(retry).toHaveBeenCalledTimes(1);
+});
+
+it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () => {
+  const team: ConversationBotView = { ...botOf('team:entity', '团队 Bot'), section: 'team' };
+  render(<ConversationSidebar {...sidebarProps({ teamBots: [team] })} />);
+  const teamGroup = screen.getByRole('group', { name: '张三的团队 Bot' });
+  fireEvent.click(within(teamGroup).getByRole('button', { name: '发起归属与会话范围' }));
+  expect(screen.getByRole('radio', { name: '他人发起的（开发中）' })).toBeDisabled();
+  fireEvent.click(within(teamGroup).getByRole('button', { name: '发起归属与会话范围' }));
+  fireEvent.click(
+    within(screen.getByRole('group', { name: '张三管理的 Bot' })).getByRole('button', { name: '发起归属与会话范围' }),
+  );
+  expect(screen.getByRole('radio', { name: '他人发起的' })).toBeEnabled();
 });

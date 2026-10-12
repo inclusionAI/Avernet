@@ -58,6 +58,7 @@ impl Fixture {
         self.providers
             .insert_provider(ProviderRecord {
                 provider_id: "provider-1".to_string(),
+                slug: None,
                 name: "Provider One".to_string(),
                 config: "{}".to_string(),
                 created_by: "staff-1".to_string(),

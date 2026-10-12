@@ -69,7 +69,7 @@ class TestWorkerRuntimeStateService:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.ACTIVE,
@@ -100,7 +100,7 @@ class TestWorkerRuntimeStateService:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.DISABLED,
@@ -122,7 +122,7 @@ class TestWorkerRuntimeStateService:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.INACTIVE,
@@ -157,7 +157,7 @@ class TestWorkerRuntimeStateService:
             responsibilities=["testing"],
             capabilities=[Capability(name="test", level=CapabilityLevel.EXPERT)],
             state=WorkerState(
-                availability=Availability.AVAILABLE,
+                availability=Availability.PUBLIC,
                 trust_level=TrustLevel.TRUSTED,
             ),
             lifecycle_state=WorkerLifecycleState.DISABLED,

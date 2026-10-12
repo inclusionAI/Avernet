@@ -4,6 +4,8 @@ import remarkGfm from 'remark-gfm'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type EvolveSkillAsset, type EvolveSkillEvent } from '../api/client'
 
+import SkillEditDialog from '../components/SkillEditDialog'
+import { spaceLabel } from '../components/SpaceSelector'
 import SkillTaskLaunchDialog, { type SkillTaskAction } from '../components/SkillTaskLaunchDialog'
 import { SkillVersionEditDialog, SkillVersionRollbackDialog } from '../components/SkillVersionDialogs'
 import TestBenchComparison from '../components/TestBenchComparison'
@@ -141,6 +143,7 @@ export default function SkillDetail() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [editingMetadata, setEditingMetadata] = useState(false)
   const [rollbackVersion, setRollbackVersion] = useState<Version | null>(null)
   const [rollbackSubmitting, setRollbackSubmitting] = useState(false)
   const [rollbackError, setRollbackError] = useState('')
@@ -253,7 +256,7 @@ export default function SkillDetail() {
   if (loading) return <div className="mx-auto max-w-7xl px-4 py-20 text-center text-sm text-gray-500">正在加载 Skill 详情…</div>
   return <div className="mx-auto max-w-[1480px] px-4 py-7 sm:px-6 lg:px-8">
     <button className="mb-5 text-sm text-gray-500 hover:text-gray-800" onClick={() => navigate(backTo)}>← {backLabel}</button>
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-blue-600">Skill 详情</p><h1 className="mt-1 text-2xl font-semibold text-gray-950">{asset?.name ?? 'Skill 不存在'}</h1>{asset && <><p className="mt-1 font-mono text-xs text-gray-400">{asset.botId} / {asset.skillId}</p>{asset.description && <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">{asset.description}</p>}</>}</div>{asset && <div className="flex flex-wrap gap-2">{asset.canEdit !== false && <button onClick={() => setEditing(true)} className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100">编辑 Skill</button>}<button onClick={() => setLaunchAction('diagnose')} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100">诊断</button><button onClick={() => setLaunchAction('hardening')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100">加固</button><button onClick={() => setLaunchAction('optimize')} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">优化</button></div>}</div>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-blue-600">Skill 详情</p><h1 className="mt-1 text-2xl font-semibold text-gray-950">{asset?.name ?? 'Skill 不存在'}</h1>{asset && <><p className="mt-1 font-mono text-xs text-gray-400">{asset.botId} / {asset.skillId}</p><p className="mt-1 text-xs text-gray-500">{spaceLabel(asset)}</p>{asset.description && <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">{asset.description}</p>}</>}</div>{asset && <div className="flex flex-wrap gap-2">{asset.canEdit !== false && <button onClick={() => setEditingMetadata(true)} className="rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50">编辑</button>}{asset.canEdit !== false && <button onClick={() => setEditing(true)} className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-100">编辑 Skill</button>}<button onClick={() => setLaunchAction('diagnose')} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100">诊断</button><button onClick={() => setLaunchAction('hardening')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100">加固</button><button onClick={() => setLaunchAction('optimize')} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">优化</button></div>}</div>
     {asset && selection && <section className="mt-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:grid lg:grid-cols-[340px_minmax(0,1fr)]">
       <SkillHistoryTimeline asset={asset} events={events} selection={selection} onSelect={select} />
       <div className="min-w-0">
@@ -265,7 +268,8 @@ export default function SkillDetail() {
     </section>}
     {asset && !selection && <section className="mt-5 rounded-2xl border border-gray-200 bg-white py-16 text-center text-sm text-gray-400">该 Skill 暂无可查看的版本。</section>}
     {asset && launchAction && <SkillTaskLaunchDialog key={`${asset.assetId}:${launchAction}`} asset={asset} action={launchAction} returnTo={returnTo} onClose={() => setLaunchAction(null)} />}
-    {asset?.canEdit !== false && currentVersion && editing && <SkillVersionEditDialog assetId={asset.assetId} version={currentVersion} onClose={() => setEditing(false)} onCreated={refreshAfterVersionCreated} />}
+    {asset && asset.canEdit !== false && editingMetadata && <SkillEditDialog key={asset.assetId} asset={asset} onClose={() => setEditingMetadata(false)} onSaved={ownership => setAsset(current => current ? { ...current, ...ownership } : current)} />}
+    {asset && asset.canEdit !== false && currentVersion && editing && <SkillVersionEditDialog assetId={asset.assetId} version={currentVersion} onClose={() => setEditing(false)} onCreated={refreshAfterVersionCreated} />}
     {rollbackVersion && <SkillVersionRollbackDialog version={rollbackVersion} submitting={rollbackSubmitting} error={rollbackError} onClose={() => setRollbackVersion(null)} onConfirm={() => void confirmRollback()} />}
     {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
   </div>

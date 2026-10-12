@@ -25,6 +25,41 @@ from src.application.services.profile_analyzer_service import (
     ProfileAnalysisResult,
     ProfileAnalyzerService,
 )
+from src.application.utils.drm_config_helper import get_drm_config, set_drm_config
+from src.domain.models.worker_profile_content import WorkerProfileContent
+
+
+def test_profile_prompt_template_is_read_from_composed_provider_per_request():
+    class MutableDrmProvider:
+        template = "first {display_name}"
+
+        def get_profile_prompt_template(self) -> str:
+            return self.template
+
+    provider = MutableDrmProvider()
+    previous_provider = get_drm_config()
+    gateway = MagicMock()
+    gateway.generate.return_value = MagicMock(
+        raw_text="",
+        errors=[],
+        warnings=[],
+        parse_success=False,
+        finish_reason="stop",
+        latency_ms=0,
+    )
+    service = ProfileAnalyzerService(llm_gateway=gateway)
+    content = WorkerProfileContent(worker_id="worker-1", display_name="Alpha")
+
+    try:
+        set_drm_config(provider)
+        service._call_llm_analyze(content)
+        assert gateway.generate.call_args.args[0].user_prompt == "first Alpha"
+
+        provider.template = "second {display_name}"
+        service._call_llm_analyze(content)
+        assert gateway.generate.call_args.args[0].user_prompt == "second Alpha"
+    finally:
+        set_drm_config(previous_provider)
 
 
 class TestProfileAnalyzerServiceParseRawResponse:
@@ -72,7 +107,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         assert result.semantic_profile is not None
         assert "【职责定位】" in result.semantic_profile
         assert "【经验能力】" in result.semantic_profile
-        assert "【Skill能力】" in result.semantic_profile
+        assert "dima-for-teamclaw" in result.semantic_profile
         assert "刻薄的AI助手" in result.semantic_profile
         assert result.capability_tags == [
             "实时计算",
@@ -106,6 +141,21 @@ class TestProfileAnalyzerServiceParseRawResponse:
 
         # 测试空标签
         assert service._extract_capability_tags("## 能力标签\n\n能力标签:") == []
+
+    @pytest.mark.parametrize("empty_marker", ["无", "none", "null", "[]"])
+    def test_semantically_empty_capability_tags_are_discarded(
+        self, service, empty_marker
+    ):
+        raw_text = f"## 能力标签\n\n能力标签: {empty_marker}"
+
+        assert service._extract_capability_tags(raw_text) == []
+
+    def test_structured_semantically_empty_capability_tags_are_discarded(self, service):
+        result = service._parse_structured_response(
+            {"semantic_profile": "无能力画像", "capability_tags": ["无", "none"]}
+        )
+
+        assert result.capability_tags == []
 
     def test_extract_section(self, service):
         """测试 section 提取（包括存在/不存在场景）"""
@@ -150,7 +200,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         profile = service._build_semantic_profile(raw_text)
         assert "【职责定位】" in profile
         assert "【经验能力】" in profile
-        assert "【Skill能力】" in profile
+        assert "skill-a: 技能A" in profile
 
     def test_parse_structured_response(self, service):
         """测试结构化响应解析（正常/边界）"""
@@ -168,8 +218,7 @@ class TestProfileAnalyzerServiceParseRawResponse:
         assert result.semantic_profile is None
         assert result.capability_tags == []
 
-        # 超长截断
+        # Match the internal contract: preserve the complete structured profile.
         long_profile = "这是一个很长的描述。" * 200
         result = service._parse_structured_response({"semantic_profile": long_profile})
-        assert len(result.semantic_profile) <= 503
-        assert result.semantic_profile.endswith("...")
+        assert result.semantic_profile == long_profile

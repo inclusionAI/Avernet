@@ -105,3 +105,53 @@ export function isViewScopeChangedFrame(message: unknown): boolean {
     frame.method === 'view_scope_changed' || frame.type === 'view_scope_changed' || frame.event === 'view_scope_changed'
   );
 }
+
+/**
+ * 匹配服务端「消息投递状态变更」的 message.delivery.updated 事件帧。
+ * 兼容 method / type / event 三种载体（与 isViewScopeChangedFrame 同模式）。
+ */
+export function isDeliveryUpdatedFrame(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const frame = message as Record<string, unknown>;
+  return (
+    frame.method === 'message.delivery.updated' ||
+    frame.type === 'message.delivery.updated' ||
+    frame.event === 'message.delivery.updated'
+  );
+}
+
+/**
+ * 从 message.delivery.updated 事件帧中安全提取 DeliveryStatusView 载荷。
+ * 帧形为 { method/event/type: 'message.delivery.updated', params/payload: DeliveryStatusView }。
+ */
+export function parseDeliveryStatusView(
+  frame: unknown,
+): import('@/domain/collaboration/types').DeliveryStatusView | null {
+  if (!frame || typeof frame !== 'object') return null;
+  const f = frame as Record<string, unknown>;
+  const payload = (f.params ?? f.payload) as Record<string, unknown> | undefined;
+  if (!payload || typeof payload !== 'object') return null;
+  // 必要字段校验
+  if (
+    typeof payload.delivery_id !== 'string' ||
+    typeof payload.message_id !== 'string' ||
+    typeof payload.target_bot_id !== 'string' ||
+    typeof payload.status !== 'string' ||
+    typeof payload.state_version !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    delivery_id: payload.delivery_id,
+    message_id: payload.message_id,
+    target_bot_id: payload.target_bot_id,
+    flow_kind: (payload.flow_kind as import('@/domain/collaboration/types').DeliveryFlowKind) ?? 'group',
+    kind: (payload.kind as import('@/domain/collaboration/types').DeliveryType) ?? 'send',
+    status: payload.status as import('@/domain/collaboration/types').DeliveryStatus,
+    state_version: payload.state_version,
+    run_id: typeof payload.run_id === 'string' ? payload.run_id : null,
+    wait_reason: (payload.wait_reason as import('@/domain/collaboration/types').DeliveryWaitReason) ?? null,
+    admission_error: typeof payload.admission_error === 'string' ? payload.admission_error : null,
+    content_preview: typeof payload.content_preview === 'string' ? payload.content_preview : null,
+  };
+}

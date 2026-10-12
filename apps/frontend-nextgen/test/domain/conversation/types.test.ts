@@ -39,7 +39,7 @@ describe('domain/conversation types', () => {
   it('type contracts hold at compile time', () => {
     const originEnum: Equal<ConversationOrigin, 'mine' | 'others'> = true;
     const scopeEnum: Equal<ConversationSessionScope, 'all' | 'favorite'> = true;
-    const sectionEnum: Equal<ConversationBotSection, 'managed' | 'friend'> = true;
+    const sectionEnum: Equal<ConversationBotSection, 'managed' | 'team' | 'friend'> = true;
     const friendGroupState: Equal<ConversationFriendGroupView['state'], 'unloaded' | 'loading' | 'loaded' | 'error'> =
       true;
     const routeStateAllOptional: Equal<

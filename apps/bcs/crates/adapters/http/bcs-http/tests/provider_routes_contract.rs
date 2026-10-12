@@ -1375,6 +1375,7 @@ async fn delete_allowed_switch_provider_legacy_bot_without_binding() {
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2083,6 +2084,7 @@ async fn register_provider_bot_reuses_provider_ref_as_bot_uuid_for_allowed_switc
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2160,6 +2162,7 @@ async fn provider_bot_attributes_allow_an_allowlisted_provider_admin_to_manage_u
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2313,6 +2316,7 @@ async fn provider_bot_attributes_reject_a_disabled_provider_for_get_and_patch() 
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2465,6 +2469,7 @@ async fn register_provider_bot_rejects_allowed_switch_provider_ref_that_is_exist
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2841,6 +2846,7 @@ async fn seed_provider_admin(
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.to_string(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {
@@ -2997,6 +3003,7 @@ async fn register_provider_bot_plugin_mode_accepted_for_allow_listed_provider() 
     provider_repo
         .insert_provider(ProviderRecord {
             provider_id: provider_id.clone(),
+            slug: None,
             name: "Provider".to_string(),
             config: json!({
                 "downlink": {

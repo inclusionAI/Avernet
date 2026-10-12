@@ -124,6 +124,9 @@ class ProfileFragmentDecomposer:
             if not content:
                 continue
 
+            if field_name == "profile":
+                content = f"worker_id: {profile.staff_id}\n{content}"
+
             fragments.append(ProfileFragment(
                 fragment_type=field_name,
                 content=content,
@@ -177,7 +180,7 @@ class ProfileFragmentDecomposer:
         )
 
         # 3. 按权重顺序拼接内容，每个字段最多1000字符
-        text_parts = []
+        text_parts = [f"worker_id: {profile.staff_id}"]
         for field_name in sorted_fields:
             contents = field_contents.get(field_name, [])
             if not contents:
@@ -196,10 +199,10 @@ class ProfileFragmentDecomposer:
                 text_parts.append("Skills: " + ", ".join(skill_names))
 
         # 如果没有内容，生成一个基础的 profile 标识
-        if not text_parts:
+        if len(text_parts) == 1:
             return ProfileFragment(
                 fragment_type="full",
-                content=f"Profile: {profile.profile_key}",
+                content=f"worker_id: {profile.staff_id}\nProfile: {profile.profile_key}",
                 weight=self._type_weights.get("full", 0.1),
                 description="Empty profile fallback"
             )

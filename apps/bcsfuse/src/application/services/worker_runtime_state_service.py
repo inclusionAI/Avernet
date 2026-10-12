@@ -141,6 +141,7 @@ class WorkerRuntimeStateService:
 
         # 如果已经是 online，同步 worker.state 后返回
         if old_state == WorkerRuntimeState.ONLINE:
+            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
             # 确保 worker.state.runtime_state 同步
             if isinstance(worker, dict):
                 # OSS mode: dict worker
@@ -233,20 +234,23 @@ class WorkerRuntimeStateService:
         else:
             logger.debug(f"[RuntimeStateService] No index sync adapter, skipping index sync")
 
-        # 🔧 Worker 状态变化时重建向量索引，更新 payload 中的 availability/runtime_state
-        # 向量从 ZDAS 加载（不重新 embed），只更新 payload 字段
-        if self._vector_store:
-            try:
-                self._rebuild_worker_vectors(worker_id)
-            except Exception as e:
-                logger.warning(f"[RuntimeStateService] Failed to rebuild worker vectors: {e}")
-        else:
-            logger.debug(f"[RuntimeStateService] No vector store, skipping vector rebuild")
+        self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.ONLINE)
 
         logger.info(f"[RuntimeStateService] Worker {worker_id} set to ONLINE by {updated_by}")
 
         # Return fresh worker from store
         return self._registry_store.get_by_id(worker_id)
+
+    def _sync_vector_runtime_state(self, worker_id: str, state: WorkerRuntimeState) -> None:
+        if self._vector_store is None:
+            return
+        from src.application.services.worker_vector_state_sync import sync_worker_vector_state
+
+        count = sync_worker_vector_state(self._vector_store, worker_id, state.value)
+        # Initial online publication still creates an index. Existing profiles
+        # only need payload updates: do not re-embed or delete their vectors.
+        if count == 0 and state == WorkerRuntimeState.ONLINE:
+            self._rebuild_worker_vectors(worker_id)
 
     def _rebuild_worker_vectors(self, worker_id: str) -> None:
         """
@@ -304,6 +308,7 @@ class WorkerRuntimeStateService:
 
         # 如果已经是 offline，同步 worker.state 后返回
         if old_state == WorkerRuntimeState.OFFLINE:
+            self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.OFFLINE)
             # 确保 worker.state.runtime_state 同步
             if isinstance(worker, dict):
                 # OSS mode: dict worker
@@ -396,15 +401,7 @@ class WorkerRuntimeStateService:
         else:
             logger.debug(f"[RuntimeStateService] No index sync adapter, skipping index sync")
 
-        # 🔧 Worker 状态变化时重建向量索引，更新 payload 中的 availability/runtime_state
-        # 向量从 ZDAS 加载（不重新 embed），只更新 payload 字段
-        if self._vector_store:
-            try:
-                self._rebuild_worker_vectors(worker_id)
-            except Exception as e:
-                logger.warning(f"[RuntimeStateService] Failed to rebuild worker vectors: {e}")
-        else:
-            logger.debug(f"[RuntimeStateService] No vector store, skipping vector rebuild")
+        self._sync_vector_runtime_state(worker_id, WorkerRuntimeState.OFFLINE)
 
         logger.info(f"[RuntimeStateService] Worker {worker_id} set to OFFLINE by {updated_by}")
 

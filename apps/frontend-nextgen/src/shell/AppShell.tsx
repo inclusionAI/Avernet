@@ -10,6 +10,7 @@ import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
 import { getMergedNavigationItems, getNavigationItem } from './navigation';
+import { getRouteMeta } from './routeMeta';
 
 /**
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
@@ -19,6 +20,7 @@ import { getMergedNavigationItems, getNavigationItem } from './navigation';
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const hideNavigation = getRouteMeta(location.pathname)?.navigationVisibility === 'hidden';
   const activeItem = useMemo(() => getNavigationItem(location.pathname), [location.pathname]);
   // 合并 Open Core 基线与 internal overlay 注入的额外导航项（capability 同步返回，无请求）。
   const mergedItems = useMemo(() => getMergedNavigationItems(), []);
@@ -35,8 +37,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [activeSection]);
   // 视口回到桌面（≥lg）时收起一级导航抽屉，避免抽屉压住重新出现的内流侧栏。
   useEffect(() => {
-    if (isDesktop) setMobileNavOpen(false);
-  }, [isDesktop]);
+    if (isDesktop || hideNavigation) setMobileNavOpen(false);
+  }, [isDesktop, hideNavigation]);
   // <lg 抽屉内点导航：跳转并收起抽屉。
   const handleMobileNavigate = (path: string) => {
     history.push(path);
@@ -70,29 +72,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
       <OpenSourceExperienceNotice />
       <div className="flex min-h-0 flex-1">
-        <AppSidebar
-          activePath={location.pathname}
-          collapsed={sidebarCollapsed}
-          items={mergedItems}
-          onNavigate={(path) => history.push(path)}
-          onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
-          currentUser={currentUser}
-        />
+        {!hideNavigation && (
+          <AppSidebar
+            activePath={location.pathname}
+            collapsed={sidebarCollapsed}
+            items={mergedItems}
+            onNavigate={(path) => history.push(path)}
+            onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+            currentUser={currentUser}
+          />
+        )}
         <main className="relative min-w-0 flex-1 overflow-hidden">
           {/* <lg 一级导航入口（原顶栏汉堡归位为悬浮按钮）：≥lg 隐藏(内流侧栏可见)。 */}
-          <div className="absolute left-2 top-2 z-40 lg:hidden">
-            <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={() => setMobileNavOpen(true)} />
-          </div>
+          {!hideNavigation && (
+            <div className="absolute left-2 top-2 z-40 lg:hidden">
+              <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={() => setMobileNavOpen(true)} />
+            </div>
+          )}
           {children}
         </main>
       </div>
       {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由左上悬浮汉堡触发本抽屉。 */}
-      <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-        <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
-          <DrawerTitle className="sr-only">主导航</DrawerTitle>
-          <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
-        </DrawerContent>
-      </Drawer>
+      {!hideNavigation && (
+        <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
+            <DrawerTitle className="sr-only">主导航</DrawerTitle>
+            <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
+          </DrawerContent>
+        </Drawer>
+      )}
     </div>
   );
 }

@@ -80,6 +80,7 @@ class PaasService(Protocol):
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
         mode: OutBoundOperationRuleUpdatedMode | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Update outbound operation rule for a device."""
         ...
@@ -133,6 +134,10 @@ class PaasService(Protocol):
         self, paas_device_id: str, port: int, path: str | None = None
     ) -> HttpConnectionInfo:
         """Resolve HTTP connection info for invoking endpoints on a device."""
+        ...
+
+    async def close(self) -> None:
+        """Release request-scoped resources, such as HTTP sessions."""
         ...
 
 

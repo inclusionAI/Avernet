@@ -1,7 +1,9 @@
 """Coding-engine restart precondition; platform exec, never Relay HTTP.
 
-The script is the runtime's v1 lifecycle contract. Only pre-rollout containers
-may omit it. The runtime installs it before enabling canonical data bind mounts.
+Direct ARCA bindings keep their original stop/start flow without runtime backup
+probes. For BaaS, the script is the runtime's v1 lifecycle contract; only
+pre-rollout containers may omit it. The runtime installs it before enabling
+canonical data bind mounts.
 """
 from __future__ import annotations
 
@@ -83,7 +85,13 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
     started = time.monotonic()
-    deadline = started + DEADLINE_SECONDS
+    # Ordinary durable operations share one budget across task redeliveries and
+    # all physical targets. Published/Caller paths retain their existing budget.
+    from .restart_state import BACKUP_TIMEOUT, current_restart
+    execution = current_restart.get()
+    remaining = (BACKUP_TIMEOUT - (time.time() - execution.payload["started_at"])
+                 if execution is not None else DEADLINE_SECONDS)
+    deadline = started + remaining
     action, boot, last_status = 'start', None, None
     last_log = started
 
@@ -105,7 +113,11 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     log('probe', 'started')
     try:
         while True:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             value = parse_result(execute(command(action, operation_id)), operation_id)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             status = value['status']
             if status == 'legacy':
                 if action != 'start':
@@ -140,10 +152,14 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
 
     def verify():
         try:
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             # An absent helper is re-probed read-only; never start work on a
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            if execution is not None and time.monotonic() >= deadline:
+                raise TimeoutError("重启备份超过等待预算，禁止销毁")
             if current['status'] != status or (boot and current.get('boot_id') != boot):
                 raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化，禁止使用旧凭据重启')
             if status == 'committed' and receipt(current) != generation:
@@ -204,6 +220,7 @@ def _live_targets(state):
     # is a safe no-op: BaaS has confirmed that there is no live container to
     # enter.  Keep an actually empty inventory fail-closed because it may be a
     # stale or incomplete BaaS projection while the Bot is still present.
+    # _query_inventory handles empty terminal Bots only after extra confirmation.
     if not devices:
         raise RuntimeError("目标容器清单为空，禁止跳过重启备份")
     return targets
@@ -219,6 +236,40 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     )
     try:
         state = {'devices': runtime.list_devices_by_bot_uuid(bot_uuid=target_id)}
+        if state['devices'] == []:
+            # An empty projection alone is not proof that replacement is safe.
+            # Consult BaaS, not the local Bot status (durable admission already
+            # changed that to PENDING). Never skip backup for a FAILED Bot that
+            # still has devices. get_bot's devices field is not an inventory
+            # without health_check, so re-read the dedicated devices endpoint.
+            detail = runtime.get_bot(bot_uuid=target_id)
+            if isinstance(detail, dict) and (
+                (detail.get('status') == 'RELEASED'
+                 and detail.get('bot_uuid', target_id) == target_id)
+                or (detail.get('status') == 'FAILED'
+                    and detail.get('bot_uuid') == target_id)
+            ):
+                state['devices'] = runtime.list_devices_by_bot_uuid(bot_uuid=target_id)
+                if state['devices'] == []:
+                    _log_inventory(
+                        bot_id=bot_id, target_id=target_id, state=state, phase=phase,
+                        operation_id=operation_id,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    logger.info(
+                        "event=aicoding_restart_backup phase=%s inventory=resolved "
+                        "reason=confirmed_empty_terminal_bot bot_id=%s target_id=%s "
+                        "operation_id=%s baas_status=%s target_count=0",
+                        phase, bot_id, target_id, operation_id, detail['status'],
+                    )
+                    return {}
+                if isinstance(state['devices'], list) and state['devices']:
+                    # The initial observation had no devices. A newly visible
+                    # target may belong to another in-flight reconstruction;
+                    # never start a backup on it under this recovery attempt.
+                    raise RestartBackupError(
+                        'target_changed', '确认期间目标容器清单变化，禁止替换'
+                    )
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
         logger.error(
@@ -287,7 +338,11 @@ class AicodingRestartBackupMixin:
 
         def verify_and_fence():
             verify()
-            execution.fence_mutation()
+            execution.verify_backup = verify
+            # BaaS request preparation is not a remote mutation. Its fence is
+            # installed by before_restart_submission, immediately before POST.
+            if execution.payload["provider"] != "baas":
+                execution.fence_mutation()
         return verify_and_fence
 
     async def prepare_restart_async(self, ctx, **kwargs):
@@ -379,20 +434,23 @@ class AicodingRestartBackupMixin:
                 check = self._prepare_restart(
                     ctx, device_id=target, target_runtime=target_runtime_provider(),
                     operation_id=operation_id)
+            elif provider == 'arca':
+                # Direct ARCA restart does not participate in the BaaS backup
+                # protocol. In particular, recovery must not require an exec
+                # into an already destroyed sandbox. Keep the binding verifier
+                # and the caller's mutation fence before the original stop/start.
+                logger.info(
+                    "event=aicoding_restart_backup phase=skip reason=arca_provider "
+                    "bot_id=%s binding_id=%s", ctx.bot_id, binding_id,
+                )
+                def check():
+                    return None
             else:
                 if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
-                    # Legacy ARCA's physical sandbox ID is already persisted.
-                    # PaaS accepts it independently of OCB's binding status.
-                    props = _field(binding, 'device_props') or {}
-                    physical = props.get('sandbox_id')
-                    if provider != 'arca' or not isinstance(physical, str) or not physical.startswith('ARCA-SANDBOX-'):
-                        raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
-                    runtime = target_runtime_provider()
-                    def execute(cmd):
-                        return _execute_physical(runtime, physical, cmd)
-                else:
-                    def execute(cmd):
-                        return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
+                    raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
+
+                def execute(cmd):
+                    return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
                 check = prepare_backup(
                     execute=execute,
                     operation_id=operation_id,

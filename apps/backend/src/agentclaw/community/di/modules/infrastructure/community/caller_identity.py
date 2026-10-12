@@ -34,6 +34,7 @@ class CommunityCallerIamTokenService:
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
     ) -> CallerIamTokenOutcome:
         del (
             iam_token,
@@ -43,6 +44,7 @@ class CommunityCallerIamTokenService:
             publish_id,
             entity_id,
             is_test_exchange,
+            session_key,
         )
         return CallerIamTokenOutcome(iam_token=CALLER_MODE_UNSUPPORTED_TOKEN)
 

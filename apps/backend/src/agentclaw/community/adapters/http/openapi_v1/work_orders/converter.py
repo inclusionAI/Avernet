@@ -107,6 +107,15 @@ def display_title(
             resolved = _TITLE_BY_BIZ_STATUS.get((biz_type or "", status))
             if resolved is None and stored_title and stored_title != "新的系统通知":
                 resolved = stored_title
+    if status in (WorkOrderStatus.PROCESSING, WorkOrderStatus.FAILED):
+        subject = {
+            WorkOrderBizType.SPACE_JOIN.value: "空间加入申请",
+            WorkOrderBizType.BOT_COLLABORATOR.value: "Bot 共同编辑申请",
+            WorkOrderBizType.SKILL_COLLABORATOR.value: "Skill 共同编辑申请",
+            WorkOrderBizType.BOT_FRIEND.value: "好友申请",
+        }.get(biz_type or "", "工单")
+        outcome = "处理中" if status is WorkOrderStatus.PROCESSING else "处理失败"
+        resolved = f"{subject}{outcome}"
     if resolved is None:
         return None
     if approval_mode is WorkOrderApprovalMode.AUTO and "自动审批" not in resolved:

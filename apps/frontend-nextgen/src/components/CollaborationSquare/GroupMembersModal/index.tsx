@@ -8,6 +8,7 @@ interface GroupMembersModalProps {
   group: PublicGroup | null;
   members: PublicGroupMember[];
   loading: boolean;
+  ownerUserName?: string | null;
   onClose: () => void;
 }
 
@@ -41,13 +42,21 @@ function MemberAvatar({ member }: { member: PublicGroupMember }) {
   );
 }
 
-export function GroupMembersModal({ open, group, members, loading, onClose }: GroupMembersModalProps) {
+export function GroupMembersModal({ open, group, members, loading, ownerUserName, onClose }: GroupMembersModalProps) {
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContent>
         <ModalHeader>
           <ModalTitle>{group ? `${group.name} · 公开成员` : '公开成员'}</ModalTitle>
-          <ModalDescription>成员详情仅展示名称、身份类型和角色。</ModalDescription>
+          <div>
+            <ModalDescription>成员详情仅展示名称、身份类型和角色。</ModalDescription>
+            {!loading && ownerUserName && (
+              <p className="m-0 break-words text-xs text-muted-foreground">
+                <span>Owner 用户：</span>
+                <span>{ownerUserName}</span>
+              </p>
+            )}
+          </div>
         </ModalHeader>
         {loading ? (
           <div aria-label="正在加载成员">

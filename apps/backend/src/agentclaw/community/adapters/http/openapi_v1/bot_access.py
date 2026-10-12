@@ -71,6 +71,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
+    resolve_explicit_permission_level,
     resolve_operable_permission_level,
 )
 from agentclaw.community.core.repository.protocols.bot import (
@@ -107,7 +108,11 @@ def require_check(rule: Check) -> Callable[..., AsyncIterator[None]]:
         owner_id: OwnerIdDep,
     ) -> AsyncIterator[None]:
         level = await _resolve_level(
-            request, bot_id=bot_id, caller_id=caller_id, owner_id=owner_id
+            request,
+            bot_id=bot_id,
+            caller_id=caller_id,
+            owner_id=owner_id,
+            explicit=rule.explicit,
         )
         if level < rule.level:
             # The ids go to the log because the response cannot carry them: it
@@ -225,7 +230,12 @@ async def _uses_member_management_semantics(
 
 
 async def _resolve_level(
-    request: Request, *, bot_id: str, caller_id: str, owner_id: str
+    request: Request,
+    *,
+    bot_id: str,
+    caller_id: str,
+    owner_id: str,
+    explicit: bool = False,
 ) -> PermissionLevel:
     """:func:`_level`, with its database work off the event loop.
 
@@ -266,6 +276,7 @@ async def _resolve_level(
         bot_id=bot_id,
         caller_id=caller_id,
         owner_id=owner_id,
+        explicit=explicit,
     )
 
 
@@ -276,6 +287,7 @@ def _level(
     bot_id: str,
     caller_id: str,
     owner_id: str,
+    explicit: bool = False,
 ) -> PermissionLevel:
     """The caller's level on the addressed bot, or ``NONE`` if anything failed.
 
@@ -287,6 +299,13 @@ def _level(
     Synchronous and blocking by design: :func:`_resolve_level` is what keeps it
     off the event loop, and it takes its services as arguments so that this
     function never reaches for the injector from a worker thread.
+
+    ``explicit`` names a different *source*, not a different height: the answer
+    counts only what an explicit collaborator row or ownership grants, and
+    ignores the MEMBER a live Space membership synthesizes — the domain the
+    edit/operations rows there mark with it. ``get_operable…``'s synthesized
+    answer stays the default because every plain read on it depends on Space
+    members keeping their view and chat.
     """
     try:
         bot = bots.get_by_id_and_owner(bot_id, owner_id)
@@ -297,6 +316,21 @@ def _level(
         return PermissionLevel.NONE
     if not bot:
         return PermissionLevel.NONE
+    if explicit:
+        try:
+            return resolve_explicit_permission_level(
+                collaborators,
+                bot=bot,
+                user_id=caller_id,
+                owner_id=owner_id,
+            )
+        except Exception:
+            logger.exception(
+                "[bot_access] explicit collaborator lookup failed for bot=%s; "
+                "refusing",
+                for_log(bot_id),
+            )
+            return PermissionLevel.NONE
     try:
         return resolve_operable_permission_level(
             collaborators,

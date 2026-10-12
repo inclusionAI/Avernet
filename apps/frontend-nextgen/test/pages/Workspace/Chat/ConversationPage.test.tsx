@@ -9,7 +9,7 @@ import { conversationInitialState, useConversationStore } from '@/stores/convers
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const managedBot: ChatBotView = {
   botId: 'bot-a:1',
@@ -18,6 +18,20 @@ const managedBot: ChatBotView = {
   displayName: '管理 Bot',
   online: true,
   chatable: true,
+};
+
+const agentCodingBot: ChatBotView = {
+  botId: 'coding-bot:2088',
+  realBotId: 'coding-bot',
+  ownerId: '2088',
+  displayName: 'AgentCoding Bot',
+  online: true,
+  chatable: true,
+  engine: 'claude_code',
+  isAgentCodingBot: true,
+  templateName: '应用 Bot',
+  spaceId: '73',
+  spaceName: '测试空间',
 };
 const emptyList = {
   items: [],
@@ -43,13 +57,17 @@ jest.mock('@umijs/max', () => ({
   useSearchParams: () => [new URLSearchParams(), jest.fn()],
 }));
 
+jest.mock('@/services/workspace/teamBotConversationService', () => ({
+  teamBotConversationService: { listBots: jest.fn().mockResolvedValue({ ok: true, data: [] }) },
+}));
+
 jest.mock('@/hooks/useMediaQuery', () => ({ useMinWidth: () => true }));
 
 jest.mock('@/services/workspace/conversationService', () => ({
   conversationService: {
     listDirectory: jest.fn().mockResolvedValue({
       ok: true,
-      data: { managedBots: [managedBot], friendBots: [], hasAgentCodingBots: false },
+      data: { managedBots: [managedBot], friendBots: [] },
     }),
     listManagedSessions: jest.fn().mockResolvedValue({ ok: true, data: { items: [], total: 0, page: 1 } }),
     listFriendBotSessions: jest.fn().mockResolvedValue({ ok: true, data: { items: [], total: 0, page: 1 } }),
@@ -205,6 +223,26 @@ describe('ConversationPage(Task 8 组合页)', () => {
     await screen.findByText('张三管理的 Bot');
   });
 
+  it('点击 AgentCoding Bot 直接进入专用 coding-chat', async () => {
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    const { history } = require('@umijs/max') as { history: { push: jest.Mock; replace: jest.Mock } };
+    history.push.mockClear();
+    conversationServiceMock.listDirectory.mockResolvedValueOnce({
+      ok: true,
+      data: { managedBots: [agentCodingBot], friendBots: [] },
+    });
+
+    render(<ConversationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'AgentCoding Bot' }));
+
+    expect(history.push).toHaveBeenCalledTimes(1);
+    expect(history.push).toHaveBeenCalledWith(
+      '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
+    );
+  });
+
   it('origin=mine 选中会话渲染交互舞台(不渲染只读面板)', async () => {
     useConversationStore.setState({
       ...conversationInitialState,
@@ -245,13 +283,22 @@ describe('ConversationPage(Task 8 组合页)', () => {
     expect(screen.queryByText('请选择一个好友用户会话')).not.toBeInTheDocument();
   });
 
-  it('origin=others 选中好友会话:不触发写接口与实时连接装配(spec §13)', async () => {
+  it.each(['managed', 'team'] as const)('%s origin=others 选中好友会话:只读、零写接口和实时连接', async (section) => {
+    if (section === 'team') {
+      require('@/services/workspace/conversationService').conversationService.listDirectory.mockResolvedValueOnce({
+        ok: true,
+        data: { managedBots: [], friendBots: [] },
+      });
+      require('@/services/workspace/teamBotConversationService').teamBotConversationService.listBots.mockResolvedValueOnce(
+        { ok: true, data: [managedBot] },
+      );
+    }
     useConversationStore.setState({
       ...conversationInitialState,
       expandedBotIds: { 'bot-a:1': true },
       originByManagedBotId: { 'bot-a:1': 'others' },
       selectedBotId: 'bot-a:1',
-      selectedSection: 'managed',
+      selectedSection: section,
       selectedOrigin: 'others',
       selectedScope: 'all',
       selectedFriendUserId: 'f9',
@@ -296,9 +343,11 @@ describe('ConversationPage(Task 8 组合页)', () => {
     // 只读面板分支接管(真实只读面板渲染选中会话头),交互舞台未挂载。
     expect(await screen.findByText('他人会话')).toBeInTheDocument();
     expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /发送|消息|输入/ })).not.toBeInTheDocument();
 
     // useBotChat(实时连接装配入口)接收到 null 目标:真实 Hook 对 null bot/session 不建连。
-    expect(mockUseBotChat).toHaveBeenCalledWith(null, null, expect.anything());
+    expect(mockUseBotChat).toHaveBeenCalledWith(null, null, expect.anything(), undefined, '101');
 
     // 发送/重连/首条消息请求链路零调用。
     expect(mockBotChat.send).not.toHaveBeenCalled();
@@ -364,4 +413,27 @@ describe('CollaborationPage(Task 8 组合页)', () => {
     expect(screen.getByLabelText('协作群列表')).toBeInTheDocument();
     expect(screen.getByTestId('group-chat-pane')).toBeInTheDocument();
   });
+});
+
+it('expanding a Bot with no sessions replaces the chat stage with its creation prompt', async () => {
+  render(<ConversationPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '管理 Bot' }));
+  expect(await screen.findByText('管理 Bot 暂无会话')).toBeInTheDocument();
+  expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
+  expect(mockUseBotChat).toHaveBeenLastCalledWith(null, null, expect.anything(), undefined, '101');
+  const service = require('@/services/workspace/botSessionService').botSessionService as { createSession: jest.Mock };
+  service.createSession.mockResolvedValueOnce({
+    ok: true,
+    data: {
+      sessionId: 'new-s',
+      botId: 'bot-a:1',
+      title: '新会话',
+      messageCount: 0,
+      gmtCreate: '',
+      gmtModified: '',
+    },
+  });
+  fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
+  await waitFor(() => expect(screen.getByTestId('interactive-stage')).toBeInTheDocument());
+  expect(useConversationStore.getState().selectedSessionId).toBe('new-s');
 });

@@ -30,7 +30,7 @@ class TestWorkerProfileSettings:
         settings = WorkerProfileSettings()
 
         # 默认 roots
-        assert settings.roots == ["/aidesktop/aidesktop_pre/bolt_data"]
+        assert settings.roots == []
 
         # 默认选项
         assert settings.include_backup is False
@@ -246,7 +246,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
         # 应该使用默认值
         settings = WorkerProfileSettings()
-        assert settings.roots == ["/aidesktop/aidesktop_pre/bolt_data"]
+        assert settings.roots == []
 
 
 class TestWorkerProfileSettingsValidation:
@@ -258,9 +258,9 @@ class TestWorkerProfileSettingsValidation:
             WorkerProfileSettings,
         )
 
-        # 空列表应使用默认值
+        # An empty public configuration must not select private filesystem roots.
         settings = WorkerProfileSettings(roots=[])
-        assert settings.roots == ["/aidesktop/aidesktop_pre/bolt_data"]
+        assert settings.roots == []
 
     def test_empty_root_string_ignored(self):
         """测试空字符串路径被忽略"""

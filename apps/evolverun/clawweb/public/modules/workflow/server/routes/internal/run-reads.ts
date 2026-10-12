@@ -13,7 +13,7 @@ export function createInternalRunReadsRouter(repo: RunReadRepository): Router {
           || (kind === "logs" && (typeof q.flowId !== "string" || !q.flowId))) {
           res.status(400).json({ success: false, message: "Missing bot/owner scope or flowId" }); return;
         }
-        for (const key of ["workflowId", "status", "identityKey", "nodeId", "level"]) {
+        for (const key of ["workflowId", "status", "identityKey", "nodeId", "level", "userId", "sessionKey", "sessionId"]) {
           if (q[key] !== undefined && typeof q[key] !== "string") {
             res.status(400).json({success:false,message:`Invalid ${key}`}); return;
           }
@@ -21,8 +21,11 @@ export function createInternalRunReadsRouter(repo: RunReadRepository): Router {
         if (q.includeHidden !== undefined && typeof q.includeHidden !== "boolean") {
           res.status(400).json({success:false,message:"Invalid includeHidden"}); return;
         }
+        if (q.scope !== undefined && (kind !== "runs" || !["bot", "session", "all"].includes(q.scope))) {
+          res.status(400).json({success:false,message:"Invalid run scope"}); return;
+        }
         const data = kind === "runs" ? await repo.listRuns(q) : await repo.readLogs(q);
-        res.json({ success: true, data });
+        res.json({ success: true, data: kind === "runs" ? { ...data, scope: q.scope ?? "bot" } : data });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const status = message.includes("not found") ? 404 : /scope|cursor|limit must/.test(message) ? 400 : 500;

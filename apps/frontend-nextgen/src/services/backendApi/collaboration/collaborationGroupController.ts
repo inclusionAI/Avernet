@@ -56,6 +56,9 @@ export interface GroupDetailData {
   originator_actor_id: string;
   participants: GroupParticipantDto[];
   driver_bot_uuid: string;
+  driver_bot_name?: string;
+  driver_bot_owner?: string;
+  driver_bot_owner_name?: string;
   collaboration: GroupCollaboration;
   name?: string;
   created_at: number;

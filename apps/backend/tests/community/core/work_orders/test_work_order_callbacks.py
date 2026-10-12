@@ -286,7 +286,7 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
         for record in caplog.records
         if record.message == "friend work-order BCN callback response"
     )
-    assert request_log.request_body is None
+    assert not hasattr(request_log, "request_body")
     assert request_log.has_authorization is True
     assert request_log.has_x_avernet_principal is True
     auth_log = next(
@@ -307,17 +307,14 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
     assert request_log.principal_length == len(READDRESSED_PRINCIPAL)
     assert len(request_log.principal_fingerprint) == 16
     assert len(request_log.source_principal_fingerprint) == 16
-    assert (
-        request_log.source_principal_fingerprint != request_log.principal_fingerprint
-    )
+    assert request_log.source_principal_fingerprint != request_log.principal_fingerprint
     assert "secret-principal" not in request_log.message
     assert response_log.http_status == 403
     assert response_log.response_code == 403201
-    assert response_log.response_message == "Forbidden"
+    assert not hasattr(response_log, "response_message")
     assert response_log.response_request_id == "bcn-request-1"
-    assert response_log.response_body_raw == (
-        '{"code":403201,"message":"Forbidden","data":null,"request_id":"bcn-request-1"}'
-    )
+    assert not hasattr(response_log, "response_body_raw")
+    assert response_log.response_body_length > 0
     assert response_log.duration_ms >= 0
     assert "secret-auth" not in caplog.text
     assert "secret-principal" not in caplog.text
@@ -370,21 +367,23 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     )
     assert response_log.http_status == 502
     assert response_log.response_code is None
-    assert response_log.response_body_raw == "Bad Gateway"
+    assert response_log.response_body_length == len("Bad Gateway")
+    assert not hasattr(response_log, "response_body_raw")
     failure_log = next(
         record
         for record in caplog.records
         if record.message == "friend work-order decision callback failed"
     )
     assert failure_log.exception_type == "HTTPStatusError"
-    assert failure_log.response_body_raw == "Bad Gateway"
+    assert failure_log.response_body_length == len("Bad Gateway")
+    assert not hasattr(failure_log, "response_body_raw")
     assert failure_log.principal_header_count == 0
     assert failure_log.principal_fingerprint is None
     assert failure_log.source_principal_fingerprint is None
     assert failure_log.principal_length is None
 
 
-def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
+def test_friend_handler_omits_large_response_body_from_logs(caplog) -> None:
     caplog.set_level("INFO", logger="start")
     http = MagicMock(spec=HttpClient)
     large_body = "x" * 16_385
@@ -408,8 +407,9 @@ def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
         for record in caplog.records
         if record.message == "friend work-order BCN callback response"
     )
-    assert response_log.response_body_raw.endswith("...<truncated>")
-    assert len(response_log.response_body_raw) == 16 * 1024 + len("...<truncated>")
+    assert not hasattr(response_log, "response_body_raw")
+    assert response_log.response_body_length == len(large_body)
+    assert large_body not in caplog.text
 
 
 def test_friend_handler_rejects_with_review_reason() -> None:
@@ -561,3 +561,22 @@ def test_creation_validation_accepts_friend_contract_and_trims_id() -> None:
     )
 
     assert friend_request_id(biz_data) == "request-1"
+
+
+def test_callback_diagnostics_omit_echoed_secrets_and_review_reason(caplog):
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response(
+        {"code": 403201, "message": "echo-private-body", "data": "echo-private-body"},
+        status_code=403,
+    )
+    with pytest.raises(WorkOrderCallbackError):
+        _handler(http).handle(
+            context=_context(),
+            decision=WorkOrderDecision.REJECTED,
+            review_remark="private-review-reason",
+            credential=WorkOrderCallbackCredential(headers={}),
+        )
+    diagnostic_records = repr([record.__dict__ for record in caplog.records])
+    assert "echo-private-body" not in diagnostic_records
+    assert "private-review-reason" not in diagnostic_records
