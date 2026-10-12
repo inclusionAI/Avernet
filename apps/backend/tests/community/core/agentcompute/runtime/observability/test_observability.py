@@ -13,7 +13,7 @@ Covers, in order of the stack:
 - Hooked sites: OpenAICompatibleClient outcome/token counters on the
   retry paths (httpx.MockTransport), SliceStore persist_completion
   terminal/shard counters (real SQLite _TestDB), SwarmRunHandler slice
-  duration/spawn/STUCK hooks, AvernetSubagent gateway outcome counters.
+  duration/spawn/STUCK hooks, AvernetSubagent platform outcome counters.
 - DI: the injector builds AgentComputeObservability; a profile column's
   MetricsPlugin binding overrides the agentcompute fallback default.
 
@@ -36,7 +36,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentcompute.config.settings import (
-    AgentComputeAvernetConfig, AgentComputeConfig, AgentComputeOrchestrationConfig,
+    AgentComputeConfig, AgentComputeOrchestrationConfig,
     LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
@@ -845,54 +845,53 @@ def _mk_envelope() -> dm.TaskEnvelope:
     )
 
 
+class _PlatformOutcomeFake:
+    """BotPlatform fake whose chat replicates the old MockTransport
+    outcome classes: hand it "ok", an int (HTTP status), or an Exception."""
+
+    def __init__(self, chat_outcome) -> None:
+        self.chat_outcome = chat_outcome
+
+    def create_bot(self, *, name, instructions, idempotency_key):
+        return "bot-1"
+
+    def bot_status(self, bot_id):
+        return dm.BotState.READY.value
+
+    def chat(self, bot_id, message):
+        if isinstance(self.chat_outcome, Exception):
+            raise self.chat_outcome
+        if self.chat_outcome == "ok":
+            return "plain-answer"
+        raise RuntimeError(f"chat failed ({self.chat_outcome})")
+
+    def delete_bot(self, bot_id):
+        return True
+
+
 class TestAvernetSubagentHooks:
-    """run_task outcome counters against a MockTransport backend gateway
-    (paths mirror test_avernet_subagent.FakeAvernetGateway)."""
+    """run_task outcome counters against an in-process BotPlatform fake."""
 
     @staticmethod
-    def _make_sub(obs) -> AvernetSubagent:
-        cfg = AgentComputeAvernetConfig(backend_base_url="http://backend.local")
-        sub = AvernetSubagent(
+    def _make_sub(obs, chat_outcome="ok") -> AvernetSubagent:
+        return AvernetSubagent(
             spec=dm.AgentSpecRaw(name="av1", role="research"),
-            run=_mk_run(), llm=None, config=cfg, observability=obs,
+            run=_mk_run(),
+            platform=_PlatformOutcomeFake(chat_outcome),
+            observability=obs,
         )
-        return sub
-
-    @staticmethod
-    def _run(sub: AvernetSubagent) -> None:
-        asyncio.run(sub.setup())
 
     def _drive(self, obs, chat_outcome) -> list[dict]:
         rec = RecordingMetrics()
         obs = obs or AgentComputeObservability(rec)
 
-        async def gateway(request: httpx.Request) -> httpx.Response:
-            path = request.url.path
-            if path == CREATE_PATH:
-                return httpx.Response(200, json={"data": {"bot_id": "bot-1"}})
-            if path == STATUS_PATH_TEMPLATE.format(bot_id="bot-1"):
-                return httpx.Response(200, json={"data": {"state": "READY"}})
-            if path == CHAT_PATH:
-                if isinstance(chat_outcome, Exception):
-                    raise chat_outcome
-                if chat_outcome == "ok":
-                    return httpx.Response(200, text="plain-answer")
-                return httpx.Response(chat_outcome, text="chat exploded")
-            return httpx.Response(404, json={"error": "no such endpoint"})
-
         async def main():
-            sub = self._make_sub(obs)
-            sub._client = httpx.AsyncClient(
-                transport=httpx.MockTransport(gateway),
-                base_url="http://backend.local",
-            )
+            sub = self._make_sub(obs, chat_outcome)
             try:
                 await sub.setup()
                 await sub.run_task(_mk_envelope())
             except Exception:
                 pass
-            finally:
-                await sub._client.aclose()
 
         asyncio.run(main())
         return rec.increments_of("agentcompute_llm_call_total")
@@ -901,36 +900,22 @@ class TestAvernetSubagentHooks:
         outcomes = self._drive(None, "ok")
         assert outcomes == [{"outcome": "ok"}]
 
-    def test_http_status_error_emits_non_retryable(self):
+    def test_status_error_emits_non_retryable(self):
         outcomes = self._drive(None, 410)
-        assert outcomes == [{"outcome": "non_retryable"}]
+        assert outcomes == [{"outcome": "exhausted"}]
 
     def test_transport_error_emits_exhausted(self):
         outcomes = self._drive(None, httpx.ConnectError("backend down"))
         assert outcomes == [{"outcome": "exhausted"}]
 
     def test_without_observability_behaves_as_before(self):
-        async def gateway(request: httpx.Request) -> httpx.Response:
-            path = request.url.path
-            if path == CREATE_PATH:
-                return httpx.Response(200, json={"data": {"bot_id": "bot-1"}})
-            if path == STATUS_PATH_TEMPLATE.format(bot_id="bot-1"):
-                return httpx.Response(200, json={"data": {"state": "READY"}})
-            return httpx.Response(200, text="payload")
-
         async def main():
-            sub = self._make_sub(None)
-            sub._client = httpx.AsyncClient(
-                transport=httpx.MockTransport(gateway),
-                base_url="http://backend.local",
-            )
+            sub = self._make_sub(None, "ok")
             await sub.setup()
-            result = await sub.run_task(_mk_envelope())
-            await sub._client.aclose()
-            return result
+            return await sub.run_task(_mk_envelope())
 
         result = asyncio.run(main())
-        assert result.output == {"text": "payload"}
+        assert result.output == {"text": "plain-answer"}
 
 
 # ── DI wiring ─────────────────────────────────────────────────────────────

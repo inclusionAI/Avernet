@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol,
@@ -40,6 +40,7 @@ from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWor
 from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
 )
+from agentclaw.community.core.agentcompute.spi.bot import BotPlatform
 from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.metrics import MetricsPlugin
@@ -190,10 +191,20 @@ class AgentComputeModule(Module):
     @inject
     def provide_runtime(
         self,
+        injector: Injector,
         llm: LLMProvider,
         config: AgentComputeConfig,
+        observability: AgentComputeObservability,
     ) -> SubagentRuntime:
-        factory = DefaultSubagentFactory(llm, config.egress)
+        # The avernet BotPlatform is a host binding, not an agentcompute one:
+        # profiles that run the platform side bind BotPlatform (the
+        # in-process seam); others resolve no platform and avernet-kind
+        # spawns fail clear at the factory.
+        try:
+            platform: BotPlatform | None = injector.get(BotPlatform)
+        except Exception:
+            platform = None
+        factory = DefaultSubagentFactory(llm, platform, observability)
         store = FilesystemArtifactStore(config.artifact_store_root)
         return SubagentRuntime(
             factory=factory,

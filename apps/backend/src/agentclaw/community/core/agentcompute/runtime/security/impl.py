@@ -3,8 +3,8 @@
 - PII classification of stored swarm content (goal, messages, shards):
   pattern families for the classes an operator must report on, with a
   redactor for export surfaces.
-- Egress allowlist: the two outbound surfaces (LLM endpoint, Avernet
-  bot gateway) are validated at client construction against the
+- Egress allowlist: the single outbound surface (the LLM endpoint) is
+  validated at client construction against the
   configured allowlist — fail clear at boot, not per request.
 - Prompt-injection heuristics: subagent output is untrusted data that
   flows into orchestrator prompts; markers detectable here are recorded

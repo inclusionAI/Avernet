@@ -86,7 +86,7 @@ class TestEgressAllowlist:
             validate_egress_url(
                 "https://rogue.example.com",
                 allowed_hosts=("api.example.com",),
-                require_https=False, surface="avernet",
+                require_https=False, surface="llm",
             )
 
     def test_allowlisted_host_and_defaults_pass(self):
@@ -97,7 +97,7 @@ class TestEgressAllowlist:
         ) == "https://api.example.com/v1"
         assert validate_egress_url(
             "http://127.0.0.1:8000", allowed_hosts=(),
-            require_https=False, surface="avernet",
+            require_https=False, surface="llm",
         ) == "http://127.0.0.1:8000"
 
     def test_llm_client_fails_clear_at_construction(self):

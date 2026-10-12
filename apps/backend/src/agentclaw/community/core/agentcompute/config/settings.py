@@ -35,16 +35,6 @@ class AgentComputeOrchestrationConfig:
 
 
 @dataclass(frozen=True)
-class AgentComputeAvernetConfig:
-    backend_base_url: str = "http://127.0.0.1:8000"
-    bot_create_path: str = "/openapi/v1/bots/with-manifest"
-    bot_status_path: str = "/openapi/v1/bots/{bot_id}/status"
-    bot_delete_path: str = "/openapi/v1/bots/{bot_id}"
-    http_timeout: float = 60.0
-    http_retries: int = 2
-
-
-@dataclass(frozen=True)
 class AgentComputeTenantLimits:
     max_concurrent_runs: int = 8
     max_fanout_width: int = 8
@@ -85,9 +75,6 @@ class AgentComputeConfig:
     llm: LlmConfig | None = None
     orchestration: AgentComputeOrchestrationConfig = field(
         default_factory=AgentComputeOrchestrationConfig
-    )
-    avernet: AgentComputeAvernetConfig = field(
-        default_factory=AgentComputeAvernetConfig
     )
     tenant_limits: AgentComputeTenantLimits = field(
         default_factory=AgentComputeTenantLimits

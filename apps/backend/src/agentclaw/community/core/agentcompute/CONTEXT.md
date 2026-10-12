@@ -85,8 +85,9 @@ must stay backward-readable across releases. Guard/termination semantics
 No import of `core/task`, `core/task_queue`, `core/harness`,
 `plugin_api/object_storage`, or `core/system_config`; kernel only
 (`core.base`, `di`, `plugin_api.database`, `kernel.*`, `log`). Transport
-stays at the adapters; httpx appears only inside `plugins/` (LLM client,
-avernet subagent). Enforced by
+stays at the adapters; httpx appears only inside `plugins/` (LLM client).
+The avernet subagent calls the host platform through the in-process
+`BotPlatform` seam — no socket leaves the module. Enforced by
 `tests/community/architecture/test_agentcompute_isolation.py`.
 
 ## Operation knobs (`AgentComputeConfig`)

@@ -117,9 +117,12 @@ Controls map:
   run's agents, messages, shards, rounds, guard events, job and run rows
   (tenant-scoped). The append-only `ac_agent_compute_audit` trail is a
   governance record and is intentionally kept.
-- Egress: both outbound surfaces validate against `config.egress`
+- Egress: the single outbound surface (the LLM endpoint) validates against
+  `config.egress`
   (scheme http(s)-only, optional https-only, optional host allowlist) at
-  client construction - fail clear at boot.
+  client construction - fail clear at boot. The avernet subagent talks to
+  the host platform through the in-process `BotPlatform` seam; it
+  opens no socket and holds no egress surface.
 - Prompt injection: subagent output is untrusted data. `SliceStore`
   records `prompt_injection` guard events for detected markers while
   still routing the result; the orchestrator wraps every result in an

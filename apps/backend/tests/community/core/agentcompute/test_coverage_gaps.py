@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentcompute.config.settings import (
-    AgentComputeAvernetConfig, AgentComputeConfig, AgentComputeOrchestrationConfig,
+    AgentComputeConfig, AgentComputeOrchestrationConfig,
     LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
@@ -157,13 +157,24 @@ class TestDefaultSubagentFactory:
 
     @pytest.mark.asyncio
     async def test_avernet_kind_creates_avernet_subagent(self):
-        factory = DefaultSubagentFactory(StubLLMProvider())
+        factory = DefaultSubagentFactory(StubLLMProvider(), platform=object())
         sub = factory.create(
             dm.AgentSpecRaw(name="b1", role="worker", kind=dm.AgentKind.AVENET),
             _mk_run(),
         )
         assert isinstance(sub, AvernetSubagent)
-        await sub.teardown()
+
+    def test_avernet_kind_without_platform_fails_clear(self):
+        from agentclaw.community.core.agentcompute.service.protocols import (
+            AgentComputeConfigError,
+        )
+
+        factory = DefaultSubagentFactory(StubLLMProvider())
+        with pytest.raises(AgentComputeConfigError, match="BotPlatform"):
+            factory.create(
+                dm.AgentSpecRaw(name="b1", role="worker", kind=dm.AgentKind.AVENET),
+                _mk_run(),
+            )
 
 
 class TestLLMBackedSubagent:
@@ -208,16 +219,43 @@ class TestAvernetSubagentTeardown:
 
     @pytest.mark.asyncio
     async def test_teardown_swallows_bot_delete_failure(self):
-        config = AgentComputeAvernetConfig(
-            backend_base_url="http://127.0.0.1:1", http_timeout=0.05,
-        )
+        class _BoomPlatform:
+            def delete_bot(self, bot_id):
+                raise RuntimeError("platform gone")
+
         sub = AvernetSubagent(
             dm.AgentSpecRaw(name="b", role="worker"), _mk_run(),
-            llm=None, config=config,
+            _BoomPlatform(),
         )
         sub._bot_id = "bot-1"
         await sub.teardown()
         assert sub._bot_id is None
+
+    def test_factory_fails_clear_without_platform(self):
+        from agentclaw.community.core.agentcompute.plugins.agents.factory import (
+            DefaultSubagentFactory,
+        )
+        from agentclaw.community.core.agentcompute.service.protocols import (
+            AgentComputeConfigError,
+        )
+        factory = DefaultSubagentFactory(llm=None)
+        with pytest.raises(AgentComputeConfigError, match="BotPlatform"):
+            factory.create(
+                dm.AgentSpecRaw(name="b", role="worker", kind=dm.AgentKind.AVENET),
+                _mk_run(),
+            )
+
+    def test_factory_builds_bot_subagent_with_platform(self):
+        from agentclaw.community.core.agentcompute.plugins.agents import bot as bot_pkg
+        from agentclaw.community.core.agentcompute.plugins.agents.factory import (
+            DefaultSubagentFactory,
+        )
+        factory = DefaultSubagentFactory(llm=None, platform=object())
+        sub = factory.create(
+            dm.AgentSpecRaw(name="b", role="worker", kind=dm.AgentKind.AVENET),
+            _mk_run(),
+        )
+        assert isinstance(sub, bot_pkg.AvernetSubagent)
 
 
 class TestDecisionParserGaps:
