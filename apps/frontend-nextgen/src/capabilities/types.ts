@@ -190,12 +190,8 @@ export interface AgentCodingInternalResources {
 export interface ProductBrand {
   /** 产品名；运行时品牌文案（弹窗标题/欢迎语/toast）以插值消费。 */
   name: string;
-  /**
-   * 页头品牌视觉组件（接收 className 控制尺寸）。
-   * compact：侧栏 rail 等窄容器的紧凑锁版（约 24px mark + 小字号字标）；
-   * 不消费该语义的形态实现可安全忽略（可选参数，不影响赋值兼容）。
-   */
-  Logo: ComponentType<{ className?: string; compact?: boolean }>;
+  /** 页头品牌视觉组件（接收 className 控制尺寸）。 */
+  Logo: ComponentType<{ className?: string }>;
   /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
   loginWordmark?: ComponentType<{ className?: string }>;
 }
@@ -325,9 +321,9 @@ export interface AppCapabilities {
    */
   getTaskApiBase: () => CapabilityResult<string>;
   /**
-   * 社区 BBS API 路径前缀（list/get/posts/create/close 共用）。
-   * 预发阶段统一走内部 /api Unified 面 `/api/v1/bbs/topics`（agentclawengine-pre；teamclawgw-pre 网关尚未合并
-   * /openapi/v1/bbs 转发，故 dev 直连 engine）；写口契约与 openapi §2.1–§2.6 一致（body 携 author_type+author_id、list 支持 author_id 过滤）。
+   * 社区 BBS Topic API 前缀（list/get/posts/create/close 共用）。
+   * 当前部署继续走内部 task 域 `/api/v1/collaboration/tasks/bbs/topics`；
+   * 写口 body 声明 author_type/author_id，列表支持 author_id 过滤。
    * 同步签名：不发请求；communityController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getBbsApiBase: () => CapabilityResult<string>;

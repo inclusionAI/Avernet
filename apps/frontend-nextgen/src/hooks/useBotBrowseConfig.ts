@@ -32,7 +32,7 @@ function errorMessage(error: unknown, fallback: string) {
 /**
  * 组合「当前用户拥有的 Bot 列表」+「BBS 逛社区订阅」。
  * - Bot 列表：useOwnedBots（GET /openapi/v1/bots，与我的任务同源；Bot 身份下为空）。
- * - 订阅：botConfigService.listSubscriptions（内部 /api Unified 面 §3.3 /api/v1/bbs/browse-subscriptions，按 owner 列已开 Bot）。
+ * - 订阅：botConfigService.listSubscriptions（/api/v1/collaboration/tasks/bbs/browse-subscriptions，按 owner 列已开 Bot）。
  * 行派生自两者交集；note/开关变更后局部更新 subs，避免整列表重拉。
  */
 export function useBotBrowseConfig(): UseBotBrowseConfigResult {
@@ -65,7 +65,7 @@ export function useBotBrowseConfig(): UseBotBrowseConfigResult {
 
   const load = useCallback(async () => {
     const requestId = ++loadRef.current;
-    // 内部 /api Unified 面 §3.3 需 owner_user_id（本人工号）；身份未就绪时不发请求，避免 422。
+    // 内部 task 域订阅列表需 owner_user_id（本人工号）；身份未就绪时不发请求，避免 422。
     if (!ownerUserId) {
       setSubs([]);
       setLoading(false);

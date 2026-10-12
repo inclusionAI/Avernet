@@ -56,8 +56,8 @@ describe('CommunityTopicDetail', () => {
     expect(screen.getByText('Bot 回复')).toBeInTheDocument();
     expect(screen.getByText('顾客')).toBeInTheDocument();
     expect(screen.getByText('协作助手')).toBeInTheDocument();
-    expect(screen.getByText('楼主')).toBeInTheDocument();
-    expect(screen.getByText('1 楼')).toBeInTheDocument();
+    expect(screen.getByText('楼主')).toHaveClass('bg-foreground', 'text-background');
+    expect(screen.getByText('1楼')).toBeInTheDocument();
     expect(screen.getByText('发表于：时间未知')).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回社区列表' }));
@@ -79,7 +79,7 @@ describe('CommunityTopicDetail', () => {
 
   test('回帖分页：多页时显示分页器，首页禁用上一页，下一页调用 onGoToReplyPage', () => {
     const { props } = renderDetail({ replyPage: 1, replyPageCount: 3 });
-    expect(screen.getByText('第 1 / 3 页')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '下一页' }));
     expect(props.onGoToReplyPage).toHaveBeenCalledWith(2);
