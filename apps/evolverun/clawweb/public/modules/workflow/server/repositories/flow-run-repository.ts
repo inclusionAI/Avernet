@@ -542,13 +542,18 @@ export class FlowRunRepository {
   }
 
   /** Resume a locally authorized manual retry without rewriting node history or started_at. */
-  async resumeForRetry(flowId: string): Promise<boolean> {
+  async resumeForRetry(flowId: string): Promise<'resumed' | 'not_found' | 'conflict'> {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
-      "UPDATE flow_runs SET status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ?",
+      `UPDATE flow_runs SET status = 'running', completed_at = NULL, gmt_modified = ?
+       WHERE flow_id = ? AND status IN ('failed', 'blocked', 'waiting', 'running')`,
       [now, flowId],
     );
-    return result.affectedRows > 0;
+    if (result.affectedRows > 0) return 'resumed';
+    const rows = await this.db.query<{ status: string }>('SELECT status FROM flow_runs WHERE flow_id = ?', [flowId]);
+    if (!rows.length) return 'not_found';
+    // MySQL may report zero changed rows for an idempotent same-second replay.
+    return rows[0].status === 'running' ? 'resumed' : 'conflict';
   }
 
   async deleteByFlowId(flowId: string): Promise<boolean> {

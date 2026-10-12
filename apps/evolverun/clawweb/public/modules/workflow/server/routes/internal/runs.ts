@@ -455,8 +455,13 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      if (!await flowRunRepo.resumeForRetry(flowId)) {
+      const outcome = await flowRunRepo.resumeForRetry(flowId);
+      if (outcome === 'not_found') {
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        return;
+      }
+      if (outcome === 'conflict') {
+        res.status(409).json({ success: false, error: "Conflict", message: `Flow run "${flowId}" is no longer retryable` });
         return;
       }
       res.json({ success: true });

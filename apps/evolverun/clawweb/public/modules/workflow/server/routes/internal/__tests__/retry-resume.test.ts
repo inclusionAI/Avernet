@@ -51,3 +51,14 @@ it('keeps the legacy status endpoint able to resume a failed TaskGuard run', asy
   expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get('flow'))
     .toEqual({ status: 'running', started_at: 123 });
 });
+
+it('retries waiting and blocked runs but never reopens a run completed after the local intent', async () => {
+  for (const status of ['waiting', 'blocked', 'succeeded', 'cancelled']) {
+    raw.prepare('INSERT INTO flow_runs (flow_id, status, started_at, completed_at) VALUES (?, ?, 123, 456)')
+      .run(status, status);
+    const response = await put(`${status}/retry-resume`);
+    expect(response.status).toBe(['waiting', 'blocked'].includes(status) ? 200 : 409);
+    expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get(status))
+      .toEqual({ status: ['waiting', 'blocked'].includes(status) ? 'running' : status, started_at: 123 });
+  }
+});
