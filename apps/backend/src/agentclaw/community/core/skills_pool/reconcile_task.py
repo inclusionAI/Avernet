@@ -386,6 +386,7 @@ class SkillsPoolReconcileWakeupListener(LifecycleBase):
         binding_repository: DeviceBindingRepository,
         bot_repository: BotRepository,
         task_queue_service: TaskQueueService,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
         registry: HandlerRegistry | None = None,
         task_handler: SkillsPoolReconcileTaskHandler | None = None,
         quarantine_task_handler: SkillsPoolQuarantineCleanupTaskHandler | None = None,
@@ -393,6 +394,7 @@ class SkillsPoolReconcileWakeupListener(LifecycleBase):
         self._bindings = binding_repository
         self._bots = bot_repository
         self._queue = task_queue_service
+        self._layouts = layout_repository
         self._registry = registry
         self._task_handler = task_handler
         self._quarantine_task_handler = quarantine_task_handler
@@ -523,12 +525,19 @@ class SkillsPoolReconcileWakeupListener(LifecycleBase):
         bot_id = current_bot.get("bot_id")
         if not isinstance(bot_id, str) or not bot_id:
             return
+        scope = BotSkillLayoutScope(
+            env=binding.env,
+            entity_id=binding.entity_id,
+            bot_id=bot_id,
+        )
+        if is_pool_native_state(
+            self._layouts.get(scope),
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            engine_type=str(current_bot.get("active_engine") or ""),
+        ):
+            return
         payload = build_skills_pool_reconcile_payload(
-            scope=BotSkillLayoutScope(
-                env=binding.env,
-                entity_id=binding.entity_id,
-                bot_id=bot_id,
-            ),
+            scope=scope,
             source=source,
             signal_identity=signal_identity,
         )

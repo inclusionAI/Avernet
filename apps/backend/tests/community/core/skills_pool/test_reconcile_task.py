@@ -110,6 +110,7 @@ def _listener(
             binding_repository=bindings,
             bot_repository=bots,
             task_queue_service=queue,
+            layout_repository=MagicMock(),
         ),
         queue,
     )
@@ -477,6 +478,53 @@ def test_ineligible_unclaimed_bot_never_probes_or_reconciles_runtime() -> None:
     assert handler.handle(_payload()) == Complete()
     assert len(claims.calls) == 1
     assert reconcile.calls == []
+
+
+@pytest.mark.parametrize("phase", [SkillLayoutPhase.POOL_INITIALIZING, SkillLayoutPhase.POOL_ACTIVE])
+@pytest.mark.parametrize("provider", ["arca", "baas"])
+def test_pool_native_wakeup_does_not_enqueue_migration(phase, provider) -> None:
+    listener, queue = _listener(
+        binding=_binding(
+            provider=provider,
+            props={"sandbox_id": "sandbox-current", "restart_publish_id": "1002"},
+        ),
+    )
+    listener._layouts.get.return_value = replace(
+        _claimed_state(active_layout=SkillLayout.POOL),
+        target_layout=None,
+        phase=phase,
+        migration_generation=None,
+        preparation_id=None,
+        rollout_evidence=RolloutEvidence(
+            env="pre", config_id=7, config_version="revision-1", batch_id=None,
+            engine_type="openclaw", decision_reason="owner_allowlist",
+        ),
+    )
+    event = (
+        DeviceAliveEvent(
+            device_id="device-current", binding_id=42, entity_id="entity-1",
+            entity_type="staff", device_provider="arca", sandbox_id="sandbox-current",
+        )
+        if provider == "arca"
+        else BaasPublishCompletedEvent(
+            binding_id=42, bot_id="bot-1", owner_id="owner-1",
+            publish_id=1002, publish_kind="restart",
+        )
+    )
+    listener.handle(event)
+    queue.enqueue.assert_not_called()
+
+
+def test_migrated_pool_wakeup_still_enqueues_reconciliation() -> None:
+    listener, queue = _listener(
+        binding=_binding(provider="arca", props={"sandbox_id": "sandbox-current"}),
+    )
+    listener._layouts.get.return_value = _claimed_state(active_layout=SkillLayout.POOL)
+    listener.handle(DeviceAliveEvent(
+        device_id="device-current", binding_id=42, entity_id="entity-1",
+        entity_type="staff", device_provider="arca", sandbox_id="sandbox-current",
+    ))
+    queue.enqueue.assert_called_once()
 
 
 def test_pool_native_task_does_not_enter_migration_reconciliation() -> None:

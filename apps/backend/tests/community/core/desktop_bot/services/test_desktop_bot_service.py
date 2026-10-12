@@ -1898,6 +1898,7 @@ class TestPublishPolling:
             binding_repository=mocks["binding_repo"],
             bot_repository=mocks["bot_repo"],
             task_queue_service=queue,
+            layout_repository=MagicMock(),
         )
         completed: list[BaasPublishCompletedEvent] = []
         reset_event_bus()
