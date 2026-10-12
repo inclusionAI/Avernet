@@ -160,6 +160,18 @@ class TestRunRepository:
         assert fetched.tenant == TENANT_A
         assert fetched.goal == "test goal"
 
+    def test_catalog_kind_round_trips_as_enum(self, run_repo):
+        run = _mk_run()
+        run.agent_catalog = (
+            dm.AgentSpecRaw(name="r1", role="research"),
+            dm.AgentSpecRaw(name="r2", role="bot", kind=dm.AgentKind.AVENET),
+        )
+        run_repo.create(run)
+        fetched = run_repo.get(run.run_id, TENANT_A)
+        kinds = [spec.kind for spec in fetched.agent_catalog]
+        assert all(isinstance(kind, dm.AgentKind) for kind in kinds)
+        assert [kind.value for kind in kinds] == ["llm", "avernet"]
+
     def test_tenant_isolation(self, run_repo):
         run = _mk_run(tenant=TENANT_A)
         run_repo.create(run)

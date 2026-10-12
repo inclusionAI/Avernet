@@ -238,7 +238,16 @@ class RunRepository(RunRepositoryProtocol):
     @staticmethod
     def _to_domain(row: om.AcAgentComputeRunModel) -> dm.Run:
         catalog_raw = _loads(row.agent_catalog) or []
-        agent_catalog = tuple(dm.AgentSpecRaw(**c) for c in catalog_raw)
+        # The column stores the spec dicts as plain JSON, so enum fields
+        # come back as strings; coerce them back to their typed enums here
+        # (the JSON boundary) instead of leaving str values in the typed
+        # domain contract, where consumers crash at attribute time.
+        agent_catalog = tuple(
+            dm.AgentSpecRaw(**{
+                **c, "kind": dm.AgentKind(c.get("kind", dm.AgentKind.LLM.value)),
+            })
+            for c in catalog_raw
+        )
         req_md_raw = _loads(row.request_metadata) or {}
         return dm.Run(
             run_id=dm.RunId(row.run_id),
