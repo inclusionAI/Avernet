@@ -639,8 +639,8 @@ async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phas
     assert len(commands) == 2
     assert isinstance(result, Reschedule)
     assert len(mutations) == 1  # Neither backup timeout nor identity change vetoes restart.
-    if changed:
-        assert 'reason=instance_changed' in caplog.text
+    assert 'reason=timeout' in caplog.text
+    assert 'action=continue_restart' in caplog.text
     assert s.repo.bot['ext'].get('start_status') != 'FAILED'
     assert isinstance(s.handler.handle(task.payload), Reschedule)
     assert len(mutations) == 1  # Redelivery observes; it never repeats the mutation.

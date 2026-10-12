@@ -80,14 +80,6 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
     return value
 
 
-def _check_boot_identity(value, expected):
-    boot = value.get('boot_id')
-    if isinstance(boot, str) and boot and expected and boot != expected:
-        raise RestartBackupError('instance_changed', '备份期间实例身份发生变化')
-    if value['status'] != 'legacy' and (not isinstance(boot, str) or not boot):
-        raise RestartBackupError('invalid_response', '备份结果缺少实例身份')
-
-
 def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str) -> Callable[[], None]:
     """Wait outside the legacy restart lock; return a short receipt verifier."""
@@ -123,8 +115,6 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             if time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
             value = parse_result(execute(command(action, operation_id)), operation_id)
-            # Identity evidence in a received response must not be hidden by timeout.
-            _check_boot_identity(value, boot)
             if time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
             status = value['status']
@@ -132,7 +122,10 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                 if action != 'start':
                     raise RestartBackupError('helper_disappeared', '重启备份脚本在执行期间消失')
             else:
-                boot = value['boot_id']
+                current_boot = value.get('boot_id')
+                if not isinstance(current_boot, str) or not current_boot or (boot and boot != current_boot):
+                    raise RestartBackupError('instance_changed', '备份期间实例身份发生变化')
+                boot = current_boot
             if status == 'not_mounted' and action != 'start':
                 raise RestartBackupError('mount_changed', '备份期间挂载状态发生变化')
             generation = receipt(value) if status == 'committed' else '-'
@@ -164,11 +157,10 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
             # replacement container while holding the legacy short-lived lock.
             check_action = 'start' if status == 'not_mounted' else 'status'
             current = parse_result(execute(command(check_action, operation_id)), operation_id)
-            _check_boot_identity(current, boot)
             if execution is not None and time.monotonic() >= deadline:
                 raise TimeoutError("重启备份超过等待预算")
-            if current['status'] != status:
-                raise RestartBackupError('receipt_stale', '备份后状态变化')
+            if current['status'] != status or (boot and current.get('boot_id') != boot):
+                raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化')
             if status == 'committed' and receipt(current) != generation:
                 raise RestartBackupError('generation_changed', '备份凭据变化')
             log('verify', 'allowed', generation=generation)
@@ -457,18 +449,26 @@ class AicodingRestartBackupMixin:
                     operation_id=operation_id,
                 )
             elif provider == 'arca':
-                # Direct ARCA bindings retain stop/start without a new backup
-                # dependency, including old or already unavailable sandboxes.
-                logger.info("event=aicoding_restart_backup phase=skip reason=arca_provider bot_id=%s",
-                            ctx.bot_id)
+                # Direct ARCA restart does not participate in the BaaS backup
+                # protocol. In particular, recovery must not require an exec
+                # into an already destroyed sandbox. Keep the binding verifier
+                # and the caller's mutation fence before the original stop/start.
+                logger.info(
+                    "event=aicoding_restart_backup phase=skip reason=arca_provider "
+                    "bot_id=%s binding_id=%s", ctx.bot_id, binding_id,
+                )
                 def check():
                     return None
             else:
-                # Only BaaS bindings participate in this backup protocol.
-                logger.info("event=aicoding_restart_backup phase=skip reason=non_baas_provider bot_id=%s",
-                            ctx.bot_id)
-                def check():
-                    return None
+                def execute(cmd):
+                    if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
+                        raise RestartBackupError('missing_device', '无法定位待恢复容器')
+                    return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
+                check = _attempt_backup(
+                    execute=execute,
+                    operation_id=operation_id,
+                    bot_id=ctx.bot_id, target_id=target,
+                )
 
             def verify():
                 current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)

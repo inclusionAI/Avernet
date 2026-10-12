@@ -1,4 +1,4 @@
-"""Backup failures yield to restart; observed target changes never do."""
+"""Backup failures yield to restart; lifecycle guards remain mandatory."""
 import logging
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -101,7 +101,9 @@ def test_observed_instance_change_degrades(phase, caplog):
     sequence = [response('running'), committed(boot_id='new')] if phase == 'prepare' else [committed(), committed(boot_id='new')]
     with patch.object(backup.time, 'sleep'):
         backup._attempt_backup(execute=Mock(side_effect=sequence), operation_id=OPERATION, bot_id='b', target_id='p')()
-    assert 'reason=instance_changed' in caplog.text
+    reason = 'instance_changed' if phase == 'prepare' else 'receipt_stale'
+    assert f'reason={reason}' in caplog.text
+    assert 'action=continue_restart' in caplog.text
 
 
 def test_inventory_change_continues_after_failed_backup(caplog):

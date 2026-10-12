@@ -697,7 +697,8 @@ def test_arca_skips_all_backup_io_but_still_verifies_binding(engine, status, rec
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
 @pytest.mark.parametrize('provider', ['local', 'unknown'])
-def test_non_baas_provider_skips_backup_but_keeps_binding_guard(engine, status, provider):
+@pytest.mark.parametrize('failure', [None, 'prepare', 'verify'])
+def test_non_baas_provider_retains_backup_attempt_and_binding_guard(engine, status, provider, failure):
     ctx = BotProvisioningContext(
         bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine,
     )
@@ -705,24 +706,31 @@ def test_non_baas_provider_skips_backup_but_keeps_binding_guard(engine, status, 
     device.get_device.return_value = {
         'device_id': 'container-1', 'device_provider': provider, 'status': status,
     }
-    device.exec_shell_new.side_effect = AssertionError('must not execute backup')
+    device.exec_shell_new.side_effect = (
+        ConnectionError('unavailable') if failure == 'prepare' else
+        [response('not_mounted'), ConnectionError('unavailable')] if failure == 'verify' else
+        [response('not_mounted'), response('not_mounted')]
+    )
     runtime_provider = Mock(side_effect=AssertionError('must not resolve BaaS'))
     repository = Mock()
     repository.get_by_id_and_owner.return_value = {'binding_id': 42}
-    with patch.object(backup, 'prepare_backup', side_effect=AssertionError('must not back up')) as prepared:
-        verify = AicodingProvisioningStrategy(engine).prepare_restart(
-            ctx, binding_id=42, device_service_provider=lambda: device,
-            target_runtime_provider=runtime_provider, bot_repository=repository,
-        )
+    verify = AicodingProvisioningStrategy(engine).prepare_restart(
+        ctx, binding_id=42, device_service_provider=lambda: device,
+        target_runtime_provider=runtime_provider, bot_repository=repository,
+        operation_id=OPERATION,
+    )
+    verify()  # Backup failures must not block restart.
+    expected_calls = 0 if status in {'FAILED', 'STOPPED'} else 1 if failure == 'prepare' else 2
+    assert device.exec_shell_new.call_count == expected_calls
+    if expected_calls:
+        assert all(call.kwargs['device_id'] == 'container-1'
+                   for call in device.exec_shell_new.call_args_list)
+    repository.get_by_id_and_owner.return_value = {'binding_id': 43}
+    with pytest.raises(backup.RestartBackupError) as caught:
         verify()
-        repository.get_by_id_and_owner.return_value = {'binding_id': 43}
-        with pytest.raises(backup.RestartBackupError) as caught:
-            verify()
-        assert caught.value.reason == 'binding_changed'
-        repository.get_by_id_and_owner.side_effect = RuntimeError('database unavailable')
-        with pytest.raises(RuntimeError, match='database unavailable'):
-            verify()
-    prepared.assert_not_called()
-    device.exec_shell_new.assert_not_called()
+    assert caught.value.reason == 'binding_changed'
+    repository.get_by_id_and_owner.side_effect = RuntimeError('database unavailable')
+    with pytest.raises(RuntimeError, match='database unavailable'):
+        verify()
     runtime_provider.assert_not_called()
     repository.update_by_owner.assert_not_called()
