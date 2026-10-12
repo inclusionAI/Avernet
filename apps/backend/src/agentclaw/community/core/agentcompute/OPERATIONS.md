@@ -4,6 +4,18 @@ Stage-B writeups for tasks 12.3 (schema), 12.6 (pool), 12.9 (artifact TTL),
 12.10 (perf review). Names/defaults cite `config/settings.py`
 (`AgentComputeConfig`) and `plugins/community/database.py` as shipped.
 
+## Configuration wiring
+
+`AgentComputeConfig` parses the `agentcompute` ``user_config`` block
+(`AgentComputeConfig.from_block`, defensively — a malformed value takes its
+default rather than wedging boot; an absent block equals the bare defaults,
+so profiles that ship no block keep their current behavior). The community
+and singlebox overlays ship the block with env-injected LLM credentials: a
+submit without `AGENTCOMPUTE_LLM_BASE_URL` + `AGENTCOMPUTE_LLM_MODEL` answers
+the intended 400 (missing LLM config), never a silent default.
+`AGENTCOMPUTE_ARTIFACT_ROOT` relocates the artifact store (a shared volume in
+multi-pod deployments — see the artifact notes in 12.9).
+
 ## 12.3 Schema evolution
 
 - **Doctrine:** forward-only, additive, backward-readable (D38) — full policy,

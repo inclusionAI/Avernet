@@ -334,3 +334,17 @@ agentcompute_platform:
   bot_type: "personal"
   identity_file: "SOUL.md"
   owner_work_no: "${AGENTCOMPUTE_PLATFORM_OWNER:-}"
+
+# The swarm runtime's operation knobs (AgentComputeConfig.from_block in
+# core/agentcompute/config/settings.py — an absent sub-block leaves that
+# group at its default). LLM credentials are env-injected: unset means
+# fail-clear at submit (400 missing LLM config), a working submit needs
+# AGENTCOMPUTE_LLM_BASE_URL + AGENTCOMPUTE_LLM_MODEL (+ API key when the
+# endpoint requires one).
+agentcompute:
+  enabled: true
+  llm:
+    base_url: "${AGENTCOMPUTE_LLM_BASE_URL:-}"
+    api_key: "${AGENTCOMPUTE_LLM_API_KEY:-}"
+    default_model: "${AGENTCOMPUTE_LLM_MODEL:-}"
+  artifact_store_root: "${AGENTCOMPUTE_ARTIFACT_ROOT:-/tmp/agentcompute/artifacts}"

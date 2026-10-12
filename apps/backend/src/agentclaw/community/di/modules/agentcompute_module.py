@@ -22,6 +22,7 @@ from agentclaw.community.core.agentcompute.plugins.llm.openai import OpenAICompa
 from agentclaw.community.core.agentcompute.plugins.agents.factory import (
     DefaultSubagentFactory,
 )
+from agentclaw.community.di.modules.config_module import _block
 from agentclaw.community.core.agentcompute.plugins.artifact_store.filesystem import (
     FilesystemArtifactStore,
 )
@@ -99,7 +100,13 @@ class AgentComputeModule(Module):
     @provider
     @singleton
     def provide_config(self) -> AgentComputeConfig:
-        return AgentComputeConfig()
+        # The `agentcompute` user_config block, not a bare construction: a
+        # deployment that ships no block parses to the bare defaults, one
+        # that ships it gets every knob wired (llm env-injected by the
+        # overlay; missing LLM stays fail-clear at submit). from_block is
+        # defensive end to end — a bad value downgrades to its default
+        # rather than wedging boot.
+        return AgentComputeConfig.from_block(_block("agentcompute"))
 
     @provider
     @singleton
