@@ -207,7 +207,7 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     literals. Dictionary keys describe fields; values carry credentials.
     Unparseable diff fragments retain the conservative regex behavior.
     """
-    stripped = content.strip()
+    stripped = content.strip().rstrip(",")
     if stripped.startswith(("f\"", "f'", "F\"", "F'")):
         try:
             formatted = ast.parse(stripped, mode="eval").body
