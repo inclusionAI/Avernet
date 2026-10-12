@@ -417,6 +417,7 @@ class BaasDeviceService(DeviceService):
             device_provider=BAAS_DEVICE_PROVIDER,
             device_props={
                 "bot_uuid": baas_result.bot_uuid,
+                "client_id": baas_result.bot_uuid,
                 "local_device_id": device_id,
                 "publish_id": baas_result.publish_id,
                 "device_from": "baas",
@@ -720,7 +721,7 @@ class BaasDeviceService(DeviceService):
         if str(props.get("restart_publish_id") or "") != str(publish_id):
             return False, "stale Skills Pool restart publish identity"
         bot_uuid = str(props.get("bot_uuid") or "")
-        client_id = str(props.get("client_id") or "")
+        client_id = str(props.get("client_id") or binding.device_id)
         callback_token = str(props.get("callback_token") or "")
         if not bot_uuid or not client_id or not callback_token:
             return False, "incomplete Skills Pool restart callback context"

@@ -34,7 +34,7 @@ class BaasContainerInitializer:
         """Execute the 6-step init sequence inside the BaaS container."""
         entity_id = device.device_props.get("entity_id")
         entity_type = device.device_props.get("entity_type")
-        client_id = device.device_props.get("client_id", "")
+        client_id = str(device.device_props.get("client_id") or device.device_id)
         symbol = device.device_props.get("symbol")
         envs = device.device_props.get("envs")
         effective_startup_identity = (
@@ -178,7 +178,7 @@ class BaasContainerInitializer:
             args.extend(("--admins", admins))
 
         cmd = shlex.join(str(value) for value in args)
-        start_cmd = f"nohup {cmd} >> /home/admin/start.log 2>&1 &"
+        start_cmd = _admin_background_command(cmd, "/home/admin/start.log")
         self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
             cmd=start_cmd,
@@ -211,9 +211,8 @@ class BaasContainerInitializer:
         if startup_identity:
             watchdog_values.extend(("--startup_identity", startup_identity))
         watchdog_args = shlex.join(watchdog_values)
-        watchdog_cmd = (
-            f"nohup {watchdog_args} >> "
-            "/home/admin/logs/starting_watchdog.log 2>&1 &"
+        watchdog_cmd = _admin_background_command(
+            watchdog_args, "/home/admin/logs/starting_watchdog.log"
         )
         self._baas_service.exec_command_on_bot(
             bot_uuid=bot_uuid,
@@ -221,6 +220,13 @@ class BaasContainerInitializer:
             timeout_seconds=30,
         )
         logger.info("[_start_baas_sandbox_service] watchdog dispatched: bot_uuid=%s", bot_uuid)
+
+
+def _admin_background_command(command: str, log_path: str) -> str:
+    """Preserve startup envs and support both root and admin exec transports."""
+    body = f"nohup {command} >> {shlex.quote(log_path)} 2>&1 &"
+    as_admin = shlex.join(["su", "admin", "-c", body])
+    return f'if [ "$(id -un)" = admin ]; then {body} else {as_admin}; fi'
 
 
 def _deserialize_symbol(symbol: str | None) -> list[SynlinkMappingInfo]:

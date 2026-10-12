@@ -726,6 +726,7 @@ class TestDoAllocate:
         # 本地拼装 id 留 props.local_device_id 备查。回归守护:trace
         # 0b446a4d17822154217278160e3e69(staff_ 查 BaaS 404 BOT_NOT_FOUND)。
         assert allocated.device_id == "BAAS-CTR-xxx"
+        assert allocated.device_props["client_id"] == allocated.device_id
         assert allocated.device_props["local_device_id"] == "staff_staff_u001_default_abc"
         assert allocated.device_provider == BAAS_DEVICE_PROVIDER
         assert allocated.device_props["bot_uuid"] == "BAAS-CTR-xxx"
@@ -1298,7 +1299,7 @@ class TestStartServiceInitSteps:
         assert "start_service.sh" in cmds[-2]
         assert "starting_watchdog.sh" in cmds[-1]
 
-    def test_no_su_admin_in_commands(self):
+    def test_startup_user_selection_is_limited_to_service_and_watchdog(self):
         svc, baas = self._make_success_svc()
 
         with patch(
@@ -1309,7 +1310,10 @@ class TestStartServiceInitSteps:
 
         for call in baas.exec_command_on_bot.call_args_list:
             cmd = call.kwargs.get("cmd", "")
-            assert "su admin" not in cmd, f"BaaS container should not use su admin: {cmd}"
+            if "start_service.sh" in cmd or "starting_watchdog.sh" in cmd:
+                assert '"$(id -un)" = admin' in cmd
+            else:
+                assert "su admin" not in cmd
 
     def test_init_uses_correct_bot_uuid(self):
         svc, baas = self._make_success_svc()
@@ -1580,6 +1584,10 @@ class TestInitStepEdgeCases:
         assert "--startup_identity publish-1001" in cmd
         watchdog_cmd = baas.exec_command_on_bot.call_args_list[1].kwargs["cmd"]
         assert "--startup_identity publish-1001" in watchdog_cmd
+        assert '"$(id -un)" = admin' in cmd
+        assert '"$(id -un)" = admin' in watchdog_cmd
+        assert "su admin -c" in cmd
+        assert "su admin -c" in watchdog_cmd
 
     def test_legacy_startup_preserves_old_watchdog_wire(self):
         baas = MagicMock()
