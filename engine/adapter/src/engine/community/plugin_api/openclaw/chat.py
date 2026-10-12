@@ -75,8 +75,11 @@ class OpenClawChatPort(Protocol):
         Yields:
             EventFrame instances matching the OpenClaw event vocabulary.
 
-        If on_ack is supplied, await it before yielding events. Failed or
-        completed-replay ACKs end the stream without waiting for new events.
+        If on_ack is supplied, await it before yielding events. Failed ACKs
+        end the stream without events; successful status=ok replays yield an adapter
+        notice as chat delta + final, without waiting for new upstream events.
+        The notice ends this call, not necessarily the original model run.
+        In-flight ACKs keep waiting for the actual run's events.
         Closing the stream must release its upstream listeners.
         """
         ...

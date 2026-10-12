@@ -72,15 +72,15 @@ async def test_actual_ack_precedes_early_final(setup, status, cached):
 
 
 @pytest.mark.parametrize("ok,status,cached", [(True, "ok", True), (False, "error", None)])
-async def test_terminal_ack_preserves_failure_without_fabricating_final(setup, ok, status, cached):
+async def test_only_successful_cached_ack_emits_notice(setup, ok, status, cached):
     client, websocket, start = setup
     client.send_request = AsyncMock(return_value=ResponseFrame(
         id="upstream", ok=ok, payload={"runId": "old", "status": status},
         error=None if ok else ErrorShape("DENIED", "original failure", retryable=False),
     ))
     await asyncio.wait_for(asyncio.gather(*await start()), 1)
-    websocket.send_text.assert_awaited_once()
-    frame = json.loads(websocket.send_text.call_args.args[0])
+    frames = [json.loads(call.args[0]) for call in websocket.send_text.call_args_list]
+    frame = frames[0]
     assert frame["id"] == "r-1"
     assert frame["ok"] is ok
     assert frame["payload"]["accepted"] is ok
@@ -88,6 +88,27 @@ async def test_terminal_ack_preserves_failure_without_fabricating_final(setup, o
     if not ok:
         assert frame["error"]["code"] == "DENIED"
         assert frame["error"]["message"] == "original failure"
+        assert len(frames) == 1
+    else:
+        assert len(frames) == 3
+        assert [f["payload"]["state"] for f in frames[1:]] == ["delta", "final"]
+        assert all(f["event"] == "chat" for f in frames[1:])
+        assert frames[1]["payload"]["message"] == frames[2]["payload"]["message"]
+        assert frames[1]["payload"]["deltaText"] == frames[1]["payload"]["message"]["content"][0]["text"]
+        assert "deltaText" not in frames[2]["payload"]
+        for event in frames[1:]:
+            payload = event["payload"]
+            assert payload["runId"] == "old"
+            assert payload["sessionKey"] == "sk"
+            assert payload["cached"] is True
+            assert payload["adapterNotice"] == "cached_request"
+            assert payload["message"]["role"] == "assistant"
+            assert payload["message"]["content"] == [{
+                "type": "text",
+                "text": "系统提示：本次请求命中了已有请求记录，未启动新的执行。"
+                        "本次未返回回答正文，请查看原会话。此提示不代表原任务已完成。",
+            }]
+    client.send_request.assert_awaited_once()
     assert not any(client._event_listeners.values())
 
 
@@ -210,7 +231,7 @@ async def _start_resume(server, websocket, auth_gate_service):
 
 
 @pytest.mark.parametrize("ok,status", [(True, "ok"), (False, "error")])
-async def test_resumable_terminal_ack_does_not_fabricate_terminal_event(
+async def test_resumable_terminal_ack_only_records_cached_notice(
     setup, server, auth_gate_service, fake_engine, ok, status,
 ):
     client, websocket, _ = setup
@@ -221,7 +242,7 @@ async def test_resumable_terminal_ack_does_not_fabricate_terminal_event(
     run = await _start_resume(server, websocket, auth_gate_service)
     await asyncio.wait_for(run.task, 1)
     frames = [json.loads(call.args[0]) for call in websocket.send_text.await_args_list]
-    assert len(frames) == 1
+    assert len(frames) == (3 if ok else 1)
     assert frames[0]["type"] == "res"
     assert frames[0]["ok"] is ok
     assert frames[0]["payload"]["status"] == status
@@ -230,7 +251,10 @@ async def test_resumable_terminal_ack_does_not_fabricate_terminal_event(
     assert server._openclaw_resume.lookup(session_key="sk", ticket=ticket) is run
     assert run.state == ("final" if ok else "error")
     assert run.finished_at is not None
-    assert not run._events
+    assert len(run._events) == (2 if ok else 0)
+    assert [json.loads(event)["payload"]["state"] for event in run._events] == (
+        ["delta", "final"] if ok else []
+    )
     assert not any(client._event_listeners.values())
     fake_engine.on_connection_close.assert_awaited_once()
 
@@ -289,6 +313,75 @@ async def test_resumable_startup_failure_is_only_failed_ack(setup, server, auth_
     assert run.state == "error"
     assert run.finished_at is not None
     assert not run._events
+
+
+async def test_cached_notice_is_replayed_after_initial_socket_is_lost(
+    setup, server, auth_gate_service,
+):
+    client, websocket, _ = setup
+    client.send_request = AsyncMock(return_value=ResponseFrame.ok_response(
+        "upstream", {"runId": "old", "status": "ok"},
+    ))
+    websocket.send_text.side_effect = ConnectionError("disconnected")
+    run = await _start_resume(server, websocket, auth_gate_service)
+    await asyncio.wait_for(run.task, 1)
+    ack = json.loads(websocket.send_text.await_args_list[0].args[0])
+    await server._release_conn("conn-1")
+    new_socket = SimpleNamespace(send_text=AsyncMock())
+    result = await server._handle_chat_resume(
+        new_socket, "conn-2", _req("chat.resume", {}),
+        {"sessionKey": "sk", "resumeTicket": ack["payload"]["resumeTicket"]},
+    )
+    assert result.payload["state"] == "final"
+    await asyncio.sleep(0)
+    events = [json.loads(call.args[0]) for call in new_socket.send_text.await_args_list]
+    assert [event["payload"]["state"] for event in events] == ["delta", "final"]
+    assert [event["payload"]["resumeSeq"] for event in events] == [1, 2]
+    assert all(event["payload"]["adapterNotice"] == "cached_request" for event in events)
+    client.send_request.assert_awaited_once()
+    assert not any(client._event_listeners.values())
+
+
+async def test_fresh_socket_reattaches_in_flight_run_without_early_final(setup, server):
+    client, old_socket, start = setup
+    acknowledged = asyncio.Event()
+
+    async def write(_text):
+        acknowledged.set()
+
+    old_socket.send_text.side_effect = write
+    client.send_request = AsyncMock(return_value=ResponseFrame.ok_response(
+        "upstream", {"runId": "old", "status": "in_flight"},
+    ))
+    old_tasks = await start()
+    await asyncio.wait_for(acknowledged.wait(), 1)
+    await server._release_conn("conn-1")
+    assert all(task.done() for task in old_tasks)
+
+    acknowledged.clear()
+    new_socket = SimpleNamespace(send_text=AsyncMock(side_effect=write))
+    task = asyncio.create_task(server._run_ack_chat(
+        new_socket, "conn-2", "new-request", "sk", "hello", None, "new-key",
+    ))
+    await asyncio.wait_for(acknowledged.wait(), 1)
+    assert not task.done()
+    assert new_socket.send_text.await_count == 1
+    _fire_event(client, "chat", {
+        "runId": "unrelated", "sessionKey": "sk", "state": "final", "text": "wrong",
+    })
+    for state in ("delta", "final"):
+        _fire_event(client, "chat", {
+            "runId": "old", "sessionKey": "sk", "state": state,
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "answer"}]},
+        })
+    await asyncio.wait_for(task, 1)
+    frames = [json.loads(call.args[0]) for call in new_socket.send_text.await_args_list]
+    assert frames[0]["id"] == "new-request"
+    assert frames[0]["payload"]["runId"] == "old"
+    assert [event["payload"]["state"] for event in frames[1:]] == ["delta", "final"]
+    assert all(event["payload"]["runId"] == "old" for event in frames[1:])
+    assert all("adapterNotice" not in event["payload"] for event in frames[1:])
+    assert not any(client._event_listeners.values())
 
 
 async def test_resumable_missing_ack_finishes_record(setup, server, auth_gate_service, fake_engine):
