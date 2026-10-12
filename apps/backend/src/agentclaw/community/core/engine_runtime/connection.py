@@ -36,6 +36,7 @@ from agentclaw.community.core.engine_runtime.engine_connection_service_protocol 
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineResourceNotFoundError,
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
@@ -186,7 +187,8 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         self._desktop_connections = desktop_connections
 
     def build(
-        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str
+        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str,
+        device_uuid: str | None = None,
     ) -> ConnectionResult:
         """Return the addressed bot's usable sockets for one stage.
 
@@ -229,6 +231,10 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         binding_id = self._stage_binding_id(
             bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
         )
+        if device_uuid is not None:
+            binding = self._binding_repository.get_by_id(binding_id)
+            if facts.bot_type == "desktop" or getattr(binding, "device_provider", None) not in {"baas", "teclaw"}:
+                raise EngineResourceNotFoundError("instance selection is unavailable")
 
         # Composed as the **resolved owner**, deliberately, even when the
         # admitted caller is a collaborator. The adjudication above is this
@@ -270,7 +276,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                         transport_mode="direct",
                     )
             else:
-                info = self._get_connection(binding_id, operator, chat_path)
+                info = self._get_connection(binding_id, operator, chat_path, device_uuid)
         except BaasNoActiveDevicesError as exc:
             raise EngineDeviceNotReadyError(
                 f"device unavailable for bot={bot_id}"
@@ -372,10 +378,13 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         return binding.id
 
     def _get_connection(
-        self, binding_id: int, operator: OperatorContext, chat_path: str
+        self, binding_id: int, operator: OperatorContext, chat_path: str,
+        device_uuid: str | None = None,
     ) -> object:
         """Ask the provider for this device's connection."""
+        selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
         return self._device_service.get_device_connection(
+            **selection,
             binding_id=binding_id,
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,

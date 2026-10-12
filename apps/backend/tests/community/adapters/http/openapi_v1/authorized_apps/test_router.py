@@ -217,6 +217,13 @@ def collaborators():
     class _Collaborators:
         # The effective-ladder shape the gate calls: the row (its ``id`` and
         # ``owner_id``) drives the answer now, rather than the wire pair.
+        # The operator ladder resolves explicitly from here on; this
+        # double's rows are real, so both ladders answer the same.
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
+            return self.get_operable_permission_level(
+                bot=bot, user_id=user_id, env=env
+            )
+
         def get_operable_permission_level(self, *, bot, user_id, env=None):
             bot_pk = int(bot.get("id") or 0)
             owner_id = str(bot.get("owner_id") or "")

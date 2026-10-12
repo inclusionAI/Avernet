@@ -1192,9 +1192,10 @@ a name no bot can be called. Component-first put **every** component name there.
 Bot-first moves them one segment deeper, where they collide with nothing.
 
 The operations that keep a literal in that segment are the ones with no single
-bot to name: creating a bot, listing them, `check-name`, `ceiling`, the
-`authorized` groups, the tenant-wide `mcp` catalogue, `logs` (a trace query that
-reads *across* bots), and `loadtest`. They are the only things that do.
+bot to name: creating a bot, listing owned or collaborating bots, `check-name`,
+`ceiling`, the `authorized` groups, the tenant-wide `mcp` catalogue, `logs` (a
+trace query that reads *across* bots), and `loadtest`. They are the only things
+that do.
 
 Specified in `specs/2026-08-15-openapi-v1-bot-first-addressing`; a test
 (`tests/…/openapi_v1/test_path_convention.py`) asserts the rule against the
@@ -1207,20 +1208,20 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  connection  engine  identity
+all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 
-Eight of those twenty-six — `approvals`, `connection`, `engine`, `identity`,
+Eight of those twenty-seven — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the eighteen that remain:
+list is the nineteen that remain:
 
 ```text
-all  authorized  authorized-apps  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
+all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
 ```
 
@@ -1330,6 +1331,7 @@ the other six: this is what "done" looks like per category.
 |---|---|---|---|
 | POST | `/openapi/v1/bots` | Create a bot; may need Passport authorization | `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]` |
 | GET | `/openapi/v1/bots` | List caller's bots (`keyword`, `engine`, `status`, paged) | `Envelope[Page[Bot]]` |
+| GET | `/openapi/v1/bots/collaborations` | List only Bots the caller collaborates on; each item exposes `entity_id`, `owner_id`, and the caller's collaboration role | `Envelope[Page[CollaboratingBot]]` |
 | GET | `/openapi/v1/bots/check-name` | Bot-name availability (`name`) | `Envelope[NameCheck]` |
 | GET | `/openapi/v1/bots/ceiling` | Selected Space's Bot ceiling | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |

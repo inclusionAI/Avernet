@@ -105,6 +105,7 @@ members = [
     "crates/tools/bcs-bridge/cli",
     "crates/tools/bcs-bridge/app",
     "crates/tools/bcs-bridge/core",
+    "crates/tools/bcs-bridge/qwenwork",
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
     "crates/tools/bcs-rule-bot",

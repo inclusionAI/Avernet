@@ -52,7 +52,7 @@ def test_replace_preserves_unrelated_fields_and_clears_omitted_bot_headers() -> 
                     server_code="mcp.weather",
                     env=get_current_env(),
                     api_key="existing-secret",
-                    extra_config='{"api_key":"existing-secret","headers":{"B":"2"},"endpoint_env":"PRE","transport_protocol":"SSE"}',
+                    extra_config='{"api_key":"existing-secret","headers":{"B":"2"},"endpoint_env":"PRE","transport_protocol":"SSE","url":"https://global.example.test/mcp"}',
                 ),
                 BotMCPConfig(
                     owner_id="owner", bot_id="bot-x", server_code="mcp.weather",
@@ -86,6 +86,7 @@ def test_replace_preserves_unrelated_fields_and_clears_omitted_bot_headers() -> 
         "headers": {"B": "4"},
         "endpoint_env": "PROD",
         "transport_protocol": None,
+        "url": "https://global.example.test/mcp",
     }
     assert bots == {"bot-x": {"headers": {"A": "3"}, "url": "https://example.test/mcp"}}
 
@@ -101,8 +102,53 @@ def test_replace_preserves_unrelated_fields_and_clears_omitted_bot_headers() -> 
         owner_id="owner", server_code="mcp.weather"
     )
     assert cleared_user["extra_config"]["headers"] == {}
+    assert cleared_user["extra_config"]["url"] == "https://global.example.test/mcp"
     assert cleared_user["api_key"] == "existing-secret"
     assert cleared_bots == {"bot-x": {"url": "https://example.test/mcp"}}
+
+
+def test_url_snapshot_replaces_only_url_fields_and_empty_clears_them() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add_all([
+            UserMCPConfig(
+                user_id="owner", server_code="mcp.weather", env=get_current_env(),
+                extra_config='{"headers":{"B":"2"},"url":"https://old.example.test/mcp"}',
+            ),
+            BotMCPConfig(
+                owner_id="owner", bot_id="bot-x", server_code="mcp.weather",
+                env=get_current_env(),
+                config='{"headers":{"A":"3"},"url":"https://old-bot.example.test/mcp"}',
+            ),
+        ])
+
+    repo = ScopedMCPConfigRepository(db)
+    common = {
+        "user_id": "owner", "server_code": "mcp.weather",
+        "headers": {"B": "2"}, "bot_headers": {"bot-x": {"A": "3"}},
+        "owned_bot_ids": {"bot-x"}, "endpoint_env": "PROD",
+        "transport_protocol": None,
+    }
+    repo.replace(
+        **common, user_url="https://new.example.test/mcp",
+        bot_urls={"bot-x": "https://new-bot.example.test/mcp"},
+    )
+    user = UserMCPConfigRepository(db).get_by_user_and_server_code("owner", "mcp.weather")
+    bot = BotMCPConfigRepository(db).get_by_bot_and_server_code(
+        owner_id="owner", bot_id="bot-x", server_code="mcp.weather"
+    )
+    assert user["extra_config"]["url"] == "https://new.example.test/mcp"
+    assert bot == {
+        "headers": {"A": "3"}, "url": "https://new-bot.example.test/mcp",
+    }
+
+    repo.replace(**common, user_url=None, bot_urls={})
+    user = UserMCPConfigRepository(db).get_by_user_and_server_code("owner", "mcp.weather")
+    bot = BotMCPConfigRepository(db).get_by_bot_and_server_code(
+        owner_id="owner", bot_id="bot-x", server_code="mcp.weather"
+    )
+    assert "url" not in user["extra_config"]
+    assert bot == {"headers": {"A": "3"}}
 
 
 def test_replace_rolls_back_user_and_bot_changes_when_second_write_fails() -> None:
@@ -112,11 +158,12 @@ def test_replace_rolls_back_user_and_bot_changes_when_second_write_fails() -> No
             [
                 UserMCPConfig(
                     user_id="owner", server_code="mcp.weather", env=get_current_env(),
-                    extra_config='{"headers":{"B":"2"},"endpoint_env":"PROD"}',
+                    extra_config='{"headers":{"B":"2"},"endpoint_env":"PROD","url":"https://old.example.test/mcp"}',
                 ),
                 BotMCPConfig(
                     owner_id="owner", bot_id="bot-x", server_code="mcp.weather",
-                    env=get_current_env(), config='{"headers":{"A":"old"}}',
+                    env=get_current_env(),
+                    config='{"headers":{"A":"old"},"url":"https://old-bot.example.test/mcp"}',
                 ),
             ]
         )
@@ -137,6 +184,8 @@ def test_replace_rolls_back_user_and_bot_changes_when_second_write_fails() -> No
                 user_id="owner", server_code="mcp.weather", headers={"B": "4"},
                 bot_headers={"bot-x": {"A": "3"}}, owned_bot_ids={"bot-x"},
                 endpoint_env="PRE", transport_protocol="SSE",
+                user_url="https://new.example.test/mcp",
+                bot_urls={"bot-x": "https://new-bot.example.test/mcp"},
             )
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_on_second_write)
@@ -147,7 +196,9 @@ def test_replace_rolls_back_user_and_bot_changes_when_second_write_fails() -> No
     )
     assert writes == 2
     assert user["extra_config"]["headers"] == {"B": "2"}
+    assert user["extra_config"]["url"] == "https://old.example.test/mcp"
     assert bot["headers"] == {"A": "old"}
+    assert bot["url"] == "https://old-bot.example.test/mcp"
 
 
 def test_replace_is_tenant_scoped_for_both_user_and_bot_rows() -> None:

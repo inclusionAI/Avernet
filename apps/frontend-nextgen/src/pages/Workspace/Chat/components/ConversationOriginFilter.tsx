@@ -88,8 +88,14 @@ export function ConversationOriginFilter({
             </span>
           }
           className={cn(
-            'h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary',
-            (origin === 'others' || (supportsFavorites && scope === 'favorite')) && 'bg-primary/10 text-primary',
+            // 底色 2026-10-10 用户反馈修正：dmore artboard-003 稿注释实测
+            //「点击筛选项后，icon 改为蓝色高亮，并有圆点提示」——激活态只有蓝色 icon + 圆点，
+            // 不画 bg-primary/10 底色方块（自绘底与所在行/操作区底色不一致）。
+            // hover 与同排「新建会话」按钮统一走 muted 灰系，激活态 hover 保持蓝色不被覆盖。
+            'h-6 w-6 rounded-md hover:bg-muted',
+            origin === 'others' || (supportsFavorites && scope === 'favorite')
+              ? 'text-primary hover:text-primary'
+              : 'text-muted-foreground hover:text-foreground',
           )}
         />
       </PopoverTrigger>

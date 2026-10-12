@@ -27,6 +27,7 @@ from agentclaw.community.core.runtime_binding.models import (
     RuntimeBindingTarget,
 )
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -52,7 +53,9 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         runtime_updater: CallerRuntimeUpdaterProtocol,
         runtime_bindings: RuntimeBindingResolutionService,
         lock_repository: BotCollabLockRepositoryProtocol,
+        session_validator: CallerSessionValidator,
     ) -> None:
+        self._session_validator = session_validator
         self._caller_identity = caller_identity
         self._auth_plugin = auth_plugin
         self._token_provider = token_provider
@@ -70,6 +73,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
     ) -> CallerIamTokenOutcome:
         if not iam_token:
             return CallerIamTokenOutcome(iam_token="", error="IAM_TOKEN cookie not found")
@@ -116,6 +120,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                     entity_id=entity_id,
                     binding_id=context.binding_id,
                     is_test_exchange=True,
+                    session_key=session_key,
                 )
                 logger.info("caller_token_exchange_succeeded bot_id=%s stage=%s", bot_id, stage.value)
                 return CallerIamTokenOutcome(iam_token=iam_token)
@@ -127,6 +132,13 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                 actor_user_id=identity.staffId,
                 stage=stage,
             )
+            for target in targets:
+                await asyncio.to_thread(
+                    self._session_validator.validate, bot_id=bot_id,
+                    owner_id=context.owner_id, caller_user_id=identity.staffId,
+                    binding_id=target.binding_id, stage=stage.value,
+                    session_key=session_key,
+                )
             updated_targets = 0
             caller_token = await asyncio.to_thread(
                 self._caller_identity.exchange_caller_token,
@@ -149,6 +161,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
                         binding_id=target.binding_id,
                         is_test_exchange=False,
                         caller_token=caller_token,
+                        session_key=session_key,
                     )
                     updated_targets += 1
                     logger.info(
@@ -193,8 +206,10 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
         entity_id: str | None,
         binding_id: int | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
         caller_token: CallerToken | None = None,
     ) -> None:
+        session_kwargs = {"session_key": session_key} if session_key is not None else {}
         await asyncio.to_thread(
             self._caller_identity.exchange_caller_identity,
             iam_token=iam_token,
@@ -209,6 +224,7 @@ class CallerIamTokenService(CallerIamTokenServiceProtocol):
             binding_id=binding_id,
             is_test_exchange=is_test_exchange,
             caller_token=caller_token,
+            **session_kwargs,
         )
 
     def _resolve_refresh_targets(

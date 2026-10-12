@@ -50,7 +50,7 @@ impl std::fmt::Debug for BotConfig {
             .field("cwd", &self.cwd)
             .field("permission_mode", &self.permission_mode)
             .field("engine_bin", &self.engine_bin)
-            .field("engine_options", &self.engine_options)
+            .field("engine_options", &self.engine_options.keys().collect::<Vec<_>>())
             .finish()
     }
 }

@@ -1,4 +1,4 @@
-"""Atomic persistence of one user's MCP Header-group snapshot."""
+"""Atomic persistence of one user's scoped MCP connection rules."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _json_object(value: str | None) -> dict[str, Any]:
 
 
 class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
-    """Replace user and owner-qualified Bot Header maps in one transaction."""
+    """Replace user and owner-qualified Bot rules in one transaction."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -43,9 +43,15 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
         owned_bot_ids: set[str],
         endpoint_env: str,
         transport_protocol: str | None,
+        user_url: str | None = None,
+        bot_urls: dict[str, str] | None = None,
     ) -> None:
         if not bot_headers.keys() <= owned_bot_ids:
             raise ValueError("Bot Header scope contains a Bot not owned by the user")
+        if bot_urls is not None and not bot_urls.keys() <= owned_bot_ids:
+            raise ValueError("Bot URL scope contains a Bot not owned by the user")
+        if bot_urls is None and user_url is not None:
+            raise ValueError("user_url requires an explicit URL replacement")
         env = get_current_env()
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
@@ -66,6 +72,11 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                 endpoint_env=endpoint_env,
                 transport_protocol=transport_protocol,
             )
+            if bot_urls is not None:
+                if user_url is None:
+                    extra.pop("url", None)
+                else:
+                    extra["url"] = user_url
             encoded_user = json.dumps(extra, ensure_ascii=False, sort_keys=True)
             if user_row is None:
                 session.add(
@@ -94,12 +105,17 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                 .all()
             )
             existing = {str(row.bot_id): _json_object(row.config) for row in rows}
-            for bot_id in sorted(existing.keys() | bot_headers.keys()):
+            for bot_id in sorted(existing.keys() | bot_headers.keys() | (bot_urls or {}).keys()):
                 config = dict(existing.get(bot_id) or {})
                 if bot_headers.get(bot_id):
                     config["headers"] = bot_headers[bot_id]
                 else:
                     config.pop("headers", None)
+                if bot_urls is not None:
+                    if bot_id in bot_urls:
+                        config["url"] = bot_urls[bot_id]
+                    else:
+                        config.pop("url", None)
                 bot_mcp_configs.replace(
                     session,
                     bot_id=bot_id,

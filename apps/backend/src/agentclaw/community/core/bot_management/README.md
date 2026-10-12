@@ -119,3 +119,18 @@ The synchronous restart, stop/start and provider upgrade flows are unchanged. Th
 and Bot repository provide dedup and ext CAS primitives. Repository contracts and implementations are unchanged. Journal and status
 writes are separate; lifecycle-field CAS is not provided. No table or frontend migration is needed.
 See the 2026-10-08 durable-restart spec for recovery and query limitations.
+
+### Restart backup scope
+
+Direct `arca` bindings do not run runtime backup probes, archives, or receipt
+verification, regardless of binding status. They keep the existing stop/start
+recovery path, including when the old sandbox has already been destroyed.
+Binding identity verification, restart locking, and the durable mutation fence
+still run before replacement. The source binding provider determines this
+policy, even if allocation will migrate the replacement to BaaS.
+
+BaaS bindings and BaaS instance restarts retain inventory checks, runtime backup,
+and receipt verification. An empty or unqueryable BaaS inventory and backup
+failures still block replacement. This change adds no API, schema, configuration,
+or frontend migration; it only removes the backup dependency from direct ARCA
+restart. Normal stop/start failures continue to propagate.

@@ -794,6 +794,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs-bridge-app",
+ "bcs-bridge-qwenwork",
  "libc",
  "reqwest",
  "rusqlite",
@@ -829,6 +830,28 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-bridge-qwenwork"
+version = "0.1.3"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bcs-bridge-core",
+ "bcs-protocol",
+ "futures",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tokio-util",
+ "toml",
+ "tracing",
  "uuid",
 ]
 

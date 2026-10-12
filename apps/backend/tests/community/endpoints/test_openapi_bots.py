@@ -41,7 +41,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
-from tests.community.factories.bot_collaborator import make_bot
+from tests.community.factories.bot_collaborator import (
+    make_bot,
+    make_collaborator_record,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -52,6 +55,8 @@ from tests.community.framework import (
 
 _OWNER = "bots-owner"
 _BOT_ID = "bots-bot"
+_SHARED_BOT_ID = "bots-shared-bot"
+_SHARED_OWNER = "bots-shared-owner"
 _ENGINE = "openclaw"
 _KEY = "bots-framework-signing-key-at-least-32-bytes"
 _BASE_PATH = "/openapi/v1/bots"
@@ -194,6 +199,27 @@ def _seed_happy_services(world) -> None:
         return {"bot_id": _BOT_ID, "status": "completed"}
 
     bind_overrides(world, DataInitServiceProtocol, {"trigger_init": trigger_init})
+
+
+def _seed_collaborating_bot(world) -> None:
+    _seed_verifier(world)
+    bot = make_bot(
+        world,
+        bot_id=_SHARED_BOT_ID,
+        owner_id=_SHARED_OWNER,
+        bot_type="personal",
+        status="ACTIVE",
+        active_engine=_ENGINE,
+    )
+    make_collaborator_record(
+        world,
+        bot_pk=bot["id"],
+        bot_id=_SHARED_BOT_ID,
+        owner_id=_SHARED_OWNER,
+        user_id=_OWNER,
+        role="member",
+        operator_id=_SHARED_OWNER,
+    )
 
 
 _CREATE_BODY = {
@@ -393,6 +419,45 @@ for _method, _path, _input, _status in _HAPPY_CASES:
             status=_status, json_contains=_HAPPY_BODIES[(_method, _path)]
         ),
     )(lambda: None)
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE_PATH}/collaborations",
+    scenario="happy",
+    input=CaseInput(query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_collaborating_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "data": {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_id": _SHARED_BOT_ID,
+                        "entity_id": _SHARED_OWNER,
+                        "owner_id": _SHARED_OWNER,
+                        "collaboration": {"role": "member"},
+                    }
+                ],
+            }
+        },
+    ),
+)
+def list_collaborating_bots_happy():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE_PATH}/collaborations",
+    scenario="forbidden_user_scope",
+    input=CaseInput(query_params=_FORBIDDEN_QUERY, headers=_HEADERS),
+    seed=_seed_verifier,
+    expect=ExpectError(status=403, json_contains={"data": None}),
+)
+def list_collaborating_bots_forbidden_user_scope():
+    """The framework owns invocation."""
 
 
 def _seed_recycle_result(world, *, error: bool) -> None:

@@ -75,6 +75,7 @@ class CollaboratorServiceProtocol(Protocol):
         user_id: str,
         required_level: PermissionLevel,
         env: Optional[str] = None,
+        explicit: bool = False,
     ) -> Dict[str, Any]: ...
 
     def check_permission(

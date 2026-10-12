@@ -51,6 +51,7 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.core.mcp.url_resolution import effective_mcp_url_override
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
@@ -412,12 +413,16 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     "local-MCP registry has no entry for it). MCP Center is "
                     "unreachable or holds no record for this code."
                 ) from detail_failure
+            user_config = self._mcp_config_service.get_user_unified_config(
+                req.user_id, server_code
+            )
             api_key, headers, endpoint_env, transport = (
                 self._mcp_config_service.build_mcp_sync_payload(
                     user_id=req.user_id,
                     mcp_data=md,
                     engine_type=req.engine_type,
                     bot_override=bot_override,
+                    user_config_snapshot=user_config or {},
                 )
             )
             inputs.append(
@@ -427,7 +432,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     headers=headers,
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
-                    url_override=(bot_override or {}).get("url"),
+                    url_override=effective_mcp_url_override(user_config, bot_override),
                     strict_transport_protocol=bool(
                         bot_override
                         and transport

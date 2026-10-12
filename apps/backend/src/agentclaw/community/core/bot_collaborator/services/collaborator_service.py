@@ -30,6 +30,9 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
     MemberManagementCapabilityService,
 )
+from agentclaw.community.core.bot_collaborator.services.explicit_standing import (
+    ExplicitStandingMixin,
+)
 from agentclaw.community.core.bot_collaborator.services.editor_policy import (
     EditorPolicy,
 )
@@ -72,7 +75,11 @@ __all__ = [
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
+class CollaboratorService(
+    ExplicitStandingMixin,
+    CollaboratorQueryMixin,
+    CollaboratorServiceProtocol,
+):
     """Bot 协作者管理服务。
 
     提供协作者的 CRUD 操作和权限检查功能。
@@ -303,6 +310,10 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
             owner_id: Bot 拥有者工号
             required_level: 需要的权限级别
             env: 环境标识
+            explicit: 编辑/操作域的调用置 True —— 权限必须立足于显式协
+                作者行或所有权，Space 成员身份合成的 MEMBER 在该域没有
+                发言权（迭代11 编辑权限申请审批策略 §3.1）。读类面保持
+                默认：合成 MEMBER 正是空间成员的查看与对话所依。
 
         Raises:
             PermissionDeniedError: 权限不足
@@ -817,6 +828,7 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
         user_id: str,
         required_level: PermissionLevel,
         env: Optional[str] = None,
+        explicit: bool = False,
     ) -> Dict[str, Any]:
         """检查用户在 Bot 中的协作权限。
 
@@ -862,9 +874,18 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
         # for row answers. Using the raw ladder here left the internal faces
         # both granting nothing to Team Space members and still admitting
         # editors whose Space membership had been revoked.
-        level = self.get_operable_permission_level(
-            bot=bot, user_id=user_id, env=env
-        )
+        # ``explicit`` callers (the edit/operations domain) resolve on the
+        # explicit ladder instead: one row read, the Space synthesis silent,
+        # COSEC still applying — the same source split the openapi rows'
+        # ``Check … explicit=True`` publish.
+        if explicit:
+            level = self.get_explicit_permission_level(
+                bot=bot, user_id=user_id, env=env
+            )
+        else:
+            level = self.get_operable_permission_level(
+                bot=bot, user_id=user_id, env=env
+            )
 
         result = {
             "has_permission": level >= required_level,

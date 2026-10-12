@@ -3,14 +3,16 @@
 // - unloaded 不判空、不显示"暂无会话"(未加载 ≠ 空列表);
 // - 仅当该好友的 Session 请求成功且为空时整组隐藏;
 // - error 保留分组并给局部重试;分页失败保留已加载行。
-import { Button, Skeleton } from '@/components/ui';
+import { Button } from '@/components/ui';
 import type { ConversationFriendGroupView } from '@/domain/conversation/types';
 import { cn } from '@/utils/cn';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import { ListErrorState } from '../../components/ListErrorState';
+import { ConversationLoadMore } from './ConversationLoadMore';
 import { ConversationSessionRow } from './ConversationSessionRow';
+import { ConversationSessionRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationFriendGroupProps {
   group: ConversationFriendGroupView;
@@ -40,7 +42,7 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
   }
 
   return (
-    <div>
+    <div className="pl-6">
       <div
         className={cn(
           'group relative flex min-h-12 items-center gap-2 px-4 py-1.5 transition-colors',
@@ -69,13 +71,9 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
       </div>
 
       {expanded && (
-        <div aria-label={`${group.friend.displayName}的会话列表`} className="pl-6">
+        <div aria-label={`${group.friend.displayName}的会话列表`}>
           {group.state === 'loading' || sessions.loading ? (
-            <div className="py-1">
-              {[1, 2].map((i) => (
-                <Skeleton.Block key={i} className="mx-4 h-12 rounded-lg" />
-              ))}
-            </div>
+            <ConversationSessionRowsSkeleton rows={2} />
           ) : group.state === 'error' ? (
             <ListErrorState message={group.error ?? '会话加载失败'} onRetry={onRetry} />
           ) : group.state === 'loaded' && sessions.error ? (
@@ -94,17 +92,7 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
                 ))}
               </div>
               {sessions.hasMore && (
-                <div className="flex justify-center px-4 pb-2 pt-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={sessions.isLoadingMore}
-                    onClick={() => onLoadMore()}
-                    className="h-7 rounded-md border border-input bg-background px-3 text-xs text-foreground hover:bg-accent"
-                  >
-                    {sessions.isLoadingMore ? '正在加载…' : '加载更多会话'}
-                  </Button>
-                </div>
+                <ConversationLoadMore loading={sessions.isLoadingMore} onClick={() => onLoadMore()} />
               )}
               {sessions.loadMoreError && <ListErrorState message={sessions.loadMoreError} onRetry={onLoadMore} />}
             </>

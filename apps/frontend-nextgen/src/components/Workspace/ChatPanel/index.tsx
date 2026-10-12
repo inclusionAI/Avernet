@@ -1,5 +1,6 @@
 import { getCapabilities } from '@/capabilities';
-import { Empty, Skeleton } from '@/components/ui';
+import { Empty } from '@/components/ui';
+import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { IdentityView } from '@/domain/collaboration';
@@ -62,11 +63,17 @@ interface Props {
   inputRef?: RefObject<SenderRef>;
   /** 当前会话标题（单聊选中会话后顶栏显示会话名，与协作群顶栏一致；缺省回退 target.name）。 */
   sessionTitle?: string;
+  /** 当前会话 ID（SVG 稿头部会话码胶囊，纯展示）。 */
+  sessionCode?: string;
   /** <lg 打开单聊会话列表。 */
   onOpenSessionList?: () => void;
   historyPagination?: { hasMore: boolean; isLoading: boolean; onLoadMore: () => void };
   /** 打开会话文件面板（验收微调：文件管理入口迁至顶栏，与协作群位置规则一致；缺省不渲染入口）。 */
   onManageFiles?: () => void;
+  /** 对话页头部图标列插槽（chat-header-panels）：提供时取代文件入口图标位，行为由页面装配。 */
+  headerActions?: ReactNode;
+  /** 待定位高亮的消息 id（历史面板结果点击）；由消息列表滚动至该消息并短暂高亮。 */
+  highlightMessageId?: string | null;
 }
 export function ChatPanel({
   target,
@@ -98,9 +105,12 @@ export function ChatPanel({
   taskComposer,
   inputRef,
   sessionTitle,
+  sessionCode,
   onOpenSessionList,
   historyPagination,
   onManageFiles,
+  headerActions,
+  highlightMessageId,
 }: Props) {
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -204,19 +214,18 @@ export function ChatPanel({
         <ChatPanelHeader
           target={target}
           sessionTitle={sessionTitle}
+          sessionCode={sessionCode}
           connectionLabel={connectionCopy.label}
           connectionTone={connectionCopy.tone}
           onOpenSessionList={onOpenSessionList}
           onManageFiles={onManageFiles}
+          actions={headerActions}
         />
 
-        {/* 消息区两态强制：空消息区一律骨架屏，空态文案仅对确认后的真空会话渲染；demo 保持原空态。 */}
+        {/* 消息区两态强制：空消息区一律骨架屏，空态文案仅对确认后的真空会话渲染；demo 保持原空态。
+            骨架为真实群聊解剖的回声(系统 pill/长短气泡/图片附件)，吸收历史装载缝隙。 */}
         {resolvedMode !== 'demo' && messageAreaSkeleton ? (
-          <div className="flex min-h-0 flex-1 flex-col space-y-3 px-3 py-6 sm:px-6" aria-label="加载会话消息">
-            <Skeleton.Block className="h-12 w-3/4 rounded-xl" />
-            <Skeleton.Block className="h-12 w-2/3 rounded-xl" />
-            <Skeleton.Block className="h-12 w-5/6 rounded-xl" />
-          </div>
+          <ChatMessageSkeleton />
         ) : (
           <ChatMessageList
             messages={messages}
@@ -235,6 +244,7 @@ export function ChatPanel({
             hasMoreHistory={historyPagination?.hasMore}
             isLoadingMoreHistory={historyPagination?.isLoading}
             onLoadMoreHistory={historyPagination?.onLoadMore}
+            highlightMessageId={highlightMessageId}
           />
         )}
 
@@ -246,7 +256,7 @@ export function ChatPanel({
           <MessageQuoteBar quote={messageInteractions.quote} onClear={messageInteractions.clearQuote} />
           <Sender
             ref={senderRef as React.Ref<SenderRef>}
-            className="w-full"
+            className="sender-shell w-full"
             value={draft}
             onChange={onDraftChange}
             onSubmit={submit}
@@ -254,7 +264,7 @@ export function ChatPanel({
             loading={isRequesting}
             disabled={target.status !== 'available' || !isInteractive || isRequesting}
             submitType="enter"
-            placeholder={`给 ${target.name} 发送消息…`}
+            placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
             fileChip={fileChip}
             command={command}
             toolbar={{

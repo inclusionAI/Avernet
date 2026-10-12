@@ -520,6 +520,9 @@ class TemplateRepository(Protocol):
     def get_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get template by bot_id.
 
+        The shared bot_id "default" returns None without accessing the database.
+        Other IDs use the existing lookup without engine or owner filtering.
+
         Args:
             bot_id: Bot ID
 

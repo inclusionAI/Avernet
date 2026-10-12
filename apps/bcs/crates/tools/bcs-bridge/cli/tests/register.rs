@@ -92,7 +92,8 @@ async fn gateway_registration_uses_the_explicit_provider_bot_ref_and_default_eng
     let bot = &document["bot"][0];
     assert_eq!(bot["provider_bot_ref"].as_str(), Some("worker-1"));
     assert_eq!(bot["engine"].as_str(), Some("claude-code"));
-    assert_eq!(bot["engine_bin"].as_str(), home.path().join("bin/claude").canonicalize().unwrap().to_str());
+    assert_eq!(Path::new(bot["engine_bin"].as_str().unwrap()).canonicalize().unwrap(),
+        home.path().join("bin/claude").canonicalize().unwrap());
     assert!(bot.get("model").is_none(), "no default model is configured");
     assert_eq!(document["registration"]["api_url"].as_str(), Some(api.base.as_str()));
 }
@@ -145,4 +146,23 @@ async fn help_lists_the_open_source_defaults() {
     for expected in ["--provider-auth", "static-bearer", "--engine", "claude-code", "--engine-bin", "--api-url"] {
         assert!(help.contains(expected), "missing {expected}: {help}");
     }
+}
+
+#[tokio::test]
+async fn desktop_engine_registration_needs_no_executable_and_rejects_engine_bin() {
+    let api = Api::new().await;
+    let home = tempfile::tempdir().unwrap();
+    let output = register(home.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "qwenwork"])
+        .env("PATH", "").output().await.unwrap();
+    assert!(output.status.success(), "{}", diagnostic(&output));
+    assert_eq!(saved(home.path())["bot"][0]["engine"].as_str(), Some("qwenwork"));
+    assert!(saved(home.path())["bot"][0].get("engine_bin").is_none());
+    let other = tempfile::tempdir().unwrap();
+    let output = register(other.path(), &["--mode", "plugin", "--api-url", &api.base,
+        "--upstream-url", "ws://127.0.0.1:21000/ws/bot", "--engine", "qwenwork", "--engine-bin", "/missing"])
+        .output().await.unwrap();
+    assert!(!output.status.success());
+    assert!(diagnostic(&output).contains("--engine-bin does not apply"));
+    assert_eq!(api.calls().len(), 1);
 }

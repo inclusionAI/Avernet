@@ -99,6 +99,7 @@ class FakeRelay:
         self, *, bot_id, owner_id, method, path,
         body=None, params=None, timeout=None, enveloped=True, facts=None,
         stage,
+        device_uuid=None,
     ) -> EngineResult:
         # Record the ATTEMPT first, then resolve. Ordering it the other way
         # made "no device was touched" tautological: a foreign bot raises in
@@ -118,6 +119,7 @@ class FakeRelay:
                 "path": path, "body": body, "params": params,
                 "timeout": timeout, "enveloped": enveloped,
                 "stage": stage,
+                **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             }
         )
         if self.raises is not None:
@@ -212,6 +214,16 @@ def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
             return {"id": 1, "bot_id": bot_id, "owner_id": owner_id, "env": "dev"}
 
     class _Collaborators:
+        # The operator ladder resolves explicitly now; these doubles'
+        # operators ARE explicit collaborators, so both ladders agree.
+        def get_explicit_permission_level(self, *, bot, user_id, env=None):
+            return self.get_operable_permission_level(
+                bot={"bot_id": bot.get("bot_id", "?"),
+                     "owner_id": bot.get("owner_id", "?")},
+                user_id=user_id,
+                env=env,
+            )
+
         def get_operable_permission_level(self, *, bot, user_id, env=None):
             key = (str(bot["bot_id"]), str(bot["owner_id"]), user_id)
             return (

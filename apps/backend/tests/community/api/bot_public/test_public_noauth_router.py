@@ -1,6 +1,7 @@
 """Tests for bot_public_noauth router.
 
 Tests for the public endpoints:
+- GET /api/public/bots/{bot_id}/binding
 - GET /api/public/bots/{bot_id}/appcoding-bots
 - PATCH /api/public/bots/{bot_id}/ext
 
@@ -97,8 +98,17 @@ def mock_bot_repo():
         [{
             "id": 1,
             "bot_id": "default",
+            "bot_name": "Default Bot",
             "owner_id": "test_owner",
-            "ext": {"existing_key": "existing_value"},
+            "device_id": "device_001",
+            "binding_id": 1001,
+            "template_config": {"must": "not leak"},
+            "ext": {
+                "existing_key": "existing_value",
+                "arch_domain": "测试架构域",
+                "iam_token": "secret-jwt",
+                "token": "enc:v1:secret",
+            },
         }]
     ))
     repo.update_by_owner = MagicMock(return_value={"id": 1, "bot_id": "default"})
@@ -112,6 +122,66 @@ def client(mock_bot_service, mock_bot_repo):
     app.include_router(router)
     attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo)]))
     return TestClient(app)
+
+
+# --- Tests for GET /api/public/bots/{bot_id}/binding ---
+
+class TestGetBotBindingPublic:
+    """GET /api/public/bots/{bot_id}/binding."""
+
+    def test_no_auth_required(self, client, mock_bot_repo):
+        resp = client.get("/api/public/bots/arch_001/binding")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"]["bot_id"] == "default"
+        assert body["data"]["device_id"] == "device_001"
+        assert body["data"]["binding_id"] == 1001
+        assert "template_config" not in body["data"]
+        mock_bot_repo.list_by_conditions.assert_called_once_with(
+            bot_id="arch_001", page=1, page_size=1
+        )
+
+    def test_sensitive_fields_are_scrubbed(self, client):
+        resp = client.get("/api/public/bots/arch_001/binding")
+
+        bot = resp.json()["data"]
+        assert bot["device_id"] == "device_001"
+        assert bot["binding_id"] == 1001
+        assert "template_config" not in bot
+        assert "iam_token" not in bot["ext"]
+        assert "token" not in bot["ext"]
+        assert bot["ext"]["arch_domain"] == "测试架构域"
+
+    def test_not_found(self, client, mock_bot_repo):
+        mock_bot_repo.list_by_conditions.return_value = (0, [])
+
+        resp = client.get("/api/public/bots/missing/binding")
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 404
+        assert body["data"] is None
+
+    def test_service_error_handled(self, client, mock_bot_repo):
+        from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+        mock_bot_repo.list_by_conditions.side_effect = BotServiceError("Database error")
+
+        resp = client.get("/api/public/bots/arch_001/binding")
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 500
+
+    def test_unexpected_error_handled(self, client, mock_bot_repo):
+        mock_bot_repo.list_by_conditions.side_effect = RuntimeError("Unexpected error")
+
+        resp = client.get("/api/public/bots/arch_001/binding")
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 500
 
 
 # --- Tests for GET /api/public/bots/{bot_id}/appcoding-bots ---

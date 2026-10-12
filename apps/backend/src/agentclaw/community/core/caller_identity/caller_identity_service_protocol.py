@@ -122,6 +122,7 @@ class CallerIdentityServiceProtocol(Protocol):
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
+        session_key: str | None = None,
         caller_token: CallerToken | None = None,
     ) -> None: ...
 

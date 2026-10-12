@@ -23,4 +23,5 @@ class CallerIamTokenServiceProtocol(Protocol):
         publish_id: int | None,
         entity_id: str | None,
         is_test_exchange: bool,
+        session_key: str | None = None,
     ) -> CallerIamTokenOutcome: ...

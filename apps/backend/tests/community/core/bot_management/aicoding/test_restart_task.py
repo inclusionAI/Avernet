@@ -114,7 +114,16 @@ class Queue:
 
 
 @pytest.fixture
-def setup():
+def setup(monkeypatch):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import AicodingBaasRestart
+
+    # These are task-state-machine tests. Actual strategy-owned orchestration
+    # and shared-service isolation are exercised by test_restart_service.py.
+    monkeypatch.setattr(AicodingBaasRestart, "preflight", lambda *args: None)
+    monkeypatch.setattr(AicodingBaasRestart, "execute", lambda self, bot, execution:
+        self.service.restart_bot(bot_id=execution.state.bot_id,
+                                 user_id=execution.state.owner_id,
+                                 nick_name=execution.payload.get("nick_name")))
     repo, queue = Repository(), Queue()
     binding = {
         "status": "ACTIVE",
@@ -129,8 +138,9 @@ def setup():
     }
     service._repository, service._task_queue_service = repo, queue
     service._template_service = Mock()
+    service._restart_bot_baas = Mock(return_value=None)
     ctx, strategy = resolve_restart_strategy(repo.bot)
-    services = RestartServices(repo, queue, service.get_bot, service._template_service)
+    services = RestartServices(repo, queue, service.get_bot, service._template_service, service)
     progress = Mock(return_value={"status": "PENDING"})
     handler = AicodingRestartHandler(
         repository=repo,
@@ -381,9 +391,13 @@ async def test_stable_backup_id_and_single_under_lock_mutation_fence(setup):
             assert journal(s.repo.bot)["phase"] == "BACKING_UP"
             verifier()
             receipt.assert_called_once()
+            assert journal(s.repo.bot)["phase"] == "BACKING_UP"
+            assert not execution.fenced
+            s.strategy.before_restart_submission(s.ctx)
+            assert receipt.call_count == 2
             assert journal(s.repo.bot)["phase"] == "RESTARTING"
             with pytest.raises(RestartSuperseded):
-                verifier()
+                s.strategy.before_restart_submission(s.ctx)
     finally:
         current_restart.reset(context_reset_handle)
 
@@ -634,3 +648,76 @@ async def test_process_loss_after_mutation_is_not_replayed(setup):
     assert journal(s.repo.bot)["phase"] == "RESTARTING"
     assert isinstance(s.handler.handle(task(s).payload), Reschedule)
     s.service.restart_bot.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_submission_adopts_handoff_without_reissuing(setup):
+    s = setup
+    await submit(s)
+    mock_lifecycle(s)
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    # Simulate process loss after POST/intent persistence, before handoff capture.
+    record = s.repo.bot["ext"][KEY]
+    record["phase"] = "RESTARTING"
+    record.pop("handoff")
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)["phase"] == "WAITING_READY"
+    assert journal(s.repo.bot)["handoff"]["publish_id"] == "12"
+    s.service.restart_bot.assert_called_once()
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_submission_error_cleanup_never_clears_a_newer_operation(fenced):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_baas import (
+        AicodingSubmissionMixin,
+    )
+    import httpx
+
+    request = httpx.Request("POST", "https://provider.invalid/update")
+    error = httpx.HTTPStatusError("not found", request=request,
+                                  response=httpx.Response(404, request=request))
+    execution = SimpleNamespace(
+        payload={"provider": "baas", "binding_id": 7}, fenced=fenced,
+        operation_id="old", state=Mock(),
+    )
+    execution.state.read.return_value = {
+        "binding_id": 7, "ext": {KEY: {"operation_id": "new", "phase": "BACKING_UP"}},
+    }
+    clear = Mock()
+    context_reset_handle = current_restart.set(execution)
+    try:
+        with pytest.raises(RestartSuperseded):
+            AicodingSubmissionMixin().on_restart_submission_error(None, error, clear_intent=clear)
+        clear.assert_not_called()
+    finally:
+        current_restart.reset(context_reset_handle)
+
+
+@pytest.mark.parametrize('phase', ['RESTARTING', 'WAITING_READY'])
+@pytest.mark.parametrize('queue_status', [TaskStatus.PENDING, TaskStatus.RUNNING])
+@pytest.mark.parametrize('binding_cleared', [False, True])
+@pytest.mark.asyncio
+async def test_duplicate_during_rebuild_never_starts_another_backup(
+    setup, phase, queue_status, binding_cleared
+):
+    s = setup
+    first = await submit(s)
+    original_task = task(s)
+    original_task.status = queue_status
+    s.repo.bot['ext'][KEY]['phase'] = phase
+    s.binding['status'] = 'PENDING'
+    if binding_cleared:
+        s.repo.bot['binding_id'] = None
+        s.binding.clear()
+    with patch(
+        'agentclaw.community.core.bot_management.engines.aicoding.restart_baas.'
+        'AicodingBaasRestart.preflight'
+    ) as preflight, patch.object(s.strategy, 'prepare_restart') as backup:
+        second = await submit(s)
+    assert second['restart_operation_id'] == first['restart_operation_id']
+    assert second['restart_in_progress'] is True
+    assert task(s) is original_task
+    assert len(s.queue.tasks) == 1
+    preflight.assert_not_called()
+    backup.assert_not_called()
+    s.service.restart_bot.assert_not_called()

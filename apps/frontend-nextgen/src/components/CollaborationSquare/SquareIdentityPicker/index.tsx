@@ -55,7 +55,6 @@ export function SquareIdentityPicker() {
         headerLabel="为 Ta 加好友："
         headerTooltip="每个身份（用户或 Bot）都拥有各自独立的好友关系。"
         onRetry={() => void retryLoadIdentities()}
-        hideBotRegistration
         // 发现页底色为 bg-muted，卡片保留协作群布局，但用背景 token 确保与页面对比清晰。
         triggerClassName="bg-background hover:bg-accent hover:text-foreground"
       />

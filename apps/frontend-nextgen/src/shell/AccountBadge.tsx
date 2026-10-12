@@ -22,10 +22,7 @@ export interface AccountUser {
 /** 圆头像位（loading 旋转 / error 灰）。 */
 function AvatarIcon({ spinning }: { spinning?: boolean }) {
   return (
-    <span
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-      style={{ background: 'linear-gradient(135deg, rgb(37,99,235), rgb(59,130,246))' }}
-    >
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-brand text-primary-foreground">
       {spinning ? (
         <Loader2 className={cn('h-4 w-4 animate-spin')} aria-hidden />
       ) : (
@@ -71,7 +68,7 @@ function ReadyAccountBadge({
       onClick={openInfo}
     >
       <span className="flex text-left" style={{ lineHeight: 1.2 }}>
-        <span className="truncate max-w-[120px] text-[13px] font-semibold text-foreground">{user.displayName}</span>
+        <span className="truncate max-w-[120px] text-sm font-medium text-foreground">{user.displayName}</span>
       </span>
     </Button>
   );
@@ -129,7 +126,7 @@ export function AccountBadge({
         leftIcon={<AvatarIcon spinning />}
       >
         <span className="flex text-left" style={{ lineHeight: 1.2 }}>
-          <span className="text-[13px] font-semibold text-[rgb(29,33,41)]">加载中…</span>
+          <span className="text-sm font-medium text-foreground">加载中…</span>
         </span>
       </Button>
     );
@@ -144,7 +141,7 @@ export function AccountBadge({
         leftIcon={<AvatarIcon />}
       >
         <span className="flex flex-col text-left" style={{ lineHeight: 1.2 }}>
-          <span className="text-[13px] font-semibold text-[rgb(134,144,156)]">未登录</span>
+          <span className="text-sm font-medium text-content-soft">未登录</span>
         </span>
       </Button>
     );

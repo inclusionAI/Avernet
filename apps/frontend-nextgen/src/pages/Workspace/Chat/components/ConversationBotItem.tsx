@@ -2,10 +2,9 @@
 // 展开区按 section/origin 分流:
 // - managed+mine / friend:交互式 Session 列表(选中 / 新建 / 加载更多走 Hook 回调);
 // - managed+others:好友用户分组只读视图(分组渲染在 ConversationFriendGroup)。
-// 同一时刻仅一个 Bot 展开(跨管理/好友分组，由 Store 统一互斥)。
-import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
+// 同一时刻仅一个 Bot 展开(跨我的/团队/好友分组,由 Store 单键替换统一互斥)。
+import { Badge, Button, IconButton } from '@/components/ui';
 import { getBotEngineLabel, supportsBotSessionFavorites } from '@/domain/botEngine';
-import { getBotTypeLabel } from '@/domain/botType';
 import type {
   ConversationBotSection,
   ConversationFriendDirectoryState,
@@ -15,16 +14,17 @@ import type {
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import { ListErrorState } from '../../components/ListErrorState';
-import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
 import { ConversationFriendGroup } from './ConversationFriendGroup';
 import { ConversationOriginFilter } from './ConversationOriginFilter';
 import { ConversationSessionList } from './ConversationSessionList';
+import { ConversationFriendRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationBotItemOthers {
   directory: ConversationFriendDirectoryState;
@@ -44,7 +44,6 @@ export interface ConversationBotItemOthers {
 }
 
 export interface ConversationBotItemProps {
-  sessionActions?: ConversationSessionListActions;
   bot: ChatBotView;
   section: ConversationBotSection;
   expanded: boolean;
@@ -66,8 +65,10 @@ export interface ConversationBotItemProps {
   onLoadMore(): void;
   onToggleFavorite(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
-  /** AgentCoding Bot 直接进入 coding-chat;不展开普通会话树。 */
+  /** AgentCoding Bot 专用入口:与 Bot 工坊「去使用」一致,跳 /coding/coding-chat。 */
   onOpenAgentCodingBot(bot: ChatBotView): void;
+  /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读/好友分组区不消费。 */
+  sessionActions?: ConversationSessionListActions;
 }
 
 // AC-9:全部好友分组均成功且零会话(整组隐藏)→ 整区空态;
@@ -82,13 +83,7 @@ function allFriendGroupsEmpty(groups: ConversationFriendGroupView[]): boolean {
 /** origin=others 展开区:好友目录 / 好友分组的 loading / error / empty 状态。 */
 function OthersArea({ others }: { others?: ConversationBotItemOthers }) {
   if (!others || !others.hasCache || others.directory.loading) {
-    return (
-      <div className="py-1">
-        {[1, 2].map((i) => (
-          <Skeleton.Block key={i} className="mx-4 h-12 rounded-lg" />
-        ))}
-      </div>
-    );
+    return <ConversationFriendRowsSkeleton rows={3} />;
   }
   if (others.directory.error) {
     return <ListErrorState message={others.directory.error} onRetry={others.onRetryDirectory} />;
@@ -137,71 +132,77 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
-  // AgentCoding Bot 是可点击入口，但普通会话树操作仍只属于普通 Bot。
-  const hasNormalSessions = !bot.isAgentCodingBot && bot.chatable;
-  const engineLabel = getBotEngineLabel(bot.engine);
-  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : engineLabel;
-  const typeLabel = getBotTypeLabel(bot.botType);
+  const interactive = !bot.isAgentCodingBot && bot.chatable;
+  // AgentCoding 行徽标展示模板名(区分多个 AgentCoding Bot);普通 Bot 展示引擎名,dmore「至多一枚」不变。
+  const runtimeLabel = bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : getBotEngineLabel(bot.engine);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
-  const filterActive = hasNormalSessions && isManaged && (origin === 'others' || (canFavorite && scope === 'favorite'));
+  const filterActive = isManaged && (origin === 'others' || (canFavorite && scope === 'favorite'));
   const handleToggle = () => {
-    if (!bot.chatable) return;
-    // AgentCoding Bot 使用专用 Coding 对话入口，不创建/展开普通 session。
+    // AgentCoding Bot 是可点击入口,但不建普通 session:直接进专用 coding 对话页(与工坊「去使用」一致)。
     if (bot.isAgentCodingBot) {
       onOpenAgentCodingBot(bot);
       return;
     }
+    if (!bot.chatable) return;
     onToggle();
   };
 
   return (
     <div>
+      {/* 行 32px、节点节奏 36px（dmore DOM 实测：一级行胶囊全宽 inset-x8，rx6）：选中/展开 = 整行 32px #EBEBEB 胶囊、
+          无品牌左棒；头像 16px 圆 + #2563EB/10% 底（SVG 稿所有头像位的统一底）；
+          名称 14px #525252（选中 #09090B）；引擎徽标 = 白底 + #E4E4E7 边框小方签（每行至多一枚，
+          类型徽标 per 稿撤除）；尾随灰色小箭头。行间 4px 由 SidebarSection 列表容器 gap-1 承载。 */}
       <div
         className={cn(
-          'group relative flex min-h-14 items-center gap-2 px-4 py-2.5 transition-colors',
-          selected || expanded ? 'bg-muted' : 'hover:bg-accent/50',
+          'group relative mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors',
+          selected || expanded ? 'bg-selected' : 'hover:bg-muted/60',
         )}
       >
-        {(selected || expanded) && (
-          <span aria-hidden="true" className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm bg-primary" />
-        )}
         <Button
           variant="ghost"
           aria-label={bot.displayName}
-          aria-expanded={hasNormalSessions ? expanded : false}
+          aria-expanded={interactive ? expanded : false}
           aria-current={selected ? 'page' : undefined}
           onClick={handleToggle}
           className={cn(
-            'flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent',
-            !bot.chatable && 'cursor-not-allowed opacity-50',
+            'flex h-auto min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
+            !interactive && 'cursor-not-allowed opacity-50',
           )}
         >
           <AvatarTile
             src={bot.avatarUrl}
             label={bot.displayName}
-            className={selected || expanded ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : undefined}
-            fallbackContent={<span className="text-[10px] font-semibold tracking-[0.08em]">BOT</span>}
+            className="h-4 w-4 rounded-full"
+            fallbackContent={
+              <span className="text-[8px] font-semibold leading-none tracking-[0.06em]">
+                {bot.displayName.slice(0, 1)}
+              </span>
+            }
           />
-          <div className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{bot.displayName}</span>
-            <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground group-hover:pr-24">
-              {runtimeLabel && (
-                <Badge tone="primary" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
-                  {runtimeLabel}
-                </Badge>
+          <div className="flex min-w-0 flex-1 items-center gap-2 group-hover:pr-24">
+            <span
+              className={cn(
+                'min-w-0 truncate text-sm font-normal',
+                selected || expanded ? 'text-foreground' : 'text-content-strong',
               )}
-              {typeLabel && (
-                <Badge tone="primary" className="shrink-0 rounded px-1.5 py-0 text-[10px] leading-4">
-                  {typeLabel}
-                </Badge>
-              )}
-            </div>
+            >
+              {bot.displayName}
+            </span>
+            {runtimeLabel && (
+              <Badge
+                tone="outline"
+                className="shrink-0 rounded bg-background px-1.5 py-0 text-[10px] leading-4 text-content-strong"
+              >
+                {runtimeLabel}
+              </Badge>
+            )}
           </div>
         </Button>
-        {hasNormalSessions && (
+        {interactive && (
           <div
             className={cn(
-              'absolute inset-y-0 right-[30px] z-10 flex items-center gap-0.5 pl-5',
+              'absolute inset-y-0 right-[26px] z-10 flex items-center gap-0.5 pl-5',
               'mask-[linear-gradient(to_right,transparent,black_20px)]',
               selected || expanded ? 'sidebar-actions-cover-selected' : 'sidebar-actions-cover-hover',
               'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
@@ -224,7 +225,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
                 label="新建会话"
                 size="sm"
                 icon={<Plus className="h-3.5 w-3.5" />}
-                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
                   onCreateSession();
@@ -233,15 +234,16 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             )}
           </div>
         )}
-        {hasNormalSessions &&
+        {interactive &&
           (expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
           ))}
       </div>
-      {expanded && hasNormalSessions && (
-        <div aria-label={`会话列表：${bot.displayName}`} className="pl-6">
+      {expanded && interactive && (
+        // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
+        <div aria-label={`会话列表：${bot.displayName}`}>
           {isOthers ? (
             <OthersArea others={others} />
           ) : (

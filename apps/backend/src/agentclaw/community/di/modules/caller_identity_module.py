@@ -28,6 +28,8 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerTokenProviderProtocol,
 )
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
+from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
@@ -59,6 +61,15 @@ class CallerIdentityModule(Module):
     @singleton
     @provider
     @inject
+    def caller_session_validator(
+        self, binding_repository: DeviceBindingRepository,
+        runtime_bindings: RuntimeBindingResolutionService,
+    ) -> CallerSessionValidator:
+        return CallerSessionValidator(binding_repository=binding_repository, runtime_bindings=runtime_bindings)
+
+    @singleton
+    @provider
+    @inject
     def caller_identity_service(
         self,
         bot_repository: BotRepository,
@@ -69,6 +80,7 @@ class CallerIdentityModule(Module):
         mcp_sync_service: MCPSyncServiceProtocol,
         passport_plugin: PassportPlugin,
         collaborator_service: CoreCollaboratorServiceProtocol,
+        session_validator: CallerSessionValidator,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -80,6 +92,7 @@ class CallerIdentityModule(Module):
             mcp_sync_service=mcp_sync_service,
             passport_plugin=passport_plugin,
             collaborator_service=collaborator_service,
+            session_validator=session_validator,
         )
 
     @singleton
@@ -142,6 +155,7 @@ class CallerIdentityModule(Module):
         runtime_updater: CallerRuntimeUpdater,
         runtime_bindings: RuntimeBindingResolutionService,
         lock_repository: BotCollabLockRepositoryProtocol,
+        session_validator: CallerSessionValidator,
     ) -> CallerIamTokenService:
         return CallerIamTokenService(
             caller_identity=caller_identity,
@@ -150,6 +164,7 @@ class CallerIdentityModule(Module):
             runtime_updater=runtime_updater,
             runtime_bindings=runtime_bindings,
             lock_repository=lock_repository,
+            session_validator=session_validator,
         )
 
     @singleton

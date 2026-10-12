@@ -186,7 +186,7 @@ def test_arca_does_not_require_logical_baas_id(service):
         ("transport", "query_failed", "RuntimeError"),
     ],
 )
-def test_safe_resolution_logs_and_transport_error_identity(
+def test_resolution_logs_provider_reason_and_transport_error_identity(
     service, monkeypatch, mode, reason, error_type
 ):
     log = MagicMock()
@@ -218,8 +218,10 @@ def test_safe_resolution_logs_and_transport_error_identity(
     assert "provider=" in rendered
     assert f"reason={reason}" in rendered
     assert f"error_type={error_type}" in rendered
-    for secret in ("private-", TARGET, "logical-bot", "sandbox_id"):
-        assert secret not in rendered
+    if mode == "provider":
+        assert target_binding.device_provider in rendered
+    for value in (TARGET, "logical-bot", "sandbox_id"):
+        assert value not in rendered
 
 
 @pytest.fixture

@@ -104,12 +104,26 @@ class BotInventoryService(BotInventoryServiceProtocol):
             levels = self._access.get_operable_permission_levels(
                 bots=cloud_rows, user_id=owner_id
             )
+            try:
+                explicit_pks = self._access.has_explicit_membership(
+                    bots=cloud_rows, user_id=owner_id
+                )
+            except AttributeError:
+                # Same fail-closed convention as the seam's explicit ladder:
+                # an unresolvable authority answers "standing is explicit
+                # nowhere", so EDIT leaves every card — never an open 500.
+                logger.error(
+                    "[bot_inventory] access port has no explicit membership "
+                    "judgment; every card resolves read-only"
+                )
+                explicit_pks = frozenset()
             cards.extend(
                 self._to_item(
                     row,
                     owner_id,
                     space,
                     levels.get(int(row.get("id") or 0), PermissionLevel.NONE),
+                    explicit=int(row.get("id") or 0) in explicit_pks,
                 )
                 for row in cloud_rows
                 if row.get("bot_type") != "service"
@@ -132,6 +146,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                         lifecycle_card,
                         space,
                         level,
+                        explicit=int(row.get("id") or 0) in explicit_pks,
                     )
                     for lifecycle_card in lifecycle_cards
                 )
@@ -369,11 +384,14 @@ class BotInventoryService(BotInventoryServiceProtocol):
         owner_id: str,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
+        explicit: bool,
     ) -> BotInventoryItem:
         bot_type = str(row.get("bot_type") or "personal")
         if bot_type == "desktop":
+            # Local Bots are the caller's own: ownership is explicit by
+            # definition, so no caller of this branch has a say in the flag.
             return self._to_local_item(row, owner_id, current_space, level)
-        return self._to_cloud_item(row, owner_id, current_space, level)
+        return self._to_cloud_item(row, owner_id, current_space, level, explicit)
 
     def _to_cloud_item(
         self,
@@ -381,6 +399,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         owner_id: str,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
+        explicit: bool,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
@@ -389,6 +408,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             kind=BotInventoryKind.PERSONAL_CLOUD,
             deploy_mode=DeployMode.CLOUD,
             current_space=current_space,
+            explicit=explicit,
         )
 
     def _to_local_item(
@@ -398,6 +418,8 @@ class BotInventoryService(BotInventoryServiceProtocol):
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
     ) -> BotInventoryItem:
+        # Local rows are the caller's own desktop Bots — resolved at OWNER,
+        # which is explicit standing by definition.
         return self._build_item(
             row=row,
             owner_id=owner_id,
@@ -405,6 +427,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             kind=BotInventoryKind.LOCAL,
             deploy_mode=DeployMode.LOCAL,
             current_space=current_space,
+            explicit=True,
         )
 
     def _to_service_item(
@@ -414,6 +437,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         lifecycle_card: ServiceLifecycleCard,
         current_space: BusinessSpaceRef | None,
         level: PermissionLevel,
+        explicit: bool,
     ) -> BotInventoryItem:
         return self._build_item(
             row=row,
@@ -423,6 +447,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             deploy_mode=DeployMode.CLOUD,
             lifecycle_card=lifecycle_card,
             current_space=current_space,
+            explicit=explicit,
         )
 
     def _build_item(
@@ -435,6 +460,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
         deploy_mode: DeployMode,
         lifecycle_card: ServiceLifecycleCard | None = None,
         current_space: BusinessSpaceRef | None = None,
+        explicit: bool,
     ) -> BotInventoryItem:
         ext = _as_mapping(row.get("ext"))
         normalized = {**dict(row), "ext": ext}
@@ -454,6 +480,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             actions=tuple(actions),
             disabled=dict(disabled),
             level=level,
+            explicit=explicit,
         )
         bot_id = str(row.get("bot_id") or "")
         publication_id = lifecycle_card.publication_id if lifecycle_card else None
@@ -507,8 +534,17 @@ class BotInventoryService(BotInventoryServiceProtocol):
         actions: tuple[BotAction, ...],
         disabled: dict[str, str],
         level: PermissionLevel,
+        explicit: bool,
     ) -> tuple[tuple[BotAction, ...], dict[str, str]]:
+        # ``explicit=False``: the caller's MEMBER is Space-synthesized — no
+        # collaborator row, just membership of the Bot's Space. The product
+        # rule (迭代11 编辑权限申请审批策略 §3.1) keeps the edit and
+        # operations surfaces for the Owner and the editors the Owner granted
+        # or approved, so a Space member's card offers reads only. The same
+        # bars carry ``explicit=True`` on the route side, so a disabled EDIT
+        # here is the truth and not a stale hint: the entry behind it refuses.
         if level >= PermissionLevel.OWNER:
+            # Owners are explicit standing by definition.
             return actions, disabled
         if kind is BotInventoryKind.SERVICE and level >= PermissionLevel.MEMBER:
             allowed = tuple(
@@ -527,15 +563,39 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 disabled.setdefault(
                     BotAction.UPGRADE.value, "Bot Admin permission required"
                 )
+            if not explicit:
+                kept = tuple(
+                    action
+                    for action in allowed
+                    if action in (BotAction.VIEW, BotAction.CHAT)
+                )
+                for action in allowed:
+                    if action not in kept:
+                        disabled.setdefault(
+                            action.value, "Bot editor permission required"
+                        )
+                return kept, disabled
             return allowed, disabled
         # MEMBER is defined as "edit content only": editing (skills/skill-sets,
         # whose endpoints gate on PermissionLevel.MEMBER) stays available to
         # collaborators on every card kind, while the owner-scoped actions
         # (restart/delete/update...) remain disabled. NONE keeps view-only.
+        # Space-synthesized MEMBER edits nothing (see above), so it lands on
+        # the same shape the NONE branch produces: read-only, with the reason.
+        # CHAT stays on both MEMBER origins: the chat face is a plain read
+        # row, so withholding it would publish a disabled reason the backend
+        # contradicts the moment the caller opens a session — the "default
+        # chat" the module docstring promises (the direct callback of the
+        # 迭代11 rule: view and chat for Space members, edit for the
+        # explicit editors the Owner granted or approved).
         kept = [
             action
             for action in actions
-            if action is BotAction.EDIT and level >= PermissionLevel.MEMBER
+            if (
+                action is BotAction.CHAT
+                or (action is BotAction.EDIT and explicit)
+            )
+            and level >= PermissionLevel.MEMBER
         ]
         for action in actions:
             if action is BotAction.VIEW or action in kept:

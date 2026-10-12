@@ -26,10 +26,21 @@ class Check:
     Getting the level wrong here refuses callers the surface means to admit, or
     admits callers it means to refuse — this is the enforcing column, unlike
     :class:`ServiceChecked`'s.
+
+    ``explicit`` names the membership the level must come from: the operation's
+    MEMBER/ADMIN has to rest on an explicit collaborator row (or on ownership)
+    — the MembershipBot level a live Space membership synthesises does not
+    carry. It marks the edit/operations domain, whose product rule (迭代11
+    编辑权限申请审批策略, PRD §3.1) keeps those surfaces for the Owner and
+    the editors the Owner granted or approved; a read left plain keeps
+    admitting the synthesized MEMBER, which is what a Space member's view and
+    chat ride on. Leave it off everywhere else: naming it on a read would
+    revoke the very access the product promises Space members by default.
     """
 
     level: PermissionLevel
     edit_lock: _EditLock | None = None
+    explicit: bool = False
 
     def __post_init__(self) -> None:
         """Refuse ``NONE``, which would be a gate that never refuses.

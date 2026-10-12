@@ -643,6 +643,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
+    ("GET", "/openapi/v1/bots/collaborations"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
     # delegating user does not own appears in no listing of that user's bots, so
     # without this it would be undiscoverable.

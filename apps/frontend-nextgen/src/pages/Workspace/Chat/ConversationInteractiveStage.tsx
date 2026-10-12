@@ -10,7 +10,7 @@ import { AgentCodingGuide } from '@/pages/Workspace/components/AgentCodingGuide'
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import type { PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { ConversationInteractiveChatModel } from './hooks/useConversationInteractiveChat';
 
 /** ChatPanel 以非空 RefObject 声明 ref prop;实际均为 useRef<T>(null) 形态的静态换形。 */
@@ -21,8 +21,15 @@ export function ConversationInteractiveStage(props: {
   model: ConversationInteractiveChatModel;
   onOpenSessionList(): void;
   onOpenAgentCodingBot(bot: ChatBotView): void;
+  /** 头部五图标列（chat-header-panels）：页面装配，取代原「会话文件」单图标位。 */
+  headerActions?: ReactNode;
+  /** 头部右缘面板（会话详情/历史消息）：由页面按开合态装配（chat-header-panels）。 */
+  headerRightPanels?: ReactNode;
+  /** 历史面板结果点击的定位高亮消息 id（透传消息列表滚动定位）。 */
+  highlightMessageId?: string | null;
 }): JSX.Element {
-  const { model, onOpenSessionList, onOpenAgentCodingBot } = props;
+  const { model, onOpenSessionList, onOpenAgentCodingBot, headerActions, headerRightPanels, highlightMessageId } =
+    props;
   const { botChat, fileFeature, taskExecution } = model;
   return (
     <>
@@ -33,10 +40,13 @@ export function ConversationInteractiveStage(props: {
           target={model.target}
           viewer={model.viewer}
           sessionTitle={model.selectedSession?.title}
+          sessionCode={model.selectedSession?.sessionId}
           authenticatedUserId={model.authenticatedUserId}
           authenticatedUserName={model.authenticatedUserName}
           userAvatarUrl={model.userAvatarUrl}
           messages={botChat.chat.messages}
+          headerActions={headerActions}
+          highlightMessageId={highlightMessageId}
           isRequesting={botChat.chat.isRequesting}
           isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
           connectionStatus={botChat.connectionStatus}
@@ -56,7 +66,6 @@ export function ConversationInteractiveStage(props: {
             isLoading: botChat.isLoadingMoreHistory,
             onLoadMore: () => void botChat.loadMoreHistory(),
           }}
-          onManageFiles={model.desktopFileFeaturesHidden ? undefined : fileFeature.openFileDrawer}
           modelSelector={
             <BotModelSelectorContainer
               chatBots={model.chatBots}
@@ -89,6 +98,7 @@ export function ConversationInteractiveStage(props: {
         />
       )}
       {fileFeature.featureNode}
+      {headerRightPanels}
     </>
   );
 }

@@ -1,11 +1,17 @@
 """Tests for core.auth.dependencies (post Rule 14)."""
-import pytest
+
+import base64
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agentclaw.community.adapters.http.auth.dependencies import (
     _build_auth_context,
     get_current_staff_id,
     get_current_user,
+    get_device_connection_user,
     require_operator,
 )
 from agentclaw.community.core.auth.models import AuthenticatedIdentity
@@ -19,17 +25,20 @@ from agentclaw.community.plugin_api.auth import AuthRequestContext
 
 class FakeQueryParams(dict):
     """Minimal QueryParams-like object for unit tests."""
+
     pass
 
 
 class FakeHeaders(dict):
     """FastAPI's request.headers iterates as ``(k, v)`` pairs of strings —
     a plain dict satisfies that."""
+
     pass
 
 
 class FakeRequest:
     """Minimal Request-like object for unit tests."""
+
     def __init__(self, cookies=None, headers=None, query_params=None, base_url=""):
         self.cookies = cookies or {}
         self._headers = FakeHeaders(headers or {})
@@ -41,9 +50,27 @@ class FakeRequest:
         return self._headers
 
 
+def _iam_token(sno: str) -> str:
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"sno": sno}).encode()).decode().rstrip("=")
+    )
+    return f"header.{payload}.signature"
+
+
+class FakeSecretResolver:
+    def __init__(self, value: str | None):
+        self.value = value
+
+    def get_secret(self, _name: str):
+        if self.value is None:
+            return None
+        return SimpleNamespace(secret_value=self.value)
+
+
 # ============================================================
 # _build_auth_context — snapshots the request
 # ============================================================
+
 
 def test_build_auth_context_includes_cookies_headers_query_baseurl():
     req = FakeRequest(
@@ -64,6 +91,7 @@ def test_build_auth_context_includes_cookies_headers_query_baseurl():
 # get_current_user — delegates to AuthPlugin
 # ============================================================
 
+
 @pytest.mark.asyncio
 async def test_get_current_user_delegates_to_plugin():
     fake_user = AuthenticatedIdentity(id="1", operatorName="u", outUserNo="1")
@@ -76,6 +104,7 @@ async def test_get_current_user_delegates_to_plugin():
     # Plugin's AuthenticatedIdentity is converted to the adapter's
     # AuthenticatedUser at the boundary. Field-for-field copy.
     from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+
     assert isinstance(user, AuthenticatedUser)
     assert user.id == fake_user.id
     assert user.staffId == fake_user.staffId
@@ -123,6 +152,7 @@ async def test_get_current_user_collapses_transport_errors_to_redirect():
 # Other deps unchanged
 # ============================================================
 
+
 def test_get_current_staff_id_missing_header_raises_unauthorized():
     with pytest.raises(Unauthorized) as ei:
         get_current_staff_id(x_staff_id=None)
@@ -137,3 +167,83 @@ async def test_require_operator_denied_raises_forbidden():
     with pytest.raises(Forbidden) as ei:
         await require_operator(user=user, auth_plugin=plugin)
     assert "权限不足" in ei.value.detail
+
+
+# ============================================================
+# get_device_connection_user — internal assertion or Cookie fallback
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_device_connection_user_accepts_service_bearer_and_iam_token(
+    monkeypatch,
+):
+    import agentclaw.community.adapters.http.auth.dependencies as deps
+
+    monkeypatch.setattr(
+        deps,
+        "_block",
+        lambda _name: {"access_secret_name": "dima-secret"},
+    )
+    plugin = AsyncMock()
+    req = FakeRequest(
+        headers={
+            "authorization": "Bearer connection-secret",
+            "x-iam-token": _iam_token("136677"),
+        }
+    )
+
+    user = await get_device_connection_user(
+        req,
+        auth_plugin=plugin,
+        secret_resolver=FakeSecretResolver("connection-secret"),
+    )
+
+    assert user.staffId == "136677"
+    plugin.resolve_user_from_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_device_connection_user_rejects_bad_bearer_without_cookie_fallback(
+    monkeypatch,
+):
+    import agentclaw.community.adapters.http.auth.dependencies as deps
+
+    monkeypatch.setattr(
+        deps,
+        "_block",
+        lambda _name: {"access_secret_name": "dima-secret"},
+    )
+    plugin = AsyncMock()
+    req = FakeRequest(
+        cookies={"IAM_TOKEN": "browser-cookie"},
+        headers={
+            "authorization": "Bearer wrong",
+            "x-iam-token": _iam_token("136677"),
+        },
+    )
+
+    with pytest.raises(Unauthorized):
+        await get_device_connection_user(
+            req,
+            auth_plugin=plugin,
+            secret_resolver=FakeSecretResolver("connection-secret"),
+        )
+    plugin.resolve_user_from_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_device_connection_user_without_iam_token_uses_existing_auth():
+    fake_user = AuthenticatedIdentity(id="1", operatorName="u", outUserNo="1")
+    plugin = AsyncMock()
+    plugin.resolve_user_from_request = AsyncMock(return_value=fake_user)
+    req = FakeRequest(cookies={"staff_id": "1"})
+
+    user = await get_device_connection_user(
+        req,
+        auth_plugin=plugin,
+        secret_resolver=FakeSecretResolver(None),
+    )
+
+    assert user.staffId == "1"
+    plugin.resolve_user_from_request.assert_awaited_once()

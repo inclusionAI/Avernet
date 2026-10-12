@@ -43,7 +43,7 @@ class FakeConnections:
     def __set_relay(self, relay):  # wired by the fixture
         self._relay = relay
 
-    def build(self, *, bot_id, owner_id, caller_id, stage) -> ConnectionResult:
+    def build(self, *, bot_id, owner_id, caller_id, stage, device_uuid=None) -> ConnectionResult:
         # The real service resolves the addressed bot and adjudicates the
         # caller before touching the device service; model that, or a foreign
         # bot / non-operator appears to succeed here.
@@ -54,6 +54,7 @@ class FakeConnections:
                 "owner_id": owner_id,
                 "caller_id": caller_id,
                 "stage": stage,
+                **({"device_uuid": device_uuid} if device_uuid is not None else {}),
             }
         )
         if self.raises is not None:
@@ -109,6 +110,13 @@ def test_chat_socket_is_offered(client, relay):
     assert data["sockets"][0]["url"].startswith("wss://")
     assert data["engine"] == "openclaw"
     assert data["expires_at"]
+
+
+def test_connection_pins_requested_instance(client, relay, connections):
+    relay.set_bot_type("service")
+    ok(client.get(URL, params={"stage": "online", "device_uuid": "device-B"}))
+    assert connections.calls[-1]["device_uuid"] == "device-B"
+    assert connections.calls[-1]["stage"] == "online"
 
 
 def test_no_terminal_socket_is_offered(client, relay):
@@ -270,3 +278,9 @@ def test_ready_friend_connection_refuses_incomplete_upstream_material(
     )
 
     assert fails(response, 502)["message"] == "Engine service error"
+
+
+def test_friend_connection_rejects_instance_selection(client, connections):
+    response = client.get(URL, params={"f_user_id": "friend", "session_id": "s1", "device_uuid": "device-a"})
+    assert response.status_code == 404
+    assert connections.calls == []

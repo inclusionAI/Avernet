@@ -23,7 +23,7 @@ def _bare_baas_service() -> BaasService:
     return object.__new__(BaasService)
 
 
-@pytest.mark.parametrize("provider", ["arca", "baas"])
+@pytest.mark.parametrize("provider", ["arca", "baas", "teclaw"])
 def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution(provider) -> None:
     service = _bare_baas_service()
     service._bot_repo = MagicMock()
@@ -77,6 +77,8 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution(provi
         "publish_id": None,
         "entity_id": "entity-1",
     }
+    if provider == "teclaw":
+        update_kwargs["session_key"] = "original-session"
     service.update_caller_identity(**update_kwargs)
 
     service._resolve_caller_binding_id.assert_called_once()
@@ -104,6 +106,7 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution(provi
         assert paas_device_id == "device-1@template-1"
         assert service.list_devices_by_bot_uuid.call_count == 2
         service.list_devices_by_bot_uuid.assert_called_with("baas-bot-1", timeout=3.0)
+    assert service.append_caller_outbound_rule.call_args.kwargs == ({"session_key": "original-session"} if provider == "teclaw" else {})
     assert outbound_rule.header_operation_rules[0].header_name == "x-caller-token"
     assert outbound_rule.header_operation_rules[0].action == "set"
     assert outbound_rule.header_operation_rules[0].value == "caller-token"
@@ -218,3 +221,20 @@ def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
     )
 
     service.append_caller_outbound_rule.assert_called_once()
+
+@pytest.mark.parametrize("key", [None, "", " \t"])
+def test_teclaw_missing_session_key_never_appends(key):
+    service = _bare_baas_service()
+    service._bot_repo = MagicMock()
+    service._bot_repo.get_by_id_and_entity.return_value = {"owner_id": "owner-1", "bot_type": "service", "status": "ACTIVE"}
+    service._device_binding_repo = MagicMock()
+    service._device_binding_repo.get_by_id.return_value = SimpleNamespace(id=9, device_provider="teclaw", status="ACTIVE", device_id="teclaw-bot-1")
+    service.append_caller_outbound_rule = MagicMock()
+    service.list_devices_by_bot_uuid = MagicMock()
+    with pytest.raises(CallerCredentialError) as error:
+        service.update_caller_identity(bot_id="bot-1", owner_user_id="owner-1", caller_user_id="caller-1",
+                                       caller_token=CallerToken(access_token="caller-token", subject_user_id="caller-1", expires_at=datetime.now(), fingerprint="ignored"),
+                                       stage="draft", publish_id=None, entity_id="entity-1", binding_id=9, session_key=key)
+    assert error.value.code == "CALLER_CREDENTIAL_REQUEST_INVALID"
+    service.append_caller_outbound_rule.assert_not_called()
+    service.list_devices_by_bot_uuid.assert_not_called()

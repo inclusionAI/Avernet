@@ -1,8 +1,9 @@
 //! Engine plugin interface.
 //!
 //! An [`Engine`] drives one downstream turn against a local coding-agent
-//! process. Engines are created by an [`EngineFactory`] registered under a
-//! string id in the [`EngineRegistry`]; `[[bot]] engine = "<id>"` selects one.
+//! process or an already-running application. Engines are created by an
+//! [`EngineFactory`] registered under a string id in the [`EngineRegistry`];
+//! `[[bot]] engine = "<id>"` selects one.
 //! The built-in factories are [`claude_code::ClaudeCodeFactory`] (`claude-code`)
 //! and [`codex_app_server::CodexAppServerFactory`] (`codex`). Distributions add
 //! engines or override a built-in by registering a factory under the same id.
@@ -14,7 +15,7 @@
 //! - emit only engine-neutral events (`sse::chat_delta`, `agent_thinking`,
 //!   `agent_tool`, `interaction_event`); the run loop derives terminal frames
 //!   from the returned [`TurnOutcome`] / [`TurnError`];
-//! - on `abort`, or when `events` is closed, stop the engine process and return
+//! - on `abort`, or when `events` is closed, stop the active engine turn and return
 //!   [`TurnError::Aborted`];
 //! - HITL is optional: register pending decisions with `TurnRequest::interactions`
 //!   and await their resolution, or reject engine-side requests.
@@ -127,7 +128,12 @@ pub trait EngineFactory: Send + Sync {
     /// bot keeps its sessions only while its engine id is unchanged.
     fn id(&self) -> &str;
     /// Executable looked up on `PATH` when the bot configures no `engine_bin`.
+    /// Ignored when `requires_bin` returns false.
     fn default_bin(&self) -> &str;
+    /// False for adapters to an already-running application. Registration skips
+    /// executable lookup and ignores `default_bin`; `build` receives an empty path.
+    /// Existing subprocess factories retain executable validation by default.
+    fn requires_bin(&self) -> bool { true }
     /// Build an engine for `bin`, validating the bot's `engine_options`.
     fn build(&self, bin: PathBuf, options: &toml::Table) -> Result<Arc<dyn Engine>, String>;
 }
@@ -163,7 +169,12 @@ impl EngineRegistry {
         let factory = self.get(&bot.engine).ok_or_else(|| format!(
             "unknown engine '{}' for bot '{}'; available engines: {}",
             bot.engine, bot.provider_bot_ref, self.ids().collect::<Vec<_>>().join(", ")))?;
-        let bin = bot.engine_bin.clone().unwrap_or_else(|| PathBuf::from(factory.default_bin()));
+        let bin = if factory.requires_bin() {
+            bot.engine_bin.clone().unwrap_or_else(|| PathBuf::from(factory.default_bin()))
+        } else {
+            if bot.engine_bin.is_some() { return Err(format!("engine '{}' does not accept engine_bin", bot.engine)); }
+            PathBuf::new()
+        };
         factory.build(bin, &bot.engine_options)
             .map_err(|error| format!("engine '{}' for bot '{}': {error}", bot.engine, bot.provider_bot_ref))
     }

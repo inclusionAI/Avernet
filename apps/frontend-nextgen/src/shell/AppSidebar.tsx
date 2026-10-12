@@ -39,43 +39,45 @@ export function AppSidebar({
 
   const shell = (
     <>
-      {/* 品牌区：原顶栏 Logo 迁入；通知中心上移至 Logo 右侧（V1.6 形态） */}
+      {/* 品牌区（SVG 稿）：行高 52px；左 Logo mark 紧凑锁版（12,15 24×22）、右上一排功能图标（通知 + 折叠控制）32px 居中。 */}
       {collapsed ? (
-        <div className="flex flex-col items-center gap-1 px-2 pb-1 pt-4">
+        <div className="flex flex-col items-center gap-1 px-2 pb-1 pt-3.5">
           {notificationBell && <NotificationBell />}
+          {onToggleCollapsed && (
+            <IconButton
+              label={collapsed ? '展开导航' : '折叠导航'}
+              icon={collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              onClick={onToggleCollapsed}
+            />
+          )}
         </div>
       ) : (
-        <div className="flex items-center gap-2 px-4 pb-2 pt-4">
-          <brand.Logo className="h-8 min-w-0" />
-          <span className="ml-auto flex shrink-0 items-center">{notificationBell && <NotificationBell />}</span>
+        <div className="flex h-[52px] items-center gap-2 px-3">
+          <brand.Logo compact className="min-w-0" />
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {notificationBell && <NotificationBell />}
+            {onToggleCollapsed && (
+              <IconButton label="折叠导航" icon={<PanelLeftClose className="h-4 w-4" />} onClick={onToggleCollapsed} />
+            )}
+          </span>
         </div>
       )}
 
       <SidebarNavList activePath={activePath} items={items} onNavigate={onNavigate} collapsed={collapsed} />
 
-      {/* 底部用户行：账号身份与「更多」浮层（帮助/ReleaseNotes/用户手册/平台指标）；主题切换留待后续。 */}
+      {/* 底部用户行（SVG 稿）：32px 圆头像 + 14px 姓名 #09090B + 右侧「更多」浮层，
+          行与导航区之间无分隔线（稿为纯留白过渡）。 */}
       {collapsed ? (
-        <div className="flex flex-col items-center gap-1 border-t border-border bg-background/70 px-2 pb-3 pt-2">
+        <div className="flex flex-col items-center gap-1 bg-background/70 px-2 pb-3 pt-2">
           <AccountBadge currentUser={currentUser} collapsed />
           <HelpMenu variant="more" />
         </div>
       ) : (
-        <div className="flex items-center gap-1 border-t border-border bg-background/70 px-2 pb-3 pt-2">
+        <div className="flex items-center gap-1 bg-background/70 px-2 pb-3 pt-2">
           <AccountBadge currentUser={currentUser} />
           <span className="ml-auto flex shrink-0 items-center">
             <HelpMenu variant="more" />
           </span>
-        </div>
-      )}
-
-      {/* 右边缘悬浮折叠/展开控制（复用 AppShell 既有 collapsed state，不新增交互语义） */}
-      {onToggleCollapsed && (
-        <div className="absolute -right-3 top-1/2 z-10 -translate-y-1/2">
-          <IconButton
-            label={collapsed ? '展开导航' : '折叠导航'}
-            icon={collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            onClick={onToggleCollapsed}
-          />
         </div>
       )}
     </>

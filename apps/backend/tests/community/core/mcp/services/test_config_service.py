@@ -550,6 +550,28 @@ class TestMCPConfigServiceUpdateConfig:
         # old is None because get_user_unified_config returns None (mock default)
         repo.update.assert_called_once()
 
+    def test_legacy_user_write_preserves_global_url(self):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.return_value = {
+            "id": "1",
+            "extra_config": {
+                "api_key": "old-key",
+                "headers": {"B": "2"},
+                "url": "https://global.example.test/mcp",
+            },
+        }
+        svc = _service(repo=repo)
+
+        svc.update_user_unified_config(
+            user_id="user1", server_code="mcp.test", api_key=None,
+            headers={"B": "4"}, endpoint_env=None, transport_protocol=None,
+        )
+
+        saved = repo.update.call_args.args[1]["extra_config"]
+        assert saved["headers"] == {"B": "4"}
+        assert saved["url"] == "https://global.example.test/mcp"
+        assert saved["api_key"] == "old-key"
+
     def test_rollback_unified_config_deletes_when_old_is_none(self):
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {"id": "1"}
@@ -685,7 +707,7 @@ class TestMCPConfigServiceBuildPayload:
         assert endpoint_env == "PRE"
         assert transport == "SSE"
 
-    def test_custom_url_does_not_redirect_inherited_or_managed_credentials(
+    def test_custom_url_keeps_explicit_user_headers_but_not_managed_credentials(
         self, monkeypatch
     ):
         repo = MagicMock()
@@ -730,10 +752,70 @@ class TestMCPConfigServiceBuildPayload:
         )
 
         assert api_key is None
-        assert headers == {"X-Manifest": "non-sensitive"}
+        assert headers == {
+            "X-User-Secret": "secret",
+            "X-Manifest": "non-sensitive",
+        }
         assert transport == "SSE"
         resolver.get_secret.assert_not_called()
         bot_repo.get_by_bot_and_server_code.assert_not_called()
+
+    def test_global_custom_url_keeps_user_and_bot_headers_without_managed_credentials(
+        self, monkeypatch
+    ):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.return_value = {
+            "extra_config": {
+                "api_key": "old-key",
+                "url": "https://global.example.test/mcp",
+                "headers": {"X-Region": "global", "X-Trace": "on"},
+            }
+        }
+        resolver = MagicMock()
+        svc = _service(
+            repo=repo,
+            credentials=McpRuntimeCredentialsConfig(
+                header_secrets={"mcp.test": {"Authorization": "managed-secret"}}
+            ),
+            resolver=resolver,
+        )
+        monkeypatch.setattr(
+            "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
+            lambda _engine: [{"server_code": "mcp.test", "headers": {"X-Default": "1"}}],
+        )
+
+        api_key, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"},
+            bot_override={"headers": {"x-region": "bot"}},
+        )
+
+        assert api_key is None
+        assert headers == {"x-region": "bot", "X-Trace": "on"}
+        resolver.get_secret.assert_not_called()
+
+    def test_explicit_user_snapshot_avoids_a_second_config_read(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.side_effect = AssertionError(
+            "configuration must be read only once for URL and Headers"
+        )
+        svc = _service(repo=repo)
+        monkeypatch.setattr(
+            "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
+            lambda _engine: [],
+        )
+
+        api_key, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"},
+            user_config_snapshot={
+                "url": "https://global.example.test/mcp",
+                "api_key": "old-key",
+                "headers": {"X-User": "yes"},
+            },
+        )
+
+        assert api_key is None
+        assert headers == {"X-User": "yes"}
+        repo.get_by_user_and_server_code.assert_not_called()
 
     def test_managed_header_overrides_user_header_case_insensitively(self, monkeypatch):
         repo = MagicMock()

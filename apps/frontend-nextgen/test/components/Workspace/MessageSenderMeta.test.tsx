@@ -41,7 +41,7 @@ describe('MessageSenderLayout', () => {
     expect(meta).not.toHaveClass('pr-11');
   });
 
-  it('验收微调：名称/时间行与 28px 头像光学居中（mt-1.5）且与内容首行留呼吸间距（mb-2）', () => {
+  it('SVG 稿实测：元信息行 13px 常规字重，13px 名称/时间空隙并排（无分隔点），与内容首行留呼吸间距（mb-1.5）', () => {
     render(
       <MessageSenderLayout
         avatar={avatar}
@@ -52,6 +52,40 @@ describe('MessageSenderLayout', () => {
       </MessageSenderLayout>,
     );
     const meta = screen.getByTestId('message-sender-meta');
-    expect(meta).toHaveClass('mt-1.5', 'mb-2');
+    expect(meta).toHaveClass('mt-1', 'mb-1.5', 'text-[13px]');
+    // SVG 稿：名称与时间并排无「·」分隔点。
+    expect(meta).toHaveTextContent(/风太OC/);
+    expect(meta).toHaveTextContent(/09-14 10:00/);
+    expect(meta.textContent).not.toContain('·');
+  });
+
+  it('dmore 实测：Bot 侧名称 400/#525252 在前、时间 12px #71717A 在后', () => {
+    render(<MessageSenderMeta name="本地代码专家" time="15:48" align="left" />);
+    const meta = screen.getByTestId('message-sender-meta');
+    const [name, time] = Array.from(meta.children);
+    expect(name).toHaveClass('font-normal', 'text-content-strong');
+    expect(time).toHaveClass('text-xs', 'text-muted-foreground');
+    // DOM 顺序 = 名称在前、时间在后。
+    expect(name.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('用户侧时间在前、名称在后，名称不加重颜色（与 Bot 侧同用 content-strong）', () => {
+    render(<MessageSenderMeta name="陈燕平" time="15:20" align="right" />);
+    const meta = screen.getByTestId('message-sender-meta');
+    const [time, name] = Array.from(meta.children);
+    expect(time).toHaveClass('text-xs', 'text-muted-foreground');
+    expect(name).toHaveClass('font-normal', 'text-content-strong');
+    expect(name).not.toHaveClass('font-medium', 'text-foreground');
+    expect(time.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('dmore 实测：头像缺省(null)时 Bot 消息裸排版，不渲染头像槽位', () => {
+    const { container } = render(
+      <MessageSenderLayout avatar={null} align="left" meta={<MessageSenderMeta name="Bot" align="left" />}>
+        <div>内容</div>
+      </MessageSenderLayout>,
+    );
+    expect(container.querySelector('[data-testid="sender-avatar"]')).toBeNull();
+    expect(screen.getByTestId('message-sender-meta')).toBeInTheDocument();
   });
 });
