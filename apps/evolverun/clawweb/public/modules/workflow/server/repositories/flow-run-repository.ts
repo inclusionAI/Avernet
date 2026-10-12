@@ -4,8 +4,6 @@
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 
-import { RecoveryClockRepository, type RecoveryClockCommand, type ExpectedRecoveryClock } from "./recovery-clock-repository.js";
-
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("unknown column 'evolution_analysis_status'")
@@ -125,12 +123,6 @@ export type FindWorkflowTypesPageResult = {
 
 export class FlowRunRepository {
   constructor(private db: IDatabase) {}
-
-  getRecoveryClock(flowId: string) { return new RecoveryClockRepository(this.db).get(flowId); }
-
-  putRecoveryClock(flowId: string, input: RecoveryClockCommand) {
-    return new RecoveryClockRepository(this.db).put(flowId, input);
-  }
 
   // ── Read methods ──
 
@@ -358,58 +350,52 @@ export class FlowRunRepository {
   }
 
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
-    const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async (tx, currentStatus) => {
-      const clock = await clocks.get(flowId, tx);
-      if (clock && (clock.phase === "retry_pending"
-        || ["succeeded", "failed", "cancelled"].includes(currentStatus ?? ""))) return false;
-      const now = this.db.dialect.now();
-      // Build SET clause dynamically: only include fields when explicitly provided.
-      // result_json: undefined = preserve existing (e.g. on success, keep last node result);
-      //              null/string = overwrite (e.g. on failure, write structured error info).
-      const sets: string[] = [
-        "status = ?", "total_duration_ms = ?",
-        "total_token_usage = ?", "current_phase = ?", "completed_at = ?", "gmt_modified = ?",
-      ];
-      const values: unknown[] = [
-        completion.status,
-        completion.totalDurationMs ?? null,
-        completion.totalTokenUsage ?? null,
-        completion.currentPhase ?? null,
-        completion.completedAt,
-        now,
-      ];
-      if (completion.resultJson !== undefined) {
-        sets.push("result_json = ?");
-        values.push(completion.resultJson);
-      }
-      if (completion.inputJson !== undefined) {
-        sets.push("input_json = ?");
-        values.push(completion.inputJson);
-      }
-      // Reconcile succeeded/failed counts from caller-provided values (final truth)
-      // or fall back to node_executions sub-query for accurate reconciliation.
-      if (completion.succeededCount !== undefined) {
-        sets.push("succeeded_count = ?");
-        values.push(completion.succeededCount);
-      } else {
-        sets.push("succeeded_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status IN ('succeeded', 'skipped'))");
-        values.push(flowId);
-      }
-      if (completion.failedCount !== undefined) {
-        sets.push("failed_count = ?");
-        values.push(completion.failedCount);
-      } else {
-        sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
-        values.push(flowId);
-      }
+    const now = this.db.dialect.now();
+    // Build SET clause dynamically: only include fields when explicitly provided.
+    // result_json: undefined = preserve existing (e.g. on success, keep last node result);
+    //              null/string = overwrite (e.g. on failure, write structured error info).
+    const sets: string[] = [
+      "status = ?", "total_duration_ms = ?",
+      "total_token_usage = ?", "current_phase = ?", "completed_at = ?", "gmt_modified = ?",
+    ];
+    const values: unknown[] = [
+      completion.status,
+      completion.totalDurationMs ?? null,
+      completion.totalTokenUsage ?? null,
+      completion.currentPhase ?? null,
+      completion.completedAt,
+      now,
+    ];
+    if (completion.resultJson !== undefined) {
+      sets.push("result_json = ?");
+      values.push(completion.resultJson);
+    }
+    if (completion.inputJson !== undefined) {
+      sets.push("input_json = ?");
+      values.push(completion.inputJson);
+    }
+    // Reconcile succeeded/failed counts from caller-provided values (final truth)
+    // or fall back to node_executions sub-query for accurate reconciliation.
+    if (completion.succeededCount !== undefined) {
+      sets.push("succeeded_count = ?");
+      values.push(completion.succeededCount);
+    } else {
+      sets.push("succeeded_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status IN ('succeeded', 'skipped'))");
       values.push(flowId);
-      const result = await tx.exec(
-        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
-        values,
-      );
-      return result.affectedRows > 0;
-    });
+    }
+    if (completion.failedCount !== undefined) {
+      sets.push("failed_count = ?");
+      values.push(completion.failedCount);
+    } else {
+      sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
+      values.push(flowId);
+    }
+    values.push(flowId);
+    const result = await this.db.exec(
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
+      values,
+    );
+    return result.affectedRows > 0;
   }
 
   /**
@@ -424,38 +410,22 @@ export class FlowRunRepository {
     currentPhase: string;
     totalDurationMs?: number | null;
     completedAt: number;
-    expectedClock?: ExpectedRecoveryClock;
   }): Promise<boolean> {
-    const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async tx => {
-      const clock = await clocks.get(flowId, tx);
-      const expected = fields.expectedClock;
-      if (clock && (!expected || clock.phase !== "active"
-        || clock.ownerInstanceId !== expected.ownerInstanceId || clock.bootId !== expected.bootId
-        || clock.epoch !== expected.epoch || clock.seq !== expected.seq)) return false;
-      if (!clock && expected) return false;
-      const result = await tx.exec(
-        `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-         WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
-        [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId],
-      );
-      return result.affectedRows > 0;
-    });
+    const result = await this.db.exec(
+      `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
+       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')`,
+      [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId],
+    );
+    return result.affectedRows > 0;
   }
 
   async updateStatus(flowId: string, status: string): Promise<boolean> {
-    const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async (tx, currentStatus) => {
-      const clock = await clocks.get(flowId, tx);
-      if (clock && (clock.phase === "retry_pending"
-        || ["succeeded", "failed", "cancelled"].includes(currentStatus ?? ""))) return false;
-      const now = this.db.dialect.now();
-      const result = await tx.exec(
-        "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
-        [status, now, flowId],
-      );
-      return result.affectedRows > 0;
-    });
+    const now = this.db.dialect.now();
+    const result = await this.db.exec(
+      "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')",
+      [status, now, flowId],
+    );
+    return result.affectedRows > 0;
   }
 
   /** Abort a flow run: set status to "cancelled" (user-initiated abort) and record completed_at + result_json. */
@@ -508,15 +478,11 @@ export class FlowRunRepository {
   }
 
   async resetStartedAt(flowId: string, startedAt: number): Promise<boolean> {
-    const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async tx => {
-      if (await clocks.get(flowId, tx)) return false;
-      const result = await tx.exec(
-        "UPDATE flow_runs SET started_at = ?, completed_at = NULL WHERE flow_id = ?",
-        [startedAt, flowId],
-      );
-      return result.affectedRows > 0;
-    });
+    const result = await this.db.exec(
+      "UPDATE flow_runs SET started_at = ?, completed_at = NULL WHERE flow_id = ?",
+      [startedAt, flowId],
+    );
+    return result.affectedRows > 0;
   }
 
   /**
@@ -553,15 +519,15 @@ export class FlowRunRepository {
     }
   }
 
-  /** Fence the legacy retry before changing either child nodes or the run. */
+  /** Legacy retry: change child nodes and the run in one transaction. */
   async resetFailedForRetry(
     flowId: string,
     resetFailedNodes: (tx: IDatabase) => Promise<number>,
-  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'clock_conflict' } | { status: 'not_found' }> {
-    const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async (tx, status) => {
-      if (status === null) return { status: 'not_found' };
-      if (await clocks.get(flowId, tx)) return { status: 'clock_conflict' };
+  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' }> {
+    return this.db.transaction(async tx => {
+      await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?", [flowId]);
+      const rows = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
+      if (!rows.length) return { status: 'not_found' };
       const resetCount = await resetFailedNodes(tx);
       const now = this.db.dialect.now();
       const result = await tx.exec(
@@ -571,6 +537,16 @@ export class FlowRunRepository {
       if (result.affectedRows !== 1) throw new Error(`Failed to reset flow run ${flowId} for retry`);
       return { status: 'updated', resetCount };
     });
+  }
+
+  /** Resume a locally authorized manual retry without rewriting node history or started_at. */
+  async resumeForRetry(flowId: string): Promise<boolean> {
+    const now = this.db.dialect.now();
+    const result = await this.db.exec(
+      "UPDATE flow_runs SET status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ?",
+      [now, flowId],
+    );
+    return result.affectedRows > 0;
   }
 
   async deleteByFlowId(flowId: string): Promise<boolean> {

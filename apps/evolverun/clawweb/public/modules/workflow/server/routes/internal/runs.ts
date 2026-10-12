@@ -9,8 +9,6 @@ import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
-import { createRecoveryClockRouter } from "./recovery-clock.js";
-import { isExpectedRecoveryClock, type ExpectedRecoveryClock } from "../../repositories/recovery-clock-repository.js";
 
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
@@ -33,7 +31,6 @@ export function createInternalRunsRouter(
   observers: { onTerminal?: RunTerminalObserver } = {},
 ): Router {
   const router = Router();
-  router.use(createRecoveryClockRouter(flowRunRepo));
 
   /** POST / — insert a flow run */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
@@ -187,24 +184,18 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { reason, current_phase, total_duration_ms, completed_at, expectedClock } = req.body as {
+      const { reason, current_phase, total_duration_ms, completed_at } = req.body as {
         reason?: string;
         current_phase?: string;
         total_duration_ms?: number | null;
         completed_at?: number;
-        expectedClock?: ExpectedRecoveryClock;
       };
-      if (expectedClock !== undefined && !isExpectedRecoveryClock(expectedClock)) {
-        res.status(400).json({ success: false, error: "Bad Request", message: "Invalid expectedClock" });
-        return;
-      }
       if (!reason) {
         res.status(400).json({ success: false, error: "Bad Request", message: "reason is required" });
         return;
       }
       const claimed = await flowRunRepo.markFailedIfRunning(flowId, {
         reason,
-        expectedClock,
         currentPhase: current_phase ?? "timeout",
         totalDurationMs: total_duration_ms ?? null,
         completedAt: completed_at ?? Math.floor(Date.now() / 1000),
@@ -335,10 +326,6 @@ export function createInternalRunsRouter(
 
       const ok = await flowRunRepo.resetStartedAt(flowId, Math.floor(startedAt));
       if (!ok) {
-        if (await flowRunRepo.getRecoveryClock(flowId)) {
-          res.status(409).json({ success: false, error: "Conflict", message: "Recovery clock owns the timeout window; started_at is immutable" });
-          return;
-        }
         apiLog("PUT", `/runs/${flowId}/started-at`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
@@ -450,10 +437,6 @@ export function createInternalRunsRouter(
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
-      if (result.status === 'clock_conflict') {
-        res.status(409).json({ success: false, error: "Conflict", message: "Use the recovery clock retry protocol" });
-        return;
-      }
 
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
       res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
@@ -461,6 +444,25 @@ export function createInternalRunsRouter(
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg });
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
+    }
+  }));
+
+  /** PUT /:flowId/retry-resume — complete a locally journaled retry without changing node history or started_at. */
+  router.put("/:flowId/retry-resume", asyncHandler(async (req: Request, res: Response) => {
+    const flowId = String(req.params.flowId);
+    if (!flowRunRepo) {
+      res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
+      return;
+    }
+    try {
+      if (!await flowRunRepo.resumeForRetry(flowId)) {
+        res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ success: false, error: "Internal Server Error", message });
     }
   }));
 

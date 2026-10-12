@@ -28,5 +28,8 @@ The example shows the response envelope only; `specJson` contains the complete w
 
 These changes are additive and require no schema migration: the two run columns already exist. Deploy the Avernet backend before the matching ClawMind client so version metadata is retained and pack-pinned historical lookups receive pack identity.
 
-Related internal API: [recovery clock and timeout fencing](recovery-clock-contract.md),
-including schema migration 140 and coordinated engine rollout.
+## Restart recovery retry
+
+`PUT /runs/:flowId/retry-resume` is called only after ClawMind has saved a manual retry intent in its persistent local journal. It idempotently changes the existing `flow_runs` row to `running` and clears `completed_at`; it preserves the original `started_at` and all `node_executions` history. A missing run returns 404. A write failure returns 500, so the local intent remains pending for replay. The existing `/runs/:flowId/retry-failed` route retains its legacy failed-node reset behavior.
+
+Restart recovery uses the existing run record and the existing retry mailbox. It does not require an additional shared schema migration.

@@ -1,6 +1,5 @@
 import type { IDatabase } from './db.js';
 import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
-import { recoveryClockMigration } from './recovery-clock-schema.js';
 /**
  * Schema DDL for ClawWeb.
  *
@@ -3303,5 +3302,4 @@ END`,
     description: "Preserve the selected Bot environment for Skill assets",
     sql: [`ALTER TABLE ce_skill_assets ADD COLUMN bot_env VARCHAR(32) DEFAULT NULL COMMENT '来源Bot环境；历史未记录时为空'`],
   },
-  recoveryClockMigration,
 ];
