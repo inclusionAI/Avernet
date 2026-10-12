@@ -35,6 +35,10 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     is_excluded,
     validate_required_paths,
 )
+from agentclaw.community.core.service_bot.services.local_bin_artifact import (
+    restore_local_bin_artifact,
+    sync_local_bin_artifact,
+)
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
@@ -1434,6 +1438,16 @@ class BotBuildService:
                 error_message="rsync migration failed",
             )
 
+            if is_nas:
+                sync_local_bin_artifact(
+                    source_home=source_dir.parent,
+                    target_dir=target_dir,
+                    device_id=device_id,
+                    version=version_str,
+                    build_ignore_paths=build_ignore_paths,
+                    run_command=self._run_local_command,
+                )
+
             # Device-side fallback for extra-include files that are unreadable
             # on the NAS merge area due to NFS root_squash (uid-1000-owned
             # sessions/cron-tasks.json). Only the publish/migrate path has the
@@ -1949,6 +1963,15 @@ class BotBuildService:
                 error_message="restore draft extra workspace failed",
                 timeout_seconds=remaining_timeout(),
             )
+
+        restore_local_bin_artifact(
+            artifact_dir=artifact_dir,
+            target_home=draft_dir.parent,
+            bot_id=bot_id,
+            version=source_version,
+            run_command=self._run_local_command,
+            timeout_seconds=remaining_timeout(),
+        )
 
         return {
             "restore_type": "migration_path",
