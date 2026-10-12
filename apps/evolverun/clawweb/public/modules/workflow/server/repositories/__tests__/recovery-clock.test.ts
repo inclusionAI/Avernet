@@ -5,6 +5,7 @@ import { sqliteDialect } from '../../../../../shared/server/db/dialect.js';
 import { SqliteDatabase } from '../../../../../shared/server/db.js';
 import { migrations } from '../../../../../shared/server/schema.js';
 import { FlowRunRepository } from '../flow-run-repository.js';
+import { NodeExecutionRepository } from '../node-execution-repository.js';
 
 const initial = { mode: 'claim', ownerInstanceId: 'owner', bootId: 'boot1', epoch: 0, seq: 1, elapsedMs: 1200, phase: 'recovering' } as const;
 const timeout = { reason: 'timeout', currentPhase: 'timeout', completedAt: 999 };
@@ -139,7 +140,34 @@ describe('recovery clock storage contract', () => {
     raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
     raw.exec("UPDATE flow_runs SET status = 'failed', failed_count = 1");
     await repo.putRecoveryClock('flow', initial);
-    expect(await repo.resetFailedForRetry('flow', 1)).toBe(false);
+    expect(await repo.resetFailedForRetry('flow', async () => 1)).toEqual({ status: 'clock_conflict' });
+    expect(raw.prepare('SELECT status, failed_count FROM flow_runs').get()).toEqual({ status: 'failed', failed_count: 1 });
+  });
+  it('fences legacy node resets and run status in one transaction', async () => {
+    raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
+    raw.exec(`CREATE TABLE node_executions (flow_id TEXT, status TEXT, error_text TEXT,
+      duration_ms INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+      INSERT INTO node_executions VALUES ('flow', 'failed', 'error', 10, 999, 999);
+      UPDATE flow_runs SET status = 'failed', failed_count = 1 WHERE flow_id = 'flow'`);
+    const nodes = new NodeExecutionRepository(db);
+    const reset = () => repo.resetFailedForRetry('flow', tx => nodes.resetFailedByFlowId('flow', tx));
+
+    await repo.putRecoveryClock('flow', initial);
+    expect(await reset()).toEqual({ status: 'clock_conflict' });
+    expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'failed' });
+    expect(raw.prepare('SELECT status, failed_count FROM flow_runs').get()).toEqual({ status: 'failed', failed_count: 1 });
+  });
+  it('rolls back legacy node resets when the run update fails', async () => {
+    raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
+    raw.exec(`CREATE TABLE node_executions (flow_id TEXT, status TEXT, error_text TEXT,
+      duration_ms INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+      INSERT INTO node_executions VALUES ('flow', 'failed', 'error', 10, 999, 999);
+      UPDATE flow_runs SET status = 'failed', failed_count = 1 WHERE flow_id = 'flow';
+      CREATE TRIGGER fail_legacy_retry BEFORE UPDATE OF status ON flow_runs
+      WHEN NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'run update failed'); END`);
+    const nodes = new NodeExecutionRepository(db);
+    await expect(repo.resetFailedForRetry('flow', tx => nodes.resetFailedByFlowId('flow', tx))).rejects.toThrow('run update failed');
+    expect(raw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'failed' });
     expect(raw.prepare('SELECT status, failed_count FROM flow_runs').get()).toEqual({ status: 'failed', failed_count: 1 });
   });
   it('keeps legacy timeout/reset and propagates missing schema errors', async () => {

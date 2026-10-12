@@ -443,35 +443,20 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      if (await flowRunRepo.getRecoveryClock(flowId)) {
-        res.status(409).json({ success: false, error: "Conflict", message: "Use the recovery clock retry protocol" });
-        return;
-      }
-
-      const run = await flowRunRepo.findByFlowId(flowId);
-      if (!run) {
+      const result = await flowRunRepo.resetFailedForRetry(flowId, tx =>
+        nodeExecRepo ? nodeExecRepo.resetFailedByFlowId(flowId, tx) : Promise.resolve(0));
+      if (result.status === 'not_found') {
         apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });
         return;
       }
-
-      // Reset failed node executions
-      let resetCount = 0;
-      if (nodeExecRepo) {
-        resetCount = await nodeExecRepo.resetFailedByFlowId(flowId);
-      }
-
-      // Decrement failed_count by the number of reset nodes (not blindly clear to 0)
-      // and set status back to running
-      const ok = await flowRunRepo.resetFailedForRetry(flowId, resetCount);
-      if (!ok) {
-        apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: "Failed to reset run" });
-        res.status(500).json({ success: false, error: "Internal Server Error", message: "Failed to reset run for retry" });
+      if (result.status === 'clock_conflict') {
+        res.status(409).json({ success: false, error: "Conflict", message: "Use the recovery clock retry protocol" });
         return;
       }
 
-      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: resetCount });
-      res.json({ success: true, data: { flowId, resetNodes: resetCount } });
+      apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 200, resetNodes: result.resetCount });
+      res.json({ success: true, data: { flowId, resetNodes: result.resetCount } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/retry-failed`, { flowId, status: 500, error: msg });

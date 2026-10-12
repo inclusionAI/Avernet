@@ -553,19 +553,23 @@ export class FlowRunRepository {
     }
   }
 
-  /** Decrement failed_count by resetCount and set status back to running (for retry-failed).
-   *  Avoids blindly clearing failed_count to 0 which would erase counts for
-   *  other failed nodes that are not being retried. */
-  async resetFailedForRetry(flowId: string, resetCount: number): Promise<boolean> {
+  /** Fence the legacy retry before changing either child nodes or the run. */
+  async resetFailedForRetry(
+    flowId: string,
+    resetFailedNodes: (tx: IDatabase) => Promise<number>,
+  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'clock_conflict' } | { status: 'not_found' }> {
     const clocks = new RecoveryClockRepository(this.db);
-    return clocks.withRun(flowId, async tx => {
-      if (await clocks.get(flowId, tx)) return false;
+    return clocks.withRun(flowId, async (tx, status) => {
+      if (status === null) return { status: 'not_found' };
+      if (await clocks.get(flowId, tx)) return { status: 'clock_conflict' };
+      const resetCount = await resetFailedNodes(tx);
       const now = this.db.dialect.now();
       const result = await tx.exec(
         "UPDATE flow_runs SET failed_count = GREATEST(failed_count - ?, 0), status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ?",
         [resetCount, now, flowId],
       );
-      return result.affectedRows > 0;
+      if (result.affectedRows !== 1) throw new Error(`Failed to reset flow run ${flowId} for retry`);
+      return { status: 'updated', resetCount };
     });
   }
 

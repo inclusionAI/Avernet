@@ -7,6 +7,8 @@ import type { Server } from 'node:http';
 import { SqliteDatabase } from '../../../../../../shared/server/db.js';
 import { recoveryClockMigration } from '../../../../../../shared/server/recovery-clock-schema.js';
 import { FlowRunRepository } from '../../../repositories/flow-run-repository.js';
+import { NodeExecutionRepository } from '../../../repositories/node-execution-repository.js';
+import type { IDatabase } from '../../../../../../shared/server/db.js';
 import { createInternalRunsRouter } from '../runs.js';
 
 let server: Server;
@@ -50,4 +52,45 @@ it('returns storage errors instead of pretending an unavailable clock is absent'
   expect((await fetch(`${base}/flow/recovery-clock`)).status).toBe(500);
   expect((await put('flow/recovery-clock', claim)).status).toBe(500);
   expect((await put('flow/fail-if-running', { reason: 'timeout' })).status).toBe(500);
+});
+
+it('does not leave child nodes reset when the first clock claim races legacy retry', async () => {
+  const localRaw = new Database(':memory:');
+  localRaw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
+  localRaw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, failed_count INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+    INSERT INTO flow_runs VALUES ('racing-flow', 'failed', 1, 999, 999);
+    CREATE TABLE node_executions (flow_id TEXT, status TEXT, error_text TEXT, duration_ms INTEGER, completed_at INTEGER, gmt_modified INTEGER);
+    INSERT INTO node_executions VALUES ('racing-flow', 'failed', 'error', 10, 999, 999)`);
+  for (const sql of recoveryClockMigration.sql) localRaw.exec(sqliteDialect.renderDdl(sql));
+  const localDb = new SqliteDatabase(localRaw);
+  const runs = new FlowRunRepository(localDb);
+  runs.findByFlowId = async () => ({ flow_id: 'racing-flow' }) as Awaited<ReturnType<FlowRunRepository['findByFlowId']>>;
+  let claimPromise: Promise<unknown> | undefined;
+  class RacingNodes extends NodeExecutionRepository {
+    override async resetFailedByFlowId(flowId: string, tx?: IDatabase): Promise<number> {
+      if (tx) claimPromise = runs.putRecoveryClock(flowId, { ...claim, bootId: 'racing-boot' });
+      else await runs.putRecoveryClock(flowId, { ...claim, bootId: 'racing-boot' });
+      const reset = super.resetFailedByFlowId as (flowId: string, tx?: IDatabase) => Promise<number>;
+      return reset.call(this, flowId, tx);
+    }
+  }
+  const localApp = express();
+  localApp.use(express.json());
+  localApp.use('/api/internal/runs', createInternalRunsRouter(runs, new RacingNodes(localDb)));
+  const localServer = await new Promise<Server>(resolve => {
+    const listening = localApp.listen(0, '127.0.0.1', () => resolve(listening));
+  });
+  try {
+    const url = `http://127.0.0.1:${(localServer.address() as { port: number }).port}/api/internal/runs/racing-flow/retry-failed`;
+    const response = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(claimPromise).toBeDefined();
+    await claimPromise;
+    expect(response.status).toBe(200);
+    expect(await runs.getRecoveryClock('racing-flow')).toEqual(expect.objectContaining({ bootId: 'racing-boot' }));
+    expect(localRaw.prepare('SELECT status, failed_count FROM flow_runs').get()).toEqual({ status: 'running', failed_count: 0 });
+    expect(localRaw.prepare('SELECT status FROM node_executions').get()).toEqual({ status: 'pending' });
+  } finally {
+    await new Promise<void>(resolve => localServer.close(() => resolve()));
+    await localDb.close();
+  }
 });
