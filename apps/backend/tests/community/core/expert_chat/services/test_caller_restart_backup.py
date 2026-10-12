@@ -53,3 +53,20 @@ async def test_caller_legacy_guard_returns_then_original_upgrade_runs():
                                              owner_id=OWNER_ID, migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
     assert order == ['legacy-allowed', 'upgrade']
+
+
+@pytest.mark.asyncio
+async def test_real_coding_backup_transport_failure_still_upgrades_caller():
+    from unittest.mock import Mock
+    svc, _, _, _, bots, _, build, *_ = _make_service()
+    bots.get_by_id_and_owner.return_value = {
+        'bot_id': BOT_ID, 'owner_id': OWNER_ID, 'active_engine': 'claude_code',
+    }
+    svc._baas.list_devices_by_bot_uuid = Mock(return_value=[{'provider_device_id': 'physical', 'status': 'ACTIVE'}])
+    svc._baas.post_bots_api = Mock(side_effect=RuntimeError('unreachable sandbox'))
+    build.upgrade_async = AsyncMock(return_value={'publish_id': 77})
+    result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
+                                         owner_id=OWNER_ID, migration_path='/artifact')
+    assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
+    svc._baas.post_bots_api.assert_called_once()
+    build.upgrade_async.assert_awaited_once()
