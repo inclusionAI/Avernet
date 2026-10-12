@@ -69,13 +69,13 @@ class _StubTrajectoryService:
     ) -> None:
         self._trajectory = trajectory
         self._raise_exc = raise_exc
-        self.calls: list[tuple[str, bool, bool]] = []
+        self.calls: list[tuple[str, bool, bool, bool]] = []
 
     async def get_trajectory(
         self, task_id: str, *, do_analysis: bool = False,
-        force_analysis: bool = False,
+        force_analysis: bool = False, session_detail: bool = False,
     ) -> TaskTrajectory:
-        self.calls.append((task_id, do_analysis, force_analysis))
+        self.calls.append((task_id, do_analysis, force_analysis, session_detail))
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._trajectory
@@ -191,7 +191,19 @@ def test_trajectory_default_read_returns_dto_with_null_analysis(client, stub_ser
     assert data["timeline"][0]["action_type"] == "submit"
     assert data["timeline"][1]["action_type"] == "dispatch"
     # stub received do_analysis=False (default)
-    assert stub_service.calls == [("t1", False, False)]
+    assert stub_service.calls == [("t1", False, False, False)]
+
+
+@pytest.mark.unit
+def test_trajectory_session_detail_param_passthrough(client, stub_service):
+    """``?session_detail=true`` 查询参经路由透传到 service;缺省默认 False
+    (纯读不实拉会话明细)。内部路由镜像同理(改其一须同步)。"""
+    r = client.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "session_detail": "true"},
+    )
+    assert r.status_code == 200
+    assert stub_service.calls[-1] == ("t1", False, False, True)
 
 
 @pytest.mark.unit
@@ -203,7 +215,7 @@ def test_trajectory_force_analysis_param_passthrough(client, stub_service):
         params={"task_id": "t1", "do_analysis": "true", "force_analysis": "true"},
     )
     assert r.status_code == 200
-    assert stub_service.calls[-1] == ("t1", True, True)
+    assert stub_service.calls[-1] == ("t1", True, True, False)
 
     # 不带参数 → 两参默认 False
     r2 = client.get(
@@ -211,7 +223,7 @@ def test_trajectory_force_analysis_param_passthrough(client, stub_service):
         params={"task_id": "t1"},
     )
     assert r2.status_code == 200
-    assert stub_service.calls[-1] == ("t1", False, False)
+    assert stub_service.calls[-1] == ("t1", False, False, False)
 
 
 @pytest.mark.unit
@@ -223,7 +235,7 @@ def test_trajectory_explicit_do_analysis_false(client, stub_service):
     )
     assert r.status_code == 200
     assert r.json()["data"]["analysis"] is None
-    assert stub_service.calls == [("t1", False, False)]
+    assert stub_service.calls == [("t1", False, False, False)]
 
 
 @pytest.mark.unit
@@ -261,7 +273,7 @@ def test_trajectory_do_analysis_true_returns_fresh_analysis():
     parsed = json.loads(data["analysis"])
     assert parsed["analysis_type"] == "tc_bot"
     assert parsed["analysis_executor"] == "bot-traj-analyst"
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +294,7 @@ def test_trajectory_do_analysis_true_bot_failure_returns_504():
         params={"task_id": "t1", "do_analysis": "true"},
     )
     assert r.status_code == 504
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 @pytest.mark.unit
@@ -318,7 +330,7 @@ def test_trajectory_do_analysis_true_not_configured_returns_503():
         params={"task_id": "t1", "do_analysis": "true"},
     )
     assert r.status_code == 503
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +353,7 @@ def test_internal_trajectory_mirror_returns_same_dto_shape():
     data = r.json()["data"]
     assert data["task_id"] == "t1"
     assert json.loads(data["analysis"])["analysis_type"] == "tc_bot"
-    assert svc.calls == [("t1", True, False)]
+    assert svc.calls == [("t1", True, False, False)]
 
 
 @pytest.mark.unit
@@ -354,7 +366,7 @@ def test_internal_trajectory_default_read():
     )
     assert r.status_code == 200
     assert r.json()["data"]["analysis"] is None
-    assert svc.calls == [("t1", False, False)]
+    assert svc.calls == [("t1", False, False, False)]
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +427,7 @@ def test_trajectory_display_html_returns_html_page():
     assert "策略=search 选中=botA(hit_single)" in body
     assert "推进理由" in body                     # analysis section label
     # the service still received do_analysis=False (display does not toggle analysis)
-    assert svc.calls == [("t1", False, False)]
+    assert svc.calls == [("t1", False, False, False)]
 
 
 @pytest.mark.unit

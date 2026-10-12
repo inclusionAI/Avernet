@@ -1293,13 +1293,44 @@ async def test_get_trajectory_attaches_session_msgs_to_last_event():
     traj = _make_trajectory(task_id="t1", timeline=timeline)
     svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(events=records), _FakeAnalyzer(), None)
 
-    result = await svc.get_trajectory("t1", do_analysis=False)
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     n1_events = [e for e in result.timeline if e.node_id == "n1"]
     assert n1_events[0].session_msgs is None, "早事件不挂"
     assert n1_events[-1].session_msgs == msgs, "末位事件挂物化过的会话原文"
     n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
     assert n2_last.session_msgs is None, "未物化节点不挂(缺字段=无信号)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_pure_read_default_skips_session_detail_entirely():
+    """session_detail 默认 false:零外部读(bcs 不被调)、零事件行读副作用可见于返回——
+    末位事件不挂 session_msgs(即使 ext_info 已物化缓存也缺席),timeline 本体不受影响。"""
+    msgs = [{"role": "user", "content": "hi"}]
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=1000,
+                     rec_id=1, ext_info=json.dumps({"schema_v": 1, "session_msgs": msgs},
+                                                    ensure_ascii=False)),
+    ]
+    timeline = [_make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=1000)]
+    bcs = _FakeBcs(messages_by_session={"sess-1": msgs})
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    repo = _FakeRepo(events=records)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), repo, _FakeAnalyzer(), None,
+                                graph=graph, bcs=bcs)
+
+    result = await svc.get_trajectory("t1")   # 默认 do_analysis=False, session_detail=False
+
+    assert bcs.calls == [], "默认不实拉会话明细(零外部 GET)"
+    assert all(getattr(e, "session_msgs", None) is None for e in result.timeline), \
+        "默认返回不携带 session_msgs(缓存也不挂)"
+    assert repo.merge_calls == []
+    assert repo.backfill_calls == []
 
 
 @pytest.mark.asyncio
@@ -1443,8 +1474,8 @@ def test_is_engine_session_id_matches_engine_namespaces_only():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pure_read_live_fetches_session_msgs_and_never_persists():
-    """REQ-8 锁:纯读实拉会话明细挂返回对象,但零 DB 写(merge/backfill 均不可达)
-    且零 bot 调用。"""
+    """REQ-8 锁:纯读(session_detail=True)实拉会话明细挂返回对象,但零 DB 写
+    (merge/backfill 均不可达)且零 bot 调用。"""
     timeline = [_make_event(node_id="n-run", gmt_create=1000)]
     graph = _FakeGraph([
         _FakeNode(node_id="n-run", status=Status.RUNNING,
@@ -1458,7 +1489,7 @@ async def test_pure_read_live_fetches_session_msgs_and_never_persists():
         graph=graph, bcs=bcs,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=False)
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls == [("sess-1", 50, None)]   # 实拉,默认 limit 50
     assert result.timeline[0].session_msgs == _LIVE_MSGS
@@ -1470,8 +1501,8 @@ async def test_pure_read_live_fetches_session_msgs_and_never_persists():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pure_read_falls_back_to_cached_snapshot_when_live_fetch_fails():
-    """实拉失败 → WARNING 降级,回退末位事件 ext_info.session_msgs 缓存快照;
-    不抛、不写库。"""
+    """实拉失败(session_detail=True 路径)→ WARNING 降级,回退末位事件
+    ext_info.session_msgs 缓存快照;不抛、不写库。"""
     timeline = [_make_event(node_id="n-run", gmt_create=1000)]
     graph = _FakeGraph([
         _FakeNode(node_id="n-run", status=Status.RUNNING,
@@ -1489,7 +1520,7 @@ async def test_pure_read_falls_back_to_cached_snapshot_when_live_fetch_fails():
         graph=graph, bcs=bcs,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=False)
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls  # 实拉确实尝试过
     assert result.timeline[0].session_msgs == cached  # 回退缓存快照
@@ -1500,8 +1531,8 @@ async def test_pure_read_falls_back_to_cached_snapshot_when_live_fetch_fails():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pure_read_live_fetch_off_when_graph_unbound():
-    """默认构造(graph 未接线)→ 纯读实拉整体关闭(零副作用);缓存快照照常挂载。
-    存量 e2e 构造方式的回归锁。"""
+    """默认构造(graph 未接线)→ 纯读实拉(session_detail=True)整体关闭(零副作用);
+    缓存快照照常挂载。存量 e2e 构造方式的回归锁。"""
     cached = [{"role": "user", "content": "from cache"}]
     records = [_make_record(
         node_id="n1", ext_info=json.dumps({"session_msgs": cached}),
@@ -1515,7 +1546,7 @@ async def test_pure_read_live_fetch_off_when_graph_unbound():
         bcs=bcs,  # bcs 接了,但 graph 未接 → 探测关闭
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=False)
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert bcs.calls == []
     assert result.timeline[0].session_msgs == cached
@@ -1555,7 +1586,8 @@ async def test_do_analysis_engine_session_id_dispatches_to_baas_channel():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist():
-    """纯读遇到引擎会话 → 同样走 BaaS 通道,BCS 不动;结果挂返回对象,不落库。"""
+    """纯读(session_detail=True)遇到引擎会话 → 同样走 BaaS 通道,BCS 不动;
+    结果挂返回对象,不落库。"""
     timeline = [_make_event(node_id="n-eng", gmt_create=1000)]
     graph = _FakeGraph([
         _FakeNode(node_id="n-eng", status=Status.RUNNING,
@@ -1572,7 +1604,7 @@ async def test_pure_read_engine_session_id_dispatches_to_baas_channel_no_persist
         graph=graph, bcs=bcs, openapi_bot=openapi,
     )
 
-    result = await svc.get_trajectory("t1", do_analysis=False)
+    result = await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert openapi.calls == [(_ENGINE_SID, 50, "20260920_hzzaxnzf:35983")]
     assert bcs.calls == []
@@ -1722,7 +1754,7 @@ async def test_live_fetch_honors_running_session_message_limit_config():
         graph=graph, bcs=bcs, openapi_bot=openapi,
     )
 
-    await svc.get_trajectory("t1", do_analysis=False)
+    await svc.get_trajectory("t1", do_analysis=False, session_detail=True)
 
     assert [c[1] for c in bcs.calls] == [7]
     assert [c[1] for c in openapi.calls] == [7]

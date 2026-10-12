@@ -339,9 +339,11 @@ class TaskTrajectoryServiceProtocol(Protocol):
         *,
         do_analysis: bool = False,
         force_analysis: bool = False,
+        session_detail: bool = False,
     ) -> TaskTrajectory:
         """Read the trajectory for ``task_id``; optionally trigger bot analysis
-        (``force_analysis=True`` 强制重跑,跳过 timeline 版本号幂等快路径)。"""
+        (``force_analysis=True`` 强制重跑,跳过 timeline 版本号幂等快路径;
+        ``session_detail=True`` 纯读时实拉会话明细,默认 false 不携带)。"""
         ...
 
     def emit_trajectory_event(
@@ -428,15 +430,18 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         *,
         do_analysis: bool = False,
         force_analysis: bool = False,
+        session_detail: bool = False,
     ) -> TaskTrajectory:
         """Read the trajectory for ``task_id``; optionally trigger bot analysis.
 
         ``do_analysis=False`` (default, PURE READ): assembler reads the events
         table and returns ``TaskTrajectory``; ``analysis`` = persisted or
-        ``None``; no DB write, no bot call. 纯读也会对每个带 session_id 的子任务
-        **实拉会话明细**(只读外部服务;BCS 键走 BCS 读口,引擎键
-        ``agent:main:session:*`` 走 BaaS Open API——结果只挂返回的内存轨迹对象,
-        不落库);单节点拉取失败 WARNING 降级,回退末位事件 ext_info 快照。
+        ``None``; no DB write, no bot call. 纯读默认**不携带会话明细**
+        (``session_detail=False``:零外部 GET,响应更轻);``session_detail=True``
+        时才对每个带 session_id 的子任务**实拉会话明细**(只读外部服务;
+        BCS 键走 BCS 读口,引擎键 ``agent:main:session:*`` 走 BaaS Open API——
+        结果只挂返回的内存轨迹对象,不落库);单节点拉取失败 WARNING 降级,
+        回退末位事件 ext_info 快照。
 
         ``do_analysis=True``: INCREMENTALLY IDEMPOTENT — assembles; computes the
         timeline fingerprint (ALL the task's event rows, ``id+gmt_create`` 正序);
@@ -463,14 +468,18 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
             self._attach_node_outputs(trajectory)
-            records = self._safe_list_records(task_id)
-            # 纯读也实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
+            # session_detail=True 才实拉会话明细(REQ-8 不变式保持:纯读绝不写库——
             # merge_last_event_ext_info / backfill_analysis 只在分析路径可达;
-            # 纯读实拉结果仅挂返回的内存轨迹对象)。单节点拉取失败已在 helper 内
-            # WARNING 降级,节点缺席 fresh map → _attach_session_msgs 自然回退
-            # 该子任务末位事件的 ext_info 缓存快照(零额外回退代码)。
-            fresh = await self._live_session_msgs_for_read(task_id)
-            self._attach_session_msgs(trajectory, records, fresh)
+            # 纯读实拉结果仅挂返回的内存轨迹对象)。默认 false 零外部 GET,
+            # 返回不携带 session_msgs;单节点拉取失败已在 helper 内 WARNING 降级,
+            # 节点缺席 fresh map → _attach_session_msgs 自然回退该子任务末位事件
+            # 的 ext_info 缓存快照(零额外回退代码)。
+            if session_detail:
+                records = self._safe_list_records(task_id)
+                fresh = await self._live_session_msgs_for_read(task_id)
+                self._attach_session_msgs(trajectory, records, fresh)
+            # session_detail 与 do_analysis 完全独立:分析路径内部的会话物化/
+            # 研判/返回态富化不受该参数影响(见 _do_analysis)。
             return trajectory
         return await self._do_analysis(task_id, force_analysis=force_analysis)
 

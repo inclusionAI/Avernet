@@ -149,6 +149,11 @@ async def get_task_trajectory(
         Query(description="强制重跑分析,默认 false:忽略 timeline 版本号幂等判断,"
                           "即使版本未变也重新调 bot 并回填(do_analysis 的前门旁路)"),
     ] = False,
+    session_detail: Annotated[
+        bool,
+        Query(description="是否查询会话明细并挂到各子任务末位事件(默认 false:返回不携带"
+                          " session_msgs,零外部读);仅读路径生效,do_analysis=true 时不起作用"),
+    ] = False,
     display: Annotated[
         str | None,
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
@@ -159,9 +164,11 @@ async def get_task_trajectory(
     TaskContextServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
 
     do_analysis=false(默认,纯读):返回组装后的 TaskTrajectory,analysis 取已落库值或 None,
-    不写库、不调 bot;do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、
+    不写库、不调 bot;session_detail=false(默认)纯读不携带 session_msgs;session_detail=true
+    才实拉会话明细挂末位事件。do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、
     analysis_executor=bot_id,部署级配置非请求参数)→ 覆盖回填两表 analysis+gmt_modified → 返回
-    携新 analysis 的同形态 TaskTrajectory。bot 未配置 → 503;bot 失败/超时 → 504 且不回填
+    携新 analysis 的同形态 TaskTrajectory(该路径不受 session_detail 影响,会话明细照其内部逻辑
+    物化/研判)。bot 未配置 → 503;bot 失败/超时 → 504 且不回填
     (决策 #10/#14,analysis-trigger 失败必须可见)。原独立 /analysis 端点已并入此入口(决策 #10);
     ?narrative=true 不恢复(随 REQ-P2 裁剪)。task_action_log / NodeAction 完全不触碰(独立旁路)。
 
@@ -170,7 +177,8 @@ async def get_task_trajectory(
     """
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     trajectory = await service.get_trajectory(
-        task_id, do_analysis=do_analysis, force_analysis=force_analysis
+        task_id, do_analysis=do_analysis, force_analysis=force_analysis,
+        session_detail=session_detail,
     )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
