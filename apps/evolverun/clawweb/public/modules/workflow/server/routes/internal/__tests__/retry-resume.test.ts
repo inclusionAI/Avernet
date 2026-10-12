@@ -45,3 +45,9 @@ it('the timeout claim still wins only once', async () => {
   expect(first).toEqual({ success: true, data: { claimed: true } });
   expect(second).toEqual({ success: true, data: { claimed: false } });
 });
+
+it('keeps the legacy status endpoint able to resume a failed TaskGuard run', async () => {
+  expect((await put('flow/status', { status: 'running' })).status).toBe(200);
+  expect(raw.prepare('SELECT status, started_at FROM flow_runs WHERE flow_id = ?').get('flow'))
+    .toEqual({ status: 'running', started_at: 123 });
+});

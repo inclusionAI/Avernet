@@ -422,7 +422,9 @@ export class FlowRunRepository {
   async updateStatus(flowId: string, status: string): Promise<boolean> {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
-      "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')",
+      // Legacy clients, including TaskGuard, resume failed runs through /status.
+      // New ClawMind retries use /retry-resume and keep their own timeout fence.
+      "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
       [status, now, flowId],
     );
     return result.affectedRows > 0;

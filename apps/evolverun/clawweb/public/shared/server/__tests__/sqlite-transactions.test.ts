@@ -21,3 +21,19 @@ it('queues concurrent transactions and excludes unrelated writes from rollback',
   expect(await db.query('SELECT value FROM items ORDER BY value')).toEqual([{ value: 'next' }, { value: 'retained' }]);
   await db.close();
 });
+
+it('allows a repository bound to the original connection inside its transaction', async () => {
+  const raw = new Database(':memory:');
+  raw.exec('CREATE TABLE items (value TEXT)');
+  const db = new SqliteDatabase(raw);
+  const transaction = db.transaction(async () => {
+    await db.exec('INSERT INTO items VALUES (?)', ['rolled-back']);
+    throw new Error('rollback');
+  });
+  await expect(Promise.race([
+    transaction,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('transaction deadlocked')), 200)),
+  ])).rejects.toThrow('rollback');
+  expect(await db.query('SELECT value FROM items')).toEqual([]);
+  await db.close();
+});
