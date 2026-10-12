@@ -13,7 +13,11 @@ import time
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+    Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskGraphPatch, TaskNode,
+    TaskNodePatch, TaskSpec, task_spec_instruction, task_spec_title,
+)
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+    format_task_node_business_instruction,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,9 +59,148 @@ def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
     return str(owner) if owner else ""
 
 
-async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
+def _release_relay_bbs_claim(
+    graph, task_id: str, node_id: str, reason: str,
+    *, task_context_service=None, execution_graph=None,
+) -> None:
+    """Return a claimed Relay BBS baton to the square without touching predecessors.
+
+    回广场即录(零盲区):``task_context_service`` + ``execution_graph`` 传入时同步落一条
+    ``execute/bbs_released`` 轨迹行(前面紧邻的 ``bbs_execution_failed`` 只记因,
+    不记"棒已回广场"这个态);两参缺省(未接线)跳过,
+    ``_emit_bbs_trajectory`` 自带吞异常 + WARNING(决策 #14),绝不阻断归还补丁。"""
+    graph.report(TaskCallbackData(data={
+        "report_type": "NODE_PATCH",
+        "payload": {
+            "patch": TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.PENDING,
+                run_mode="bbs",
+                assignee=None,
+                progress_reason="BBS 接力认领失败，任务回到广场等待重新认领",
+                failure_reason=reason,
+                extend_props_patch={
+                    "bbs_owner": None,
+                    "bbs_claim_id": None,
+                    "driver_bot_id": None,
+                    "next_relay_bots": [],
+                },
+            )
+        },
+    }))
+    graph.report(TaskCallbackData(data={
+        "report_type": "GRAPH_PATCH",
+        "payload": {
+            "task_id": task_id,
+            "patch": TaskGraphPatch(
+                extend_props_patch={"bbs_mode": True, "bbs_node_id": node_id}
+            ),
+        },
+    }))
+    if task_context_service is not None and execution_graph is not None:
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, node_id,
+            "bbs_released",
+            details={"release_reason": reason},
+        )
+
+
+def _relay_bbs_execution_result_missing(graph, task_id: str, node_id: str) -> bool:
+    """Detect a claimed Relay BBS baton whose bot replied without reporting facts."""
+    try:
+        snapshot = graph.query_task_dashboard(task_id)
+    except Exception as exc:  # noqa: BLE001 graph query failure must not throw away output
+        logger.warning(
+            "[task][bbs_mode] cannot inspect relay execution result task=%s node=%s: %s",
+            task_id, node_id, exc,
+        )
+        return False
+    node = next(
+        (item for item in snapshot.tasks if item.node_id == node_id),
+        None,
+    )
+    if node is None or node.status != Status.RUNNING:
+        return False
+    extend_props = node.run_info.extend_props or {}
+    return str(extend_props.get("execution_decision") or "").strip().upper() == ""
+
+
+def _trajectory_node_id(execution_graph, target_node_id: str | None) -> str:
+    return str(target_node_id or execution_graph.task_id)
+
+
+def _trajectory_node(execution_graph, target_node_id: str | None):
+    node_id = _trajectory_node_id(execution_graph, target_node_id)
+    return next(
+        (node for node in getattr(execution_graph, "tasks", []) or []
+         if str(getattr(node, "node_id", "")) == node_id),
+        None,
+    )
+
+
+def _emit_bbs_trajectory(
+    task_context_service,
+    execution_graph,
+    target_node_id: str | None,
+    action_result: str,
+    *,
+    exception: Exception | None = None,
+    details: dict[str, Any] | None = None,
+    error_msg: str | None = None,
+    error_type: str | None = None,
+    boost_reason: str | None = None,
+) -> None:
+    """Write BBS milestones/errors through the task-context trajectory facade."""
+    if task_context_service is None:
+        return
+    task_id = str(execution_graph.task_id)
+    node = _trajectory_node(execution_graph, target_node_id)
+    node_status = getattr(node, "status", None)
+    run_info = getattr(node, "run_info", None)
+    extend_props = getattr(run_info, "extend_props", None) or {}
+    try:
+        attempt = int(extend_props.get("harness_retries", 0) or 0)
+    except (TypeError, ValueError):
+        attempt = 0
+    ext_info: dict[str, Any] = {"execution_mode": "bbs", "phase": "bbs_modal"}
+    if details:
+        ext_info.update(details)
+    if exception is not None:
+        exception_type = type(exception).__name__
+        ext_info["exception_type"] = exception_type
+        error_type = (
+            "transport_error"
+            if isinstance(exception, (TimeoutError, ConnectionError))
+            else "unclassified"
+        )
+        error_msg = str(exception)[:2000]
+    try:
+        task_context_service.emit_trajectory_event(
+            task_id,
+            _trajectory_node_id(execution_graph, target_node_id),
+            "execute",
+            action_result=action_result,
+            error_type=error_type,
+            error_msg=error_msg,
+            ext_info=ext_info,
+            status_from=node_status,
+            status_to=node_status,
+            attempt=attempt,
+            boost_reason=boost_reason or action_result,
+            now_ms=int(time.time() * 1000),
+        )
+    except Exception as exc:  # noqa: BLE001 trajectory is observational only
+        logger.warning(
+            "[task][trajectory] BBS 轨迹发射失败 task=%s action=%s: %s",
+            task_id, action_result, exc,
+        )
+
+
+async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
-                 on_bbs_report=None, group_executor=None) -> None:
+                 on_bbs_report=None, group_executor=None,
+                 target_node_id: str | None = None, task_context_service=None) -> None:
     """查询开启 claim 的 provider Bot,再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
@@ -66,11 +209,21 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     """
     logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, backend_url=%s, skill_name=%s", execution_graph.task_id, backend_url, skill_name)
     task_id = execution_graph.task_id
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id, "bbs_entered",
+        boost_reason="进入BBS模态",
+    )
     if bcn is None or bot is None:
         logger.error("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
         return
     logger.info("[task][bbs_mode] bbs_runner, list_bots, task_id=%s", execution_graph.task_id)
-    entries = await _list_claim_bots(bcn, task_id)
+    entries = await _list_claim_bots(
+        bcn, task_id,
+        on_error=lambda exc: _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_roster_failed", exception=exc,
+        ),
+    )
     logger.info(
         "[task][bbs_mode] bbs_runner, begin, task_id=%s, entries=%d,%s",
         execution_graph.task_id, len(entries), entries,
@@ -82,18 +235,34 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
 
     logger.info("[task][bbs_mode] roster 取成功 task=%s, num=%d", task_id, len(entries))
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id,
+        "bbs_bid_broadcast", details={"candidate_count": len(entries)},
+        boost_reason="广播竞价",
+    )
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
             asyncio.gather(
-                *[_bid_one(bot, r, execution_graph) for r in entries],
+                *[_bid_one(
+                    bot, r, execution_graph,
+                    on_error=lambda exc, bot_id=r.get("bot_id"): _emit_bbs_trajectory(
+                        task_context_service, execution_graph, target_node_id,
+                        "bbs_bid_failed", exception=exc,
+                        details={"bot_id": bot_id},
+                    ),
+                ) for r in entries],
                 return_exceptions=True,
             ),
             timeout=_OVERALL_TIMEOUT_4_BID,
         )
         logger.info("[task][bbs_mode] task_id=%s, bid_results=%s", task_id, bid_results)
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as exc:
         logger.error("[task][bbs_mode] bid 超时(180s)task=%s,取已回复", task_id)
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_bid_failed", exception=exc,
+        )
         bid_results = []
 
     # 解析回复
@@ -110,60 +279,118 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     winner = max(bids, key=lambda b: b["completion_rate"])
     winner_bot_id = winner["bot_id"]
     try:
-        graph.claim_bbs_owner(task_id, winner_bot_id)
+        graph.report(TaskCallbackData(data={
+            "report_type": "BBS_CLAIM",
+            "payload": {
+                "task_id": task_id,
+                "node_id": target_node_id,
+                "bot_id": winner_bot_id,
+                "claim_id": (
+                    f"auto-{task_id}-{target_node_id}-{winner_bot_id}"
+                    if target_node_id else None
+                ),
+            },
+        }))
         bbs_claim_at = int(time.time() * 1000)
     except Exception as exc:
         logger.warning("[task][bbs_mode] claim 失败 task=%s:%s", task_id, exc)
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_claim_failed", exception=exc,
+        )
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
     _group_enabled = _singlebot_2_group_switch(graph, task_id)
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
-    # 先增加一个bbs节点,PENDING
-    bbs_task_node = TaskNode(
-        node_id=f"bbs-{uuid.uuid4().hex[:8]}",
-        task_id=task_id,
-        status=Status.PENDING,
-        task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
-            context=Context(background=""),
-            goal=Goal(objective=winner.get("goal"), acceptances=[]),
-        ),
-        run_info=RuntimeInfo(
-            run_mode=actual_run_mode,
-            assignee=winner_bot_id,
-            start_time=bbs_claim_at,
-            extend_props={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
-        ),
-        node_run_graph=None
-    )
+    if target_node_id is not None:
+        # Relay claim is node-local and already transitions the target to RUNNING.
+        refreshed = graph.query_task_dashboard(task_id)
+        bbs_task_node = next(
+            (item for item in refreshed.tasks if item.node_id == target_node_id),
+            None,
+        )
+        if bbs_task_node is None or bbs_task_node.status != Status.RUNNING:
+            logger.warning(
+                "[task][bbs_mode] relay target missing/not running after claim task=%s node=%s",
+                task_id,
+                target_node_id,
+            )
+            return
+        logger.info(
+            "[task][bbs_mode] relay target claimed task=%s node=%s winner=%s",
+            task_id,
+            target_node_id,
+            winner_bot_id,
+        )
+    else:
+        # Centralized mode creates a new scoped BBS node.
+        bbs_task_node = TaskNode(
+            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
+            task_id=task_id,
+            status=Status.PENDING,
+            task_spec=TaskSpec(
+                context=Context(title=str(winner.get("title") or ""), background=""),
+                goal=Goal(objective=str(winner.get("goal") or ""), acceptances=[]),
+            ),
+            run_info=RuntimeInfo(
+                run_mode=actual_run_mode,
+                assignee=winner_bot_id,
+                start_time=bbs_claim_at,
+                extend_props={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
+            ),
+            node_run_graph=None
+        )
+        graph.report(TaskCallbackData(data={
+            "report_type": "ADD_NODES",
+            "payload": {
+                "task_id": task_id,
+                "nodes": [bbs_task_node],
+                "parent_node_id": task_id,
+                "mark_parent_planning": False,
+            },
+        }))
+        logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
 
-    # BBS is a recovery execution under a HUNG root. Creating the scoped node
-    # must not make the parent look actively planned before the relay completes;
-    # on_bbs_report is the single path that resumes parent planning.
-    graph.add_task_nodes([bbs_task_node], task_id, mark_parent_planning=False)
-    logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
-    edges = [
-        (task_id, bbs_task_node.node_id),
-    ]
-    graph.add_relations(task_id, edges)
-    logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
-
-    # 任务msg
-    msg = _task_msg(
-        skill_name,
-        execution_graph,
-        backend_url,
-        winner_bot_id,
-        bbs_task_node.task_id,
-        bbs_task_node.node_id,
-        winner.get("relay_reason", ""),
-        title=winner.get("title", ""),
-        goal=winner.get("goal", ""),
-    )
+    # 任务msg:分布式 Relay 的 BBS 认领者仍是一条普通接力棒，只允许接收
+    # 同一的 S1-S8 闭环：S6 本地规划后先 search 决策，再 PLAN_RESULT、DISPATCH_RESULT、dispatch。
+    # 闭环；中心化 legacy BBS 才保留旧的 status/output 一次性上报协议。
+    relay_inputs = None
+    if _relay_mode(execution_graph, target_node_id):
+        relay_inputs = _relay_task_inputs(
+            execution_graph=execution_graph,
+            node=bbs_task_node,
+            reason=winner.get("relay_reason", ""),
+            title=winner.get("title", ""),
+            goal=winner.get("goal", ""),
+        )
+        msg = _relay_task_msg(
+            inputs=relay_inputs,
+            backend_url=backend_url,
+            bot_id=winner_bot_id,
+            node=bbs_task_node,
+        )
+    else:
+        msg = _task_msg(
+            skill_name,
+            execution_graph,
+            backend_url,
+            winner_bot_id,
+            bbs_task_node.task_id,
+            bbs_task_node.node_id,
+            winner.get("relay_reason", ""),
+            title=winner.get("title", ""),
+            goal=winner.get("goal", ""),
+        )
 
     # 执行bbs，执行完后再更新
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id,
+        "bbs_execution_started",
+        details={"winner_bot_id": winner_bot_id, "execution_mode": actual_run_mode},
+        boost_reason=f"竞价胜出，开始执行。竞价胜出的bot是{winner_bot_id}，胜出原因是{winner.get("relay_reason")}",
+    )
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s, msg=%s", task_id, msg)
         if _group_enabled and group_executor is not None:
@@ -178,13 +405,43 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                     node_id=bbs_task_node.node_id,
                     winner_bot_id=winner_bot_id,
                     owner_user_id=_owner_user_id,
-                    task_instruction=msg,
+                    task_instruction=(
+                        str(relay_inputs["instruction"])
+                        if relay_inputs is not None
+                        else msg
+                    ),
                     deadline_monotonic=time.monotonic() + _OVERALL_TIMEOUT_4_DOT,
+                    relay_execution=relay_inputs is not None,
+                    task_objective=(
+                        str(relay_inputs["objective"])
+                        if relay_inputs is not None
+                        else ""
+                    ),
+                    acceptances=(
+                        relay_inputs["acceptances"]
+                        if relay_inputs is not None
+                        else []
+                    ),
+                    upstream_outputs=(
+                        relay_inputs["upstream_outputs"]
+                        if relay_inputs is not None
+                        else {}
+                    ),
+                    relay_blackboard=(
+                        relay_inputs["relay_blackboard"]
+                        if relay_inputs is not None
+                        else None
+                    ),
                 )
             except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
                 logger.error(
                     "[task][bbs_mode] manager_worker 群执行失败 → 回退 send_and_wait task=%s: %s",
                     task_id, exc,
+                )
+                _emit_bbs_trajectory(
+                    task_context_service, execution_graph, target_node_id,
+                    "bbs_group_execution_failed", exception=exc,
+                    details={"winner_bot_id": winner_bot_id},
                 )
                 task_result = await bot.send_and_wait_async(
                     bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
@@ -200,6 +457,25 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 timeout=_OVERALL_TIMEOUT_4_DOT,
             )
         logger.info("[task][bbs_mode] exec_done, task_id=%s, result=%s", task_id, task_result)
+
+        if target_node_id is not None and _relay_bbs_execution_result_missing(
+            graph, task_id, target_node_id
+        ):
+            # The bot chat may finish before its callback reaches the graph.
+            # Keep the claim RUNNING so that a late EXECUTION_RESULT is accepted;
+            # TaskHarness returns the baton to BBS only after its execution SLA.
+            _emit_bbs_trajectory(
+                task_context_service, execution_graph, target_node_id,
+                "bbs_execution_result_pending",
+                error_type="relay",
+                error_msg="relay BBS bot replied; awaiting EXECUTION_RESULT",
+                details={"winner_bot_id": winner_bot_id},
+            )
+            return
+        if target_node_id is not None:
+            # Relay facts and terminal transitions belong exclusively to the
+            # callback. A chat reply must not reopen an already completed node.
+            return
 
         _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
         _bbs_session = task_result.get("session_id") if isinstance(task_result, dict) else ""
@@ -219,30 +495,77 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             }
         )
 
-        logger.warning(
-        "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 保持根 HUNG, 不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
-        task_id
-        )
-        graph.update_task_node_info(_scoped_patch)
+        if on_bbs_report is not None:
+            await on_bbs_report(_scoped_patch)
+        else:
+            logger.warning(
+                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 运行事实，保持根 HUNG",
+                task_id,
+            )
+            # Centralized fallback records the scoped output.
+            graph.report(TaskCallbackData(data={
+                "report_type": "NODE_PATCH",
+                "payload": {"patch": _scoped_patch},
+            }))
         logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s, scoped_patch=%s", task_id, task_result, _scoped_patch)
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
-        # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
-        # send 失败不产生 BBS 回投，保留节点与运行记录，仅释放 claim。
-        graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                # BBS dispatch failure releases the claim but must preserve the
-                # root HUNG recovery state. PLANNING would surface as EXECUTING
-                # and falsely make a terminal child set look active again.
-                extend_props_patch={"bbs_owner": None},
-            )
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_execution_failed", exception=exc,
+            details={"winner_bot_id": winner_bot_id},
         )
+        # Relay BBS keeps the owner on the target node. Release that node back
+        # to the square; legacy centralized BBS continues to release the root owner.
+        if target_node_id is not None:
+            _release_relay_bbs_claim(
+                graph, task_id, target_node_id,
+                f"relay BBS execution failed: {exc}",
+                task_context_service=task_context_service,
+                execution_graph=execution_graph,
+            )
+        else:
+            graph.report(TaskCallbackData(data={
+                "report_type": "NODE_PATCH",
+                "payload": {"patch": TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    # BBS dispatch failure releases the claim but must preserve the
+                    # root HUNG recovery state. PLANNING would surface as EXECUTING
+                    # and falsely make a terminal child set look active again.
+                    extend_props_patch={"bbs_owner": None},
+                )},
+            }))
         logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
 
 
-async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
+async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
+                 skill_name: str = _BBS_SKILL_NAME,
+                 on_bbs_report=None, group_executor=None,
+                 target_node_id: str | None = None, task_context_service=None) -> None:
+    """Run the BBS flow and record uncaught notify errors in task trajectory."""
+    try:
+        await _notify_impl(
+            execution_graph=execution_graph,
+            bcn=bcn,
+            bot=bot,
+            graph=graph,
+            backend_url=backend_url,
+            skill_name=skill_name,
+            on_bbs_report=on_bbs_report,
+            group_executor=group_executor,
+            target_node_id=target_node_id,
+            task_context_service=task_context_service,
+        )
+    except Exception as exc:  # noqa: BLE001 preserve existing notify propagation
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_notify_failed", exception=exc,
+        )
+        raise
+
+
+async def _list_claim_bots(bcn, task_id: str, *, on_error=None) -> list[dict]:
     """查询 claim-enabled roster with bounded timeout/retry.
 
     Empty results are valid and are not retried. Only request failures and
@@ -254,7 +577,9 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
                 asyncio.to_thread(
                     bcn.list_bots_by_task_modes,
                     claim=True,
+                    dream=None,
                     match="all",
+                    visibility="public",
                 ),
                 timeout=_ROSTER_TIMEOUT,
             )
@@ -267,6 +592,8 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
                     "[task][bbs_mode] list_bots exhausted task=%s attempts=%d error=%s",
                     task_id, attempt, exc,
                 )
+                if on_error is not None:
+                    on_error(exc)
                 return []
             delay = _ROSTER_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
@@ -278,7 +605,7 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
     return []
 
 
-async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
+async def _bid_one(bot, rost_entry, execution_graph, *, on_error=None) -> dict | None:
     """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate, relay_reason, title, goal}。"""
     task_id = execution_graph.task_id
     bot_id = rost_entry["bot_id"]
@@ -291,6 +618,8 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
         logger.info("[task][bbs_mode] bid send_and_wait 成功 bot=%s，%s", bot_id, run)
     except Exception as exc:
         logger.error("[task][bbs_mode] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
+        if on_error is not None:
+            on_error(exc)
         return None
     return {"bot_id": bot_id, "run": run}
 
@@ -357,7 +686,7 @@ def _build_task_snapshot(execution_graph) -> dict:
     goal = spec.goal
     ctx = spec.context
     acc = root.run_info.acceptance_result if root.run_info else None
-    gaps = list(acc.gaps) if acc else []
+    gaps = list(acc.gap_items) if acc else []
     child_ids = [
         r.dst_id for r in (getattr(execution_graph, "relations", []) or [])
         if r.src_id == root.node_id and r.type == RelationType.DEPENDENCY
@@ -365,7 +694,7 @@ def _build_task_snapshot(execution_graph) -> dict:
     done_children = [
         {
             "node_id": n.node_id,
-            "title": n.task_spec.metadata.title,
+            "title": task_spec_title(n.task_spec),
             "output": (n.run_info.output if n.run_info else None),
         }
         for n in tasks
@@ -376,7 +705,7 @@ def _build_task_snapshot(execution_graph) -> dict:
         "node_id": root.node_id,
         "status": str(root.status),
         "goal": goal.objective,
-        "instruction": spec.metadata.instruction,
+        "instruction": task_spec_instruction(spec),
         "background": ctx.background if ctx else None,
         "acceptances": [
             {"id": a.id, "description": a.description} for a in goal.acceptances
@@ -412,6 +741,90 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
     )
 
 
+def _relay_mode(execution_graph, target_node_id: str | None) -> bool:
+    """Use Relay protocol for a node-local BBS claim in distributed Relay mode."""
+    if target_node_id is not None:
+        return True
+    config = (getattr(execution_graph, "extend_props", None) or {}).get(
+        "execution_config", {}
+    )
+    return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
+
+
+def _relay_claim_instruction(
+    *, title: str, goal: str, reason: str,
+) -> str:
+    lines: list[str] = []
+    if title:
+        lines.append(f"BBS认领范围: {title}")
+    if goal:
+        lines.append(f"BBS认领目标: {goal}")
+    if reason:
+        lines.append(f"BBS认领依据: {reason}")
+    return "；".join(lines)
+
+
+def _relay_task_inputs(
+    *,
+    execution_graph,
+    node: TaskNode,
+    reason: str,
+    title: str = "",
+    goal: str = "",
+) -> dict[str, Any]:
+    """Return the Relay task facts used by direct delivery and group delivery."""
+    snapshot = _build_task_snapshot(execution_graph)
+    claim_instruction = _relay_claim_instruction(
+        title=title, goal=goal, reason=reason
+    )
+    instruction = task_spec_instruction(node.task_spec)
+    if claim_instruction:
+        instruction = f"{claim_instruction}\n{instruction}"
+    upstream = {
+        str(item.get("node_id")): item.get("output")
+        for item in snapshot.get("done_children", [])
+        if isinstance(item, dict) and item.get("node_id")
+    }
+    return {
+        "objective": str(node.task_spec.goal.objective),
+        "instruction": instruction,
+        "acceptances": [
+            {"id": acceptance.id, "description": acceptance.description}
+            for acceptance in node.task_spec.goal.acceptances
+        ],
+        "upstream_outputs": upstream,
+        "relay_blackboard": {
+            "snapshot": snapshot,
+            "bbs_claim_title": title,
+            "bbs_claim_goal": goal,
+            "bbs_claim_reason": reason,
+        },
+    }
+
+
+def _relay_task_msg(
+    *,
+    inputs: dict[str, Any],
+    backend_url: str,
+    bot_id: str,
+    node: TaskNode,
+) -> str:
+    """Build the unified Relay closure instruction for a node-local BBS claimant."""
+    return format_task_node_business_instruction(
+        task_id=str(node.task_id),
+        node_id=str(node.node_id),
+        backend=backend_url,
+        objective=str(inputs["objective"]),
+        instruction=str(inputs["instruction"]),
+        acceptances=inputs["acceptances"],
+        upstream_outputs=inputs["upstream_outputs"],
+        reporter_bot_id=str(bot_id),
+        executor_bot_ids=[str(bot_id)],
+        relay_execution=True,
+        relay_blackboard=inputs["relay_blackboard"],
+    )
+
+
 def _task_msg(
     skill_name: str,
     execution_graph,
@@ -443,10 +856,10 @@ def _task_msg(
       "output": "存储行业尽调报告已完成,覆盖全部 5 项验收标准……",
       "acceptance_result": {
         "verdict": "DONE",
-        "acceptances_metric": [
+        "done_items": [
           {"id": "ac1", "passed": true, "summary": "投资价值已明确,给出 ★★★★☆ 评级"}
         ],
-        "gaps": []
+        "gap_items": []
       },
       "extend_props": {}
     }'

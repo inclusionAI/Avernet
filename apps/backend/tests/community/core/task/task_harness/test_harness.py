@@ -14,7 +14,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -28,10 +27,10 @@ from agentclaw.community.core.task.task_harness.harness import TaskHarness
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -216,6 +215,68 @@ class TestPollOnce:
         assert resets[0].node_id == "c1"
         assert rec.patches[0].extend_props_patch.get("harness_reset") == "timeout"
 
+    def test_relay_execution_result_missing_publishes_current_bbs_baton(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1", run_mode="single_bot", assignee="bot1")
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        # 零盲区:棒回广场的轨迹回调接线(未接线时静默跳过——既有行为不受影响)
+        returned: list[tuple] = []
+        h.set_on_relay_bbs_return(lambda tid, nid, reason: returned.append((tid, nid, reason)))
+        h.register("t1")
+        assert h._poll_once() == []
+
+        h._dispatched_at[("t1", "c1")] = clock() - 10.0
+        assert h._poll_once() == []
+
+        node = svc._get_node(graph, "c1")
+        assert node.status is Status.PENDING
+        assert node.run_info.run_mode == "bbs"
+        assert rec.patches == []
+        assert graph.extend_props["bbs_mode"] is True
+        assert graph.extend_props["bbs_node_id"] == "c1"
+        assert ("t1", "c1") not in h._dispatched_at
+        # 回调收到 (task_id, node_id, reason) —— relay/bbs_return 轨迹事件的事实原料
+        assert returned == [("t1", "c1", "执行超时未上报 EXECUTION_RESULT")]
+
+    def test_relay_bbs_waits_for_callback_then_recovers_only_after_sla(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1", run_mode="bbs", assignee="bot1")
+        clock = _Clock(0.0)
+        h = TaskHarness(svc, Recorder(), clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(3.0)
+        h._poll_once()
+        assert svc._get_node(graph, "c1").status is Status.RUNNING
+        clock.advance(3.0)
+        h._poll_once()
+        assert svc._get_node(graph, "c1").status is Status.PENDING
+        assert graph.extend_props["bbs_node_id"] == "c1"
+
+    def test_relay_bbs_return_callback_failure_does_not_break_recovery(self, svc, graph):
+        """回调抛错被吞(决策 #14):回收补丁照常落地,回调异常不外抛。"""
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1", run_mode="single_bot", assignee="bot1")
+        clock = _Clock(0.0)
+        rec = Recorder()
+
+        def _boom(task_id, node_id, reason):
+            raise RuntimeError("tcs down")
+
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.set_on_relay_bbs_return(_boom)
+        h.register("t1")
+        h._poll_once()
+        h._dispatched_at[("t1", "c1")] = clock() - 10.0
+        assert h._poll_once() == []  # 不抛
+
+        node = svc._get_node(graph, "c1")
+        assert node.status is Status.PENDING
+        assert node.run_info.run_mode == "bbs"
+        assert graph.extend_props["bbs_mode"] is True
+
     def test_not_timed_out_untouched(self, svc, graph):
         clock = _Clock(0.0)
         rec = Recorder()
@@ -305,3 +366,31 @@ class TestRunPollLoop:
         h.run_poll_loop(stop)
         assert stop.is_set()
         assert calls["n"] >= 3
+
+
+class TestRelayTurnExpiry:
+    def test_expired_relay_turn_uses_relay_resume_not_generic_timeout(self, svc, graph):
+        _dispatch_running(svc, graph, "c1", run_mode="coop_group", assignee="group1")
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        graph.extend_props["relay_turn"] = {
+            "node_id": "c1",
+            "holder_id": "bot1",
+            "status": "GRANTED",
+            "expires_at_ms": 10,
+        }
+        resumed: list[str] = []
+        rec = Recorder()
+        h = TaskHarness(
+            svc,
+            rec,
+            clock=_Clock(0.0),
+            default_sla_timeout=1.0,
+            wall_clock_ms=lambda: 11,
+        )
+        h.set_on_relay_turn_expired(resumed.append)
+        h.register("t1")
+
+        assert h._poll_once() == []
+        assert resumed == ["t1"]
+        assert rec.patches == []
+        assert svc._get_node(graph, "c1").status == Status.RUNNING

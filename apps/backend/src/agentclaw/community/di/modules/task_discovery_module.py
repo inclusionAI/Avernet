@@ -4,9 +4,12 @@
 - 绑定 ``TaskDiscoveryScheduler`` 为 singleton（Lifecycle 参与者自动发现）
 - 绑定 ``DiscoveryService`` 为 singleton
 - 绑定 ``TaskDiscoveryLockRepository`` 为 singleton（per-bot 分布式锁）
-- 提供 ``SessionInitiator``（注入 CronRelayServiceProtocol）
+- 提供 ``SessionInitiator``（唯一实现 ``OpenApiBotSessionInitiator``，注入
+  ``OpenApiBotPort``；port 未绑定 → ``UnavailableSessionInitiator`` fail-closed
+  占位。2026-09-15 统一化: 原 ``CronRelaySessionInitiator`` Relay/WS 链已废除，
+  corp 列不再覆盖绑定）
 - 提供 ``TaskReader``（注入 SQLite path）
-- 桥接 API 层的 BotServiceProtocol 和 CronRelayServiceProtocol
+- 桥接 API 层的 BotServiceProtocol 和 WorkOrderServiceProtocol
 
 配置项 (通过环境变量):
   TASK_DISCOVERY_AUTO_START        是否启用自动调度 (true/false, 默认 true)
@@ -14,17 +17,15 @@
   TASK_DISCOVERY_TIMEZONE          调度时区 (默认 "Asia/Shanghai")
   TASK_DISCOVERY_DATA_FILE         任务数据文件路径
 """
+
 from __future__ import annotations
 
-import os
+from urllib.parse import urlparse
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import (
     BotServiceProtocol as _ApiBotServiceProtocol,
-)
-from agentclaw.community.api.cron_relay_service import (
-    CronRelayServiceProtocol as _ApiCronRelayServiceProtocol,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol as _ApiWorkOrderServiceProtocol,
@@ -38,36 +39,34 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
-    NullFrontendUrlProvider,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
     NotifyMessagesProvider,
 )
-from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
-    OpenApiBotSessionInitiator,
-)
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol as _TaskDiscoveryBotServiceProtocol,
-    CronRelayServiceProtocol as _TaskDiscoveryCronRelayProtocol,
     WorkOrderServiceProtocol as _TaskDiscoveryWorkOrderServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
     SessionInitiator,
+    UnavailableSessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     TaskReader,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
+    BcsTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
-from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -78,39 +77,20 @@ _DEFAULT_BACKEND_URL = "http://localhost:8888"
 _DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
 
-def _resolve_frontend_url() -> str:
-    """Resolve frontend workbench URL — env-aware fallback chain.
+def _backend_origin_from_callback_url(provider: BcsTokenProvider | None) -> str:
+    """Return the backend origin from the standard task callback configuration.
 
-    Priority: ``FRONTEND_URL`` env > ``SINGLEBOX_FRONTEND_URL`` env (singlebox)
-    > ``http://localhost:8000``.
-
-    Does NOT inline corporate DNS names (satisfies the OSS architecture gate
-    ``test_shipped_config_no_corp_identifiers``). The singlebox env overlay sets
-    ``SINGLEBOX_FRONTEND_URL`` to the local domain; the community source defaults
-    to ``localhost``.
+    ``bcs_client.task_callback_url[_pre]`` already points BCS at this backend.
+    Reuse that deployment-neutral value instead of introducing a parallel URL
+    axis; absent configuration retains the local default for lightweight tests.
     """
-    url = os.environ.get("FRONTEND_URL")
-    if url:
-        return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
-        return os.environ.get("SINGLEBOX_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
-    return _DEFAULT_FRONTEND_URL
-
-
-def _resolve_backend_url() -> str:
-    """Resolve backend self URL — env-aware fallback chain.
-
-    Priority: ``BACKEND_URL`` env > ``SINGLEBOX_BACKEND_URL`` env (singlebox)
-    > ``http://localhost:8888``.
-
-    Mirrors ``task_module.py._resolve_api_base_url``: env-aware, no inline corp DNS.
-    """
-    url = os.environ.get("BACKEND_URL")
-    if url:
-        return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
-        return os.environ.get("SINGLEBOX_BACKEND_URL", _DEFAULT_BACKEND_URL)
-    return _DEFAULT_BACKEND_URL
+    callback_url = provider.task_callback_url if provider is not None else ""
+    if not callback_url:
+        return _DEFAULT_BACKEND_URL
+    parsed = urlparse(callback_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return _DEFAULT_BACKEND_URL
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 class TaskDiscoveryModule(Module):
@@ -146,11 +126,15 @@ class TaskDiscoveryModule(Module):
         injector: Injector,
     ) -> DiscoveryService:
         """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order + frontend_url_provider）。"""
-        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_discovery_service()")
+        logger.debug(
+            "[task_discovery] → TaskDiscoveryModule._provide_discovery_service()"
+        )
         try:
-            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
-        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
-            fe_provider = NullFrontendUrlProvider()
+            fe_provider: ConfigFrontendUrlProvider = injector.get(
+                ConfigFrontendUrlProvider
+            )
+        except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
+            fe_provider = ConfigFrontendUrlProvider()
         return DiscoveryService(
             reader=reader,
             session_initiator=session_initiator,
@@ -166,58 +150,65 @@ class TaskDiscoveryModule(Module):
     @inject
     def _provide_session_initiator(
         self,
-        cron_relay: _ApiCronRelayServiceProtocol,
         injector: Injector,
     ) -> SessionInitiator:
-        """构建 SessionInitiator — 按 DEPLOY_PROFILE 分发。
+        """构建 SessionInitiator — 唯一实现 ``OpenApiBotSessionInitiator`` (BaaS Open API)。
 
-        - singlebox → ``CronRelaySessionInitiator`` (cron relay + 直连 engine WebSocket)
-        - corp/pre/prod → ``OpenApiBotSessionInitiator`` (BaaS Open API + Bearer 鉴权)
-          当 ``OpenApiBotPort`` 未绑定或返回 None (fail-closed) → 回退 CronRelaySessionInitiator。
+        2026-09-15 统一化: 原 base 绑定 ``CronRelaySessionInitiator``（relay +
+        WebSocket 直连 engine 链）已废除;实现自 corp 列下沉为社区唯一基绑定,
+        依赖组合根经 DI 提供的 ``OpenApiBotPort``:
+        - corp/pre/prod 列 → ``CorpTaskIntegrationModule.openapi_bot_port``
+          (openapi_bot 块 api_key_secret → Mist, Bearer)。
+        - 社区/单机列 → 无凭证,``OpenApiBotPort`` 未绑定时注入
+          ``UnavailableSessionInitiator`` fail-closed 占位（调用即抛可读错误,
+          由 DiscoveryService per-bot 容错记录）;e2e/联调可显式注入本地 port stub。
 
-        对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
-
-        ``FrontendUrlProvider`` 由 DI 注入(corp 列 ``CorpFrontendUrlProvider``,
-        community/singlebox 列未绑定 → fallback ``NullFrontendUrlProvider``)。
+        ``ConfigFrontendUrlProvider`` 由 DI 注入 (corp 列经钉钉块 env-aware 固化,
+        community 列经 user_config.task_discovery 中性块, 未配置→空值)。「取 URL」
+        是数据差异而非行为差异, 故不再走 plugin 契约/分列实现。
         """
-        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
+        logger.debug(
+            "[task_discovery] → TaskDiscoveryModule._provide_session_initiator()"
+        )
         try:
-            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
-        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
-            fe_provider = NullFrontendUrlProvider()
+            fe_provider: ConfigFrontendUrlProvider = injector.get(
+                ConfigFrontendUrlProvider
+            )
+        except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
+            fe_provider = ConfigFrontendUrlProvider()
 
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
-            try:
-                openapi_bot = injector.get(OpenApiBotPort)
-                if openapi_bot is not None:
-                    logger.info(
-                        "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
-                        "(corp path, openapi_bot=%s, frontend_url_provider=%s)",
-                        type(openapi_bot).__name__,
-                        type(fe_provider).__name__,
-                    )
-                    return OpenApiBotSessionInitiator(
-                        openapi_bot=openapi_bot,
-                        frontend_url=_resolve_frontend_url(),
-                        backend_url=_resolve_backend_url(),
-                        frontend_url_provider=fe_provider,
-                    )
-                logger.warning(
-                    "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "
-                    "→ falling back to CronRelaySessionInitiator",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[task_discovery] OpenApiBotPort DI 未绑定/解析失败 "
-                    "→ falling back to CronRelaySessionInitiator: %s: %s",
-                    type(exc).__name__, exc,
-                )
-        # singlebox or fallback
-        return CronRelaySessionInitiator(
-            cron_relay=cron_relay,
-            frontend_url=_resolve_frontend_url(),
-            backend_url=_resolve_backend_url(),
+        try:
+            bcs_identity_provider: BcsTokenProvider | None = injector.get(BcsTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定 → 本地默认 origin
+            bcs_identity_provider = None
+
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE101 未绑定 → fail-closed 占位
+            logger.warning(
+                "[task_discovery] OpenApiBotPort 未绑定/解析失败(%s: %s) — "
+                "SessionInitiator 退化为 UnavailableSessionInitiator"
+                "(session 创建 fail-closed, per-bot 容错记录)",
+                type(exc).__name__,
+                exc,
+            )
+            return UnavailableSessionInitiator(
+                reason=f"OpenApiBotPort DI 解析失败: {type(exc).__name__}: {exc}"
+            )
+        if openapi_bot is None:
+            logger.warning(
+                "[task_discovery] OpenApiBotPort resolved to None (fail-closed, "
+                "openapi_bot 块未配置或 api_key 缺失) — SessionInitiator 退化为 "
+                "UnavailableSessionInitiator"
+            )
+            return UnavailableSessionInitiator(
+                reason="OpenApiBotPort resolved to None（openapi_bot 块未配置/凭证缺失）"
+            )
+
+        return OpenApiBotSessionInitiator(
+            openapi_bot=openapi_bot,
+            frontend_url=_DEFAULT_FRONTEND_URL,
+            backend_url=_backend_origin_from_callback_url(bcs_identity_provider),
             frontend_url_provider=fe_provider,
         )
 
@@ -245,16 +236,6 @@ class TaskDiscoveryModule(Module):
         so no adapter wrapper is needed — just return the instance directly.
         """
         return bot_service  # type: ignore[return-value]
-
-    @singleton
-    @provider
-    @inject
-    def _bridge_cron_relay_protocol(
-        self,
-        cron_relay: _ApiCronRelayServiceProtocol,
-    ) -> _TaskDiscoveryCronRelayProtocol:
-        """Adapt the API cron relay to the task_discovery module's local contract."""
-        return cron_relay  # type: ignore[return-value]
 
     @singleton
     @provider

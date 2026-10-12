@@ -80,6 +80,7 @@ class TaskNodeRunInfoRecord:
     start_time: Optional[int]
     update_time: Optional[int]
     end_time: Optional[int]
+    actual_goal: Optional[dict[str, Any]] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -87,12 +88,25 @@ class TaskNodeRunInfoRecord:
         """Project the ``acceptance_result`` JSON dict onto the domain type."""
         if self.acceptance_result is None:
             return None
+        raw = self.acceptance_result
+        done_items = (
+            list(raw["done_items"])
+            if "done_items" in raw
+            else [
+                item
+                for item in raw.get("acceptances_metric", [])
+                if not (isinstance(item, dict) and item.get("passed") is False)
+            ]
+        )
+        gap_items = (
+            list(raw["gap_items"])
+            if "gap_items" in raw
+            else list(raw.get("gaps", []))
+        )
         return AcceptanceResult(
-            verdict=AcceptanceVerdict(self.acceptance_result["verdict"]),
-            acceptances_metric=list(
-                self.acceptance_result.get("acceptances_metric", [])
-            ),
-            gaps=list(self.acceptance_result.get("gaps", [])),
+            verdict=AcceptanceVerdict(raw["verdict"]),
+            done_items=done_items,
+            gap_items=gap_items,
         )
 
 
@@ -209,3 +223,67 @@ class TaskActionLogRecord:
             status_to=self.status_to,
             payload=dict(self.payload),
         )
+
+
+# ---------------------------------------------------------------------------
+# Task trajectory storage records (REQ-11 + REQ-P1).
+#
+# Table-faithful records for the trajectory旁路采集 tables. ``action_input`` /
+# ``ext_info`` / ``analysis`` are kept as the raw stored strings: ``action_input``
+# is a digest/原文 (not JSON); ``ext_info`` is free JSON the domain object does
+# NOT map (analyzer reads on demand, spec REQ-1); ``analysis`` is an embedded
+# ``TrajectoryAnalysis`` JSON string. Repo (P1b) supplies ``gmt_create`` from the
+# domain int-ms timestamp and does NOT rely on the DB ``DEFAULT CURRENT_TIMESTAMP``
+# (kept only as a fallback). No FK / no association to ``task_action_log`` or
+# ``task_callback`` — independent trajectory entity (spec invariant).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TrajectoryEventRecord:
+    """Table-faithful record for one ``task_trajectory_events`` row (append-only)."""
+
+    id: int
+    task_id: str
+    node_id: str
+    action_type: str
+    attempt: int
+    action_result: Optional[str] = None
+    action_input: Optional[str] = None
+    status_from: Optional[str] = None
+    status_to: Optional[str] = None
+    boost_reason: Optional[str] = None
+    error_type: Optional[str] = None
+    error_msg: Optional[str] = None
+    ext_info: Optional[str] = None
+    analysis: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class TaskTrajectoryRecord:
+    """Table-faithful record for one ``task_trajectory`` head row (per task)."""
+
+    id: int
+    task_id: str
+    analysis: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class TaskCallbackCorrelationRecord:
+    """Table-faithful record for one ``task_callback_correlation`` row (REQ-P1).
+
+    Persists the callback↔(node, retry) correlation across restarts so in-flight
+    callbacks arriving after a restart can be re-attached to the right node.
+    """
+
+    id: int
+    event_id: str
+    main_session_id: str
+    task_id: str
+    node_id: str
+    retry: int
+    gmt_create: Optional[datetime] = None

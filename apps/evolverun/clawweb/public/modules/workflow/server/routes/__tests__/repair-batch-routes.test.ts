@@ -131,7 +131,7 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     await f.service.report({ workflowId: 'wf-1', taskId: created.taskId, revision: 1, expectedStateVersion: 0, status: 'succeeded', draft, checks });
     const diff = await f.request(`/${created.taskId}/revisions/1/diff?base=baseline&candidateCommit=forged`);
     expect(diff).toMatchObject({ status: 200, body: { candidateCommit: draft.candidateCommit, baseCommit: created.input.baseline.packCommit } });
-    f.executionPort.dispatch = async () => { throw new Error('uncertain'); };
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 400: invalid request'); };
     const revised = await f.request(`/${created.taskId}/revisions`, { ...input, requestId: 'revision-2', feedback: 'Improve further', expectedAttemptRevision: 1, parentCandidateCommit: draft.candidateCommit });
     expect(revised).toMatchObject({ status: 202, body: { revision: 2, phase: 'drafting' } });
     expect((await f.request(`/${created.taskId}`)).body.execution.status).toBe('dispatch_failed');

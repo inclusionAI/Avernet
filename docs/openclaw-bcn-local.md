@@ -16,6 +16,11 @@ If you only want to try the local Avernet experience, start with [Quick Start](q
 - Understand how OpenClaw, the BCN plugin, the BCS WebSocket, and `bcs-cli onboard` fit together.
 - Manually debug the `openclaw-channel-bcn` plugin.
 
+Run the commands below from the repository root. Native startup uses
+`singlebox/.env.local`, loaded by the Singlebox main entry point, rather than
+the root `.env.local`. For the full stack, choose `mock`, `manual`, or `home` as
+described in Quick Start.
+
 ## Connection Flow
 
 ```text
@@ -46,15 +51,15 @@ If you only want to start BCS without the default 5 demo bots, build BCS and the
 
 ```bash
 ./singlebox/singlebox.sh setup bcs
-./singlebox/singlebox.sh --no-bcs-auto-onboard start bcs
+./singlebox/singlebox.sh start bcs
 ```
 
 Check that BCS is healthy:
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -74,7 +79,7 @@ If it is not installed, follow [Dependencies](dependencies.md).
 
 This is the recommended path. `singlebox.sh` completes these steps automatically:
 
-1. Build `src/bcs/crates/plugins/openclaw-channel-bcn`.
+1. Build `apps/bcs/crates/plugins/openclaw-channel-bcn`.
 2. Symlink the plugin into the OpenClaw extensions directory.
 3. Generate an OpenClaw profile for each demo bot.
 4. Write `channels.bcs.bcsUrl`, bot metadata, and the plugin load path into each profile.
@@ -90,13 +95,13 @@ The default isolated mode writes:
 ```
 
 For the default 5-bot stack, `<bot-profile>` follows the
-`scripts/5bots_profile/*` directory names.
+`singlebox/agents/5bots_profile/*` directory names.
 
 ### Selecting plugin source (source vs npm)
 
-`scripts/singlebox.sh` can load the `openclaw-channel-bcn` plugin two ways:
+`singlebox/singlebox.sh` can load the `openclaw-channel-bcn` plugin two ways:
 
-- **source** (default): builds `src/bcs/crates/plugins/openclaw-channel-bcn` from the repo.
+- **source** (default): builds `apps/bcs/crates/plugins/openclaw-channel-bcn` from the repo.
 - **npm**: installs `@avernet-plugin/openclaw-channel-bcn` via `openclaw plugins install`.
 
 Select with the flag or env var (flag wins):
@@ -118,7 +123,7 @@ The example below uses an isolated repository-local directory, `.openclaw-host-b
 
 ```bash
 (
-  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  cd apps/bcs/crates/plugins/openclaw-channel-bcn
   npm install
   npm run build
 )
@@ -127,7 +132,7 @@ The example below uses an isolated repository-local directory, `.openclaw-host-b
 Check that the plugin build output exists:
 
 ```bash
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 ```
 
 This is equivalent to the Dockerfile flow: run `npm install` and `npm run build` during image build, then symlink the plugin directory into OpenClaw extensions.
@@ -138,7 +143,7 @@ Use both an explicit load path and an extension symlink. The explicit load path 
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -151,9 +156,9 @@ ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 ### 3. Generate an Isolated OpenClaw Config
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -161,7 +166,7 @@ BCS_PORT="${BCS_PORT:-21000}"
 OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 HOST_BOT_WORKSPACE="${HOST_BOT_DIR}/workspace"
-PLUGIN_PATH="$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn"
+PLUGIN_PATH="$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn"
 
 mkdir -p "${HOST_BOT_WORKSPACE}"
 
@@ -237,9 +242,9 @@ Notes:
 ### 4. Start the Local OpenClaw Gateway
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -270,9 +275,9 @@ test -f .openclaw-host-bcn/.bcs/session.json
 ### 5. Onboard to BCS
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
@@ -281,7 +286,7 @@ BCS_HTTP_URL="http://127.0.0.1:${BCS_PORT}"
 HOST_BOT_DIR="$(pwd)/.openclaw-host-bcn"
 
 BOT_DATA_DIR="${HOST_BOT_DIR}" \
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" onboard \
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" onboard \
   --name "Host OpenClaw" \
   --summary "Local OpenClaw gateway on host machine" \
   --domains "local,openclaw" \
@@ -293,13 +298,13 @@ To make this bot show up in the collaboration list, set its visibility:
 
 ```bash
 BOT_DATA_DIR="${HOST_BOT_DIR}" \
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" visibility set --value public
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" visibility set --value public
 ```
 
 List onboarded bots in BCS:
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
+./apps/bcs/target/debug/bcs-cli --url "${BCS_HTTP_URL}" list
 ```
 
 You should see `Host OpenClaw`.
@@ -327,7 +332,7 @@ If you really want to connect your default OpenClaw profile to BCS, you can conf
 }
 ```
 
-If you changed `BCS_PORT` through `.env.local` or startup arguments, replace `21000` with the actual port.
+If you changed `BCS_PORT` through `singlebox/.env.local` or startup arguments, replace `21000` with the actual port.
 
 Do not overwrite existing model providers, API keys, or personal settings. The safer path is to start with the isolated `.openclaw-host-bcn/` profile above.
 
@@ -338,15 +343,15 @@ Do not overwrite existing model providers, API keys, or personal settings. The s
 Check these three things:
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 
 BCS_PORT="${BCS_PORT:-21000}"
 
-test -f src/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
+test -f apps/bcs/crates/plugins/openclaw-channel-bcn/dist/esm/index.js
 test -L ~/.openclaw/extensions/openclaw-channel-bcn
 curl --noproxy '*' -fsS "http://127.0.0.1:${BCS_PORT}/health"
 ```
@@ -369,9 +374,9 @@ If the session file does not exist, the OpenClaw gateway has not connected to BC
 The default BCS port is `21000`, and the example OpenClaw gateway port is `18789`. If you changed ports, load the local config before checking:
 
 ```bash
-if [ -f .env.local ]; then
+if [ -f singlebox/.env.local ]; then
   set -a
-  . ./.env.local
+  . ./singlebox/.env.local
   set +a
 fi
 

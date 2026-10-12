@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
-    OpenApiAuthError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
+    OpenApiAuthError, OpenApiBadRequestError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
 
 
@@ -374,3 +374,78 @@ def test_injected_client_kept_across_loops():
 
     assert _run(take()) is injected
     assert _run(take()) is injected  # 跨 loop 仍是注入的同一 client
+
+
+# ===== get_session_messages:引擎侧会话明细读口(GET /openapi/v1/sessions/{sid}/messages,Bearer) =====
+_SID = "agent:main:session:8ccd0594-032e-4266-a42b-cee2ec833562:user:35983"
+
+
+def test_get_session_messages_encodes_path_and_forwards_query_headers():
+    """冒号型引擎 session key percent-encode 进 path;Bearer/Cookie/Referer 照透传;bot_id/limit 进 query。"""
+    seen: dict = {}
+
+    def h(req):
+        seen["path"] = req.url.raw_path.decode("ascii").split("?")[0]  # raw_path 保留 %3A 编码形态
+        seen["params"] = dict(req.url.params)
+        seen["auth"] = req.headers.get("authorization")
+        seen["cookie"] = req.headers.get("cookie")
+        seen["referer"] = req.headers.get("referer")
+        return httpx.Response(200, json={"code": 0, "data": {"messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "done"},
+        ], "total": 2, "has_more": False}})
+
+    msgs = _run(_adapter(h).get_session_messages(_SID, limit=50, bot_id="bot9:ent1"))
+    assert seen["path"] == (
+        "/openapi/v1/sessions/agent%3Amain%3Asession%3A8ccd0594-032e-4266-a42b-"
+        "cee2ec833562%3Auser%3A35983/messages"
+    )
+    assert seen["params"]["limit"] == "50"
+    assert seen["params"]["bot_id"] == "bot9:ent1"
+    assert seen["auth"] == "Bearer ak1234567890"
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+    assert msgs == [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "done"}]
+
+
+def test_get_session_messages_omits_bot_id_when_none():
+    seen: dict = {}
+
+    def h(req):
+        seen["params"] = dict(req.url.params)
+        return httpx.Response(200, json={"code": 0, "data": {"messages": []}})
+
+    msgs = _run(_adapter(h).get_session_messages(_SID))
+    assert "bot_id" not in seen["params"]
+    assert msgs == []
+
+
+def test_get_session_messages_clamps_limit_to_baas_range():
+    """BaaS Query 校验 ge=1 le=1000:越界 limit 须预夹,不打到 422。"""
+    captured: list[str] = []
+
+    def h(req):
+        captured.append(dict(req.url.params)["limit"])
+        return httpx.Response(200, json={"code": 0, "data": {"messages": []}})
+
+    _run(_adapter(h).get_session_messages(_SID, limit=5000))
+    _run(_adapter(h).get_session_messages(_SID, limit=0))
+    _run(_adapter(h).get_session_messages(_SID, limit=None))
+    assert captured == ["1000", "1", "50"]
+
+
+def test_get_session_messages_raises_on_nonzero_business_code():
+    def h(req):
+        # HTTP 200 但业务 code 非 0(如 bot 不在 allowed_bots / Session not exist 信封)
+        return httpx.Response(200, json={"code": 40401, "message": "session not found", "data": None})
+
+    with pytest.raises(OpenApiError):
+        _run(_adapter(h).get_session_messages(_SID, bot_id="bot9:ent1"))
+
+
+def test_get_session_messages_http_errors_mapped():
+    """404 会话/绑定不存在 → BadRequestError;500 → ServerError(沿用 _map_status 既有映射)。"""
+    with pytest.raises(OpenApiBadRequestError):
+        _run(_adapter(lambda req: httpx.Response(404)).get_session_messages(_SID))
+    with pytest.raises(OpenApiServerError):
+        _run(_adapter(lambda req: httpx.Response(500)).get_session_messages(_SID))

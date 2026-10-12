@@ -157,7 +157,7 @@ crates/
 
 ```bash
 # From the ocb repo root
-cd src/bcs
+cd apps/bcs
 
 # Build
 cargo build
@@ -214,11 +214,12 @@ just the bare service), use the monorepo-level `singlebox.sh` script:
 ```bash
 # From the ocb repo root
 
-# 1. Check prerequisites (tools, ports, dependencies)
-./singlebox/singlebox.sh check
+# 1. Check prerequisites, then prepare binaries and frontend dependencies
+./singlebox/singlebox.sh check bcs_frontend
+./singlebox/singlebox.sh setup bcs_frontend
 
 # 2. Start BCS + Frontend (E2E group)
-./singlebox/singlebox.sh --local start bcs_frontend
+./singlebox/singlebox.sh start bcs_frontend
 ```
 
 This brings up:
@@ -228,18 +229,28 @@ This brings up:
 | BCS | `21000` | Coordination service (local mode, SQLite) |
 | Frontend | `8000` | Avernet workbench UI |
 
-With `--local`, BCS runs in local mode (loopback auth, SQLite, no external
-database) and auto-onboards demo bots so you can immediately create groups and
-send messages from the UI.
+Singlebox uses isolated local runtime paths by default (local auth mock,
+SQLite, no external database); `--local` has been removed. `bcs_frontend`
+serves the default `legacy` frontend and does not start demo bots. To add the
+5 demo bots, run:
+
+```bash
+./singlebox/singlebox.sh setup bots
+./singlebox/singlebox.sh start bots
+```
+
+Choose `mock`, `manual`, or `home` when prompted. `manual` requires complete
+model settings in `singlebox/.env.local`; see the
+[Quick Start](../../docs/quick-start.md#model-configuration).
 
 ### Other useful commands
 
 ```bash
 # Start only BCS (no frontend)
-./singlebox/singlebox.sh --local start bcs
+./singlebox/singlebox.sh start bcs
 
-# Start all services (BCS + Frontend + Backend + Engine + OpenClaw)
-./singlebox/singlebox.sh --local start all
+# Start the full configured singlebox stack
+./singlebox/singlebox.sh start all
 
 # Check what's running
 ./singlebox/singlebox.sh status

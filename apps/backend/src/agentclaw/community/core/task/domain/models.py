@@ -60,7 +60,7 @@ class NodeAction(StrEnum):
     PLAN = "plan"               # 规划(gap 计算 + 产子);payload: target/children/has_gap/gap_detail
     DISPATCH = "dispatch"       # 搜推派发结果;payload: outcome(HIT_SINGLE|HIT_MULTI|MISS)/run_mode/assignee/miss_reason
     EXECUTE = "execute"         # 执行产出(bot 回投 output/exec_error);payload: success/exec_error/output
-    VERIFY = "verify"           # 验收结论;payload: verdict/acceptances_metric/gaps
+    VERIFY = "verify"           # 验收结论;payload: verdict/done_items/gap_items
     RESET = "reset"             # harness 复位重投;payload: reason/prev_status/harness_retries
     TRANSITION = "transition"   # 框架直驱翻态(HUNG/传播 DONE);payload: reason
 
@@ -86,28 +86,25 @@ class TaskType(StrEnum):
 
 # ===== 规格面(Task Specification)=====
 @dataclass
-class Metadata:
-    task_id: str
-    title: str
-    instruction: str               # 核心执行指令(Prompt/提示词)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"task_id": self.task_id, "title": self.title, "instruction": self.instruction}
-
-
-@dataclass
 class Context:
-    background: str
-    extend_props: dict[str, Any] = field(default_factory=dict)  # 上下文扩展属性(非结构化补充)
+    """任务业务上下文。title/background 可为空，extend_props 承载交付物、约束和资源。"""
+
+    background: str = ""
+    extend_props: dict[str, Any] = field(default_factory=dict)
+    title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"background": self.background, "extend_props": dict(self.extend_props)}
+        return {
+            "title": self.title,
+            "background": self.background,
+            "extend_props": dict(self.extend_props),
+        }
 
 
 @dataclass
 class AcceptanceCriteria:
     id: str
-    description: str               # 验收标准的具体描述(无 type 字段)
+    description: str
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "description": self.description}
@@ -119,32 +116,86 @@ class Goal:
     acceptances: list[AcceptanceCriteria]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"objective": self.objective, "acceptances": [a.to_dict() for a in self.acceptances]}
-
-
-@dataclass
-class TaskSpec:
-    metadata: Metadata
-    context: Context
-    goal: Goal                     # 无 SLA
-
-    def to_dict(self) -> dict[str, Any]:
         return {
-            "metadata": self.metadata.to_dict(),
-            "context": self.context.to_dict(),
-            "goal": self.goal.to_dict(),
+            "objective": self.objective,
+            "acceptances": [a.to_dict() for a in self.acceptances],
         }
 
 
 @dataclass
-class TaskInfo:
-    """对外 ``execute`` 入参。"""
+class TaskSpec:
+    """纯业务规格：不承载 task_id、instruction、assignee 或其它运行态。"""
 
+    context: Context
+    goal: Goal
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"context": self.context.to_dict(), "goal": self.goal.to_dict()}
+
+
+def task_spec_title(spec: "TaskSpec") -> str:
+    return str(spec.context.title or spec.goal.objective or "").strip()
+
+
+def task_spec_instruction(spec: "TaskSpec") -> str:
+    """Build an execution instruction from business facts without storing one in TaskSpec."""
+    parts = [str(spec.goal.objective or "").strip()]
+    props = spec.context.extend_props or {}
+    for label, key in (("交付物", "deliverables"), ("约束", "constraints"), ("资源", "resources")):
+        values = props.get(key) or []
+        if isinstance(values, list) and values:
+            parts.append(f"{label}: " + "；".join(str(item) for item in values))
+    if spec.context.background:
+        parts.append(f"背景: {spec.context.background}")
+    return "\n".join(part for part in parts if part)
+
+
+@dataclass
+class TaskInfo:
+    """正式任务信息；task_id 属于任务实体，不属于 TaskSpec。"""
+
+    task_id: str
     task_spec: TaskSpec
     source_type: str       # "bot" | "coop_group"
     owner_bot_id: str         # owning bot id
     owner_user_id: str = ""   # owning user id, kept separate from owner_bot_id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
+
+
+@dataclass(frozen=True)
+class TaskRuntimeProfile:
+    """Task-creation snapshot of governed orchestration strategies and modes."""
+
+    planner_strategy: str = "default"
+    dispatcher_strategy: str = "default"
+    runner_strategy: str = "default"
+    allowed_run_modes: tuple[str, ...] = ("single_bot", "coop_group", "bbs")
+
+    @classmethod
+    def from_execution_config(cls, config: dict[str, Any]) -> "TaskRuntimeProfile":
+        raw = config.get("runtime_profile") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        modes = raw.get("allowed_run_modes", config.get("allowed_run_modes"))
+        if not isinstance(modes, (list, tuple)) or not modes:
+            modes = cls.allowed_run_modes
+        normalized = tuple(
+            dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
+        )
+        return cls(
+            planner_strategy=str(raw.get("planner_strategy") or "default"),
+            dispatcher_strategy=str(raw.get("dispatcher_strategy") or "default"),
+            runner_strategy=str(raw.get("runner_strategy") or "default"),
+            allowed_run_modes=normalized or cls.allowed_run_modes,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "planner_strategy": self.planner_strategy,
+            "dispatcher_strategy": self.dispatcher_strategy,
+            "runner_strategy": self.runner_strategy,
+            "allowed_run_modes": list(self.allowed_run_modes),
+        }
 
 
 # ===== 运行态(Runtime Graph)=====
@@ -153,8 +204,27 @@ class AcceptanceResult:
     """验收/审计结果(无 verifier 字段)。"""
 
     verdict: AcceptanceVerdict
-    acceptances_metric: list[Any] = field(default_factory=list)  # 已满足的验收指标明细(新协议为指标对象数组,放宽为 Any)
-    gaps: list[Any] = field(default_factory=list)  # 与期望目标的差距(驱动 plan 自算,非 plan 入参);新协议 FAIL 为对象数组,放宽为 Any
+    done_items: list[Any] = field(default_factory=list)  # 已完成接收项;协议为对象数组[{id,passed,summary}]
+    gap_items: list[Any] = field(default_factory=list)  # 未完成/未通过接收项;协议为对象数组,放宽为 Any
+
+
+@dataclass
+class DoneOutput:
+    """Graph 已接纳、可供后续规划复用的节点执行事实。"""
+
+    node_id: str
+    actual_goal: Goal
+    output: dict[str, Any]
+    acceptance_result: AcceptanceResult
+
+
+@dataclass
+class TaskContext:
+    """跨中心化与 Relay 共用的最小任务业务上下文。"""
+
+    spec: TaskSpec
+    all_done_output: list[DoneOutput]
+    gaps: list[str]
 
 
 @dataclass
@@ -187,8 +257,11 @@ class RuntimeInfo:
     assignee: str | None = None              # 执行者(bot_id / group_id)
     start_time: int | None = None         # 任务/节点开始时间(根在 init_graph;叶子 task_dispatch/BBS claim 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
+    actual_goal: Goal | None = None          # 实际执行目标
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
+    progress_reason: str | None = None  # why this node/assignee was advanced
+    failure_reason: str | None = None   # why planning/search/delivery/execution failed
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)
     action_log: list[NodeActionEvent] = field(default_factory=list)  # 动作级历史快照(append-only)
 
@@ -233,6 +306,45 @@ class TaskNode:
     # 无跨兄弟/跨层级直接数据边——数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载
 
 
+def _relay_graph_status(graph: "TaskExecutionGraph") -> "Status":
+    """Derive the Relay graph state from baton convergence, not the root node.
+
+    ``DONE`` on a handed-off baton only means that it produced a successor.
+    The whole Relay graph is complete only after every node has reached its own
+    terminal state, the active leaf is accepted (``SUCCESS``), and the latest
+    persisted GAP snapshot is an explicit empty list. A missing GAP snapshot is
+    not treated as completion.
+    """
+    if graph.status in {Status.FAILED, Status.HUNG, Status.CANCELLED}:
+        return graph.status
+    if not graph.tasks:
+        return graph.status
+
+    active = {Status.PENDING, Status.PLANNING, Status.RUNNING}
+    if any(node.status in active for node in graph.tasks):
+        return Status.RUNNING
+    for terminal in (Status.FAILED, Status.HUNG, Status.CANCELLED):
+        if any(node.status == terminal for node in graph.tasks):
+            return terminal
+
+    outgoing = {
+        relation.src_id
+        for relation in graph.relations
+        if relation.type == RelationType.DEPENDENCY
+    }
+    leaves = [node for node in graph.tasks if node.node_id not in outgoing] or list(
+        graph.tasks
+    )
+    all_nodes_closed = all(
+        node.status in {Status.DONE, Status.SUCCESS} for node in graph.tasks
+    )
+    active_leaf_accepted = all(node.status == Status.SUCCESS for node in leaves)
+    gaps = graph.extend_props.get("gaps")
+    if gaps == [] and all_nodes_closed and active_leaf_accepted:
+        return Status.DONE
+    return Status.RUNNING
+
+
 @dataclass
 class TaskExecutionGraph:
     """任务运行时执行图。"""
@@ -250,14 +362,24 @@ class TaskExecutionGraph:
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
     @property
-    def effective_status(self) -> "Status":
-        """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,使"图状态与根节点状态保持一致"
-        落在观测口径;无根(未初始化)回落存储的图级 ``status``。
+    def is_relay(self) -> bool:
+        """Whether this graph is driven by the serial Relay orchestration mode."""
+        config = self.extend_props.get("execution_config")
+        return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
 
-        纯只读派生,不改并发主线——图级 ``status`` 仍由编排核 ``update_task_graph_info`` 显式写
-        (终态收口 / loop_exhausted / 外部镜像);控制流(``_is_graph_terminal`` 等)继续读 ``status``,
-        本属性供看板/持久化等"以根态为准"的观测口径消费。与 ``_persist_locked`` 既有 root 派生
-        (runtime_status)完全等价,是其单源化的命名口径。"""
+    @property
+    def effective_status(self) -> "Status":
+        """图级有效态：按编排模式派生。
+
+        中心化保持既有口径：有根节点时以根节点状态为准。Relay 不镜像根节点；
+        根/前序节点 ``DONE`` 只表示已交接，图级状态由各节点收敛态与最新 GAP 决定。
+        无根(未初始化)回落存储的图级 ``status``。
+
+        纯只读派生，不改并发主线。图级 ``status`` 仍由 Relay 事实写入或
+        ``update_task_graph_info`` 显式写；控制流(``_is_graph_terminal`` 等)继续读 ``status``。
+        本属性供持久化、任务列表和看板等统一观测口径消费。"""
+        if self.is_relay:
+            return _relay_graph_status(self)
         root = next((n for n in self.tasks if n.node_id == self.task_id), None)
         return root.status if root is not None else self.status
 
@@ -270,7 +392,7 @@ class TaskSummary:
     task_id: str
     run_id: int
     status: Status
-    title: str = ""              # 根节点 task_spec.metadata.title
+    title: str = ""              # 根节点 task_spec.context.title
     node_count: int = 0          # 图中节点总数
     loop_round: int = 0          # 图级轮次
     bbs_mode: bool = False       # 图 extend_props["bbs_mode"] 投影(BBS-relay 升级标志)
@@ -295,9 +417,14 @@ class TaskNodePatch:
     assignee: str | None = None
     start_time: int | None = None                    # 节点进入 task_dispatch/BBS claim 的时间
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
-    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
+    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(DONE→SUCCESS / FAILED→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
+    progress_reason: str | None = None                       # 推进原因(规划/搜推/派发)
+    failure_reason: str | None = None                        # 失败原因(规划/搜推/派发/执行)
     extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
+    actual_goal: Goal | None = None                            # Relay 当前 Bot 实际接受的执行目标
+    local_acceptance_result: AcceptanceResult | None = None   # Relay 节点局部验收事实，不直接驱动终态
+    execution_decision: str | None = None                      # ACCEPTED | DECLINED
 
 
 @dataclass
@@ -376,4 +503,9 @@ class PlanResult:
     children: list["TaskNode"] = field(default_factory=list)
     has_gap: bool = False
     gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")
-    acceptance_result: AcceptanceResult | None = None  # owner bot plan 自评(对齐 common_task 协议 {verdict,acceptances_metric:[{id,passed,summary}],gaps});gap 闭翻 DONE 时直接用作父自身验收结果,空则回退合成
+    acceptance_result: AcceptanceResult | None = None  # owner bot plan 自评(对齐 common_task 协议 {verdict,done_items:[{id,passed,summary}],gap_items});gap 闭翻 DONE 时直接用作父自身验收结果,空则回退合成
+    # REQ-3 PLAN 轨迹溯源(additive optional 字段,默认 None → 完全向后兼容;现有构造不影响)
+    strategy_name: str | None = None         # "workflow" | "gap_based" | None — 命中策略名
+    prompt_digest: str | None = None         # SHA-256(prompt + response[:500]);workflow/未命中 → None
+    raw_response_digest: str | None = None   # SHA-256(response[:500]);workflow/未命中 → None
+    planned_children: list[str] | None = None  # 去重后子 node_id 列表(TaskPlanner.plan 回填)

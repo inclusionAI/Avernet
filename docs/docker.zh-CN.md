@@ -2,7 +2,9 @@
 
 [English](docker.md)
 
-这份文档教你用 `Dockerfile.ocb` 构建 Docker 镜像，然后启动本地 Avernet stack。
+这份文档教你用 `docker/minibcn/Dockerfile.ocb` 构建 Docker 镜像，然后启动本地 Avernet stack。
+
+> 当前限制：`docker/ocb-entrypoint.sh` 仍向 singlebox 传入已移除的 `--local`，当前容器启动会失败。下面的路径已按仓库布局更新，但不代表 Docker 启动已验证通过。Docker 入口修复前，请使用 [本机 Quick Start](quick-start.zh-CN.md)。
 
 Docker 路径分为两步：
 
@@ -15,7 +17,7 @@ Docker 路径分为两步：
 |---|---|
 | BCS server | Rust 写的 Bot Coordination Service，对外暴露 `:21000` |
 | 前端工作台 | 从 `apps/frontend` 构建出的 Avernet 静态前端，对外暴露 `:8000` |
-| `bcs-cli` | 命令行工具，位于 `/opt/ocb/src/bcs/target/debug/bcs-cli` |
+| `bcs-cli` | 命令行工具，位于 `/opt/ocb/apps/bcs/target/debug/bcs-cli` |
 | `openclaw` 全局命令 | 公网 npm 安装，方便容器内或主机端跑 OpenClaw |
 | BCN 插件 | `openclaw-channel-bcn`，从源码 build 后软链到 `/root/.openclaw/extensions/openclaw-channel-bcn`，让 OpenClaw 能连 BCS |
 | 5 个 OpenClaw 实例 | 容器启动后跑 5 个 OpenClaw demo 角色（CEO / 产品经理 / 研发 / 验证 / 客服），每个通过 BCN 插件连 BCS 并自动 onboard，监听 `:30001`/`:30011`/`:30021`/`:30031`/`:30041` |
@@ -32,14 +34,14 @@ Docker 路径分为两步：
 - （可选）对应的模型 API key
 - （可选）对应的模型 ID
 
-不要把 API key 写进 `Dockerfile.ocb`，也不要提交到 Git。运行容器时用 `-e` 传进去。
+不要把 API key 写进 `docker/minibcn/Dockerfile.ocb`，也不要提交到 Git。运行容器时用 `-e` 传进去。
 
 ## 第一步：编译镜像
 
 在仓库根目录运行：
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local .
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local .
 ```
 
 这一步会做这些事：
@@ -56,7 +58,7 @@ docker build -f Dockerfile.ocb -t ocb:local .
 默认走官方源，海外开发者直接 `docker build` 即可。中国大陆拉 apt / cargo / npm / Rust toolchain 慢的话，加一个参数即可：
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local \
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local \
   --build-arg USE_CN_MIRROR=1 \
   .
 ```
@@ -70,7 +72,7 @@ docker build -f Dockerfile.ocb -t ocb:local \
 如果你的 registry 证书临时有问题，可以临时关闭 npm TLS 校验：
 
 ```bash
-docker build -f Dockerfile.ocb -t ocb:local \
+docker build -f docker/minibcn/Dockerfile.ocb -t ocb:local \
   --build-arg NPM_STRICT_SSL=false \
   .
 ```
@@ -85,24 +87,30 @@ docker build -f Dockerfile.ocb -t ocb:local \
 - `<model-api-key>`：模型 API key，例如 `sk-xxxxxxxxxxxxxxxx`
 - `<model-id>`：模型服务提供方展示的模型 ID
 
-如果用 Docker Compose，默认不需要创建 `.env.local`。只有需要覆盖端口、本地 mock 显示名、指定宿主机 OpenClaw 配置目录，或显式配置模型 API 时，才复制模板并显式传入：
+先按第一步从仓库根目录构建 `ocb:local`。Compose 文件位于 `docker/minibcn/docker-compose.yml`，但其构建上下文尚未同步迁移。下面使用已构建镜像并加上 `--no-build`，不使用过时的 Compose 构建配置：
 
 ```bash
-test -f .env.local || cp .env.example .env.local
-# 按需取消注释或修改 .env.local 里的可选配置
-docker compose --env-file .env.local up --build
+docker compose -f docker/minibcn/docker-compose.yml up --no-build
 ```
 
-Docker 会只读挂载宿主机 `${HOME}/.openclaw` 到容器内，并在没有完整 `OPENCLAW_OPENAI_*` 时尝试复用其中的 `openclaw.json`。这条路径和本机 `singlebox.sh` 的 5bot 行为对齐：完整 `OPENCLAW_OPENAI_*` 优先；否则回退到本机 OpenClaw 模型配置；都没有时继续启动，但 bot 不能真实回复。
+如果用 Docker Compose，默认不需要创建 `singlebox/.env.local`。只有需要覆盖端口、本地 mock 显示名、指定宿主机 OpenClaw 配置目录，或显式配置模型 API 时，才复制模板并显式传入：
+
+```bash
+test -f singlebox/.env.local || cp singlebox/.env.example singlebox/.env.local
+# 按需取消注释或修改 singlebox/.env.local 里的可选配置
+docker compose -f docker/minibcn/docker-compose.yml --env-file singlebox/.env.local up --no-build
+```
+
+Docker 会只读挂载宿主机 `${HOME}/.openclaw` 到容器内，并在没有完整 `OPENCLAW_OPENAI_*` 时尝试复用其中的 `openclaw.json`。这是 Docker 的旧模型来源行为，不是本机 singlebox 的 `mock` / `manual` / `home` 菜单；本机 `manual` 要求三项完整，不会自动回退到宿主机 JSON。
 如果宿主机配置目录不存在，Docker Compose 可能会创建一个空目录；启动仍会继续，但不会复用本机模型配置。
 
-要改成其他宿主机 OpenClaw 配置目录，在 `.env.local` 中设置：
+要改成其他宿主机 OpenClaw 配置目录，在 `singlebox/.env.local` 中设置：
 
 ```bash
 OPENCLAW_HOST_CONFIG_DIR=/path/to/.openclaw
 ```
 
-如果你没有本机 OpenClaw 配置，也可以在 `.env.local` 中同时设置这三项：
+如果你没有本机 OpenClaw 配置，也可以在 `singlebox/.env.local` 中同时设置这三项：
 
 ```bash
 OPENCLAW_OPENAI_BASE_URL=https://api.openai.com/v1
@@ -127,7 +135,7 @@ docker run --rm -it \
 
 - 用 local 配置启动 BCS。
 - 在 `:8000` 启动前端工作台。
-- 启动 5 个 OpenClaw 实例（CEO / 产品经理 / 研发 / 验证 / 客服），每个由 `src/bcs/scripts/start_bcs_bots.sh` 拉起。
+- 启动 5 个 OpenClaw 实例（CEO / 产品经理 / 研发 / 验证 / 客服），每个由 `apps/bcs/scripts/start_bcs_bots.sh` 拉起。
 - 让 5 个 OpenClaw 通过 BCN 插件连接到 BCS（WebSocket `/ws/bot`）。
 - 把 5 个 OpenClaw 实例 onboard 到 BCS。
 - 把它们设置为 `public`，方便本地测试。
@@ -152,10 +160,17 @@ http://127.0.0.1:8000/
 
 前端是默认使用方式。你也可以用下面这些更底层的连接方式：
 
+下面的 `docker exec`、`docker cp`、日志和停止示例使用 `docker run --name` 设置的 `ocb-local` 名称。使用 Compose 时，请改用 `teamclaw` 服务，例如：
+
+```bash
+docker compose -f docker/minibcn/docker-compose.yml exec teamclaw \
+  /opt/ocb/apps/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 list
+```
+
 ### 方式 A：用容器内的 `bcs-cli`
 
 ```bash
-docker exec -it ocb-local /opt/ocb/src/bcs/target/debug/bcs-cli \
+docker exec -it ocb-local /opt/ocb/apps/bcs/target/debug/bcs-cli \
   --url http://127.0.0.1:21000 onboard \
   --name "My Bot" --summary "Hello bot"
 ```
@@ -163,7 +178,7 @@ docker exec -it ocb-local /opt/ocb/src/bcs/target/debug/bcs-cli \
 ### 方式 B：把 `bcs-cli` 复制到主机使用
 
 ```bash
-docker cp ocb-local:/opt/ocb/src/bcs/target/debug/bcs-cli ./bcs-cli
+docker cp ocb-local:/opt/ocb/apps/bcs/target/debug/bcs-cli ./bcs-cli
 ./bcs-cli --url http://127.0.0.1:21000 onboard --name "My Bot"
 ```
 
@@ -186,21 +201,21 @@ npm install -g "openclaw@>=2026.3.28"
 ```bash
 # 仓库根目录下执行
 (
-  cd src/bcs/crates/plugins/openclaw-channel-bcn
+  cd apps/bcs/crates/plugins/openclaw-channel-bcn
   npm install
   npm run build
 )
 
 # 软链到 OpenClaw 扩展目录
 mkdir -p ~/.openclaw/extensions
-ln -sfn "$(pwd)/src/bcs/crates/plugins/openclaw-channel-bcn" \
+ln -sfn "$(pwd)/apps/bcs/crates/plugins/openclaw-channel-bcn" \
   ~/.openclaw/extensions/openclaw-channel-bcn
 
 # 验证软链指向源码
 ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
-这正是容器内 `Dockerfile.ocb` 做的事，只是把 `/opt/ocb` 换成宿主机仓库路径。
+这正是容器内 `docker/minibcn/Dockerfile.ocb` 做的事，只是把 `/opt/ocb` 换成宿主机仓库路径。
 
 #### C-2. `docker cp` 从容器复制一份（适合"我不想本地 build"）
 
@@ -208,7 +223,7 @@ ls -l ~/.openclaw/extensions/openclaw-channel-bcn
 
 ```bash
 mkdir -p ~/.openclaw/extensions
-docker cp ocb-local:/opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn \
+docker cp ocb-local:/opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn \
   ~/.openclaw/extensions/openclaw-channel-bcn
 ```
 
@@ -226,7 +241,7 @@ BCS_URL=ws://127.0.0.1:21000/ws/bot \
 把宿主机这个 OpenClaw 注册到 BCS：
 
 ```bash
-./src/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 onboard \
+./apps/bcs/target/debug/bcs-cli --url http://127.0.0.1:21000 onboard \
   --name "Host OpenClaw" \
   --summary "OpenClaw on host machine" \
   --domains "local,openclaw" \
@@ -256,7 +271,7 @@ docker stop ocb-local
 
 不配置模型环境变量也可以启动容器，用于验证 BCS、BCN 插件和本地 bot onboard。
 
-如果你要用 Docker Compose 验证真实模型调用，默认会尝试复用本机 `${HOME}/.openclaw/openclaw.json`。如果没有本机 OpenClaw 配置，也可以在 `.env.local` 中同时设置：
+如果你要用 Docker Compose 验证真实模型调用，默认会尝试复用本机 `${HOME}/.openclaw/openclaw.json`。如果没有本机 OpenClaw 配置，也可以在 `singlebox/.env.local` 中同时设置：
 
 ```bash
 OPENCLAW_OPENAI_BASE_URL=<model-api-base-url>
@@ -276,7 +291,7 @@ OPENCLAW_OPENAI_MODEL_ID=<model-id>
 
 如果 `21000` 或 `8000` 已经被你电脑上的其他程序占用了，可以换端口。Docker Compose 会在容器内和宿主机上使用同一个值。
 
-使用 Docker Compose 时，在 `.env.local` 中修改：
+使用 Docker Compose 时，在 `singlebox/.env.local` 中修改：
 
 ```bash
 BCS_PORT=<可用的 BCS 端口>
@@ -286,19 +301,19 @@ FRONTEND_PORT=<可用的前端端口>
 然后启动：
 
 ```bash
-docker compose --env-file .env.local up --build
+docker compose -f docker/minibcn/docker-compose.yml --env-file singlebox/.env.local up --no-build
 ```
 
 检查 BCS：
 
 ```bash
 set -a
-. ./.env.local
+. ./singlebox/.env.local
 set +a
 curl "http://127.0.0.1:${BCS_PORT:-21000}/health"
 ```
 
-前端访问 `.env.local` 中的 `FRONTEND_PORT`；未设置时默认是 `http://127.0.0.1:8000/`。
+前端访问 `singlebox/.env.local` 中的 `FRONTEND_PORT`；未设置时默认是 `http://127.0.0.1:8000/`。
 
 ### 3. 依赖下载失败
 
@@ -322,7 +337,7 @@ docker logs -f ocb-local
 
 ## 这不是生产镜像
 
-`Dockerfile.ocb` 是本地体验和联调用的镜像。
+`docker/minibcn/Dockerfile.ocb` 是本地体验和联调用的镜像。
 
 它会以开发模式启动 BCS 和 5 个测试 bot，适合第一次跑通 BCS，不适合作为生产部署镜像。
 
