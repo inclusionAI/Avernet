@@ -62,6 +62,22 @@ class CompletionResponse:
 
 
 @dataclass(frozen=True)
+class CompletionChunk:
+    """One streaming delta from ``LLMProvider.stream_complete``.
+
+    ``text`` is the delta for this chunk (not the accumulated text);
+    ``finish_reason``, ``model`` and ``token_usage`` are only set on the
+    final chunk (OpenAI-compatible servers send usage in the last data
+    chunk when ``stream_options.include_usage`` is requested).
+    """
+
+    text: str = ""
+    finish_reason: FinishReason | None = None
+    model: ModelId | None = None
+    token_usage: TokenUsage | None = None
+
+
+@dataclass(frozen=True)
 class DecisionParse:
     decision: Decision | None
     error: str | None = None

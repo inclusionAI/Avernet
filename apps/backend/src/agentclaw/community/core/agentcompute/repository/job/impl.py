@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select, update
 
@@ -14,6 +14,14 @@ from agentclaw.community.core.agentcompute.repository.job.protocol import (
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 TaskQueueStatus = dm.TaskQueueStatus
+
+
+def _utcnow() -> datetime:
+    # utcnow() is deprecated (3.12): aware-now, stripped to naive UTC so the
+    # job columns keep their naive-UTC storage convention (SQLite compares
+    # datetimes as text; mixing aware and naive renders would drift).
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 
 def _new_id() -> str:
@@ -32,8 +40,8 @@ class JobRepository(JobRepositoryProtocol):
                 job_id=_new_id(),
                 run_id=run_id,
                 status=TaskQueueStatus.PENDING.value,
-                run_at=run_at or datetime.utcnow(),
-                deadline_at=datetime.utcnow() + timedelta(seconds=deadline_seconds),
+                run_at=run_at or _utcnow(),
+                deadline_at=_utcnow() + timedelta(seconds=deadline_seconds),
                 tenant=tenant,
             )
             session.add(row)
@@ -51,7 +59,7 @@ class JobRepository(JobRepositoryProtocol):
 
     def claim_batch(self, worker_id: str, tenant_filter: list[dm.TenantId] | None,
                     limit: int, lease_seconds: int) -> list[dict]:
-        now = datetime.utcnow()
+        now = _utcnow()
         lease_until = now + timedelta(seconds=lease_seconds)
         with self._db.orm_session() as session:
             stmt = (
@@ -87,7 +95,7 @@ class JobRepository(JobRepositoryProtocol):
         Returns claim dicts extended with `reclaims`; the worker applies the
         D40 circuit breaker: `reclaims` > reclaim_max -> run terminal STUCK.
         """
-        now = datetime.utcnow()
+        now = _utcnow()
         lease_until = now + timedelta(seconds=lease_seconds)
         with self._db.orm_session() as session:
             rows = session.execute(
@@ -125,7 +133,7 @@ class JobRepository(JobRepositoryProtocol):
                     om.AcAgentComputeJobModel.claimed_by == worker_id,
                     om.AcAgentComputeJobModel.claim_epoch == claim_epoch,
                     om.AcAgentComputeJobModel.is_deleted == False,
-                ).values(lease_expires_at=datetime.utcnow() + timedelta(seconds=lease_seconds))
+                ).values(lease_expires_at=_utcnow() + timedelta(seconds=lease_seconds))
             )
         return result.rowcount > 0
 
@@ -140,7 +148,7 @@ class JobRepository(JobRepositoryProtocol):
                     om.AcAgentComputeJobModel.claim_epoch == claim_epoch,
                 ).values(
                     status=TaskQueueStatus.PENDING.value,
-                    run_at=datetime.utcnow() + timedelta(seconds=delay_seconds),
+                    run_at=_utcnow() + timedelta(seconds=delay_seconds),
                     last_error=error,
                     claimed_by=None,
                     lease_expires_at=None,

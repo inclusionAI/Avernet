@@ -22,10 +22,11 @@ from agentclaw.community.core.agentcompute.domain.models.enums import (
     TerminationReason, WaitMode, WorkerOutcomeKind,
 )
 from agentclaw.community.core.agentcompute.domain.models.specs import (
-    AcceptanceGap, AgentSpecRaw, CompletionRequest, CompletionResponse,
-    Decision, DecisionParse, FinalAnswer, FinishDecision, GuardDetails,
-    HandoffDecision, MessageContent, RequestMetadata, SpawnDecision,
-    StructuredOutput, SubagentResult, TaskEnvelope, TokenUsage, WaitDecision,
+    AcceptanceGap, AgentSpecRaw, CompletionChunk, CompletionRequest,
+    CompletionResponse, Decision, DecisionParse, FinalAnswer, FinishDecision,
+    GuardDetails, HandoffDecision, MessageContent, RequestMetadata,
+    SpawnDecision, StructuredOutput, SubagentResult, TaskEnvelope, TokenUsage,
+    WaitDecision,
 )
 from agentclaw.community.core.agentcompute.domain.models.entities import (
     Agent, GuardEvent, Message, NameAliasMap, ResultShard, Round, Run,
@@ -42,7 +43,8 @@ __all__ = [
     "LlmCallKind", "WorkerOutcomeKind", "TaskQueueStatus", "FinishReason",
     "StreamEventKind",
     "TokenUsage", "AcceptanceGap", "TaskEnvelope", "SubagentResult",
-    "CompletionRequest", "CompletionResponse", "DecisionParse", "RunPage",
+    "CompletionRequest", "CompletionResponse", "CompletionChunk",
+    "DecisionParse", "RunPage",
     "SpawnDecision", "WaitDecision", "HandoffDecision", "FinishDecision",
     "Decision",
     "RequestMetadata", "AgentSpecRaw", "Run", "Agent", "Message",

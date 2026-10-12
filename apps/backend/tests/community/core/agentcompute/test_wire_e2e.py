@@ -164,15 +164,26 @@ def wire():
     stop = threading.Event()
 
     def tick_worker(done: threading.Event) -> None:
+        # One persistent event loop for the whole fixture, matching how the
+        # production worker runs inside the app's single loop. The runtime's
+        # asyncio objects (work queue, events, pool tasks) are created and
+        # awaited on this loop only; a fresh asyncio.run() per tick puts
+        # every tick on a different loop, which is the one variable that
+        # correlated with the sync run stalling in full-battery contexts.
         import asyncio
 
-        while not stop.is_set():
-            try:
-                asyncio.run(worker.run_once())
-            except Exception as exc:
-                print(f"[wire-worker] tick error: {exc!r}", flush=True)
-            time.sleep(0.05)
-        done.set()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            while not stop.is_set():
+                try:
+                    loop.run_until_complete(worker.run_once())
+                except Exception as exc:
+                    print(f"[wire-worker] tick error: {exc!r}", flush=True)
+                time.sleep(0.05)
+        finally:
+            loop.close()
+            done.set()
 
     worker_done = threading.Event()
     worker_thread = threading.Thread(
@@ -274,6 +285,35 @@ class TestOverTheWire:
         assert status == 200
         assert body["status"] == "COMPLETED"
         assert body["final_answer"] == "done over the wire"
+
+    def test_sync_run_over_wire_diag(self, wire):
+        # TEMPORARY diagnostic twin of the test above: when the submit stalls,
+        # dump worker stacks + durable rows before re-raising, so the
+        # full-battery-only stall can be caught in the act.
+        from agentclaw.community.core.agentcompute.repository.registry import (
+            ALL_MODELS,
+        )
+        from sqlalchemy import select
+        try:
+            status, body = _post(
+                "/agentcompute/v1/runs?wait=true",
+                _submit_body(goal="sync cycle", idem="wire-sync"),
+            )
+        except Exception:
+            import faulthandler
+            import sys
+            print("\n===SYNC STALL DIAG dump at timeout===", flush=True)
+            faulthandler.dump_traceback(file=sys.stdout)
+            db = wire.get(AgentComputeWorker)._job_repo._db
+            with db.orm_session() as s:
+                for model in ALL_MODELS:
+                    if model.__tablename__ != "ac_agent_compute_audit":
+                        rows = s.execute(select(model)).scalars().all()
+                        print(f"[{model.__tablename__}] {len(rows)} rows", flush=True)
+                        for row in rows[:5]:
+                            print("   ", row, flush=True)
+            raise
+        assert status == 200
 
     def test_idempotency_join_over_wire(self, wire):
         body = _submit_body(goal="dedup", idem="wire-dedup")

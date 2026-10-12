@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from agentclaw.community.core.agentcompute.domain.models import (
+    CompletionChunk,
     CompletionRequest,
     CompletionResponse,
     FinishReason,
@@ -115,6 +116,75 @@ class OpenAICompatibleClient:
                 ) from last_exc
 
         raise RuntimeError("unreachable")
+
+    def stream_complete(self, request: CompletionRequest):
+        # Streaming twin of complete(): stream_options.include_usage makes
+        # the send a final usage-carrying data event before [DONE], so a
+        # consumer can record tokens without a second call. No retry here —
+        # a stream that dies mid-flight surfaces to the caller as terminal;
+        # partial text already yielded stays the caller's to discard.
+        return self._stream_chunks(request)
+
+    async def _stream_chunks(self, request: CompletionRequest):
+        model = self._resolve_model(request.model, request.kind)
+        body = {
+            "model": model,
+            "messages": [
+                *([{"role": "system", "content": request.system_prompt}] if request.system_prompt else []),
+                {"role": "user", "content": request.user_prompt},
+            ],
+            "max_tokens": request.max_tokens or self._max_tokens,
+            "temperature": request.temperature,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        async with self._client.stream("POST", "/chat/completions", json=body) as response:
+            if response.status_code >= 400:
+                if self._obs is not None:
+                    self._obs.llm_call(
+                        "non_retryable" if response.status_code < 500 else "transient"
+                    )
+                raise RuntimeError(
+                    f"chat completion stream failed ({response.status_code})"
+                )
+            usage: TokenUsage | None = None
+            finish_reason: FinishReason | None = None
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                event = json.loads(data)
+                if event.get("usage"):
+                    usage = TokenUsage(
+                        prompt_tokens=event["usage"].get("prompt_tokens", 0),
+                        completion_tokens=event["usage"].get("completion_tokens", 0),
+                        total_tokens=event["usage"].get("total_tokens", 0),
+                    )
+                    continue
+                choices = event.get("choices") or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                delta_text = (choice.get("delta") or {}).get("content") or ""
+                raw_finish = choice.get("finish_reason")
+                if raw_finish:
+                    try:
+                        finish_reason = FinishReason(raw_finish)
+                    except ValueError:
+                        finish_reason = FinishReason.ERROR
+                if delta_text:
+                    yield CompletionChunk(text=delta_text)
+            yield CompletionChunk(
+                finish_reason=finish_reason or FinishReason.STOP,
+                model=ModelId(model),
+                token_usage=usage or TokenUsage(0, 0, 0),
+            )
+            if self._obs is not None:
+                self._obs.llm_call("ok")
+                if usage is not None:
+                    self._obs.token_usage(UNATTRIBUTED_TENANT, request.kind, usage)
 
     def _resolve_model(self, model: ModelId | None, kind: LlmCallKind) -> str:
         if model is not None:

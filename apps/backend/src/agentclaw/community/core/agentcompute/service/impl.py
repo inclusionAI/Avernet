@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import uuid
 from contextlib import contextmanager
@@ -230,7 +230,8 @@ class AgentComputeService(AgentComputeServiceProtocol):
         # like every other timestamp in the module. Cost enforcement stays
         # out (D22) — this is a read for billing attribution.
         since = (
-            datetime.utcfromtimestamp(since_ms / 1000.0) if since_ms is not None
+            datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+            if since_ms is not None
             else None
         )
         usage = self._message_repo.aggregate_usage_by_tenant(

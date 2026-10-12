@@ -110,6 +110,12 @@ class RunRepository(RunRepositoryProtocol):
         }
         if status in self.TERMINAL_STATUSES:
             values["ended_at"] = _now_ms()
+            # The *active* idempotency key only exists to join duplicate
+            # submits while the run is live; at terminal it must be cleared
+            # so the unique index frees the slot — a retry with the same
+            # key then creates a fresh run instead of IntegrityError-ing
+            # against the completed row.
+            values["active_idempotency_key"] = None
         job_epoch_current = (
             select(om_job.AcAgentComputeJobModel.job_id).where(
                 om_job.AcAgentComputeJobModel.run_id == run_id,

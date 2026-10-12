@@ -402,3 +402,99 @@ class TestStubLLMProvider:
             assert default.model == "stub"
 
         asyncio.run(main())
+
+
+def _sse(data_events: list[dict], done: bool = True) -> bytes:
+    lines = [f"data: {json.dumps(event)}" for event in data_events]
+    if done:
+        lines.append("data: [DONE]")
+    return ("\n\n".join(lines) + "\n\n").encode()
+
+
+class TestStreamingPath:
+    def test_openai_stream_yields_deltas_then_usage_chunk(self):
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "Hel"}}]},
+                {"choices": [{"delta": {"content": "lo"}, "finish_reason": "stop"}]},
+                {"choices": [], "usage": {
+                    "prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7,
+                }},
+            ])
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            chunks = [chunk async for chunk in client.stream_complete(_req())]
+            await client._client.aclose()
+
+            assert "".join(c.text for c in chunks) == "Hello"
+            deltas = [c for c in chunks if c.text]
+            assert all(c.finish_reason is None for c in deltas)
+            final = chunks[-1]
+            assert final.text == ""
+            assert final.finish_reason == FinishReason.STOP
+            assert final.model == "default-model-x"
+            assert final.token_usage == TokenUsage(3, 4, 7)
+
+            sent = json.loads(server.requests[0].read())
+            assert sent["stream"] is True
+            assert sent["stream_options"] == {"include_usage": True}
+
+        asyncio.run(main())
+
+    def test_openai_stream_rejects_unknown_finish_reason_to_error(self):
+        async def main():
+            payload = _sse([
+                {"choices": [{"delta": {"content": "x"}, "finish_reason": "weird"}]},
+                {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            ])
+            server = FakeOpenAIServer([httpx.Response(200, content=payload)])
+            client = _make_client(server)
+            chunks = [chunk async for chunk in client.stream_complete(_req())]
+            await client._client.aclose()
+            assert chunks[-1].finish_reason == FinishReason.ERROR
+
+        asyncio.run(main())
+
+    def test_openai_stream_fail_fast_has_no_retry(self):
+        async def main():
+            server = FakeOpenAIServer([
+                httpx.Response(500, json={"error": "boom"}),
+                httpx.Response(200, content=_sse([
+                    {"choices": [{"delta": {"content": "never"}}]},
+                ])),
+            ])
+            client = _make_client(server, max_retries=3)
+            with pytest.raises(RuntimeError, match="stream failed \\(500\\)"):
+                async for _ in client.stream_complete(_req()):
+                    pass
+            await client._client.aclose()
+            assert len(server.requests) == 1, "streaming must not retry"
+
+        asyncio.run(main())
+
+    def test_openai_stream_uses_orchestrator_model_override(self):
+        async def main():
+            server = FakeOpenAIServer([httpx.Response(200, content=_sse([
+                {"choices": [{"delta": {"content": "hi"}}]},
+            ]))])
+            client = _make_client(server, orchestrator_model="scout-commander")
+            async for _ in client.stream_complete(_req(kind=LlmCallKind.ORCHESTRATOR)):
+                pass
+            await client._client.aclose()
+            sent = json.loads(server.requests[0].read())
+            assert sent["model"] == "scout-commander"
+
+        asyncio.run(main())
+
+    def test_stub_stream_mirrors_scripted_complete(self):
+        async def main():
+            stub = StubLLMProvider(script=["spot decision"])
+            chunks = [c async for c in stub.stream_complete(_req(model=ModelId("echo-model")))]
+            assert [c.text for c in chunks] == ["spot decision", ""]
+            final = chunks[-1]
+            assert final.finish_reason == FinishReason.STOP
+            assert final.model == "echo-model"
+            assert final.token_usage == TokenUsage(10, 10, 20)
+            assert stub.call_count == 1, "stream shares the script counter with complete()"
+
+        asyncio.run(main())
