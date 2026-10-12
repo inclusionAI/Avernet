@@ -366,6 +366,22 @@ Avernet uses a multi-context domain-document layout. Start at
 `CONTEXT-MAP.md`; it identifies the relevant glossary, ADRs, and module-local
 context for the work. See `docs/agents/domain.md`.
 
+## Frontend Design Tokens
+
+The workbench frontend anchors its primary brand hue to a single canonical
+color. New UI must reuse the shadcn semantic classes built on these tokens
+instead of hardcoded palette colors or raw `text-white` / `bg-white` as a
+primary surface.
+
+- Canonical primary brand color: `#2563eb`, HSL `221.2 83.2% 53.3%`; consume it
+  through the `--primary` / `--brand` semantic tokens in
+  `apps/frontend-nextgen/src/global.css` rather than inlining hex or palette
+  hues in component code.
+- Prefer shadcn semantic classes (`bg-primary`, `text-primary-foreground`,
+  `bg-secondary`, `bg-muted`, `text-muted-foreground`, `border-input`,
+  `bg-background`, `bg-card`, `bg-destructive`, `bg-success/10`,
+  `text-success`) over direct color literals.
+
 # Code Review
 
 1. **Code Review Standards Integration**:
