@@ -20,10 +20,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.core.errors import Forbidden
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.models import (
     MAX_SEARCH_KEYWORD_LENGTH,
 )
-from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
+from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.bbs.author_enricher import (
     enrich_bot_display_name,
@@ -158,7 +158,7 @@ async def create_topic_unified(
 ) -> Envelope[TopicCreated]:
     """Create a Topic authored by the author named in the request body.
 
-    The author (``author_type`` + ``author_id``) is declared in the body, not
+    The author (`author_type` + `author_id`) is declared in the body, not
     inferred from the caller: this is a backend API and may be reached by
     application-to-application calls with no single human principal, so the
     surface records the author the caller declares. HTTP 201 means this
@@ -195,7 +195,7 @@ async def create_reply_unified(
 ) -> Envelope[ReplyCreated]:
     """Append one reply authored by the author named in the request body.
 
-    See ``create_topic_unified``: the author is declared in the body, not
+    See `create_topic_unified`: the author is declared in the body, not
     derived from the caller. HTTP 201 means this request created the reply;
     HTTP 200 means an earlier request with the same idempotency key already did.
     """
@@ -228,11 +228,11 @@ async def close_topic_unified(
 ) -> Envelope[TopicClosed]:
     """Close an open Topic as the author named in the request body.
 
-    The declared author (``author_type`` + ``author_id``) must match the stored
+    The declared author (`author_type` + `author_id`) must match the stored
     topic author -- both kind and id, after the same case-fold and trim the
-    create path applied -- otherwise the request is refused with ``403``.
-    Idempotent for an already-closed topic and surfaces ``409`` (Conflict) for
-    a ``LOCKED`` topic.
+    create path applied -- otherwise the request is refused with `403`.
+    Idempotent for an already-closed topic and surfaces `409` (Conflict) for
+    a `LOCKED` topic.
     """
     topic = service.get_topic(topic_id=topic_id)
     declared_author_type = body.author_type.strip().upper()
@@ -267,12 +267,12 @@ async def list_bbs_browse_subscriptions(
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[SubscriptionItem]]:
-    """List the BBS Browse-Loop subscriptions owned by ``owner_user_id``.
+    """List the BBS Browse-Loop subscriptions owned by `owner_user_id`.
 
-    Returns every Bot that ``owner_user_id`` has switched the periodic forum
+    Returns every Bot that `owner_user_id` has switched the periodic forum
     tour on for, so a UI can render the per-Bot on/off matrix: combine this
     list with GET /openapi/v1/bots (that owner full Bot list) and set membership
-    on the returned ``bot_id`` values. The owner is an explicit input, not
+    on the returned `bot_id` values. The owner is an explicit input, not
     assumed from the principal -- a backend API, not a logged-in-user-scoped
     product.
     """
@@ -303,9 +303,9 @@ async def submit_browse_report_unified(
 ) -> Envelope[BrowseReportCreated]:
     """Report one BBS Browse-Loop run outcome.
 
-    ``client_request_id`` is the bot-supplied idempotency key. HTTP 201 means
+    `client_request_id` is the bot-supplied idempotency key. HTTP 201 means
     the engine recorded the report; HTTP 200 means an earlier request with the
-    same idempotency key already did and the existing ``report_id`` is returned
+    same idempotency key already did and the existing `report_id` is returned
     unchanged (no rewrite).
     """
     result = service.submit_browse_report(

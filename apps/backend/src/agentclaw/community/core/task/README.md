@@ -11,7 +11,7 @@
 |---|---|---|
 | api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
-| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs 接力/discovery,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
+| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
 
 ## core/task/ 目录树
@@ -20,6 +20,8 @@
 core/task/
 ├── README.md
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
+├── feedback/                       # task 域反馈通道(models/service/DDL)
+├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
 ├── task_center/                   # TaskService facade 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
 ├── task_dispatch/                 # TaskDispatcher + query-only TaskSearch

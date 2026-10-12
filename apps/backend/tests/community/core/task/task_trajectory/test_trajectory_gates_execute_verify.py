@@ -130,13 +130,14 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
 
 
-def _accept(verdict: AcceptanceVerdict = AcceptanceVerdict.DONE,
-            gaps: list[str] | None = None,
-            gap_items: list[str] | None = None) -> AcceptanceResult:
+def _accept(
+    verdict: AcceptanceVerdict = AcceptanceVerdict.DONE,
+    gap_items: list[str] | None = None,
+) -> AcceptanceResult:
     return AcceptanceResult(
         verdict=verdict,
         done_items=[],
-        gap_items=gap_items if gap_items is not None else gaps or [],
+        gap_items=gap_items or [],
     )
 
 
@@ -1129,7 +1130,7 @@ class TestStaticPlanExecuteVerifyTrajectoryGate:
         the node); ``error_type``/``error_msg`` are None (no exec_error origin
         on the success path)."""
         svc = TaskGraphService()
-        graph = svc.initialize_graph(_static_task_info("t1"))
+        svc.initialize_graph(_static_task_info("t1"))
         # Manually materialize the "worker" node + set it RUNNING (mirrors what
         # ``_static_execute`` does for wave-0 children, without going through the
         # full dispatch flow on a unit test).
@@ -1167,7 +1168,7 @@ class TestStaticPlanExecuteVerifyTrajectoryGate:
         acceptance failed — mirrors the dynamic branch's accept_fail path
         where EXECUTE(success) precedes VERIFY(accept_fail))."""
         svc = TaskGraphService()
-        graph = svc.initialize_graph(_static_task_info("t1"))
+        svc.initialize_graph(_static_task_info("t1"))
         _set_running_node(svc, "t1", "worker", harness_retries=0)
         repo = _TrajRepo()
         eng = _TrajectoryCaseEngine(

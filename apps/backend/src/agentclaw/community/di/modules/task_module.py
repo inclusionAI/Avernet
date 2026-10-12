@@ -31,12 +31,20 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskSettingsService,
     TaskSettingsServiceProtocol,
 )
+from agentclaw.community.api.task.feedback_service import FeedbackServiceProtocol
+from agentclaw.community.api.task.forum_service import ForumServiceProtocol
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.repository.implementations.task.feedback import (
+    FeedbackRepository,
+)
+from agentclaw.community.core.repository.implementations.task.forum import (
+    ForumRepository,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
@@ -44,6 +52,12 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.feedback import (
+    FeedbackRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.task.forum import (
+    ForumRepositoryProtocol,
 )
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
@@ -56,6 +70,13 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
 from agentclaw.community.core.task.task_center.delivery_lifecycle import TaskDeliveryLifecycle
+from agentclaw.community.core.task.feedback.services.feedback_service import FeedbackService
+from agentclaw.community.core.task.forum.browsing import (
+    BbsBrowseLoopRunner,
+    BbsBrowseLoopScheduler,
+)
+from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
@@ -125,6 +146,15 @@ class TaskModule(Module):
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
+        binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
+        binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
+        binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
+        # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
+        # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
+        # discoverable by the application lifecycle auto-start path.
+        binder.bind(BbsBrowseLoopScheduler, to=BbsBrowseLoopScheduler, scope=singleton)
+        binder.bind(BbsBrowseCronManager, to=BbsBrowseCronManager, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
         # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
         # InMemoryCallbackCorrelationRegistry 经下方 in_memory_callback_correlation_registry
@@ -132,6 +162,21 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    def bbs_browse_loop_runner(
+        self,
+        bot: OpenApiBotPort,
+        service: ForumServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
+    ) -> BbsBrowseLoopRunner:
+        """Build the forum runner with this deployment's YAML-configured Backend URL."""
+        return BbsBrowseLoopRunner(
+            bot,
+            service,
+            backend_url=task_dispatch.backend_url,
         )
 
     @singleton

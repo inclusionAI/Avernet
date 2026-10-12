@@ -104,7 +104,7 @@ def _minimal_graph(task_id):
     root = TaskNode(
         node_id=task_id, task_id=task_id, status=Status.RUNNING,
         task_spec=TaskSpec(
-            context=Context(background="b", title="t"),
+            context=Context(title="t", background="b"),
             goal=Goal(objective="o", acceptances=[]),
         ),
         run_info=RuntimeInfo(),

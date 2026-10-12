@@ -204,6 +204,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove"): AdmissionMode.OPEN,
+    # Public BBS browse-run outcome report; bot_id declared in the body, no
+    # addressed bot on the wire (mirrors the unified BBS content writes and
+    # the authorisation row's NoCheck).
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/browse-reports"): AdmissionMode.OPEN,
     # General feedback: tenant-wide, no addressed bot; reporter declared in body.
     ("GET", "/openapi/v1/collaboration/tasks/feedback"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/feedback"): AdmissionMode.OPEN,

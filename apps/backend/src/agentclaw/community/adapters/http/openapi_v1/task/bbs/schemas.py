@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     MAX_AUTHOR_DISPLAY_NAME_LENGTH,
     MAX_AUTHOR_AVATAR_URL_LENGTH,
@@ -52,9 +52,9 @@ class CreateTopicRequest(BaseModel):
 class CreateHumanTopicRequest(BaseModel):
     """Create a Topic as the calling human user.
 
-    The public human contract does not expose ``topic_type``: the product
+    The public human contract does not expose `topic_type`: the product
     surface does not distinguish topic kinds, so the published topic always
-    reads as the default ``DISCUSSION``. The author is the calling principal —
+    reads as the default `DISCUSSION`. The author is the calling principal —
     never accepted from the body — so the route carries no author field.
     """
 
@@ -93,16 +93,16 @@ class CreateReplyRequest(BaseModel):
 class AuthorRefRequest(BaseModel):
     """Explicit author reference carried in the body of a public BBS write.
 
-    The ``/openapi/v1/collaboration/tasks/bbs/*`` unified write routes declare the author of the
+    The `/openapi/v1/collaboration/tasks/bbs/*` unified write routes declare the author of the
     content in the request body rather than inferring it from a verified caller:
     this surface is a backend API and may be reached by application-to-
     application calls with no single human principal. The engine records the
     declared author verbatim; the close route additionally compares it to the
     stored topic author.
 
-    ``author_type`` is a free string here so the case-insensitive normalisation
-    in ``ForumService._author_type`` (``.upper()`` then membership in
-    ``AUTHOR_TYPES``) still applies: sending ``human`` is as valid as ``HUMAN``.
+    `author_type` is a free string here so the case-insensitive normalisation
+    in `ForumService._author_type` (`.upper()` then membership in
+    `AUTHOR_TYPES`) still applies: sending `human` is as valid as `HUMAN`.
     """
 
     author_type: str = Field(
@@ -142,12 +142,12 @@ class AuthorRefRequest(BaseModel):
 
 
 class CreateTopicRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics``: create a Topic as a declared author.
+    """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics`: create a Topic as a declared author.
 
-    The author is named explicitly (``author_type`` + ``author_id``); the
+    The author is named explicitly (`author_type` + `author_id`); the
     declared author may be a human or a Bot. The product surface does not
-    distinguish topic kinds; the Topic is persisted as ``DISCUSSION`` and
-    the write body carries no ``topic_type`` Flag.
+    distinguish topic kinds; the Topic is persisted as `DISCUSSION` and
+    the write body carries no `topic_type` Flag.
     """
 
     client_request_id: str = Field(
@@ -168,10 +168,10 @@ class CreateTopicRequestUnified(AuthorRefRequest):
 
 
 class CreateReplyRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts``: reply as a
+    """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts`: reply as a
     declared author.
 
-    See ``CreateTopicRequestUnified``: the author is named in the body, not
+    See `CreateTopicRequestUnified`: the author is named in the body, not
     derived from the caller.
     """
 
@@ -188,12 +188,12 @@ class CreateReplyRequestUnified(AuthorRefRequest):
 
 
 class CloseTopicRequestUnified(AuthorRefRequest):
-    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close``: close a
+    """Body for `POST /openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close`: close a
     Topic as a declared author.
 
     The engine verifies the declared author matches the stored topic author
     (after the same case-fold and trim the create path applied) before
-    closing, so a mismatch surfaces as ``403``.
+    closing, so a mismatch surfaces as `403`.
     """
 
 
@@ -216,12 +216,12 @@ class ReplyCreated(BaseModel):
 class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
     """Internal-surface body for human Topic creation.
 
-    Mirrors ``POST /openapi/v1/collaboration/tasks/bbs/topics`` for trusted backend/agent callers that
+    Mirrors `POST /openapi/v1/collaboration/tasks/bbs/topics` for trusted backend/agent callers that
     bypass the gateway Spanner admission. The trusted caller declares which
-    human it is acting as via ``author_id``: the engine does NOT re-verify the
-    principal here because the ``/api/v1/*`` surface is gateway-signed. See
-    ``adapters/http/openapi_v1/task/router.py`` for the same pattern where
-    ``TaskInfoRequestDTO.owner_user_id`` rides in the body on both surfaces.
+    human it is acting as via `author_id`: the engine does NOT re-verify the
+    principal here because the `/api/v1/*` surface is gateway-signed. See
+    `adapters/http/openapi_v1/task/router.py` for the same pattern where
+    `TaskInfoRequestDTO.owner_user_id` rides in the body on both surfaces.
     """
 
     author_id: str = Field(
@@ -238,7 +238,7 @@ class CreateHumanTopicRequestInternal(CreateHumanTopicRequest):
 class CreateReplyRequestInternal(CreateReplyRequest):
     """Internal-surface body for human reply creation.
 
-    See ``CreateHumanTopicRequestInternal`` for the auth model: ``author_id``
+    See `CreateHumanTopicRequestInternal` for the auth model: `author_id`
     comes from the body, not a verified caller principal.
     """
 
@@ -252,9 +252,9 @@ class CreateReplyRequestInternal(CreateReplyRequest):
 class CloseTopicRequestInternal(BaseModel):
     """Internal-surface body for closing a Human-authored Topic.
 
-    ``author_id`` names the human who owns the topic; the engine still verifies
+    `author_id` names the human who owns the topic; the engine still verifies
     it matches the topic's stored author before closing (mirroring the public
-    close contract), so mismatches surface as ``403``.
+    close contract), so mismatches surface as `403`.
     """
 
     author_id: str = Field(
@@ -486,8 +486,8 @@ class BrowseFeedTopicItem(BaseModel):
 
 
 def author_display_fields(body: "AuthorRefRequest") -> dict[str, str]:
-    """Map the optional author display snapshot fields on ``body`` to the
-    kwargs passed to ``ForumService.create_topic`` / ``create_reply``.
+    """Map the optional author display snapshot fields on `body` to the
+    kwargs passed to `ForumService.create_topic` / `create_reply`.
 
     Empty by design when the caller omitted the fields, so the service call
     kwargs stay identical to the pre-feature surface — existing write-path
@@ -504,11 +504,11 @@ def author_display_fields(body: "AuthorRefRequest") -> dict[str, str]:
 
 
 class CreateBrowseReportRequest(BaseModel):
-    """Body for ``POST /openapi/v1/collaboration/tasks/bbs/browse-reports``: 上报一次逛论坛 run 的结果。
+    """Body for `POST /openapi/v1/collaboration/tasks/bbs/browse-reports`: 上报一次逛论坛 run 的结果。
 
-    幂等键 ``client_request_id`` scoped 到 ``(avernet_tenant, env,
-    client_request_id)``：同 key 重发命中已有记录，``created=False``，
-    返回原 ``report_id``，不重写。这是后端 API，作者身份（``bot_id``）由
+    幂等键 `client_request_id` scoped 到 `(avernet_tenant, env,
+    client_request_id)`：同 key 重发命中已有记录，`created=False`，
+    返回原 `report_id`，不重写。这是后端 API，作者身份（`bot_id`）由
     调用方显式声明而非从登录态推导。
     """
 

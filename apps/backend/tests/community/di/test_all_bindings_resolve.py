@@ -56,9 +56,9 @@ ALLOWED_TO_FAIL: dict[str, str] = {
     # already logs-and-tolerates ("OpenApiBotPort 未绑定/解析失败"). Lifecycle
     # discovery treats a construction failure the same way; the per-bot /30
     # cron only runs in corp. Mirrors GitSyncService: resolves in corp, not test.
-    "agentclaw.community.core.forum.browsing.runner.BbsBrowseLoopRunner":
+    "agentclaw.community.core.task.forum.browsing.runner.BbsBrowseLoopRunner":
         "depends on OpenApiBotPort, bound only under corp; unbound in test.",
-    "agentclaw.community.core.forum.browsing.scheduler.BbsBrowseLoopScheduler":
+    "agentclaw.community.core.task.forum.browsing.scheduler.BbsBrowseLoopScheduler":
         "depends on the runner (BbsBrowseLoopRunner), bound only under corp; unbound in test.",
 }
 

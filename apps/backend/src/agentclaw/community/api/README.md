@@ -115,6 +115,7 @@ provides:
   - ServiceArtifactLineageReaderProtocol
   - ServiceEditLockServiceProtocol
   - ForumServiceProtocol
+  - FeedbackServiceProtocol
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
   - TcResourceReadyObserverProtocol
@@ -228,7 +229,8 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.engine_runtime_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.feedback.service_protocol  # FeedbackServiceProtocol — defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.content_scanner_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.health_diagnosis_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.harness.patch_engine_service_protocol  # Protocol defined in its owning core module, re-exported here

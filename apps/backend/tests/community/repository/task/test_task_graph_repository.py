@@ -26,7 +26,7 @@ def _graph(task_id="T-GRAPH"):
         task_id=task_id,
         status=Status.PENDING,
         task_spec=TaskSpec(
-            context=Context(background="background", title="title"),
+            context=Context(title="title", background="background"),
             goal=Goal(objective="objective", acceptances=[]),
         ),
         run_info=RuntimeInfo(),

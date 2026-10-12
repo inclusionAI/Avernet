@@ -1,12 +1,12 @@
 """Public BBS Browse-Loop toggle + reads + manual triggers on the openapi surface.
 
 The join/cancel writes and the per-Bot reads/feed/triggers all share the
-``/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs`` prefix. The whole group is mounted in
-``_OPEN_SUBGROUPS`` (only ``require_principal`` + base ``ERROR_RESPONSES``):
+`/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs` prefix. The whole group is mounted in
+`_OPEN_SUBGROUPS` (only `require_principal` + base `ERROR_RESPONSES`):
 the body declares the operator, the path names the addressed Bot, and nothing
-on this group is owner-scoped. This mirrors the internal ``http/bbs/router.py``
+on this group is owner-scoped. This mirrors the internal `http/bbs/router.py`
 handlers verbatim — same service / cron / scheduler calls — exposing them on
-the public ``/openapi/v1`` surface the product and app-to-app callers reach.
+the public `/openapi/v1` surface the product and app-to-app callers reach.
 
 Beyond the toggle writes, the group also serves the single-Bot subscription
 read, the actor-aware feed the Browse Loop consumes each tick, and four
@@ -35,16 +35,16 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.core.errors import NotFound
-from agentclaw.community.core.forum.browsing import (
+from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
-from agentclaw.community.core.forum.browsing.cron_setup import BbsBrowseCronManager
-from agentclaw.community.core.forum.models import (
+from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
 )
-from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
+from agentclaw.community.core.task.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 
 from .schemas import (
@@ -79,7 +79,7 @@ async def upsert_bbs_browse_subscription(
                 "The owner whose Bot's Browse loop is switched on (work-no) —"
                 " A backend API: the owner is declared as an explicit query "
                 "parameter, never resolved from or restricted to the logged-in "
-                "caller -- mirrors the internal /api/v1/.../browse-subscription "
+                "caller -- mirrors the bot-scoped browse-subscription "
                 "handler verbatim. The value is the same identifier as "
                 "SubscriptionItem.owner_user_id."
             ),
@@ -96,7 +96,7 @@ async def upsert_bbs_browse_subscription(
     """加入或刷新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
 
     mode 后端恒定 OpenClaw cron，不暴露触发模式选择；订阅发起人取自必填的
-    owner_user_id query（不取自登录人，与内部 /api/v1 面签名一一对齐）。请求体
+    owner_user_id query（不取自登录态，由调用方作为必填参数显式声明）。请求体
     只携带可选备注。若该 Bot 此前在旧框架轮询下注册过，一并卸下旧触发，保证
     任意时刻仅一份触发。创建返回 201，更新已存在订阅返回 200。
     """
@@ -149,11 +149,11 @@ async def delete_bbs_browse_subscription(
 # Public reads + manual triggers — exposed on the openapi surface so the
 # product UI can render per-Bot on/off state and let a user drive a one-shot
 # Browse without a separate internal ticket. These mirror the internal
-# ``/api/v1/collaboration/tasks/bots/{bot_id}/bbs/*`` handlers verbatim (same service/runner calls),
+# `/api/v1/collaboration/tasks/bots/{bot_id}/bbs/*` handlers verbatim (same service/runner calls),
 # differing only in the authorisation seam: the public routes require a
 # verified OpenAPI principal and admit OPEN / NoCheck — they name no owner on
 # the wire, so there is no addressed-owner grant to check and no logged-in-user
-# coupling. The declared ``bot_id`` path segment is the only key.
+# coupling. The declared `bot_id` path segment is the only key.
 # ---------------------------------------------------------------------------
 
 
@@ -172,7 +172,7 @@ async def get_bbs_browse_subscription(
     """读取该 Bot 当前的逛论坛订阅状态，不存在则 404。
 
     Read state lives beside the join/cancel writes so the UI can render a Bot
-    on/off switch. It is a backend read keyed by the addressed ``bot_id``: the
+    on/off switch. It is a backend read keyed by the addressed `bot_id`: the
     owner is not assumed from the principal, so admission is OPEN and the
     authorisation row is NoCheck.
     """
@@ -207,9 +207,9 @@ async def list_bbs_browse_feed(
 ) -> Envelope[Page[BrowseFeedTopicItem]]:
     """读取该 Bot 待处理的 Topic feed（POLL/NOTICE 已回复则不再出现）。
 
-    Mirrors the internal ``GET /api/v1/collaboration/tasks/bots/{bot_id}/bbs/feed`` — the Feed the
-    Browse Loop actor consumes each tick. Exposed on the public surface so a
-    collaborator may preview what a Bot will act on without filing an ops ticket.
+    The Feed the Browse Loop actor consumes each tick. Exposed on the public
+    surface so a collaborator may preview what a Bot will act on without filing
+    an ops ticket.
     """
     result = service.list_browse_feed(
         bot_id=bot_id,
@@ -239,10 +239,9 @@ async def trigger_bbs_browse_framework(
 ) -> Envelope[dict[str, Any]]:
     """A 模式手动触发：按框架 cron 口径向该 Bot 推送一次「立即逛论坛」。
 
-    The addressed subscription must exist with mode=framework. Mirrors the
-    internal ``POST /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework``;
-    exposed on the public surface so the product can independently verify the A
-    delivery path is wired.
+    The addressed subscription must exist with mode=framework. Exposed on the
+    public surface so the product can independently verify the A delivery path
+    is wired.
     """
     result = await runner.push_browse_once(
         bot_id=bot_id, expected_mode=BROWSE_MODE_FRAMEWORK
@@ -264,10 +263,9 @@ async def trigger_bbs_browse_self(
 ) -> Envelope[dict[str, Any]]:
     """B 模式手动触发：按 OpenClaw 自带 cron 口径向该 Bot 推送一次「立即逛论坛」。
 
-    The addressed subscription must exist with mode=openclaw. Mirrors the
-    internal ``POST /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self``;
-    production is driven by the Bot local */30 cron, this route only verifies
-    the Bot can complete one Browse Run on its own.
+    The addressed subscription must exist with mode=openclaw. Production is
+    driven by the Bot local */30 cron; this route only verifies the Bot can
+    complete one Browse Run on its own.
     """
     result = await runner.push_browse_once(
         bot_id=bot_id, expected_mode=BROWSE_MODE_OPENCLAW

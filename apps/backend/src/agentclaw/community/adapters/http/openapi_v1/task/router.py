@@ -5,13 +5,13 @@ GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskSe
 GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
 GET  /openapi/v1/collaboration/tasks/bbs/list   — 列 BBS 接力任务(分页;delegate TaskServiceProtocol.list_bbs_tasks)
 
-前端公开面经 gateway spanner 鉴权(``/openapi/v1/collaboration/**`` → user+app required)。其余内部接口
-(回投 / bbs 接力步 claim·attach·result / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``,不经 spanner)。
-统一 ``/openapi/v1`` 返回协议:成功经 ``envelope()`` → ``Envelope{code,message,data,request_id}``;
+前端公开面经 gateway spanner 鉴权(`/openapi/v1/collaboration/**` → user+app required)。其余内部接口
+(回投 / bbs 接力步 claim·attach·result / 任务发现阶段)见 `adapters/http/task/`(前缀 `/api/v1/collaboration/tasks`,不经 spanner)。
+统一 `/openapi/v1` 返回协议:成功经 `envelope()` → `Envelope{code,message,data,request_id}`;
 领域异常(GraphAlreadyInitialized/TaskNotFound/TaskState/GraphIntegrity…)直接上抛,
-由 ``@envelope_errors`` + ``ENVELOPE_ERRORS`` 映射为统一 ``ErrorEnvelope``——router 不手写
-``HTTPException`` 处理领域错误。仅对纯输入校验(非法 status 过滤)用 ``HTTPException`` 走中央 handler,
-同样产出 ``ErrorEnvelope``。对齐 api/task/task_service.py Protocol。
+由 `@envelope_errors` + `ENVELOPE_ERRORS` 映射为统一 `ErrorEnvelope`——router 不手写
+`HTTPException` 处理领域错误。仅对纯输入校验(非法 status 过滤)用 `HTTPException` 走中央 handler,
+同样产出 `ErrorEnvelope`。对齐 api/task/task_service.py Protocol。
 """
 from __future__ import annotations
 
@@ -83,11 +83,11 @@ def _validate_single_status(status: str | None) -> str | None:
 
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
-# Handler-level principal dependency: ``test_public_routes_require_principal`` walks each
-# route's dependant tree, and the ``@envelope_errors`` wrapper keeps handler-level
-# `Depends(...)` params reachable while the router-level ``_PUBLIC_AUTH`` stays on the
+# Handler-level principal dependency: `test_public_routes_require_principal` walks each
+# route's dependant tree, and the `@envelope_errors` wrapper keeps handler-level
+# `Depends(...)` params reachable while the router-level `_PUBLIC_AUTH` stays on the
 # mount. Operations with no bot to gate (execute/dashboard) declare this so the route
-# is visibly gated, then ``del principal`` since the identity is not used.
+# is visibly gated, then `del principal` since the identity is not used.
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
@@ -172,8 +172,8 @@ async def get_task_trajectory(
     (决策 #10/#14,analysis-trigger 失败必须可见)。原独立 /analysis 端点已并入此入口(决策 #10);
     ?narrative=true 不恢复(随 REQ-P2 裁剪)。task_action_log / NodeAction 完全不触碰(独立旁路)。
 
-    display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
-    序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。
+    display=html:返回自包含 HTML 轨迹页(FastAPI 对 `HTMLResponse` 返回值跳过 `response_model`
+    序列化,与默认 `Envelope[TaskTrajectoryDTO]` JSON 形态并存;错误仍走 `envelope_errors` 的 JSON)。
     """
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     trajectory = await service.get_trajectory(

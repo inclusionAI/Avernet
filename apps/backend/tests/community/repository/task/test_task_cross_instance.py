@@ -41,7 +41,7 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
 
 def _spec(task_id):
     return TaskSpec(
-        context=Context(background="bg", title="t"),
+        context=Context(title="t", background="bg"),
         goal=Goal(objective="obj", acceptances=[]),
     )
 

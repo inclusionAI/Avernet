@@ -106,16 +106,17 @@ class OpenApiBotConfig:
     """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
     Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
     ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-    ``base_url`` is the host (non-secret) of the BaaS Open API this deployment
-    talks to — one canonical value, supplied by the deployment overlay (mirrors
-    the ``bcn`` block convention). ``api_key_secret`` is the LITERAL
+    ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
+    per ``get_current_env()`` — mirrors the ``bcn`` block convention
+    (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
     Bearer ``api_key`` (env-injected, no Mist in the community build); empty
     -> the OpenApiBotPort stays None (fail-closed; ``single_bot`` dispatch
     degrades). ``api_key_prefix`` is the optional allowed-bots grant path
     segment; empty -> the adapter falls back to ``api_key[:10]``.
     """
 
-    base_url: str = ""  # BaaS Open API host for this deployment
+    base_url: str = ""  # env-aware resolved prod host
+    base_url_pre: str = ""  # env-aware pre host
     api_key_secret: str = ""  # LITERAL Bearer api_key (no Mist in community)
     api_key_prefix: str = ""
 
@@ -129,21 +130,24 @@ class BcsClientConfig:
     (Bearer ``provider_admin_token``); this block feeds the coordination plane
     (HMAC, group/session lifecycle) consumed by the coop-group task runner. The
     ``provider_id`` / ``provider_admin_token`` pair REUSES the ``bcn`` block
-    identity for the task-mode roster path — empty bcn -> provider_id
+    identity (env-aware) for the task-mode roster path — empty bcn -> provider_id
     empty -> roster degrades (HMAC group creation still works).
 
     ``token_secret`` / ``secret_secret`` are the LITERAL HMAC key/secret
     (env-injected, no Mist in the community build); BOTH required or the port
     stays None (fail-closed; ``coop_group`` degrades, ``single_bot``
-    unaffected). ``task_callback_url`` is the callback host (the endpoint BCS
-    posts task results back to) for this deployment — non-secret, stays literal
-    in YAML; empty -> the callback URL is not surfaced (callback off).
+    unaffected). ``task_callback_url`` / ``task_callback_url_pre`` are
+    env-aware callback hosts (the endpoint BCS posts task results back to) —
+    non-secret, stay literal in YAML; empty -> the callback URL is not
+    surfaced (callback off).
     """
 
-    base_url: str = ""  # BCS coordinator host for this deployment
+    base_url: str = ""  # prod BCS coordinator host
+    base_url_pre: str = ""  # pre BCS coordinator host
     token_secret: str = ""  # LITERAL HMAC key (no Mist in community)
     secret_secret: str = ""  # LITERAL HMAC secret (no Mist in community)
-    task_callback_url: str = ""  # task-result callback host (BCS -> endpoint)
+    task_callback_url: str = ""  # prod task-result callback host (BCS -> endpoint)
+    task_callback_url_pre: str = ""  # pre task-result callback host (BCS -> endpoint)
 
 
 @dataclass(frozen=True)

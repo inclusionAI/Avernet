@@ -127,6 +127,15 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # this entry cannot exempt anything else.
     "tc_resource_ready_publisher",
                      # outbound HTTP client adapter; it is not a FastAPI route.
+    "trajectory_html",
+                     # trajectory route dispatch target for display=html; pure DTO to HTML
+                     # render with no FastAPI import, tested without a client.
+    "relay_callback_guard",
+                     # inbound relay-callback guard + failure trajectory logging; imports the
+                     # adapter translator, so it cannot move to core and stays here.
+    "author_enricher",
+                     # BBS read-side BOT author display-name fill; resolves the bot service off
+                     # the request injector, so it stays in the adapter layer.
 )
 
 

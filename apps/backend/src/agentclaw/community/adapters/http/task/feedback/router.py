@@ -36,11 +36,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.core.feedback.models import (
+from agentclaw.community.core.task.feedback.models import (
     MAX_MODULE_LENGTH,
     MAX_REPORTER_ID_LENGTH,
 )
-from agentclaw.community.core.feedback.service_protocol import (
+from agentclaw.community.core.task.feedback.service_protocol import (
     FeedbackServiceProtocol,
 )
 from agentclaw.community.di import Injected

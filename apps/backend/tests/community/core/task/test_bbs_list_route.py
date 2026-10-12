@@ -56,7 +56,7 @@ def _record(
         retry=0,
         assignee_id="asg-1",
         status=status,
-        acceptance_result={"verdict": "PASS", "done_items": [], "gap_items": []},
+        acceptance_result={"verdict": "DONE", "done_items": [], "gap_items": []},
         extend_props={"assignee_name": "Alice"} if extend_props is None else extend_props,
         relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
         relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),

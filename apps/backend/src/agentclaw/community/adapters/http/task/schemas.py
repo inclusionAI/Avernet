@@ -37,11 +37,15 @@ class ContextDTO(BaseModel):
 
 
 class AcceptanceCriteriaDTO(BaseModel):
+    """单条验收标准 DTO：唯一标识加描述。"""
+
     id: str = Field(..., description="验收标准唯一标识")
     description: str = Field("", description="验收标准具体描述")
 
 
 class GoalDTO(BaseModel):
+    """目标 DTO：任务目标描述加若干验收标准。"""
+
     objective: str = Field("", description="任务目标描述")
     acceptances: list[AcceptanceCriteriaDTO] = Field(
         default_factory=list, description="验收标准列表"
@@ -51,33 +55,37 @@ class GoalDTO(BaseModel):
 class TaskSpecDTO(BaseModel):
     """正式任务规格，仅包含 context + goal。"""
 
-    context: ContextDTO = Field(default_factory=ContextDTO)
-    goal: GoalDTO = Field(default_factory=GoalDTO)
+    context: ContextDTO = Field(default_factory=ContextDTO, description="任务上下文")
+    goal: GoalDTO = Field(default_factory=GoalDTO, description="任务目标")
 
 
 class RequestMetadataDTO(BaseModel):
     """Legacy execute input accepted only at the HTTP migration boundary."""
 
-    title: str = ""
-    instruction: str = ""
+    title: str = Field("", description="任务标题")
+    instruction: str = Field("", description="任务指令")
 
 
 class RequestAcceptanceDTO(BaseModel):
+    """请求侧单条验收标准 DTO：唯一标识加验收描述。"""
+
     id: str = Field(..., description="验收标准唯一标识")
     acceptance: str = Field("", description="验收标准具体描述")
 
 
 class RequestGoalDTO(BaseModel):
+    """请求侧目标 DTO：目标描述加若干验收标准。"""
+
     objective: str = Field("", description="任务目标描述")
-    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list)
+    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
 
 
 class RequestTaskSpecDTO(BaseModel):
     """提交任务规格。metadata 仅用于兼容旧客户端，不进入领域 TaskSpec。"""
 
-    context: ContextDTO = Field(default_factory=ContextDTO)
-    goal: RequestGoalDTO = Field(default_factory=RequestGoalDTO)
-    metadata: RequestMetadataDTO | None = Field(None, exclude=True)
+    context: ContextDTO = Field(default_factory=ContextDTO, description="任务上下文")
+    goal: RequestGoalDTO = Field(default_factory=RequestGoalDTO, description="任务目标")
+    metadata: RequestMetadataDTO | None = Field(None, exclude=True, description="旧客户端兼容字段，不进入领域 TaskSpec")
 
 
 class ExecutionConfigDTO(BaseModel):

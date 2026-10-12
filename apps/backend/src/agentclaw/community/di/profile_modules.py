@@ -191,6 +191,10 @@ def modules_for(profile: DeployProfile) -> list[Module]:
 
             column.extend(
                 [
+                    # Task transport ports are configuration-driven and shared with the
+                    # community/public column. There is no task-specific profile branch;
+                    # empty user_config -> fail-closed (port None). Mirrors singlebox.
+                    TaskRunnerIntegrationModule(),
                     CommunityDeviceSyncModule(),
                     TestDevicesModule(),
                     TestHttpClientModule(),
