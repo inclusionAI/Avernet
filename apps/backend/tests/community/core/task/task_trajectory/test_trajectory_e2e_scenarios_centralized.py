@@ -197,8 +197,8 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 def _accept(verdict: AcceptanceVerdict = AcceptanceVerdict.DONE,
-            gaps: list[str] | None = None) -> AcceptanceResult:
-    return AcceptanceResult(verdict=verdict, done_items=[], gap_items=gaps or [])
+            gap_items: list[str] | None = None) -> AcceptanceResult:
+    return AcceptanceResult(verdict=verdict, done_items=[], gap_items=gap_items or [])
 
 
 def _data(loop_task_id: str = "t1::c1", *,

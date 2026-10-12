@@ -91,6 +91,7 @@ def _task_body() -> dict:
 def _seed_graph(world, task_id: str) -> None:
     world.get(TaskGraphService).initialize_graph(
         TaskInfo(
+            task_id=task_id,
             task_spec=TaskSpec(
                 context=Context(title="Public task", background="endpoint coverage"),
                 goal=Goal(objective="cover task endpoint", acceptances=[

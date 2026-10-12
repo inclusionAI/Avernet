@@ -61,6 +61,12 @@ class _CallbackTaskService:
     def __init__(self) -> None:
         self.callback = _CallbackSink()
 
+    def get_task_dashboard(self, task_id, node_id=None, *, include_action_log=False):
+        # The /callback happy path's legacy-result guard reads
+        # ``graph.extend_props.get("execution_config", {})``; an empty stand-in
+        # short-circuits the guard (no relay-mode reject).
+        return SimpleNamespace(extend_props={})
+
 
 def _seed_task_service(world) -> None:
     async def execute(_self, _task_info):
@@ -71,7 +77,7 @@ def _seed_task_service(world) -> None:
             extend_props={"group_id": "bcs_grp_endpoint_1"},
         )
 
-    def claim(_self, task_id, _bot_id):
+    def claim(_self, task_id, bot_id=None, node_id=None, *, claim_id=None):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
 
     def attach(_self, task_id, _parent_node_id, _task_spec, _bot_id):
