@@ -93,6 +93,14 @@ _ALLOWLIST: dict[str, str] = {
     "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
     "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
     "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
+    # ── bbs/task relocation + a2a/trajectory (merged via task_iteration; new paths) ─
+    "adapters/http/app.py": "~1002 lines — FastAPI app mounting all routers (bbs/task adds mounts).",
+    "adapters/http/openapi_v1/authorization_rules.py": "~1035 lines — authorization table (bbs routes + avatar/links OWNER_SCOPED rows).",
+    "core/task/task_runner/modal_executor/task_executor.py": "~1026 lines — task modal executor (bbs browse-loop dispatch).",
+    "core/task/task_context/task_trajectory/analyzer.py": "~1105 lines — trajectory analyzer (accept/verify gates, gap_items).",
+    "core/task/task_context/task_trajectory/trajectory_service.py": "~1499 lines — trajectory service (a2a send-message in benchmark execute).",
+    "adapters/http/task/schemas.py": "~1075 lines — task router request/response schemas (a2a).",
+    "adapters/http/task/router.py": "~1090 lines — task router (a2a send message in benchmark execute).",
 }
 
 

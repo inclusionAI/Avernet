@@ -38,11 +38,6 @@ _REMOVED_FIELDS: dict[type, tuple[tuple[str, ...], tuple[str, ...]]] = {
         ),
         ("base_url", "provider_id", "provider_admin_token"),
     ),
-    cfg.OpenApiBotConfig: (("base_url_pre",), ("base_url",)),
-    cfg.BcsClientConfig: (
-        ("base_url_pre", "task_callback_url_pre"),
-        ("base_url", "task_callback_url"),
-    ),
 }
 
 
@@ -69,10 +64,8 @@ _SHIPPED_CONFIGS = (
 # ``daas_sdk_config_prod`` was the block-level shape of the same pattern.
 _LEGACY_KEYS = frozenset(
     {
-        "base_url_pre",
         "api_base_url_pre",
         "aixcore_base_url_pre",
-        "task_callback_url_pre",
         "provider_id_prod",
         "provider_id_pre",
         "provider_admin_token_prod",
