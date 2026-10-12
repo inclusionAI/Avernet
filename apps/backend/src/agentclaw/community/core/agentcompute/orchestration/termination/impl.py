@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from agentclaw.community.core.agentcompute.domain.models import (
     Run, TerminationReason,
 )
+from agentclaw.community.core.agentcompute.orchestration.state import RunState
 
 
 def _now_ms() -> int:

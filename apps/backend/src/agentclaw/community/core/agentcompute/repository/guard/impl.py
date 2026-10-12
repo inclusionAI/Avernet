@@ -43,7 +43,7 @@ class GuardEventRepository(GuardEventRepositoryProtocol):
                 select(om.AcAgentComputeGuardEventModel).where(
                     om.AcAgentComputeGuardEventModel.run_id == run_id,
                     om.AcAgentComputeGuardEventModel.tenant == tenant,
-                    om.AcAgentComputeGuardEventModel.is_deleted == False,
+                    om.AcAgentComputeGuardEventModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeGuardEventModel.id)
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
@@ -56,7 +56,7 @@ class GuardEventRepository(GuardEventRepositoryProtocol):
                        om.AcAgentComputeGuardEventModel).where(
                     om.AcAgentComputeGuardEventModel.run_id == run_id,
                     om.AcAgentComputeGuardEventModel.tenant == tenant,
-                    om.AcAgentComputeGuardEventModel.is_deleted == False,
+                    om.AcAgentComputeGuardEventModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeGuardEventModel.id)
             ).all()
             return [(r[0], self._to_domain(r[1])) for r in rows]

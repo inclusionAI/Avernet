@@ -49,7 +49,7 @@ class MessageRepository(MessageRepositoryProtocol):
                     om.AcAgentComputeMessageModel.run_id == run_id,
                     om.AcAgentComputeMessageModel.agent_id == agent_id,
                     om.AcAgentComputeMessageModel.tenant == tenant,
-                    om.AcAgentComputeMessageModel.is_deleted == False,
+                    om.AcAgentComputeMessageModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeMessageModel.seq)
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
@@ -62,7 +62,7 @@ class MessageRepository(MessageRepositoryProtocol):
                     om.AcAgentComputeMessageModel.run_id == run_id,
                     om.AcAgentComputeMessageModel.agent_id == agent_id,
                     om.AcAgentComputeMessageModel.tenant == tenant,
-                    om.AcAgentComputeMessageModel.is_deleted == False,
+                    om.AcAgentComputeMessageModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeMessageModel.seq.desc())
             ).scalars().all()
             if len(total) <= tail:
@@ -74,7 +74,7 @@ class MessageRepository(MessageRepositoryProtocol):
                     om.AcAgentComputeMessageModel.agent_id == agent_id,
                     om.AcAgentComputeMessageModel.tenant == tenant,
                     om.AcAgentComputeMessageModel.seq <= cutoff,
-                    om.AcAgentComputeMessageModel.is_deleted == False,
+                    om.AcAgentComputeMessageModel.is_deleted.is_(False),
                 ).values(is_deleted=True)
             )
         return result.rowcount

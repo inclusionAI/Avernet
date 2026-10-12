@@ -76,7 +76,7 @@ class AgentRepository(AgentRepositoryProtocol):
                     om.AcAgentComputeAgentModel.run_id == run_id,
                     om.AcAgentComputeAgentModel.agent_id == agent_id,
                     om.AcAgentComputeAgentModel.tenant == tenant,
-                    om.AcAgentComputeAgentModel.is_deleted == False,
+                    om.AcAgentComputeAgentModel.is_deleted.is_(False),
                 )
             ).scalar_one_or_none()
             return self._to_domain(row, tenant) if row else None
@@ -87,7 +87,7 @@ class AgentRepository(AgentRepositoryProtocol):
                 select(om.AcAgentComputeAgentModel).where(
                     om.AcAgentComputeAgentModel.run_id == run_id,
                     om.AcAgentComputeAgentModel.tenant == tenant,
-                    om.AcAgentComputeAgentModel.is_deleted == False,
+                    om.AcAgentComputeAgentModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeAgentModel.id)
             ).scalars().all()
             return [self._to_domain(r, tenant) for r in rows]
@@ -100,7 +100,7 @@ class AgentRepository(AgentRepositoryProtocol):
                        om.AcAgentComputeAgentModel).where(
                     om.AcAgentComputeAgentModel.run_id == run_id,
                     om.AcAgentComputeAgentModel.tenant == tenant,
-                    om.AcAgentComputeAgentModel.is_deleted == False,
+                    om.AcAgentComputeAgentModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeAgentModel.id)
             ).all()
             return [(r[0], self._to_domain(r[1], tenant)) for r in rows]
@@ -111,11 +111,16 @@ class AgentRepository(AgentRepositoryProtocol):
                       bot_id: str | None = None, bot_state: str | None = None,
                       claim_epoch: int = 0) -> bool:
         values: dict[str, Any] = {"status": status}
-        if attempts is not None: values["attempts"] = attempts
-        if error is not None: values["error"] = error
-        if output is not None: values["output"] = _dumps(output)
-        if bot_id is not None: values["bot_id"] = bot_id
-        if bot_state is not None: values["bot_state"] = bot_state
+        if attempts is not None:
+            values["attempts"] = attempts
+        if error is not None:
+            values["error"] = error
+        if output is not None:
+            values["output"] = _dumps(output)
+        if bot_id is not None:
+            values["bot_id"] = bot_id
+        if bot_state is not None:
+            values["bot_state"] = bot_state
         values["ended_at"] = _now_ms() if status in ("COMPLETED", "FAILED", "KILLED") else None
         with self._db.orm_session() as session:
             result = session.execute(
@@ -123,7 +128,7 @@ class AgentRepository(AgentRepositoryProtocol):
                     om.AcAgentComputeAgentModel.run_id == run_id,
                     om.AcAgentComputeAgentModel.agent_id == agent_id,
                     om.AcAgentComputeAgentModel.tenant == tenant,
-                    om.AcAgentComputeAgentModel.is_deleted == False,
+                    om.AcAgentComputeAgentModel.is_deleted.is_(False),
                 ).values(**values)
             )
         return result.rowcount > 0

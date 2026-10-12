@@ -66,7 +66,7 @@ class JobRepository(JobRepositoryProtocol):
                 select(om.AcAgentComputeJobModel).where(
                     om.AcAgentComputeJobModel.status == TaskQueueStatus.PENDING.value,
                     om.AcAgentComputeJobModel.run_at <= now,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 ).limit(limit)
             )
             if tenant_filter:
@@ -102,7 +102,7 @@ class JobRepository(JobRepositoryProtocol):
                 select(om.AcAgentComputeJobModel).where(
                     om.AcAgentComputeJobModel.status == TaskQueueStatus.RUNNING.value,
                     om.AcAgentComputeJobModel.lease_expires_at < now,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 ).limit(limit)
             ).scalars().all()
             reclaimed = []
@@ -132,7 +132,7 @@ class JobRepository(JobRepositoryProtocol):
                     om.AcAgentComputeJobModel.tenant == tenant,
                     om.AcAgentComputeJobModel.claimed_by == worker_id,
                     om.AcAgentComputeJobModel.claim_epoch == claim_epoch,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 ).values(lease_expires_at=_utcnow() + timedelta(seconds=lease_seconds))
             )
         return result.rowcount > 0
@@ -188,7 +188,7 @@ class JobRepository(JobRepositoryProtocol):
                 update(om.AcAgentComputeJobModel).where(
                     om.AcAgentComputeJobModel.run_id == run_id,
                     om.AcAgentComputeJobModel.tenant == tenant,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 ).values(cancel_requested=True)
             )
         return result.rowcount > 0
@@ -198,7 +198,7 @@ class JobRepository(JobRepositoryProtocol):
             return session.execute(
                 select(func.count()).select_from(om.AcAgentComputeJobModel).where(
                     om.AcAgentComputeJobModel.status == TaskQueueStatus.PENDING.value,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 )
             ).scalar_one()
 
@@ -208,7 +208,7 @@ class JobRepository(JobRepositoryProtocol):
                 select(om.AcAgentComputeJobModel.cancel_requested).where(
                     om.AcAgentComputeJobModel.run_id == run_id,
                     om.AcAgentComputeJobModel.tenant == tenant,
-                    om.AcAgentComputeJobModel.is_deleted == False,
+                    om.AcAgentComputeJobModel.is_deleted.is_(False),
                 )
             ).scalar_one_or_none()
             return bool(row) if row is not None else False

@@ -39,7 +39,7 @@ class RoundRepository(RoundRepositoryProtocol):
                 select(om.AcAgentComputeRoundModel).where(
                     om.AcAgentComputeRoundModel.run_id == run_id,
                     om.AcAgentComputeRoundModel.tenant == tenant,
-                    om.AcAgentComputeRoundModel.is_deleted == False,
+                    om.AcAgentComputeRoundModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeRoundModel.stage_index)
             ).scalars().all()
             return [self._to_domain(r) for r in rows]
@@ -52,7 +52,7 @@ class RoundRepository(RoundRepositoryProtocol):
                        om.AcAgentComputeRoundModel).where(
                     om.AcAgentComputeRoundModel.run_id == run_id,
                     om.AcAgentComputeRoundModel.tenant == tenant,
-                    om.AcAgentComputeRoundModel.is_deleted == False,
+                    om.AcAgentComputeRoundModel.is_deleted.is_(False),
                 ).order_by(om.AcAgentComputeRoundModel.id)
             ).all()
             return [(r[0], self._to_domain(r[1])) for r in rows]

@@ -76,7 +76,7 @@ class RunRepository(RunRepositoryProtocol):
                 select(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.run_id == run_id,
                     om.AcAgentComputeRunModel.tenant == tenant,
-                    om.AcAgentComputeRunModel.is_deleted == False,
+                    om.AcAgentComputeRunModel.is_deleted.is_(False),
                 )
             ).scalar_one_or_none()
             return self._to_domain(row) if row else None
@@ -87,7 +87,7 @@ class RunRepository(RunRepositoryProtocol):
                 select(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.active_idempotency_key == idempotency_key,
                     om.AcAgentComputeRunModel.tenant == tenant,
-                    om.AcAgentComputeRunModel.is_deleted == False,
+                    om.AcAgentComputeRunModel.is_deleted.is_(False),
                     om.AcAgentComputeRunModel.status == dm.RunStatus.RUNNING.value,
                 )
             ).scalar_one_or_none()
@@ -121,7 +121,7 @@ class RunRepository(RunRepositoryProtocol):
                 om_job.AcAgentComputeJobModel.run_id == run_id,
                 om_job.AcAgentComputeJobModel.tenant == tenant,
                 om_job.AcAgentComputeJobModel.claim_epoch == claim_epoch,
-                om_job.AcAgentComputeJobModel.is_deleted == False,
+                om_job.AcAgentComputeJobModel.is_deleted.is_(False),
             ).exists()
         )
         with self._db.orm_session() as session:
@@ -131,7 +131,7 @@ class RunRepository(RunRepositoryProtocol):
                 update(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.run_id == run_id,
                     om.AcAgentComputeRunModel.tenant == tenant,
-                    om.AcAgentComputeRunModel.is_deleted == False,
+                    om.AcAgentComputeRunModel.is_deleted.is_(False),
                     job_epoch_current,
                 ).values(**values)
             )
@@ -143,7 +143,7 @@ class RunRepository(RunRepositoryProtocol):
         with self._db.orm_session() as session:
             conditions = [
                 om.AcAgentComputeRunModel.tenant == tenant,
-                om.AcAgentComputeRunModel.is_deleted == False,
+                om.AcAgentComputeRunModel.is_deleted.is_(False),
             ]
             if status is not None:
                 conditions.append(om.AcAgentComputeRunModel.status == status.value)
@@ -166,7 +166,7 @@ class RunRepository(RunRepositoryProtocol):
                 select(func.count()).select_from(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.tenant == tenant,
                     om.AcAgentComputeRunModel.status == dm.RunStatus.RUNNING.value,
-                    om.AcAgentComputeRunModel.is_deleted == False,
+                    om.AcAgentComputeRunModel.is_deleted.is_(False),
                 )
             ).scalar_one()
 
@@ -175,7 +175,7 @@ class RunRepository(RunRepositoryProtocol):
             return session.execute(
                 select(func.count()).select_from(om.AcAgentComputeRunModel).where(
                     om.AcAgentComputeRunModel.status == dm.RunStatus.RUNNING.value,
-                    om.AcAgentComputeRunModel.is_deleted == False,
+                    om.AcAgentComputeRunModel.is_deleted.is_(False),
                 )
             ).scalar_one()
 
