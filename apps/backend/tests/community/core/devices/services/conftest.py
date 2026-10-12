@@ -38,7 +38,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tests.community.framework.fixtures import app_with_testing_modules, world  # noqa: F401
+from tests.community.framework.fixtures import app_with_testing_modules  # noqa: F401
+from tests.community.framework.fixtures import world as _world_fixture
+
+# Export the same fixture while allowing helpers to accept a parameter named world.
+world = _world_fixture
 
 
 @dataclass
@@ -220,7 +224,6 @@ def device_service(world, fake_baas_service):
         LocalDeviceService,
     )
     from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-    from agentclaw.community.core.system_config import DeviceConfigService
 
     repo = world.get(DeviceBindingRepository)
     bot_repository = world.get(BotRepository)
