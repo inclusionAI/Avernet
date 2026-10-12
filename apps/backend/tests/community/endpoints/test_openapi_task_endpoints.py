@@ -16,7 +16,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Status,
     TaskInfo,
     TaskSpec,
@@ -93,8 +92,7 @@ def _seed_graph(world, task_id: str) -> None:
     world.get(TaskGraphService).initialize_graph(
         TaskInfo(
             task_spec=TaskSpec(
-                metadata=Metadata(task_id=task_id, title="Public task", instruction="test"),
-                context=Context(background="endpoint coverage"),
+                context=Context(title="Public task", background="endpoint coverage"),
                 goal=Goal(objective="cover task endpoint", acceptances=[
                     AcceptanceCriteria(id="ac1", description="covered"),
                 ]),
