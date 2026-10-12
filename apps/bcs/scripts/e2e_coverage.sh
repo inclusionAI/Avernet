@@ -139,11 +139,9 @@ preflight_reclaim_ports() {
 }
 
 # 1. Start the instrumented service + bcsfuse + 5 bots (unless --skip-start).
-#    Uses --standalone so bot profiles live under <checkout>/.standalone-openclaw
-#    (per-checkout isolation) instead of the shared ~/.openclaw-* that --local
-#    writes. Without this, running in a second checkout/worktree collides with
-#    the first's ~/.openclaw-* stamps ("profile exists but does not match this
-#    singlebox local stack"). e2e.sh needs the 5 demo bots onboarded first
+#    Singlebox isolates bot profiles under <checkout>/.standalone-openclaw by
+#    default; --standalone remains an explicit compatibility alias for that
+#    same layout. e2e.sh needs the 5 demo bots onboarded first
 #    (UUIDs resolved by name), so start bcs_bots not just bcs; otherwise
 #    GET /bots is empty and every resolution fails. bcs_bots = bcs + bots,
 #    no frontend (e2e needs none).
@@ -156,7 +154,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   # it the instrumented server falls back to the profiler default
   # `default_<hash>_<pid>.profraw` in its own CWD — the repo root, where
   # singlebox is invoked from — leaking profraw there (outside target/, not
-  # covered by src/bcs/.gitignore). Pointing it at cov-e2e/llvm-cov-target
+  # covered by apps/bcs/.gitignore). Pointing it at cov-e2e/llvm-cov-target
   # keeps runtime profraw next to the objects cargo llvm-cov report merges.
   cov_runtime_dir="$bcs_dir/target/cov-e2e/llvm-cov-target"
   export LLVM_PROFILE_FILE="$cov_runtime_dir/bcs-%m-%p.profraw"
@@ -168,8 +166,8 @@ if [[ "$skip_start" -eq 0 ]]; then
   # still hit the running bcs server and are logged server-side — what we want).
   export BCS_DEBUG=true
   # Match start_bcs_binary: BCS_LOG = ${LOG_DIR}/bcs.log where
-  # LOG_DIR=${DEP_DIR}/logs and DEP_DIR=<repo>/scripts/.dependencies (DEP_DIR is
-  # resolved relative to singlebox's own SCRIPT_DIR = <repo>/scripts, NOT the
+  # LOG_DIR=${DEP_DIR}/logs and DEP_DIR=<repo>/singlebox/.dependencies (DEP_DIR is
+  # resolved relative to singlebox's own SCRIPT_DIR = <repo>/singlebox, NOT the
   # repo root). singlebox redirects bcs's stderr to it; debug_middleware writes
   # there with BCS_DEBUG=true above. The file is truncated right before e2e runs
   # below so the endpoint report counts only the e2e suite's hits, not singlebox's

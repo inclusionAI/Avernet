@@ -26,7 +26,7 @@ import ssl
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Optional
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -50,6 +50,7 @@ _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", 
 _DEFAULT_EARLY_FINAL_GRACE_SECONDS = 3.0
 # Long-running subagent workflows can be quiet while work continues upstream.
 _DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS = 20 * 60
+_MAX_PRE_ACK_BYTES = 1_572_864
 
 
 def _summarize_attachments(attachments: Any) -> dict[str, Any]:
@@ -615,6 +616,7 @@ class OpenClawGatewayClient:
         timeout_ms: Optional[int] = None,
         idempotency_key: Optional[str] = None,
         attachments: Optional[list[dict[str, Any]]] = None,
+        on_ack: Callable[[ResponseFrame], Awaitable[None]] | None = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         发送聊天消息并流式返回事件
@@ -625,6 +627,35 @@ class OpenClawGatewayClient:
             raise ConnectionError("Not connected")
 
         event_queue: asyncio.Queue[Optional[EventFrame]] = asyncio.Queue()
+        ack_pending = on_ack is not None
+        early_events: list[tuple[Callable[[EventFrame], None], EventFrame]] = []
+        early_bytes = 0
+        early_overflow = False
+
+        def buffer_before_ack(handler: Callable[[EventFrame], None], event: EventFrame) -> bool:
+            nonlocal early_bytes, early_overflow
+            if not ack_pending:
+                return False
+            payload = event.payload or {}
+            event_session = payload.get("sessionKey")
+            # COSEC: Reject known foreign sessions before charging this request's
+            # buffer. Keep same-session runs: their actual ID may arrive in ACK.
+            if (
+                payload.get("runId") != expected_run_id
+                and isinstance(event_session, str)
+                and event_session
+                and event_session.strip().lower().removeprefix("agent:main:")
+                != session_key.strip().lower().removeprefix("agent:main:")
+            ):
+                return True
+            # COSEC: Bound uncorrelated events until the upstream run identity is known.
+            early_bytes += len(event.to_json().encode("utf-8"))
+            if early_bytes > _MAX_PRE_ACK_BYTES:
+                early_overflow = True
+            elif not early_overflow:
+                early_events.append((handler, event))
+            return True
+
         done = False
         expected_run_id = idempotency_key or uuid.uuid4().hex
         run_id: Optional[str] = expected_run_id
@@ -739,6 +770,8 @@ class OpenClawGatewayClient:
             nonlocal pending_compaction_finals, pending_early_final
             nonlocal suppressed_compaction_lifecycle_ends
             if done:
+                return
+            if buffer_before_ack(on_chat_event, event):
                 return
             payload = event.payload or {}
             remember_trusted_parent_session(payload)
@@ -923,6 +956,8 @@ class OpenClawGatewayClient:
                 event_queue.put_nowait(event)
 
         def on_approval_requested(event: EventFrame) -> None:
+            if buffer_before_ack(on_approval_requested, event):
+                return
             if done:
                 return
             payload = dict(event.payload or {})
@@ -937,6 +972,8 @@ class OpenClawGatewayClient:
             event_queue.put_nowait(EventFrame(event="chat", payload=payload))
 
         def on_approval_resolved(event: EventFrame) -> None:
+            if buffer_before_ack(on_approval_resolved, event):
+                return
             if done:
                 return
             payload = dict(event.payload or {})
@@ -985,6 +1022,15 @@ class OpenClawGatewayClient:
                 bool(idempotency_key),
             )
             response = await self.send_request("chat.send", params)
+            resp_payload = response.payload or {}
+            if early_overflow:
+                raise BufferError("OpenClaw pre-ACK event buffer exceeded")
+            if on_ack is not None:
+                await on_ack(response)
+                if not response.ok or resp_payload.get("status") == "ok":
+                    return
+                if early_overflow:
+                    raise BufferError("OpenClaw pre-ACK event buffer exceeded")
             if not response.ok:
                 error_msg = response.error.message if response.error else "Unknown error"
                 log.info(
@@ -1002,10 +1048,13 @@ class OpenClawGatewayClient:
                 }
                 return
 
-            resp_payload = response.payload or {}
             run_id = resp_payload.get("runId")
             if isinstance(run_id, str) and run_id:
                 allowed_run_ids.add(run_id)
+            ack_pending = False
+            for handler, event in early_events:
+                handler(event)
+            early_events.clear()
             log.info(
                 "[chat_stream][send_response] ok=true sessionKey=%s expectedRunId=%s "
                 "responseRunId=%s payloadKeys=%s",

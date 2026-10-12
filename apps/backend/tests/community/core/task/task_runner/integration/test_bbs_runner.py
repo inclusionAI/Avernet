@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor import (
@@ -25,8 +25,7 @@ def _execution_graph(task_id="t1", objective="整理基础架构方向架构师�
     root = TaskNode(
         node_id=task_id, task_id=task_id, status=Status.HUNG,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="架构师名册", instruction="整理3位架构师"),
-            context=Context(background="基础架构方向"),
+            context=Context(title="架构师名册", background="基础架构方向"),
             goal=Goal(objective=objective,
                       acceptances=[AcceptanceCriteria("ac_arch", "给出3位架构师姓名/角色+职责")]),
         ),
@@ -92,10 +91,13 @@ class _FakeBcn:
     def __init__(self, roster):
         self._roster = roster
 
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+    def list_bots_by_task_modes(
+        self, *, claim=None, dream=None, match="any", visibility=None
+    ):
         assert claim is True
         assert dream is None
         assert match == "all"
+        assert visibility == "public"
         return list(self._roster)
 
 
@@ -106,11 +108,14 @@ class _FlakyBcn(_FakeBcn):
         self.failures = failures
         self.calls = 0
 
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+    def list_bots_by_task_modes(
+        self, *, claim=None, dream=None, match="any", visibility=None
+    ):
         self.calls += 1
         assert claim is True
         assert dream is None
         assert match == "all"
+        assert visibility == "public"
         if self.calls <= self.failures:
             raise RuntimeError("roster unavailable")
         return list(self._roster)
@@ -139,20 +144,80 @@ class _FakeGraph:
         self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
         self.added_nodes = []                # notify 创建的 scoped BBS 节点
         self.root_status = Status.HUNG       # BBS 创建前根节点的恢复态
+        self.dashboard = None
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
         self.bbs_owner = bot_id
         return MagicMock(success=True)
 
+    def query_task_dashboard(self, task_id):
+        if self.dashboard is None:
+            raise TaskStateError(f"dashboard unavailable: {task_id}")
+        return self.dashboard
+
+    def report(self, data):
+        report_type = data.data["report_type"]
+        payload = data.data["payload"]
+        if report_type == "BBS_CLAIM":
+            result = self.claim_bbs_owner(payload["task_id"], payload["bot_id"])
+            if payload.get("node_id") and self.dashboard is not None:
+                node = next(
+                    item for item in self.dashboard.tasks
+                    if item.node_id == payload["node_id"]
+                )
+                node.status = Status.RUNNING
+                node.run_info.assignee = payload["bot_id"]
+                node.run_info.extend_props.update({
+                    "bbs_owner": payload["bot_id"],
+                    "relay_holder_id": payload["bot_id"],
+                    "driver_bot_id": payload["bot_id"],
+                    "next_relay_bots": [payload["bot_id"]],
+                })
+            return result
+        if report_type == "ADD_NODES":
+            return self.add_task_nodes(
+                payload["nodes"],
+                payload["task_id"],
+                mark_parent_planning=payload.get("mark_parent_planning", True),
+            )
+        if report_type == "NODE_PATCH":
+            return self.update_task_node_info(payload["patch"])
+        if report_type == "GRAPH_PATCH":
+            if self.dashboard is not None:
+                self.dashboard.extend_props.update(
+                    payload["patch"].extend_props_patch or {}
+                )
+            return MagicMock(success=True)
+        raise AssertionError(report_type)
+
     def update_task_node_info(self, patch):
         if (
             patch.extend_props_patch
             and "bbs_owner" in patch.extend_props_patch
-            and patch.extend_props_patch["bbs_owner"] is None
+            and patch.node_id != "t-process-root"
         ):
             self.bbs_owner = None
             self.cleared = True
+        if self.dashboard is not None:
+            node = next(
+                (
+                    item for item in self.dashboard.tasks
+                    if item.node_id == patch.node_id
+                ),
+                None,
+            )
+            if node is not None:
+                if patch.status is not None:
+                    node.status = patch.status
+                if patch.run_mode is not None:
+                    node.run_info.run_mode = patch.run_mode
+                node.run_info.assignee = patch.assignee
+                node.run_info.extend_props.update(patch.extend_props_patch or {})
+                if patch.progress_reason:
+                    node.run_info.progress_reason = patch.progress_reason
+                if patch.failure_reason:
+                    node.run_info.failure_reason = patch.failure_reason
 
     def add_task_nodes(self, nodes, task_id, *, mark_parent_planning=True):
         # Mirror TaskGraphService's parent-state side effect so this test catches
@@ -233,9 +298,9 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert msg_bot == "B"
     # notify 仅完成 BBS 投递与 scoped 节点回写；根节点仍保持 HUNG，
     # 后续由 callback/report 进入 engine.on_bbs_report 才能统一收口。
-    assert on_bbs_report.calls == []
-    assert graph.bbs_owner == "B"
-    assert not graph.cleared
+    assert len(on_bbs_report.calls) == 1
+    assert graph.bbs_owner is None
+    assert graph.cleared
     assert len(graph.added_nodes) == 1
     scoped = graph.added_nodes[0]
     assert scoped.run_info.start_time is not None
@@ -244,6 +309,196 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
     assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
     assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
+    # 中心化 legacy BBS 不误用分布式事件协议；分布式 BBS 由独立用例守护。
+    assert "执行步骤：1、执行任务 2、通过post接口上报结果" in msg_text
+    assert '"status": "SUCCESS"' in msg_text
+    assert "【分布式接力闭环】" not in msg_text
+
+
+def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
+    """Relay BBS uses the centralized bid selector without creating bbs-xxxx duplicate nodes."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-1",
+        task_id="t-relay",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(
+            run_mode="bbs",
+            extend_props={"execution_decision": "ACCEPTED"},
+        ),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    bot = _FakeBot(rates={"A": 90})
+    bcn = _FakeBcn(_roster("A"))
+    graph.dashboard = execution_graph
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-1",
+    ))
+
+    assert graph.added_nodes == []
+    assert graph.claimed == "A"
+    assert bot.sent_messages and bot.sent_messages[0][0] == "A"
+
+    relay_msg = bot.sent_messages[0][1]
+    assert "【分布式接力闭环】" in relay_msg
+    assert "loop_task_id=t-relay::relay-bbs-1" in relay_msg
+    assert '"event_type": "EXECUTION_RESULT"' in relay_msg
+    assert "PLAN_RESULT" in relay_msg and "DISPATCH_RESULT" in relay_msg
+    assert "GET http://x/api/v1/collaboration/tasks/t-relay/context" in relay_msg
+    assert '"status": "SUCCESS"' not in relay_msg
+    assert "执行步骤：1、执行任务 2、通过post接口上报结果" not in relay_msg
+
+
+def test_notify_relay_empty_roster_keeps_bbs_node_pending_for_square():
+    """Relay MISS 动态选人失败时，BBS 节点保持 PENDING 等待广场认领。"""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-square", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-square",
+        task_id="t-relay-square",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    bot = _FakeBot(rates={})
+    bcn = _FakeBcn([])
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-square",
+    ))
+
+    assert graph.claimed is None
+    assert graph.added_nodes == []
+    assert bot.sent_messages == []
+    assert relay_node.status is Status.PENDING
+    assert relay_node.run_info.assignee is None
+    assert relay_node.run_info.run_mode == "bbs"
+
+
+def test_notify_relay_send_failure_releases_current_bbs_node():
+    """Relay BBS delivery failure releases the target node, not the root owner."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-send-failure", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-send-failure",
+        task_id="t-relay-send-failure",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    bot = _FakeBot(rates={"A": 80}, dispatch_raises=True)
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-send-failure",
+    ))
+
+    root = execution_graph.tasks[0]
+    assert root.status is Status.HUNG
+    assert relay_node.status is Status.PENDING
+    assert relay_node.run_info.run_mode == "bbs"
+    assert relay_node.run_info.assignee is None
+    assert relay_node.run_info.extend_props["bbs_owner"] is None
+    assert relay_node.run_info.extend_props["bbs_claim_id"] is None
+    assert execution_graph.extend_props["bbs_mode"] is True
+    assert execution_graph.extend_props["bbs_node_id"] == "relay-bbs-send-failure"
+
+
+def test_relay_bot_reply_before_callback_keeps_claim_and_records_pending_result():
+    """A completed chat is not an EXECUTION_RESULT; late callbacks need a live baton."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-late-callback", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-late", task_id=execution_graph.task_id,
+        status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    trajectory = _TrajectoryContext()
+    bot = _FakeBot(rates={"A": 80})
+
+    _run(notify(
+        execution_graph, bcn=_FakeBcn(_roster("A")), bot=bot, graph=graph,
+        backend_url="http://x", target_node_id=relay_node.node_id,
+        task_context_service=trajectory,
+    ))
+
+    assert len(bot.sent_messages) == 1
+    assert relay_node.status is Status.RUNNING
+    assert relay_node.run_info.assignee == "A"
+    assert relay_node.run_info.extend_props["bbs_owner"] == "A"
+    assert not graph.cleared
+    pending = [e[3] for e in trajectory.events
+               if e[3]["action_result"] == "bbs_execution_result_pending"]
+    assert len(pending) == 1
+    assert pending[0]["error_type"] == "relay"
+    assert not any(e[3]["action_result"] == "bbs_execution_failed"
+                   for e in trajectory.events)
+    # A callback after the chat reply can still target the claimed RUNNING node.
+    graph.update_task_node_info(TaskNodePatch(
+        task_id=execution_graph.task_id, node_id=relay_node.node_id,
+        extend_props_patch={"execution_decision": "ACCEPTED"},
+    ))
+    assert relay_node.status is Status.RUNNING
+    assert relay_node.run_info.extend_props["execution_decision"] == "ACCEPTED"
+
+
+def test_relay_callback_before_chat_reply_does_not_reopen_node():
+    """The chat completion must never overwrite callback-owned relay state."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-callback-first", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-callback-first", task_id=execution_graph.task_id,
+        status=Status.PENDING, task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"), node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+
+    class _CallbackFirstBot(_FakeBot):
+        async def send_and_wait_async(self, **kwargs):
+            result = await super().send_and_wait_async(**kwargs)
+            if "[bbs-bid]" not in kwargs["message"]:
+                relay_node.status = Status.DONE
+                relay_node.run_info.extend_props["execution_decision"] = "ACCEPTED"
+            return result
+
+    bot = _CallbackFirstBot(rates={"A": 80})
+    _run(notify(
+        execution_graph, bcn=_FakeBcn(_roster("A")), bot=bot, graph=graph,
+        backend_url="http://x", target_node_id=relay_node.node_id,
+    ))
+
+    assert len(bot.sent_messages) == 1
+    assert relay_node.status is Status.DONE
+    assert relay_node.run_info.extend_props["execution_decision"] == "ACCEPTED"
+    assert not graph.cleared
 
 
 def test_notify_empty_roster_returns_silently():
@@ -387,7 +642,7 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
                 skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
 
     assert graph.claimed == "B"  # 最高 completion_rate 胜出(选优键未变)
-    assert on_bbs_report.calls == []
+    assert len(on_bbs_report.calls) == 1
     scoped = [p for p in graph.patches if p.node_id != "t1"]
     assert len(scoped) == 1
     assert scoped[0].extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
@@ -449,3 +704,70 @@ def test_notify_brings_winner_title_goal_into_execution_message():
     assert "B 部分标题" in msg_text  # 胜出 bot 的 bid title 进执行消息
     assert "B 部分目标" in msg_text  # 胜出 bot 的 bid goal 进执行消息
     assert "A 部分" not in msg_text  # 未胜出 bot 的 title/goal 不进执行消息
+
+
+class _TrajectoryContext:
+    def __init__(self):
+        self.events: list[tuple] = []
+
+    def emit_trajectory_event(self, task_id, node_id, action_type, **kwargs):
+        self.events.append((task_id, node_id, action_type, kwargs))
+
+
+def test_notify_records_bbs_milestones_in_trajectory():
+    trajectory = _TrajectoryContext()
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80})
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-trajectory"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        task_context_service=trajectory,
+    ))
+
+    assert [event[3]["action_result"] for event in trajectory.events] == [
+        "bbs_entered",
+        "bbs_bid_broadcast",
+        "bbs_execution_started",
+    ]
+    assert all(event[2] == "execute" for event in trajectory.events)
+    assert trajectory.events[1][3]["ext_info"]["candidate_count"] == 1
+    assert trajectory.events[2][3]["ext_info"]["winner_bot_id"] == "A"
+    for _, node_id, _, kwargs in trajectory.events:
+        assert node_id == "t-trajectory"
+        assert kwargs["status_from"] == Status.HUNG
+        assert kwargs["status_to"] == Status.HUNG
+        assert kwargs["attempt"] == 0
+        assert kwargs["boost_reason"]
+        assert kwargs["now_ms"] > 0
+
+
+def test_notify_records_execution_exception_in_trajectory():
+    trajectory = _TrajectoryContext()
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80}, dispatch_raises=True)
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-trajectory-error"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        task_context_service=trajectory,
+    ))
+
+    event = trajectory.events[-1][3]
+    assert event["action_result"] == "bbs_execution_failed"
+    assert event["error_type"] == "unclassified"
+    assert event["error_msg"] == "dispatch failed"
+    assert event["ext_info"]["exception_type"] == "RuntimeError"
+    assert event["status_from"] == Status.HUNG
+    assert event["status_to"] == Status.HUNG
+    assert event["attempt"] == 0
+    assert event["boost_reason"] == "bbs_execution_failed"
+    assert event["now_ms"] > 0

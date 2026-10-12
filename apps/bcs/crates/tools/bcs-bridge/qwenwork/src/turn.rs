@@ -121,7 +121,8 @@ impl Engine for QwenWork {
             callback(&self.state, &request, &conversation, &req.prompt),
         )
         .await?;
-        let result = collect(&req.run_id, &mut rx, &events, &abort, &peer.closed).await;
+        let result = collect(&req, &self.state, &conversation, &mut rx, &events, &abort, &peer.closed).await;
+        req.interactions.invalidate_run(&req.run_id, json!({"decision":"deny"}));
         match result {
             Ok(text) => Ok(TurnOutcome {
                 engine_session_id: Some(conversation),
@@ -180,7 +181,7 @@ async fn stop(state: &Arc<State>, peer: &Peer, conversation: &str) -> Result<(),
         .map_err(|_| TurnError::Protocol("QwenWork stop confirmation timed out".into()))?
 }
 
-async fn emit(
+pub(crate) async fn emit(
     events: &mpsc::Sender<StreamEvent>,
     event: StreamEvent,
     abort: &CancellationToken,
@@ -195,12 +196,15 @@ async fn emit(
 }
 
 async fn collect(
-    run: &str,
+    req: &TurnRequest,
+    state: &State,
+    conversation: &str,
     rx: &mut mpsc::Receiver<Input>,
     events: &mpsc::Sender<StreamEvent>,
     abort: &CancellationToken,
     closed: &CancellationToken,
 ) -> Result<String, TurnError> {
+    let run = &req.run_id;
     let mut text = String::new();
     let mut revised = false;
     let mut finished = false;
@@ -210,6 +214,7 @@ async fn collect(
     let mut early_results = HashMap::new();
     let mut early_bytes = 0usize;
     let mut completion_deadline = None;
+    let mut answered: HashMap<String, Value> = HashMap::new();
     loop {
         if finished && lifecycle.complete() && pending.is_empty() && early_results.is_empty() {
             return Ok(text);
@@ -229,6 +234,28 @@ async fn collect(
             input = rx.recv() => input.ok_or_else(|| TurnError::EngineExited("QwenWork event queue closed".into()))?,
         };
         match input {
+            Input::Question { hook, reply } => {
+                if !crate::questions::permitted(&hook["tool_input"]) {
+                    let _ = reply.send(crate::questions::deny("Invalid or secret question form cannot be forwarded"));
+                    return Err(TurnError::Protocol("Invalid or secret AskUserQuestion form".into()));
+                }
+                let id = hook["tool_use_id"].as_str().filter(|s| !s.is_empty())
+                    .ok_or_else(|| TurnError::Protocol("Question Hook missing tool_use_id".into()))?.to_owned();
+                if let Some(response) = answered.get(&id) {
+                    let _ = reply.send(response.clone());
+                    continue;
+                }
+                if answered.len() >= 128 {
+                    let _ = reply.send(crate::questions::deny("Question limit reached"));
+                    return Err(TurnError::Protocol("QwenWork question limit reached".into()));
+                }
+                if seen.insert((id.clone(), true)) {
+                    pending.insert(id.clone());
+                    emit(events, tool(run, &hook, ToolPhase::Start), abort, closed).await?;
+                }
+                let response = crate::questions::answer(req, &hook, events, abort, closed, reply, (state, conversation)).await?;
+                answered.insert(id, response);
+            }
             Input::Snapshot {
                 text: next,
                 finished: done,

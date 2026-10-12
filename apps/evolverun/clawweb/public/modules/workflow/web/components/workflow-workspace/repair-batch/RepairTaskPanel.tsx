@@ -9,7 +9,9 @@ const records = (value: unknown) => Array.isArray(value) ? value.map(record) : [
 const reportLabel = (value: unknown, fallback: string) => ({ changed: '已修改', not_needed: '无需修改', unresolved: '未解决', passed: '通过', failed: '失败', not_covered: '未覆盖', mock: 'Mock', none: '未覆盖', external_resources: '外部资源', pack_script_execution: 'Pack 脚本执行' }[String(value)] ?? (value == null ? fallback : String(value)))
 const executionLabels: Record<NonNullable<RepairTaskDetail['execution']>['status'], string> = {
   created: '等待派发', dispatching: '正在派发；状态未确认时不要重复提交', dispatched: '已派发，等待生成结果',
-  running: 'AIS 正在生成候选 Pack', dispatch_failed: '派发未确认', succeeded: '执行结果已返回', failed: '执行失败', cancelled: '执行已取消',
+  running: 'AIS 正在生成候选 Pack', dispatch_failed: 'AIS 拒绝派发，可修正配置后重试',
+  dispatch_uncertain: '派发结果无法确认，请核对 AIS Job 后处理；不能直接重试以免重复生成',
+  succeeded: '执行结果已返回', failed: '执行失败', cancelled: '执行已取消',
 }
 
 export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel, onRetryDispatch, dispatchError, busy }: {
@@ -43,9 +45,9 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
         最近尝试：v{detail.latestAttempt.revision} · {phases[detail.latestAttempt.phase] ?? detail.latestAttempt.phase}
         <JsonDetails title="查看本次失败原因" value={detail.latestAttempt.error} />
       </div>
-      <p className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700">{detail.latestSuccessful ? `最近成功候选：v${detail.latestSuccessful.revision}` : '尚无成功候选稿'}</p>
+      <p className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700">{detail.latestSuccessful ? `最近可继续修订的候选：v${detail.latestSuccessful.revision}${detail.latestSuccessful.phase === 'blocked' ? '（检查未通过）' : ''}` : '尚无可修订候选稿'}</p>
     </div>
-    {detail.execution && <div className={`mt-3 rounded-lg border p-3 text-xs ${detail.execution.status === 'dispatch_failed' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+    {detail.execution && <div className={`mt-3 rounded-lg border p-3 text-xs ${['dispatch_failed', 'dispatch_uncertain'].includes(detail.execution.status) ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
       <p className="mb-1 font-medium">执行与派发状态 · v{detail.latestAttempt.revision}</p>
       <p>{executionLabels[detail.execution.status]}</p>
       {detail.execution.jobId && <p className="mt-1 break-all text-slate-500">AIS Job：{detail.execution.jobId} · 第 {detail.execution.attempt} 次</p>}

@@ -328,6 +328,97 @@ def test_sync_extra_include_files_copies_only_configured_file(tmp_path):
     assert svc._run_local_command.call_args.kwargs["timeout_seconds"] == 123
 
 
+def _home_scoped_extra_include_plan():
+    return EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=[
+            "/home/admin/.codefuse/fuse/codefuse.json",
+        ],
+    )
+
+
+def test_sync_extra_include_files_maps_home_scoped_file_for_build(tmp_path):
+    home_dir = tmp_path / "home"
+    source_dir = home_dir / ".aicoding"
+    target_dir = tmp_path / "artifact" / "aicoding"
+    source_file = home_dir / ".codefuse" / "fuse" / "codefuse.json"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text('{"source":"draft-home"}')
+
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=source_dir,
+        target_dir=target_dir,
+        build_plan=_home_scoped_extra_include_plan(),
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    cmd = svc._run_local_command.call_args.kwargs["cmd"]
+    assert cmd[-2] == str(source_file)
+    assert cmd[-1] == str(target_dir / "home" / ".codefuse" / "fuse" / "codefuse.json")
+
+
+def test_sync_extra_include_files_restores_home_scoped_file(tmp_path):
+    artifact_dir = tmp_path / "artifact" / "aicoding"
+    draft_dir = tmp_path / "home" / ".aicoding"
+    artifact_file = artifact_dir / "home" / ".codefuse" / "fuse" / "codefuse.json"
+    artifact_file.parent.mkdir(parents=True)
+    artifact_file.write_text('{"source":"artifact"}')
+    home_file = tmp_path / "home" / ".codefuse" / "fuse" / "codefuse.json"
+
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock(side_effect=_fake_rsync_copy)
+
+    svc._sync_extra_include_files(
+        source_dir=artifact_dir,
+        target_dir=draft_dir,
+        build_plan=_home_scoped_extra_include_plan(),
+        command_name="rsync draft restore extra include",
+        error_message="restore draft extra include file failed",
+        restore=True,
+    )
+
+    cmd = svc._run_local_command.call_args.kwargs["cmd"]
+    assert cmd[-2] == str(artifact_file)
+    assert cmd[-1] == str(home_file)
+    assert home_file.read_text() == '{"source":"artifact"}'
+
+
+def test_sync_extra_include_files_skips_home_symlink_escape(tmp_path, caplog):
+    home_dir = tmp_path / "home"
+    source_dir = home_dir / ".aicoding"
+    source_dir.mkdir(parents=True)
+    outside_file = tmp_path / "outside.json"
+    outside_file.write_text('{"secret":"outside"}')
+    scoped_file = home_dir / ".codefuse" / "fuse" / "codefuse.json"
+    scoped_file.parent.mkdir(parents=True)
+    scoped_file.symlink_to(outside_file)
+
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+
+    svc._sync_extra_include_files(
+        source_dir=source_dir,
+        target_dir=tmp_path / "artifact" / "aicoding",
+        build_plan=_home_scoped_extra_include_plan(),
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    svc._run_local_command.assert_not_called()
+    assert "Skip extra include source outside allowed root" in caplog.text
+
+
 def test_sync_extra_include_files_logs_and_continues_on_copy_failure(tmp_path, caplog):
     plan = EngineBuildPlan(
         engine_type="aicoding",
@@ -568,6 +659,60 @@ def test_sync_extra_include_files_falls_back_to_device_on_root_squash(tmp_path):
     assert svc._device_service.exec_shell_new.call_count == 1
     assert svc._device_service.exec_shell_new.call_args.kwargs["device_id"] == "dev-1"
     assert (target_dir / "sessions" / "cron-tasks.json").read_text() == '{"tasks":[1]}'
+
+
+class _UnreadableScopedHomeSourceDir:
+    """Path double whose parent resolves to an unreadable home-root file."""
+
+    @property
+    def parent(self):
+        return _UnreadableScopedHomeSourceFile()
+
+
+class _UnreadableScopedHomeSourceFile:
+    """Stand in for a draft-home file whose admin stat is blocked by NFS."""
+
+    def __truediv__(self, other):
+        assert other == ".codefuse/fuse/codefuse.json"
+        return self
+
+    def exists(self):
+        raise PermissionError("simulated EACCES")
+
+    def is_file(self):
+        raise PermissionError("simulated EACCES")
+
+    def __str__(self):
+        return "/host/.merge_nas/bot/.codefuse/fuse/codefuse.json"
+
+
+def test_sync_extra_include_files_home_file_falls_back_to_device(tmp_path):
+    target_dir = tmp_path / "target"
+
+    svc = object.__new__(BotBuildService)
+    svc._device_service = MagicMock()
+    svc._device_service.exec_shell_new.return_value = CommandResult(
+        stdout='{"inScope":true}',
+        exit_code=0,
+        stderr="",
+    )
+    svc._run_local_command = MagicMock(side_effect=_fake_rsync_copy)
+    svc._sudo_is_file = MagicMock(return_value=False)
+
+    svc._sync_extra_include_files(
+        source_dir=_UnreadableScopedHomeSourceDir(),
+        target_dir=target_dir,
+        build_plan=_home_scoped_extra_include_plan(),
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+        device_id="dev-1",
+        device_source_root="/home/admin/.aicoding",
+    )
+
+    esn = svc._device_service.exec_shell_new.call_args.kwargs
+    assert esn["shell_cmd"] == ("cat /home/admin/.codefuse/fuse/codefuse.json")
+    expected_target = target_dir / "home" / ".codefuse" / "fuse" / "codefuse.json"
+    assert expected_target.read_text() == '{"inScope":true}'
 
 
 def test_sync_extra_include_files_skip_when_no_device_and_root_probe_fails(tmp_path, caplog):

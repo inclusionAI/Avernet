@@ -3,7 +3,8 @@
 编排完整流程：
 1. ``TaskReader`` 读取已发现的待确认任务 (按 bot_id/owner_id/dt 过滤)
 2. 为每个 bot 的所有任务通过 ``SessionInitiator`` 创建 engine session（获得 session_id）
-   — 同时通过 WebSocket ``chat.send`` 注入发现提示消息
+   — 唯一实现 ``OpenApiBotSessionInitiator`` 经 BaaS Open API ``/openapi/v1/messages``
+     一步完成 session 创建与发现提示消息注入（原 Relay/WS 注入链已废除）
 3. session 创建成功后通过 ``NotifyMessagesProvider`` 投递通知（发现摘要 + session 链接）
 4. 用户在前端确认后，由执行框架处理（不在本模块）
 
@@ -11,7 +12,7 @@
 
     service = DiscoveryService(
         reader=SqliteTaskReader("scripts/.dependencies/data/discovered_tasks.db"),
-        session_initiator=CronRelaySessionInitiator(cron_relay),
+        session_initiator=OpenApiBotSessionInitiator(openapi_bot),
         notify_sender=CommunityNotifySender(),
     )
 
@@ -21,6 +22,7 @@
     # discover_all_bots — 遍历所有 bot（由 scheduler 线程调用）
     results = await service.discover_all_bots()
 """
+
 from __future__ import annotations
 
 import json
@@ -28,7 +30,7 @@ import os
 import socket
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from agentclaw.community.core.repository.protocols.task import (
     TaskDiscoveryLockRepositoryProtocol,
@@ -40,8 +42,8 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
     NotifyMessagesProvider,
@@ -80,6 +82,12 @@ class DiscoveryResult:
     session: Optional[DiscoverySession] = None
     notification_message: str = ""
     notification_sent: bool = False
+    # 2026-09-16: 通知明细拆分。notification_sent = card_sent or work_order_sent
+    # 的聚合语义保留(向后兼容), 但工单通道(本地 DB 写, 几乎必成功)会掩盖
+    # 外发卡片失败 —— 明细字段让 discover/status 响应可直读钉钉通道健康度,
+    # 无需翻服务端日志(2026-09-16 预发: notification_sent=true 而钉钉卡片未发)。
+    card_sent: bool = False
+    work_order_sent: bool = False
     error: Optional[str] = None
 
     @property
@@ -102,7 +110,7 @@ class DiscoveryService:
         bot_service: BotServiceProtocol | None = None,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol | None = None,
         work_order_service: WorkOrderServiceProtocol | None = None,
-        frontend_url_provider: FrontendUrlProvider | None = None,
+        frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
         self._reader = reader
         self._session_initiator = session_initiator
@@ -117,9 +125,7 @@ class DiscoveryService:
         #: 最近的发现结果 (task_id → DiscoveryResult)，供外部查询
         self._discoveries: dict[str, DiscoveryResult] = {}
 
-    def _try_acquire_lock(
-        self, bot_id: str
-    ) -> Optional[TaskDiscoveryLockRecord]:
+    def _try_acquire_lock(self, bot_id: str) -> Optional[TaskDiscoveryLockRecord]:
         """尝试获取该 bot 当日的发现锁（与 _try_acquire_restart_lock 逻辑同构）。
 
         多机器 cron 同时 fire 时，所有机器都进入 ``discover_all_bots()``，
@@ -135,7 +141,9 @@ class DiscoveryService:
         Holder: ``HOSTNAME`` 环境变量或 ``socket.gethostname()``。
         TTL: ``DISCOVERY_LOCK_TTL_SECONDS`` (600s) — 崩机后 stale reaper 恢复。
         """
-        logger.debug("[task_discovery] → DiscoveryService._try_acquire_lock(bot_id=%s)", bot_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService._try_acquire_lock(bot_id=%s)", bot_id
+        )
         env = get_current_env()
         today = datetime.now().strftime("%Y-%m-%d")
         holder = os.environ.get("HOSTNAME", socket.gethostname())
@@ -152,7 +160,10 @@ class DiscoveryService:
             logger.warning(
                 "[task_discovery] Reaping stale discovery lock: env=%s, bot=%s, "
                 "date=%s, created=%s",
-                env, bot_id, today, stale.gmt_create,
+                env,
+                bot_id,
+                today,
+                stale.gmt_create,
             )
             # compare-and-delete：token 不匹配说明已被其他机器 reap+reacquire
             self._lock_repo.release(env, bot_id, today, stale.lock_token)
@@ -198,9 +209,7 @@ class DiscoveryService:
 
         # 3) 取交集：db 有 pending 任务 且 bot 存活
         # TODO: 交集基础上通过 dream mode 接口进一步过滤
-        intersection = [
-            db_bots[bid] for bid in db_bots if bid in live_bot_ids
-        ]
+        intersection = [db_bots[bid] for bid in db_bots if bid in live_bot_ids]
 
         # 4) 按 owner_id 聚合 — 同一个 owner 只取第一个 bot 执行发现，
         #    避免同一用户多个 bot 重复发现
@@ -214,8 +223,11 @@ class DiscoveryService:
         logger.info(
             "[task_discovery] scheduled discovery: db=%d bots, live=%d bots, "
             "intersection=%d, after owner aggregation=%d bot(s) (from %d pending tasks)...",
-            len(db_bots), len(live_bots), len(intersection),
-            len(bots_to_discover), len(pending),
+            len(db_bots),
+            len(live_bots),
+            len(intersection),
+            len(bots_to_discover),
+            len(pending),
         )
 
         all_results: list[DiscoveryResult] = []
@@ -245,7 +257,9 @@ class DiscoveryService:
             except Exception as exc:
                 logger.error(
                     "[task_discovery] bot=%s failed: %s",
-                    bot_id, exc, exc_info=True,
+                    bot_id,
+                    exc,
+                    exc_info=True,
                 )
             finally:
                 if lock is not None:
@@ -278,19 +292,27 @@ class DiscoveryService:
            — 同时通过 WebSocket 注入发现提示消息
         3. 发送通知（发现摘要 + session 链接）
         """
-        logger.debug("[task_discovery] → DiscoveryService.discover(bot_id=%s, owner_id=%s, agent_id=%s)", bot_id, owner_id, agent_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService.discover(bot_id=%s, owner_id=%s, agent_id=%s)",
+            bot_id,
+            owner_id,
+            agent_id,
+        )
         dt = datetime.now().strftime("%Y-%m-%d")
         tasks = self._reader.read_pending_tasks_for_bot(bot_id, owner_id, dt)
         if not tasks:
             logger.info(
                 "[task_discovery] no pending tasks for bot=%s owner=%s dt=%s",
-                bot_id, owner_id, dt,
+                bot_id,
+                owner_id,
+                dt,
             )
             return []
 
         logger.info(
             "[task_discovery] discovered %d pending tasks for bot=%s",
-            len(tasks), bot_id,
+            len(tasks),
+            bot_id,
         )
 
         results: list[DiscoveryResult] = []
@@ -319,7 +341,11 @@ class DiscoveryService:
         model: str | None,
     ) -> DiscoveryResult:
         """处理单个任务：创建 session+注入消息 → 发通知。"""
-        logger.debug("[task_discovery] → DiscoveryService._discover_single(task_id=%s, bot_id=%s)", task.task_id, bot_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService._discover_single(task_id=%s, bot_id=%s)",
+            task.task_id,
+            bot_id,
+        )
         try:
             session = await self._session_initiator.initiate_session(
                 all_tasks,
@@ -331,7 +357,10 @@ class DiscoveryService:
 
             # 通知走两个通道：外发卡片（NotifySender）+ 工单通知（WorkOrderService）。
             card_sent = self._send_notification(
-                task, owner_id, session, len(all_tasks),
+                task,
+                owner_id,
+                session,
+                len(all_tasks),
             )
             work_order_sent = self._send_work_order_event(task, owner_id, session)
             notification_sent = card_sent or work_order_sent
@@ -350,11 +379,14 @@ class DiscoveryService:
                 task=task,
                 session=session,
                 notification_sent=notification_sent,
+                card_sent=card_sent,
+                work_order_sent=work_order_sent,
             )
         except Exception as exc:
             logger.error(
                 "[task_discovery] failed for task %s: %s",
-                task.task_id, exc,
+                task.task_id,
+                exc,
             )
             return DiscoveryResult(task=task, error=str(exc))
 
@@ -373,7 +405,11 @@ class DiscoveryService:
         deep_link 指向 session，用户点击后进入 session 确认。
         extra 携带通用交互卡片参数（不绑定具体服务商）。
         """
-        logger.debug("[task_discovery] → DiscoveryService._send_notification(task_id=%s, user_id=%s)", task.task_id, user_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService._send_notification(task_id=%s, user_id=%s)",
+            task.task_id,
+            user_id,
+        )
         session_url = session.session_url
         message = NotifyMessage(
             title="发现待确认任务",
@@ -384,8 +420,6 @@ class DiscoveryService:
                 "channel": "tc_card",
                 "card_template_id": os.environ.get(
                     "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
-                ) or os.environ.get(
-                    "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", ""
                 ),
                 "card_biz_id": f"discover_things_{task.task_id}",
                 "card_data": json.dumps(
@@ -422,7 +456,11 @@ class DiscoveryService:
         ``work_order_service`` 未注入时直接返回 False（no-op，保持向后兼容）。
         失败不抛异常 — 仅记 warning 并返回 False，不影响发现主流程。
         """
-        logger.debug("[task_discovery] → DiscoveryService._send_work_order_event(task_id=%s, user_id=%s)", task.task_id, user_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService._send_work_order_event(task_id=%s, user_id=%s)",
+            task.task_id,
+            user_id,
+        )
         svc = self._work_order_service
         if svc is None:
             return False
@@ -439,6 +477,7 @@ class DiscoveryService:
                 title=task.title,
                 content={
                     **task.to_card_data(),
+                    "text": f"{task.to_card_data().get('card_name', '')}：{task.to_card_data().get('workitem_name', '')}",
                     "session_url": session.session_url,
                     "task_id": task.task_id,
                 },
@@ -473,7 +512,10 @@ class DiscoveryService:
 
         从内存 ``self._discoveries`` 读取 — 后端重启后会丢，仅反映进程内最近的 discover 结果。
         """
-        logger.debug("[task_discovery] → DiscoveryService.get_discovery_result(task_id=%s)", task_id)
+        logger.debug(
+            "[task_discovery] → DiscoveryService.get_discovery_result(task_id=%s)",
+            task_id,
+        )
         return self._discoveries.get(task_id)
 
 
@@ -500,10 +542,12 @@ def create_default_service(
     logger.debug("[task_discovery] → create_default_service(data_file=%s)", data_file)
     reader = SqliteTaskReader(data_file)
     from agentclaw.community.core.task.task_discovery.session_initiator import (
-        CronRelaySessionInitiator,
+        UnavailableSessionInitiator,
     )
 
-    session_initiator = CronRelaySessionInitiator(cron_relay=None)
+    session_initiator = UnavailableSessionInitiator(
+        reason="create_default_service 手动装配路径无 OpenApiBotPort"
+    )
     return DiscoveryService(
         reader=reader,
         session_initiator=session_initiator,

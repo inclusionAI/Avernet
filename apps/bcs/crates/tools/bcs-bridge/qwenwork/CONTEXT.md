@@ -11,6 +11,8 @@
 - `bcs-bridge-core::engine` and engine-neutral stream event constructors.
 - QwenWork's WeCom Bot protocol and HTTP Hooks.
 - Read-only QwenWork SQLite chat metadata (never transcript contents).
+- Optional local Unix MCP task detail/answer control for AskUserQuestion. Detail is
+  limited to the correlated task and one recent message; response text is not forwarded.
 
 ## Ownership and allowed dependencies
 
@@ -49,3 +51,12 @@ BCS routing policy or server database migration changes.
 peer and SQLite fixture. It also drives bridge's runtime consumer and checks
 the generated stream and persisted session mapping. CLI registration tests
 cover executable-free registration. See README for configuration and limits.
+
+AskUserQuestion uses a parked synchronous PreToolUse Hook and the shared
+InteractionRegistry. BCS owns interaction ids, resolutions and run deadlines;
+the adapter translates forms and native desktop answer delivery. Local MCP is
+restricted to get_detail and submit_response on the verified task. Later question
+Hooks cannot execute while the original answer is being delivered. Secret forms
+are denied before stream publication. This does not add execution approval
+support or change any BCS contract. See README for bounded metadata/query costs
+and the current desktop IM policy limitation.

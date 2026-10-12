@@ -61,7 +61,7 @@ resolve_bcs_local_llm_api_key_reference() {
 
     if [ -z "${OPENAI_API_KEY:-}" ]; then
         log_error "OPENCLAW_OPENAI_API_KEY references OPENAI_API_KEY, but OPENAI_API_KEY is not set."
-        log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/.env.local."
+        log_error "Set OPENAI_API_KEY in the launch environment, or set OPENCLAW_OPENAI_API_KEY to a real key in ${PROJECT_ROOT}/singlebox/.env.local."
         return 1
     fi
 
@@ -1143,7 +1143,7 @@ bcs_prereqs() {
             has_error=true
         else
             prereq_warn "Port ${BCS_PORT} is in use"
-            print_port_conflict_guidance "${BCS_PORT}" "${PROJECT_ROOT}" "BCS" "$(singlebox_cmd stop bcs)" "set BCS_PORT=<free-port> in .env.local" false
+            print_port_conflict_guidance "${BCS_PORT}" "${PROJECT_ROOT}" "BCS" "$(singlebox_cmd stop bcs)" "set BCS_PORT=<free-port> in singlebox/.env.local" false
         fi
     fi
 

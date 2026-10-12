@@ -18,6 +18,7 @@ from typing import Any, AsyncIterator
 import httpx
 
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import BcsTokenProvider
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ def _map_status(resp: httpx.Response) -> None:
         raise BcsServerError(f"{resp.status_code} {resp.text}")
 
 
-class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
+class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by live acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
         self._owns_client = http_client is None
@@ -137,7 +138,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     def task_callback_url(self) -> str:
         """任务回投目标 origin(scheme://netloc):BCS 把 state_machine.* 等事件 POST 回此 origin +
         ``_BCN_EVENT_CALLBACK_PATH``。值由 token provider 经 corp 注入(``CorpBcsTokenProvider.task_callback_url``,
-        env-aware ``bcs_client.task_callback_url[_pre]``);社区/singlebox 默认空 → TaskExecutor 兜底
+        env-aware ``bcs_client.task_callback_url[_pre]``);社区/本地未配置默认空 → TaskExecutor 兜底
         ``api_base_url``(economy_governance 派生)。"""
         return str(getattr(self._t, "task_callback_url", "") or "")
 
@@ -214,7 +215,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         data = r.json()
         # 实 BCS 创建群响应键名为 ``id``(``group_detail_to_create_json`` groups.rs:2093 与 v1 legacy
         # v1_group_detail_to_legacy_create_json groups.rs:782 均 ``"id": result.group_id``),
-        # 非早期假设的 ``group_id``。与 ``singlebox_bcs_adapter.create_group`` 对齐取 ``(group_id or id)``,
+        # 非早期假设的 ``group_id``。与 BCS REST 实际响应保持一致,取 ``(group_id or id)``,
         # 缺则带 body 抛 KeyError 便于定位(此前 ``data["group_id"]`` 对预发 BCS 直接 KeyError)。
         group_id = data.get("group_id") or data.get("id")
         if not group_id:
@@ -240,15 +241,24 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         return r.json()
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
-                                   since_msg_id: str | None = None) -> list[Any]:
+                                   since_msg_id: str | None = None,
+                                   caller_bearer: str | None = None) -> list[Any]:
         path = f"/sessions/{session_id}/messages"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)
+        # 会话历史读口有参与者级 ACL(401 "valid Human identity or Bot token is
+        # required for this session history request")——服务 HMAC 签名不是会话参与者。
+        # 参考 create_group 的 caller 身份手法:携带持有者 bot 的 session_token 做
+        # ``Authorization: Bearer``,让 BCS 把 caller 解析成会话内的成员 bot。token
+        # 不打日志(与 create_group 同规约)。
+        if caller_bearer:
+            headers["Authorization"] = f"Bearer {caller_bearer}"
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
-        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s",
-                    path, self._t.base_url, limit, since_msg_id)
+        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s caller_identity=%s",
+                    path, self._t.base_url, limit, since_msg_id,
+                    "bearer" if caller_bearer else "hmac-only")
         _t0 = time.monotonic()
         async with self._client_for_current_loop() as client:
             r = await client.request("GET", path, params=params, headers=headers)
@@ -274,6 +284,52 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     async def get_state_machine_run(self, run_id: str) -> dict[str, Any]:
         r = await self._req("GET", f"/state-machine-runs/{run_id}")
         return r.json()
+
+    async def send_message_a2a(
+        self,
+        *,
+        target_bot_id: str,
+        target_user_id: str,
+        message: str,
+        session_id: str | None = None,
+        caller_bearer: str | None = None,
+    ) -> BotSendResult:
+        """BCS A2A 单 bot 异步消息:``POST /bots/{target_bot_id}:{target_user_id}/chat-async``。
+
+        目标按 ``bot_id:owner_id`` 寻址(BCS A2A 原生路径形态);发送方身份由
+        ``caller_bearer``(发起 bot 的 session_token,直读 bcs_bots)作
+        ``Authorization: Bearer`` 表达——chat-async 把 caller 严格解析为该 token 的 bot
+        (run 只有发起 bot 可读),HMAC 服务签名不足以过该口。与 ``create_group`` 的
+        ``caller_bot_token`` / ``get_session_messages`` 的 ``caller_bearer`` 同一手法,
+        token 不打日志。``session_id`` 原样作 BCS session_key(多轮复用同一会话);
+        ``responseMode`` 固定 ``after-last-tool-call``(对齐 bcs-cli chat 默认)。
+
+        响应为 202 + 裸 JSON(``run_id/bot_uuid/session_id/status/expires_at_ms``),
+        缺 ``run_id``(如网关登录门回显 JSON)按业务失败直抛,避免调用方拿到空 handle。
+        """
+        path = f"/bots/{target_bot_id}:{target_user_id}/chat-async"
+        body: dict[str, Any] = {
+            "message": message,
+            "responseMode": "after-last-tool-call",
+        }
+        if session_id:
+            body["sessionId"] = session_id
+        # 参考 create_group:Bearer 叠加在 X-ECB-* 服务签名之上做 caller 身份。
+        extra_headers: dict[str, str] | None = None
+        if caller_bearer:
+            extra_headers = {"Authorization": f"Bearer {caller_bearer}"}
+        else:
+            logger.warning(
+                "[task][bcs_http] send_message_a2a 无 caller_bearer(仅 HMAC 匿名)— "
+                "chat-async 把 caller 解析为 bot,预计 401 target=%s",
+                f"{target_bot_id}:{target_user_id}",
+            )
+        r = await self._req("POST", path, json=body, extra_headers=extra_headers)
+        data = r.json()
+        run_id = data.get("run_id")
+        if not run_id:
+            raise BcsClientError(f"send_message_a2a 响应缺 run_id: {_response_summary(r)}")
+        return BotSendResult(run_id=run_id, session_id=data.get("session_id"))
 
     async def validate_definition(self, definition_yaml: str) -> None:
         await self._req("POST", "/collaboration/definitions/validate", json={"yaml": definition_yaml})

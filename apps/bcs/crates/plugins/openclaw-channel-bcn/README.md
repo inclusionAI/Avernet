@@ -25,9 +25,17 @@ terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
 run IDs are rejected. The plugin requires protocol V3, so the key is the
 canonical BCS Session ID from the original `chat.send`.
 
+## 1.0.25 patch
+
+Fixes task tool Session scoping on V3 connections. Version 1.0.24 sends a bare
+Group ID for task control RPCs when V3 separates Group and Session IDs, causing
+assignment persistence failures. Upgrade to 1.0.25 to preserve the originating
+Session for assignment, progress messages and completion. No protocol or schema
+migration is required.
+
 ## Bot WebSocket Protocol
 
-Version `1.0.24` requires Bot WebSocket protocol V3. After `bot.connect`
+Version `1.0.24` and later require Bot WebSocket protocol V3. After `bot.connect`
 negotiates `unified_run_events` and `canonical_session_id`, every run event is
 sent with the canonical `runId`, `sessionId`, `seq`, and `ts` fields. Assistant
 output uses `event: "chat"` with `state` and `content`; tool, thinking,
@@ -35,6 +43,12 @@ lifecycle, assistant, and error streams use a flat `event: "agent"` payload.
 The plugin does not emit the legacy `chat.event`, `run_id`, `bcs_group_id`,
 or `message` run-event fields on a V3 connection, and chat text is never sent
 through the legacy `deltaText` compatibility field.
+
+Task control RPCs (`task.dispatch`, `task.message`, and `task.complete`) retain
+their existing session-scoped `group_id` format: `<group_id>:<session_suffix>`.
+The plugin uses the canonical Session ID from `chat.send` when invoking these
+RPCs, including when V3 supplies the group and Session IDs separately. This
+keeps task dispatch, progress and completion within the originating Session.
 
 ## Install From npm
 
@@ -66,7 +80,7 @@ Select with the flag or env var (flag wins):
 BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.24 ./singlebox/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.25 ./singlebox/singlebox.sh
 ```
 
 ## Configure

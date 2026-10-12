@@ -155,6 +155,9 @@
       "scan_interval_hours": 1,
       "storage_dir": "./data/skills_scan"
     },
+    "task_discovery": {
+      "frontend_url": "${FRONTEND_URL:-http://localhost:8000}"
+    },
     "task_queue_worker": {
       "enabled": true
     },
