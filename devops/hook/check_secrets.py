@@ -207,6 +207,19 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
     literals. Dictionary keys describe fields; values carry credentials.
     Unparseable diff fragments retain the conservative regex behavior.
     """
+    stripped = content.strip()
+    if stripped.startswith(("f\"", "f'", "F\"", "F'")):
+        try:
+            formatted = ast.parse(stripped, mode="eval").body
+        except (SyntaxError, ValueError):
+            pass
+        else:
+            if isinstance(formatted, ast.JoinedStr):
+                return all(
+                    not isinstance(item, ast.FormattedValue)
+                    or isinstance(item.value, (ast.Name, ast.Attribute))
+                    for item in formatted.values
+                )
     if assignment.group("quoted") is not None:
         return False
     expression = content[assignment.start("bare"):].strip().rstrip(",")
