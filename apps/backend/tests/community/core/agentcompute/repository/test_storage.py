@@ -330,28 +330,65 @@ class TestAgentRepository:
         agents = agent_repo.list_by_run(run.run_id, TENANT_A)
         assert len(agents) == 2
 
-    def test_update_status_running(self, run_repo, agent_repo):
+    def _claimed_run(self, run_repo, job_repo):
+        # The agent fence is the run fence (D28): an update must carry the
+        # job row's CURRENT claim epoch to land, so every writing test first
+        # enqueues + claims its run the way a worker would.
         run = _mk_run()
         run_repo.create(run)
+        job_repo.enqueue(run_id=run.run_id, tenant=TENANT_A, deadline_seconds=3600)
+        claimed = job_repo.claim_batch("w1", None, 1, 60)[0]
+        return run, claimed["claim_epoch"]
+
+    def test_update_status_running(self, run_repo, agent_repo, job_repo):
+        run, epoch = self._claimed_run(run_repo, job_repo)
         agent = _mk_agent(run)
         agent_repo.create(agent)
         ok = agent_repo.update_status(
             run.run_id, agent.agent_id, TENANT_A,
-            dm.AgentStatus.RUNNING.value,
+            dm.AgentStatus.RUNNING.value, claim_epoch=epoch,
         )
         assert ok
-        fetched = agent_repo.get(run.run_id, agent.id if hasattr(agent, 'id') else agent.agent_id, TENANT_A)
+        fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
         assert fetched.status == dm.AgentStatus.RUNNING
 
-    def test_update_output_and_error(self, run_repo, agent_repo):
+    def test_update_status_fenced_by_claim_epoch(self, run_repo, agent_repo, job_repo):
+        run, epoch = self._claimed_run(run_repo, job_repo)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value, claim_epoch=epoch + 100,
+        ) is False
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_A).status             == dm.AgentStatus.QUEUED
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value, claim_epoch=epoch,
+        ) is True
+
+    def test_update_status_without_a_job_row_is_fenced(self, run_repo, agent_repo):
+        # A run someone never enqueued belongs to no slice: a status write
+        # with a stale-or-absent epoch has no current-owner to match and is
+        # refused, exactly like the run row's own fence.
         run = _mk_run()
         run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        assert agent_repo.update_status(
+            run.run_id, agent.agent_id, TENANT_A,
+            dm.AgentStatus.COMPLETED.value,
+        ) is False
+        assert agent_repo.get(run.run_id, agent.agent_id, TENANT_A).status \
+            == dm.AgentStatus.QUEUED
+
+    def test_update_output_and_error(self, run_repo, agent_repo, job_repo):
+        run, epoch = self._claimed_run(run_repo, job_repo)
         agent = _mk_agent(run)
         agent_repo.create(agent)
         agent_repo.update_status(
             run.run_id, agent.agent_id, TENANT_A,
             dm.AgentStatus.FAILED.value,
-            error="something went wrong",
+            error="something went wrong", claim_epoch=epoch,
         )
         fetched = agent_repo.get(run.run_id, agent.agent_id, TENANT_A)
         assert fetched.status == dm.AgentStatus.FAILED
@@ -367,6 +404,23 @@ class TestAgentRepository:
 
 
 class TestResultShardXOR:
+
+    def test_shard_double_insert_converges_to_the_survivor(
+            self, run_repo, agent_repo, shard_repo):
+        # The unique pair (uk_shard_agent) is the exactly-once invariant; a
+        # racing pod that loses the double-insert must converge to the
+        # surviving row rather than surface an IntegrityError.
+        run = _mk_run()
+        run_repo.create(run)
+        agent = _mk_agent(run)
+        agent_repo.create(agent)
+        first = _mk_shard(run, agent)
+        created = shard_repo.create(first)
+        again = shard_repo.create(_mk_shard(run, agent))
+        shards = shard_repo.list_by_run(run.run_id, TENANT_A)
+        assert len(shards) == 1
+        assert created.source_agent_id == again.source_agent_id
+
     def test_shard_with_payload(self, run_repo, agent_repo, shard_repo):
         run = _mk_run()
         run_repo.create(run)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.repository.shard import model as om
@@ -22,17 +23,27 @@ class ResultShardRepository(ResultShardRepositoryProtocol):
             raise ValueError("Result shard must carry exactly one of payload or artifact_key (D31)")
         if shard.payload is not None and shard.artifact_key is not None:
             raise ValueError("Result shard must not carry both payload and artifact_key (D31)")
-        with self._db.orm_session() as session:
-            row = om.AcAgentComputeResultShardModel(
-                shard_id=shard.id,
-                run_id=shard.run_id,
-                tenant=shard.tenant,
-                source_agent_id=shard.source_agent_id,
-                payload=_dumps(shard.payload) if shard.payload is not None else None,
-                artifact_key=shard.artifact_key,
-                routed_at=shard.routed_at,
-            )
-            session.add(row)
+        try:
+            with self._db.orm_session() as session:
+                row = om.AcAgentComputeResultShardModel(
+                    shard_id=shard.id,
+                    run_id=shard.run_id,
+                    tenant=shard.tenant,
+                    source_agent_id=shard.source_agent_id,
+                    payload=_dumps(shard.payload) if shard.payload is not None else None,
+                    artifact_key=shard.artifact_key,
+                    routed_at=shard.routed_at,
+                )
+                session.add(row)
+        except IntegrityError:
+            # uk_shard_agent: the (run, agent) pair already landed — a racing
+            # pod won the double-insert between the existence check and this
+            # write. Exactly-once means converge to the surviving row, not
+            # surface the collision; a non-pair IntegrityError re-raises.
+            existing = self.get_by_run_agent(shard.run_id, shard.source_agent_id, shard.tenant)
+            if existing is not None:
+                return existing
+            raise
         return shard
 
     def get_by_run_agent(self, run_id: dm.RunId, agent_id: dm.AgentId,

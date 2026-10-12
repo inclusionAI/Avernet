@@ -7,6 +7,7 @@ from sqlalchemy import delete, select, update
 
 from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.repository.agent import model as om
+from agentclaw.community.core.agentcompute.repository.job import model as om_job
 from agentclaw.community.core.agentcompute.repository.agent.protocol import (
     AgentRepositoryProtocol,
 )
@@ -122,6 +123,19 @@ class AgentRepository(AgentRepositoryProtocol):
         if bot_state is not None:
             values["bot_state"] = bot_state
         values["ended_at"] = _now_ms() if status in ("COMPLETED", "FAILED", "KILLED") else None
+        # D28 fencing, the run row's own rule: a subagent's terminal state is
+        # slice-owned, and a stale pod (lease lost, epoch bumped by the
+        # reclaimer) must not overwrite the agent row the new owner is
+        # executing against. claim_epoch mirrors RunRepository.update_status
+        # exactly — the write lands only on the job row's CURRENT epoch.
+        job_epoch_current = (
+            select(om_job.AcAgentComputeJobModel.job_id).where(
+                om_job.AcAgentComputeJobModel.run_id == run_id,
+                om_job.AcAgentComputeJobModel.tenant == tenant,
+                om_job.AcAgentComputeJobModel.claim_epoch == claim_epoch,
+                om_job.AcAgentComputeJobModel.is_deleted.is_(False),
+            ).exists()
+        )
         with self._db.orm_session() as session:
             result = session.execute(
                 update(om.AcAgentComputeAgentModel).where(
@@ -129,6 +143,7 @@ class AgentRepository(AgentRepositoryProtocol):
                     om.AcAgentComputeAgentModel.agent_id == agent_id,
                     om.AcAgentComputeAgentModel.tenant == tenant,
                     om.AcAgentComputeAgentModel.is_deleted.is_(False),
+                    job_epoch_current,
                 ).values(**values)
             )
         return result.rowcount > 0

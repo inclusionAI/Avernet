@@ -230,7 +230,7 @@ class SliceStore:
             for s in shards
         ]
 
-    def rehydrate(self, run: Run) -> tuple[RunState, set[tuple[str, str]], list[Agent]]:
+    def rehydrate(self, run: Run, claim_epoch: int = 0) -> tuple[RunState, set[tuple[str, str]], list[Agent]]:
         state = RunState(run=run)
         state.round_index = len(self._round_repo.list_by_run(run.run_id, run.tenant))
         agents = self._agent_repo.list_by_run(run.run_id, run.tenant)
@@ -256,6 +256,8 @@ class SliceStore:
                         shard.payload if shard.payload is not None else None,
                         shard.artifact_key,
                     ),
+                
+                    claim_epoch=claim_epoch,
                 )
 
         # Spawn history for still-open agents so the orchestrator's dedup guard

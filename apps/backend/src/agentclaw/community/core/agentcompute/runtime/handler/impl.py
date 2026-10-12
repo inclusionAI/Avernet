@@ -173,7 +173,7 @@ class SwarmRunHandler:
             self._job_repo.complete(run_id, tenant, self._worker_id, claim_epoch)
             return "complete"
 
-        state, done_pairs, interrupted = self.store.rehydrate(run)
+        state, done_pairs, interrupted = self.store.rehydrate(run, claim_epoch)
         self._run_repo.update_status(run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch)
         deadline = self._deadline()
 
