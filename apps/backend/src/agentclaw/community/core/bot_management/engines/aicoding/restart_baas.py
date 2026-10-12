@@ -65,11 +65,16 @@ class AicodingSubmissionMixin:
         if execution is None or execution.payload["provider"] != "baas":
             return
         execution.check_target(ctx, execution.payload["binding_id"])
-        if execution.verify_backup is None:
-            raise RuntimeError("缺少已验证的备份，禁止提交重启")
-        # Configuration preparation can take time. Recheck the actual container
-        # and committed generation at the last possible moment before submission.
-        execution.verify_backup()
+        if execution.verify_backup is not None:
+            execution.verify_backup()
+        else:
+            logger.warning(
+                "event=aicoding_restart_backup phase=verify_receipt status=degraded "
+                "reason=missing_verifier action=continue_restart data_loss_risk=true "
+                "bot_id=%s target_id=%s operation_id=%s",
+                ctx.bot_id, execution.payload['device_id'], execution.operation_id,
+            )
+        # Mandatory operation ownership/CAS is independent of optional backup.
         execution.fence_mutation()
 
     def on_restart_submission_error(self, ctx, error, *, clear_intent) -> None:

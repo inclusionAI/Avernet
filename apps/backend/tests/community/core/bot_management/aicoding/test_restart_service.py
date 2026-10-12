@@ -319,11 +319,11 @@ async def test_definitive_404_marks_failed_and_clears_poll_intent(lifecycle):
 
 
 @pytest.mark.asyncio
-async def test_final_receipt_failure_clears_intent_without_remote_submit(lifecycle):
+async def test_final_identity_change_clears_intent_without_remote_submit(lifecycle):
     s = lifecycle
     await s.service.restart_bot_async(bot_id="b", user_id="o")
     task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key("b", "o"))
-    receipt = Mock(side_effect=[None, RestartBackupError("receipt_stale", "changed")])
+    receipt = Mock(side_effect=[None, RestartBackupError("instance_changed", "changed")])
     with patch.object(AicodingRestartBackupMixin, "_prepare_restart", return_value=receipt):
         assert isinstance(s.handler.handle(task.payload), Fail)
     assert s.repo.bot["status"] == "FAILED"
@@ -539,3 +539,108 @@ def test_engine_preparation_matches_legacy_payload_builder_arguments(lifecycle, 
         return values
 
     assert normalized(coding_arguments) == normalized(legacy_arguments)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcome', ['prepare_failed', 'submitted', 'ambiguous'])
+async def test_degraded_backup_real_worker_submission_boundary(lifecycle, outcome):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    s.platform.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical'}]
+    mutations = []
+
+    def post(**kwargs):
+        if kwargs['action'] == 'aicoding_restart_backup':
+            raise ConnectionError('private backup output')
+        assert journal(s.repo.bot)['phase'] == 'RESTARTING'
+        mutations.append(kwargs)
+        if outcome == 'ambiguous':
+            raise TimeoutError('private submission output')
+        return {'publish_id': 12}
+
+    s.platform.post_bots_api.side_effect = post
+    if outcome == 'prepare_failed':
+        s.platform._build_create_bot_payload.side_effect = ValueError('private config')
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    result = s.handler.handle(task.payload)
+    if outcome == 'prepare_failed':
+        assert isinstance(result, Fail)
+        assert not mutations
+        message = s.repo.bot['ext']['start_message']
+        assert '提交前准备失败' in message
+        assert '备份已完成' not in message and 'private' not in message
+    else:
+        assert isinstance(result, Reschedule)
+        assert len(mutations) == 1
+        assert s.repo.bot['status'] == 'PENDING'
+        assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    s.handler.handle(task.payload)
+    assert len(mutations) == (0 if outcome == 'prepare_failed' else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('changed', [False, True])
+async def test_inventory_change_after_initial_failure_does_not_veto_submission(lifecycle, changed, caplog):
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    def inventory(target):
+        return [{'status': 'ACTIVE', 'provider_device_id': target}]
+    s.platform.list_devices_by_bot_uuid.side_effect = [
+        ConnectionError('unavailable'), inventory('old'), inventory('new' if changed else 'old')]
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    result = s.handler.handle(task.payload)
+    assert isinstance(result, Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+    assert s.platform.post_bots_api.call_args.kwargs['action'] == 'coding_restart'
+    if changed:
+        assert 'reason=target_changed' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    s.platform.post_bots_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['prepare', 'verify'])
+@pytest.mark.parametrize('changed', [False, True])
+async def test_late_boot_response_does_not_veto_original_restart(lifecycle, phase, changed, caplog):
+    import json
+    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup as backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+
+    s = lifecycle
+    await s.service.restart_bot_async(bot_id='b', user_id='o')
+    s.platform.list_devices_by_bot_uuid.return_value = [
+        {'status': 'ACTIVE', 'provider_device_id': 'physical'}]
+    now = [0]
+    commands, mutations = [], []
+
+    def post(**kwargs):
+        if kwargs['action'] != 'aicoding_restart_backup':
+            mutations.append(kwargs)
+            return {'publish_id': 12}
+        commands.append(kwargs)
+        late = len(commands) == 2
+        if late:
+            now[0] = 1501
+        operation = current_restart.get().operation_id
+        status = 'running' if phase == 'prepare' and not late else 'committed'
+        return {'exit_code': 0, 'stdout': json.dumps({
+            'version': 1, 'operation_id': operation, 'status': status,
+            'boot_id': 'B' if late and changed else 'A',
+            'backup': {'status': 'success', 'generation_id': 'g', 'operation_id': operation},
+        })}
+
+    s.platform.post_bots_api.side_effect = post
+    task = s.queue.find_by_idempotency_key(TASK_TYPE, task_key('b', 'o'))
+    with patch.object(backup.time, 'monotonic', side_effect=lambda: now[0]), \
+         patch.object(backup.time, 'sleep'):
+        result = s.handler.handle(task.payload)
+    assert len(commands) == 2
+    assert isinstance(result, Reschedule)
+    assert len(mutations) == 1  # Neither backup timeout nor identity change vetoes restart.
+    if changed:
+        assert 'reason=instance_changed' in caplog.text
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    assert isinstance(s.handler.handle(task.payload), Reschedule)
+    assert len(mutations) == 1  # Redelivery observes; it never repeats the mutation.

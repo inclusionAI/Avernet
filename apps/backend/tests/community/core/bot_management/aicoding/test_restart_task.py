@@ -651,6 +651,77 @@ async def test_process_loss_after_mutation_is_not_replayed(setup):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [ConnectionError('old container unavailable'), TimeoutError('backup timed out')])
+async def test_real_backup_failure_keeps_durable_restart_running_without_failed_bot(setup, failure):
+    s = setup
+    await submit(s)
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    runtime.post_bots_api.side_effect = failure
+    devices = Mock()
+    devices.get_device.return_value = s.binding
+
+    def restart(**kwargs):
+        verify = s.strategy.prepare_restart(
+            s.ctx, binding_id=7, device_service=devices, bot_repository=s.repo,
+            target_runtime_provider=lambda: runtime,
+        )
+        verify()
+        assert not current_restart.get().fenced
+        s.strategy.before_restart_submission(s.ctx)  # Fence immediately before POST.
+        assert current_restart.get().fenced
+        s.binding['device_props'] = {
+            'restart_request_id': 'request', 'restart_publish_id': '12',
+            'restart_workflow_baseline': 10,
+        }
+        return deepcopy(s.repo.bot)
+
+    s.service.restart_bot.side_effect = restart
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    assert journal(s.repo.bot)['phase'] == 'WAITING_READY'
+    assert s.repo.bot['status'] == 'PENDING'
+    assert s.repo.bot['ext'].get('start_status') != 'FAILED'
+    s.service.restart_bot.assert_called_once()
+    # Redelivery observes the existing workflow instead of retrying backup/restart.
+    assert isinstance(s.handler.handle(task(s).payload), Reschedule)
+    s.service.restart_bot.assert_called_once()
+    runtime.post_bots_api.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['database', 'superseded'])
+async def test_backup_degradation_does_not_swallow_mutation_fence_failure(setup, failure):
+    s = setup
+    await submit(s)
+    payload = task(s).payload
+    state = RestartState(s.repo, 'b', 'o', payload['operation_id'])
+    state.update({'QUEUED'}, phase='BACKING_UP')
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import RestartExecution
+    execution = RestartExecution(state, payload)
+    token = current_restart.set(execution)
+    runtime = Mock()
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
+    runtime.post_bots_api.side_effect = ConnectionError('unavailable')
+    devices = Mock()
+    devices.get_device.return_value = s.binding
+    try:
+        verify = s.strategy.prepare_restart(s.ctx, binding_id=7, device_service=devices,
+                                            bot_repository=s.repo, target_runtime_provider=lambda: runtime)
+        verify()
+        if failure == 'database':
+            s.repo.failed_write = True
+            expected = RuntimeError
+        else:
+            state.update({'BACKING_UP'}, phase='RESTARTING')
+            expected = RestartSuperseded
+        with pytest.raises(expected):
+            s.strategy.before_restart_submission(s.ctx)
+        assert not execution.fenced
+    finally:
+        current_restart.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_reclaimed_submission_adopts_handoff_without_reissuing(setup):
     s = setup
     await submit(s)

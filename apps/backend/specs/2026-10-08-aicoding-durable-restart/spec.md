@@ -38,19 +38,21 @@ is explicitly scoped to eligible bound ordinary coding Bots, not every request.
 
 ## Execution and observation entirely inside aicoding
 
-The worker sets a coding-owned ContextVar and invokes the unchanged restart_bot.
-The already-existing prepare_restart hook uses a stable backup operation ID and
-runs receipt/identity checks before a CAS transition BACKING_UP -> RESTARTING
-under the existing restart lock. No lock ownership or TTL behavior is changed.
+The worker sets a coding-owned ContextVar. Direct ARCA uses the original
+restart_bot stop/start flow. Ordinary BaaS uses AicodingBaasRestart: best-effort
+backup, existing restart lock, request preparation, final target/receipt recheck,
+then the CAS transition BACKING_UP -> RESTARTING immediately before provider POST.
+No lock ownership or TTL behavior is changed. A verifier callable proves that
+the precondition was installed, not that a backup was committed.
 
-Before calling restart_bot, the worker records old provider request/publish IDs.
-After the call returns, or after a caught ambiguous BaaS exception, it reads the
-existing binding props to capture new provider intent. It does not inject calls
-into the provider mutation. The original BaaS implementation already persists
-request ID, workflow baseline and its own recovery task before platform mutation.
-Only changed intent is adopted; an old request/publish is not proof of this restart.
-For successful stop/start returns the strategy records the replacement binding
-(or waits for its allocation); a failed stop/start call is not replayed.
+Before execution, the worker records old provider request/publish IDs. The BaaS
+orchestrator persists request ID, workflow baseline and provider recovery work
+before submission. After return or an ambiguous post-fence exception, the worker
+captures the new provider intent; old intent is not proof of this restart.
+Pre-submission failures terminate without claiming backup success. An ambiguous
+post-fence response is observed, never retried as a fresh mutation. For stop/start
+the worker records the replacement binding or waits for allocation; a failed
+stop/start call is not replayed.
 
 WAITING_READY observation requires the matching BaaS publish to succeed and the
 existing provider finalization markers/readiness, or readiness of a replacement
@@ -59,10 +61,20 @@ The frontend continues to use the original stored-runtime readiness semantics.
 
 ## Failure and recovery limits
 
-- Backup failure saves phase=FAILED, ext.start_status=FAILED and a sanitized
-  ext.start_message through original ext CAS; status-only update_by_owner writes
-  Bot.status=FAILED. The old container is not destroyed by this restart, but its
-  workload may have stopped during backup; continued availability is not promised.
+- Amendment (2026-10-11): backup is best effort. Unavailable/invalid inventory,
+  backup command failures, failed receipts and timeouts log sanitized warnings
+  and continue the original restart. These failures alone do not mark the Bot
+  FAILED. Direct ARCA bindings skip this backup protocol; BaaS-managed containers
+  still attempt it, including those hosted on ARCA.
+- Amendment (2026-10-12): backup-observed physical target/boot changes only warn
+  and continue restart. Lifecycle binding/engine/operation changes still block. Database,
+  durable mutation-fence and worker-level failures retain their original error
+  handling, including FAILED journal/start status where applicable.
+- Restart may destroy the old container without a confirmed backup, losing data
+  not previously persisted. A backend timeout does not cancel the historical
+  helper. If replacement fails, previously stopped workloads are not guaranteed
+  to recover; continued availability is not promised. No script upgrade,
+  frontend or /status change is required for this policy.
 - Target checks reject already-observed engine/binding changes. No lifecycle-field
   database CAS exists in the restored Repository interface.
 - Ext and status use separate writes. Exceptions propagate; repeat admission or
@@ -73,9 +85,12 @@ The frontend continues to use the original stored-runtime readiness semantics.
   is used because it could erase the CAS-owned mutation fence.
 - Process loss after RESTARTING but before strategy observation cannot reliably
   correlate completion. Reclaimed deliveries wait; they never rerun destruction
-  or creation. Business timeout (2 hours) reports failure/manual inspection. A
+  or creation. Business timeout (35 minutes) reports failure/manual inspection. A
   live worker may still persist observation; existing BaaS recovery remains active.
-- The queue deadline is 24 hours. Each target backup budget remains 1500 seconds.
+- The queue deadline is 24 hours. Ordinary restart shares one 1500-second backup
+  budget across queue delay, redeliveries and physical targets, followed by a
+  600-second provider observation allowance. Published/Caller paths retain their
+  existing per-target backup budget.
 - If the queue terminates without handler cleanup, /status does not synthesize an
   error from queue state; frontend timeout and operational inspection remain needed.
 - Existing runtime callbacks are unchanged. This change does not claim to isolate

@@ -311,7 +311,7 @@ class AicodingRestartHandler:
             ):
                 return Reschedule(POLL_SECONDS)
             message = (
-                "备份已完成，但重启提交前准备失败；本次重启已终止，旧容器未执行替换"
+                "重启提交前准备失败；本次重启已终止，旧容器未执行替换"
                 if execution.verify_backup is not None
                 else _failure_message(error, fenced=execution.fenced)
             )
