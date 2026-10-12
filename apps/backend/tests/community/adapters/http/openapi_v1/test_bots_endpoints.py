@@ -24,9 +24,6 @@ from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
     user_scoped_client,
 )
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
 from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
@@ -42,7 +39,6 @@ from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,

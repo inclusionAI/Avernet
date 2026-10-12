@@ -4,7 +4,7 @@ Uses a minimal FastAPI test app — never imports agentclaw.servers.web.app.
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
@@ -19,7 +19,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
     BotNotFoundError,
     BotOperationNotAllowedError,
-    BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
     BotNameInvalidError,

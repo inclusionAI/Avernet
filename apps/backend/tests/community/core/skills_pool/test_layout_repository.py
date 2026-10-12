@@ -36,7 +36,6 @@ from agentclaw.community.core.skills_pool.repository.models import (
     SkillsPoolRolloutAuditModel,
 )
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
-from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
