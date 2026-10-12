@@ -5,9 +5,9 @@ import { Router, type Request, type Response } from "express";
 import { createHash } from "node:crypto";
 import multer from "multer";
 import JSZip from "jszip";
-import type { BenchDomainRepository } from "../repositories/bench-domain-repository.js";
-import type { BenchTemplateRepository } from "../repositories/bench-template-repository.js";
-import type { BenchTemplateVersionRepository } from "../repositories/bench-template-version-repository.js";
+import { BenchDomainRepository } from "../repositories/bench-domain-repository.js";
+import { BenchTemplateRepository } from "../repositories/bench-template-repository.js";
+import { BenchTemplateVersionRepository } from "../repositories/bench-template-version-repository.js";
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
 import type { BenchTaskResultRepository } from "../repositories/bench-task-result-repository.js";
 import type { BenchArtifactRepository, BenchArtifactRow } from "../repositories/bench-artifact-repository.js";
@@ -1871,7 +1871,10 @@ async function importScannedFiles(args: {
   const parsedByKey = new Map(args.parsedFiles.map((file) => [file.fileKey, file]));
   const importedByKey = new Map<string, Record<string, unknown>>();
 
-  await args.db.transaction(async () => {
+  await args.db.transaction(async (tx) => {
+    const domainRepo = args.domainRepo ? new BenchDomainRepository(tx) : null;
+    const templateRepo = new BenchTemplateRepository(tx);
+    const versionRepo = new BenchTemplateVersionRepository(tx);
     for (const item of args.scanItems) {
       const action = String(item.action ?? "");
       if (action === "skip" || action === "conflict") continue;
@@ -1882,9 +1885,9 @@ async function importScannedFiles(args: {
 
       const frontmatter = parsed.parsedMeta.frontmatter as Record<string, unknown> | undefined;
       const result = await upsertTemplateAndVersion({
-        domainRepo: args.domainRepo,
-        templateRepo: args.templateRepo,
-        versionRepo: args.versionRepo,
+        domainRepo,
+        templateRepo,
+        versionRepo,
         ownerUserId: args.ownerUserId,
         domainId: args.domainId,
         templateName: parsed.templateName,
