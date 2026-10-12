@@ -64,6 +64,7 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             });
             refs.insert(key, record.bot_uuid.clone());
         }
+        self.bots.persist_provider_affiliation(&record).await?;
         records.insert(record.bot_uuid.clone(), record);
         Ok(())
     }
@@ -86,6 +87,7 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             || records.values().any(|existing| existing.provider_id == record.provider_id && existing.provider_bot_ref == record.provider_bot_ref)
         { return Err(conflict()); }
         let now = binding_now_ms()?;
+        self.bots.persist_provider_affiliation(&record).await?;
         if !self.bots.create_registration_if_absent(record.bot_uuid.clone(), capabilities, owner, token).await? {
             return Err(conflict());
         }

@@ -790,6 +790,7 @@ class BcsApiClient:
         name: str,
         summary: str,
         owners: list[str],
+        bot_slug: str | None = None,
     ) -> JsonObject:
         self.require_provider()
         payload = {
@@ -801,7 +802,7 @@ class BcsApiClient:
         response = self.request_json(
             "POST",
             f"/providers/{self.state.provider_id}/bots",
-            payload,
+            {**payload, **({"bot_slug": bot_slug} if bot_slug is not None else {})},
             bearer_token=self.state.provider_admin_token,
         )
         self.state.upsert_bot(response)
@@ -1018,7 +1019,7 @@ class Console:
             parser.add_argument(
                 "--auth",
                 default="static_bearer",
-                choices=["static_bearer", "agentpass", "provider_admin"],
+                choices=["static_bearer", "agentpass", "agentpass-subbots", "provider_admin"],
             )
             parser.add_argument("--webhook-url", default=self.webhook_url)
             ns = parser.parse_args(args[1:])
@@ -1054,6 +1055,7 @@ class Console:
             parser.add_argument("--name")
             parser.add_argument("--summary", default="")
             parser.add_argument("--owner", action="append")
+            parser.add_argument("--bot-slug")
             ns = parser.parse_args(args[1:])
             owners = ns.owner or [self.default_owner]
             name = ns.name or ns.provider_bot_ref
@@ -1062,6 +1064,7 @@ class Console:
                 name=name,
                 summary=ns.summary,
                 owners=owners,
+                bot_slug=ns.bot_slug,
             )
             return "bot registered\n" + pretty_json(
                 {

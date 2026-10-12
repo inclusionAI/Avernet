@@ -25,6 +25,8 @@ tags:
   - name: Collaboration / Event Subscriptions
     description: Durable Event Subscription and Webhook delivery management.
 paths:
+  /openapi/v1/collaboration/register/check:
+    $ref: ./openapi/register-check.yaml#/RegisterCheckPath
   /openapi/v1/auth/url:
     $ref: ./openapi/auth.yaml#/AuthUrlPath
   /openapi/v1/auth/callback/{provider}:

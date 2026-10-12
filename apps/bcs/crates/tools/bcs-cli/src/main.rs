@@ -379,6 +379,10 @@ fn resolve_bcs_url(cli: &Cli) -> Result<String> {
 ///
 /// Note: bcs-cli is stateless - it only READS session files, never writes.
 fn discover_token(explicit_token: Option<&str>) -> Result<String> {
+    let caller = bcs_cli::CallerContext::from_env_with_token(explicit_token)?;
+    if std::env::var("BCN_AUTH_MODE").ok().as_deref() == Some("agentpass-subbots") {
+        return Ok(caller.select_token(explicit_token, None, None).unwrap_or_default().to_string());
+    }
     // 1. Use explicit token if provided
     if let Some(token) = explicit_token {
         if !token.is_empty() {
@@ -421,20 +425,14 @@ fn get_token(token_arg: Option<&str>) -> Result<String> {
 ///
 /// This is used by friend/visibility commands that operate on "my" bot
 /// without requiring the user to specify their own bot_uuid.
-fn resolve_my_bot_uuid() -> Result<String> {
+async fn resolve_my_bot_uuid(client: &BcsClient) -> Result<String> {
+    if let Some(actor) = bcs_cli::CallerContext::from_env_with_token(client.token())?.actor_id() { return Ok(actor.into()); }
     if let Ok(Some(session)) = load_optional_session_info() {
-        if let Some(ref uuid) = session.bot_uuid {
-            if !uuid.is_empty() {
-                return Ok(uuid.clone());
-            }
+        if client.token().is_some_and(|token| !token.is_empty() && token == session.token) {
+            if let Some(uuid) = session.bot_uuid.filter(|uuid| !uuid.is_empty()) { return Ok(uuid); }
         }
     }
-
-    Err(anyhow!(
-        "Cannot resolve current bot UUID.\n\
-         Ensure $BOT_DATA_DIR/.bcs/session.json contains a valid bot_uuid field.\n\
-         This file is created after bot.connect succeeds."
-    ))
+    client.current_bot_uuid().await
 }
 
 /// Parse a `--input` / `--meta` style argument: a `@file.json` reference is
@@ -2164,6 +2162,8 @@ pub async fn run() -> Result<()> {
         .compact()
         .init();
 
+    bcs_cli::CallerContext::new(None, std::env::var("BCN_ACTOR_BOT_ID").ok().as_deref())?;
+
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
@@ -2344,6 +2344,7 @@ pub async fn run() -> Result<()> {
         } else {
             BcsClient::with_token(bcs_url, token)
         };
+        client.set_actor_id(bcs_cli::CallerContext::from_env_with_token(Some(token)).expect("validated caller context").actor_id()).expect("validated Actor");
         client.set_client_identity(format!("bcs-cli/{}", env!("CARGO_PKG_VERSION")));
         if let Ok(traceparent) = std::env::var("TRACEPARENT") {
             if let Err(error) = client.set_traceparent(traceparent.trim()) {
@@ -2411,23 +2412,15 @@ pub async fn run() -> Result<()> {
                 client.set_oauth_headers(headers.clone());
             }
 
-            // Auto-discover existing session token to avoid duplicate registration.
-            // Priority: explicit --token > BCN_BOT_TOKEN env > session.json
-            let resolved_token =
-                token
-                    .or_else(|| {
-                        std::env::var("BCN_BOT_TOKEN")
-                            .ok()
-                            .filter(|t| !t.is_empty())
-                    })
-                    .or_else(|| {
-                        get_optional_session_file_path()
-                        .and_then(|p| load_session_info_from_path(&p).ok().flatten())
-                        .and_then(|s| if s.token.is_empty() { None } else {
-                            info!("Found existing session token from session file, will reconnect");
-                            Some(s.token)
-                        })
-                    });
+            let caller = bcs_cli::CallerContext::from_env_with_token(token.as_deref())?;
+            if caller.actor_id().is_some_and(|actor| bot_id.as_deref().is_some_and(|id| id != actor)) {
+                anyhow::bail!("--bot-id must match BCN_ACTOR_BOT_ID when connecting");
+            }
+            client.set_actor_id(caller.actor_id())?;
+            let selected = get_token(token.as_deref())?;
+            let resolved_token = (!selected.is_empty()).then_some(selected);
+            if let Some(token) = &resolved_token { client.set_token(token); }
+            let bot_id = bot_id.or_else(|| caller.actor_id().map(str::to_owned));
 
             // If we found a session token and no bot_id override, warn the user
             // that this bot is already registered (will reconnect instead of creating new).
@@ -2452,8 +2445,8 @@ pub async fn run() -> Result<()> {
 
             let result = client.connect(params).await?;
 
-            // Save session.json for subsequent commands
-            {
+            // Actor-scoped execution must not overwrite a shared session file.
+            if caller.actor_id().is_none() {
                 let session_bcs_url =
                     normalize_bcs_ws_url(&bcs_url).unwrap_or_else(|| bcs_url.clone());
                 let session = SessionInfo {
@@ -4090,7 +4083,7 @@ pub async fn run() -> Result<()> {
                 FriendCommands::List { bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(
@@ -4321,7 +4314,7 @@ pub async fn run() -> Result<()> {
                 VisibilityCommands::Get { bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(
@@ -4355,7 +4348,7 @@ pub async fn run() -> Result<()> {
                 VisibilityCommands::Set { value, bot_uuid } => {
                     let my_bot_uuid = match bot_uuid {
                         Some(id) => id,
-                        None => resolve_my_bot_uuid()?,
+                        None => resolve_my_bot_uuid(&client).await?,
                     };
 
                     debug_request!(

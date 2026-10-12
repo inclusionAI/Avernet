@@ -1855,7 +1855,7 @@ async fn resolve_session_caller(
 ) -> Result<bcs_service_api::CallerContext, Response> {
     // Try to extract a bot caller from token first so bearer Bot tokens are not
     // accidentally treated as an ambient Human identity in local/static auth setups.
-    if let Some(bot_id) = state.bot_uuid_from_headers(headers).await {
+    if let Some(bot_id) = state.bot_uuid_from_headers(headers).await? {
         return Ok(bcs_service_api::CallerContext::Bot(
             bcs_service_api::BotActor { bot_uuid: bot_id },
         ));

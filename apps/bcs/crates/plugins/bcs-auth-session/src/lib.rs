@@ -50,11 +50,24 @@ impl AuthPlugin for SessionTokenPlugin {
         &self,
         headers: &HeaderMap,
     ) -> Result<Option<AuthPrincipal>, AuthError> {
+        bcs_auth_api::validate_bot_credentials(headers)?;
         let Some(token) = extract_bot_token(headers) else {
             return Ok(None);
         };
-        match self.lookup.find_bot_by_token(&token).await? {
+        let actor = bcs_auth_api::expected_actor_id(headers)?;
+        match self.lookup.find_bot_by_token_for_actor(&token, actor).await? {
             Some(info) => {
+                if let Some(auth) = headers.get("authorization").and_then(|value| value.to_str().ok()) {
+                    let auth = auth.split_once(' ').filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
+                        .map(|(_, token)| token).unwrap_or(auth).trim();
+                    // User OAuth may be opaque. Only a second resolved Bot
+                    // credential is a conflict; unknown user credentials are
+                    // left to their own authentication plugin.
+                    if auth != token && !is_jwt_format(auth)
+                        && self.lookup.find_bot_by_token(auth).await?.is_some() {
+                        return Err(AuthError::InvalidToken("Conflicting Bot credentials".into()));
+                    }
+                }
                 let mut p = AuthPrincipal::new(AuthSource::SessionToken);
                 p.bot_uuid = Some(info.bot_uuid);
                 p.owner_id = info.owner_id;
@@ -141,5 +154,28 @@ mod tests {
         let plugin = SessionTokenPlugin::new(lookup);
         let h = headers_with_bearer("Bearer raw-uuid-token");
         assert!(plugin.authenticate(&h).await.unwrap().is_none());
+    }
+
+    struct CredentialLookup;
+    #[async_trait]
+    impl BotLookupPort for CredentialLookup {
+        async fn find_bot_by_token(&self, token: &str) -> Result<Option<BotInfo>, AuthError> {
+            Ok(match token {
+                "static-a" => Some(BotInfo { bot_uuid:"a".into(),owner_id:None }),
+                "static-b" => Some(BotInfo { bot_uuid:"b".into(),owner_id:None }),
+                _ => None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn opaque_user_oauth_is_distinct_from_a_conflicting_bot_token() {
+        let plugin = SessionTokenPlugin::new(Arc::new(CredentialLookup));
+        let mut headers = headers_with_bearer("Bearer human-oauth-token");
+        headers.insert("x-bcs-bot-token", HeaderValue::from_static("static-b"));
+        headers.insert("x-bcn-actor-bot-id", HeaderValue::from_static("b"));
+        assert_eq!(plugin.authenticate(&headers).await.unwrap().unwrap().bot_uuid.as_deref(), Some("b"));
+        headers.insert("authorization", HeaderValue::from_static("Bearer static-a"));
+        assert!(plugin.authenticate(&headers).await.is_err());
     }
 }

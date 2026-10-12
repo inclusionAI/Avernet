@@ -26,11 +26,11 @@ use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 /// repository implementation.
 #[derive(Clone)]
 pub struct BotCore {
-    repo: Arc<dyn BotRepoPort>,
-    provider_repo: Option<Arc<dyn ProviderRepoPort>>,
+    pub(super) repo: Arc<dyn BotRepoPort>,
+    pub(super) provider_repo: Option<Arc<dyn ProviderRepoPort>>,
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
-    provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
-    bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
+    pub(super) bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
 }
 
 impl BotCore {
@@ -193,6 +193,7 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
+        let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
         self.repo.register(bot_id, capabilities).await
     }
 
@@ -203,6 +204,7 @@ impl BotRegistryCoreService for BotCore {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
+        let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
         self.repo
             .register_with_owner_and_token(bot_id, capabilities, created_by, token)
             .await
@@ -213,6 +215,7 @@ impl BotRegistryCoreService for BotCore {
         bot_id: &str,
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
+        let capabilities = self.protect_provider_identity(bot_id, capabilities).await?;
         self.repo.update_capabilities(bot_id, capabilities).await
     }
 
@@ -517,7 +520,8 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
-        self.repo.save_to_storage(bot_id, caps).await
+        let caps = self.protect_provider_identity(bot_id, caps.clone()).await?;
+        self.repo.save_to_storage(bot_id, &caps).await
     }
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
@@ -584,8 +588,13 @@ impl BotRegistryCoreService for BotCore {
         self.repo.find_bot_by_token(token).await
     }
 
+    async fn query_agent_bots(&self, query: &bcs_service_api::types::agent_registration::AgentBotQuery) -> ServiceResult<Vec<bcs_service_api::types::agent_registration::AgentBotRecord>> { self.agent_bots(query).await }
+    async fn validate_signed_bot(&self, id: &str) -> ServiceResult<()> { self.signed_bot_identity(id).await }
+    async fn resolve_agent_bot(&self, agent_code: &str, actor: Option<&str>) -> ServiceResult<Option<bcs_service_api::types::agent_registration::AgentBotRecord>> { self.agent_bot_identity(agent_code, actor).await }
+    async fn resolve_bot_token(&self, token: &str, actor: Option<&str>) -> ServiceResult<Option<bcs_service_api::types::agent_registration::AgentBotRecord>> { self.token_bot_identity(token, actor).await }
+
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {
-        self.repo.find_bot_by_agent_code(agent_code).await
+        self.agent_bot_identity(agent_code, None).await.ok().flatten().map(|bot| bot.bot.bot_id)
     }
 
     async fn find_agent_registration(

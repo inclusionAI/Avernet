@@ -24,6 +24,7 @@ pub async fn create_friend_request(
     let caller_actor_id =
         match resolve_caller(&state, &headers, &uri, req.from_bot.as_deref()).await {
             Ok(caller) => caller,
+            Err(ResolveCallerError::Authentication(error)) => return error.into_response(),
             Err(ResolveCallerError::NoCaller) => {
                 return error_response(
                     StatusCode::UNAUTHORIZED,
@@ -103,6 +104,7 @@ pub async fn list_friend_requests(
     let caller_actor_id =
         match resolve_caller(&state, &headers, &uri, query.bot_uuid.as_deref()).await {
             Ok(caller) => caller,
+            Err(ResolveCallerError::Authentication(error)) => return error.into_response(),
             Err(ResolveCallerError::NoCaller) => {
                 return error_response(
                     StatusCode::UNAUTHORIZED,
@@ -262,6 +264,7 @@ pub async fn list_friends(
 #[derive(Debug)]
 enum ResolveCallerError {
     NoCaller,
+    Authentication(crate::error::HttpAdapterError),
     NoUserIdentity,
     BotNotFound(String),
     OwnershipDenied(String),
@@ -285,7 +288,7 @@ async fn resolve_caller(
     uri: &Uri,
     requested_actor_id: Option<&str>,
 ) -> Result<String, ResolveCallerError> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(actor_id);
     }
 
@@ -313,7 +316,7 @@ async fn resolve_request_receiver_caller(
     request_id: &str,
     action: &str,
 ) -> Result<ResolvedRequestReceiverCaller, Response> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(ResolvedRequestReceiverCaller {
             actor_id,
             request_to_bot: None,
@@ -359,7 +362,7 @@ async fn resolve_friends_list_caller(
     uri: &Uri,
     target_actor_id: &str,
 ) -> Result<String, Response> {
-    if let Some(actor_id) = optional_caller_from_token(state, headers).await {
+    if let Some(actor_id) = optional_caller_from_token(state, headers).await? {
         return Ok(actor_id);
     }
 
@@ -424,7 +427,7 @@ async fn check_actor_ownership(
     }
 }
 
-async fn optional_caller_from_token(state: &HttpAppState, headers: &HeaderMap) -> Option<String> {
+async fn optional_caller_from_token(state: &HttpAppState, headers: &HeaderMap) -> Result<Option<String>, crate::error::HttpAdapterError> {
     state.bot_uuid_from_headers(headers).await
 }
 
@@ -509,4 +512,8 @@ fn error_response(status: StatusCode, message: impl Into<String>) -> Response {
         })),
     )
         .into_response()
+}
+
+impl From<crate::error::HttpAdapterError> for ResolveCallerError {
+    fn from(error: crate::error::HttpAdapterError) -> Self { Self::Authentication(error) }
 }

@@ -23,7 +23,7 @@ async fn caller(state: &HttpAppState, headers: &HeaderMap, uri: &Uri) -> Result<
             } else { StatusCode::UNAUTHORIZED });
         }
     }
-    if state.bot_uuid_from_headers(headers).await.is_some() { return Err(StatusCode::FORBIDDEN); }
+    if state.bot_uuid_from_headers(headers).await?.is_some() { return Err(StatusCode::FORBIDDEN); }
     if headers.contains_key("X-BCS-Bot-Token") { return Err(StatusCode::UNAUTHORIZED); }
     if let Some(token) = crate::headers::extract_bearer_token(headers) {
         if state.bot_runtime_token_resolver.try_provider_admin(&token).await.is_some() {

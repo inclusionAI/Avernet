@@ -480,6 +480,7 @@ async fn run_driver(
     turn_req.model = bot.model.clone();
     turn_req.permission_mode = bot.permission_mode.clone();
     turn_req.interactions = state.interactions.clone();
+    turn_req.env = state.config.execution_env(&bot);
     turn_req.trace = state.trace.as_ref()
         .map(|store| TraceContext::new(store.clone(), bot.engine.clone(), run_id.clone()));
 

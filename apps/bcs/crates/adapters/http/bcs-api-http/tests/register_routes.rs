@@ -26,6 +26,17 @@ struct FakeRegisterService {
 
 #[async_trait]
 impl RegisterService for FakeRegisterService {
+    async fn check_bot(&self, command: RegisterBot) -> Result<bcs_service_api::core::provider_registration::ProviderRegistrationCheck, ApplicationError> {
+        assert_eq!(command.bot_slug.as_deref(),Some("a"));
+        assert_eq!(command.provider_bot_ref.as_deref(),Some("parent"));
+        assert_eq!(command.token,"registration-token");
+        Ok(bcs_service_api::core::provider_registration::ProviderRegistrationCheck {
+            provider_id:"p".into(),auth_mode:bcs_service_api::ProviderAuthMode::AgentPassSubbots,
+            identity:bcs_domain::provider_identity::ProviderBotIdentity {
+                agent_code:Some("parent".into()),provider_bot_ref:"parent:a".into(),bot_slug:Some("a".into()),
+            },available:true,reason:None,identity_version:1,
+        })
+    }
     async fn issue_register_token(
         &self,
         command: IssueRegisterToken,
@@ -211,4 +222,16 @@ async fn unknown_and_empty_modes_are_bad_requests_without_echoing_capabilities()
         assert!(!body.to_string().contains("secret"));
         assert!(service.registered.lock().unwrap().is_empty());
     }
+}
+
+#[tokio::test]
+async fn slug_precheck_is_public_read_only_and_preserves_input() {
+    let service=fake_service(false);
+    let request=bare_request("POST","/openapi/v1/collaboration/register/check?token=registration-token&bot_name=A&provider_bot_ref=parent&bot_slug=a&mode=plugin");
+    let response=test_router(service.clone()).oneshot(request).await.unwrap();
+    assert_eq!(response.status(),StatusCode::OK);
+    let body=response_json(response).await;
+    assert_eq!(body["data"]["available"],true);
+    assert_eq!(body["data"]["provider_bot_ref"],"parent:a");
+    assert!(service.registered.lock().unwrap().is_empty());
 }

@@ -51,6 +51,7 @@ pub struct RegisteredProvider {
 /// `POST /bots/onboard` flow.
 #[derive(Debug, Clone, Default)]
 pub struct RegisterProviderBotParams {
+    pub bot_slug: Option<String>,
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
@@ -173,6 +174,9 @@ pub struct ProviderBotDeletion {
 
 #[async_trait]
 pub trait ProviderBotCoreService: Send + Sync {
+    async fn check_provider_bot_registration(&self, _provider_id: &str, _token: &str, _params: RegisterProviderBotParams) -> ServiceResult<crate::core::provider_registration::ProviderRegistrationCheck> {
+        Err(ServiceError::InternalError("Provider registration check is not configured".into()))
+    }
     /// Delete a Bot-owned Provider identity (upstream or gateway), after Provider
     /// admin authorization. SQL gateway deletion also disables its projection.
     /// None means no Bot metadata identity is available; callers may use the
@@ -246,6 +250,12 @@ pub trait ProviderBotCoreService: Send + Sync {
         agent_code: &str,
     ) -> ServiceResult<RuntimeBotIdentity>;
 
+    async fn authenticate_agentpass_actor_event(&self, provider_id: &str, agent_code: &str, actor: &str) -> ServiceResult<RuntimeBotIdentity> {
+        let bot = self.authenticate_agentpass_event(provider_id, agent_code).await?;
+        if bot.bot_uuid != actor { return Err(ServiceError::Unauthorized("Actor does not match AgentPass Bot".into())); }
+        Ok(bot)
+    }
+
     async fn authenticate_provider_admin_event(
         &self,
         provider_id: &str,
@@ -277,9 +287,7 @@ pub trait ProviderBotCoreService: Send + Sync {
     /// Each `Option` field is a PATCH: `Some` replaces the value (an empty
     /// `Vec` clears the array), `None` leaves it unchanged. The binding
     /// identity (`provider_bot_ref`, `bot_uuid`) is never changed. The
-    /// `agent_code` is reconstructed from the provider's auth mode so an
-    /// AgentPass bot's routing identifier survives a reload — callers must not
-    /// pass it through from `registry.get()`, which strips it.
+    /// Stored `agent_code` is preserved; ordinary updates cannot change identity.
     async fn update_provider_bot(
         &self,
         provider_id: &str,

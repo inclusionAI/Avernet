@@ -13,6 +13,9 @@ use bcs_service_api::{
 };
 use std::sync::Arc;
 
+#[path = "provider_registration/subbots.rs"]
+mod subbots;
+
 struct Fixture {
     core: ProviderRegistrationCore,
     registry: Arc<BotCore>,
@@ -52,7 +55,7 @@ async fn fixture_with_auth(
         providers.clone(),
         credentials.clone(),
         providers.clone(),
-    ));
+    ).with_bot_provider_repo(membership.clone()));
     let admin = ProviderCore::new(
         providers.clone(),
         providers.clone(),
@@ -399,6 +402,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
 
 fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
     RegisterProviderBot {
+            bot_slug: None,
         provider_id: f.provider.clone(),
         provider_bot_ref: "stable-ref".into(),
         owner: "alice".into(),

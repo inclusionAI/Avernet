@@ -10,6 +10,7 @@ DB-side).
 
 from __future__ import annotations
 
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.community.spi.bot import RegisteredBot
@@ -26,7 +27,12 @@ class BotRow(Base):  # type: ignore[misc]
     bot_uuid: Mapped[str] = mapped_column()
     env: Mapped[str] = mapped_column()
     created_by: Mapped[str] = mapped_column()
-    agent_code: Mapped[str] = mapped_column()
+    agent_code: Mapped[str | None] = mapped_column()
+    provider_id: Mapped[str | None] = mapped_column(default=None)
+    provider_bot_ref: Mapped[str | None] = mapped_column(default=None)
+    is_deleted: Mapped[int] = mapped_column(default=0)
+    actor_kind: Mapped[str] = mapped_column(default="bot")
+    status: Mapped[str] = mapped_column(default="online")
 
     # TODO
     # app_id: Mapped[int] = mapped_column(BigInteger)
@@ -36,8 +42,29 @@ class BotRow(Base):  # type: ignore[misc]
         """Map this row onto the SPI :class:`RegisteredBot` (core fields only)."""
         return RegisteredBot(
             bot_uuid=self.bot_uuid,
-            owner_id=self.created_by,
+            owner_id=self.created_by or "",
             app_id=-1,
-            agent_code=self.agent_code,
+            agent_code=self.agent_code or "",
             tenant="default",
         )
+
+
+class ProviderRow(Base):  # type: ignore[misc]
+    """Read mapping of existing Provider configuration, not a schema migration."""
+
+    __tablename__ = "bcs_providers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider_id: Mapped[str] = mapped_column()
+    env: Mapped[str] = mapped_column()
+    config: Mapped[dict[str, object]] = mapped_column(JSON)
+    disabled: Mapped[int] = mapped_column(default=0)
+
+
+class ProviderBindingRow(Base):  # type: ignore[misc]
+    __tablename__ = "bcs_provider_bot_bindings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bot_uuid: Mapped[str] = mapped_column()
+    provider_id: Mapped[str] = mapped_column()
+    provider_bot_ref: Mapped[str] = mapped_column()
+    env: Mapped[str] = mapped_column()
+    disabled: Mapped[int] = mapped_column(default=0)

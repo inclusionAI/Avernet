@@ -1666,6 +1666,9 @@ fn build_openapi_v1_state(
     Arc<dyn bcs_service_api::InternalBotAttributesService>,
 ) {
     let relation_env = crate::env::resolve_env();
+    let principal_verifier = Arc::new(crate::principal_state::StatefulPrincipalVerifier {
+        inner: principal_verifier, registry: registry.clone(),
+    });
     let provider_registration = Arc::new(bcs_bot::core::provider_registration::ProviderRegistrationCore::new(
         provider_repos.provider_repo.clone(),
         provider_repos.provider_credentials.clone(),
@@ -2726,7 +2729,7 @@ impl Default for BcsServerState {
             auth_chain,
             auth_config,
             bot_ws_admission,
-            gateway_principal_verifier,
+            gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
@@ -4324,7 +4327,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             bot_ws_admission: config.bot_ws_admission.build(),
-            gateway_principal_verifier,
+            gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
@@ -5224,7 +5227,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             bot_ws_admission: config.bot_ws_admission.build(),
-            gateway_principal_verifier,
+            gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
@@ -5789,6 +5792,7 @@ impl bcs_service_api::GroupDispatchContextPort for CoreGroupDispatchContext {
 
 fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::bot::BotDispatchState> {
     Arc::new(bcs_ws::bot::BotDispatchState {
+        expected_actor_id: None,
         bot_runtime: state.services.bot_runtime.clone(),
         message_flow: state.services.message_flow.clone(),
         collaboration_runtime: state.services.collaboration_runtime.clone(),
@@ -6016,6 +6020,7 @@ mod tests {
             .expect("register provider");
         let bot = provider_management
             .register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
+            bot_slug: None,
                 webhook_url: None,
                 provider_id: registered.provider_id.clone(),
                 provider_admin_token: registered.provider_admin_token.clone(),
@@ -6754,6 +6759,11 @@ async fn bot_ws_handler(
     headers: axum::http::HeaderMap,
     ws: WsUpgrade,
 ) -> Response {
+    let expected_actor_id = match bcs_auth_api::expected_actor_id(&headers) {
+        Ok(Some(actor)) if actor.starts_with("human_") => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
+        Ok(actor) => actor.map(str::to_owned),
+        Err(_) => return axum::http::StatusCode::UNAUTHORIZED.into_response(),
+    };
     if let Some(admission) = &state.bot_ws_admission {
         if let Err(retry_after) = admission.try_acquire() {
             debug!(
@@ -6775,7 +6785,9 @@ async fn bot_ws_handler(
 
     let request_id = bcs_observability::current_request_id();
     ws.on_upgrade(move |socket| {
-        let ws_state = bot_ws_dispatch_state(&state);
+        let mut ws_state = (*bot_ws_dispatch_state(&state)).clone();
+        ws_state.expected_actor_id = expected_actor_id;
+        let ws_state = Arc::new(ws_state);
         let metrics_hook = ws_lifecycle_hook(&state);
         bcs_observability::with_request_id(request_id, bcs_ws::bot::handle_connection(
             socket,

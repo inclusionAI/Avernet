@@ -247,8 +247,13 @@ impl ProviderManagementService for ProviderManagement {
 
     async fn register_provider_bot(
         &self,
-        command: RegisterProviderBotCommand,
+        mut command: RegisterProviderBotCommand,
     ) -> ServiceResult<RegisterProviderBotOutcome> {
+        let provider = self.get_active_provider(&command.provider_id, &command.provider_admin_token).await?;
+        let config: serde_json::Value = serde_json::from_str(&provider.config).map_err(|_| ServiceError::InternalError("invalid Provider configuration".into()))?;
+        let auth_mode: bcs_service_api::ProviderAuthMode = serde_json::from_value(config.pointer("/downlink/auth_mode").cloned().unwrap_or_default()).map_err(|_| ServiceError::InternalError("invalid Provider mode".into()))?;
+        let identity = bcs_service_api::types::provider_identity::normalize(auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
+        if auth_mode == bcs_service_api::ProviderAuthMode::AgentPassSubbots { command.bot_uuid = None; command.reject_existing_bot_uuid = false; }
         if command.reject_existing_bot_uuid {
             self.reject_existing_bot_uuid_for_unbound_ref(
                 &command.provider_id,
@@ -264,7 +269,7 @@ impl ProviderManagementService for ProviderManagement {
             .unwrap_or_default();
         let duplicate_registration = self
             .provider_bot_core
-            .get_provider_bot_binding_by_ref(&command.provider_id, &command.provider_bot_ref)
+            .get_provider_bot_binding_by_ref(&command.provider_id, &identity.provider_bot_ref)
             .await?
             .is_some();
         let (binding, bot_runtime_token) = self
@@ -273,6 +278,7 @@ impl ProviderManagementService for ProviderManagement {
                 &command.provider_id,
                 &command.provider_admin_token,
                 RegisterProviderBotParams {
+            bot_slug: command.bot_slug,
                     webhook_url: command.webhook_url,
                     bot_name: command.name,
                     summary: command.summary,
@@ -308,6 +314,7 @@ impl ProviderManagementService for ProviderManagement {
             None
         };
         Ok(RegisterProviderBotOutcome {
+            auth_mode, identity,
             webhook_url: binding.webhook_url,
             bot_uuid: binding.bot_uuid,
             provider_id: binding.provider_id,
@@ -319,6 +326,12 @@ impl ProviderManagementService for ProviderManagement {
             capabilities,
             actor_kind: ActorKind::Bot,
         })
+    }
+
+    async fn check_provider_bot_registration(&self, command: RegisterProviderBotCommand) -> ServiceResult<bcs_service_api::core::provider_registration::ProviderRegistrationCheck> {
+        self.provider_bot_core.check_provider_bot_registration(&command.provider_id, &command.provider_admin_token, RegisterProviderBotParams {
+            bot_slug: command.bot_slug, webhook_url: command.webhook_url, bot_name: command.name, owners: command.owners, provider_bot_ref: command.provider_bot_ref, domains: command.domains, skills: command.skills, scopes: command.scopes, summary: command.summary, bot_uuid: command.bot_uuid, connection_mode: command.connection_mode,
+        }).await
     }
 
     async fn list_provider_bots(

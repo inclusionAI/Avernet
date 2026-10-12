@@ -6,10 +6,13 @@ logic is exercised in isolation; the DB-backed registry has its own test.
 
 from __future__ import annotations
 
+import pytest
+
 from gateway.community.plugins.authn.bot_token import (
     BotTokenStrategy,
     is_jwt_format,
 )
+from gateway.community.spi.auth import AuthError
 from gateway.community.spi.authn import BotPrincipal, CredentialBundle
 from gateway.community.spi.bot import RegisteredBot
 
@@ -33,11 +36,10 @@ def _creds(headers: dict[str, str]) -> CredentialBundle:
     return CredentialBundle(headers=headers, cookies={}, query={})
 
 
-async def test_authorization_wins_over_dedicated_header() -> None:
+async def test_conflicting_bot_credentials_fail() -> None:
     creds = _creds({"x-avernet-bot-token": "nope", "authorization": "Bearer bot-key"})
-    result = await _strat().build(creds)
-    assert isinstance(result, BotPrincipal)
-    assert result.bot.token == "bot-key"
+    with pytest.raises(AuthError):
+        await _strat().build(creds)
 
 
 async def test_jwt_authorization_falls_back_to_dedicated_header() -> None:
@@ -93,3 +95,16 @@ def test_is_jwt_format_heuristic() -> None:
     assert is_jwt_format("a.b") is False
     assert is_jwt_format("a.b.c.d") is False
     assert is_jwt_format("plain") is False
+
+
+async def test_opaque_user_oauth_can_accompany_a_dedicated_bot_token() -> None:
+    result = await _strat().build(
+        _creds(
+            {
+                "authorization": "Bearer human-oauth-token",
+                "x-bcs-bot-token": "bot-key",
+            }
+        )
+    )
+    assert isinstance(result, BotPrincipal)
+    assert result.bot.token == "bot-key"

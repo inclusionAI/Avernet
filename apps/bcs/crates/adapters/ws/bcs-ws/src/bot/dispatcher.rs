@@ -112,7 +112,9 @@ pub trait TaskCallbackHook: Send + Sync {
     async fn execute_callback(&self, group_id: String);
 }
 
+#[derive(Clone)]
 pub struct BotDispatchState {
+    pub expected_actor_id: Option<String>,
     pub bot_runtime: Arc<dyn BotRuntimeConnectionService>,
     pub message_flow: Arc<dyn MessageFlowService>,
     pub collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
@@ -346,6 +348,10 @@ async fn handle_bot_connect(
     registered_bot_id: &mut Option<String>,
 ) -> Result<()> {
     // Parse params
+    if registered_bot_id.is_some() {
+        send_error(tx, req_id, "already_connected", "This socket already has a Bot identity").await?;
+        return Ok(());
+    }
     let params: WireBotConnectParams = serde_json::from_value(params).map_err(|e| {
         BotWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
     })?;
@@ -378,7 +384,7 @@ async fn handle_bot_connect(
     let result = state
         .bot_runtime
         .connect_streaming(BotRuntimeConnectCommand {
-            caller_actor_id: None,
+            caller_actor_id: state.expected_actor_id.clone(),
             token: params.token,
             bot_id: params.bot_id,
             protocol_version: Some(requested_version),

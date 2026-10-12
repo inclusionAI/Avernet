@@ -7,7 +7,7 @@ use bcs_service_api::core::provider_registration::*;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::bot_provider::BotProviderRecord;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, ProviderAuthMode,
+    BotCapabilities, BotRegistryCoreService,
     ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
     RelationCoreService, ServiceError, ServiceResult,
 };
@@ -126,6 +126,21 @@ impl ProviderRegistrationCore {
 
 #[async_trait]
 impl ProviderRegistrationCoreService for ProviderRegistrationCore {
+    async fn check(&self, command: RegisterProviderBot) -> ServiceResult<ProviderRegistrationCheck> {
+        let provider = self.authorized_provider(&command.provider_id, &command.owner).await?;
+        validate_id("provider_bot_ref", &command.provider_bot_ref)?;
+        if !(2..=64).contains(&command.bot_name.chars().count()) || command.bot_name != command.bot_name.trim() {
+            return Err(invalid("bot-name must be 2-64 characters without surrounding whitespace"));
+        }
+        let downlink = parse_downlink_config(&provider.config)?;
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
+        self.endpoint(&provider, &downlink, &command).await?;
+        let occupied = self.registrations.get_provider_bot_by_ref(&command.provider_id, &identity.provider_bot_ref).await?.is_some()
+            || self.bindings.get_binding_by_provider_ref(&command.provider_id, &identity.provider_bot_ref).await?.is_some();
+        Ok(ProviderRegistrationCheck { provider_id: command.provider_id, auth_mode: downlink.auth_mode,
+            identity, available: !occupied, reason: occupied.then(|| "provider_bot_ref_taken".into()), identity_version: 1 })
+    }
+
     async fn authorize(
         &self,
         provider_id: &str,
@@ -141,7 +156,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
 
     async fn register(
         &self,
-        command: RegisterProviderBot,
+        mut command: RegisterProviderBot,
     ) -> ServiceResult<ProviderRegistrationResult> {
         let provider = self
             .authorized_provider(&command.provider_id, &command.owner)
@@ -155,6 +170,8 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &command.provider_bot_ref, command.bot_slug.as_deref()).map_err(invalid)?;
+        command.provider_bot_ref = identity.provider_bot_ref.clone();
         let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.
@@ -175,8 +192,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             name: Some(record.bot_name.clone()), visibility: "protected".into(),
             // Match Provider-admin registration for both connection modes:
             // AgentPass identifies this Bot by its Provider's external ref.
-            agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
-                .then(|| record.provider_bot_ref.clone()),
+            agent_code: identity.agent_code.clone(),
             ..BotCapabilities::default()
         }, &record.owner, &record.bot_token).await?;
         self.registry
@@ -192,6 +208,8 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,
+            identity,
+            auth_mode: downlink.auth_mode,
         })
     }
 }

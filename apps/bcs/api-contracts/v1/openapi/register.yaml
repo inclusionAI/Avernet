@@ -53,13 +53,21 @@ BotRegistrationResult:
     registration:
       type: object
       additionalProperties: false
-      required: [provider_id, provider_bot_ref, mode, webhook_url, effective_webhook_url]
+      required: [provider_id, provider_bot_ref, mode, webhook_url, effective_webhook_url, auth_mode, agent_code, bot_slug]
       description: Present only for Provider-scoped registration. Does not indicate bridge process readiness.
       properties:
         provider_id:
           type: string
         provider_bot_ref:
           type: string
+        auth_mode:
+          type: string
+          enum: [static_bearer, provider_admin, agentpass, agentpass-subbots]
+        agent_code:
+          type: [string, "null"]
+          description: Original AgentPass parent, never composed with the slug.
+        bot_slug:
+          type: [string, "null"]
         mode:
           type: string
           enum: [plugin, gateway]
@@ -156,6 +164,9 @@ RegisterPath:
       overridden by request parameters. Provider authorization is checked again
       on redemption. Plugin saves membership without HTTP delivery binding.
       Both modes support static_bearer, provider_admin and agentpass Providers.
+      agentpass-subbots requires bot_slug. BCS stores the original parent as
+      agent_code and composes provider_bot_ref as parent:slug. Existing Providers
+      cannot change authentication mode.
       For AgentPass, provider_bot_ref must be the real AgentPass agent code;
       BCS saves it as the Bot's agent_code, as in Provider-admin registration.
       No separate agent_code parameter or AgentPass token is required to register.
@@ -207,6 +218,15 @@ RegisterPath:
           minLength: 1
           maxLength: 128
           pattern: '^[A-Za-z0-9_.:-]+$'
+      - name: bot_slug
+        in: query
+        required: false
+        description: Required for agentpass-subbots; ignored by other modes. Unique under Provider and parent, including tombstones.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
       - name: webhook_url
         in: query
         required: false

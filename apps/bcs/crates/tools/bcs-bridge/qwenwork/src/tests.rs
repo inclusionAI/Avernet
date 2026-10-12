@@ -440,6 +440,8 @@ fn bot_debug_redacts_engine_option_values() {
     let mut options = toml::Table::new();
     options.insert("secret".into(), "sensitive-value".into());
     let bot = bcs_bridge_core::config::BotConfig {
+        agent_code: None,
+        bot_slug: None,
         provider_bot_ref: "qwen".into(),
         bot_id: None,
         token: None,

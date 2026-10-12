@@ -489,6 +489,25 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Auth plugins can use this to resolve provider-registered bots whose
     /// `agent_code` was set to their `provider_bot_ref`.
     /// Default impl returns `None` so noop/mock registries need not implement it.
+    async fn query_agent_bots(&self, _query: &crate::types::agent_registration::AgentBotQuery) -> ServiceResult<Vec<crate::types::agent_registration::AgentBotRecord>> { Err(ServiceError::InternalError("Agent Bot query is not configured".into())) }
+    /// Recheck the signed UUID against current persisted state; unknown TC subjects remain supported.
+    async fn validate_signed_bot(&self, _id: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("Bot state validation is not configured".into()))
+    }
+    async fn resolve_agent_bot(&self, _agent_code: &str, _actor: Option<&str>) -> ServiceResult<Option<crate::types::agent_registration::AgentBotRecord>> { Err(ServiceError::InternalError("Agent Bot identity is not configured".into())) }
+    async fn resolve_bot_token(&self, token: &str, actor: Option<&str>) -> ServiceResult<Option<crate::types::agent_registration::AgentBotRecord>> {
+        let Some(id) = self.find_bot_by_token(token).await else { return Ok(None); };
+        if actor.is_some_and(|actor| actor != id) { return Err(ServiceError::Unauthorized("Actor does not match Bot token".into())); }
+        let Some(bot) = self.try_get(&id).await? else { return Ok(None); };
+        if bot.actor_kind != crate::ActorKind::Bot { return Ok(None); }
+        Ok(Some(crate::types::agent_registration::AgentBotRecord {
+            bot: crate::types::AgentBotRegistration { bot_id: id, name: bot.capabilities.name, summary: bot.capabilities.summary, provider_id: None, provider_bot_ref: None },
+            agent_code: bot.capabilities.agent_code.unwrap_or_default(), owner_id: bot.created_by,
+            provider_auth_mode: None, provider_disabled: false, binding_disabled: false,
+            status: "online".into(), provider_metadata_loaded: false,
+        }))
+    }
+
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {
         let _ = agent_code;
         None

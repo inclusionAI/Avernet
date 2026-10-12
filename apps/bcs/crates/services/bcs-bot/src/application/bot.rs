@@ -41,6 +41,23 @@ pub struct Bot {
 }
 
 impl Bot {
+    async fn validate_connect_identity(&self, caller: Option<&str>, token: Option<&str>, target: Option<&str>) -> Result<(), BotUseCaseError> {
+        let expected = caller.filter(|id| !id.starts_with("human_"));
+        if expected.is_some_and(|id| target.is_some_and(|target| target != id)) {
+            return Err(BotUseCaseError::Unauthorized("Connect Bot does not match authenticated Actor".into()));
+        }
+        let resolved = if let Some(token) = token {
+            self.registry.resolve_bot_token(token, expected).await?
+        } else { None };
+        if let Some(bot) = resolved {
+            if target.is_some_and(|target| target != bot.bot.bot_id) {
+                return Err(BotUseCaseError::Unauthorized("Connect token and Bot UUID do not match".into()));
+            }
+        } else if expected.is_some() {
+            return Err(BotUseCaseError::Unauthorized("Connect requires this Bot's static token".into()));
+        }
+        Ok(())
+    }
     pub fn new(registry: Arc<dyn BotRegistryCoreService>) -> Self {
         Self::new_with_friend(registry, Arc::new(EmptyFriendCoreService))
     }
@@ -571,6 +588,7 @@ impl BotManagementService for Bot {
         &self,
         command: BotConnectCommand,
     ) -> Result<BotConnectResult, BotUseCaseError> {
+        self.validate_connect_identity(command.caller_actor_id.as_deref(), command.token.as_deref(), command.bot_id.as_deref()).await?;
         if let Some(bot_id) = command.bot_id.as_deref() {
             self.validate_connect_bot_id(bot_id).await?;
         }
@@ -836,12 +854,14 @@ impl BotRuntimeConnectionService for Bot {
         command: BotRuntimeConnectCommand,
     ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
         let BotRuntimeConnectCommand {
-            caller_actor_id: _,
+            caller_actor_id,
             token,
             bot_id,
             protocol_version,
             client_kind,
         } = command;
+
+        self.validate_connect_identity(caller_actor_id.as_deref(), token.as_deref(), bot_id.as_deref()).await?;
 
         if let Some(bot_id) = bot_id.as_deref() {
             self.validate_connect_bot_id(bot_id).await?;

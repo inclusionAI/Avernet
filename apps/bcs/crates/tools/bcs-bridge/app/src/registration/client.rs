@@ -53,12 +53,13 @@ impl RegistrationClient {
         body(response, operation).await
     }
 
-    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str) -> anyhow::Result<BotRegistration> {
+    pub(crate) async fn register(&self, token: &str, name: &str, agent_code: &str, mode: &str, webhook: Option<&str>, provider_id: &str, slug: Option<&str>) -> anyhow::Result<BotRegistration> {
         let mut url = self.endpoint("openapi/v1/collaboration/register")?;
         let mut pairs = vec![
             ("token", token), ("bot-name", name), ("provider_bot_ref", agent_code), ("mode", mode),
         ];
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
+        if let Some(slug) = slug { pairs.push(("bot_slug", slug)); }
         url.query_pairs_mut().extend_pairs(pairs);
         let response = self.client.post(url).send().await
             .map_err(|_| anyhow::anyhow!("Registration request failed; its outcome may be unknown. Check registration status before retrying"))?;
@@ -73,10 +74,37 @@ impl RegistrationClient {
         if [&registration.bot_uuid, &registration.bot_token, &registration.registration.provider_id]
             .iter().any(|value| value.trim().is_empty())
             || registration.registration.provider_id != provider_id
-            || registration.registration.provider_bot_ref != agent_code || registration.registration.mode != mode {
+            || registration.registration.provider_bot_ref != slug.map(|s| format!("{agent_code}:{s}")).unwrap_or_else(|| agent_code.into())
+            || registration.registration.mode != mode
+            || slug.is_some_and(|s| registration.registration.auth_mode.as_deref() != Some("agentpass-subbots")
+                || registration.registration.agent_code.as_deref() != Some(agent_code)
+                || registration.registration.bot_slug.as_deref() != Some(s)) {
             bail!("Registration succeeded but returned invalid credentials or a mismatched binding");
         }
         Ok(registration)
+    }
+
+    pub(crate) async fn check(&self, token: &str, name: &str, parent: &str, slug: &str,
+        mode: &str, webhook: Option<&str>, provider: &str) -> anyhow::Result<()> {
+        let mut url = self.endpoint("openapi/v1/collaboration/register/check")?;
+        let mut pairs = vec![("token",token),("bot-name",name),("provider_bot_ref",parent),
+            ("bot_slug",slug),("mode",mode)];
+        if let Some(webhook) = webhook { pairs.push(("webhook_url",webhook)); }
+        url.query_pairs_mut().extend_pairs(pairs);
+        let response = self.client.post(url).send().await.map_err(|_| anyhow::anyhow!("Registration precheck request failed"))?;
+        let bytes = body(response,"Registration precheck").await?;
+        let envelope: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("Invalid registration precheck response"))?;
+        let data = &envelope["data"];
+        if envelope["code"] != 20000 || data["provider_id"] != provider
+            || data["auth_mode"] != "agentpass-subbots" || data["agent_code"] != parent
+            || data["bot_slug"] != slug || data["provider_bot_ref"] != format!("{parent}:{slug}")
+            || data["identity_version"] != 1 {
+            bail!("Registration precheck returned a mismatched Provider mode or identity");
+        }
+        if data["available"] != true {
+            bail!("Bot slug is occupied; a previous registration may have completed. Review the saved pending registration before choosing another slug");
+        }
+        Ok(())
     }
 }
 
@@ -102,6 +130,12 @@ pub struct RegistrationScope {
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: String,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub agent_code: Option<String>,
+    #[serde(default)]
+    pub bot_slug: Option<String>,
 }
 
 #[cfg(test)]

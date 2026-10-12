@@ -17,6 +17,7 @@ pub const DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS: u64 = 3 * 60 * 60 * 1_000;
 
 #[derive(Clone)]
 pub enum ProviderBotEventCredential {
+    WithActor { credential: Box<ProviderBotEventCredential>, bot_uuid: String },
     StaticBearer(String),
     AgentPass {
         agent_code: String,
@@ -30,6 +31,7 @@ pub enum ProviderBotEventCredential {
 impl std::fmt::Debug for ProviderBotEventCredential {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::WithActor { credential, bot_uuid } => f.debug_struct("WithActor").field("credential", credential).field("bot_uuid", bot_uuid).finish(),
             Self::StaticBearer(_) => f.write_str("StaticBearer(***)"),
             Self::AgentPass { .. } => f.write_str("AgentPass(***)"),
             Self::ProviderAdmin {
@@ -79,6 +81,7 @@ pub struct UpdateProviderCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotCommand {
+    pub bot_slug: Option<String>,
     pub webhook_url: Option<String>,
     pub provider_id: String,
     pub provider_admin_token: String,
@@ -96,6 +99,8 @@ pub struct RegisterProviderBotCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotOutcome {
+    pub auth_mode: ProviderAuthMode,
+    pub identity: crate::types::provider_identity::ProviderBotIdentity,
     pub webhook_url: Option<String>,
     pub bot_uuid: String,
     pub provider_id: String,
@@ -244,6 +249,9 @@ pub struct ProviderBotTaskModesFilter {
 
 #[async_trait]
 pub trait ProviderManagementService: Send + Sync {
+    async fn check_provider_bot_registration(&self, _command: RegisterProviderBotCommand) -> ServiceResult<crate::core::provider_registration::ProviderRegistrationCheck> {
+        Err(crate::ServiceError::InternalError("Provider registration check is not configured".into()))
+    }
     /// Credential-free public discovery. Disabled Providers remain visible.
     async fn get_provider_by_slug(
         &self, slug: &str,

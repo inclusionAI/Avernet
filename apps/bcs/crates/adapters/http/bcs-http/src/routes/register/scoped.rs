@@ -16,6 +16,7 @@ use crate::state::HttpAppState;
 
 #[derive(Deserialize)]
 struct ScopedRegisterQuery {
+    bot_slug: Option<String>,
     mode: Option<ProviderRegistrationMode>,
     provider_bot_ref: Option<String>,
     webhook_url: Option<String>,
@@ -74,6 +75,7 @@ pub(super) async fn register_bot(
         Err(error) => return error_response(error),
     };
     match service.register_bot(RegisterBot {
+        bot_slug: query.bot_slug,
         token, bot_name, mode: query.mode,
         provider_bot_ref: query.provider_bot_ref, webhook_url: query.webhook_url,
     }).await {

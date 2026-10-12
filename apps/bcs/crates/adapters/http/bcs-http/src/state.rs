@@ -805,20 +805,29 @@ impl HttpAppState {
     /// default to `["local"]`), resolve a non-JWT session token directly via the
     /// registry — mirroring the legacy `SessionTokenPlugin` non-JWT branch. JWT
     /// tokens without a chain are not resolvable (production always has a chain).
-    pub async fn bot_uuid_from_headers(&self, headers: &HeaderMap) -> Option<String> {
+    pub async fn bot_uuid_from_headers(&self, headers: &HeaderMap) -> Result<Option<String>, crate::error::HttpAdapterError> {
+        let actor = bcs_auth_api::expected_actor_id(headers)?;
+        bcs_auth_api::validate_bot_credentials(headers)?;
         if let Some(chain) = self.auth_chain.as_ref() {
-            if let Ok(result) = chain.authenticate(headers).await {
-                if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
-                    return Some(bot_uuid);
-                }
+            let result = chain.authenticate(headers).await?;
+            if let Some(bot_uuid) = result.principal.and_then(|p| p.bot_uuid) {
+                return Ok(Some(bot_uuid));
             }
         }
-
-        let token = bot_token_from_headers(headers)?;
+        let Some(token) = bot_token_from_headers(headers) else {
+            return if actor.is_some() { Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())) } else { Ok(None) };
+        };
         if bcs_auth_api::is_jwt_format(&token) {
-            return None;
+            return if actor.is_some() { Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())) } else { Ok(None) };
         }
-        self.services.registry.find_bot_by_token(&token).await
+        let bot = self.services.registry.resolve_bot_token(&token, actor).await?;
+        if bot.is_none() && actor.is_none() && self.auth_chain.is_none() {
+            // Local legacy heartbeat can precede its registered row. Production
+            // always has a chain and uses the authoritative identity snapshot.
+            return Ok(self.services.registry.find_bot_by_token(&token).await);
+        }
+        if actor.is_some() && bot.is_none() { return Err(crate::error::HttpAdapterError::Unauthorized("matching Bot credential required".into())); }
+        Ok(bot.map(|bot| bot.bot.bot_id))
     }
 }
 

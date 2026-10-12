@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 #[derive(Clone)]
 pub struct RegisterProviderBot {
+    pub bot_slug: Option<String>,
     pub provider_id: String,
     /// Stable Provider identity. For AgentPass, the real agent code; persisted
     /// as BotCapabilities.agent_code in both plugin and gateway modes.
@@ -21,10 +22,26 @@ pub struct RegisterProviderBot {
 pub struct ProviderRegistrationResult {
     pub record: ProviderRegistrationRecord,
     pub effective_webhook_url: Option<String>,
+    pub identity: bcs_domain::provider_identity::ProviderBotIdentity,
+    pub auth_mode: bcs_domain::ProviderAuthMode,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderRegistrationCheck {
+    pub provider_id: String,
+    pub auth_mode: bcs_domain::ProviderAuthMode,
+    #[serde(flatten)]
+    pub identity: bcs_domain::provider_identity::ProviderBotIdentity,
+    pub available: bool,
+    pub reason: Option<String>,
+    pub identity_version: u8,
 }
 
 #[async_trait]
 pub trait ProviderRegistrationCoreService: Send + Sync {
+    async fn check(&self, _command: RegisterProviderBot) -> ServiceResult<ProviderRegistrationCheck> {
+        Err(crate::ServiceError::InternalError("Provider registration check is not configured".into()))
+    }
     /// Checks current existence, enabled state and owner/self-service policy.
     /// Issuance deliberately does not require a delivery endpoint.
     async fn authorize(

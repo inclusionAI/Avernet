@@ -31,6 +31,7 @@ pub struct RegisterTokenScope {
 /// Command for registering a bot with a register token.
 #[derive(Debug, Clone)]
 pub struct RegisterBot {
+    pub bot_slug: Option<String>,
     pub token: String,
     pub bot_name: String,
     pub mode: Option<ProviderRegistrationMode>,
@@ -50,6 +51,9 @@ pub struct BotRegistration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotRegistrationScope {
+    pub auth_mode: bcs_domain::ProviderAuthMode,
+    pub agent_code: Option<String>,
+    pub bot_slug: Option<String>,
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub mode: ProviderRegistrationMode,
@@ -61,6 +65,9 @@ pub struct BotRegistrationScope {
 /// anonymous token-to-bot registration.
 #[async_trait]
 pub trait RegisterService: Send + Sync {
+    async fn check_bot(&self, _command: RegisterBot) -> Result<crate::core::provider_registration::ProviderRegistrationCheck, ApplicationError> {
+        Err(ApplicationError::internal("registration check is not configured"))
+    }
     async fn issue_register_token(
         &self,
         command: IssueRegisterToken,

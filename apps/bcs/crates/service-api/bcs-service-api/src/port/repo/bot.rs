@@ -16,6 +16,10 @@ use crate::types::{
 /// separate port before treating this as a narrow persistence-only repository.
 #[async_trait]
 pub trait BotRepoPort: Send + Sync {
+    /// Local stores retain affiliation as a fail-closed marker across restart.
+    /// SQL stores already persist it atomically in the Bot row.
+    async fn persist_provider_affiliation(&self, _record: &crate::bot_provider::BotProviderRecord) -> ServiceResult<()> { Ok(()) }
+    async fn local_provider_affiliation(&self, _id: &str) -> ServiceResult<bool> { Ok(false) }
     /// Authoritative, read-only Agent registration lookup in the current BCN
     /// environment. Ignore process-local cache/heartbeat and Bot enabled state;
     /// exclude tombstones and non-Bot actors. Return Conflict on ambiguity and
@@ -283,6 +287,14 @@ pub trait BotRepoPort: Send + Sync {
     /// whose `agent_code` was set to their `provider_bot_ref`.
     ///
     /// Default impl returns `None` so test/noop repos need not implement it.
+    async fn query_agent_bots(&self, _query: &crate::types::agent_registration::AgentBotQuery) -> ServiceResult<Vec<crate::types::agent_registration::AgentBotRecord>> {
+        Err(crate::types::ServiceError::InternalError("Agent Bot query is not configured".into()))
+    }
+
+    async fn lookup_bot_token(&self, _token: &str, _actor: Option<&str>) -> ServiceResult<Option<crate::types::agent_registration::AgentBotRecord>> {
+        Err(crate::types::ServiceError::InternalError("Bot credential query is not configured".into()))
+    }
+
     async fn find_bot_by_agent_code(&self, agent_code: &str) -> Option<String> {
         let _ = agent_code;
         None
