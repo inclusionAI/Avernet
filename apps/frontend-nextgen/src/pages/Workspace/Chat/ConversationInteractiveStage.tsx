@@ -81,11 +81,10 @@ export function ConversationInteractiveStage(props: {
               onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}
               disabled={model.taskComposerDisabled}
               disabledReason={model.taskComposerDisabledReason}
-              selectedWorkflow={taskExecution.selectedWorkflow}
-              pendingDynamic={taskExecution.pendingDynamic}
+              selections={taskExecution.selections}
               onWorkflowSelected={taskExecution.selectWorkflow}
               onDynamicSelected={taskExecution.selectDynamic}
-              onClearSelection={taskExecution.clearSelection}
+              onRemoveSelection={taskExecution.removeSelection}
             />
           }
           fileChip={model.desktopFileFeaturesHidden ? undefined : fileFeature.fileChip}

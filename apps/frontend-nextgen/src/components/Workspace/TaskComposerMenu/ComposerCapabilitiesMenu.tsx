@@ -1,6 +1,10 @@
 // @asset-migrated: teamclaw 自研
 /** ComposerCapabilitiesMenu —— Sender 左侧「通用协作能力」胶囊触发器 + 单行三项能力菜单 + 工作流子面板。
  *
+ * 多胶囊叠加（2026-10-12 语义修正）：选中项不再取代胶囊触发器——＋触发器常驻，
+ * 选中项以 chip 列表在触发器右侧并列追加，可继续点 ＋ 添加；每 chip 独立 x 清除。
+ * 叠加规则：同一工作流按 workflowId 去重、动态任务全场至多一个（见 useTaskExecution）。
+ *
  * dmore 实测（hd_f54eba11 index.html，2026-10-10）：
  * - 胶囊 179×28：Plus 圆钮 28×28(rx9999, icon 12px #09090B) + 竖分隔线 1×16(#EEEEEE→bg-border) +
  *   文案「通用协作能力」13px/400 #09090B + ChevronDown 12px #A1A1AA。
@@ -19,7 +23,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui';
 import { WorkflowSubPanel, type WorkflowPanelItem } from '@/components/Workspace/TaskComposerMenu/WorkflowSubPanel';
-import type { UseTaskExecutionResult, WorkflowSelection } from '@/hooks/useTaskExecution';
+import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
+import type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
+import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { cn } from '@/utils/cn';
 import { ChevronDown, FileUp, FolderOpen, ImageDown, Plus, Sparkles, Workflow, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
@@ -37,11 +43,12 @@ export interface ComposerCapabilitiesMenuProps {
   enableWorkflow?: boolean;
   disabled?: boolean;
   disabledReason?: string | null;
-  selectedWorkflow?: WorkflowSelection | null;
-  pendingDynamic?: boolean;
+  /** 可叠加选中项（胶囊 chips）：workflow 按 workflowId 去重、动态任务至多一个。 */
+  selections: ComposerSelection[];
   onWorkflowSelected?: (w: WorkflowSelection) => void;
   onDynamicSelected?: () => void;
-  onClearSelection?: () => void;
+  /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
+  onRemoveSelection?: (key: string) => void;
   className?: string;
 }
 
@@ -74,7 +81,7 @@ const MenuRow = React.forwardRef<
 ));
 MenuRow.displayName = 'MenuRow';
 
-/** 选中态 chip：胶囊切换形态（dmore 选中帧），x 清除后恢复胶囊。 */
+/** 选中态 chip：并列叠加形态（多胶囊语义），x 单独清除；形状沿用 dmore 选中帧。 */
 function SelectionChip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
     <Badge tone="primary" className="gap-1 py-0.5 pr-1">
@@ -202,15 +209,13 @@ export function ComposerCapabilitiesMenu({
   enableWorkflow = false,
   disabled,
   disabledReason,
-  selectedWorkflow,
-  pendingDynamic,
+  selections,
   onWorkflowSelected,
   onDynamicSelected,
-  onClearSelection,
+  onRemoveSelection,
   className,
 }: ComposerCapabilitiesMenuProps) {
   const [open, setOpen] = useState(false);
-  const hasSelection = !!selectedWorkflow || pendingDynamic;
   const close = () => setOpen(false);
   const pickWorkflow = (w: WorkflowPanelItem) => {
     onWorkflowSelected?.(w);
@@ -226,51 +231,55 @@ export function ComposerCapabilitiesMenu({
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      {hasSelection ? (
-        <SelectionChip
-          label={selectedWorkflow ? selectedWorkflow.title : '动态任务'}
-          onClear={() => onClearSelection?.()}
-        />
-      ) : (
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            {/* 胶囊触发器（dmore 179×28）：＋圆钮 + 竖分隔线 + 文案 + 下拉指示。
-             * 总开关 disabled 只禁用子项并呈现 disabledReason，触发器保持可开（spec Scenario「不可会话态」）。 */}
-            <Button
-              variant="ghost"
-              aria-label="通用协作能力"
-              aria-haspopup="menu"
-              aria-expanded={open}
-              className="h-7 gap-0 px-0"
-            >
-              <span aria-hidden="true" className="flex size-7 items-center justify-center rounded-full">
-                <Plus className="size-3" />
-              </span>
-              <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-border" />
-              <span className="text-[13px] font-normal leading-none text-foreground">通用协作能力</span>
-              <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-[162px] rounded-xl p-[7px]">
-            <MenuBody
-              onUpload={withClose(onUpload)}
-              onAddImage={withClose(onAddImage)}
-              onManageFiles={withClose(onManageFiles)}
-              onDynamic={() => {
-                onDynamicSelected?.();
-                close();
-              }}
-              onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
-              workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
-              disabled={disabled}
-              workflows={execution.workflows}
-              workflowsLoading={execution.workflowsLoading}
-              onWorkflowHover={() => void execution.loadWorkflows()}
-            />
-            {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
-          </PopoverContent>
-        </Popover>
-      )}
+      {/* ＋胶囊触发器常驻（多胶囊语义）：有选中项时 chips 并列其右，仍可继续点 ＋ 添加。 */}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          {/* 胶囊触发器（dmore 179×28）：＋圆钮 + 竖分隔线 + 文案 + 下拉指示。
+           * 总开关 disabled 只禁用子项并呈现 disabledReason，触发器保持可开（spec Scenario「不可会话态」）。 */}
+          <Button
+            variant="ghost"
+            aria-label="通用协作能力"
+            aria-haspopup="menu"
+            aria-expanded={open}
+            className="h-7 gap-0 px-0"
+          >
+            <span aria-hidden="true" className="flex size-7 items-center justify-center rounded-full">
+              <Plus className="size-3" />
+            </span>
+            <span aria-hidden="true" className="mx-2.5 h-4 w-px bg-border" />
+            <span className="text-[13px] font-normal leading-none text-foreground">通用协作能力</span>
+            <ChevronDown aria-hidden="true" className="ml-1.5 size-3 text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[162px] rounded-xl p-[7px]">
+          <MenuBody
+            onUpload={withClose(onUpload)}
+            onAddImage={withClose(onAddImage)}
+            onManageFiles={withClose(onManageFiles)}
+            onDynamic={() => {
+              onDynamicSelected?.();
+              close();
+            }}
+            onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+            workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
+            disabled={disabled}
+            workflows={execution.workflows}
+            workflowsLoading={execution.workflowsLoading}
+            onWorkflowHover={() => void execution.loadWorkflows()}
+          />
+          {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
+        </PopoverContent>
+      </Popover>
+      {selections.map((selection) => {
+        const key = composerSelectionKey(selection);
+        return (
+          <SelectionChip
+            key={key}
+            label={selection.kind === 'workflow' ? selection.workflow.title : '动态任务'}
+            onClear={() => onRemoveSelection?.(key)}
+          />
+        );
+      })}
     </div>
   );
 }

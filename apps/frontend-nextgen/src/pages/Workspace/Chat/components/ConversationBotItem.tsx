@@ -47,7 +47,6 @@ export interface ConversationBotItemProps {
   bot: ChatBotView;
   section: ConversationBotSection;
   expanded: boolean;
-  selected: boolean;
   /** 当前 Bot 下选中的 Session(跨 origin 高亮)。 */
   selectedSessionId: string | null;
   origin: ConversationOrigin;
@@ -113,7 +112,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   bot,
   section,
   expanded,
-  selected,
   selectedSessionId,
   origin,
   scope,
@@ -149,21 +147,20 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 
   return (
     <div>
-      {/* 行 32px、节点节奏 36px（dmore DOM 实测：一级行胶囊全宽 inset-x8，rx6）：选中/展开 = 整行 32px #EBEBEB 胶囊、
-          无品牌左棒；头像 16px 圆 + #2563EB/10% 底（SVG 稿所有头像位的统一底）；
-          名称 14px #525252（选中 #09090B）；引擎徽标 = 白底 + #E4E4E7 边框小方签（每行至多一枚，
+      {/* 行 32px、节点节奏 36px（dmore DOM 实测：一级行胶囊全宽 inset-x8，rx6）：Bot 行无选中态——
+          选中只存在于其下会话行,展开也不改变行背景(仅 hover 有弱化底)；头像 16px 圆 + #2563EB/10% 底
+          （SVG 稿所有头像位的统一底）；名称 14px #525252；引擎徽标 = 白底 + #E4E4E7 边框小方签（每行至多一枚，
           类型徽标 per 稿撤除）；尾随灰色小箭头。行间 4px 由 SidebarSection 列表容器 gap-1 承载。 */}
       <div
         className={cn(
           'group relative mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors',
-          selected || expanded ? 'bg-selected' : 'hover:bg-muted/60',
+          'hover:bg-muted/60',
         )}
       >
         <Button
           variant="ghost"
           aria-label={bot.displayName}
           aria-expanded={interactive ? expanded : false}
-          aria-current={selected ? 'page' : undefined}
           onClick={handleToggle}
           className={cn(
             'flex h-auto min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-1 text-left hover:bg-transparent',
@@ -180,13 +177,14 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               </span>
             }
           />
-          <div className="flex min-w-0 flex-1 items-center gap-2 group-hover:pr-24">
-            <span
-              className={cn(
-                'min-w-0 truncate text-sm font-normal',
-                selected || expanded ? 'text-foreground' : 'text-content-strong',
-              )}
-            >
+          <div
+            className={cn(
+              'flex min-w-0 flex-1 items-center gap-2 group-hover:pr-24',
+              // 筛选/加号被钉住可见时(展开或筛选激活),文字同样让位,避免撤掉遮盖底后文字透出图标背后。
+              (expanded || filterActive) && 'pr-24',
+            )}
+          >
+            <span className="min-w-0 truncate text-sm font-normal text-content-strong">
               {bot.displayName}
             </span>
             {runtimeLabel && (
@@ -202,11 +200,12 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         {interactive && (
           <div
             className={cn(
-              'absolute inset-y-0 right-[26px] z-10 flex items-center gap-0.5 pl-5',
+              'absolute inset-y-0 right-[34px] z-10 flex items-center gap-0.5 pl-5',
               'mask-[linear-gradient(to_right,transparent,black_20px)]',
-              selected || expanded ? 'sidebar-actions-cover-selected' : 'sidebar-actions-cover-hover',
+              // 遮盖底撤除:按钮 hover 自带 muted 底,操作区不再叠一层与行底不一致的底色;
+              // right-[34px] 使行尾箭头与「新建会话」之间保持与按钮间(gap-0.5)一致的 2px 等宽间隙。
               'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
-              (selected || expanded || filterActive) && 'opacity-100',
+              (expanded || filterActive) && 'opacity-100',
             )}
           >
             {isManaged && (
@@ -234,12 +233,23 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             )}
           </div>
         )}
-        {interactive &&
-          (expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-content-icon" aria-hidden="true" />
-          ))}
+        {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle)。语义与键盘仍由
+            主按钮承载,故不参与 Tab 序、对读屏隐藏,避免一行两个等价控件。 */}
+        {interactive && (
+          <button
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
+            onClick={handleToggle}
+            className="my-auto flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted"
+          >
+            {expanded ? (
+              <ChevronDown className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
+            )}
+          </button>
+        )}
       </div>
       {expanded && interactive && (
         // 展开区不再整体缩进:session 行(dmore 平齐化 1:1)自带全宽行槽,交互热区在行内部分级。
