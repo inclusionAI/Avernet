@@ -94,6 +94,7 @@ def _make_service(
         mcp_sync=MagicMock(),
         template_resolver=template_resolver,
         vault=vault,
+        layout_confirmation=MagicMock(),
         task_queue_service=task_queue_service,
         template_service=template_service,
     )

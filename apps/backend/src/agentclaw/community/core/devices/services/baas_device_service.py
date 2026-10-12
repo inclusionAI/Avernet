@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.protocols import (
         BotQueryProtocol,
         BotSyncProtocol,
+        LayoutInitializationConfirmationProtocol,
         McpSyncProtocol,
     )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -110,6 +111,7 @@ class BaasDeviceService(DeviceService):
         template_service: TemplateConfigReader | None = None,
         secret_resolver: SecretResolver | None = None,
         theta_master_key_secret: str = "",
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         super().__init__(
             repository=repository,
@@ -120,6 +122,7 @@ class BaasDeviceService(DeviceService):
             mcp_sync=mcp_sync,
             vault=vault,
             task_queue_service=task_queue_service,
+            layout_confirmation=layout_confirmation,
         )
         self._baas_service = baas_service
         self._header_updater = BaasDeviceHeaderUpdater(
