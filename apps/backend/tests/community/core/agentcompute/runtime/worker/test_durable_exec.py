@@ -18,7 +18,7 @@ from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeOrchestrationConfig,
 )
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
-from tests.community.core.agentcompute.test_swarm_slice import (
+from tests.community.core.agentcompute.runtime.handler.test_swarm_slice import (
     TENANT, WORKER, _TestDB, FakeFactory, RepeatingLLMProvider, _build_env,
     _enqueue_and_claim, _finish_decision, _mk_run, _spawn_decision,
     _wait_decision,

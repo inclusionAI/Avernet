@@ -49,7 +49,7 @@ from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError,
 )
 
-from tests.community.core.agentcompute.test_swarm_slice import (
+from tests.community.core.agentcompute.runtime.handler.test_swarm_slice import (
     TENANT, FakeFactory, RepeatingLLMProvider, _TestDB, _build_env,
     _finish_decision, _mk_run,
 )

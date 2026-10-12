@@ -23,7 +23,7 @@ from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpecRaw, EpochMillis, ProviderId, RequestMetadata, Run, RunId,
     RunStatus, SubagentResult, TaskEnvelope, TenantId,
 )
-from agentclaw.community.core.agentcompute.plugins.agents.avernet import (
+from agentclaw.community.core.agentcompute.plugins.agents.bot import (
     AvernetSubagent,
 )
 

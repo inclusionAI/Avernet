@@ -45,7 +45,7 @@ from pathlib import Path
 
 from agentclaw.community.core.agentcompute.repository import registry as om
 
-_BACKEND_ROOT = Path(__file__).parents[4]
+_BACKEND_ROOT = Path(__file__).parents[5]
 _SQL_DIR = (
     _BACKEND_ROOT
     / "src"

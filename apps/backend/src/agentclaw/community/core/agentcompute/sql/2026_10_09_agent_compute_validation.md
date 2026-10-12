@@ -8,7 +8,7 @@
   - `2026_10_08_agent_compute.sql` — v1 tables: `run`, `agent`, `message`,
     `result_shard`, `round`, `guard_event`, `job` (durable slice queue, D34).
   - Later files evolve these additively (see
-    `tests/community/core/agentcompute/test_agentcompute_schema_contract.py`
+    `tests/community/core/agentcompute/repository/test_agentcompute_schema_contract.py`
     for the enforced policy).
 - **ORM parity:** `core/agentcompute/repository/registry.py` is the source of
   truth; `Base.metadata.create_all` (community SQLite bootstrap,
@@ -123,7 +123,7 @@ partitioning, no distributed row lock) — the same gap
   columns (`env`/`tenant`/`is_deleted`/`gmt_*`), env/tenant-scoped unique
   keys, and the doc-file policy (dated names, no destructive statements,
   additive ALTERs) are enforced in CI by
-  `tests/community/core/agentcompute/test_agentcompute_schema_contract.py`.
+  `tests/community/core/agentcompute/repository/test_agentcompute_schema_contract.py`.
 
 ## Pre-release validation status
 

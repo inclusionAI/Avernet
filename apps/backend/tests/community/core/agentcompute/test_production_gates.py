@@ -35,7 +35,7 @@ from agentclaw.community.core.agentcompute.service.protocols import (
     QueueDepthExceeded, SubmitRunRequest, TenantRunLimitExceeded,
 )
 
-from tests.community.core.agentcompute.test_swarm_slice import (
+from tests.community.core.agentcompute.runtime.handler.test_swarm_slice import (
     TENANT, FakeFactory, RepeatingLLMProvider, _TestDB, _build_env,
     _finish_decision, _mk_run, _spawn_decision, _wait_decision,
 )

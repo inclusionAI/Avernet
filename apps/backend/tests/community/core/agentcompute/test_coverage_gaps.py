@@ -36,13 +36,13 @@ from agentclaw.community.core.agentcompute.orchestration.state import RunState
 from agentclaw.community.core.agentcompute.orchestration.termination import (
     TerminationEvaluator,
 )
-from agentclaw.community.core.agentcompute.plugins.agents.avernet import (
+from agentclaw.community.core.agentcompute.plugins.agents.bot import (
     AvernetSubagent,
 )
 from agentclaw.community.core.agentcompute.plugins.agents.factory import (
     DefaultSubagentFactory,
 )
-from agentclaw.community.core.agentcompute.plugins.agents.llm_subagent import (
+from agentclaw.community.core.agentcompute.plugins.agents.llm import (
     LLMBackedSubagent,
 )
 from agentclaw.community.core.agentcompute.plugins.artifact_store.filesystem import (

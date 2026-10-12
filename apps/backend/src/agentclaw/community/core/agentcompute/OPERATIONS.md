@@ -10,7 +10,7 @@ Stage-B writeups for tasks 12.3 (schema), 12.6 (pool), 12.9 (artifact TTL),
   apply order, verification queries, and rollback note live in
   `sql/2026_10_09_agent_compute_validation.md`. CI enforcement (dated names,
   no destructive statements, additive ALTERs, ORM↔DDL column + unique-index
-  parity) lives in `tests/community/core/agentcompute/test_agentcompute_schema_contract.py`.
+  parity) lives in `tests/community/core/agentcompute/repository/test_agentcompute_schema_contract.py`.
 - **Rule of thumb for a new change:** add a dated sql file (`YYYY_MM_DD_`),
   add the same columns/indexes to the owning `repository/<table>/model.py` in the same change,
   keep every new column nullable or defaulted, and never repurpose an old one.

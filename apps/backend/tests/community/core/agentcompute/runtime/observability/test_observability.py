@@ -53,7 +53,7 @@ from agentclaw.community.core.agentcompute.orchestration.termination import (
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
 )
-from agentclaw.community.core.agentcompute.plugins.agents.avernet import (
+from agentclaw.community.core.agentcompute.plugins.agents.bot import (
     AvernetSubagent,
 )
 from agentclaw.community.core.agentcompute.plugins.llm.openai import OpenAICompatibleClient

@@ -30,11 +30,11 @@ from agentclaw.community.core.agentcompute.runtime.pool import (
     SubagentRuntime,
 )
 
-from tests.community.core.agentcompute.test_swarm_slice import (
+from tests.community.core.agentcompute.runtime.handler.test_swarm_slice import (
     TENANT, FakeFactory, RepeatingLLMProvider, _TestDB, _build_env,
     _finish_decision, _mk_run, _spawn_decision, _wait_decision,
 )
-from tests.community.core.agentcompute.test_admission import RecordingMetrics
+from tests.community.core.agentcompute.service.test_admission import RecordingMetrics
 
 
 # ---------------------------------------------------------------------------
