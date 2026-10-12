@@ -39,6 +39,12 @@ Decode or storage failures must propagate rather than yield a partial page.
 Internal ZDAS and public MySQL providers exclude `is_deleted = 1` rows; SQLite
 has no soft-deletion column.
 
+Each rebuild scan captures the greatest active ID before its first page and
+stops at that ID. This prevents continuously inserted higher IDs from extending
+the scan. MySQL and ZDAS changes committed during the scan are picked up by
+the existing incremental replay. Local SQLite writes through the vector store
+update the local indexes after rebuild releases its index lock.
+
 Each change-feed pass captures the greatest durable `(gmt_modify, id)` key
 before reading its first page and stops at that key. Mutations committed later
 are left for the next pass, so sustained writes cannot keep one rebuild or sync

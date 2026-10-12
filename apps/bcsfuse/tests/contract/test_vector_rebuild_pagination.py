@@ -25,6 +25,7 @@ class PageConnection:
         self.queries = []
         self.page = []
         self.rollbacks = 0
+        self.upper_id = None
 
     def is_connected(self):
         return True
@@ -33,14 +34,25 @@ class PageConnection:
         return self
 
     def execute(self, sql, params):
+        if "SELECT MAX(`id`)" in sql:
+            active_ids = [row[0] for row in self.rows if not row[3]]
+            self.upper_id = max(active_ids, default=None)
+            self.page = [(self.upper_id,)]
+            return
         assert "is_deleted" in sql and "ORDER BY" in sql and "LIMIT %s" in sql
+        assert "`id` <= %s" in sql
         self.queries.append(params)
-        after, limit = (None, params[0]) if len(params) == 1 else params
+        after = None if len(params) == 2 else params[0]
+        upper_id, limit = params[-2:]
         self.page = [
             row[:3]
             for row in self.rows
-            if not row[3] and (after is None or row[0] > after)
+            if not row[3] and row[0] <= upper_id
+            and (after is None or row[0] > after)
         ][:limit]
+
+    def fetchone(self):
+        return self.page[0] if self.page else None
 
     def fetchall(self):
         return self.page
@@ -61,8 +73,25 @@ def test_mysql_rebuild_pages_skip_deleted_rows_and_bound_each_query():
     batches = list(backend.iter_batches(2))
 
     assert [[point.id for point in batch] for batch in batches] == [["a", "b"], ["d"]]
-    assert connection.queries == [(2,), ("b", 2)]
-    assert connection.rollbacks == 2
+    assert connection.queries == [("d", 2), ("b", "d", 2)]
+    assert connection.rollbacks == 3
+
+
+def test_mysql_rebuild_excludes_rows_inserted_after_initial_max_id():
+    connection = PageConnection()
+    backend = MySQLVectorPersistenceBackend(vector_dimension=2)
+    backend._conn = connection
+    backend._schema_initialized = True
+
+    pages = backend.iter_batches(2)
+    first = next(pages)
+    connection.rows.append(("z", pickle.dumps([1.0, 0.0]), "{}", False))
+    remaining = list(pages)
+
+    assert [[point.id for point in page] for page in [first, *remaining]] == [
+        ["a", "b"], ["d"]
+    ]
+    assert connection.upper_id == "d"
 
 
 def test_sqlite_rebuild_pages_without_loading_all_vectors(tmp_path):
@@ -77,6 +106,26 @@ def test_sqlite_rebuild_pages_without_loading_all_vectors(tmp_path):
         batches = list(backend.iter_batches(2))
 
         assert [[point.id for point in batch] for batch in batches] == [["a", "b"], ["c"]]
+    finally:
+        backend._conn.close()
+
+
+def test_sqlite_rebuild_excludes_rows_inserted_after_initial_max_id(tmp_path):
+    backend = SQLiteVectorPersistenceBackend(str(tmp_path / "vectors.sqlite"))
+    try:
+        backend.save_batch([
+            VectorPoint(id=key, vector=[1.0, 0.0], payload={})
+            for key in ("a", "b", "d")
+        ])
+        pages = backend.iter_batches(2)
+        first = next(pages)
+        backend.save(VectorPoint(id="z", vector=[1.0, 0.0], payload={}))
+        remaining = list(pages)
+
+        assert [[point.id for point in page] for page in [first, *remaining]] == [
+            ["a", "b"], ["d"]
+        ]
+        assert backend.exists("z")
     finally:
         backend._conn.close()
 

@@ -263,12 +263,31 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
         finally:
             self._finish_read(cursor)
 
+    @_synchronized_connection
+    def _active_upper_id(self) -> str | None:
+        self._ensure_connection()
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                f"SELECT MAX(`id`) FROM {TABLE_NAME} WHERE `is_deleted` = 0",
+                (),
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Error as e:
+            raise RuntimeError(f"Failed to read MySQL rebuild upper ID: {e}") from e
+        finally:
+            self._finish_read(cursor)
+
     @_synchronized_pages
     def iter_batches(self, batch_size: int):
         """Page active rows by primary key so a rebuild never buffers all vectors."""
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
 
+        upper_id = self._active_upper_id()
+        if upper_id is None:
+            return
         last_id = None
         while True:
             self._ensure_connection()
@@ -277,15 +296,16 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                 if last_id is None:
                     cursor.execute(
                         f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
-                        "WHERE `is_deleted` = 0 ORDER BY `id` LIMIT %s",
-                        (batch_size,),
+                        "WHERE `is_deleted` = 0 AND `id` <= %s "
+                        "ORDER BY `id` LIMIT %s",
+                        (upper_id, batch_size),
                     )
                 else:
                     cursor.execute(
                         f"SELECT `id`, `vector`, `payload` FROM {TABLE_NAME} "
-                        "WHERE `is_deleted` = 0 AND `id` > %s "
+                        "WHERE `is_deleted` = 0 AND `id` > %s AND `id` <= %s "
                         "ORDER BY `id` LIMIT %s",
-                        (last_id, batch_size),
+                        (last_id, upper_id, batch_size),
                     )
                 rows = cursor.fetchall()
                 points = []

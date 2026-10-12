@@ -186,6 +186,15 @@ class SQLiteVectorPersistenceBackend:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
 
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute("SELECT MAX(id) FROM bcsfuse_vector_embeddings")
+            row = cursor.fetchone()
+            upper_id = row[0] if row else None
+        finally:
+            cursor.close()
+        if upper_id is None:
+            return
         last_id = None
         while True:
             cursor = self._conn.cursor()
@@ -193,14 +202,14 @@ class SQLiteVectorPersistenceBackend:
                 if last_id is None:
                     cursor.execute(
                         "SELECT id, vector, payload FROM bcsfuse_vector_embeddings "
-                        "ORDER BY id LIMIT ?",
-                        (batch_size,),
+                        "WHERE id <= ? ORDER BY id LIMIT ?",
+                        (upper_id, batch_size),
                     )
                 else:
                     cursor.execute(
                         "SELECT id, vector, payload FROM bcsfuse_vector_embeddings "
-                        "WHERE id > ? ORDER BY id LIMIT ?",
-                        (last_id, batch_size),
+                        "WHERE id > ? AND id <= ? ORDER BY id LIMIT ?",
+                        (last_id, upper_id, batch_size),
                     )
                 rows = cursor.fetchall()
                 points = [
