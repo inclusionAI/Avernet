@@ -49,6 +49,9 @@ it('the timeout claim still wins only once', async () => {
   expect(stale).toEqual({ success: true, data: { claimed: false } });
   expect(first).toEqual({ success: true, data: { claimed: true } });
   expect(second).toEqual({ success: true, data: { claimed: false } });
+  expect((await put('flow/completion', { status: 'succeeded', retry_epoch: 1 })).status).toBe(409);
+  expect(raw.prepare('SELECT status, result_json FROM flow_runs WHERE flow_id = ?').get('flow'))
+    .toEqual({ status: 'failed', result_json: 'timeout' });
 });
 
 it('keeps the legacy status endpoint able to resume a failed TaskGuard run', async () => {
@@ -85,4 +88,13 @@ it('rejects a stale completion without changing the newer retry', async () => {
   expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs WHERE flow_id = ?').get('late'))
     .toEqual({ status: 'running', retry_epoch: 1 });
   expect((await put('late/completion', { status: 'succeeded', retry_epoch: 1 })).status).toBe(200);
+});
+
+it('rejects status writes without the current retry epoch', async () => {
+  raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)')
+    .run('status-epoch', 'running', 1);
+  expect((await put('status-epoch/status', { status: 'waiting' })).status).not.toBe(200);
+  expect((await put('status-epoch/status', { status: 'waiting', retry_epoch: 1 })).status).toBe(200);
+  expect(raw.prepare('SELECT status FROM flow_runs WHERE flow_id = ?').get('status-epoch'))
+    .toEqual({ status: 'waiting' });
 });

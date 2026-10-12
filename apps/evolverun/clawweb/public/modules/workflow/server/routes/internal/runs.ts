@@ -258,7 +258,7 @@ export function createInternalRunsRouter(
   /** PUT /:flowId/status — update status */
   router.put("/:flowId/status", asyncHandler(async (req: Request, res: Response) => {
     const flowId = String(req.params.flowId);
-    const { status } = req.body as { status?: string };
+    const { status, retry_epoch } = req.body as { status?: string; retry_epoch?: number };
     apiLog("PUT", `/runs/${flowId}/status`, { flowId, newStatus: status });
     if (!flowRunRepo) {
       apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 503, error: "Database not configured" });
@@ -272,7 +272,12 @@ export function createInternalRunsRouter(
         return;
       }
 
-      const row = await flowRunRepo.updateStatus(flowId, status);
+      if (retry_epoch !== undefined && (!Number.isSafeInteger(retry_epoch) || retry_epoch < 0)) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "retry_epoch must be a nonnegative safe integer" });
+        return;
+      }
+
+      const row = await flowRunRepo.updateStatus(flowId, status, retry_epoch);
       if (!row) {
         apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 404 });
         res.status(404).json({ success: false, error: "Not Found", message: `Flow run "${flowId}" not found` });

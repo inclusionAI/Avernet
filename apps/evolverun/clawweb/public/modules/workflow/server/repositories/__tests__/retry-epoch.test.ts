@@ -87,3 +87,54 @@ it('keeps the legacy failed-node retry available when its epoch is null', async 
     expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs').get()).toEqual({ status: 'running', retry_epoch: null });
   } finally { await db.close(); }
 });
+
+it('keeps a positive-epoch watchdog claim final without blocking normal failure details', async () => {
+  const raw = new Database(':memory:');
+  raw.exec(`CREATE TABLE flow_runs (
+    flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER DEFAULT 0,
+    completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
+    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+  );
+  INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('timed-out', 'running', 1);
+  INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('normal-failure', 'failed', 1);`);
+  const db = new SqliteDatabase(raw);
+  try {
+    const runs = new FlowRunRepository(db);
+    expect(await runs.markFailedIfRunning('timed-out', {
+      reason: 'timeout', currentPhase: 'timeout', completedAt: 10, retryEpoch: 1,
+    })).toBe(true);
+    expect(await runs.updateCompletion('timed-out', {
+      status: 'succeeded', completedAt: 11, succeededCount: 0, failedCount: 0, retryEpoch: 1,
+    })).toBe(false);
+    expect(await runs.updateCompletion('timed-out', {
+      status: 'failed', completedAt: 11, succeededCount: 0, failedCount: 0, retryEpoch: 1,
+    })).toBe(false);
+    expect(await runs.updateStatus('timed-out', 'running', 1)).toBe(false);
+    expect(await runs.updateStatus('timed-out', 'waiting', 1)).toBe(false);
+    expect(raw.prepare('SELECT status, result_json FROM flow_runs WHERE flow_id = ?').get('timed-out'))
+      .toEqual({ status: 'failed', result_json: 'timeout' });
+    expect(await runs.updateCompletion('normal-failure', {
+      status: 'failed', completedAt: 12, succeededCount: 0, failedCount: 0, retryEpoch: 1,
+    })).toBe(true);
+  } finally { await db.close(); }
+});
+
+it('rejects stale status writes after a retry while preserving epoch-zero status updates', async () => {
+  const raw = new Database(':memory:');
+  raw.exec(`CREATE TABLE flow_runs (
+    flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER DEFAULT 0,
+    completed_at INTEGER, gmt_modified INTEGER
+  );
+  INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('retried', 'running', 1);
+  INSERT INTO flow_runs (flow_id, status) VALUES ('legacy', 'failed');`);
+  const db = new SqliteDatabase(raw);
+  try {
+    const runs = new FlowRunRepository(db);
+    expect(await runs.updateStatus('retried', 'waiting')).toBe(false);
+    expect(await runs.updateStatus('retried', 'failed', 0)).toBe(false);
+    expect(await runs.updateStatus('retried', 'waiting', 1)).toBe(true);
+    expect(await runs.updateStatus('retried', 'running', 1)).toBe(true);
+    expect(await runs.updateStatus('legacy', 'running')).toBe(true);
+    expect(raw.prepare('SELECT status FROM flow_runs WHERE flow_id = ?').get('retried')).toEqual({ status: 'running' });
+  } finally { await db.close(); }
+});

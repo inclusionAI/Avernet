@@ -394,9 +394,13 @@ export class FlowRunRepository {
     }
     values.push(flowId, completion.retryEpoch ?? 0);
     const result = await this.db.exec(
-      // Legacy TaskGuard sends the retry's running status asynchronously. Its
-      // completion may reach this route first while the previous status is failed.
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ? AND status NOT IN ('succeeded', 'cancelled', 'canceled')`,
+      // Legacy TaskGuard can complete before its delayed running-status write.
+      // For a fenced retry, a failed row with completed_at set was claimed by
+      // the watchdog and must stay terminal. A normal fail() status write has
+      // no completed_at yet, so its completion may still provide final details.
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+       AND status NOT IN ('succeeded', 'cancelled', 'canceled')
+       AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`,
       values,
     );
     return result.affectedRows > 0;
@@ -424,15 +428,19 @@ export class FlowRunRepository {
     return result.affectedRows > 0;
   }
 
-  async updateStatus(flowId: string, status: string): Promise<boolean> {
+  async updateStatus(flowId: string, status: string, retryEpoch = 0): Promise<boolean> {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
       // Legacy clients, including TaskGuard, resume failed runs through /status.
       // New ClawMind retries use /retry-resume and keep their own timeout fence.
       status === 'running'
-        ? "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status IN ('failed', 'blocked', 'waiting', 'running')"
-        : "UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ?",
-      [status, now, flowId],
+        ? `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+           AND status IN ('failed', 'blocked', 'waiting', 'running')
+           AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`
+        : `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+           AND (COALESCE(retry_epoch, 0) = 0 OR (status NOT IN ('succeeded', 'cancelled', 'canceled')
+             AND (status <> 'failed' OR completed_at IS NULL)))`,
+      [status, now, flowId, retryEpoch],
     );
     return result.affectedRows > 0;
   }
