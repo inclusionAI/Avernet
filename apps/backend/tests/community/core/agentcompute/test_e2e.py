@@ -119,7 +119,7 @@ class _FakeFactory:
     def __init__(self) -> None:
         self.created: list[str] = []
 
-    def create(self, spec: dm.AgentSpecRaw, run: dm.Run) -> _FakeSubagent:
+    def create(self, spec: dm.AgentSpec, run: dm.Run) -> _FakeSubagent:
         self.created.append(spec.name)
         return _FakeSubagent(spec.name)
 
@@ -211,8 +211,8 @@ def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
         tenant=TENANT,
         goal="e2e: map the incident to owning services",
         agents=(
-            dm.AgentSpecRaw(name="a1", role="research"),
-            dm.AgentSpecRaw(name="a2", role="research"),
+            dm.AgentSpec(name="a1", role="research"),
+            dm.AgentSpec(name="a2", role="research"),
         ),
         idempotency_key=idempotency_key,
     )

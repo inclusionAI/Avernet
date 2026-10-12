@@ -13,7 +13,7 @@ import json
 import time
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, BotState, Run, SubagentResult, TaskEnvelope,
+    AgentSpec, BotState, Run, SubagentResult, TaskEnvelope,
 )
 from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
@@ -33,7 +33,7 @@ _TERMINAL_FAILURE = frozenset({
 
 class AvernetSubagent:
 
-    def __init__(self, spec: AgentSpecRaw, run: Run,
+    def __init__(self, spec: AgentSpec, run: Run,
                  platform: BotPlatform,
                  observability: AgentComputeObservability | None = None) -> None:
         self._spec = spec

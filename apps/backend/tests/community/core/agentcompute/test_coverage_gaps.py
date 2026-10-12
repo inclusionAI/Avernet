@@ -150,7 +150,7 @@ class TestDefaultSubagentFactory:
     async def test_llm_kind_creates_llm_backed_subagent(self):
         factory = DefaultSubagentFactory(StubLLMProvider())
         run = _mk_run()
-        spec = dm.AgentSpecRaw(name="s1", role="research", kind=dm.AgentKind.LLM)
+        spec = dm.AgentSpec(name="s1", role="research", kind=dm.AgentKind.LLM)
         sub = factory.create(spec, run)
         assert isinstance(sub, LLMBackedSubagent)
         await sub.teardown()
@@ -159,7 +159,7 @@ class TestDefaultSubagentFactory:
     async def test_avernet_kind_creates_avernet_subagent(self):
         factory = DefaultSubagentFactory(StubLLMProvider(), platform=object())
         sub = factory.create(
-            dm.AgentSpecRaw(name="b1", role="worker", kind=dm.AgentKind.AVENET),
+            dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
             _mk_run(),
         )
         assert isinstance(sub, AvernetSubagent)
@@ -172,7 +172,7 @@ class TestDefaultSubagentFactory:
         factory = DefaultSubagentFactory(StubLLMProvider())
         with pytest.raises(AgentComputeConfigError, match="BotPlatform"):
             factory.create(
-                dm.AgentSpecRaw(name="b1", role="worker", kind=dm.AgentKind.AVENET),
+                dm.AgentSpec(name="b1", role="worker", kind=dm.AgentKind.AVENET),
                 _mk_run(),
             )
 
@@ -182,7 +182,7 @@ class TestLLMBackedSubagent:
     def _env(self):
         llm = StubLLMProvider(script=['{"a": 1}', "plain-text-not-json"])
         run = _mk_run()
-        spec = dm.AgentSpecRaw(name="s1", role="research", model="m-1")
+        spec = dm.AgentSpec(name="s1", role="research", model="m-1")
         return LLMBackedSubagent(spec, run, llm), llm
 
     @pytest.mark.asyncio
@@ -224,7 +224,7 @@ class TestAvernetSubagentTeardown:
                 raise RuntimeError("platform gone")
 
         sub = AvernetSubagent(
-            dm.AgentSpecRaw(name="b", role="worker"), _mk_run(),
+            dm.AgentSpec(name="b", role="worker"), _mk_run(),
             _BoomPlatform(),
         )
         sub._bot_id = "bot-1"
@@ -241,7 +241,7 @@ class TestAvernetSubagentTeardown:
         factory = DefaultSubagentFactory(llm=None)
         with pytest.raises(AgentComputeConfigError, match="BotPlatform"):
             factory.create(
-                dm.AgentSpecRaw(name="b", role="worker", kind=dm.AgentKind.AVENET),
+                dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
                 _mk_run(),
             )
 
@@ -252,7 +252,7 @@ class TestAvernetSubagentTeardown:
         )
         factory = DefaultSubagentFactory(llm=None, platform=object())
         sub = factory.create(
-            dm.AgentSpecRaw(name="b", role="worker", kind=dm.AgentKind.AVENET),
+            dm.AgentSpec(name="b", role="worker", kind=dm.AgentKind.AVENET),
             _mk_run(),
         )
         assert isinstance(sub, bot_pkg.AvernetSubagent)
@@ -678,11 +678,11 @@ def _mk_run(goal="gap goal") -> dm.Run:
         tenant=TENANT,
         goal=goal,
         agent_catalog=(
-            dm.AgentSpecRaw(name="a1", role="research"),
-            dm.AgentSpecRaw(name="a2", role="researcher",
+            dm.AgentSpec(name="a1", role="research"),
+            dm.AgentSpec(name="a2", role="researcher",
                             instructions="be terse"),
         ),
-        provider=dm.ProviderId("stub"),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(int(time.time() * 1000)),
@@ -707,7 +707,7 @@ def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
         tenant=TENANT,
         goal="coverage-gap goal",
-        agents=(dm.AgentSpecRaw(name="a1", role="research"),),
+        agents=(dm.AgentSpec(name="a1", role="research"),),
         idempotency_key=idempotency_key,
     )
 
@@ -749,7 +749,7 @@ class _RecordingFactory:
     def __init__(self) -> None:
         self.created_specs: list[str] = []
 
-    def create(self, spec: dm.AgentSpecRaw, run: dm.Run) -> _InstantSubagent:
+    def create(self, spec: dm.AgentSpec, run: dm.Run) -> _InstantSubagent:
         self.created_specs.append(spec.name)
         return _InstantSubagent(spec.name)
 
@@ -982,7 +982,7 @@ class TestOrchestratorEdges:
         orchestrator = self._orchestrator(StubLLMProvider())
         run = _mk_run()
         state = RunState(run=run)
-        state.active_persona = dm.AgentSpecRaw(
+        state.active_persona = dm.AgentSpec(
             name="a2", role="researcher", instructions="be terse",
         )
         prompt = orchestrator._system_prompt(run, state)

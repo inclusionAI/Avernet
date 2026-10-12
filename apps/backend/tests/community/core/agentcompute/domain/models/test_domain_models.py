@@ -84,12 +84,12 @@ class TestFrozenDataclasses:
             sd.kind = dm.DecisionKind.FINISH
 
     def test_agent_spec_raw_frozen(self):
-        spec = dm.AgentSpecRaw(name="s1", role="r1")
+        spec = dm.AgentSpec(name="s1", role="r1")
         with pytest.raises(AttributeError):
             spec.name = "s2"
 
     def test_agent_spec_raw_defaults(self):
-        spec = dm.AgentSpecRaw(name="s", role="r")
+        spec = dm.AgentSpec(name="s", role="r")
         assert spec.kind == dm.AgentKind.LLM
         assert spec.model is None
         assert spec.metadata == {}
@@ -123,7 +123,7 @@ class TestRunRecord:
         run = dm.Run(
             run_id=dm.RunId("r1"), tenant=dm.TenantId("t1"),
             goal="goal", agent_catalog=(),
-            provider=dm.ProviderId("p"), request_metadata=dm.RequestMetadata(),
+            provider=dm.ProviderKind.STUB, request_metadata=dm.RequestMetadata(),
             status=dm.RunStatus.RUNNING, started_at=dm.EpochMillis(0),
         )
         assert run.termination_reason is None

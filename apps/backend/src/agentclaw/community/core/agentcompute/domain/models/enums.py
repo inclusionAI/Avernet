@@ -113,3 +113,18 @@ class StreamEventKind(StrEnum):
     AGENT_STATE = "agent_state"
     ROUND = "round"
     TERMINAL = "terminal"
+
+class ProviderKind(StrEnum):
+    """Which serving substrate backs the run (wire + ac_agent_compute_run.provider)."""
+
+    DEFAULT = "default"
+    STUB = "stub"
+    AVENET = "avernet"
+
+    @classmethod
+    def coerce(cls, value: str | None) -> "ProviderKind":
+        """Boundary coercion for wire/row strings, failing safe to DEFAULT."""
+        try:
+            return cls(value or "")
+        except ValueError:
+            return cls.DEFAULT

@@ -34,7 +34,7 @@ from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol, SubmitRunRequest,
 )
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, RunStatus,
+    AgentSpec, ProviderKind, RunStatus,
 )
 from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError, AgentComputeRunNotFoundError, TenantRunLimitExceeded,
@@ -316,13 +316,13 @@ def _to_domain(dto: SubmitRunDTO, tenant: str) -> SubmitRunRequest:
         tenant=tenant,
         goal=dto.goal,
         agents=tuple(
-            AgentSpecRaw(
+            AgentSpec(
                 name=a.name, role=a.role, instructions=a.instructions,
                 kind=a.kind, model=a.model, metadata=a.metadata,
             )
             for a in dto.agents
         ),
-        provider=dto.provider or "default",
+        provider=ProviderKind.coerce(dto.provider),
         model=dto.model,
         idempotency_key=dto.idempotency_key,
     )

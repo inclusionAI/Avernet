@@ -18,7 +18,7 @@ from collections import deque
 import pytest
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, AgentStatus, EpochMillis, ProviderId, RequestMetadata,
+    AgentSpec, AgentStatus, EpochMillis, ProviderKind, RequestMetadata,
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
     TerminationReason, TokenUsage,
 )
@@ -37,9 +37,9 @@ def _mk_run(catalog=None) -> Run:
         tenant=TenantId("tenant-a"),
         goal="test goal",
         agent_catalog=tuple(catalog) if catalog else (
-            AgentSpecRaw(name="researcher", role="deep research"),
+            AgentSpec(name="researcher", role="deep research"),
         ),
-        provider=ProviderId("stub"),
+        provider=ProviderKind("stub"),
         request_metadata=RequestMetadata(),
         status=RunStatus.RUNNING,
         started_at=EpochMillis(_now_ms()),
@@ -69,7 +69,7 @@ class ScriptedSubagent:
     run_task call consumes one script entry).
     """
 
-    def __init__(self, spec: AgentSpecRaw, script: deque, tracker: dict,
+    def __init__(self, spec: AgentSpec, script: deque, tracker: dict,
                  on_run=None) -> None:
         self.name = spec.name
         self.spec = spec
@@ -130,7 +130,7 @@ class FakeFactory:
             "envelopes": [],
         }
 
-    def create(self, spec: AgentSpecRaw, run: Run) -> ScriptedSubagent:
+    def create(self, spec: AgentSpec, run: Run) -> ScriptedSubagent:
         self.creates += 1
         self.created_specs.append(spec)
         self.created_runs.append(run)
@@ -647,7 +647,7 @@ class TestSiblingIsolation:
 class TestSpecResolution:
     def test_envelope_name_resolved_from_run_catalog(self):
         async def main():
-            catalog_spec = AgentSpecRaw(
+            catalog_spec = AgentSpec(
                 name="researcher", role="deep research",
                 instructions="specific instructions",
             )
@@ -678,7 +678,7 @@ class TestSpecResolution:
                 await rt.stop()
 
             assert factory.creates == 1
-            assert factory.created_specs[0] == AgentSpecRaw(
+            assert factory.created_specs[0] == AgentSpec(
                 name="ghost", role="the objective"
             )
 

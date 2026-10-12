@@ -111,7 +111,7 @@ def _req(tenant: str, idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
         tenant=tenant,
         goal="test goal",
-        agents=(dm.AgentSpecRaw(name="r1", role="research"),),
+        agents=(dm.AgentSpec(name="r1", role="research"),),
         idempotency_key=idempotency_key,
     )
 
@@ -218,8 +218,8 @@ class TestListRuns:
                 run_id=run_id,
                 tenant=dm.TenantId("tenant-a"),
                 goal=f"goal-{i}",
-                agent_catalog=(dm.AgentSpecRaw(name="r1", role="research"),),
-                provider=dm.ProviderId("stub"),
+                agent_catalog=(dm.AgentSpec(name="r1", role="research"),),
+                provider=dm.ProviderKind("stub"),
                 request_metadata=dm.RequestMetadata(),
                 status=status,
                 started_at=dm.EpochMillis(int(time.time() * 1000)),

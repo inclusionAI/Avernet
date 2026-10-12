@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentclaw.community.core.agentcompute.domain.models import AgentSpecRaw, Run
+from agentclaw.community.core.agentcompute.domain.models import AgentSpec, Run
 from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
 )
@@ -22,7 +22,7 @@ class DefaultSubagentFactory:
         self._platform = platform
         self._obs = observability
 
-    def create(self, spec: AgentSpecRaw, run: Run) -> Subagent:
+    def create(self, spec: AgentSpec, run: Run) -> Subagent:
         if spec.kind.value == "avernet":
             # Fail clear at spawn time: an avernet-kind agent needs the
             # host's in-process BotPlatform binding; silently skipping to

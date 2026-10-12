@@ -140,7 +140,7 @@ class FakeFactory:
         self.gate = gate
         self.tracker: dict[str, int] = {}
 
-    def create(self, spec: dm.AgentSpecRaw, run: dm.Run):
+    def create(self, spec: dm.AgentSpec, run: dm.Run):
         seen = self.creates.get(spec.name, 0)
         self.creates[spec.name] = seen + 1
         return FakeSubagent(
@@ -163,11 +163,11 @@ def _mk_run(goal="swarm goal") -> dm.Run:
         tenant=TENANT,
         goal=goal,
         agent_catalog=(
-            dm.AgentSpecRaw(name="a1", role="research"),
-            dm.AgentSpecRaw(name="a2", role="research"),
-            dm.AgentSpecRaw(name="sl1", role="research"),
+            dm.AgentSpec(name="a1", role="research"),
+            dm.AgentSpec(name="a2", role="research"),
+            dm.AgentSpec(name="sl1", role="research"),
         ),
-        provider=dm.ProviderId("stub"),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(_now_ms()),

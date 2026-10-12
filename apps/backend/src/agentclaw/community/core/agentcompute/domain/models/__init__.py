@@ -13,16 +13,16 @@ from __future__ import annotations
 
 from agentclaw.community.core.agentcompute.domain.models.ids import (
     AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
-    JobId, MessageId, ModelId, ProviderId, RoundId, RunId, SecretRef,
+    JobId, MessageId, ModelId, RoundId, RunId, SecretRef,
     ShardId, TenantId,
 )
 from agentclaw.community.core.agentcompute.domain.models.enums import (
     AgentKind, AgentStatus, BotState, DecisionKind, FinishReason, GuardKind,
-    LlmCallKind, MessageRole, RunStatus, StreamEventKind, TaskQueueStatus,
+    LlmCallKind, MessageRole, ProviderKind, RunStatus, StreamEventKind, TaskQueueStatus,
     TerminationReason, WaitMode, WorkerOutcomeKind,
 )
 from agentclaw.community.core.agentcompute.domain.models.specs import (
-    AcceptanceGap, AgentSpecRaw, CompletionChunk, CompletionRequest,
+    AcceptanceGap, AgentSpec, CompletionChunk, CompletionRequest,
     CompletionResponse, Decision, DecisionParse, FinalAnswer, FinishDecision,
     GuardDetails, HandoffDecision, MessageContent, RequestMetadata,
     SpawnDecision, StructuredOutput, SubagentResult, TaskEnvelope, TokenUsage,
@@ -35,7 +35,7 @@ from agentclaw.community.core.agentcompute.domain.models.entities import (
 
 __all__ = [
     "RunId", "AgentId", "TenantId", "JobId", "MessageId", "ShardId",
-    "RoundId", "EventId", "ArtifactKey", "ProviderId", "ModelId", "BotId",
+    "RoundId", "EventId", "ArtifactKey", "ProviderKind", "ModelId", "BotId",
     "IdempotencyKey", "SecretRef", "EpochMillis",
     "StructuredOutput", "FinalAnswer", "MessageContent", "GuardDetails",
     "RunStatus", "AgentStatus", "AgentKind", "BotState", "MessageRole",
@@ -47,6 +47,6 @@ __all__ = [
     "DecisionParse", "RunPage",
     "SpawnDecision", "WaitDecision", "HandoffDecision", "FinishDecision",
     "Decision",
-    "RequestMetadata", "AgentSpecRaw", "Run", "Agent", "Message",
+    "RequestMetadata", "AgentSpec", "Run", "Agent", "Message",
     "ResultShard", "Round", "GuardEvent", "NameAliasMap",
 ]

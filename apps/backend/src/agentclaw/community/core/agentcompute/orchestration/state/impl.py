@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from agentclaw.community.core.agentcompute.domain.models import Run, AgentSpecRaw
+from agentclaw.community.core.agentcompute.domain.models import Run, AgentSpec
 
 
 @dataclass
@@ -15,4 +15,4 @@ class RunState:
     last_spawn_objectives: list[str] = field(default_factory=list)
     routed_shard_count: int = 0
     recent_decision: Any = None
-    active_persona: AgentSpecRaw | None = None
+    active_persona: AgentSpec | None = None

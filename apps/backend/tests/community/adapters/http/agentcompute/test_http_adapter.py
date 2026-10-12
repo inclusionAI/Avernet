@@ -43,8 +43,8 @@ def _mk_run(status: dm.RunStatus = dm.RunStatus.COMPLETED) -> dm.Run:
         run_id=dm.RunId("run-1"),
         tenant=dm.TenantId(TENANT),
         goal="analyze the build logs",
-        agent_catalog=(dm.AgentSpecRaw(name="r1", role="research"),),
-        provider=dm.ProviderId("stub"),
+        agent_catalog=(dm.AgentSpec(name="r1", role="research"),),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=status,
         started_at=dm.EpochMillis(1),
@@ -212,7 +212,7 @@ def _spec_body() -> dict:
                 "metadata": {"tier": "1"},
             }
         ],
-        "provider": "acme",
+        "provider": "stub",
         "model": "orchestrator-x",
         "idempotency_key": "idem-1",
     }
@@ -328,11 +328,11 @@ class TestSyncRunRoundTrip:
         (req,) = stub.submitted
         assert req.tenant == TENANT
         assert req.goal == "analyze the build logs"
-        assert req.provider == "acme"
+        assert req.provider == "stub"
         assert req.model == "orchestrator-x"
         assert req.idempotency_key == "idem-1"
         (agent,) = req.agents
-        assert isinstance(agent, dm.AgentSpecRaw)
+        assert isinstance(agent, dm.AgentSpec)
         assert agent.name == "r1"
         assert agent.role == "research"
         assert agent.kind is dm.AgentKind.LLM

@@ -120,7 +120,7 @@ class RequestMetadata:
 
 
 @dataclass(frozen=True)
-class AgentSpecRaw:
+class AgentSpec:
     name: str
     role: str
     instructions: str = ""

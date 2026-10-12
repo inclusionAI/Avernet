@@ -94,7 +94,7 @@ def _mk_req(tenant="t1", *, idem=None, goal="admission goal") -> SubmitRunReques
     return SubmitRunRequest(
         tenant=tenant,
         goal=goal,
-        agents=(dm.AgentSpecRaw(name="a1", role="research"),),
+        agents=(dm.AgentSpec(name="a1", role="research"),),
         idempotency_key=idem,
     )
 
@@ -104,8 +104,8 @@ def _mk_running_run(tenant: str) -> dm.Run:
         run_id=dm.RunId(uuid.uuid4().hex),
         tenant=dm.TenantId(tenant),
         goal=uuid.uuid4().hex,
-        agent_catalog=(dm.AgentSpecRaw(name="a1", role="research"),),
-        provider=dm.ProviderId("stub"),
+        agent_catalog=(dm.AgentSpec(name="a1", role="research"),),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(int(time.time() * 1000)),

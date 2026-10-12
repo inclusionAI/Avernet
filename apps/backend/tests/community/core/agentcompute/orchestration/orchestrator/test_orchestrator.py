@@ -9,8 +9,8 @@ from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeOrchestrationConfig,
 )
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, EpochMillis, FinishDecision,
-    HandoffDecision, ProviderId, RequestMetadata, Run, RunId, RunStatus,
+    AgentSpec, EpochMillis, FinishDecision,
+    HandoffDecision, ProviderKind, RequestMetadata, Run, RunId, RunStatus,
     SpawnDecision, TenantId, TerminationReason, WaitDecision,
 )
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
@@ -33,10 +33,10 @@ def _mk_run() -> Run:
         tenant=TenantId("test-tenant"),
         goal="test",
         agent_catalog=(
-            AgentSpecRaw(name="researcher", role="research"),
-            AgentSpecRaw(name="writer", role="write"),
+            AgentSpec(name="researcher", role="research"),
+            AgentSpec(name="writer", role="write"),
         ),
-        provider=ProviderId("stub"),
+        provider=ProviderKind("stub"),
         request_metadata=RequestMetadata(),
         status=RunStatus.RUNNING,
         started_at=EpochMillis(int(time.time() * 1000)),

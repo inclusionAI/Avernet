@@ -4,15 +4,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentclaw.community.core.agentcompute.domain.models.enums import (
-    AgentKind, AgentStatus, BotState, GuardKind, MessageRole, RunStatus,
-    TerminationReason,
+    AgentKind, AgentStatus, BotState, GuardKind, MessageRole, ProviderKind,
+    RunStatus, TerminationReason,
 )
 from agentclaw.community.core.agentcompute.domain.models.ids import (
     AgentId, ArtifactKey, BotId, EpochMillis, EventId, IdempotencyKey,
-    MessageId, ProviderId, RoundId, RunId, ShardId, TenantId,
+    MessageId, RoundId, RunId, ShardId, TenantId,
 )
 from agentclaw.community.core.agentcompute.domain.models.specs import (
-    AgentSpecRaw, Decision, FinalAnswer, GuardDetails, MessageContent,
+    AgentSpec, Decision, FinalAnswer, GuardDetails, MessageContent,
     RequestMetadata, StructuredOutput, TaskEnvelope, TokenUsage,
 )
 
@@ -30,8 +30,8 @@ class Run:
     run_id: RunId
     tenant: TenantId
     goal: str
-    agent_catalog: tuple[AgentSpecRaw, ...]
-    provider: ProviderId
+    agent_catalog: tuple[AgentSpec, ...]
+    provider: ProviderKind
     request_metadata: RequestMetadata
     status: RunStatus
     started_at: EpochMillis

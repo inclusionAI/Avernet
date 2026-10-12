@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, CompletionRequest, LlmCallKind,
+    AgentSpec, CompletionRequest, LlmCallKind,
     Run, SubagentResult, TaskEnvelope, ModelId,
 )
 from agentclaw.community.core.agentcompute.spi.llm import LLMProvider
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class LLMBackedSubagent:
 
-    def __init__(self, spec: AgentSpecRaw, run: Run, llm: LLMProvider) -> None:
+    def __init__(self, spec: AgentSpec, run: Run, llm: LLMProvider) -> None:
         self._spec = spec
         self._run = run
         self._llm = llm

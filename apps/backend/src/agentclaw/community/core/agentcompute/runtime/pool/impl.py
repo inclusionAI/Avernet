@@ -9,7 +9,7 @@ from typing import Any, Iterator
 
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentId, AgentStatus, IdempotencyKey, Run,
-    SubagentResult, TaskEnvelope, TenantId, AgentSpecRaw,
+    SubagentResult, TaskEnvelope, TenantId, AgentSpec,
 )
 from dataclasses import dataclass
 
@@ -222,7 +222,7 @@ class SubagentRuntime:
     async def _execute_with_retry(self, item: _WorkItem) -> dict[str, Any]:
         spec = self._find_spec(item.run, item.envelope)
         if spec is None:
-            spec = AgentSpecRaw(name=item.envelope.name, role=item.envelope.objective)
+            spec = AgentSpec(name=item.envelope.name, role=item.envelope.objective)
 
         schema = item.envelope.output_schema
         validator = None
@@ -315,7 +315,7 @@ class SubagentRuntime:
         self._metrics.increment("agentcompute_upstream_failures")
 
     @staticmethod
-    def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpecRaw | None:
+    def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpec | None:
         for spec in run.agent_catalog:
             if spec.name == envelope.name:
                 return spec

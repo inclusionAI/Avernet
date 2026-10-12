@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, Run, SubagentResult, TaskEnvelope,
+    AgentSpec, Run, SubagentResult, TaskEnvelope,
 )
 
 
@@ -19,4 +19,4 @@ class Subagent(Protocol):
 @runtime_checkable
 class SubagentFactory(Protocol):
 
-    def create(self, spec: AgentSpecRaw, run: Run) -> Subagent: ...
+    def create(self, spec: AgentSpec, run: Run) -> Subagent: ...

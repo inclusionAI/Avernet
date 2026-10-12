@@ -70,8 +70,8 @@ def _submit_request(tenant: str = TENANT, *, goal: str = "gate goal",
                     idem: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
         tenant=tenant, goal=goal,
-        agents=(dm.AgentSpecRaw(name="a1", role="worker"),),
-        provider="stub", idempotency_key=idem,
+        agents=(dm.AgentSpec(name="a1", role="worker"),),
+        provider=dm.ProviderKind.STUB, idempotency_key=idem,
     )
 
 

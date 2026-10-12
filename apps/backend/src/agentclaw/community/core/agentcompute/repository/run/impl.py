@@ -52,7 +52,7 @@ class RunRepository(RunRepositoryProtocol):
         with self._db.orm_session() as session:
             row = om.AcAgentComputeRunModel(
                 run_id=run.run_id,
-                env=run.provider or "default",
+                env=run.provider.value,
                 tenant=run.tenant,
                 goal=run.goal,
                 agent_catalog=_dumps([a.__dict__ for a in run.agent_catalog]),
@@ -197,7 +197,7 @@ class RunRepository(RunRepositoryProtocol):
         # (the JSON boundary) instead of leaving str values in the typed
         # domain contract, where consumers crash at attribute time.
         agent_catalog = tuple(
-            dm.AgentSpecRaw(**{
+            dm.AgentSpec(**{
                 **c, "kind": dm.AgentKind(c.get("kind", dm.AgentKind.LLM.value)),
             })
             for c in catalog_raw
@@ -208,7 +208,7 @@ class RunRepository(RunRepositoryProtocol):
             tenant=dm.TenantId(row.tenant),
             goal=row.goal,
             agent_catalog=agent_catalog,
-            provider=dm.ProviderId(row.provider or "default"),
+            provider=dm.ProviderKind.coerce(row.provider),
             request_metadata=dm.RequestMetadata(**req_md_raw),
             status=_decode_run_status(row.status),
             started_at=dm.EpochMillis(row.started_at or 0),

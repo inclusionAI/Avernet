@@ -109,9 +109,9 @@ def _mk_run(run_id=None, tenant=TENANT_A) -> dm.Run:
         tenant=tenant,
         goal="test goal",
         agent_catalog=(
-            dm.AgentSpecRaw(name="r1", role="research"),
+            dm.AgentSpec(name="r1", role="research"),
         ),
-        provider=dm.ProviderId("stub"),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(_now_ms()),
@@ -166,8 +166,8 @@ class TestRunRepository:
     def test_catalog_kind_round_trips_as_enum(self, run_repo):
         run = _mk_run()
         run.agent_catalog = (
-            dm.AgentSpecRaw(name="r1", role="research"),
-            dm.AgentSpecRaw(name="r2", role="bot", kind=dm.AgentKind.AVENET),
+            dm.AgentSpec(name="r1", role="research"),
+            dm.AgentSpec(name="r2", role="bot", kind=dm.AgentKind.AVENET),
         )
         run_repo.create(run)
         fetched = run_repo.get(run.run_id, TENANT_A)

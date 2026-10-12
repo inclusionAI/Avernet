@@ -230,8 +230,8 @@ def _mk_run(goal="obs goal") -> dm.Run:
         run_id=dm.RunId(uuid.uuid4().hex),
         tenant=TENANT,
         goal=goal,
-        agent_catalog=(dm.AgentSpecRaw(name="a1", role="research"),),
-        provider=dm.ProviderId("stub"),
+        agent_catalog=(dm.AgentSpec(name="a1", role="research"),),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(int(time.time() * 1000)),
@@ -695,7 +695,7 @@ class _ObsRecordingSubagent:
 
 
 class _ObsRecordingFactory:
-    def create(self, spec: dm.AgentSpecRaw, run: dm.Run):
+    def create(self, spec: dm.AgentSpec, run: dm.Run):
         return _ObsRecordingSubagent(spec.name, {"did": spec.name})
 
 
@@ -816,7 +816,7 @@ class TestSwarmRunHooks:
         handler = _obs_handler(db, AgentComputeObservability(rec), [])
         run = dm.Run(
             run_id=dm.RunId(uuid.uuid4().hex), tenant=TENANT, goal="g",
-            agent_catalog=(), provider=dm.ProviderId("stub"),
+            agent_catalog=(), provider=dm.ProviderKind("stub"),
             request_metadata=dm.RequestMetadata(),
             status=dm.RunStatus.COMPLETED,
             started_at=dm.EpochMillis(0),
@@ -875,7 +875,7 @@ class TestAvernetSubagentHooks:
     @staticmethod
     def _make_sub(obs, chat_outcome="ok") -> AvernetSubagent:
         return AvernetSubagent(
-            spec=dm.AgentSpecRaw(name="av1", role="research"),
+            spec=dm.AgentSpec(name="av1", role="research"),
             run=_mk_run(),
             platform=_PlatformOutcomeFake(chat_outcome),
             observability=obs,

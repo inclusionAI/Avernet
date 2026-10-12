@@ -55,7 +55,7 @@ def _run() -> dm.Run:
         tenant=dm.TenantId("tenant-1"),
         goal="conformance",
         agent_catalog=(),
-        provider=dm.ProviderId("stub"),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(0),

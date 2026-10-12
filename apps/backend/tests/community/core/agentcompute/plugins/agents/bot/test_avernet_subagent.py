@@ -18,7 +18,7 @@ import time
 import pytest
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpecRaw, EpochMillis, ProviderId, RequestMetadata, Run, RunId,
+    AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run, RunId,
     RunStatus, TaskEnvelope, TenantId,
 )
 from agentclaw.community.core.agentcompute.plugins.agents.bot import (
@@ -36,15 +36,15 @@ def _mk_run(run_id="run-42") -> Run:
         tenant=TenantId("tenant-a"),
         goal="goal",
         agent_catalog=(),
-        provider=ProviderId("avernet"),
+        provider=ProviderKind("avernet"),
         request_metadata=RequestMetadata(),
         status=RunStatus.RUNNING,
         started_at=EpochMillis(_now_ms()),
     )
 
 
-def _mk_spec(name="scout") -> AgentSpecRaw:
-    return AgentSpecRaw(name=name, role="worker")
+def _mk_spec(name="scout") -> AgentSpec:
+    return AgentSpec(name=name, role="worker")
 
 
 def _mk_envelope(objective="survey the logs", boundaries="stay read-only"):
@@ -125,7 +125,7 @@ class TestLifecycle:
     def test_setup_uses_spec_instructions_when_given(self):
         async def main():
             gw = FakePlatform()
-            spec = AgentSpecRaw(name="clerk", role="worker",
+            spec = AgentSpec(name="clerk", role="worker",
                                 instructions="File the reports weekly.")
             sub = AvernetSubagent(spec, _mk_run(), gw)
             await sub.setup()

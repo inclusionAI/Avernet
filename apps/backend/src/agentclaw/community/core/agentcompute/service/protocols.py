@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentKind, AgentSpecRaw, AgentStatus, GuardKind, RequestMetadata, Run,
+    AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind, RequestMetadata, Run,
     RunPage, RunStatus,
 )
 
@@ -20,8 +20,8 @@ from agentclaw.community.core.agentcompute.domain.models import (
 class SubmitRunRequest:
     tenant: str
     goal: str
-    agents: tuple[AgentSpecRaw, ...]
-    provider: str = "default"
+    agents: tuple[AgentSpec, ...]
+    provider: ProviderKind = ProviderKind.DEFAULT
     model: str | None = None
     request_metadata: RequestMetadata = field(default_factory=RequestMetadata)
     idempotency_key: str | None = None

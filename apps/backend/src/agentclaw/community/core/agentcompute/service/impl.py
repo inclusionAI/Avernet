@@ -10,7 +10,7 @@ from typing import Any, Iterator
 
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
 from agentclaw.community.core.agentcompute.domain.models import (
-    EpochMillis, ProviderId, Run, RunId, RunPage, RunStatus, TenantId,
+    EpochMillis, ProviderKind, Run, RunId, RunPage, RunStatus, TenantId,
 )
 from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
 from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
@@ -101,7 +101,7 @@ class AgentComputeService(AgentComputeServiceProtocol):
             tenant=TenantId(req.tenant),
             goal=req.goal,
             agent_catalog=req.agents,
-            provider=ProviderId(req.provider),
+            provider=req.provider,
             request_metadata=req.request_metadata,
             status=RunStatus.RUNNING,
             started_at=EpochMillis(int(time.time() * 1000)),
@@ -125,7 +125,7 @@ class AgentComputeService(AgentComputeServiceProtocol):
             await asyncio.sleep(1.0)
         return self.get_run(run_id, req.tenant) or Run(
             run_id=RunId(run_id), tenant=TenantId(req.tenant), goal=req.goal,
-            agent_catalog=req.agents, provider=ProviderId(req.provider),
+            agent_catalog=req.agents, provider=req.provider,
             request_metadata=req.request_metadata, status=RunStatus.TIMED_OUT,
             started_at=EpochMillis(0),
         )

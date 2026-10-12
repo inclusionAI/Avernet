@@ -148,7 +148,7 @@ class _CountingFactory:
         self.creates: dict[str, int] = {}
         self._make = make
 
-    def create(self, spec: dm.AgentSpecRaw, run: dm.Run):
+    def create(self, spec: dm.AgentSpec, run: dm.Run):
         self.creates[spec.name] = self.creates.get(spec.name, 0) + 1
         return self._make(spec.name)
 
@@ -159,9 +159,9 @@ def _flat_run(tenant=TENANT) -> dm.Run:
         tenant=dm.TenantId(tenant),
         goal="drain breaker goal",
         agent_catalog=tuple(
-            dm.AgentSpecRaw(name=n, role="research") for n in ("a1", "a2", "a3")
+            dm.AgentSpec(name=n, role="research") for n in ("a1", "a2", "a3")
         ),
-        provider=dm.ProviderId("stub"),
+        provider=dm.ProviderKind("stub"),
         request_metadata=dm.RequestMetadata(),
         status=dm.RunStatus.RUNNING,
         started_at=dm.EpochMillis(int(time.time() * 1000)),
