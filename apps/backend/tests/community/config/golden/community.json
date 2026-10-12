@@ -320,6 +320,7 @@
       "claude_code_session_root": "/home/admin/.claude",
       "deepseek_harness_root": "/home/admin/.dsh",
       "hermes_root": "<CWD>/data/workspace/hermes",
+      "home_admin_artifact_root": "home_admin_root",
       "openclaw_root": "<CWD>/data/workspace/openclaw"
     },
     "workspace_hosting": {
