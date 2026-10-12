@@ -136,6 +136,7 @@ def wire():
     injector.binder.bind(
         AgentComputeConfig,
         to=AgentComputeConfig(
+            enabled=False,
             llm=LlmConfig(base_url="stub", api_key="stub",
                           default_model="stub"),
             orchestration=AgentComputeOrchestrationConfig(
@@ -286,34 +287,30 @@ class TestOverTheWire:
         assert body["status"] == "COMPLETED"
         assert body["final_answer"] == "done over the wire"
 
-    def test_sync_run_over_wire_diag(self, wire):
-        # TEMPORARY diagnostic twin of the test above: when the submit stalls,
-        # dump worker stacks + durable rows before re-raising, so the
-        # full-battery-only stall can be caught in the act.
-        from agentclaw.community.core.agentcompute.repository.registry import (
-            ALL_MODELS,
+    def test_resubmit_after_terminal_creates_new_run(self, wire):
+        # Retry contract: idempotency joins duplicates only while the
+        # original run is live; once terminal, the active key is cleared
+        # and the same key must create a fresh run — the full battery
+        # caught the missing clear as a 500 IntegrityError on resubmit.
+        # Two orchestrated lifecycles in one test need double script capacity.
+        wire.get(LLMProvider)._orchestrator.set_script(list(_ORCHESTRATOR_SCRIPT) * 2)
+        status, first = _post(
+            "/agentcompute/v1/runs?wait=true",
+            _submit_body(goal="retry cycle", idem="wire-sync-retry"),
         )
-        from sqlalchemy import select
-        try:
-            status, body = _post(
-                "/agentcompute/v1/runs?wait=true",
-                _submit_body(goal="sync cycle", idem="wire-sync"),
-            )
-        except Exception:
-            import faulthandler
-            import sys
-            print("\n===SYNC STALL DIAG dump at timeout===", flush=True)
-            faulthandler.dump_traceback(file=sys.stdout)
-            db = wire.get(AgentComputeWorker)._job_repo._db
-            with db.orm_session() as s:
-                for model in ALL_MODELS:
-                    if model.__tablename__ != "ac_agent_compute_audit":
-                        rows = s.execute(select(model)).scalars().all()
-                        print(f"[{model.__tablename__}] {len(rows)} rows", flush=True)
-                        for row in rows[:5]:
-                            print("   ", row, flush=True)
-            raise
         assert status == 200
+        first_run_id = first["run_id"]
+        assert first["status"] == "COMPLETED"
+        assert first["final_answer"] == "done over the wire"
+
+        status, second = _post(
+            "/agentcompute/v1/runs?wait=true",
+            _submit_body(goal="retry cycle", idem="wire-sync-retry"),
+        )
+        assert status == 200
+        assert second["status"] == "COMPLETED"
+        assert second["final_answer"] == "done over the wire"
+        assert second["run_id"] != first_run_id
 
     def test_idempotency_join_over_wire(self, wire):
         body = _submit_body(goal="dedup", idem="wire-dedup")
