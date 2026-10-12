@@ -33,6 +33,8 @@ export function AppSidebar({
 }: AppSidebarProps) {
   // 品牌语义经 capability 解析：Open Core = Avernet 横版 wordmark；internal = 现状「蓝底色块 + TeamClaw」。
   const brand = getCapabilities().getProductBrand().value;
+  // 折叠侧栏左上用紧凑 mark（brand.loginWordmark），不向 Logo 组件新增未声明 compact prop。
+  const BrandMark = brand.loginWordmark ?? brand.Logo;
   // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认展示；
   // 隐藏形态下未读数轮询随组件不挂载自然停止，通知 service 层不改。
   const { notificationBell } = getCapabilities().getShellVisibility().value;
@@ -53,7 +55,7 @@ export function AppSidebar({
         </div>
       ) : (
         <div className="flex h-[52px] items-center gap-2 px-3">
-          <brand.Logo compact className="min-w-0" />
+          <BrandMark className="h-6 min-w-0" />
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {notificationBell && <NotificationBell />}
             {onToggleCollapsed && (
