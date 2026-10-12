@@ -86,9 +86,16 @@ class SQLiteWorkerProfileContentStore:
         cursor.executescript(CREATE_WORKER_PROFILE_CONTENTS_TABLE)
         cursor.execute("PRAGMA table_info(bcsfuse_worker_profile_contents)")
         if "description" not in {row[1] for row in cursor.fetchall()}:
-            cursor.execute(
-                "ALTER TABLE bcsfuse_worker_profile_contents ADD COLUMN description TEXT"
-            )
+            try:
+                cursor.execute(
+                    "ALTER TABLE bcsfuse_worker_profile_contents ADD COLUMN description TEXT"
+                )
+            except sqlite3.OperationalError as error:
+                if "duplicate column name" not in str(error).lower():
+                    raise
+                cursor.execute("PRAGMA table_info(bcsfuse_worker_profile_contents)")
+                if "description" not in {row[1] for row in cursor.fetchall()}:
+                    raise
         self._conn.commit()
 
     def _row_to_content(self, row: sqlite3.Row) -> WorkerProfileContent:

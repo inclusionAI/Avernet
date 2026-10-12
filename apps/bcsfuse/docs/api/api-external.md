@@ -85,7 +85,7 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
 ```
 
 更新已有数据时，`name` 必传；其他未出现的字段保留旧值。显式传空字符串或空数组会清空相应字段；`contents`、`metadata` 传非空对象时按键合并，显式传 `{}` 时清空整张映射。`skill_sets` 显式传入时整体替换。`runtime_state: null` 与省略一样保留现状。LLM 分析失败时保留旧值；回写前若检测到画像已更新，则丢弃过期结果。
-同一 Profile 的并发同步会按存储版本重新合并并有限重试；若冲突持续，返回 `PROFILE_SYNC_FAILED`，不会将丢失更新报告为成功。
+同一 Worker 或 Profile 的并发同步会按存储版本重新合并并有限重试；若冲突持续，分别返回 `SYNC_WORKER_ERROR` 或 `PROFILE_SYNC_FAILED`，不会将丢失更新报告为成功。
 
 ### 响应
 
@@ -108,7 +108,7 @@ Authorization: Bearer <BCSFUSE_AUTH_TOKEN>
 | 400 | 请求体无效 |
 | 401 | 未认证 |
 | 422 | 参数校验失败 |
-| 500 | Profile 同步失败（`PROFILE_SYNC_FAILED`；之前的 Worker 写入可能已提交，可重试） |
+| 500 | Worker 或 Profile 同步失败（`SYNC_WORKER_ERROR` / `PROFILE_SYNC_FAILED`；已提交的前序写入不会回滚，可重试） |
 | 503 | Provider 不可用 |
 
 ### 示例

@@ -34,6 +34,8 @@ def test_database_times_are_returned_and_readback_failure_rolls_back(
     }
     row = None if read_failure else persisted
     if operation.startswith("worker"):
+        if operation == "worker_update":
+            cursor.rowcount = 1
         with patch.object(MySQLWorkerRegistryStore, "_ensure_schema"):
             store = MySQLWorkerRegistryStore(pool)
         worker = Worker(

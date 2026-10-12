@@ -193,6 +193,12 @@ implementations are tested against the same contracts. Storage write and
 cleanup failures propagate to the application service and must not be reported
 as success.
 
+Worker registry providers must make `update(worker)` atomic with respect to
+`worker.version`: the database write must match that version, increment it
+once, and reject a conflict without writing. Sparse sync retries those
+conflicts against the latest Worker so concurrent updates to different fields
+do not silently overwrite each other.
+
 Profile providers implement `save_if_version(content, expected_version)` for
 sparse sync: `None` as the expected version inserts only when absent; an integer
 updates only that stored version. A version mismatch returns `None` without
@@ -283,10 +289,11 @@ runtime state; new Workers default online. Existing Profile scalar fields,
 `skill_sets` replaces the list, including `[]`. Supplied nonempty `contents`
 and `metadata` maps merge by key; an explicitly empty map clears that map.
 Supplied `profile.summary` replaces `contents.ecb_summary`; null removes it.
-Concurrent syncs use Profile versioned writes and retry a stale merge against
-the latest committed Profile up to five times. Exhausted conflicts return 500
-`PROFILE_SYNC_FAILED` so the caller can retry; they are never acknowledged as
-successful writes. This does not make Worker and Profile writes one transaction.
+Concurrent syncs use versioned Worker and Profile writes and retry stale merges
+against the latest committed record up to five times. Exhausted Worker
+conflicts return 500 `SYNC_WORKER_ERROR`; exhausted Profile conflicts return
+500 `PROFILE_SYNC_FAILED`. Neither is acknowledged as a successful write.
+This does not make Worker and Profile writes one transaction.
 LLM analysis may replace only generated `contents` keys after successful
 analysis. Before writing, it reads the current Profile and skips a stale
 result when that Profile no longer matches the analyzed snapshot. This check

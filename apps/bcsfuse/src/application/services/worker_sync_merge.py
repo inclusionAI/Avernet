@@ -5,9 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.application.ports.worker_profile_content_store import WorkerProfileContentStore
+from src.application.ports.worker_registry_store import WorkerRegistryStore
+from src.domain.exceptions import WorkerNotFoundException
+from src.domain.models.worker import Worker
 from src.domain.models.worker_profile_content import WorkerProfileContent
 
 _PROFILE_SYNC_MAX_ATTEMPTS = 5
+_WORKER_SYNC_MAX_ATTEMPTS = 5
 
 
 def merge_worker_fields(
@@ -28,6 +32,30 @@ def merge_worker_fields(
     if "trust_level" in supplied:
         merged["state"]["trust_level"] = incoming["trust_level"]
     return merged
+
+
+def save_merged_worker(
+    store: WorkerRegistryStore,
+    incoming: dict[str, Any],
+    supplied: set[str],
+    *,
+    worker_id: str,
+    active_profile_key: str | None,
+) -> Worker:
+    """Retry a sparse Worker merge after an atomic version conflict."""
+    for _ in range(_WORKER_SYNC_MAX_ATTEMPTS):
+        current = store.get_by_id(worker_id)
+        if current is None:
+            raise WorkerNotFoundException(worker_id)
+        worker_data = merge_worker_fields(current.model_dump(), incoming, supplied)
+        if active_profile_key is not None:
+            worker_data["active_profile_key"] = active_profile_key
+        try:
+            return store.update(Worker.model_validate(worker_data))
+        except ValueError as error:
+            if not str(error).startswith("Version conflict:"):
+                raise
+    raise RuntimeError("worker changed during sync; retry the request")
 
 
 def merge_profile_fields(

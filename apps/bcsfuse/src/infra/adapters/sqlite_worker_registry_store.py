@@ -407,11 +407,14 @@ class SQLiteWorkerRegistryStore:
         # 更新数据库
         data = self._worker_to_dict(updated_worker)
         set_clause = ", ".join([f"{k} = ?" for k in data.keys() if k != "id"])
-        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = ?"
-        params = [v for k, v in data.items() if k != "id"] + [updated_worker.id]
+        sql = f"UPDATE bcsfuse_workers SET {set_clause} WHERE id = ? AND version = ?"
+        params = [v for k, v in data.items() if k != "id"] + [updated_worker.id, worker.version]
 
         cursor = self._conn.cursor()
         cursor.execute(sql, params)
+        if cursor.rowcount != 1:
+            self._conn.rollback()
+            raise ValueError(f"Version conflict: expected {worker.version} for {worker.id}")
         self._conn.commit()
 
         return updated_worker.model_copy(deep=True)

@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import HTTPException, Request, status
 
 from src.application.services.worker_sync_merge import (
-    merge_worker_fields,
+    save_merged_worker,
     save_merged_profile,
 )
 from src.interfaces.api.schemas.worker_management_schemas import (
@@ -162,20 +162,16 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             logger.info(f"[Workers R3 Sync] Worker created: {worker_id} with active_profile_key={active_profile_key}")
         else:
             # Update existing worker
-            worker_dict = merge_worker_fields(
-                existing.model_dump(),
+            existing = save_merged_worker(
+                worker_store,
                 req.model_dump(),
                 req.model_fields_set,
-            )
-            # Update active_profile_key
-            if req.profile.activate:
-                worker_dict['active_profile_key'] = (
+                worker_id=worker_id,
+                active_profile_key=(
                     req.profile_key or f"{worker_id}:{profile_id}"
-                )
-
-            from src.domain.models.worker import Worker as WorkerModel
-            updated_worker = WorkerModel.model_validate(worker_dict)
-            worker_store.update(updated_worker)
+                ) if req.profile.activate else None,
+            )
+            availability = existing.state.availability
             logger.info(f"[Workers R3 Sync] Worker updated: {worker_id}, availability={availability.value}")
 
         # Step 2: Only explicit changes or new workers write runtime state.
