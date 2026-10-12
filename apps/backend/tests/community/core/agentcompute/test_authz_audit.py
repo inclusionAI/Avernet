@@ -29,12 +29,12 @@ from agentclaw.community.adapters.http.agentcompute.router import (
 from agentclaw.community.api.agentcompute_service import (
     AgentComputeServiceProtocol,
 )
-from agentclaw.community.core.agentcompute.audit import (
+from agentclaw.community.core.agentcompute.repository.audit.impl import (
     REASONS, AgentComputeAuditWriter, AuditAction,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.repository import audit_models as am
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.repository.audit import model as am
+from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError, RunEvents, SubmitRunRequest, TenantRunLimitExceeded,
 )
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthenticatedIdentity
@@ -309,7 +309,7 @@ class TestAuditModelShape:
             assert names >= {"env", "tenant"}, f"{idx.name} not tenant-scoped"
 
     def test_registered_in_all_models_and_metadata(self):
-        from agentclaw.community.core.agentcompute.repository import models as om
+        from agentclaw.community.core.agentcompute.repository import registry as om
         from agentclaw.community.core.base import Base as CoreBase
 
         assert am.AcAgentComputeAuditModel in om.ALL_MODELS

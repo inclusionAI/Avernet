@@ -89,7 +89,7 @@ def validate_egress_url(url: str, *, allowed_hosts: tuple[str, ...],
     request. Rules: only http(s) schemes; optional https-only; when an
     allowlist is configured the host must be in it.
     """
-    from agentclaw.community.core.agentcompute.service_protocol import (
+    from agentclaw.community.core.agentcompute.service.protocols import (
         AgentComputeConfigError,
     )
 

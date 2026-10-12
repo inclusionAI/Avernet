@@ -13,8 +13,9 @@ from agentclaw.community.core.agentcompute.domain.models import (
 )
 from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import DecisionParser
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, RunState,
+    RunState,
 )
 
 logger = logging.getLogger(__name__)

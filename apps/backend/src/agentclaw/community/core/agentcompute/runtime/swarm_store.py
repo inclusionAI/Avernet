@@ -9,14 +9,15 @@ from agentclaw.community.core.agentcompute.config.settings import AgentComputeCo
 from agentclaw.community.core.agentcompute.domain.models import (
     Agent, AgentId, AgentStatus, EpochMillis, Message, MessageId, MessageRole, ResultShard, Round, RoundId, Run, RunId, ShardId, TenantId, EventId, GuardEvent, GuardKind, EpochMillis,
 )
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     NULL_OBSERVABILITY, AgentComputeObservability,
 )
 from agentclaw.community.core.agentcompute.orchestration.termination import RunState
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, MessageRepository,
-    ResultShardRepository, RoundRepository,
-)
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
 from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
@@ -128,7 +129,7 @@ class SliceStore:
 
     def _record_injection(self, run_id: RunId, tenant: TenantId,
                           agent_id: AgentId, payload: Any) -> None:
-        from agentclaw.community.core.agentcompute.security import (
+        from agentclaw.community.core.agentcompute.runtime.security import (
             detect_prompt_injection,
         )
         if self._guard_repo is None or payload is None:

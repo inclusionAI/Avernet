@@ -13,11 +13,14 @@ from agentclaw.community.core.agentcompute.config.settings import AgentComputeCo
 from agentclaw.community.core.agentcompute.domain.models import (
     EpochMillis, ProviderId, Run, RunId, RunPage, RunStatus, TenantId,
 )
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
-    ResultShardRepository, RoundRepository, RunRepository,
-)
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError, AgentComputeRunNotFoundError,
     AgentComputeServiceProtocol, AgentEvent, GlobalRunLimitExceeded,
     GuardEventSummary, QueueDepthExceeded, RoundEvent, RunEvents,
@@ -204,7 +207,7 @@ class AgentComputeService(AgentComputeServiceProtocol):
         return counts
 
     def content_classification(self, run_id: str, tenant: str) -> dict[str, int] | None:
-        from agentclaw.community.core.agentcompute.security import classify_pii
+        from agentclaw.community.core.agentcompute.runtime.security import classify_pii
         rid, tid = RunId(run_id), TenantId(tenant)
         run = self._run_repo.get(rid, tid)
         if run is None:

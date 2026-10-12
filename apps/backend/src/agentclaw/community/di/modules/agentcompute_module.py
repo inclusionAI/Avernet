@@ -10,8 +10,9 @@ from agentclaw.community.api.agentcompute_service import (
 from agentclaw.community.core.agentcompute.config.settings import AgentComputeConfig
 from agentclaw.community.core.agentcompute.service import AgentComputeService
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import Orchestrator
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, TerminationEvaluator,
+    TerminationEvaluator,
 )
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
@@ -25,16 +26,19 @@ from agentclaw.community.core.agentcompute.plugins.agents.factory import (
 from agentclaw.community.core.agentcompute.plugins.artifact_store.filesystem import (
     FilesystemArtifactStore,
 )
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
-    ResultShardRepository, RoundRepository, RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
     SubagentRuntime,
 )
 from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
 )
 from agentclaw.community.core.agentcompute.spi.llm_provider import LLMProvider

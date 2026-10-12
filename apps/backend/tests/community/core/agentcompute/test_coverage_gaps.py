@@ -31,8 +31,10 @@ from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
     Orchestrator, decision_to_dict,
 )
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, RunState, TerminationEvaluator,
+    RunState,
+    TerminationEvaluator,
 )
 from agentclaw.community.core.agentcompute.plugins.agents.avernet_subagent import (
     AvernetSubagent,
@@ -50,14 +52,22 @@ from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import
     DecisionParser,
 )
 from agentclaw.community.core.agentcompute.plugins.llm.client import StubLLMProvider
-from agentclaw.community.core.agentcompute.repository import models as om
-from agentclaw.community.core.agentcompute.repository.impl import (
-    _decode_agent_status, _decode_bot_state, _decode_finish_reason,
-    _decode_guard_kind, _decode_message_role, _decode_run_status,
-    _decode_termination_reason, _dumps_valid_json, AgentRepository,
-    GuardEventRepository, JobRepository, MessageRepository, ResultShardRepository,
-    RoundRepository, RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository import registry as om
+from agentclaw.community.core.agentcompute.repository.decode import _decode_agent_status
+from agentclaw.community.core.agentcompute.repository.decode import _decode_bot_state
+from agentclaw.community.core.agentcompute.repository.decode import _decode_finish_reason
+from agentclaw.community.core.agentcompute.repository.decode import _decode_guard_kind
+from agentclaw.community.core.agentcompute.repository.decode import _decode_message_role
+from agentclaw.community.core.agentcompute.repository.decode import _decode_run_status
+from agentclaw.community.core.agentcompute.repository.decode import _decode_termination_reason
+from agentclaw.community.core.agentcompute.repository.run.impl import _dumps_valid_json
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 from agentclaw.community.core.agentcompute.repository.types import _dumps, _loads
 from agentclaw.community.core.agentcompute.runtime.swarm_store import (
     SliceStore, agent_output,
@@ -68,7 +78,7 @@ from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
 from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
 from agentclaw.community.core.agentcompute.service import AgentComputeService
-from agentclaw.community.core.agentcompute.service_protocol import SubmitRunRequest
+from agentclaw.community.core.agentcompute.service.protocols import SubmitRunRequest
 
 TENANT = dm.TenantId("tenant-a")
 WORKER = "worker-gap"

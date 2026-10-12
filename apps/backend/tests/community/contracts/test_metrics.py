@@ -17,7 +17,7 @@ from __future__ import annotations
 import time
 
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
 )
 from agentclaw.community.plugin_api.metrics import MetricsPlugin

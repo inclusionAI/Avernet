@@ -182,7 +182,7 @@ internal_dependencies:
   - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
-  - agentclaw.community.core.agentcompute.service_protocol  # AgentCompute Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here
+  - agentclaw.community.core.agentcompute.service.protocols  # AgentCompute Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.architect_rebind_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.data_proxy_service_protocol  # Protocol defined in its owning core module, re-exported here

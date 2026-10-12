@@ -48,7 +48,7 @@ _BANNED_PREFIXES: tuple[str, ...] = (
 _TRANSPORT_TOP_MODULES: frozenset[str] = frozenset({"fastapi", "httpx", "pytest"})
 
 _SPI_FILES = tuple(sorted((_MODULE_ROOT / "spi").glob("*.py")))
-_SERVICE_PROTOCOL = _MODULE_ROOT / "service_protocol.py"
+_SERVICE_PROTOCOL = _MODULE_ROOT / "service" / "protocols.py"
 _SCHEMAS = (
     _AGENTCLAW_ROOT / "community" / "adapters" / "http" / "agentcompute" / "schemas.py"
 )

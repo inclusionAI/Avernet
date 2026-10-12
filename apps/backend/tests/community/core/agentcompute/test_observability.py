@@ -40,14 +40,15 @@ from agentclaw.community.core.agentcompute.config.settings import (
     LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability, NULL_OBSERVABILITY, UNATTRIBUTED_TENANT,
 )
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
     Orchestrator,
 )
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, TerminationEvaluator,
+    TerminationEvaluator,
 )
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
@@ -58,11 +59,14 @@ from agentclaw.community.core.agentcompute.plugins.agents.avernet_subagent impor
 from agentclaw.community.core.agentcompute.plugins.llm.client import (
     OpenAICompatibleClient, StubLLMProvider,
 )
-from agentclaw.community.core.agentcompute.repository import models as om
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
-    ResultShardRepository, RoundRepository, RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository import registry as om
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
     SubagentRuntime,
 )

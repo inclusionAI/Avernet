@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, select
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.repository import models as om
+from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeOrchestrationConfig,
 )

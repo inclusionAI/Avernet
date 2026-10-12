@@ -32,8 +32,9 @@ from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
     Orchestrator,
 )
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, TerminationEvaluator,
+    TerminationEvaluator,
 )
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
@@ -41,18 +42,21 @@ from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import
 from agentclaw.community.core.agentcompute.plugins.llm.client import (
     StubLLMProvider,
 )
-from agentclaw.community.core.agentcompute.repository import models as om
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
-    ResultShardRepository, RoundRepository, RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository import registry as om
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
     SubagentRuntime,
 )
 from agentclaw.community.core.agentcompute.runtime.swarm_run import SwarmRunHandler
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
 from agentclaw.community.core.agentcompute.service import AgentComputeService
-from agentclaw.community.core.agentcompute.service_protocol import SubmitRunRequest
+from agentclaw.community.core.agentcompute.service.protocols import SubmitRunRequest
 
 TENANT = dm.TenantId("tenant-a")
 WORKER = "worker-e2e"

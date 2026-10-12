@@ -24,7 +24,7 @@ from enum import StrEnum
 
 from injector import inject
 
-from agentclaw.community.core.agentcompute.repository.audit_models import (
+from agentclaw.community.core.agentcompute.repository.audit.model import (
     AcAgentComputeAuditModel,
 )
 from agentclaw.community.log import get_logger

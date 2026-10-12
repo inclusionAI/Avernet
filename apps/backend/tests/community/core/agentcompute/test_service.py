@@ -21,15 +21,16 @@ from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeConfig, AgentComputeTenantLimits, LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.repository import models as om
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, RoundRepository,
-    MessageRepository,
-    ResultShardRepository,
-    RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository import registry as om
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 from agentclaw.community.core.agentcompute.service import AgentComputeService
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError, AgentComputeRunNotFoundError,
     AgentComputeServiceProtocol, SubmitRunRequest, TenantRunLimitExceeded,
 )
@@ -497,7 +498,7 @@ class TestTenantUsageAttribution:
         import uuid as _uuid
         self._seed_message(db, role=dm.MessageRole.DECISION,
                            usage=dm.TokenUsage(7, 7, 14))
-        from agentclaw.community.core.agentcompute.repository import models as om_
+        from agentclaw.community.core.agentcompute.repository import registry as om_
         from sqlalchemy import update
         with db.orm_session() as session:
             session.execute(update(om_.AcAgentComputeMessageModel).values(

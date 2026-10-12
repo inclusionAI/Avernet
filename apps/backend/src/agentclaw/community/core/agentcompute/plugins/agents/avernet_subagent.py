@@ -10,7 +10,7 @@ from agentclaw.community.core.agentcompute.config.settings import AgentComputeAv
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpecRaw, BotState, ModelId, Run, SubagentResult, TaskEnvelope,
 )
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
 )
 from agentclaw.community.log import get_logger
@@ -31,7 +31,7 @@ class AvernetSubagent:
                  config: AgentComputeAvernetConfig | None = None,
                  observability: AgentComputeObservability | None = None,
                  egress: Any = None) -> None:
-        from agentclaw.community.core.agentcompute.security import validate_egress_url
+        from agentclaw.community.core.agentcompute.runtime.security import validate_egress_url
         self._spec = spec
         self._run = run
         self._config = config or AgentComputeAvernetConfig()

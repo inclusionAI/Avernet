@@ -3,55 +3,21 @@
 One row per authorized boundary outcome on the agentcompute HTTP surface
 (D25 / design §17.5): accepted and rejected submits (with the admission
 reason), and cancel requests. Written best-effort by
-:class:`agentclaw.community.core.agentcompute.audit.AgentComputeAuditWriter`;
+:class:`agentclaw.community.core.agentcompute.repository.audit.AgentComputeAuditWriter`;
 never updated or deleted — the writer exposes no mutation methods, which is
-the enforcement shape (mirrors ``ac_governance_audit``).
-
-The mandatory-column mix-in is defined locally rather than imported from
-``repository/models.py``: ``models.py`` imports this module to append the
-model to ``ALL_MODELS``-adjacent metadata, and the writer imports this module
-directly — importing the shared base back from ``models`` would turn either
-entry order into a circular import. The columns are kept character-for-
-character identical to ``_AgentComputeBase`` so both layouts stay
-interchangeable (see ``tests/.../test_storage.py`` mandatory-column gate).
+the enforcement shape (mirrors ``ac_governance_audit``). The mandatory-column
+mix-in is the shared ``repository.base._AgentComputeBase`` each table model
+uses (see ``tests/.../test_storage.py`` mandatory-column gate).
 """
 from __future__ import annotations
 
-from sqlalchemy import (
-    BigInteger,
-    Boolean,
-    Column,
-    DateTime,
-    Index,
-    Integer,
-    String,
-)
-from sqlalchemy.dialects import mysql
-from sqlalchemy.sql import func
+from sqlalchemy import Column, Index, String
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.utils.env_utils import get_current_env
-
-AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
-
-_ENV_LEN = 20
-_TENANT_LEN = 64
+from agentclaw.community.core.agentcompute.repository.base import _AgentComputeBase
 
 
-class _AgentComputeAuditBase:
-    """Mandatory columns — mirrors ``repository.models._AgentComputeBase``."""
-
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
-    env = Column(String(_ENV_LEN), nullable=False, default=get_current_env)
-    tenant = Column(String(_TENANT_LEN), nullable=False)
-    is_deleted = Column(Boolean, nullable=False, default=False, server_default="0")
-    gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-
-class AcAgentComputeAuditModel(_AgentComputeAuditBase, Base):
+class AcAgentComputeAuditModel(_AgentComputeBase, Base):
     """Append-only audit row for the agentcompute HTTP boundary.
 
     Domain columns (5, within the ≤10 budget from task 12.7):

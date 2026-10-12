@@ -1,5 +1,5 @@
 -- agentcompute ac_agent_compute_* tables.
--- The ORM (core/agentcompute/repository/models.py) renders a plain unique
+-- The ORM (core/agentcompute/repository registry) renders a plain unique
 -- index; the BLOCK_SIZE/LOCAL/GLOBAL modifiers below are OceanBase-only and
 -- not expressible in SQLAlchemy. Operator-provisioned in prod.
 

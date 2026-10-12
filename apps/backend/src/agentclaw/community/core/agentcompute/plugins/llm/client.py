@@ -16,7 +16,7 @@ from agentclaw.community.core.agentcompute.domain.models import (
     ModelId,
     TokenUsage,
 )
-from agentclaw.community.core.agentcompute.observability import (
+from agentclaw.community.core.agentcompute.runtime.observability import (
     UNATTRIBUTED_TENANT, AgentComputeObservability,
 )
 
@@ -34,7 +34,7 @@ class OpenAICompatibleClient:
         observability: AgentComputeObservability | None = None,
         egress: Any = None,
     ) -> None:
-        from agentclaw.community.core.agentcompute.security import validate_egress_url
+        from agentclaw.community.core.agentcompute.runtime.security import validate_egress_url
         if egress is not None:
             validate_egress_url(
                 base_url,

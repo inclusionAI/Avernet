@@ -21,10 +21,10 @@ from agentclaw.community.api.agentcompute_service import (
 from agentclaw.community.adapters.http.agentcompute.router import (
     register_exception_handlers, router,
 )
-from agentclaw.community.core.agentcompute.audit import AgentComputeAuditWriter
+from agentclaw.community.core.agentcompute.repository.audit.impl import AgentComputeAuditWriter
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthenticatedIdentity
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.service.protocols import (
     RunEvents, SubmitRunRequest,
 )
 

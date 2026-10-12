@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from injector import Module, inject, provider, singleton
 
-from agentclaw.community.core.agentcompute.audit import AgentComputeAuditWriter
+from agentclaw.community.core.agentcompute.repository.audit.impl import AgentComputeAuditWriter
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 

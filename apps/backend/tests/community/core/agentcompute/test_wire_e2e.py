@@ -226,9 +226,7 @@ class TestOverTheWire:
         assert status == 422
 
     def test_async_job_full_cycle_over_wire(self, wire):
-        from agentclaw.community.core.agentcompute.repository.impl import (
-            JobRepository,
-        )
+        from agentclaw.community.core.agentcompute.repository.job import JobRepository
         svc = wire.get(AgentComputeService)
         jobs = wire.get(JobRepository)
         status, submit = _post("/agentcompute/v1/runs",
@@ -248,10 +246,11 @@ class TestOverTheWire:
                 break
             time.sleep(0.1)
         else:
-            from agentclaw.community.core.agentcompute.repository.impl import (
-                AgentRepository, GuardEventRepository, MessageRepository,
-                ResultShardRepository, RoundRepository,
-            )
+            from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+            from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+            from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+            from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+            from agentclaw.community.core.agentcompute.repository.round import RoundRepository
             rid = dm.RunId(run_id)
             agents = wire.get(AgentRepository).list_by_run(rid, dm.TenantId(TENANT))
             shards = wire.get(ResultShardRepository).list_by_run(rid, dm.TenantId(TENANT))

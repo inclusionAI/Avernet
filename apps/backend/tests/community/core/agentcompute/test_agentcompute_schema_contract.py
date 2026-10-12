@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from agentclaw.community.core.agentcompute.repository import models as om
+from agentclaw.community.core.agentcompute.repository import registry as om
 
 _BACKEND_ROOT = Path(__file__).parents[4]
 _SQL_DIR = (

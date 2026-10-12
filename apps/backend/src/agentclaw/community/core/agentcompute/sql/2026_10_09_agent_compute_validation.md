@@ -10,7 +10,7 @@
   - Later files evolve these additively (see
     `tests/community/core/agentcompute/test_agentcompute_schema_contract.py`
     for the enforced policy).
-- **ORM parity:** `core/agentcompute/repository/models.py` is the source of
+- **ORM parity:** `core/agentcompute/repository/registry.py` is the source of
   truth; `Base.metadata.create_all` (community SQLite bootstrap,
   `create_schema: true`) is the canonical fresh-install shape. The dated
   files are the operator-provision shape and must be regenerated in the same

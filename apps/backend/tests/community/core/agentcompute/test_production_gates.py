@@ -22,7 +22,7 @@ from agentclaw.community.core.agentcompute.config.settings import (
     AgentComputeTenantLimits, LlmConfig,
 )
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.repository import models as om
+from agentclaw.community.core.agentcompute.repository import registry as om
 from agentclaw.community.core.agentcompute.runtime.subagent_runtime import (
     SubagentRuntime,
 )
@@ -31,7 +31,7 @@ from agentclaw.community.core.agentcompute.runtime.upstream_breaker import (
 )
 from agentclaw.community.core.agentcompute.runtime.worker import AgentComputeWorker
 from agentclaw.community.core.agentcompute.service import AgentComputeService
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.service.protocols import (
     QueueDepthExceeded, SubmitRunRequest, TenantRunLimitExceeded,
 )
 

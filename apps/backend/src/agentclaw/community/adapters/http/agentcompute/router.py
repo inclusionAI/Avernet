@@ -36,10 +36,10 @@ from agentclaw.community.api.agentcompute_service import (
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpecRaw, RunStatus,
 )
-from agentclaw.community.core.agentcompute.service_protocol import (
+from agentclaw.community.core.agentcompute.service.protocols import (
     AgentComputeConfigError, AgentComputeRunNotFoundError, TenantRunLimitExceeded,
 )
-from agentclaw.community.core.agentcompute.audit import AgentComputeAuditWriter, AuditAction
+from agentclaw.community.core.agentcompute.repository.audit.impl import AgentComputeAuditWriter, AuditAction
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.agentcompute.schemas import (
     CancelResponseDTO, RunListDTO, RunSummaryDTO,

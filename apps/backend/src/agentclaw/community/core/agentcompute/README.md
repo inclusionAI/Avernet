@@ -78,7 +78,7 @@ Domain models use `@dataclass` (zero framework dependency, matching `core/task/d
 | D16 identity retry | interrupted agents respawn under their original `agent_id` + idempotency key |
 | D31 shard XOR | exactly one of payload / artifact_key carries a result |
 
-## Tables (`ac_agent_compute_*`, schema in `repository/models.py`)
+## Tables (`ac_agent_compute_*`, schema in `repository/<table>/model.py`)
 
 All tables carry `id`, `env`, `tenant`, `is_deleted`, `gmt_create`, `gmt_modified` from `_AgentComputeBase`.
 
@@ -149,7 +149,7 @@ Kinds: `serial_collapse`, `spurious_parallelism`, `dedupe_reject`, `depth_exceed
 
 ## Service / HTTP / CLI surface
 
-Service Protocol (`service_protocol.py`): `submit_async`, `submit_sync`,
+Service Protocol (`service/protocols.py`): `submit_async`, `submit_sync`,
 `get_run`, `list_runs`, `run_events`, `cancel`. The HTTP router prefix is
 `/agentcompute/v1`; reads and per-run routes take the tenant from the
 `X-Tenant-Id` header.

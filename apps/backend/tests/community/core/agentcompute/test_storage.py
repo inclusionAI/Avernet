@@ -13,11 +13,14 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.agentcompute.domain import models as dm
-from agentclaw.community.core.agentcompute.repository import models as om
-from agentclaw.community.core.agentcompute.repository.impl import (
-    AgentRepository, GuardEventRepository, JobRepository, MessageRepository,
-    ResultShardRepository, RoundRepository, RunRepository,
-)
+from agentclaw.community.core.agentcompute.repository import registry as om
+from agentclaw.community.core.agentcompute.repository.agent import AgentRepository
+from agentclaw.community.core.agentcompute.repository.guard import GuardEventRepository
+from agentclaw.community.core.agentcompute.repository.job import JobRepository
+from agentclaw.community.core.agentcompute.repository.message import MessageRepository
+from agentclaw.community.core.agentcompute.repository.shard import ResultShardRepository
+from agentclaw.community.core.agentcompute.repository.round import RoundRepository
+from agentclaw.community.core.agentcompute.repository.run import RunRepository
 
 
 class _TestDB:
@@ -696,14 +699,18 @@ class TestMandatoryColumns:
                 f"{model.__name__} inherits pydantic.BaseModel"
 
     def test_repository_impl_no_await_in_session(self):
+        # D19: every per-table impl.py must keep its session block sync.
         import ast, pathlib
-        impl_path = pathlib.Path(
-            "src/agentclaw/community/core/agentcompute/repository/impl.py"
+        impl_dir = pathlib.Path(
+            "src/agentclaw/community/core/agentcompute/repository"
         )
-        tree = ast.parse(impl_path.read_text())
-        for node in ast.walk(tree):
-            assert not isinstance(node, (ast.Await, ast.AsyncFor)), \
-                f"async construct at line {getattr(node, 'lineno', '?')}"
+        impl_files = sorted(impl_dir.glob("*/impl.py"))
+        assert impl_files, "no per-table impl.py found under repository/"
+        for impl_path in impl_files:
+            tree = ast.parse(impl_path.read_text())
+            for node in ast.walk(tree):
+                assert not isinstance(node, (ast.Await, ast.AsyncFor)), \
+                    f"async construct at {impl_path.name}:{getattr(node, 'lineno', '?')}"
 
     def test_ddl_orm_column_parity(self):
         import pathlib, re

@@ -16,8 +16,10 @@ from agentclaw.community.core.agentcompute.domain.models import (
 from agentclaw.community.core.agentcompute.orchestration.orchestrator import (
     Orchestrator,
 )
+from agentclaw.community.core.agentcompute.orchestration.guards import GuardService
 from agentclaw.community.core.agentcompute.orchestration.termination import (
-    GuardService, RunState, TerminationEvaluator,
+    RunState,
+    TerminationEvaluator,
 )
 from agentclaw.community.core.agentcompute.plugins.decision_parser.parser import (
     DecisionParser,
