@@ -9,25 +9,32 @@ in agentcompute opens a socket, and a missing BotPlatform binding means
 avernet-kind spawns fail clear at the factory (the failure mode of the
 removed HTTP implementation was hitting a 404 endpoint).
 
-The seam carries semantic persona fields, not a platform document:
-composing a manifest the product schema accepts (`bot_config_manifest`'s
-five-category grammar, see docs/bot-config-manifest/) is the platform
-adapter's translation job — "adapters translate, core stays
-transport-agnostic" — and agentcompute never guesses the document format.
+The seam carries a structured create request, not a platform document:
+a BotCreateSpec (name, description, instructions, model, metadata) is the
+product's create vocabulary (bot_name/bot_desc) in semantic form, and
+translating it into the real create request — engine, cluster, bot_type
+and space filled from the adapter's own deployment knowledge, the
+five-category `bot_config_manifest` document (see docs/bot-config-manifest/)
+composed and validated on the platform side — is the adapter's job.
+"Adapters translate, core stays transport-agnostic": agentcompute never
+sees or guesses the document format.
 """
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.agentcompute.domain.models import BotCreateSpec
+
 
 @runtime_checkable
 class BotPlatform(Protocol):
 
-    def create_bot(self, *, name: str, instructions: str,
+    def create_bot(self, *, spec: BotCreateSpec,
                    idempotency_key: str) -> str:
-        """Provision a transient bot for the persona; returns bot_id,
-        raises when the platform cannot accept it. The adapter builds the
-        product-schema manifest document from these fields."""
+        """Provision a transient bot for the persona described by spec;
+        returns a non-empty bot_id or raises when the platform cannot
+        accept it. The adapter translates spec into the product create
+        request and composes the manifest document."""
         ...
 
     def bot_status(self, bot_id: str) -> str:

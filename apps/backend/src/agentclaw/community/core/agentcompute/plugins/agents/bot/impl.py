@@ -13,7 +13,8 @@ import json
 import time
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpec, BotState, Run, SubagentResult, TaskEnvelope,
+    AgentSpec, BotCreateSpec, BotState, Run, SubagentResult,
+    TaskEnvelope,
 )
 from agentclaw.community.core.agentcompute.runtime.observability import (
     AgentComputeObservability,
@@ -48,14 +49,26 @@ class AvernetSubagent:
         # identity instead of leaking duplicates (D23 fresh context).
         try:
             self._bot_id = self._platform.create_bot(
-                name=self._spec.name,
-                instructions=self._spec.instructions or "Complete the assigned task.",
+                spec=BotCreateSpec(
+                    name=self._spec.name,
+                    description=self._spec.role,
+                    instructions=self._spec.instructions,
+                    model=self._spec.model,
+                    metadata=dict(self._spec.metadata),
+                ),
                 idempotency_key=f"{self._run.run_id}:{self._spec.name}",
             )
         except Exception:
             if self._obs is not None:
                 self._obs.llm_call("non_retryable")
             raise
+        if not (self._bot_id or "").strip():
+            # A blank identifier is a contract violation, not a slow boot:
+            # fail now instead of polling bot_status(None) to the deadline.
+            if self._obs is not None:
+                self._obs.llm_call("non_retryable")
+            raise RuntimeError(
+                f"platform returned invalid bot_id: {self._bot_id!r}")
         state = await self._poll_ready(self._bot_id)
         if state != BotState.READY.value:
             if self._obs is not None:

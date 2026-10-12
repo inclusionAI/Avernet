@@ -121,8 +121,12 @@ Controls map:
   `config.egress`
   (scheme http(s)-only, optional https-only, optional host allowlist) at
   client construction - fail clear at boot. The avernet subagent talks to
-  the host platform through the in-process `BotPlatform` seam; it
-  opens no socket and holds no egress surface.
+  the host platform through the in-process `BotPlatform` seam —
+  provision requests cross as a `BotCreateSpec` (name, description,
+  instructions, model, metadata) and the platform-side adapter composes
+  the create request and manifest document; the subagent opens no socket
+  and holds no egress surface, and a blank provisioned bot id fails fast
+  instead of polling to the deadline.
 - Prompt injection: subagent output is untrusted data. `SliceStore`
   records `prompt_injection` guard events for detected markers while
   still routing the result; the orchestrator wraps every result in an

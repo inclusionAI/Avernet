@@ -22,7 +22,8 @@ from agentclaw.community.core.agentcompute.domain.models.enums import (
     TerminationReason, WaitMode, WorkerOutcomeKind,
 )
 from agentclaw.community.core.agentcompute.domain.models.specs import (
-    AcceptanceGap, AgentSpec, CompletionChunk, CompletionRequest,
+    AcceptanceGap, AgentSpec, BotCreateSpec, CompletionChunk,
+    CompletionRequest,
     CompletionResponse, Decision, DecisionParse, FinalAnswer, FinishDecision,
     GuardDetails, HandoffDecision, MessageContent, RequestMetadata,
     SpawnDecision, StructuredOutput, SubagentResult, TaskEnvelope, TokenUsage,
@@ -47,6 +48,6 @@ __all__ = [
     "DecisionParse", "RunPage",
     "SpawnDecision", "WaitDecision", "HandoffDecision", "FinishDecision",
     "Decision",
-    "RequestMetadata", "AgentSpec", "Run", "Agent", "Message",
+    "RequestMetadata", "AgentSpec", "BotCreateSpec", "Run", "Agent", "Message",
     "ResultShard", "Round", "GuardEvent", "NameAliasMap",
 ]

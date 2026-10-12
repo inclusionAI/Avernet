@@ -34,6 +34,7 @@ provides:
   - SubagentRuntime
   - LLMProvider
   - Subagent / SubagentFactory
+  - BotPlatform        # in-process provision seam (BotCreateSpec)
   - ArtifactStore
   - DecisionParser
   - RunEvents / AgentEvent / RoundEvent / GuardEventSummary

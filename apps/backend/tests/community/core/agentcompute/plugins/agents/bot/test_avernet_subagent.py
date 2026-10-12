@@ -59,22 +59,24 @@ class FakePlatform:
     one-shot failures, every call recorded."""
 
     def __init__(self, statuses=None, chat_reply='{"result": 42}',
-                 fail_create=False, fail_chat=False, fail_delete=False):
+                 fail_create=False, fail_chat=False, fail_delete=False,
+                 bot_id="bot-42"):
         self.statuses = list(statuses or ["READY"])
         self.chat_reply = chat_reply
         self.fail_create = fail_create
         self.fail_chat = fail_chat
         self.fail_delete = fail_delete
-        self.created: list[tuple[str, str]] = []
+        self.bot_id = bot_id
+        self.created: list[tuple] = []
         self.status_queries: list[str] = []
         self.chats: list[tuple[str, str]] = []
         self.deletes: list[str] = []
 
-    def create_bot(self, *, name, instructions, idempotency_key):
+    def create_bot(self, *, spec, idempotency_key):
         if self.fail_create:
             raise RuntimeError("platform refused")
-        self.created.append((name, instructions, idempotency_key))
-        return "bot-42"
+        self.created.append((spec, idempotency_key))
+        return self.bot_id
 
     def bot_status(self, bot_id):
         self.status_queries.append(bot_id)
@@ -114,9 +116,11 @@ class TestLifecycle:
 
             assert sub._bot_id == "bot-42"
             assert len(gw.created) == 1
-            name, instructions, idem = gw.created[0]
-            assert name == "scout"
-            assert instructions == "Complete the assigned task."
+            spec, idem = gw.created[0]
+            assert spec.name == "scout"
+            assert spec.description == "worker"
+            assert spec.instructions == ""
+            assert spec.model is None
             assert idem == "run-42:scout"
             assert gw.status_queries == ["bot-42", "bot-42", "bot-42"]
 
@@ -129,8 +133,8 @@ class TestLifecycle:
                                 instructions="File the reports weekly.")
             sub = AvernetSubagent(spec, _mk_run(), gw)
             await sub.setup()
-            _, instructions, _ = gw.created[0]
-            assert instructions == "File the reports weekly."
+            spec, _ = gw.created[0]
+            assert spec.instructions == "File the reports weekly."
 
         asyncio.run(main())
 
@@ -143,6 +147,58 @@ class TestLifecycle:
                 await sub.setup()
             assert sub._bot_id is None
             assert obs.outcomes == ["non_retryable"]
+
+        asyncio.run(main())
+
+    def test_full_persona_crosses_the_seam(self):
+        async def main():
+            gw = FakePlatform()
+            spec = AgentSpec(name="clerk", role="filing clerk",
+                             instructions="File weekly.",
+                             model="clerk-7b", metadata={"tier": "1"})
+            sub = AvernetSubagent(spec, _mk_run(), gw)
+            await sub.setup()
+            create_spec, idem = gw.created[0]
+            assert create_spec.name == "clerk"
+            assert create_spec.description == "filing clerk"
+            assert create_spec.instructions == "File weekly."
+            assert create_spec.model == "clerk-7b"
+            assert create_spec.metadata == {"tier": "1"}
+            assert idem == "run-42:clerk"
+
+        asyncio.run(main())
+
+    def test_empty_bot_id_fails_fast_without_polling(self):
+        async def main():
+            gw = FakePlatform(statuses=["PROVISIONING"], bot_id="")
+            obs = _RecordingObs()
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw, observability=obs)
+            with pytest.raises(RuntimeError, match="invalid bot_id"):
+                await sub.setup()
+            assert gw.status_queries == []   # never polled a None id
+            assert obs.outcomes == ["non_retryable"]
+
+        asyncio.run(main())
+
+    def test_blank_bot_id_fails_fast_without_polling(self):
+        async def main():
+            gw = FakePlatform(bot_id="   ")
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            with pytest.raises(RuntimeError, match="invalid bot_id"):
+                await sub.setup()
+            assert gw.status_queries == []
+
+        asyncio.run(main())
+
+    def test_retried_setup_rebinds_the_same_persona(self):
+        async def main():
+            gw = FakePlatform()
+            sub = AvernetSubagent(_mk_spec(), _mk_run(), gw)
+            await sub.setup()
+            await sub.teardown()
+            await sub.setup()
+            assert [idem for _, idem in gw.created] == [
+                "run-42:scout", "run-42:scout"]
 
         asyncio.run(main())
 

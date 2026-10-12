@@ -183,3 +183,31 @@ class TestArchitecture:
     def test_domain_no_dataclass_kw_only(self):
         usage = dm.TokenUsage(prompt_tokens=1, completion_tokens=2, total_tokens=3)
         assert usage.total_tokens == 3
+
+
+class TestBotCreateSpec:
+
+    def test_create_spec_defaults(self):
+        spec = dm.BotCreateSpec(name="scout")
+        assert spec.description == ""
+        assert spec.instructions == ""
+        assert spec.model is None
+        assert spec.metadata == {}
+
+    def test_create_spec_is_frozen(self):
+        spec = dm.BotCreateSpec(name="scout")
+        with pytest.raises(Exception):
+            spec.name = "renamed"
+        with pytest.raises(Exception):
+            spec.description = "mutate"
+
+    def test_create_spec_carries_full_persona(self):
+        spec = dm.BotCreateSpec(
+            name="clerk", description="filing clerk", instructions="File weekly.",
+            model=dm.ModelId("clerk-7b"), metadata={"tier": "1"},
+        )
+        assert spec.name == "clerk"
+        assert spec.description == "filing clerk"
+        assert spec.instructions == "File weekly."
+        assert spec.model == "clerk-7b"
+        assert spec.metadata == {"tier": "1"}

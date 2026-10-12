@@ -127,3 +127,18 @@ class AgentSpec:
     kind: AgentKind = AgentKind.LLM
     model: ModelId | None = None
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class BotCreateSpec:
+    """Structured bot create request — what crosses the BotPlatform seam.
+
+    The product creation vocabulary (bot_name/bot_desc) in semantic form:
+    the platform adapter translates this into the real create request and
+    composes the manifest document; agentcompute never sees a document.
+    """
+    name: str
+    description: str = ""
+    instructions: str = ""
+    model: ModelId | None = None
+    metadata: dict[str, str] = field(default_factory=dict)

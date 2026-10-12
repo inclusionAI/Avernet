@@ -852,7 +852,7 @@ class _PlatformOutcomeFake:
     def __init__(self, chat_outcome) -> None:
         self.chat_outcome = chat_outcome
 
-    def create_bot(self, *, name, instructions, idempotency_key):
+    def create_bot(self, *, spec, idempotency_key):
         return "bot-1"
 
     def bot_status(self, bot_id):

@@ -87,7 +87,8 @@ No import of `core/task`, `core/task_queue`, `core/harness`,
 (`core.base`, `di`, `plugin_api.database`, `kernel.*`, `log`). Transport
 stays at the adapters; httpx appears only inside `plugins/` (LLM client).
 The avernet subagent calls the host platform through the in-process
-`BotPlatform` seam — no socket leaves the module. Enforced by
+`BotPlatform` seam (create = one `BotCreateSpec` + idempotency key; the
+adapter composes the platform document) — no socket leaves the module. Enforced by
 `tests/community/architecture/test_agentcompute_isolation.py`.
 
 ## Operation knobs (`AgentComputeConfig`)
