@@ -162,34 +162,17 @@ class AicodingDurableRestartMixin:
             "nick_name": kwargs.get("nick_name"),
             "started_at": time.time(),
         }
-        previous_status = bot["status"]
-        if previous_status != "PENDING":
+        if bot["status"] != "PENDING":
             if services.repository.update_by_owner(
                 bot_id, owner_id, {"status": "PENDING"}
             ) is None:
                 raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
-        try:
-            task, _created = services.task_queue.enqueue(
-                TASK_TYPE,
-                payload,
-                deadline_seconds=TASK_DEADLINE,
-                idempotency_key=key,
-            )
-        except Exception:
-            # Do not roll back an accepted task after a lost enqueue response,
-            # or a concurrent request's live task. Preserve the original error.
-            accepted = services.task_queue.find_by_idempotency_key(TASK_TYPE, key)
-            if previous_status != "PENDING" and (
-                accepted is None or (
-                    existing is not None and accepted.id == existing.id
-                    and accepted.status in TERMINAL_STATUSES
-                    and accepted.payload.get("operation_id") != payload["operation_id"]
-                )
-            ):
-                services.repository.update_by_owner(
-                    bot_id, owner_id, {"status": previous_status},
-                )
-            raise
+        task, _created = services.task_queue.enqueue(
+            TASK_TYPE,
+            payload,
+            deadline_seconds=TASK_DEADLINE,
+            idempotency_key=key,
+        )
         # A concurrent submit may have won queue dedup. Its payload, never ours,
         # owns the operation/target, even if its HTTP process died before CAS.
         result = _state(services.repository, task.payload).ensure(task.payload, task.id)

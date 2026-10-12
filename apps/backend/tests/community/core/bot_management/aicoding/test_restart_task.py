@@ -229,14 +229,21 @@ async def test_concurrent_submissions_dedup_before_backup(setup):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("original_status", ["ACTIVE", "FAILED", "PENDING"])
-async def test_enqueue_failure_restores_original_status(setup, original_status):
+async def test_enqueue_failure_leaves_pending_and_allows_retry(setup, original_status):
     setup.repo.bot["status"] = original_status
     setup.queue.fail = True
     with pytest.raises(RuntimeError, match="queue unavailable"):
         await submit(setup)
-    assert setup.repo.bot["status"] == original_status
+    assert setup.repo.bot["status"] == "PENDING"
     assert KEY not in setup.repo.bot["ext"]
+    assert task(setup) is None
     setup.service.restart_bot.assert_not_called()
+    setup.queue.fail = False
+    assert (await submit(setup))["status"] == "PENDING"
+    assert task(setup) is not None
+    mock_lifecycle(setup)
+    assert isinstance(setup.handler.handle(task(setup).payload), Reschedule)
+    assert journal(setup.repo.bot)["phase"] == "WAITING_READY"
 
 
 @pytest.mark.asyncio

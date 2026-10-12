@@ -80,9 +80,10 @@ The frontend continues to use the original stored-runtime readiness semantics.
 - Target checks reject already-observed engine/binding changes. No lifecycle-field
   database CAS exists in the restored Repository interface.
 - Ext and status use separate writes. Exceptions propagate; repeat admission or
-  worker ensure can repair incomplete FAILED status and missing journals. A crash
-  before enqueue leaves no journal, so a later request can retry, although the Bot
-  can remain PENDING until then. Repair after permanent queue termination is not
+  worker ensure can repair incomplete FAILED status and missing journals. Failure
+  before a task is accepted leaves no new journal. Enqueue errors propagate
+  without rolling back PENDING; a later request can retry, although the Bot can
+  remain PENDING until then. Repair after permanent queue termination is not
   guaranteed.
 - Re-reading operation/target before status update does not eliminate races with
   other writers between the read and UPDATE. No unconditional full-ext rewrite
