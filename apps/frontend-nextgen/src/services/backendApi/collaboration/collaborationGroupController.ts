@@ -43,6 +43,8 @@ export type GroupCollaboration =
 export interface GroupParticipantInput {
   actor_id: string;
   role: GroupParticipantDto['role'];
+  /** Provider 路由标签；服务 Bot 指定路由时携带单个运行阶段。 */
+  tags?: string[];
   /** 创建群时为指定 human 参与者设置消息可见域；不传时由后端默认规则决定。 */
   message_view_scope?: MessageViewScope;
 }

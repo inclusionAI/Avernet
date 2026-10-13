@@ -24509,6 +24509,80 @@
         ],
         "title": "Envelope[SkillEditorApprovalPolicy]",
         "type": "object"
+      },
+      "BotClassification": {
+        "description": "Allowlisted fields available before an owner/editor relationship exists.",
+        "properties": {
+          "bot_id": {
+            "description": "The external Bot identifier.",
+            "examples": [
+              "bot-1"
+            ],
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_type": {
+            "description": "Bot type: personal for individual use, service for published stage routing, or desktop for a desktop-managed Bot.",
+            "enum": [
+              "personal",
+              "service",
+              "desktop"
+            ],
+            "examples": [
+              "service"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "bot_type"
+        ],
+        "title": "BotClassification",
+        "type": "object"
+      },
+      "Envelope_BotClassification_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotClassification"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotClassification]",
+        "type": "object"
       }
     }
   },
@@ -90415,6 +90489,184 @@
         "summary": "Update Space Skill Editor Approval Policy",
         "tags": [
           "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/classification": {
+      "get": {
+        "description": "Read only Bot ID/type, without requiring owner or collaborator access.\n\nComposite BCS actor IDs are split by the caller: Bot ID in the path and\nentity suffix in the optional query. Omission uses the unique Bot lookup.\nA signed, authenticated user is required; only tenant-local records are read.",
+        "operationId": "get_bot_classification_openapi_v1_bots__bot_id__classification_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entity suffix of a composite Bot identity; omit for a unique Bot ID.",
+            "in": "query",
+            "name": "entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Entity suffix of a composite Bot identity; omit for a unique Bot ID.",
+              "examples": [
+                "owner-1"
+              ],
+              "title": "Entity Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_BotClassification_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Get Bot Classification",
+        "tags": [
+          "Bots"
         ]
       }
     }

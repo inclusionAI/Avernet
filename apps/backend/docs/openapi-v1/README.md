@@ -2,6 +2,11 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+Bot classification for group creation: `GET /openapi/v1/bots/{bot_id}/classification`
+returns only Bot ID/type to authenticated users, with optional `entity_id` for
+composite identities; no owner/editor permission is required. See the
+[Gateway classification contract](../../../../docs/specs/2026-10-13-bot-classification-openapi/spec.md).
+
 _Living coordination doc for the multi-session effort to ship the public
 `/openapi/v1` API. This is the shared map: what's done, what's left, who's on
 what, and how the pieces fit together._
