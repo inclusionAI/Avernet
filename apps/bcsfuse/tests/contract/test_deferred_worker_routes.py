@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
-
 from src.bootstrap import oss_worker_lifecycle_routes as lifecycle
 from src.infra.adapters.in_memory_worker_registry_store import (
     InMemoryWorkerRegistryStore,
@@ -46,13 +45,18 @@ async def _invoke(app, method, path, payload=None, timeline=None):
     return events
 
 
-def test_online_returns_before_vector_sync(monkeypatch):
+@pytest.mark.parametrize("prefix", ["/v1", "/api/v1"])
+def test_online_waits_for_vector_sync_off_event_loop(monkeypatch, prefix):
     events = []
+    service_threads = []
+    request_thread = threading.get_ident()
 
     class RuntimeService:
-        def set_online(self, worker_id, *, updated_by, defer_vector_sync):
-            assert defer_vector_sync is True
+        def set_online(self, worker_id, *, updated_by, defer_vector_sync=False):
+            service_threads.append(threading.get_ident())
             events.append("state_written")
+            if not defer_vector_sync:
+                events.append("vector_synced")
             return worker_id
 
         def sync_online_vectors_if_current(self, worker_id):
@@ -63,15 +67,38 @@ def test_online_returns_before_vector_sync(monkeypatch):
     monkeypatch.setattr(lifecycle, "_runtime_response", lambda worker: {"worker_id": worker})
     app = FastAPI()
     app.include_router(lifecycle.router)
+    app.include_router(lifecycle.external_router)
 
     async def invoke():
-        body_events = await _invoke(app, "PUT", "/v1/workers/bot:owner/online", timeline=events)
+        body_events = await _invoke(app, "PUT", f"{prefix}/workers/bot:owner/online", timeline=events)
         return body_events
 
     body_events = asyncio.run(invoke())
     assert body_events[0] == ("status", 200)
     assert body_events[1] == ("response", {"worker_id": "bot:owner"})
-    assert events == ["state_written", "response", "vector_synced"]
+    assert events == ["state_written", "vector_synced", "response"]
+    assert service_threads[0] != request_thread
+
+
+@pytest.mark.parametrize("prefix", ["/v1", "/api/v1"])
+def test_online_vector_write_failure_returns_existing_error(monkeypatch, prefix):
+    class RuntimeService:
+        def set_online(self, worker_id, *, updated_by):
+            raise RuntimeError("vector write failed")
+
+    monkeypatch.setattr(lifecycle, "require_oss_auth", lambda request: None)
+    monkeypatch.setattr(lifecycle, "_get_runtime_service", lambda request: RuntimeService())
+    app = FastAPI()
+    app.include_router(lifecycle.router)
+    app.include_router(lifecycle.external_router)
+    events = asyncio.run(_invoke(app, "PUT", f"{prefix}/workers/bot:owner/online"))
+    assert events == [
+        ("status", 500),
+        ("response", {"detail": {
+            "code": "RUNTIME_STATE_UPDATE_ERROR",
+            "message": "Failed to persist worker runtime state",
+        }}),
+    ]
 
 
 @pytest.mark.parametrize("prefix", ["/v1", "/api/v1"])
