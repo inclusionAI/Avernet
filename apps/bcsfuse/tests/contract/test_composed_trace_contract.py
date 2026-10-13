@@ -1,14 +1,33 @@
 """Trace context must survive composition and remain request-local."""
 
-import pytest
 import asyncio
+import logging
+
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from src.bootstrap.opensource_app import create_opensource_app
-from src.infra.trace_context import get_trace_id, set_trace_id
 from src.infra.public.observability.trace_middleware import TraceIdMiddleware
+from src.infra.trace_context import get_trace_id, set_trace_id
+
+
+def test_online_request_logs_server_duration_with_trace(caplog):
+    app = FastAPI()
+    app.add_middleware(TraceIdMiddleware)
+
+    @app.put("/v1/workers/{worker_id}/online")
+    async def online(worker_id: str):
+        return {"worker_id": worker_id}
+
+    caplog.set_level(logging.INFO, logger="src.infra.public.observability.trace_middleware")
+    with TestClient(app) as client:
+        response = client.put("/v1/workers/bot-1/online", headers={"X-Trace-ID": "online-probe"})
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("phase=request_start" in message and "trace_id=online-probe" in message for message in messages)
+    assert any("phase=request_end" in message and "status=200" in message and "elapsed_ms=" in message for message in messages)
 
 
 @pytest.mark.parametrize("headers,expected", [
