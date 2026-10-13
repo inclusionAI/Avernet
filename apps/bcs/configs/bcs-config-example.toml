@@ -371,8 +371,14 @@ session_link_url = "https://botchat.example.com/sessions/{session_id}"
 # Enable fixed Loop v2 group creation and execution; disabled by default.
 # Ordinary workflow recovery runs automatically; Loop recovery requires this switch.
 loop_execution_enabled = false
+# Admit newly created Runs that contain nested fixed Loops. Requires
+# loop_execution_enabled=true. Keep false until all readers and consumers support compiler v2.
+nested_loop_execution_enabled = false
 
 [collaboration.fixed_loop_limits]
+# Rollout-safe mixed-version setting: outermost Loop depth is 1. The schema
+# default is 4; raise this only after all readers and consumers support compiler v2.
+max_fixed_loop_depth = 1
 # Compilation resource limits; these do not enable v2 execution.
 # Initial bounds cap expansion at 2048 nodes and 4 MiB. Tune only with workload measurements.
 max_fixed_loop_iterations = 32

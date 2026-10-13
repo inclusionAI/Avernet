@@ -1,0 +1,78 @@
+name: Nested review
+participants:
+  worker:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    nodes:
+      outer:
+        kind: loop
+        display_name: Overall revision
+        loop:
+          mode: fixed
+          max_iterations: 2
+          entry_node: prepare
+          result_node: assess
+          continue_outcomes: [repeat]
+          break_outcomes: [done]
+          exhausted_outcome: capped
+          nodes:
+            prepare:
+              kind: bot_task
+              display_name: Prepare revision
+              assignee: {type: bot_binding, binding: worker}
+              instruction: Prepare this revision.
+              transitions:
+                complete: {targets: [inner]}
+            inner:
+              kind: loop
+              display_name: Local review
+              loop:
+                mode: fixed
+                max_iterations: 3
+                entry_node: draft
+                result_node: review
+                continue_outcomes: [revise]
+                break_outcomes: [approved]
+                exhausted_outcome: exhausted
+                nodes:
+                  draft:
+                    kind: bot_task
+                    display_name: Revise draft
+                    assignee: {type: bot_binding, binding: worker}
+                    instruction: Revise the draft.
+                    transitions:
+                      complete: {targets: [review]}
+                  review:
+                    kind: bot_task
+                    display_name: Review draft
+                    assignee: {type: bot_binding, binding: worker}
+                    instruction: Review the draft.
+                    judge:
+                      type: llm
+                      criteria: [Whether the draft is ready]
+                      outcomes: [revise, approved]
+              transitions:
+                approved: {targets: [assess]}
+                exhausted: {targets: [assess]}
+            assess:
+              kind: bot_task
+              display_name: Assess revision
+              assignee: {type: bot_binding, binding: worker}
+              instruction: Assess the overall revision.
+              judge:
+                type: llm
+                criteria: [Whether the overall result is ready]
+                outcomes: [repeat, done]
+        transitions:
+          done: {targets: [publish]}
+          capped: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee: {type: bot_binding, binding: worker}
+        instruction: Publish the final result.
+        final_output: true

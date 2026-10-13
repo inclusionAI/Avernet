@@ -477,6 +477,7 @@ async fn get_node_returns_enveloped_view() {
 async fn pending_human_nodes_returns_enveloped_array() {
     let pending = vec![PendingHumanNodeView {
         node_id: "node-1".to_string(),
+        execution: None,
         display_name: "Review".to_string(),
         instruction: "please review".to_string(),
         response_ref: "ref-1".to_string(),

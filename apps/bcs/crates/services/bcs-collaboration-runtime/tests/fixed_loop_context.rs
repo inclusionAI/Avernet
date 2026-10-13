@@ -11,6 +11,13 @@ fn plan() -> StateMachineExecutionPlan {
     ).unwrap().plan.unwrap()
 }
 
+fn nested_plan() -> StateMachineExecutionPlan {
+    compile_authoring_definition(
+        serde_yaml::from_str(include_str!("fixtures/nested_fixed_loop.yaml")).unwrap(),
+        &FixedLoopLimits::default(),
+    ).unwrap().plan.unwrap()
+}
+
 fn entry(plan: &StateMachineExecutionPlan, iteration: u32) -> String {
     plan.node_metadata.values().find(|meta| meta.is_loop_entry && meta.iteration == Some(iteration))
         .unwrap().execution_node_id.clone()
@@ -81,4 +88,41 @@ fn projection_filters_control_only_and_unselected_edges_without_changing_v1() {
     source.status = StateMachineNodeStatus::Skipped;
     assert!(!projects_upstream_artifact(Some(&plan), "publish", &source));
     assert!(projects_upstream_artifact(None, "publish", &source));
+}
+
+#[test]
+fn nested_context_resets_per_parent_instance_and_renders_the_full_path() {
+    let plan = nested_plan();
+    let find_entry = |outer: u32, inner: u32| plan.node_metadata.values().find(|meta| {
+        meta.is_loop_entry && meta.definition_node_id == "draft"
+            && meta.loop_path.as_ref().is_some_and(|path| {
+                path.len() == 2 && path[0].iteration == outer && path[1].iteration == inner
+            })
+    }).unwrap();
+    let first = find_entry(2, 1);
+    let context = build_loop_context(&plan, "run-nested", &first.execution_node_id, None)
+        .unwrap().unwrap();
+    assert!(context.previous_result.is_none());
+    assert_eq!(render_loop_context(&context),
+        "[Loop Path]\nouter: 2/2\ninner: 1/3\n\n[Loop Context]\nloop_id: inner\niteration: 1\nmax_iterations: 3\n\n[Previous Iteration Result]\n(none - this is the first iteration)");
+
+    let second = find_entry(2, 2);
+    let source: StateMachineNodeRun = serde_json::from_value(json!({
+        "run_id": "run-nested", "node_id": second.previous_result_node_id,
+        "status": "completed", "attempt": 0, "outcome": "revise",
+        "artifact_text": "review result", "completed_at": 99
+    })).unwrap();
+    let context = build_loop_context(&plan, "run-nested", &second.execution_node_id, Some(&source))
+        .unwrap().unwrap();
+    assert_eq!(context.previous_result.unwrap().execution_node_id, source.node_id);
+
+    let wrong = find_entry(1, 2);
+    let wrong_source: StateMachineNodeRun = serde_json::from_value(json!({
+        "run_id": "run-nested", "node_id": wrong.previous_result_node_id,
+        "status": "completed", "attempt": 0, "outcome": "revise",
+        "artifact_text": "wrong parent result", "completed_at": 98
+    })).unwrap();
+    assert!(build_loop_context(
+        &plan, "run-nested", &second.execution_node_id, Some(&wrong_source),
+    ).is_err());
 }

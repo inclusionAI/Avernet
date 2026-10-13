@@ -27,7 +27,7 @@ mod publication_recovery_tests;
 #[path = "terminal_im_recovery.rs"]
 mod terminal_im_tests;
 
-struct FaultyRuns {
+pub(super) struct FaultyRuns {
     fail_im_save: AtomicBool,
     fail_im_claim: AtomicBool,
     fail_im_marker: AtomicBool,
@@ -58,6 +58,10 @@ struct FaultyRuns {
     fail_skip_after: AtomicUsize,
     cancel_before_dispatch: AtomicBool,
     cancel_after_activation: AtomicBool,
+    pub(super) node_reads: StdMutex<Vec<String>>,
+    pub(super) get_run_calls: AtomicUsize,
+    pub(super) list_node_runs_calls: AtomicUsize,
+    pub(super) skip_calls: AtomicUsize,
 }
 
 impl FaultyRuns {
@@ -74,7 +78,9 @@ impl FaultyRuns {
             hide_opening: AtomicBool::new(false), pause_start: AtomicBool::new(false),
             pause_opening_barrier: AtomicBool::new(false), startup_paused: Notify::new(),
             fail_skip_after: AtomicUsize::new(0), cancel_before_dispatch: AtomicBool::new(false),
-            cancel_after_activation: AtomicBool::new(false) }
+            cancel_after_activation: AtomicBool::new(false), node_reads: StdMutex::new(Vec::new()),
+            get_run_calls: AtomicUsize::new(0), list_node_runs_calls: AtomicUsize::new(0),
+            skip_calls: AtomicUsize::new(0) }
     }
 
     async fn before_dispatch(&self, run_id: &str) -> ServiceResult<()> {
@@ -197,13 +203,22 @@ impl StateMachineRunRepoPort for FaultyRuns {
     async fn create_run(&self, run: StateMachineRun, nodes: Vec<StateMachineNodeRun>) -> ServiceResult<()> {
         self.inner.create_run(run, nodes).await
     }
-    async fn get_run(&self, id: &str) -> ServiceResult<Option<StateMachineRun>> { self.inner.get_run(id).await }
+    async fn get_run(&self, id: &str) -> ServiceResult<Option<StateMachineRun>> {
+        self.get_run_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.get_run(id).await
+    }
     async fn get_run_by_session_id(&self, id: &str) -> ServiceResult<Option<StateMachineRun>> { self.inner.get_run_by_session_id(id).await }
     async fn list_running_runs(&self, cursor: Option<&str>, limit: usize) -> ServiceResult<Vec<StateMachineRun>> {
         self.inner.list_running_runs(cursor, limit).await
     }
-    async fn list_node_runs(&self, id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> { self.inner.list_node_runs(id).await }
-    async fn get_node_run(&self, run: &str, node: &str) -> ServiceResult<Option<StateMachineNodeRun>> { self.inner.get_node_run(run, node).await }
+    async fn list_node_runs(&self, id: &str) -> ServiceResult<Vec<StateMachineNodeRun>> {
+        self.list_node_runs_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.list_node_runs(id).await
+    }
+    async fn get_node_run(&self, run: &str, node: &str) -> ServiceResult<Option<StateMachineNodeRun>> {
+        self.node_reads.lock().unwrap().push(format!("{run}/{node}"));
+        self.inner.get_node_run(run, node).await
+    }
     async fn mark_node_running(&self, run: &str, node: &str, attempt: i32, delivery: String, at: u64) -> ServiceResult<()> {
         self.inner.mark_node_running(run, node, attempt, delivery, at).await
     }
@@ -243,6 +258,7 @@ impl StateMachineRunRepoPort for FaultyRuns {
         self.inner.schedule_node_retry(run, node, failed, next).await
     }
     async fn skip_node(&self, run: &str, node: &str, at: u64) -> ServiceResult<bool> {
+        self.skip_calls.fetch_add(1, Ordering::SeqCst);
         if self.fail_skip_after.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)) == Ok(1) {
             return Err(injected());
         }
@@ -271,10 +287,11 @@ async fn install_runtime(h: &mut Harness, runs: Arc<dyn StateMachineRunRepoPort>
     }).collect()));
     h.runtime = test_runtime!(h.definitions.clone(), h.store.clone(), runs, h.store.clone(), group,
         h.sessions.clone(), h.delivery.clone(), judge)
-        .with_session_channel_outbound(h.channel.clone()).with_loop_execution();
+        .with_session_channel_outbound(h.channel.clone()).with_loop_execution()
+        .with_nested_loop_execution_enabled(true);
 }
 
-async fn harness(outcomes: &[&str]) -> (Harness, Arc<FaultyRuns>) {
+pub(super) async fn harness(outcomes: &[&str]) -> (Harness, Arc<FaultyRuns>) {
     let mut h = Harness::new(&[]).await;
     let runs = Arc::new(FaultyRuns::new(h.store.clone()));
     install_runtime(&mut h, runs.clone(), outcomes).await;
@@ -335,6 +352,29 @@ async fn partial_future_skip_is_repaired_through_already_skipped_nodes() {
     assert_eq!(h.delivery.commands.lock().await.len(), 2);
     assert!(h.prompt(1).await.contains("break-result"));
     assert_eq!(h.finish(1, run, "published").await.view.unwrap().run.status, StateMachineRunStatus::Completed);
+}
+
+#[tokio::test]
+async fn nested_inner_exit_repairs_only_its_future_subtree_with_admission_disabled() {
+    let (mut h, runs) = harness(&["approved", "done"]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    let run = &started.view.run;
+    h.finish(0, run, "prepared").await;
+    h.finish(1, run, "drafted").await;
+    runs.fail_skip_after.store(2, Ordering::SeqCst);
+    assert!(terminal(&h, 2, run, "approved-inner").await.is_err());
+    let before = h.store.list_node_runs(&run.run_id).await.unwrap();
+    assert_eq!(before.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 1);
+    h.runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    recover(&h).await;
+    let after = h.store.list_node_runs(&run.run_id).await.unwrap();
+    let skipped = after.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).collect::<Vec<_>>();
+    assert_eq!(skipped.len(), 4);
+    let plan = h.plan(&run.run_id).await;
+    assert!(skipped.iter().all(|node| plan.node_metadata[&node.node_id].loop_path.as_ref()
+        .is_some_and(|path| path[0].iteration == 1 && path[1].iteration > 1)));
+    assert_eq!(h.delivery.commands.lock().await.len(), 4);
+    assert!(h.prompt(3).await.contains("approved-inner"));
 }
 
 #[tokio::test]
@@ -434,6 +474,36 @@ async fn human_next_iteration_recovers_with_context_and_is_not_notified_twice() 
     let events = h.channel.events.lock().await;
     assert_eq!(events.len(), 2);
     assert_eq!(events[1].loop_context.as_ref().unwrap().previous_result.as_ref().unwrap().output, "persisted-human-result");
+}
+
+#[tokio::test]
+async fn three_level_human_context_reads_only_the_nearest_previous_result() {
+    let (h, runs) = harness(&[]).await;
+    let started = h.start(three_level_human_yaml(), true).await;
+    let query = ListPendingHumanNodesCommand {
+        run_id: started.view.run.run_id.clone(), caller_actor_id: "human_1001".into(),
+    };
+    let mut first_inner = None;
+    for index in 0..3 {
+        let pending = h.runtime.list_pending_human_nodes(query.clone()).await.unwrap().remove(0);
+        if index == 2 { first_inner = Some(pending.node_id.clone()); }
+        h.runtime.respond_human_node(RespondHumanNodeCommand {
+            run_id: started.view.run.run_id.clone(), node_id: pending.node_id,
+            caller_actor_id: "human_1001".into(), content: format!("human-{index}"),
+            source: HumanResponseSource::Http,
+        }).await.unwrap();
+    }
+    runs.node_reads.lock().unwrap().clear();
+    let pending = h.runtime.list_pending_human_nodes(query).await.unwrap().remove(0);
+    let path = pending.execution.as_ref().unwrap().loop_path.as_ref().unwrap();
+    assert_eq!(path.len(), 3);
+    assert_eq!(path[2].iteration, 2);
+    assert_eq!(pending.loop_context.as_ref().unwrap().previous_result.as_ref().unwrap()
+        .execution_node_id, first_inner.clone().unwrap());
+    let reads = runs.node_reads.lock().unwrap().clone();
+    assert_eq!(reads.len(), 2, "one previous-result read plus one existing static-upstream probe: {reads:?}");
+    assert!(reads.iter().all(|read| read.ends_with(&format!("/{}", first_inner.as_ref().unwrap()))),
+        "no ancestor result may be queried: {reads:?}");
 }
 
 #[tokio::test]

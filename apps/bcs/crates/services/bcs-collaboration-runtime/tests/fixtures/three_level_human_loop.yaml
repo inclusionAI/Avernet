@@ -1,0 +1,104 @@
+name: Three-level human review
+participants:
+  worker:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    human_input_channel:
+      channel_type: dingtalk
+    nodes:
+      outer:
+        kind: loop
+        display_name: Outer review
+        loop:
+          mode: fixed
+          max_iterations: 2
+          entry_node: outer_gate
+          result_node: outer_result
+          continue_outcomes: [repeat]
+          break_outcomes: [done]
+          exhausted_outcome: outer_exhausted
+          nodes:
+            outer_gate:
+              kind: human_input
+              display_name: Outer gate
+              assignee: {type: runtime_actor, actor: human_1001}
+              notification: {mode: direct_assignee}
+              instruction: Confirm the outer iteration.
+              node_timeout_ms: 60000
+              transitions:
+                complete: {targets: [middle]}
+            middle:
+              kind: loop
+              display_name: Middle review
+              loop:
+                mode: fixed
+                max_iterations: 2
+                entry_node: middle_gate
+                result_node: middle_result
+                continue_outcomes: [complete]
+                break_outcomes: []
+                exhausted_outcome: middle_exhausted
+                nodes:
+                  middle_gate:
+                    kind: human_input
+                    display_name: Middle gate
+                    assignee: {type: runtime_actor, actor: human_1001}
+                    notification: {mode: direct_assignee}
+                    instruction: Confirm the middle iteration.
+                    node_timeout_ms: 60000
+                    transitions:
+                      complete: {targets: [inner]}
+                  inner:
+                    kind: loop
+                    display_name: Inner review
+                    loop:
+                      mode: fixed
+                      max_iterations: 2
+                      entry_node: inner_review
+                      result_node: inner_review
+                      continue_outcomes: [complete]
+                      break_outcomes: []
+                      exhausted_outcome: inner_exhausted
+                      nodes:
+                        inner_review:
+                          kind: human_input
+                          display_name: Inner review
+                          assignee: {type: runtime_actor, actor: human_1001}
+                          notification: {mode: direct_assignee}
+                          instruction: Review the innermost result.
+                          node_timeout_ms: 60000
+                    transitions:
+                      inner_exhausted: {targets: [middle_result]}
+                  middle_result:
+                    kind: human_input
+                    display_name: Middle result
+                    assignee: {type: runtime_actor, actor: human_1001}
+                    notification: {mode: direct_assignee}
+                    instruction: Confirm the middle result.
+                    node_timeout_ms: 60000
+              transitions:
+                middle_exhausted: {targets: [outer_result]}
+            outer_result:
+              kind: human_input
+              display_name: Outer result
+              assignee: {type: runtime_actor, actor: human_1001}
+              notification: {mode: direct_assignee}
+              instruction: Decide whether another outer iteration is required.
+              node_timeout_ms: 60000
+              judge:
+                type: llm
+                criteria: [Whether the overall review is complete]
+                outcomes: [repeat, done]
+        transitions:
+          done: {targets: [publish]}
+          outer_exhausted: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee: {type: bot_binding, binding: worker}
+        instruction: Publish the reviewed result.
+        final_output: true

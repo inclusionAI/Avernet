@@ -3,6 +3,7 @@ use bcs_config_api::{MysqlDbConfig, StatementProtocol};
 use bcs_config_api::mysql::MysqlConnectionConfig;
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_service_api::{CreateStateMachineRerun, CreateStateMachineRerunOutcome};
+use bcs_service_api::port::repo::StateMachineRunSnapshot;
 use mysql_async::Opts;
 
 const TABLES: [&str; 10] = ["bcs_messages", "bcs_collaboration_delivery_checkpoints", "bcs_collaboration_events", "bcs_collaboration_definition_blobs", "bcs_collaboration_definitions", "bcs_group_sessions",
@@ -13,7 +14,14 @@ const TABLES: [&str; 10] = ["bcs_messages", "bcs_collaboration_delivery_checkpoi
 async fn real_mysql_fixed_loop_snapshot_and_rerun_contract() {
     let url = std::env::var("BCS_TEST_MYSQL_URL").expect("BCS_TEST_MYSQL_URL is required");
     let opts = Opts::from_url(&url).expect("valid MySQL test URL");
-    for protocol in [StatementProtocol::Text, StatementProtocol::Prepared] {
+    for (protocol, snapshot) in [
+        (StatementProtocol::Text, fixed_loop_snapshot_fixture()),
+        (StatementProtocol::Prepared, fixed_loop_snapshot_fixture()),
+        (StatementProtocol::Text, nested_loop_path_snapshot_fixture()),
+        (StatementProtocol::Prepared, nested_loop_path_snapshot_fixture()),
+    ] {
+        eprintln!("real MySQL snapshot contract: {:?}, {}", protocol,
+            snapshot.execution_plan.as_ref().unwrap().compiler_version);
         let mut config = MysqlDbConfig::new().with_database(opts.db_name().expect("test database"))
             .with_connection(MysqlConnectionConfig {
                 connection_type: "direct".into(), host: Some(opts.ip_or_hostname().to_string()),
@@ -38,7 +46,7 @@ async fn real_mysql_fixed_loop_snapshot_and_rerun_contract() {
         for sql in include_str!("../fixtures/mysql_pre_loop.sql").split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
             db.execute(DbStatement::new(sql)).await.unwrap();
         }
-        let result = exercise(db.clone()).await;
+        let result = exercise(db.clone(), snapshot).await;
         for table in TABLES {
             db.execute(DbStatement::new(format!("DROP TABLE `{table}`"))).await.unwrap();
         }
@@ -47,7 +55,7 @@ async fn real_mysql_fixed_loop_snapshot_and_rerun_contract() {
     }
 }
 
-async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Error>> {
+async fn exercise(db: Arc<MysqlDbPlugin>, snapshot: StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
     db.execute(DbStatement::new(
         "INSERT INTO bcs_state_machine_definition_snapshots (env, run_id, group_id, session_id, group_version, definition_id, definition_version, definition_content_hash, snapshot_json) \
          VALUES ('test', 'legacy', 'group-1', 'legacy-session', 1, 'legacy', 1, REPEAT('a', 64), JSON_OBJECT('version', 1))"
@@ -84,19 +92,18 @@ async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Erro
     terminal_im_contract::terminal_im_contract(&store, &bcs_session_store::MySqlSessionStore::new(db.clone(), "test".into())).await;
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, group_id, session_id, session_kind, status, input, activation_count, participants) VALUES ('test', 'opening-group', 'opening-session', 'chat', 'running', '{}', 1, '[]')")).await?;
     opening_contract::message_identity_contract(&bcs_message_store::MySqlMessageStore::new(db.clone(), "test".into())).await;
-    snapshot_round_trip_is_immutable(&store).await;
+    snapshot_fixture_round_trip_is_immutable(&store, snapshot.clone()).await;
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants) VALUES ('test', 'group-1:abcdef12', 'group-1', 'chat', 'running', 1, '[]')")).await?;
-    fixed_loop_rerun_copies_snapshot_once(&store).await;
+    loop_rerun_copies_snapshot_once(&store, snapshot.clone()).await;
     assert!(MySqlCollaborationStore::new(db.clone(), "other".into()).get_run_snapshot("sm-run-1").await?.is_none());
-    service_rerun_reactivates_once(&store, db.as_ref()).await?;
-    snapshot_write_failure_is_visible(&store, db.as_ref()).await?;
-    rerun_snapshot_failure_rolls_back_activation(&store, db.as_ref()).await?;
+    service_rerun_reactivates_once(&store, db.as_ref(), &snapshot).await?;
+    snapshot_write_failure_is_visible(&store, db.as_ref(), &snapshot).await?;
+    rerun_snapshot_failure_rolls_back_activation(&store, db.as_ref(), &snapshot).await?;
     batched_nodes::contract(db.as_ref(), &store).await?;
     Ok(())
 }
 
-async fn service_rerun_reactivates_once(store: &MySqlCollaborationStore, db: &dyn DbPlugin) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = fixed_loop_snapshot_fixture();
+async fn service_rerun_reactivates_once(store: &MySqlCollaborationStore, db: &dyn DbPlugin, snapshot: &StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, callback_status, participants, output) VALUES ('test', 'service-rerun', 'group-1', 'service_invocation', 'completed', 4, 'not_applicable', '[]', 'old output')")).await?;
     let mut source = test_run();
     source.run_id = "service-source".into();
@@ -134,7 +141,7 @@ async fn service_rerun_reactivates_once(store: &MySqlCollaborationStore, db: &dy
         assert_eq!((node.status, node.attempt), (StateMachineNodeStatus::Pending, 0));
         assert!(node.artifact_text.is_none());
     }
-    assert_snapshot_eq(&store.get_run_snapshot(&winner.run_id).await?.unwrap(), &snapshot);
+    assert_snapshot_eq(&store.get_run_snapshot(&winner.run_id).await?.unwrap(), snapshot);
     let session = db.query(DbStatement::new("SELECT status, activation_count, output FROM bcs_group_sessions WHERE session_id = 'service-rerun'")).await?.remove(0);
     assert_eq!(bcs_db_api::db_get_column::<i32>(&session, "activation_count")?, 5);
     assert_eq!(bcs_db_api::db_get_column::<String>(&session, "status")?, "running");
@@ -143,11 +150,10 @@ async fn service_rerun_reactivates_once(store: &MySqlCollaborationStore, db: &dy
     Ok(())
 }
 
-async fn snapshot_write_failure_is_visible(store: &MySqlCollaborationStore, db: &dyn DbPlugin) -> Result<(), Box<dyn std::error::Error>> {
+async fn snapshot_write_failure_is_visible(store: &MySqlCollaborationStore, db: &dyn DbPlugin, snapshot: &StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
     db.execute(DbStatement::new("ALTER TABLE bcs_state_machine_definition_snapshots ADD CONSTRAINT bcs_loop_reject_write CHECK (run_id <> 'write-failure')")).await?;
     let mut run = test_run();
     run.run_id = "write-failure".into();
-    let snapshot = fixed_loop_snapshot_fixture();
     let result = store.save_run_snapshot(&run, 7, &snapshot.definition, snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await;
     assert!(result.unwrap_err().to_string().contains("bcs_loop_reject_write"));
     assert!(store.get_run_snapshot(&run.run_id).await?.is_none());
@@ -155,9 +161,8 @@ async fn snapshot_write_failure_is_visible(store: &MySqlCollaborationStore, db: 
     Ok(())
 }
 
-async fn rerun_snapshot_failure_rolls_back_activation(store: &MySqlCollaborationStore, db: &dyn DbPlugin) -> Result<(), Box<dyn std::error::Error>> {
+async fn rerun_snapshot_failure_rolls_back_activation(store: &MySqlCollaborationStore, db: &dyn DbPlugin, snapshot: &StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
     db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, callback_status, participants, output) VALUES ('test', 'service-rollback', 'group-1', 'service_invocation', 'completed', 4, 'not_applicable', '[]', 'original output')")).await?;
-    let snapshot = fixed_loop_snapshot_fixture();
     let mut source = test_run();
     source.run_id = "rollback-source".into();
     source.root_run_id = Some(source.run_id.clone());
@@ -189,7 +194,7 @@ async fn rerun_snapshot_failure_rolls_back_activation(store: &MySqlCollaboration
     assert_eq!(bcs_db_api::db_get_column::<String>(&session, "status")?, "completed");
     assert_eq!(bcs_db_api::db_get_column::<i32>(&session, "activation_count")?, 4);
     assert_eq!(bcs_db_api::db_get_column::<String>(&session, "output")?, "original output");
-    assert_snapshot_eq(&store.get_run_snapshot(&source.run_id).await?.unwrap(), &snapshot);
+    assert_snapshot_eq(&store.get_run_snapshot(&source.run_id).await?.unwrap(), snapshot);
     db.execute(DbStatement::new("ALTER TABLE bcs_state_machine_definition_snapshots DROP CHECK bcs_loop_reject_rerun")).await?;
     Ok(())
 }

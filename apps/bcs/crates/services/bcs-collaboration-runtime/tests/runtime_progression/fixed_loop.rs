@@ -88,7 +88,8 @@ impl Harness {
         let runtime = test_runtime!(definitions.clone(), store.clone(), store.clone(), store.clone(),
             group, sessions.clone(), delivery.clone(), Arc::new(SequencedJudge::new(decisions)))
             .with_session_channel_outbound(channel.clone())
-            .with_loop_execution();
+            .with_loop_execution()
+            .with_nested_loop_execution_enabled(true);
         Self { runtime, public_events, store, definitions, delivery, channel, sessions }
     }
 
@@ -160,6 +161,38 @@ fn loop_yaml(iterations: u32, judged: bool, human: bool, attempts: u32) -> Strin
     serde_yaml::to_string(&definition).unwrap()
 }
 
+fn nested_loop_yaml() -> String {
+    let mut definition: Value = serde_yaml::from_str(
+        include_str!("../fixtures/nested_fixed_loop.yaml"),
+    ).unwrap();
+    definition["api_version"] = json!("bcs.collaboration/v1");
+    definition["id"] = json!("nested-runtime-test");
+    definition["version"] = json!(1);
+    definition["participants"]["worker"]["bot_id"] = json!("driver-bot");
+    serde_yaml::to_string(&definition).unwrap()
+}
+
+fn nested_authoring_yaml() -> String {
+    let mut authoring: Value = serde_yaml::from_str(&nested_loop_yaml()).unwrap();
+    let mapping = authoring.as_object_mut().unwrap();
+    mapping.remove("api_version");
+    mapping.remove("id");
+    mapping.remove("version");
+    authoring["participants"]["worker"].as_object_mut().unwrap().remove("bot_id");
+    serde_yaml::to_string(&authoring).unwrap()
+}
+
+fn three_level_human_yaml() -> String {
+    let mut definition: Value = serde_yaml::from_str(
+        include_str!("../fixtures/three_level_human_loop.yaml"),
+    ).unwrap();
+    definition["api_version"] = json!("bcs.collaboration/v1");
+    definition["id"] = json!("three-level-human-runtime-test");
+    definition["version"] = json!(1);
+    definition["participants"]["worker"]["bot_id"] = json!("driver-bot");
+    serde_yaml::to_string(&definition).unwrap()
+}
+
 fn iteration_id(plan: &StateMachineExecutionPlan, iteration: u32) -> String {
     plan.node_metadata.values().find(|meta| meta.iteration == Some(iteration)).unwrap().execution_node_id.clone()
 }
@@ -195,6 +228,258 @@ async fn empty_break_runs_all_iterations_then_continues_and_projects_previous_re
     assert_eq!(finished.run.status, StateMachineRunStatus::Completed);
     assert_eq!(finished.run.output.as_deref(), Some("published"));
     assert!(finished.nodes.iter().all(|node| node.attempt == 0 && node.status == StateMachineNodeStatus::Completed));
+}
+
+#[tokio::test]
+async fn nested_loop_runs_each_parent_instance_and_skips_only_the_selected_inner_tail() {
+    let h = Harness::new(&[
+        "revise", "approved", "repeat", "revise", "revise", "revise", "done",
+    ]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    let run = &started.view.run;
+    let plan = h.plan(&run.run_id).await;
+    assert_eq!(plan.state_machine.nodes.len(), 17);
+    for (index, text) in [
+        "outer-1-prepare", "outer-1-inner-1-draft", "outer-1-inner-1-review",
+        "outer-1-inner-2-draft", "outer-1-inner-2-review", "outer-1-assess",
+        "outer-2-prepare", "outer-2-inner-1-draft", "outer-2-inner-1-review",
+        "outer-2-inner-2-draft", "outer-2-inner-2-review", "outer-2-inner-3-draft",
+        "outer-2-inner-3-review", "outer-2-assess", "published",
+    ].into_iter().enumerate() {
+        if index == 6 {
+            let prompt = h.prompt(index).await;
+            assert!(prompt.contains("[Loop Path]\nouter: 2/2"), "{prompt}");
+            assert!(prompt.contains("outer-1-assess"), "{prompt}");
+        }
+        if index == 7 {
+            let prompt = h.prompt(index).await;
+            assert!(prompt.contains("[Loop Path]\nouter: 2/2\ninner: 1/3"), "{prompt}");
+            assert!(prompt.contains("(none - this is the first iteration)"), "{prompt}");
+            assert!(!prompt.contains("outer-1-inner-2-review"), "{prompt}");
+        }
+        h.finish(index, run, text).await;
+    }
+    let view = h.runtime.get_state_machine_run(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(view.run.status, StateMachineRunStatus::Completed);
+    assert_eq!(view.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Completed).count(), 15);
+    assert_eq!(view.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 2);
+    let skipped = view.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped)
+        .map(|node| &plan.node_metadata[&node.node_id]).collect::<Vec<_>>();
+    assert!(skipped.iter().all(|meta| meta.loop_path.as_ref().is_some_and(|path|
+        path[0].iteration == 1 && path[1].iteration == 3)));
+}
+
+#[tokio::test]
+async fn nested_outer_break_skips_the_complete_future_parent_subtree() {
+    let h = Harness::new(&["approved", "done"]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    let run = &started.view.run;
+    for (index, text) in ["prepared", "drafted", "approved-inner", "done-outer"].into_iter().enumerate() {
+        h.finish(index, run, text).await;
+    }
+    let view = h.runtime.get_state_machine_run(&run.run_id).await.unwrap().unwrap();
+    let plan = h.plan(&run.run_id).await;
+    let future_parent = view.nodes.iter().filter(|node| plan.node_metadata[&node.node_id].loop_path.as_ref()
+        .is_some_and(|path| path[0].iteration == 2)).collect::<Vec<_>>();
+    assert_eq!(future_parent.len(), 8);
+    assert!(future_parent.iter().all(|node| node.status == StateMachineNodeStatus::Skipped));
+    assert_eq!(h.delivery.commands.lock().await.len(), 5);
+    assert!(h.prompt(4).await.contains("done-outer"));
+}
+
+#[tokio::test]
+async fn near_capacity_outer_break_scans_and_skips_the_materialized_future_graph() {
+    let (h, costs) = recovery_tests::harness(&["approved", "done"]).await;
+    let mut definition: Value = serde_yaml::from_str(&nested_loop_yaml()).unwrap();
+    let outer = &mut definition["runtime"]["state_machine"]["nodes"]["outer"]["loop"];
+    outer["max_iterations"] = json!(31);
+    outer["nodes"]["inner"]["loop"]["max_iterations"] = json!(32);
+    let started_at = std::time::Instant::now();
+    let started = h.start(serde_yaml::to_string(&definition).unwrap(), false).await;
+    let run = &started.view.run;
+    assert_eq!(started.view.nodes.len(), 2047);
+    h.finish(0, run, "prepared").await;
+    h.finish(1, run, "drafted").await;
+    h.finish(2, run, "approved-inner").await;
+    costs.get_run_calls.store(0, Ordering::SeqCst);
+    costs.list_node_runs_calls.store(0, Ordering::SeqCst);
+    costs.skip_calls.store(0, Ordering::SeqCst);
+    costs.node_reads.lock().unwrap().clear();
+    let skip_started_at = std::time::Instant::now();
+    h.finish(3, run, "done-outer").await;
+    let skip_elapsed = skip_started_at.elapsed();
+    let before_publish = h.runtime.get_state_machine_run(&run.run_id).await.unwrap().unwrap();
+    assert_eq!(before_publish.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Completed).count(), 4);
+    assert_eq!(before_publish.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Skipped).count(), 2042);
+    assert_eq!(before_publish.nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Running).count(), 1);
+    assert_eq!(h.finish(4, run, "published").await.view.unwrap().run.status, StateMachineRunStatus::Completed);
+    assert_eq!(costs.skip_calls.load(Ordering::SeqCst), 1980);
+    assert!(costs.get_run_calls.load(Ordering::SeqCst) <= 12);
+    assert!(costs.list_node_runs_calls.load(Ordering::SeqCst) <= 8);
+    assert!(costs.node_reads.lock().unwrap().len() <= 2100);
+    eprintln!("nested capacity: nodes=2047 early_break_skipped=2042 skip={skip_elapsed:?} total={:?} repo_get_run={} repo_list_nodes={} repo_get_node={} repo_skip={}", started_at.elapsed(),
+        costs.get_run_calls.load(Ordering::SeqCst), costs.list_node_runs_calls.load(Ordering::SeqCst), costs.node_reads.lock().unwrap().len(), costs.skip_calls.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn nested_admission_switch_blocks_new_runs_but_not_existing_progression() {
+    let h = Harness::new(&["approved", "done"]).await;
+    let runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    let validation = runtime.validate_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: nested_authoring_yaml(), judge_available: true,
+    }).await.unwrap();
+    assert!(validation.valid, "{:?}", validation.errors);
+    assert!(validation.graph.is_some());
+    assert!(validation.warnings.iter().any(|warning|
+        warning.code == "VALIDATION_ONLY_FEATURE" && warning.message.contains("loop.nesting")));
+    let error = runtime.start_state_machine_run(command(nested_loop_yaml(), false)).await.err().unwrap();
+    assert!(error.to_string().contains("loop.nesting"));
+    assert!(h.store.list_pending_runs(None, 32).await.unwrap().is_empty());
+    assert!(h.store.list_running_runs(None, 32).await.unwrap().is_empty());
+    assert!(h.delivery.commands.lock().await.is_empty());
+
+    let h = Harness::new(&["approved", "done"]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    let run = &started.view.run;
+    let delivery_id = h.delivery.commands.lock().await[0].run_id.clone();
+    let runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    let outcome = complete_with_text(&runtime, &delivery_id, &run.session_id, "accepted-before-switch-off").await;
+    assert_eq!(outcome.view.unwrap().run.status, StateMachineRunStatus::Running);
+    assert_eq!(h.delivery.commands.lock().await.len(), 2);
+}
+
+#[tokio::test]
+async fn nested_admission_blocks_group_configuration_and_one_shot_before_side_effects() {
+    let h = Harness::new(&[]).await;
+    let runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    let error = runtime.configure_group_runtime(ConfigureGroupRuntimeCommand {
+        group_id: "group-1".into(), definition_yaml: Some(nested_authoring_yaml()),
+        definition: None, definition_ref: None,
+        participant_bindings: BTreeMap::from([("worker".into(), RuntimeParticipantBinding {
+            source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
+        })]),
+        auto_start_on_service_invocation: true,
+    }).await.err().unwrap();
+    assert!(error.to_string().contains("loop.nesting"));
+    assert!(GroupRuntimeBindingRepoPort::get(h.store.as_ref(), "group-1").await.unwrap().is_none());
+    assert!(h.store.list_pending_runs(None, 32).await.unwrap().is_empty());
+    assert!(h.delivery.commands.lock().await.is_empty());
+
+    let h = Harness::new(&[]).await;
+    let session = h.sessions.create_or_reactivate(CreateOrReactivateCommand {
+        group_id: "group-1".into(), session_id: None,
+        params: NewSessionParams { session_kind: SessionKind::Chat,
+            participants: test_group().participants, ..Default::default() },
+    }).await.unwrap().session;
+    let runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    let error = runtime.start_session_state_machine_run(StartSessionStateMachineRunCommand {
+        session_id: session.id.clone(), caller_bot_id: "driver-bot".into(),
+        definition_yaml: nested_authoring_yaml(),
+        participant_bindings: BTreeMap::from([("worker".into(), RuntimeParticipantBinding {
+            source: "manual".into(), bot_ids: vec!["driver-bot".into()], extensions: Default::default(),
+        })]),
+        opening_message: None, input: json!({"question": "nested one-shot"}), judge_available: true,
+    }).await.err().unwrap();
+    assert!(error.to_string().contains("loop.nesting"));
+    assert!(h.store.get_run_by_session_id(&session.id).await.unwrap().is_none());
+    assert!(h.delivery.commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn nested_start_resolves_bindings_used_only_by_deep_leaves() {
+    let h = Harness::new(&[]).await;
+    let mut definition: Value = serde_yaml::from_str(&nested_loop_yaml()).unwrap();
+    definition["participants"]["deep_reviewer"] = json!({"required": true});
+    definition["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["inner"]
+        ["loop"]["nodes"]["review"]["assignee"]["binding"] = json!("deep_reviewer");
+    let error = h.runtime.start_state_machine_run(command(
+        serde_yaml::to_string(&definition).unwrap(), false,
+    )).await.err().unwrap();
+    assert!(error.to_string().contains("deep_reviewer"), "{error}");
+    assert!(h.store.list_pending_runs(None, 32).await.unwrap().is_empty());
+    assert!(h.store.list_running_runs(None, 32).await.unwrap().is_empty());
+    assert!(h.delivery.commands.lock().await.is_empty());
+
+    definition["participants"]["deep_reviewer"]["bot_id"] = json!("driver-bot");
+    let started = h.start(serde_yaml::to_string(&definition).unwrap(), false).await;
+    assert_eq!(started.view.nodes.len(), 17);
+    assert_eq!(h.delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn thirty_two_nested_runs_coexist_with_complete_materialization() {
+    let h = Harness::new(&[]).await;
+    let started_at = std::time::Instant::now();
+    let mut run_ids = BTreeMap::new();
+    for _ in 0..32 {
+        let started = h.start(nested_loop_yaml(), false).await;
+        assert_eq!(started.view.nodes.len(), 17);
+        assert!(run_ids.insert(started.view.run.run_id, ()).is_none());
+    }
+    let elapsed = started_at.elapsed();
+    let running = h.store.list_running_runs(None, 32).await.unwrap();
+    assert_eq!(running.len(), 32);
+    assert_eq!(h.delivery.commands.lock().await.len(), 32);
+    let mut materialized = 0;
+    for run in running {
+        materialized += h.store.list_node_runs(&run.run_id).await.unwrap().len();
+    }
+    assert_eq!(materialized, 32 * 17);
+    eprintln!("nested capacity: concurrent_runs=32 materialized_nodes={materialized} start={elapsed:?}");
+}
+
+#[tokio::test]
+async fn nested_rerun_admission_is_checked_before_creating_a_child() {
+    let h = Harness::new(&[]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    h.fail(0, &started.view.run).await;
+    let runtime = h.runtime.with_nested_loop_execution_enabled(false);
+    let error = runtime.rerun_state_machine_run(RerunStateMachineCommand {
+        source_run_id: started.view.run.run_id.clone(), authenticated_human: None,
+    }).await.err().unwrap();
+    assert!(error.to_string().contains("loop.nesting"));
+    assert!(h.store.get_direct_rerun(&started.view.run.run_id).await.unwrap().is_none());
+    assert_eq!(h.delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn nested_rerun_reuses_compiler_v2_snapshot_despite_tighter_current_limits() {
+    let h = Harness::new(&[]).await;
+    let started = h.start(nested_loop_yaml(), false).await;
+    let source_run = &started.view.run;
+    let source_snapshot = h.store.get_run_snapshot(&source_run.run_id).await.unwrap().unwrap();
+    assert_eq!(h.fail(0, source_run).await.view.unwrap().run.status, StateMachineRunStatus::Failed);
+    wait_for_callback_status(&h.sessions, &source_run.session_id, "not_applicable").await;
+    h.definitions.hide_definitions.store(true, Ordering::SeqCst);
+    let runtime = h.runtime.with_fixed_loop_limits(bcs_config_api::FixedLoopLimits {
+        max_fixed_loop_depth: 1,
+        max_compiled_state_machine_nodes: 1,
+        ..Default::default()
+    });
+    let rerun = runtime.rerun_state_machine_run(RerunStateMachineCommand {
+        source_run_id: source_run.run_id.clone(), authenticated_human: None,
+    }).await.unwrap();
+    assert!(rerun.created);
+    assert_eq!(rerun.view.nodes.len(), 17);
+    assert_eq!(rerun.view.node_execution_metadata, started.view.node_execution_metadata);
+    assert!(rerun.view.nodes.iter().all(|node|
+        node.attempt == 0 && node.artifact_text.is_none() && node.outcome.is_none()));
+    let copied = h.store.get_run_snapshot(&rerun.view.run.run_id).await.unwrap().unwrap();
+    assert_eq!(serde_json::to_value(&copied.definition).unwrap(),
+        serde_json::to_value(&source_snapshot.definition).unwrap());
+    assert_eq!(serde_json::to_value(&copied.resolved_participant_bindings).unwrap(),
+        serde_json::to_value(&source_snapshot.resolved_participant_bindings).unwrap());
+    let copied_plan = copied.execution_plan.unwrap();
+    let source_plan = source_snapshot.execution_plan.unwrap();
+    assert_eq!(copied_plan.compiler_version, source_plan.compiler_version);
+    assert_eq!(copied_plan.content_hash, source_plan.content_hash);
+    assert_eq!(serde_json::to_value(copied_plan.plan).unwrap(),
+        serde_json::to_value(source_plan.plan).unwrap());
+    let request = h.delivery.commands.lock().await[1].clone();
+    let prompt = chat_send_params(&request).message.content.iter()
+        .filter_map(|block| block.text.as_deref()).collect::<Vec<_>>().join("\n");
+    assert!(prompt.contains("[Loop Path]\nouter: 1/2"), "{prompt}");
+    assert!(!prompt.contains("test delivery failure"), "{prompt}");
 }
 
 #[tokio::test]
@@ -271,6 +556,66 @@ async fn human_entry_query_and_notification_share_context_and_reject_previous_ro
 }
 
 #[tokio::test]
+async fn three_level_human_inputs_keep_previous_results_inside_each_parent_instance() {
+    let h = Harness::new(&["repeat", "done"]).await;
+    let started = h.start(three_level_human_yaml(), true).await;
+    let run = &started.view.run;
+    let plan = h.plan(&run.run_id).await;
+    assert_eq!(started.view.nodes.len(), 21);
+    assert!(h.delivery.commands.lock().await.is_empty());
+    let query = ListPendingHumanNodesCommand { run_id: run.run_id.clone(), caller_actor_id: "human_1001".into() };
+    let mut first_inner_by_parent = BTreeMap::new();
+    let mut stale_response = None;
+    for response_index in 0..20 {
+        let mut pending_nodes = h.runtime.list_pending_human_nodes(query.clone()).await.unwrap();
+        assert_eq!(pending_nodes.len(), 1);
+        let pending = pending_nodes.remove(0);
+        let execution = pending.execution.as_ref().expect("nested Human execution");
+        let path = execution.loop_path.as_ref().expect("complete nested loop path");
+        assert!((1..=3).contains(&path.len()));
+        if plan.node_metadata[&pending.node_id].is_loop_entry {
+            assert_eq!(pending.loop_context.as_ref().unwrap().loop_path.as_ref(), Some(path));
+        } else {
+            assert!(pending.loop_context.is_none());
+        }
+        if execution.definition_node_id == "inner_review" {
+            assert_eq!(path.len(), 3);
+            let parent = (path[0].iteration, path[1].iteration);
+            if path[2].iteration == 1 {
+                assert!(pending.loop_context.as_ref().unwrap().previous_result.is_none());
+                first_inner_by_parent.insert(parent, pending.node_id.clone());
+            } else {
+                let previous = pending.loop_context.as_ref().unwrap().previous_result.as_ref().unwrap();
+                assert_eq!(previous.execution_node_id, first_inner_by_parent[&parent]);
+                assert_eq!(previous.output, format!("human-result-{}", response_index - 1));
+            }
+        }
+        let events = h.channel.events.lock().await;
+        let ready = events.last().expect("HumanInputReady event");
+        assert_eq!(ready.node_id, pending.node_id);
+        assert_eq!(ready.execution.as_ref(), Some(execution));
+        assert_eq!(ready.loop_context.as_ref(), pending.loop_context.as_ref());
+        drop(events);
+        let response = RespondHumanNodeCommand {
+            run_id: run.run_id.clone(), node_id: pending.node_id.clone(),
+            caller_actor_id: "human_1001".into(), content: format!("human-result-{response_index}"),
+            source: HumanResponseSource::Http,
+        };
+        if stale_response.is_none() && execution.definition_node_id == "inner_review" {
+            stale_response = Some(response.clone());
+        }
+        h.runtime.respond_human_node(response).await.unwrap();
+    }
+    assert_eq!(first_inner_by_parent.len(), 4);
+    assert_eq!(h.channel.events.lock().await.len(), 20);
+    assert!(h.runtime.respond_human_node(stale_response.unwrap()).await.is_err());
+    assert_eq!(h.delivery.commands.lock().await.len(), 1);
+    assert_eq!(h.finish(0, run, "published").await.view.unwrap().run.status, StateMachineRunStatus::Completed);
+    let view = h.runtime.get_state_machine_run(&run.run_id).await.unwrap().unwrap();
+    assert!(view.nodes.iter().all(|node| node.status == StateMachineNodeStatus::Completed));
+}
+
+#[tokio::test]
 async fn snapshot_and_opening_write_failures_prevent_all_dispatch() {
     let h = Harness::new(&[]).await;
     h.definitions.fail_save.store(true, Ordering::SeqCst);
@@ -302,6 +647,48 @@ async fn retry_keeps_iteration_and_context_and_stale_completion_cannot_overwrite
     assert_eq!(view.nodes.iter().find(|node| node.node_id == iteration_id(&plan, 3)).unwrap().attempt, 0);
     assert!(h.prompt(3).await.contains("second-after-retry"));
     assert!(!h.prompt(3).await.contains("stale-"));
+}
+
+#[tokio::test]
+async fn nested_retry_keeps_the_full_instance_path_and_cancel_fences_late_completion() {
+    let h = Harness::new(&["revise"]).await;
+    let mut definition: Value = serde_yaml::from_str(&nested_loop_yaml()).unwrap();
+    definition["runtime"]["state_machine"]["defaults"] = json!({"max_attempts": 2});
+    let started = h.start(serde_yaml::to_string(&definition).unwrap(), false).await;
+    let run = &started.view.run;
+    let plan = h.plan(&run.run_id).await;
+    h.finish(0, run, "prepared").await;
+    h.finish(1, run, "drafted").await;
+
+    let original_prompt = h.prompt(2).await;
+    h.fail(2, run).await;
+    assert_eq!(h.prompt(3).await, original_prompt);
+    let review_id = plan.node_metadata.values().find(|metadata|
+        metadata.definition_node_id == "review"
+            && metadata.loop_path.as_ref().is_some_and(|path|
+                path[0].iteration == 1 && path[1].iteration == 1))
+        .unwrap().execution_node_id.clone();
+    let retried = h.store.get_node_run(&run.run_id, &review_id).await.unwrap().unwrap();
+    assert_eq!(retried.attempt, 1);
+    assert_eq!(retried.status, StateMachineNodeStatus::Running);
+
+    h.finish(2, run, "stale-review").await;
+    h.finish(3, run, "review-after-retry").await;
+    let next_prompt = h.prompt(4).await;
+    assert!(next_prompt.contains("[Loop Path]\nouter: 1/2\ninner: 2/3"), "{next_prompt}");
+    assert!(next_prompt.contains("review-after-retry"), "{next_prompt}");
+    assert!(!next_prompt.contains("stale-review"), "{next_prompt}");
+
+    let cancelled = h.runtime.cancel_state_machine_run(bcs_service_api::CancelStateMachineRunCommand {
+        run_id: run.run_id.clone(), reason: Some("cancel nested retry story".into()),
+    }).await.unwrap();
+    assert_eq!(cancelled.run.status, StateMachineRunStatus::Aborted);
+    let late = h.finish(4, run, "late-inner-result").await.view.unwrap();
+    assert_eq!(late.run.status, StateMachineRunStatus::Aborted);
+    assert!(!late.nodes.iter().any(|node| node.artifact_text.as_deref() == Some("late-inner-result")));
+    let review = late.nodes.iter().find(|node| node.node_id == review_id).unwrap();
+    assert_eq!(review.attempt, 1);
+    assert_eq!(review.artifact_text.as_deref(), Some("review-after-retry"));
 }
 
 #[tokio::test]
@@ -482,6 +869,63 @@ async fn parallel_body_join_and_next_iteration_use_the_designated_result() {
         assert_eq!(next.matches("designated-result").count(), 1);
         assert!(!next.contains("parallel-output"));
     }
+}
+
+#[tokio::test]
+async fn parallel_nested_child_loops_join_only_after_both_selected_exits() {
+    let h = Harness::new(&[]).await;
+    let task = || json!({
+        "kind": "bot_task", "display_name": "Nested work", "instruction": "Complete nested work.",
+        "assignee": {"type": "bot_binding", "binding": "worker"}
+    });
+    let child = |name: &str| json!({
+        "kind": "loop", "display_name": name, "loop": {
+            "mode": "fixed", "max_iterations": 2, "entry_node": "work", "result_node": "work",
+            "continue_outcomes": ["complete"], "break_outcomes": [],
+            "exhausted_outcome": "exhausted", "nodes": {"work": task()}
+        }, "transitions": {"exhausted": {"targets": ["assess"]}}
+    });
+    let definition = json!({
+        "api_version": "bcs.collaboration/v1", "id": "parallel-nested-runtime",
+        "version": 1, "name": "Parallel nested runtime",
+        "participants": {"worker": {"bot_id": "driver-bot", "required": true}},
+        "runtime": {"kind": "state_machine", "state_machine": {
+            "version": 2, "graph_mode": "hierarchical", "nodes": {
+                "outer": {"kind": "loop", "display_name": "Outer", "loop": {
+                    "mode": "fixed", "max_iterations": 1, "entry_node": "prepare", "result_node": "assess",
+                    "continue_outcomes": ["complete"], "break_outcomes": [],
+                    "exhausted_outcome": "outer_exhausted", "nodes": {
+                        "prepare": {"kind": "bot_task", "display_name": "Prepare",
+                            "assignee": {"type": "bot_binding", "binding": "worker"},
+                            "instruction": "Prepare.", "transitions": {"complete": {"targets": ["left", "right"]}}},
+                        "left": child("Left child"), "right": child("Right child"), "assess": task()}
+                }, "transitions": {"outer_exhausted": {"targets": ["publish"]}}},
+                "publish": {"kind": "bot_task", "display_name": "Publish",
+                    "assignee": {"type": "bot_binding", "binding": "worker"},
+                    "instruction": "Publish.", "final_output": true}
+            }}}
+    });
+    let started = h.start(serde_yaml::to_string(&definition).unwrap(), false).await;
+    let run = &started.view.run;
+    assert_eq!(started.view.nodes.len(), 7);
+    h.finish(0, run, "prepared").await;
+    assert_eq!(h.delivery.commands.lock().await.len(), 3);
+    h.finish(1, run, "left-first").await;
+    assert_eq!(h.delivery.commands.lock().await.len(), 4);
+    h.finish(3, run, "left-selected-result").await;
+    assert_eq!(h.delivery.commands.lock().await.len(), 4,
+        "shared join must wait for the right child Loop exit");
+    h.finish(2, run, "right-first").await;
+    assert_eq!(h.delivery.commands.lock().await.len(), 5);
+    h.finish(4, run, "right-selected-result").await;
+    assert_eq!(h.delivery.commands.lock().await.len(), 6);
+    let assess = h.prompt(5).await;
+    assert!(assess.contains("left-selected-result") && assess.contains("right-selected-result"),
+        "{assess}");
+    assert!(!assess.contains("left-first") && !assess.contains("right-first"), "{assess}");
+    h.finish(5, run, "assessed").await;
+    assert_eq!(h.finish(6, run, "published").await.view.unwrap().run.status,
+        StateMachineRunStatus::Completed);
 }
 
 #[tokio::test]

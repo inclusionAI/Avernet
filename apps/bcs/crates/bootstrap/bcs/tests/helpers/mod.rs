@@ -113,6 +113,21 @@ pub async fn start_test_server_with_config(
         .expect("Failed to start server")
 }
 
+pub async fn start_persistent_test_server_with_config(
+    config: BcsConfig,
+) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
+    INIT_AUTH_MOCK.call_once(|| {
+        // SAFETY: runs exactly once before any server starts handling requests.
+        unsafe { std::env::set_var("BCS_AUTH_MOCK", "1") };
+    });
+    BcsServer::new_with_storage(config)
+        .await
+        .expect("Failed to initialize persistent test server")
+        .run_on_random_port()
+        .await
+        .expect("Failed to start persistent test server")
+}
+
 pub async fn start_test_server_with_state(
     bots_dir: &PathBuf,
 ) -> (

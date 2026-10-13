@@ -15,6 +15,18 @@ pub(super) fn render(event: &HumanInputReadyEvent) -> ServiceResult<String> {
         {
             return Err(invalid());
         }
+        let path = match &context.loop_path {
+            Some(path) if !path.is_empty() && path.iter().all(|frame|
+                !frame.loop_id.trim().is_empty() && frame.iteration > 0
+                    && frame.iteration <= frame.max_iterations)
+                && path.last().is_some_and(|frame| frame.loop_id == context.loop_id
+                    && frame.iteration == context.iteration
+                    && frame.max_iterations == context.max_iterations) => Some(path.iter()
+                        .map(|frame| format!("{} {}/{}", frame.loop_id, frame.iteration, frame.max_iterations))
+                        .collect::<Vec<_>>().join(" → ")),
+            Some(_) => return Err(invalid()),
+            None => None,
+        };
         let previous = match (&context.previous_result, context.iteration) {
             (None, 1) => "本轮没有上一轮结果。".to_string(),
             (Some(previous), iteration) if iteration > 1
@@ -36,7 +48,8 @@ pub(super) fn render(event: &HumanInputReadyEvent) -> ServiceResult<String> {
             }
             _ => return Err(invalid()),
         };
-        sections.push(format!("【Loop 上下文】\nLoop：{}\n轮次：{}/{}\n\n{previous}",
+        sections.push(format!("【Loop 上下文】\n{}Loop：{}\n轮次：{}/{}\n\n{previous}",
+            path.map(|path| format!("路径：{path}\n")).unwrap_or_default(),
             context.loop_id, context.iteration, context.max_iterations));
     }
     if event.notification_mode == HumanInputNotificationMode::DirectAssignee {

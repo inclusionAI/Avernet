@@ -3,6 +3,7 @@
 
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=(story_fixed_loop_human_editor_workflow)
+    E2E_TESTS_STORIES+=(story_nested_fixed_loop_workflows)
 fi
 
 story_fixed_loop_human_editor_workflow() {
@@ -16,4 +17,15 @@ story_fixed_loop_human_editor_workflow() {
         --cli "$BCS_CLI_BIN_PATH" --driver "$BOT_PM_UUID" \
         --human "$BCS_MOCK_USER_ID" || result=$?
     assert_eq "Loop workflows preserve inputs, decisions, history, and final publication" "$result" "0"
+}
+
+story_nested_fixed_loop_workflows() {
+    info "Story: Nested Bot and three-level Human Loop routing, isolation, and history"
+    get_bcs_cli_bin >/dev/null || return
+    local result=0
+    python3 "$SCRIPT_DIR/nested_fixed_loop_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --cli "$BCS_CLI_BIN_PATH" --driver "$BOT_PM_UUID" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Nested Loop workflows preserve paths, isolation, skips, history, and stale-event fences" "$result" "0"
 }

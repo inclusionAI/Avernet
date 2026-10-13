@@ -322,6 +322,10 @@ pub struct CollaborationConfig {
     /// Disabled by default; deployments must opt in explicitly.
     #[serde(default)]
     pub loop_execution_enabled: bool,
+    /// Admit new Runs whose fixed Loop bodies contain another fixed Loop.
+    /// Existing admitted Runs are not governed by this switch.
+    #[serde(default)]
+    pub nested_loop_execution_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +435,7 @@ impl Default for CollaborationConfig {
             templates: CollaborationTemplatesConfig::default(),
             fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
             loop_execution_enabled: false,
+            nested_loop_execution_enabled: false,
         }
     }
 }
@@ -1695,6 +1700,14 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    if config.collaboration.nested_loop_execution_enabled
+        && !config.collaboration.loop_execution_enabled
+    {
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "collaboration.nested_loop_execution_enabled requires collaboration.loop_execution_enabled=true",
+        )));
+    }
     config.provider_http.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -2349,13 +2362,16 @@ x-collector-route = "collector-local"
         let config: BcsConfig = toml::from_str(r#"
             bots_base_dir = "/bots"
             [collaboration.fixed_loop_limits]
+            max_fixed_loop_depth = 3
             max_fixed_loop_iterations = 4
             max_fixed_loop_body_nodes = 8
             max_compiled_state_machine_nodes = 64
             max_compiled_state_machine_bytes = 65536
         "#).unwrap();
+        assert_eq!(config.collaboration.fixed_loop_limits.max_fixed_loop_depth, 3);
         assert_eq!(config.collaboration.fixed_loop_limits.max_fixed_loop_iterations, 4);
         assert!(!config.collaboration.loop_execution_enabled);
+        assert!(!config.collaboration.nested_loop_execution_enabled);
         assert!(config.collaboration.fixed_loop_limits.validate().is_ok());
         let mut invalid = config.collaboration.fixed_loop_limits;
         invalid.max_compiled_state_machine_bytes = 0;
@@ -2373,6 +2389,20 @@ x-collector-route = "collector-local"
         assert!(config.collaboration.loop_execution_enabled);
         assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nloop_execution_enabled = 'true'").is_err());
         assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nexperimental_fixed_loop_execution = true").is_err());
+    }
+
+    #[test]
+    fn nested_loop_execution_requires_total_loop_execution() {
+        let invalid: BcsConfig = toml::from_str(
+            "bots_base_dir = '/bots'\n[collaboration]\nnested_loop_execution_enabled = true",
+        ).unwrap();
+        assert!(validate_loaded_config(&invalid).unwrap_err().to_string().contains(
+            "nested_loop_execution_enabled requires collaboration.loop_execution_enabled=true"
+        ));
+        let valid: BcsConfig = toml::from_str(
+            "bots_base_dir = '/bots'\n[collaboration]\nloop_execution_enabled = true\nnested_loop_execution_enabled = true",
+        ).unwrap();
+        assert!(valid.collaboration.nested_loop_execution_enabled);
     }
 
     #[test]

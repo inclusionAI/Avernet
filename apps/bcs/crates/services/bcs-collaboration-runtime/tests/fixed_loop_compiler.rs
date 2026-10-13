@@ -7,6 +7,7 @@ use bcs_domain::{
 };
 use bcs_collaboration_runtime::fixed_loop::{
     compile_authoring_definition, execution_plan_content_hash, FIXED_LOOP_COMPILER_VERSION,
+    NESTED_FIXED_LOOP_COMPILER_VERSION,
 };
 use bcs_collaboration_runtime::validation::validate_authoring_definition_yaml_with_limits;
 use bcs_collaboration_runtime::{validate_authoring_definition_yaml, validate_definition};
@@ -14,6 +15,8 @@ use bcs_service_api::ValidateCollaborationDefinitionYamlCommand;
 use serde_json::{json, Value};
 
 const YAML: &str = include_str!("fixtures/fixed_loop.yaml");
+const NESTED_YAML: &str = include_str!("fixtures/nested_fixed_loop.yaml");
+const THREE_LEVEL_HUMAN_YAML: &str = include_str!("fixtures/three_level_human_loop.yaml");
 
 fn yaml_block(section: &str) -> &str {
     section.split_once("```yaml\n").unwrap().1.split_once("\n```").unwrap().0
@@ -40,6 +43,288 @@ fn fixture() -> Value {
     definition.id = "fixed-loop-fixture".into();
     definition.version = 7;
     serde_json::to_value(definition).unwrap()
+}
+
+fn nested_fixture() -> Value {
+    let mut definition: CollaborationDefinition = serde_yaml::from_str(NESTED_YAML).unwrap();
+    definition.id = "nested-loop-fixture".into();
+    definition.version = 11;
+    serde_json::to_value(definition).unwrap()
+}
+
+#[test]
+fn nested_example_expands_to_v2_with_complete_instance_paths() {
+    let definition: CollaborationDefinition = serde_json::from_value(nested_fixture()).unwrap();
+    let compiled = compile_authoring_definition(definition, &FixedLoopLimits::default()).unwrap();
+    assert!(compiled.definition.requires.as_ref().unwrap().server_features.iter()
+        .any(|feature| feature == "state_machine.loop.nesting"));
+    let plan = compiled.plan.unwrap();
+    assert_eq!(plan.compiler_version, NESTED_FIXED_LOOP_COMPILER_VERSION);
+    assert_eq!(plan.state_machine.nodes.len(), 17);
+    assert_eq!(plan.state_machine.nodes.values().filter(|node| node.final_output).count(), 1);
+    assert!(plan.state_machine.nodes["publish"].final_output);
+    assert_eq!(plan.node_metadata.values().filter(|meta|
+        meta.loop_path.as_ref().is_some_and(|path| path.len() == 1)).count(), 4);
+    assert_eq!(plan.node_metadata.values().filter(|meta|
+        meta.loop_path.as_ref().is_some_and(|path| path.len() == 2)).count(), 12);
+    assert!(plan.node_metadata["publish"].loop_path.is_none());
+
+    for outer_iteration in 1..=2 {
+        for inner_iteration in 1..=3 {
+            let draft = plan.node_metadata.values().find(|meta| {
+                meta.definition_node_id == "draft" && meta.loop_path.as_ref().is_some_and(|path| {
+                    path[0].loop_id == "outer" && path[0].iteration == outer_iteration
+                        && path[1].loop_id == "inner" && path[1].iteration == inner_iteration
+                })
+            }).unwrap();
+            if inner_iteration == 1 {
+                assert!(draft.previous_result_node_id.is_none());
+            } else {
+                let previous = &plan.node_metadata[draft.previous_result_node_id.as_ref().unwrap()];
+                let path = previous.loop_path.as_ref().unwrap();
+                assert_eq!(previous.definition_node_id, "review");
+                assert_eq!(path[0].iteration, outer_iteration);
+                assert_eq!(path[1].iteration, inner_iteration - 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_preview_uses_full_definition_paths_for_loop_descriptors() {
+    let outcome = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: NESTED_YAML.into(), judge_available: true,
+    });
+    assert!(outcome.valid, "{:?}", outcome.errors);
+    assert!(outcome.warnings.iter().any(|warning|
+        warning.code == "VALIDATION_ONLY_FEATURE" && warning.message.contains("loop.nesting")));
+    let graph = outcome.graph.unwrap();
+    assert_eq!(graph.nodes.len(), 17);
+    assert_eq!(graph.loops.keys().map(String::as_str).collect::<Vec<_>>(), vec!["outer", "outer/inner"]);
+    assert_eq!(graph.loops["outer"].body_node_ids, vec!["assess", "inner", "prepare"]);
+    assert_eq!(graph.loops["outer/inner"].body_node_ids, vec!["draft", "review"]);
+}
+
+#[test]
+fn nested_depth_limit_rejects_before_expansion() {
+    let definition = serde_json::from_value(nested_fixture()).unwrap();
+    let limits = FixedLoopLimits { max_fixed_loop_depth: 1, ..Default::default() };
+    let error = compile_authoring_definition(definition, &limits).err().unwrap();
+    assert_eq!(error.code, "INVALID_DEFINITION");
+    assert!(error.path.ends_with("outer.loop.nodes.inner.loop"), "{}", error.path);
+    assert!(error.message.contains("max_fixed_loop_depth"));
+}
+
+#[test]
+fn compiler_version_follows_actual_depth_and_nested_cost_is_checked_before_expansion() {
+    let mut single = fixture();
+    single["requires"]["server_features"] = json!(["state_machine.loop.nesting"]);
+    assert_eq!(compile(single).compiler_version, FIXED_LOOP_COMPILER_VERSION);
+
+    let nested = serde_json::from_value(nested_fixture()).unwrap();
+    let limits = FixedLoopLimits { max_compiled_state_machine_nodes: 16, ..Default::default() };
+    let error = compile_authoring_definition(nested, &limits).err().unwrap();
+    assert!(error.message.contains("max_compiled_state_machine_nodes"));
+
+    let nested: CollaborationDefinition = serde_json::from_value(nested_fixture()).unwrap();
+    let bytes = serde_json::to_vec(&compile(nested_fixture())).unwrap().len();
+    assert!(compile_authoring_definition(nested.clone(), &FixedLoopLimits {
+        max_compiled_state_machine_bytes: bytes, ..Default::default()
+    }).is_ok());
+    let error = compile_authoring_definition(nested, &FixedLoopLimits {
+        max_compiled_state_machine_bytes: bytes - 1, ..Default::default()
+    }).err().unwrap();
+    assert!(error.message.contains("max_compiled_state_machine_bytes"));
+
+    let mut overflow: CollaborationDefinition = serde_yaml::from_str(THREE_LEVEL_HUMAN_YAML).unwrap();
+    let CollaborationRuntimeDefinition::StateMachine(machine) = &mut overflow.runtime else { panic!() };
+    let outer = machine.nodes.get_mut("outer").unwrap().loop_definition.as_mut().unwrap();
+    outer.max_iterations = u32::MAX;
+    let middle = outer.nodes.get_mut("middle").unwrap().loop_definition.as_mut().unwrap();
+    middle.max_iterations = u32::MAX;
+    middle.nodes.get_mut("inner").unwrap().loop_definition.as_mut().unwrap().max_iterations = u32::MAX;
+    let error = compile_authoring_definition(overflow, &FixedLoopLimits {
+        max_fixed_loop_iterations: u32::MAX,
+        max_fixed_loop_body_nodes: usize::MAX,
+        max_compiled_state_machine_nodes: usize::MAX,
+        max_compiled_state_machine_bytes: usize::MAX,
+        ..Default::default()
+    }).err().unwrap();
+    assert!(error.message.contains("overflow"));
+}
+
+#[test]
+fn nested_capacity_boundaries_cover_near_maximum_nodes_and_plan_bytes() {
+    let mut near_nodes: CollaborationDefinition = serde_json::from_value(nested_fixture()).unwrap();
+    let CollaborationRuntimeDefinition::StateMachine(machine) = &mut near_nodes.runtime else { panic!() };
+    let outer = machine.nodes.get_mut("outer").unwrap().loop_definition.as_mut().unwrap();
+    outer.max_iterations = 31;
+    outer.nodes.get_mut("inner").unwrap().loop_definition.as_mut().unwrap().max_iterations = 32;
+    let started = std::time::Instant::now();
+    let compiled = compile_authoring_definition(near_nodes, &FixedLoopLimits {
+        max_compiled_state_machine_bytes: 16 * 1024 * 1024,
+        ..Default::default()
+    }).unwrap().plan.unwrap();
+    let node_elapsed = started.elapsed();
+    assert_eq!(compiled.state_machine.nodes.len(), 2047);
+    let serialized_bytes = serde_json::to_vec(&compiled).unwrap().len();
+    eprintln!("nested capacity: nodes=2047 plan_bytes={serialized_bytes} compile={node_elapsed:?}");
+
+    let base: CollaborationDefinition = serde_json::from_value(nested_fixture()).unwrap();
+    let plan_limit = FixedLoopLimits::default().max_compiled_state_machine_bytes;
+    let plan_bytes = |padding: usize| {
+        let mut definition = base.clone();
+        let CollaborationRuntimeDefinition::StateMachine(machine) = &mut definition.runtime else { panic!() };
+        machine.nodes.get_mut("outer").unwrap().loop_definition.as_mut().unwrap()
+            .nodes.get_mut("inner").unwrap().loop_definition.as_mut().unwrap()
+            .nodes.get_mut("draft").unwrap().instruction = Some("x".repeat(padding));
+        let plan = compile_authoring_definition(definition, &FixedLoopLimits {
+            max_compiled_state_machine_bytes: usize::MAX,
+            ..Default::default()
+        }).unwrap().plan.unwrap();
+        (serde_json::to_vec(&plan).unwrap().len(), plan)
+    };
+    let mut low = 0;
+    let mut high = plan_limit;
+    while low + 1 < high {
+        let middle = low + (high - low) / 2;
+        if plan_bytes(middle).0 <= plan_limit { low = middle; } else { high = middle; }
+    }
+    let (bytes, plan) = plan_bytes(low);
+    assert!(bytes <= plan_limit && plan_limit - bytes < 64, "bytes={bytes}, limit={plan_limit}");
+    let definition = serde_json::from_value::<CollaborationDefinition>(nested_fixture()).unwrap();
+    let mut near_bytes = definition;
+    let CollaborationRuntimeDefinition::StateMachine(machine) = &mut near_bytes.runtime else { panic!() };
+    machine.nodes.get_mut("outer").unwrap().loop_definition.as_mut().unwrap()
+        .nodes.get_mut("inner").unwrap().loop_definition.as_mut().unwrap()
+        .nodes.get_mut("draft").unwrap().instruction = Some("x".repeat(low));
+    let started = std::time::Instant::now();
+    assert!(compile_authoring_definition(near_bytes.clone(), &FixedLoopLimits::default()).is_ok());
+    let byte_elapsed = started.elapsed();
+    let CollaborationRuntimeDefinition::StateMachine(machine) = &mut near_bytes.runtime else { panic!() };
+    machine.nodes.get_mut("outer").unwrap().loop_definition.as_mut().unwrap()
+        .nodes.get_mut("inner").unwrap().loop_definition.as_mut().unwrap()
+        .nodes.get_mut("draft").unwrap().instruction = Some("x".repeat(high));
+    assert!(compile_authoring_definition(near_bytes, &FixedLoopLimits::default()).is_err());
+    eprintln!("nested capacity: nodes={} plan_bytes={bytes} compile={byte_elapsed:?}",
+        plan.state_machine.nodes.len());
+}
+
+#[test]
+fn three_level_human_fixture_compiles_with_complete_paths_and_checked_cost() {
+    let validation = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: THREE_LEVEL_HUMAN_YAML.into(), judge_available: true,
+    });
+    assert!(validation.valid, "{:?}", validation.errors);
+    let mut definition: CollaborationDefinition = serde_yaml::from_str(THREE_LEVEL_HUMAN_YAML).unwrap();
+    definition.id = "three-level-human".into();
+    definition.version = 3;
+    let compiled = compile_authoring_definition(definition, &FixedLoopLimits::default()).unwrap();
+    let plan = compiled.plan.unwrap();
+    assert_eq!(plan.compiler_version, NESTED_FIXED_LOOP_COMPILER_VERSION);
+    assert_eq!(plan.state_machine.nodes.len(), 21);
+    let deepest = plan.node_metadata.values().filter(|meta|
+        meta.loop_path.as_ref().is_some_and(|path| path.len() == 3)).collect::<Vec<_>>();
+    assert_eq!(deepest.len(), 8);
+    assert!(deepest.iter().all(|meta| meta.definition_node_id == "inner_review"));
+    assert!(deepest.iter().filter(|meta| meta.iteration == Some(1))
+        .all(|meta| meta.previous_result_node_id.is_none()));
+
+    let definition: CollaborationDefinition = serde_yaml::from_str(THREE_LEVEL_HUMAN_YAML).unwrap();
+    assert!(compile_authoring_definition(definition.clone(), &FixedLoopLimits {
+        max_fixed_loop_depth: 3, ..Default::default()
+    }).is_ok());
+    let error = compile_authoring_definition(definition, &FixedLoopLimits {
+        max_fixed_loop_depth: 2, ..Default::default()
+    }).err().unwrap();
+    assert!(error.path.ends_with("outer.loop.nodes.middle.loop.nodes.inner.loop"));
+}
+
+#[test]
+fn parent_child_and_parallel_sibling_loops_with_repeated_local_ids_are_distinct() {
+    let mut same_name = nested_fixture();
+    let outer_body = same_name["runtime"]["state_machine"]["nodes"]["outer"]["loop"]
+        .as_object_mut().unwrap();
+    let child = outer_body["nodes"].as_object_mut().unwrap().remove("inner").unwrap();
+    outer_body["nodes"]["outer"] = child;
+    outer_body["nodes"]["prepare"]["transitions"]["complete"]["targets"] = json!(["outer"]);
+    let plan = compile(same_name);
+    assert!(plan.node_metadata.values().any(|metadata| metadata.loop_path.as_ref().is_some_and(|path|
+        path.iter().map(|frame| frame.loop_id.as_str()).collect::<Vec<_>>() == ["outer", "outer"]
+    )));
+
+    let mut parallel = nested_fixture();
+    let sibling = parallel["runtime"]["state_machine"]["nodes"]["outer"].clone();
+    parallel["runtime"]["state_machine"]["nodes"]["outer_b"] = sibling;
+    parallel["runtime"]["state_machine"]["nodes"]["start"] = json!({
+        "kind": "bot_task",
+        "display_name": "Start both reviews",
+        "assignee": {"type": "bot_binding", "binding": "worker"},
+        "instruction": "Start both reviews.",
+        "transitions": {"complete": {"targets": ["outer", "outer_b"]}}
+    });
+    let plan = compile(parallel);
+    assert_eq!(plan.state_machine.nodes.len(), 34);
+    let paths = plan.node_metadata.values().filter_map(|metadata| metadata.loop_path.as_ref())
+        .map(|path| path.iter().map(|frame| frame.loop_id.as_str()).collect::<Vec<_>>())
+        .collect::<BTreeSet<_>>();
+    assert!(paths.contains(&vec!["outer", "inner"]));
+    assert!(paths.contains(&vec!["outer_b", "inner"]));
+    assert_eq!(plan.node_metadata.len(), plan.node_metadata.keys().collect::<BTreeSet<_>>().len());
+}
+
+#[test]
+fn nested_ordinary_transition_cannot_escape_its_scope() {
+    let mut value = nested_fixture();
+    value["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["inner"]
+        ["loop"]["nodes"]["draft"]["transitions"]["complete"]["targets"] = json!(["assess"]);
+    let error = compile_authoring_definition(
+        serde_json::from_value(value).unwrap(), &FixedLoopLimits::default(),
+    ).err().unwrap();
+    assert!(error.path.ends_with("outer.loop.nodes.inner.loop.nodes.draft.transitions.complete.targets"));
+    assert!(error.message.contains("same body"));
+}
+
+#[test]
+fn serial_and_parallel_child_loops_resolve_entries_and_shared_join_in_parent_scope() {
+    let with_second_child = || {
+        let mut value = nested_fixture();
+        let child = value["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["inner"].clone();
+        value["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["inner2"] = child;
+        value
+    };
+
+    let mut serial = with_second_child();
+    for outcome in ["approved", "exhausted"] {
+        serial["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["inner"]
+            ["transitions"][outcome]["targets"] = json!(["inner2"]);
+    }
+    let serial = compile(serial);
+    assert_eq!(serial.state_machine.nodes.len(), 29);
+    assert!(serial.edge_metadata.iter().any(|edge| {
+        let source = &serial.node_metadata[&edge.source_execution_node_id];
+        let target = &serial.node_metadata[&edge.target_execution_node_id];
+        source.definition_node_id == "review"
+            && source.loop_path.as_ref().is_some_and(|path| path[0].iteration == 1 && path[1].loop_id == "inner")
+            && target.is_loop_entry
+            && target.loop_path.as_ref().is_some_and(|path| path[0].iteration == 1 && path[1].loop_id == "inner2" && path[1].iteration == 1)
+    }));
+
+    let mut parallel = with_second_child();
+    parallel["runtime"]["state_machine"]["nodes"]["outer"]["loop"]["nodes"]["prepare"]
+        ["transitions"]["complete"]["targets"] = json!(["inner", "inner2"]);
+    let parallel = compile(parallel);
+    assert_eq!(parallel.state_machine.nodes.len(), 29);
+    let assess = parallel.node_metadata.values().find(|metadata| {
+        metadata.definition_node_id == "assess"
+            && metadata.loop_path.as_ref().is_some_and(|path| path.len() == 1 && path[0].iteration == 1)
+    }).unwrap();
+    let incoming_children = parallel.edge_metadata.iter()
+        .filter(|edge| edge.target_execution_node_id == assess.execution_node_id)
+        .filter_map(|edge| parallel.node_metadata[&edge.source_execution_node_id].loop_path.as_ref())
+        .map(|path| path[1].loop_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(incoming_children, BTreeSet::from(["inner", "inner2"]));
 }
 
 #[test]
@@ -127,6 +412,35 @@ fn seeded_research_writing_loops_have_independent_bodies_and_explicit_exit_route
                 }
             }
         }
+    }
+}
+
+#[test]
+fn seeded_nested_review_loops_compile_with_scoped_parent_and_child_instances() {
+    for yaml in [
+        include_str!("../../../../seeds/collaboration-templates/zh-CN/nested-review-loops.yaml"),
+        include_str!("../../../../seeds/collaboration-templates/en-US/nested-review-loops.yaml"),
+    ] {
+        let validation = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+            definition_yaml: yaml.into(), judge_available: true,
+        });
+        assert!(validation.valid, "{:?}", validation.errors);
+        let graph = validation.graph.unwrap();
+        assert_eq!(graph.loops.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["delivery_cycles", "delivery_cycles/review_rounds"]);
+
+        let definition: CollaborationDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert!(definition.uses_judge());
+        let plan = compile(serde_json::to_value(definition).unwrap());
+        assert_eq!(plan.compiler_version, NESTED_FIXED_LOOP_COMPILER_VERSION);
+        assert_eq!(plan.state_machine.nodes.len(), 17);
+        assert_eq!(plan.state_machine.nodes.values().filter(|node| node.final_output).count(), 1);
+        assert!(plan.state_machine.nodes["finalize"].final_output);
+        assert_eq!(plan.node_metadata.values().filter(|node|
+            node.loop_path.as_ref().is_some_and(|path| path.len() == 1)).count(), 4);
+        assert_eq!(plan.node_metadata.values().filter(|node|
+            node.loop_path.as_ref().is_some_and(|path| path.len() == 2)).count(), 12);
+        assert!(plan.node_metadata["finalize"].loop_path.is_none());
     }
 }
 
@@ -442,7 +756,7 @@ fn unsupported_body_capabilities_and_overlong_outer_ids_are_rejected() {
 }
 
 #[test]
-fn reserved_ids_nested_loops_and_missing_final_are_rejected() {
+fn reserved_ids_child_loop_as_entry_and_missing_final_are_rejected() {
     let mut reserved = fixture();
     let node = reserved["runtime"]["state_machine"]["nodes"].as_object_mut().unwrap().remove("prepare").unwrap();
     reserved["runtime"]["state_machine"]["nodes"]["ln-reserved"] = node;

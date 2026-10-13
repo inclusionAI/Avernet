@@ -116,6 +116,10 @@ dispatcher-to-Send boundary without native inject.
   of the execution switch. V1 omits these fields; legacy Run/Node rows without
   snapshots retain their existing raw read path. Present v2 snapshots with a
   missing, corrupt or unsupported plan fail instead of returning partial metadata.
+  Compiler v2 nested leaves carry a nonempty outer-to-inner `loop_path`; the
+  legacy loop fields continue to identify its nearest frame. Pending HumanInput,
+  HumanInputReady and frozen State Machine history metadata reuse that same
+  execution object. Compiler v1 payloads omit `loop_path` byte-for-byte.
   Both HTTP adapters, public Session creation, OpenAPI and panel DTOs preserve
   the projection. Graph node `outcome` is the saved actual outcome; consumers
   compare it with edge.outcome instead of inferring selection from target state.
@@ -354,8 +358,8 @@ Actor-selection semantics, and the crate does not own concrete runtime behavior.
 
 ## Tests
 
-- `cargo test --package bcs-service-api --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs-service-api --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs-service-api --manifest-path apps/bcs/Cargo.toml`
+- `cargo check --package bcs-service-api --all-targets --manifest-path apps/bcs/Cargo.toml`
 
 ## Friend connection list contract
 

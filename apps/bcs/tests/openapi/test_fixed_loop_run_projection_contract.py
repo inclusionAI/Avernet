@@ -71,6 +71,31 @@ def test_present_execution_metadata_requires_all_fields(contract, fixture, field
         jsonschema.validate(value, contract[schema])
 
 
+def test_nested_execution_path_is_strict_and_preserves_nearest_frame(contract):
+    execution = {
+        "definition_node_id": "review",
+        "loop_id": "inner",
+        "iteration": 2,
+        "max_iterations": 3,
+        "loop_path": [
+            {"loop_id": "outer", "iteration": 1, "max_iterations": 2},
+            {"loop_id": "inner", "iteration": 2, "max_iterations": 3},
+        ],
+    }
+    schema = contract["StateMachineRunView"]["properties"]["node_execution_metadata"]["additionalProperties"]
+    jsonschema.validate(execution, schema)
+    assert execution["loop_path"][-1] == {
+        key: execution[key] for key in ["loop_id", "iteration", "max_iterations"]
+    }
+    for broken in [
+        {**execution, "loop_path": []},
+        {**execution, "loop_path": [{"loop_id": "outer", "iteration": 0, "max_iterations": 2}]},
+        {**execution, "loop_path": [{"loop_id": "outer", "iteration": 1, "max_iterations": 2, "extra": True}]},
+    ]:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(broken, schema)
+
+
 def test_v1_omits_new_fields_without_changing_existing_shapes(contract, fixture):
     run = fixture["run"]
     del run["node_execution_metadata"]

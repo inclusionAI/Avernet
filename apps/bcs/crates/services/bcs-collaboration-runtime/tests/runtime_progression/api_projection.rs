@@ -143,6 +143,7 @@ async fn first_and_later_pending_human_context_matches_node_and_run_metadata() {
         }).await.unwrap().remove(0);
         let context = pending.loop_context.unwrap();
         let execution = &started.view.node_execution_metadata.as_ref().unwrap()[&pending.node_id];
+        assert_eq!(pending.execution.as_ref(), Some(execution));
         assert_eq!(context.iteration, iteration); assert_eq!(context.iteration, execution.iteration);
         assert_eq!(context.loop_id, execution.loop_id); assert_eq!(context.max_iterations, execution.max_iterations);
         if iteration == 1 { assert!(context.previous_result.is_none()); }

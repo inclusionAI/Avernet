@@ -669,6 +669,7 @@ async fn new_command_is_not_consumed_by_active_human_input() -> TestResult {
             session_id,
             run_id: "state_run_1".to_string(),
             node_id: "human_review".to_string(),
+            execution: None,
             display_name: "Human review".to_string(),
             instruction: "Review the draft".to_string(),
             assignee_actor_id: "human_u1".to_string(),
