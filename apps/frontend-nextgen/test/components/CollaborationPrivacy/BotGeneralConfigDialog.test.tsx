@@ -39,12 +39,13 @@ const overviewWithBot = (bot: CollaborationBot): CollaborationPrivacyOverview =>
   bots: [bot],
 });
 
-const rowBot = (spaceKind: 'personal' | 'team' = 'personal') =>
+const rowBot = (spaceKind: 'personal' | 'team' = 'personal', overrides: Record<string, unknown> = {}) =>
   mapBotDto({
     bot_id: 'bot-1',
     bot_name: '通用配置助手',
     engine: 'openclaw',
     status: 'ACTIVE',
+    ...overrides,
     ...(spaceKind === 'team' ? { space: { space_id: '12', kind: 'team' } } : {}),
   }).item;
 
@@ -149,6 +150,49 @@ describe('BotGeneralConfigDialog 通用配置弹窗（collab-permission-entry-mi
     dialog.getAllByRole('switch').forEach((control) => expect(control).toBeDisabled());
   });
 });
+
+describe('BotGeneralConfigDialog Coding Bot 协作能力裁剪', () => {
+  const codingBotRow = (capabilities: Record<string, unknown>) =>
+    rowBot('personal', {
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: { capabilities },
+      },
+    });
+
+  it('模板未声明 BCN 时隐藏整个协作能力分组', async () => {
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    const bot = codingBotRow({ member_management: true });
+    expect(bot.runtime.isAgentCodingBot).toBe(true);
+    expect(bot.runtime.bcnEnabled).toBe(false);
+
+    render(<BotGeneralConfigDialog bot={bot} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('Bot 可见性')).toBeInTheDocument());
+    expect(screen.queryByRole('heading', { level: 4, name: '协作能力' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('switch', { name: /参与协作群聊|公开 Bot 画像|任务认领|Dream Mode/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('模板声明 BCN 时仅展示参与协作群聊', async () => {
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(makeBot('bot-1:900004')));
+
+    const bot = codingBotRow({ enable_bcn_network: true });
+    expect(bot.runtime.bcnEnabled).toBe(true);
+
+    render(<BotGeneralConfigDialog bot={bot} onClose={jest.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { level: 4, name: '协作能力' })).toBeInTheDocument();
+    expect(screen.queryByText('公开 Bot 画像')).not.toBeInTheDocument();
+    expect(screen.queryByText('任务认领')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dream Mode')).not.toBeInTheDocument();
+  });
+});
+
 describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:INTERNAL × 团队空间）', () => {
   const internalCapabilities = {
     getGeneralConfigPublishApprovalEnabled: () => ({ status: 'available', value: true }),
