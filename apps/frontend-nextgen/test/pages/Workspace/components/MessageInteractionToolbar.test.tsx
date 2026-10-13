@@ -78,6 +78,20 @@ describe('MessageInteractionToolbar', () => {
     expect(await screen.findByTestId('message-copy-action-feedback')).toHaveTextContent('复制失败');
     expect(await screen.findByRole('button', { name: '复制失败' })).toBeInTheDocument();
   });
+
+  it('revealOnHover 时默认隐藏，悬停宿主 .group 行/键盘聚焦再显；默认仍常显', () => {
+    const { rerender } = render(
+      <MessageCopyAction testId="message-copy-action-hover" align="left" onCopy={jest.fn()} revealOnHover />,
+    );
+
+    const revealed = screen.getByTestId('message-copy-action-hover');
+    expect(revealed).toHaveClass('opacity-0', 'group-hover:opacity-100', 'group-focus-within:opacity-100');
+    // 按钮保持可交互——hover 只是视觉显隐，不卸载操作入口。
+    expect(screen.getByRole('button', { name: '复制整条消息' })).toBeInTheDocument();
+
+    rerender(<MessageCopyAction testId="message-copy-action-hover" align="left" onCopy={jest.fn()} />);
+    expect(screen.getByTestId('message-copy-action-hover')).not.toHaveClass('opacity-0');
+  });
 });
 
 describe('MessageSelectionToolbar', () => {

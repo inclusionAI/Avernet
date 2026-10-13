@@ -268,6 +268,8 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    # The minimal classification is tenant-wide, not owner-scoped.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/{{bot_id}}/classification"),
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
     # Source credentials (W3, #1471): tenant-level named objects on an
@@ -296,14 +298,35 @@ _NO_USER_DIMENSION = {
     # principal (+ the declared owner_user_id query on join); the principal
     # authorises the call and the owner names whose Bot is toggled, neither
     # acts as an end user, so there is no user_id axis on the wire.
-    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
-    ("delete", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription"),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
+    (
+        "delete",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
+    ),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/feed"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register"),
-    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-framework",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/trigger-self",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-register",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-loop/cron-remove",
+    ),
     # BBS unified writes name the author in the request body (author_type +
     # author_id); they are backend-API writes reachable by humans, Bots and
     # app-to-app callers, so there is no user_id axis on the wire.
@@ -526,7 +549,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # /bots/{bot_id}/bbs routes (single-bot GET browse-subscription, GET feed,
 # and the four browse-loop triggers) name their bot in the path, so
 # ``path`` grows 162 -> 168; ``query`` and ``none`` are unchanged.
-_BOT_ID_PLACEMENT = {"path": 172, "query": 1, "none": 125}
+# Minimal classification adds one Bot-path operation with no user dimension.
+_BOT_ID_PLACEMENT = {"path": 173, "query": 1, "none": 125}
 
 
 def _schema() -> dict:
@@ -719,9 +743,11 @@ def test_the_pinned_number_of_operations_take_it():
     # in the body). The owner is named on the wire rather than resolved from the
     # principal, so neither write names an end user and both drop out of
     # ``taking`` while moving into ``_NO_USER_DIMENSION``: 236 -> 234.
-# Merge from dev `193256c75` (Caller token per session): the
-# collaborating-Bot collection adds one user-scoped account-level read and
-# desktop-metadata awareness stays path-addressed; counts grow 1 here.
+    # Merge from dev `193256c75` (Caller token per session): the
+    # collaborating-Bot collection adds one user-scoped account-level read and
+    # desktop-metadata awareness stays path-addressed; counts grow 1 here.
+    # Minimal classification is tenant-wide and stays in
+    # ``_NO_USER_DIMENSION``, so the user-scoped count is unchanged.
     assert len(taking) == 246
 
 

@@ -35,4 +35,16 @@ describe('PublishTopicModal', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(screen.queryByText(/主题类型|投票/)).not.toBeInTheDocument();
   });
+
+  test('发布主题编辑视图展示返回箭头并可返回列表', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = jest.fn();
+    render(<PublishTopicModal open publishing={false} onOpenChange={onOpenChange} onPublish={jest.fn()} />);
+
+    const backButton = screen.getByRole('button', { name: '返回社区列表' });
+    expect(backButton).toBeVisible();
+    await user.click(backButton);
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

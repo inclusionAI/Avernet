@@ -168,6 +168,9 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
         canManageGroup={{ allowed: false }}
         activePanel="none"
         onTogglePanel={() => {}}
+        favorites={{ favorite: false, disabled: false, onToggle: () => {} }}
+        sidePaneOpen={false}
+        onToggleSidePane={() => {}}
         onRequestDissolve={() => {}}
         onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
         onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
@@ -179,10 +182,9 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
 }
 
 describe('GroupChatPane', () => {
-  it('renders group name and session title in header when group/session provided', () => {
+  it('header 呈现群身份 chip（群名），不显会话标题（artboard-010 口径，会话由 Key 胶囊表达）', () => {
     renderPane();
-    expect(screen.getByText(/主站协作群/)).toBeInTheDocument();
-    expect(screen.getByText(/主会话/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /主站协作群/ })).toBeInTheDocument();
   });
 
   it('shows Driver processing for a free-chat group independently from user request state', () => {
@@ -336,6 +338,9 @@ describe('GroupChatPane', () => {
           canManageGroup={{ allowed: false }}
           activePanel="none"
           onTogglePanel={() => {}}
+          favorites={{ favorite: false, disabled: false, onToggle: () => {} }}
+          sidePaneOpen={false}
+          onToggleSidePane={() => {}}
           onRequestDissolve={() => {}}
           onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
           onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
@@ -436,7 +441,7 @@ describe('GroupChatBubble alignment and participant identity', () => {
       </>,
     );
     expect((mockBubbleRenders[0].sender as { align?: string }).align).toBe('right');
-    expect((mockBubbleRenders[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--primary) / 0.1)');
+    expect((mockBubbleRenders[0].sender as { bubbleColor?: string }).bubbleColor).toBe('hsl(var(--muted))');
     expect((mockBubbleRenders[1].sender as { align?: string }).align).toBe('left');
     expect((mockBubbleRenders[1].sender as { bubbleColor?: string }).bubbleColor).toBeUndefined();
     const messageMeta = screen.getAllByTestId('message-sender-meta');
@@ -498,14 +503,22 @@ describe('GroupChatBubble edit action', () => {
   });
 });
 
-describe('GroupChatBubble permanent copy action', () => {
-  it('在用户与 Bot 消息末尾显性展示复制入口，并按消息方向对齐', () => {
+describe('GroupChatBubble copy action reveal', () => {
+  it('仅最后一条回复默认展示操作行；用户消息与非末尾回复 hover 时才展示', () => {
     mockBubbleRenders.length = 0;
     const onCopy = jest.fn();
     render(
       <>
         <GroupChatBubble
           message={{ id: 'm-user-copy', role: 'user', content: '用户问题', status: 'history' } as never}
+          isLastMessage={false}
+          isRequesting={false}
+          group={group}
+          participants={[]}
+          onCopy={onCopy}
+        />
+        <GroupChatBubble
+          message={{ id: 'm-bot-mid', role: 'assistant', content: '中间回复', status: 'history' } as never}
           isLastMessage={false}
           isRequesting={false}
           group={group}
@@ -523,10 +536,16 @@ describe('GroupChatBubble permanent copy action', () => {
       </>,
     );
 
-    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('justify-end', 'pr-11');
+    // 用户消息与其他回复：默认隐藏，悬停宿主 .group 行 / 键盘聚焦 / 触屏再显。
+    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('justify-end', 'pr-11', 'opacity-0');
+    expect(screen.getByTestId('message-copy-action-m-user-copy')).toHaveClass('group-hover:opacity-100');
+    expect(screen.getByTestId('message-copy-action-m-bot-mid')).toHaveClass('justify-start', 'pl-11', 'opacity-0');
+    // 最后一条回复：常显操作行。
     expect(screen.getByTestId('message-copy-action-m-bot-copy')).toHaveClass('justify-start', 'pl-11');
-    expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(2);
+    expect(screen.getByTestId('message-copy-action-m-bot-copy')).not.toHaveClass('opacity-0');
+    expect(screen.getAllByRole('button', { name: '复制整条消息' })).toHaveLength(3);
 
+    // 默认隐藏不等于不可用：hover 态只是视觉显隐，按钮始终可触发。
     fireEvent.click(screen.getByTestId('message-copy-action-m-user-copy').querySelector('button') as HTMLButtonElement);
     expect(onCopy).toHaveBeenCalledWith('用户问题');
   });

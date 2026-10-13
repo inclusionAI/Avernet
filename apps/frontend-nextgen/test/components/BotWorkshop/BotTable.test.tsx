@@ -577,7 +577,7 @@ describe('Agent Coding Bot row actions', () => {
     expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
   });
 
-  test('只展示去使用，管理菜单仅保留指定操作', () => {
+  test('Coding Bot 保留去使用，同时展示后端声明的库存操作', () => {
     const bot = mapBotDto({
       bot_id: 'agent-template',
       bot_name: 'Agent Coding 模版 Bot',
@@ -608,10 +608,10 @@ describe('Agent Coding Bot row actions', () => {
     });
 
     expect(screen.getByRole('button', { name: '去使用 Agent Coding 模版 Bot' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     expect(screen.getByText('开启服务化')).toBeInTheDocument();

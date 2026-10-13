@@ -1,3 +1,4 @@
+import type { AisStatusHandler } from "../services/ais/status-handler.js";
 import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
 import { applySkillVersion } from "../services/evolve/skill-application.js";
 import type { EvolveHostCapabilities } from "../services/evolve/host-capabilities.js";
@@ -68,7 +69,7 @@ import {
 } from "../services/evolve/artifact-url.js";
 import { getArtifactBucket, UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import {
-  parseAisArtifactContract,
+  parseAisArtifactContract, aisContractForStep,
   validateAisArtifactRequest,
   validateAisOutput,
 } from "../services/ais/ais-artifact-contract.js";
@@ -156,6 +157,8 @@ type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
 type CancelExecution = typeof cancelEvolveExecution;
 export type EvolveRouterDeps = {
   capabilities?: EvolveHostCapabilities;
+  /** Trusted persisted aisBase.statusHandler selects a Host-registered lifecycle handler. */
+  aisStatusHandlers?: Readonly<Record<string, AisStatusHandler>>;
   /** Never read from HTTP input; absent means unchanged internal behavior. */
   version?: "openversion" | "internalversion";
   db?: IDatabase;
@@ -4983,7 +4986,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!step || !task || step.task_id !== taskId) { res.status(404).json({ error: "Step 不属于指定 Task" }); return; }
     if (TERMINAL_STATUSES.has(step.status)) { res.status(409).json({ error: "终态 Step 不再签发上传 URL" }); return; }
     if (req.body?.executor === "ais") {
-      const aisContract = parseAisArtifactContract(parseJson(task.config_json));
+      const aisContract = aisContractForStep(parseJson(task.config_json), parseJson(step.ext_json), step.step_id);
       if (!aisContract || aisContract.stepId !== step.step_id) {
         res.status(409).json({ error: "当前 Step 不属于有效的 AIS Base attempt" }); return;
       }
@@ -5232,7 +5235,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(404).json({ error: "step 不属于指定 task" }); return;
     }
     const aisTask = await repo.findTask(step.task_id);
-    const aisContract = aisTask ? parseAisArtifactContract(parseJson(aisTask.config_json)) : null;
+    const aisContract = aisTask ? aisContractForStep(parseJson(aisTask.config_json), parseJson(step.ext_json), stepId) : null;
     if (aisContract) {
       const status = String(req.body?.status ?? "").toLowerCase();
       if (aisContract.stepId !== stepId) {
@@ -5262,6 +5265,21 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           retryable: failure.retryable !== false,
         } : {}),
       };
+      const handlerName = aisContract.aisBase.statusHandler;
+      if (handlerName !== undefined) {
+        if (typeof handlerName !== "string" || !handlerName || !aisTask) {
+          res.status(422).json({ error: "AIS 状态处理配置无效" }); return;
+        }
+        const handler = deps.aisStatusHandlers && Object.hasOwn(deps.aisStatusHandlers, handlerName)
+          ? deps.aisStatusHandlers[handlerName] : undefined;
+        if (!handler) {
+          res.status(503).json({ error: "AIS 状态处理器不可用" }); return;
+        }
+        const handled = await handler({ task: aisTask, step, report: normalized });
+        if (!handled.applied) { res.status(409).json({ error: "AIS execution 状态已改变" }); return; }
+        res.json({ ok: true, duplicate: handled.duplicate === true, taskId: step.task_id, stepId, status });
+        return;
+      }
       if (TERMINAL_STATUSES.has(step.status)) {
         const sameOutput = output === undefined || JSON.stringify(output) === JSON.stringify(parseJson(step.output_json));
         const sameSummary = normalized.summary === undefined || normalized.summary === (step.summary ?? "");

@@ -358,3 +358,75 @@ def test_cli_accepts_trusted_steady_state_for_completed_pool_repair(
 
     assert (pool_root / ".pool-active").is_file()
     assert ready_marker.is_file()
+
+
+def test_completed_pool_restart_repairs_active_marker_with_ready_history(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    ready_marker = home / ".openclaw/workspace/skills-pool/.pool-ready"
+    ready_marker.parent.mkdir(parents=True)
+    ready_marker.write_text('{"preparation_id":"completed-1"}')
+    (home / ".openclaw/workspace/skills").mkdir(parents=True)
+    (ready_marker.parent / "skills-local").mkdir()
+
+    evidence = initialize_pool_native(
+        engine="openclaw",
+        home=home,
+        trusted_layout_phase="pool_active",
+    )
+
+    assert evidence.actual_layout == "pool"
+    assert ready_marker.read_text() == '{"preparation_id":"completed-1"}'
+    assert json.loads((ready_marker.parent / ".pool-active").read_text()) == {
+        "activation_state": "active",
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+    }
+
+
+@pytest.mark.parametrize("filesystem_state", ("empty", "ready", "active"))
+def test_recovery_required_never_enters_native_or_steady(
+    tmp_path: Path,
+    filesystem_state: str,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_root = home / ".openclaw/workspace/skills-pool"
+    if filesystem_state == "ready":
+        pool_root.mkdir(parents=True)
+        (pool_root / ".pool-ready").write_text("{}")
+    elif filesystem_state == "active":
+        initialize_pool_native(engine="openclaw", home=home)
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="requires migration recovery",
+    ):
+        initialize_pool_native(
+            engine="openclaw",
+            home=home,
+            trusted_layout_phase="recovery_required",
+        )
+
+
+@pytest.mark.parametrize(
+    "trusted_layout_phase",
+    ("pool_cutover_finalizing", "", "POOL_ACTIVE", " pool_active"),
+)
+def test_unknown_or_malformed_layout_phase_fails_closed(
+    tmp_path: Path,
+    trusted_layout_phase: str,
+) -> None:
+    home = tmp_path / "home" / "admin"
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="unsupported persisted Pool layout phase",
+    ):
+        initialize_pool_native(
+            engine="openclaw",
+            home=home,
+            trusted_layout_phase=trusted_layout_phase,
+        )
+
+    assert not (home / ".openclaw/workspace/skills-pool/.pool-active").exists()

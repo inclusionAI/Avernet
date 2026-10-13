@@ -7,9 +7,18 @@ from agentclaw.community.core.desktop_bot.lifecycle import DesktopBotLifecycle
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConfirmationProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skills_pool.native_creation import (
+    SkillsPoolNativeCreationPolicy,
+)
 from agentclaw.community.di.config import BaasConfig
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -36,6 +45,9 @@ class DesktopBotModule(Module):
         baas_config: BaasConfig,
         device_service: DeviceService,
         skill_set_factory: SkillSetServiceFactory,
+        skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
+        skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        layout_confirmation: LayoutInitializationConfirmationProtocol,
     ) -> DesktopBotService:
         return DesktopBotService(
             baas_service=baas_service,
@@ -45,6 +57,9 @@ class DesktopBotModule(Module):
             baas_config=baas_config,
             device_service=device_service,
             skill_set_factory=skill_set_factory,
+            skills_pool_native_creation_policy=skills_pool_native_creation_policy,
+            skill_layout_repository=skill_layout_repository,
+            layout_confirmation=layout_confirmation,
         )
 
     @singleton

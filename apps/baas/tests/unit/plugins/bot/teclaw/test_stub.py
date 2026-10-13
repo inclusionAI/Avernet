@@ -247,7 +247,9 @@ class TestStubUpdateOutboundRule:
         """Session rules append independently per session key."""
         rule = {"header_name": "x-caller-token", "value": "token-1"}
 
-        result = await stub_plugin.append_session_outbound_rule("session-key", rule)
+        result = await stub_plugin.append_session_outbound_rule(
+            "bot-1", "session-key", rule
+        )
 
         assert result is True
         assert stub_plugin._session_outbound_rules["session-key"] == [rule]

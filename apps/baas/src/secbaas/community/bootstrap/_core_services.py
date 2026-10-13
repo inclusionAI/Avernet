@@ -615,6 +615,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         record_repo=publish_record_repo,
         device_repo=device_repo,
         bot_repo=bot_repo,
+        rel_repo=bot_device_rel_repo,
     )
 
     bot_service_selector = providers.Singleton(

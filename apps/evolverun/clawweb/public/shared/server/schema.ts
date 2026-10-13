@@ -1,3 +1,4 @@
+import { recoveryTaskContextMigration } from "./schema-session-recovery.js";
 import type { IDatabase } from './db.js';
 import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
 /**
@@ -3307,4 +3308,5 @@ END`,
     description: "Fence workflow completion and timeout writes by manual retry epoch",
     sql: [`ALTER TABLE flow_runs ADD COLUMN retry_epoch INTEGER DEFAULT 0`],
   },
+  recoveryTaskContextMigration,
 ];

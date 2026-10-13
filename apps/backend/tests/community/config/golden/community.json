@@ -1,5 +1,8 @@
 {
   "raw_user_config": {
+    "admin": {
+      "cron_admin": []
+    },
     "app": {
       "description": "Custom SOFAPy application",
       "local_debug": true,

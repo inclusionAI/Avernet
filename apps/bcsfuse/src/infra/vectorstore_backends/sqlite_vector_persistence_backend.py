@@ -181,6 +181,28 @@ class SQLiteVectorPersistenceBackend:
         logger.info("[SQLiteVectorBackend] Loaded %d vectors", len(points))
         return points
 
+    def load_by_id(self, id: str) -> VectorPoint | None:
+        """Read one point while retaining load_all's decode-failure behavior."""
+        cursor = self._conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT id, vector, payload FROM bcsfuse_vector_embeddings WHERE id = ?",
+                (id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                return VectorPoint(
+                    id=row["id"], vector=self._deserialize_vector(row["vector"]),
+                    payload=json.loads(row["payload"]),
+                )
+            except Exception as e:
+                logger.warning("[SQLiteVectorBackend] Failed to load vector %s: %s", id, e)
+                return None
+        finally:
+            cursor.close()
+
     def iter_batches(self, batch_size: int):
         """Yield bounded vector pages for local index rebuilds."""
         if batch_size <= 0:

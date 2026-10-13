@@ -1240,4 +1240,3 @@ class TestStaticPlanExecuteVerifyTrajectoryGate:
         # Main flow DID run: the worker node's status flipped.
         worker = svc._get_node(graph, "worker")
         assert worker.status != Status.RUNNING
-

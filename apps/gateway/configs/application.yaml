@@ -250,6 +250,10 @@ user_config:
     # checks (admission.py USER_DELEGATED) — so it inherits the wide rule
     # above, exactly like the other operations that admit a machine caller.
 
+    # Group creation classifies known Bots before collaborator access exists.
+    "GET /openapi/v1/bots/{bot_id}/classification":
+      user: required
+
     "GET /openapi/v1/bots/{bot_id}/authorized-apps":
       user: required
     "DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}":

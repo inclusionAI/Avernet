@@ -452,23 +452,31 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
     } finally { setBusy('') }
   }
 
-  return <details className="group rounded-2xl border border-gray-200 bg-white shadow-sm">
-    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-5 marker:content-none">
-      <div><h2 className="text-sm font-semibold text-gray-900">Skill 候选版本</h2><p className="mt-1 text-xs text-gray-500">{!target.candidate?.artifact && ['completed', 'failed', 'canceled'].includes(task.status)
+  return <section aria-label="Skill 候选版本" className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+    <div className="p-5">
+      <h2 className="text-sm font-semibold text-gray-900">Skill 候选版本</h2><p className="mt-1 text-xs text-gray-500">{!target.candidate?.artifact && ['completed', 'failed', 'canceled'].includes(task.status)
         ? '任务已结束，未产生可应用的候选版本。'
-        : !target.candidate?.artifact ? '候选版本尚未生成。' : `${target.name || '待进化 Skill'} · Git Diff`}</p></div>
-      <span className="mt-0.5 shrink-0 text-xs font-medium text-blue-600 group-open:hidden">展开</span><span className="mt-0.5 hidden shrink-0 text-xs font-medium text-blue-600 group-open:inline">收起</span>
-    </summary>
-    <div className="border-t border-gray-100 px-5 pb-5 pt-4">
-      {target.candidate?.artifact && task.status === 'waiting_acceptance' && canOperate && <div className="flex gap-2">
-        <button disabled={Boolean(busy)} onClick={() => void decide('reject')} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:opacity-40">拒绝</button>
-        <button disabled={Boolean(busy)} onClick={() => void decide('accept')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">接受并应用</button>
-      </div>}
-    {diff && diff.files.length > 0 && <GitDiffView content={unifiedDiff} />}
-    {diff && diff.files.length === 0 && <p className="mt-4 text-sm text-gray-400">候选内容与任务开始时一致。</p>}
-    {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
+        : !target.candidate?.artifact ? '候选版本尚未生成。' : `${target.name || '待进化 Skill'} · Git Diff`}</p>
     </div>
-  </details>
+    {target.candidate?.artifact && task.status === 'waiting_acceptance' && canOperate && <div className="mx-5 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+      <p className="text-sm text-amber-900">待确认：接受后将应用到 Bot 中的原 Skill。</p>
+      <div className="flex gap-2">
+        <button disabled={Boolean(busy)} onClick={() => void decide('reject')} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 disabled:opacity-40">拒绝</button>
+        <button disabled={Boolean(busy)} onClick={() => void decide('accept')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">接受并应用</button>
+      </div>
+    </div>}
+    {error && <p role="alert" className="mx-5 mb-4 text-xs text-red-600">{error}</p>}
+    <details className="group border-t border-gray-100">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-sm font-medium text-gray-700 marker:content-none">
+        <span>查看候选版本差异</span>
+        <span className="shrink-0 text-xs text-blue-600 group-open:hidden">展开</span><span className="hidden shrink-0 text-xs text-blue-600 group-open:inline">收起</span>
+      </summary>
+      <div className="px-5 pb-5">
+        {diff && diff.files.length > 0 && <GitDiffView content={unifiedDiff} />}
+        {diff && diff.files.length === 0 && <p className="text-sm text-gray-400">候选内容与任务开始时一致。</p>}
+      </div>
+    </details>
+  </section>
 }
 
 function interactionStepEnded(task: EvolveTask, stepId: string): boolean {

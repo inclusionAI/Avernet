@@ -9,7 +9,7 @@
 //   标题 + 一行真实说明 + 命令提示），点击一键写入输入框并聚焦——SenderRef.insert
 //   走 commitValue→commandHandlers.onValueChange（Sender.js），命令面板随之自然唤起，
 //   与「键入 / 查看全部指令」的既有心智（Sender placeholder 同款话术）打通。
-import { Avatar } from '@/components/ui';
+import { Avatar, Button } from '@/components/ui';
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { CommandConfig } from '@tc-chat/ui/es/Sender';
 import { FileIcon, Zap } from 'lucide-react';
@@ -75,11 +75,11 @@ export function ChatEmptyState({ target, command, onInsertDraft }: ChatEmptyStat
         <div className="mt-6 flex w-full max-w-sm flex-col gap-2">
           <p className="m-0 text-xs text-muted-foreground">试试这样开场</p>
           {openers.map((opener) => (
-            <button
+            <Button
               key={opener.key}
-              type="button"
+              variant="outline"
               onClick={() => onInsertDraft(opener.insert)}
-              className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:border-primary/40 hover:bg-selected"
+              className="flex h-auto w-full items-center justify-start gap-3 rounded-xl border-border bg-background px-4 py-3 font-normal text-left hover:border-primary/40 hover:bg-selected"
             >
               <span
                 className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
@@ -94,7 +94,7 @@ export function ChatEmptyState({ target, command, onInsertDraft }: ChatEmptyStat
               <code className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                 {opener.hint}
               </code>
-            </button>
+            </Button>
           ))}
           <p className="m-0 mt-1 text-xs text-muted-foreground">也可以在输入框键入 / 查看全部指令</p>
         </div>

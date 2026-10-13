@@ -68,6 +68,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.skills_pool.runtime import SkillsPoolRuntime
+from agentclaw.community.core.skills_pool.native_creation import (
+    SkillsPoolNativeCreationPolicy,
+)
 from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
 from agentclaw.community.core.repository.implementations.skills_pool.rollout import SkillsPoolRolloutRepository
 
@@ -89,6 +92,11 @@ class SkillsPoolModule(Module):
         binder.bind(
             SkillsPoolRolloutGate,
             to=SkillsPoolRolloutGate,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillsPoolNativeCreationPolicy,
+            to=SkillsPoolNativeCreationPolicy,
             scope=singleton,
         )
         binder.bind(
@@ -235,6 +243,7 @@ class SkillsPoolModule(Module):
         binding_repository: DeviceBindingRepository,
         bot_repository: BotRepository,
         task_queue_service: TaskQueueService,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
         registry: HandlerRegistry,
         task_handler: SkillsPoolReconcileTaskHandler,
         quarantine_task_handler: SkillsPoolQuarantineCleanupTaskHandler,
@@ -243,6 +252,7 @@ class SkillsPoolModule(Module):
             binding_repository=binding_repository,
             bot_repository=bot_repository,
             task_queue_service=task_queue_service,
+            layout_repository=layout_repository,
             registry=registry,
             task_handler=task_handler,
             quarantine_task_handler=quarantine_task_handler,

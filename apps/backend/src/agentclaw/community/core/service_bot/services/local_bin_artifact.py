@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -12,6 +13,17 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+# CodeFuse creates and upgrades these launchers in the runtime home. Their
+# symlinks can be absolute while the draft home is mounted under a merge-NAS
+# path, so materializing them during a host-side build can reference the
+# build host rather than the published bot. Excluding only these fixed
+# runtime-managed names lets unrelated broken symlinks still fail loudly.
+_RUNTIME_MANAGED_LOCAL_BIN_NAMES = (
+    "cfuse",
+    "cfuse-claude",
+    "cfuse-codex",
+)
 
 
 def _validate_home_dirs(home: Path) -> None:
@@ -55,19 +67,36 @@ def sync_local_bin_artifact(
         if target_bin.exists():
             if not target_bin.is_dir():
                 raise NotADirectoryError("home artifact bin is not a directory")
-            # COSEC: clean only the fixed, validated version-root bin snapshot;
-            # never delete the version/home directory or follow parent links.
-            run_command(
-                cmd=["sudo", "rm", "-rf", "--", str(target_bin)],
-                command_name="remove local bin artifact",
-                error_message="remove local bin artifact failed",
-            )
         reason = ""
         if is_excluded(".local/bin", build_ignore_paths):
             reason = "excluded"
         elif not source_bin.exists() and not source_bin.is_symlink():
             reason = "source_missing"
         if reason:
+            if target_bin.exists():
+                # Only the validated bin snapshot is synchronized against an
+                # empty source; the version root and other Home data stay put.
+                logger.info(
+                    "service_bot.local_bin.cleanup.request " + fields
+                    + " reason=%s cleanup_method=rsync",
+                    *context, reason,
+                )
+                with tempfile.TemporaryDirectory(prefix="service-bot-cli-empty-") as empty_dir:
+                    run_command(
+                        cmd=[
+                            # Empty-source cleanup needs deletion only; do not
+                            # apply the temporary directory's mode/owner to bin.
+                            "sudo", "rsync", "-r", "--delete", "--delete-excluded",
+                            f"{empty_dir}/", f"{target_bin}/",
+                        ],
+                        command_name="rsync local bin artifact cleanup",
+                        error_message="rsync local bin artifact cleanup failed",
+                    )
+                logger.info(
+                    "service_bot.local_bin.cleanup.success " + fields
+                    + " reason=%s cleanup_method=rsync elapsed_ms=%s",
+                    *context, reason, round((time.monotonic() - started) * 1000),
+                )
             logger.info(
                 "service_bot.local_bin.skip " + fields + " reason=%s elapsed_ms=%s",
                 *context, reason, round((time.monotonic() - started) * 1000),
@@ -76,14 +105,16 @@ def sync_local_bin_artifact(
         if not source_bin.is_dir():
             raise NotADirectoryError("draft .local/bin is not a directory")
         target_bin.mkdir(parents=True, exist_ok=True)
+        exclude_paths = (
+            *extra_root_rules(build_ignore_paths, ".local/bin"),
+            *_RUNTIME_MANAGED_LOCAL_BIN_NAMES,
+        )
         # CLI installers commonly link into sibling tool directories. Match
         # the existing runtime copy's -L policy to publish standalone files.
         run_command(
             cmd=[
                 "sudo", "rsync", "-avL", "--delete", "--delete-excluded",
-                *(f"--exclude=/{path}" for path in extra_root_rules(
-                    build_ignore_paths, ".local/bin",
-                )),
+                *(f"--exclude=/{path}" for path in exclude_paths),
                 f"{source_bin}/", f"{target_bin}/",
             ],
             command_name="rsync local bin artifact",
@@ -137,6 +168,7 @@ def restore_local_bin_artifact(
         run_command(
             cmd=[
                 "sudo", "rsync", "-avL", "--chown=1000:1000",
+                *(f"--exclude=/{path}" for path in _RUNTIME_MANAGED_LOCAL_BIN_NAMES),
                 f"{source_bin}/", f"{target_bin}/",
             ],
             command_name="rsync draft restore local bin",

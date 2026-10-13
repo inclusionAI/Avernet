@@ -5,8 +5,11 @@
  * - 收藏会话：动作开关，复用 useConversationFavorites.toggleFavorite；
  * - 会话管理 / 历史消息：右缘面板互斥开合（新面板打开关闭旧面板）；
  * - 资源管理：收敛既有会话文件副屏（openFileDrawer / closeFileDrawer，同一容器）；
- * - 副屏：panelRef.openPanel/closePanel toggle（taskPanel 副屏链路沿用，无 isOpen
- *   查询能力，以本地镜像态近似）。
+ * - 副屏：closePanel 关闭；打开走 reopenSidePaneTabsFromMessages 按消息标记幂等重建
+ *   （sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 保持为真实开合态——含
+ *   消息渲染器挂载即 openTab 的「默认展开」；toggle 仅乐观翻转，真实态事件随后纠偏；
+ *   会话切换复位——useBotChat 同边界 closePanelForce；无 <AixUI type="panel"> 内容时
+ *   图标禁用，防 autoCloseWhenEmpty 弹回）。
  * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
@@ -18,6 +21,11 @@ import type {
 import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
+
+// 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
+// 保留再导出兼容既有导入面（useGroupChatHeaderPanels / 测试用例）。
+export { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 /** 头部右侧承载的右缘面板类型（资源面板走既有文件副屏，不在此枚举内）。 */
 export type ChatHeaderPanelKind = 'detail' | 'history';
@@ -53,8 +61,13 @@ export interface UseChatHeaderPanelsResult {
   /** 关闭右缘面板与文件副屏（切换会话等场景复位）。 */
   resetAll: () => void;
   favorites: ChatHeaderFavoritesModel;
+  /** 副屏真实开合态（ChatLayoutPanelSlot onIsOpenChange 同步；toggle 乐观翻转其后纠偏）。 */
   sidePaneOpen: boolean;
+  /** 会话无副屏内容（消息无 <AixUI type="panel">）时 Monitor 图标禁用，toggle 空转。 */
+  sidePaneDisabled: boolean;
   toggleSidePane: () => void;
+  /** 真实开合同步入口（接线至 ChatLayoutPanelSlot onOpenStateChange）。 */
+  onSidePaneIsOpenChange: (open: boolean) => void;
   historySearch: UseSessionHistorySearchModel;
   /** 点击搜索结果后待定位高亮的 messageId（3s 后自动清除）。 */
   highlightMessageId: string | null;
@@ -106,8 +119,10 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   const { session, messages, panelRef } = options;
 
   const [openPanel, setOpenPanel] = useState<ChatHeaderPanelKind | null>(null);
-  // 副屏 toggle 的本地镜像态（PanelHandle 无 isOpen 查询）。
+  // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
+  // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
   const [sidePaneOpen, setSidePaneOpen] = useState(false);
+  const onSidePaneIsOpenChange = useCallback((open: boolean) => setSidePaneOpen(open), []);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -136,17 +151,30 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     lastSessionIdRef.current = sessionId;
     setOpenPanel(null);
     setHighlightMessageId(null);
+    // 副屏同步复位（兜底）：useBotChat 在同边界 closePanelForce 强关面板并清空 tabs，
+    // closePanelForce 经 onIsOpenChange(false) 已同步真实态；此复位防面板随舞台切换卸载
+    // 而无事件发出的脱钩场景（与群侧孪生 useGroupChatHeaderPanels 一致）。
+    setSidePaneOpen(false);
     setSessionEpoch((epoch) => epoch + 1);
   }
+
+  // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
+  const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);
 
   const toggleSidePane = useCallback(() => {
     setSidePaneOpen((current) => {
       const next = !current;
-      if (next) panelRef.current?.openPanel();
-      else panelRef.current?.closePanel();
-      return next;
+      const panel = panelRef.current;
+      if (!panel) return current; // 面板容器未挂载（只读态/舞台切换中）：不翻镜像。
+      if (!next) {
+        panel.closePanel();
+        return false;
+      }
+      // 打开：按消息标记幂等重建 tabs，不再裸 openPanel——空 tabs 会被 autoCloseWhenEmpty
+      // 立即弹回（「打开一瞬又关闭」）；重建成功即面板已展开，镜像同步为 true。
+      return reopenSidePaneTabsFromMessages(messages, panel);
     });
-  }, [panelRef]);
+  }, [panelRef, messages]);
 
   const favorites = useMemo<ChatHeaderFavoritesModel>(() => {
     const favorite = session?.favorite === true;
@@ -177,7 +205,9 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     resetAll,
     favorites,
     sidePaneOpen,
+    sidePaneDisabled,
     toggleSidePane,
+    onSidePaneIsOpenChange,
     historySearch,
     highlightMessageId,
     locateMessage,

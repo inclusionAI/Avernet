@@ -1,6 +1,7 @@
 """CLI snapshots copy independently of the engine root and retry cleanly."""
 
 import shutil
+from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock
 
@@ -31,6 +32,7 @@ def migration(tmp_path):
     def run_command(**kwargs):
         cmd = kwargs["cmd"]
         commands.append(cmd)
+        assert cmd[1] != "rm"
         if cmd[1] == "chmod":
             return
         result = subprocess.run(cmd[1:], capture_output=True, text=True)
@@ -97,7 +99,8 @@ def test_migration_directory_ignore_skips_cli_and_clears_previous_artifact(migra
     assert (target.parent / ".local/bin/cli").exists()
 
     assert migrate((rule,))
-    assert not (target.parent / ".local/bin").exists()
+    assert (target.parent / ".local/bin").is_dir()
+    assert list((target.parent / ".local/bin").iterdir()) == []
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
@@ -115,6 +118,24 @@ def test_migration_child_ignore_omits_only_selected_cli(migration):
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("name", ["cfuse", "cfuse-claude", "cfuse-codex"])
+def test_migration_skips_runtime_managed_cfuse_wrapper(migration, name):
+    source, artifact, _, migrate = migration
+    source_home = source.parent
+    source_bin = source_home / ".local/bin"
+    source_bin.mkdir(parents=True)
+    tool_dir = source_home / ".local/tools"
+    tool_dir.mkdir()
+    (tool_dir / "wrapped").write_text("runtime-managed")
+    (source_bin / "keep").write_text("#!/bin/sh\nprintf 'keep'\n")
+    (source_bin / name).symlink_to("../tools/wrapped")
+
+    assert migrate()
+    assert (artifact.parent / ".local/bin/keep").is_file()
+    assert not (artifact.parent / f".local/bin/{name}").exists()
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
 def test_missing_home_bin_never_republishes_stale_engine_snapshot(migration, caplog):
     caplog.set_level("INFO")
     source, target, _, migrate = migration
@@ -129,7 +150,8 @@ def test_missing_home_bin_never_republishes_stale_engine_snapshot(migration, cap
     engine_bin.mkdir(parents=True)
     (engine_bin / "cli").write_text("stale")
     assert migrate()
-    assert not (target.parent / ".local/bin").exists()
+    assert (target.parent / ".local/bin").is_dir()
+    assert list((target.parent / ".local/bin").iterdir()) == []
     assert (target / ".local/bin/cli").read_text() == "stale"
     assert "service_bot.local_bin.skip" in caplog.text
     assert "reason=source_missing" in caplog.text
@@ -277,6 +299,46 @@ def test_restore_rejects_symlink_artifact_parents(tmp_path, parent, caplog):
     assert "error_type=ValueError" in caplog.text
 
 
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+def test_restore_preserves_runtime_managed_cfuse_wrappers(tmp_path):
+    artifact = tmp_path / "versions/3/openclaw"
+    artifact.mkdir(parents=True)
+    artifact_bin = artifact.parent / ".local/bin"
+    artifact_bin.mkdir(parents=True)
+    (artifact_bin / "keep").write_text("published")
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        (artifact_bin / name).write_text("published wrapper")
+
+    target_home = tmp_path / "home"
+    target_bin = target_home / ".local/bin"
+    target_bin.mkdir(parents=True)
+    (target_bin / "keep").write_text("originally local")
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        (target_bin / name).write_text("runtime wrapper")
+
+    def run_command(**kwargs):
+        cmd = kwargs["cmd"]
+        result = subprocess.run(
+            [arg for arg in cmd[1:] if not arg.startswith("--chown=")],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode:
+            raise BotBuildMigrationError(result.stderr)
+
+    restore_local_bin_artifact(
+        artifact_dir=artifact,
+        target_home=target_home,
+        bot_id="restore-cli",
+        version=3,
+        run_command=run_command,
+        timeout_seconds=30,
+    )
+    assert (target_bin / "keep").read_text() == "published"
+    for name in ("cfuse", "cfuse-claude", "cfuse-codex"):
+        assert (target_bin / name).read_text() == "runtime wrapper"
+
+
 def test_restore_copy_failure_propagates_and_logs(tmp_path, caplog):
     caplog.set_level("INFO")
     artifact = tmp_path / "artifact"
@@ -383,8 +445,10 @@ def test_retry_cleans_only_version_bin_and_keeps_other_version_data(migration):
     assert not (version_local / "bin/old-cli").exists()
     assert (version_local / "bin/new-cli").read_text() == "new"
     assert (version_local / "share/state").read_text() == "preserve other version data"
-    removal = [cmd for cmd in commands if cmd[1] == "rm"]
-    assert removal == [["sudo", "rm", "-rf", "--", str(version_local / "bin")]]
+    assert all(cmd[1] != "rm" for cmd in commands)
+    cli_copies = [cmd for cmd in commands if cmd[-1] == f"{version_local / 'bin'}/"]
+    assert len(cli_copies) == 2
+    assert all(cmd[-2] == f"{source_bin}/" for cmd in cli_copies)
 
 
 def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
@@ -392,7 +456,6 @@ def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
     artifact = tmp_path / "versions/3/openclaw"
     (artifact.parent / ".local/bin").mkdir(parents=True)
     source_home = tmp_path / "home"
-    (source_home / ".local/bin").mkdir(parents=True)
     run = MagicMock(side_effect=BotBuildMigrationError("cleanup failed"))
     with pytest.raises(BotBuildMigrationError, match="cleanup failed"):
         sync_local_bin_artifact(
@@ -401,9 +464,72 @@ def test_retry_cleanup_failure_aborts_before_copy(tmp_path, caplog):
             run_command=run,
         )
     assert run.call_count == 1
-    assert run.call_args.kwargs["command_name"] == "remove local bin artifact"
+    assert run.call_args.kwargs["command_name"] == "rsync local bin artifact cleanup"
+    assert run.call_args.kwargs["cmd"][1] == "rsync"
+    assert "service_bot.local_bin.cleanup.request" in caplog.text
+    assert "cleanup_method=rsync" in caplog.text
     assert "service_bot.local_bin.failure" in caplog.text
     assert "service_bot.local_bin.success" not in caplog.text
+    assert "service_bot.local_bin.skip" not in caplog.text
+    assert "service_bot.local_bin.cleanup.success" not in caplog.text
+
+
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("state", ["empty", "missing", "excluded"])
+def test_retry_empty_or_absent_payload_clears_only_bin_using_rsync(migration, caplog, state):
+    caplog.set_level("INFO")
+    source, artifact, commands, migrate = migration
+    source_bin = source.parent / ".local/bin"
+    source_bin.mkdir(parents=True)
+    (source_bin / "old-cli").write_text("old")
+    (source / ".local").mkdir()
+    (source / ".local/state").write_text("engine state")
+    assert migrate()
+    version_local = artifact.parent / ".local"
+    version_bin = version_local / "bin"
+    version_bin.chmod(0o750)
+    (version_local / "share").mkdir()
+    (version_local / "share/state").write_text("keep other data")
+    first_command = len(commands)
+    if state == "empty":
+        (source_bin / "old-cli").unlink()
+    elif state == "missing":
+        shutil.rmtree(source_bin)
+    rules = (".local/bin",) if state == "excluded" else ()
+    assert migrate(rules)
+    assert version_bin.is_dir() and list(version_bin.iterdir()) == []
+    assert (version_local / "share/state").read_text() == "keep other data"
+    assert (artifact / ".local/state").read_text() == "engine state"
+    assert all(cmd[1] != "rm" for cmd in commands)
+    cli_sync = [cmd for cmd in commands[first_command:] if cmd[-1] == f"{version_bin}/"]
+    assert len(cli_sync) == 1
+    assert "--delete" in cli_sync[0] and "--delete-excluded" in cli_sync[0]
+    if state == "empty":
+        assert cli_sync[0][-2] == f"{source_bin}/"
+        assert "service_bot.local_bin.cleanup.request" not in caplog.text
+    else:
+        assert not Path(cli_sync[0][-2]).exists()
+        assert version_bin.stat().st_mode & 0o777 == 0o750
+        assert "service_bot.local_bin.cleanup.request" in caplog.text
+        assert "service_bot.local_bin.cleanup.success" in caplog.text
+        assert "cleanup_method=rsync" in caplog.text
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+def test_absent_target_without_payload_does_not_create_bin_or_run_cleanup(tmp_path, excluded):
+    source_home = tmp_path / "home"
+    if excluded:
+        (source_home / ".local/bin").mkdir(parents=True)
+        (source_home / ".local/bin/cli").write_text("ignored")
+    artifact = tmp_path / "versions/3/openclaw"
+    run = MagicMock()
+    sync_local_bin_artifact(
+        source_home=source_home, target_dir=artifact,
+        device_id="device-cli-test", version="3",
+        build_ignore_paths=(".local/bin",) if excluded else (), run_command=run,
+    )
+    run.assert_not_called()
+    assert not (artifact.parent / ".local/bin").exists()
 
 
 def test_build_rejects_non_directory_version_bin(tmp_path, caplog):

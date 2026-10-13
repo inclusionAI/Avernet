@@ -74,6 +74,19 @@ class BotRepository(Protocol):
         """
         ...
 
+    def list_by_bot_uuid_only_including_deleted(self, bot_uuid: str) -> list[BotRecord]:
+        """List ALL bot record ids sharing a bot_uuid (no tenant/env filter).
+
+        The ``_only`` naming convention (see ``get_by_id_only`` /
+        ``get_active_by_bot_uuid_only``) marks cross-tenant/env lookup —
+        deliberate cross-env semantics for admin recovery, not a data-leak
+        accident. Includes soft-deleted records as well as live ones (no
+        ``is_deleted`` predicate). Used by the admin bot-restore endpoint's
+        ``bot_uuid`` resolution, which deliberately performs no env validation
+        anywhere in its chain.
+        """
+        ...
+
     def get_active_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str
     ) -> BotRecord | None:

@@ -27,9 +27,22 @@ export function ConversationInteractiveStage(props: {
   headerRightPanels?: ReactNode;
   /** 历史面板结果点击的定位高亮消息 id（透传消息列表滚动定位）。 */
   highlightMessageId?: string | null;
+  /** 副屏开合态 + toggle + 真实态同步入口（chat-header-panels）：供 ChatPanel 渲染副屏右上「收起」悬浮钮。 */
+  sidePaneOpen?: boolean;
+  onToggleSidePane?: () => void;
+  onSidePaneIsOpenChange?: (open: boolean) => void;
 }): JSX.Element {
-  const { model, onOpenSessionList, onOpenAgentCodingBot, headerActions, headerRightPanels, highlightMessageId } =
-    props;
+  const {
+    model,
+    onOpenSessionList,
+    onOpenAgentCodingBot,
+    headerActions,
+    headerRightPanels,
+    highlightMessageId,
+    sidePaneOpen,
+    onToggleSidePane,
+    onSidePaneIsOpenChange,
+  } = props;
   const { botChat, fileFeature, taskExecution } = model;
   return (
     <>
@@ -47,6 +60,9 @@ export function ConversationInteractiveStage(props: {
           messages={botChat.chat.messages}
           headerActions={headerActions}
           highlightMessageId={highlightMessageId}
+          sidePaneOpen={sidePaneOpen}
+          onToggleSidePane={onToggleSidePane}
+          onSidePaneIsOpenChange={onSidePaneIsOpenChange}
           isRequesting={botChat.chat.isRequesting}
           isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
           connectionStatus={botChat.connectionStatus}

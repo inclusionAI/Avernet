@@ -387,6 +387,44 @@ class TestBatchInsertRels:
         mock_session.add.assert_not_called()
 
 
+# ==================== max_live_bot_id_for_bot_ids ====================
+
+
+class TestMaxLiveBotIdForBotIds:
+    def test_returns_scalar_max(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.scalar.return_value = 30
+
+        result = repository.max_live_bot_id_for_bot_ids([10, 20, 30])
+
+        assert result == 30
+
+    def test_scalar_none_returns_none(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.scalar.return_value = None
+
+        result = repository.max_live_bot_id_for_bot_ids([10, 20])
+
+        assert result is None
+
+    def test_empty_bot_ids_returns_none_without_query(self, repository, mock_session):
+        result = repository.max_live_bot_id_for_bot_ids([])
+
+        assert result is None
+        mock_session.query.assert_not_called()
+
+    def test_filter_is_bot_ids_and_live_only(self, repository, mock_session):
+        """No tenant/env predicate — cross-env admin semantics; live = is_deleted==0."""
+        mock_session.query.return_value.filter.return_value.scalar.return_value = 7
+
+        repository.max_live_bot_id_for_bot_ids([1, 2, 3])
+
+        query_entities = mock_session.query.call_args.args
+        filter_call = mock_session.query.return_value.filter.call_args
+        assert len(filter_call.args) == 2, (
+            "filter must carry exactly bot_id IN (...) + is_deleted == 0 (no tenant/env)"
+        )
+        assert "bot_id" in str(query_entities[0])
+
+
 # ==================== Model.to_record ====================
 
 

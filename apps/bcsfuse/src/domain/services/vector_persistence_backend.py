@@ -177,6 +177,15 @@ class BatchedVectorPersistenceBackend(Protocol):
 
 
 @runtime_checkable
+class PointLookupVectorPersistenceBackend(Protocol):
+    """Optional durable primary-key lookup for one active vector."""
+
+    def load_by_id(self, id: str) -> VectorPoint | None:
+        """Return the exact active point, or None when it is absent/deleted."""
+        ...
+
+
+@runtime_checkable
 class WorkerScopedVectorPersistenceBackend(Protocol):
     """Optional durable lookup for a Worker's active vectors."""
 
@@ -209,6 +218,8 @@ __all__ = [
     "BatchedIncrementalVectorPersistenceBackend",
     "BatchedVectorPersistenceBackend",
     "IncrementalVectorPersistenceBackend",
+    "PointLookupVectorPersistenceBackend",
     "VectorChangeSet",
     "VectorPersistenceBackend",
+    "WorkerScopedVectorPersistenceBackend",
 ]

@@ -8,8 +8,10 @@ from agentclaw.community.adapters.http.devices.router import report_device_statu
 from agentclaw.community.adapters.http.devices.schemas import (
     ReportDeviceStatusRequest,
 )
-from agentclaw.community.core.skills_pool.native_confirmation import (
-    PoolNativeLayoutConfirmationError,
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConfirmationError,
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
 )
 
 
@@ -56,9 +58,14 @@ def test_layout_initialization_evidence_is_strict_and_optional() -> None:
 
 
 @pytest.mark.asyncio
-async def test_layout_confirmation_mismatch_returns_structured_conflict() -> None:
+@pytest.mark.parametrize("error_type", [
+    LayoutInitializationConfirmationError,
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
+])
+async def test_layout_confirmation_mismatch_returns_structured_conflict(error_type) -> None:
     service = MagicMock()
-    service.report_device_status.side_effect = PoolNativeLayoutConfirmationError(
+    service.report_device_status.side_effect = error_type(
         "layout engine does not match Bot"
     )
     request = ReportDeviceStatusRequest(

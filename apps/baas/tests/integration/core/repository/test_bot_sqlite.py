@@ -11,6 +11,7 @@ from secbaas.community.core.repository.bot import (
     BotRepository,
     RestoredBotRecord,
 )
+from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
 from secbaas.community.core.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
@@ -430,3 +431,155 @@ class TestRestoreBotRecordSqlite:
             "sibling retire must have been rolled back with the transaction"
         )
         assert sibling_after.is_deleted == 0
+
+
+class TestListByBotUuidOnlyIncludingDeletedSqlite:
+    """list_by_bot_uuid_only_including_deleted: cross-env, tombstone-inclusive listing."""
+
+    def _insert(self, repo, bot_uuid: str, *, env: str) -> int:
+        return repo.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=TEST_TENANT,
+            env=env,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            name="Uuid-list Bot",
+        )
+
+    def test_returns_all_generations_in_both_envs_including_soft_deleted(self):
+        repo: BotRepository = get_container().repository.bot_repository()
+        bot_uuid = _generate_uuid()
+
+        deleted_dev = self._insert(repo, bot_uuid, env=TEST_ENV)
+        repo.soft_delete(
+            bot_id=deleted_dev, tenant=TEST_TENANT, env=TEST_ENV, modifier="admin"
+        )
+        deleted_gray = self._insert(repo, bot_uuid, env=OTHER_ENV)
+        repo.soft_delete(
+            bot_id=deleted_gray, tenant=TEST_TENANT, env=OTHER_ENV, modifier="admin"
+        )
+        live_gray = self._insert(repo, bot_uuid, env=OTHER_ENV)
+
+        records = repo.list_by_bot_uuid_only_including_deleted(bot_uuid)
+
+        assert {r.id for r in records} == {deleted_dev, live_gray, deleted_gray}
+        by_id = {r.id: r for r in records}
+        assert by_id[deleted_dev].is_deleted == deleted_dev
+        assert by_id[deleted_gray].is_deleted == deleted_gray
+        assert by_id[live_gray].is_deleted == 0
+        assert {r.env for r in records} == {TEST_ENV, OTHER_ENV}
+
+    def test_unknown_uuid_returns_empty_list(self):
+        repo: BotRepository = get_container().repository.bot_repository()
+        assert repo.list_by_bot_uuid_only_including_deleted(_generate_uuid()) == []
+
+
+class TestRestoreByUuidResolutionSqlite:
+    """bot_uuid resolution: list all ids, then MAX(bot_id) over live rels."""
+
+    def _insert(self, repo, bot_uuid: str, *, env: str) -> int:
+        return repo.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=TEST_TENANT,
+            env=env,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            name="Resolution Bot",
+        )
+
+    def test_resolution_resolves_newest_generation_holding_a_live_rel(self):
+        """Full admin-restore resolution chain over 3 generations in two envs."""
+        repo: BotRepository = get_container().repository.bot_repository()
+        rel_repo: BotDeviceRelRepository = (
+            get_container().repository.bot_device_rel_repository()
+        )
+        bot_uuid = _generate_uuid()
+
+        gen_a = self._insert(repo, bot_uuid, env=TEST_ENV)
+        repo.soft_delete(
+            bot_id=gen_a, tenant=TEST_TENANT, env=TEST_ENV, modifier="admin"
+        )
+
+        gen_b = self._insert(repo, bot_uuid, env=OTHER_ENV)
+        repo.soft_delete(
+            bot_id=gen_b, tenant=TEST_TENANT, env=OTHER_ENV, modifier="admin"
+        )
+        tombstoned_rel_id = rel_repo.insert_rel(
+            bot_id=gen_b,
+            device_uuid=_generate_uuid(),
+            tenant=TEST_TENANT,
+            env=OTHER_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+        )
+        rel_repo.soft_delete(
+            rel_id=tombstoned_rel_id,
+            tenant=TEST_TENANT,
+            env=OTHER_ENV,
+            modifier="admin",
+        )
+
+        gen_c = self._insert(repo, bot_uuid, env=TEST_ENV)
+        repo.soft_delete(
+            bot_id=gen_c, tenant=TEST_TENANT, env=TEST_ENV, modifier="admin"
+        )
+        victim_rel_gray_id = rel_repo.insert_rel(
+            bot_id=gen_c,
+            device_uuid=_generate_uuid(),
+            tenant=TEST_TENANT,
+            env=OTHER_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+        )
+
+        records = repo.list_by_bot_uuid_only_including_deleted(bot_uuid)
+        assert {r.id for r in records} == {gen_a, gen_b, gen_c}
+
+        resolved = rel_repo.max_live_bot_id_for_bot_ids([r.id for r in records])
+
+        assert resolved == gen_c, (
+            "only gen_c holds live rels — its cross-env rel row (env=OTHER_ENV for "
+            "a TEST_ENV record) must count, and gen_b's tombstoned rel must not"
+        )
+        assert rel_repo.max_live_bot_id_for_bot_ids([gen_b]) is None, (
+            "a generation whose rels are all tombstoned resolves to None"
+        )
+        assert rel_repo.max_live_bot_id_for_bot_ids([]) is None
+
+        snapshot = repo.restore_bot_record_by_id(gen_c, modifier="ops.alice")
+
+        assert snapshot is not None
+        assert isinstance(snapshot, RestoredBotRecord)
+        assert snapshot.record.id == gen_c
+        assert snapshot.record.status == "ACTIVE"
+        assert snapshot.record.is_deleted == 0
+        assert snapshot.retired_sibling_count == 0, (
+            "gen_a/gen_b are already soft-deleted; the victim revives alone"
+        )
+        assert (
+            rel_repo.get_by_id(victim_rel_gray_id, TEST_TENANT, OTHER_ENV).is_deleted
+            == 0
+        ), "restore must not touch rel rows"
+
+    def test_resolution_without_any_rel_returns_none(self):
+        repo: BotRepository = get_container().repository.bot_repository()
+        rel_repo: BotDeviceRelRepository = (
+            get_container().repository.bot_device_rel_repository()
+        )
+        bot_uuid = _generate_uuid()
+
+        bot_id = self._insert(repo, bot_uuid, env=TEST_ENV)
+        records = repo.list_by_bot_uuid_only_including_deleted(bot_uuid)
+        assert [r.id for r in records] == [bot_id]
+
+        assert rel_repo.max_live_bot_id_for_bot_ids([bot_id]) is None
+
+    def test_resolution_unknown_bot_ids_returns_none(self):
+        rel_repo: BotDeviceRelRepository = (
+            get_container().repository.bot_device_rel_repository()
+        )
+        assert rel_repo.max_live_bot_id_for_bot_ids([99999998, 99999999]) is None

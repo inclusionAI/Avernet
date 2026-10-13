@@ -160,6 +160,7 @@ provides:
   - "LegacyMappingApplyRequired"
   - "SkillsPoolLayoutRepositoryProtocol"
   - "SkillsPoolRolloutGate"
+  - "SkillsPoolNativeCreationPolicy"
   - "SkillsPoolMigrationClaimService"
   - "SkillsPoolNativeLayoutConfirmationService"
   - "SkillsPoolReconcileService"

@@ -62,7 +62,9 @@ class TestEnsureHostedWorkspace:
     def test_idempotent_when_dima_space_id_already_present(self):
         """已有 dima_space_id → 直接返回，不调 DIMA / 不写 template。"""
         svc = _make_service()
-        svc._bot_repo.get_by_id_and_owner.return_value = _make_app_coding_bot()
+        svc._bot_repo.get_by_id_and_owner.return_value = _make_app_coding_bot(
+            active_engine="claude_code"
+        )
         svc._template_service.get_template_config.return_value = {
             "dima_space_id": "W_EXISTING",
             "other_field": "x",
@@ -77,7 +79,9 @@ class TestEnsureHostedWorkspace:
     def test_creates_workspace_and_persists_template(self):
         """无 dima_space_id ∈ 调 DIMA + create_or_update_template。"""
         svc = _make_service()
-        svc._bot_repo.get_by_id_and_owner.return_value = _make_app_coding_bot()
+        svc._bot_repo.get_by_id_and_owner.return_value = _make_app_coding_bot(
+            active_engine="claude_code"
+        )
         svc._template_service.get_template_config.return_value = {"foo": "bar"}
 
         def fake_create(staff_id, bot_id, bot_name, template_config, raise_on_failure):
@@ -102,6 +106,12 @@ class TestEnsureHostedWorkspace:
         ]
         assert persisted["dima_space_id"] == "W_NEW"
         assert persisted["foo"] == "bar"
+        assert (
+            svc._template_service.create_or_update_template.call_args.kwargs[
+                "active_engine"
+            ]
+            == "claude_code"
+        )
 
     def test_handles_none_template_config(self):
         """template_config 不存在时按空字典处理，仍能正常创建。"""

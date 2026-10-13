@@ -1,18 +1,22 @@
-import { Avatar, Badge, Button, type ButtonProps } from '@/components/ui';
+import { Avatar, Badge, Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
 import { getBotTypeLabel } from '@/domain/botType';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
-import { Check, ChevronDown, Info } from 'lucide-react';
-import { forwardRef, type ReactNode } from 'react';
+import { Check, Info, type LucideIcon } from 'lucide-react';
+import { type ReactNode } from 'react';
+
+// 触发按钮已拆至同目录 IdentityTriggerButton.tsx（工程红线：Component 单文件 ≤300 行）；
+// IdentityAvatar/IdentityDetails/IdentitySelectorLayout 仍在本文件，供其复用。
+export { IdentityTriggerButton } from './IdentityTriggerButton';
 
 function isAvatarUrl(avatar: string): boolean {
   return /^https?:\/\//.test(avatar);
 }
 
-export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration';
+export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip';
 
 /** 非折叠布局头部标签区，保留 default/sidebar 标题与 Tooltip 合同。 */
 export function IdentitySectionHeader({
@@ -71,15 +75,17 @@ export function IdentityAvatar({
   identity,
   size = 'md',
   userAvatarUrl,
+  className,
 }: {
   identity: Identity;
-  size?: 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'xxs' | 'xs' | 'sm' | 'md' | 'lg';
   userAvatarUrl?: string;
+  className?: string;
 }) {
   const avatarUrl = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
-  const avatarSize = size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
+  const avatarSize = size === 'xxs' ? 16 : size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
   return (
-    <span className="shrink-0">
+    <span className={cn('shrink-0', className)}>
       <Avatar
         name={identity.name}
         src={avatarUrl && isAvatarUrl(avatarUrl) ? avatarUrl : undefined}
@@ -165,74 +171,6 @@ export function IdentityDetails({
   );
 }
 
-interface IdentityTriggerButtonProps extends Omit<ButtonProps, 'children' | 'variant'> {
-  identity: Identity;
-  open: boolean;
-  layout: IdentitySelectorLayout;
-  userAvatarUrl?: string;
-}
-
-export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTriggerButtonProps>(
-  ({ identity, open, layout, userAvatarUrl, className, ...buttonProps }, ref) => {
-    const sidebarLayout = layout === 'sidebar';
-    const collapsedLayout = layout === 'collapsed';
-    const collaborationLayout = layout === 'collaboration';
-    const navigationLayout = sidebarLayout || collapsedLayout;
-
-    return (
-      <Button
-        ref={ref}
-        {...buttonProps}
-        variant={navigationLayout ? 'ghost' : 'outline'}
-        aria-expanded={open}
-        aria-label={`当前协作身份：${identity.name}`}
-        className={cn(
-          collapsedLayout
-            ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
-            : collaborationLayout
-            ? 'h-auto min-h-10 w-full justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-left text-xs text-foreground hover:bg-muted hover:text-foreground'
-            : 'h-auto w-full justify-between gap-2 text-left',
-          sidebarLayout
-            ? 'min-h-9 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
-            : !collapsedLayout && !collaborationLayout && 'min-h-10 rounded-lg px-2 py-1',
-          navigationLayout && open && 'border-primary',
-          className,
-        )}
-      >
-        {collapsedLayout ? (
-          identity.kind === 'user' ? (
-            <IdentityAvatar identity={identity} size="xs" userAvatarUrl={userAvatarUrl} />
-          ) : (
-            <span aria-hidden>{Array.from(identity.name.trim())[0] ?? '?'}</span>
-          )
-        ) : (
-          <>
-            <IdentityAvatar
-              identity={identity}
-              size={sidebarLayout || collaborationLayout ? 'xs' : 'sm'}
-              userAvatarUrl={userAvatarUrl}
-            />
-            <IdentityDetails
-              identity={identity}
-              compact={sidebarLayout || collaborationLayout}
-              summaryOnly={sidebarLayout}
-              userIdLabel={collaborationLayout ? '用户 ID' : undefined}
-            />
-            <ChevronDown
-              className={cn(
-                collaborationLayout ? 'h-3 w-3' : sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',
-                'shrink-0 text-muted-foreground transition-transform',
-                open && 'rotate-180',
-              )}
-            />
-          </>
-        )}
-      </Button>
-    );
-  },
-);
-IdentityTriggerButton.displayName = 'IdentityTriggerButton';
-
 function IdentityOption({
   identity,
   active,
@@ -253,11 +191,18 @@ function IdentityOption({
         if (!active) onSelect(identity.id);
       }}
       className={cn(
-        'h-auto min-h-10 w-full justify-start gap-2 rounded-lg px-2 py-1 text-left',
-        active ? 'bg-accent text-foreground hover:bg-accent' : 'hover:bg-accent',
+        // v2 气泡精修：36px 紧凑选项行（原 40px），静止态仅 hover 微透 accent，选中实底 + Check。
+        'h-auto min-h-9 w-full justify-start gap-2 rounded-md px-1.5 py-1 text-left',
+        active ? 'bg-accent text-foreground hover:bg-accent' : 'hover:bg-accent/50',
       )}
     >
-      <IdentityAvatar identity={identity} size="sm" userAvatarUrl={userAvatarUrl} />
+      <IdentityAvatar
+        identity={identity}
+        size="sm"
+        userAvatarUrl={userAvatarUrl}
+        // 选中行给头像一圈 primary 光环，与 Check 呼应，避免选中态只有底色一种表达。
+        className={cn('rounded-full', active && 'ring-2 ring-primary/20')}
+      />
       <IdentityDetails identity={identity} compact />
       {active ? <Check className="ml-auto h-4 w-4 shrink-0 text-primary" aria-hidden /> : null}
     </Button>
@@ -266,12 +211,15 @@ function IdentityOption({
 
 export function IdentitySection({
   title,
+  icon: SectionIcon,
   identities,
   activeId,
   onSelect,
   userAvatarUrl,
 }: {
   title: string;
+  /** 小节头 kind 图标（用户=UserRound / Bot=Bot），编码两类身份的语义差异。 */
+  icon: LucideIcon;
   identities: Identity[];
   activeId: string | null;
   onSelect: (id: string) => void;
@@ -280,10 +228,17 @@ export function IdentitySection({
   if (identities.length === 0) return null;
   return (
     <section aria-labelledby={`identity-section-${title}`}>
-      <h3 id={`identity-section-${title}`} className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">
-        {title}
+      <h3
+        id={`identity-section-${title}`}
+        className="flex items-center gap-1.5 px-1.5 pb-1.5 pt-1 text-[11px] font-medium text-muted-foreground"
+      >
+        <SectionIcon className="h-3 w-3 shrink-0 text-muted-foreground/80" aria-hidden />
+        <span className="shrink-0">{title}</span>
+        <span className="text-[10px] font-normal tabular-nums text-muted-foreground/70">
+          {identities.length}
+        </span>
       </h3>
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {identities.map((identity) => (
           <IdentityOption
             key={identity.id}

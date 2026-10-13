@@ -2,8 +2,9 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
-import type { IdentityView } from '@/domain/collaboration';
 import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import {
@@ -11,71 +12,17 @@ import {
   buildQuotePrompt,
   useMessageInteractions,
 } from '@/pages/Workspace/hooks/useMessageInteractions';
-import type { ConversationTarget, SupportChatState } from '@/services/workspace/workspaceModel';
-import type { ProviderConnectionStatus } from '@tc-chat/adapters';
-import type { ChatBridge, ChatMessage, PanelAction, PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
-import type { CommandConfig, FileChipConfig, SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
+import type { SubmitContext } from '@tc-chat/ui/es/Sender';
+import type { SenderRef } from '@tc-chat/ui/es/Sender';
 import { Sender, ToolbarButton } from '@tc-chat/ui/es/Sender';
 import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
-import { useCallback, useEffect, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect } from 'react';
 import { ChatEmptyState } from './ChatEmptyState';
 import { ChatMessageList } from './ChatMessageList';
+import type { ChatPanelProps } from './chatPanelContracts';
 import { getMessageBlocks, getMessageTime, resolveSingleSender } from './chatPanelPresentation';
 export { resolveSingleSender } from './chatPanelPresentation';
-interface Props {
-  target: ConversationTarget | null;
-  /** 当前查看身份，用于在消息区展示真实发送者名称，避免使用有歧义的「你」。 */
-  viewer?: IdentityView | null;
-  /** 当前认证 human，用于按 message senderId 决定用户消息名称。 */
-  authenticatedUserId?: string | null;
-  authenticatedUserName?: string | null;
-  /** 顶栏当前登录用户头像；用户消息优先复用此头像，与 Bot 消息保持区分。 */
-  userAvatarUrl?: string;
-  messages: ChatMessage[];
-  isRequesting: boolean;
-  isLoadingMessages: boolean;
-  connectionStatus: ProviderConnectionStatus;
-  retryCount: number;
-  supportState: SupportChatState;
-  draft: string;
-  panelRef: RefObject<PanelHandle>;
-  /** 主→副事件通道桥（经 <ChatLayout.Panel bridge=...> 注入；不传则不接主→副事件）。 */
-  chatBridge?: ChatBridge;
-  onDraftChange: (content: string) => void;
-  onSend: (content: string, context?: SubmitContext) => void;
-  onStop: () => void;
-  onReconnect: () => void;
-  onPanelAction: (action: PanelAction) => void;
-  modelSelector?: ReactNode;
-  fileChip?: FileChipConfig;
-  command?: CommandConfig;
-  fileToolbar?: ReactNode;
-  senderRef?: React.RefObject<SenderRef | null>;
-  mode?: 'demo' | 'support' | 'bot';
-  interactive?: boolean;
-  /** 任务发起入口（单 Bot / 协作群共用）。仅 bot 模式渲染。 */
-  taskComposer?: ReactNode;
-  /**
-   * 主屏输入框 ref（绑定原生 <Sender ref>）。透传自 useWorkspace.inputRef，经 useChatBridge.setInputRef
-   * 注册到全局桥，使 aixcore 卡片 bridge.getInputRef().insert(text) 填入单聊主屏输入框并聚焦（根因 5 修复）。
-   * SenderRef 是 BridgeInputRef 超集；原生 Sender 是 forwardRef（ChatLayout.Sender 非 forwardRef,ref 恒 null）。
-   */
-  inputRef?: RefObject<SenderRef>;
-  /** 当前会话标题（单聊选中会话后顶栏显示会话名，与协作群顶栏一致；缺省回退 target.name）。 */
-  sessionTitle?: string;
-  /** 当前会话 ID（SVG 稿头部会话码胶囊，纯展示）。 */
-  sessionCode?: string;
-  /** <lg 打开单聊会话列表。 */
-  onOpenSessionList?: () => void;
-  historyPagination?: { hasMore: boolean; isLoading: boolean; onLoadMore: () => void };
-  /** 打开会话文件面板（验收微调：文件管理入口迁至顶栏，与协作群位置规则一致；缺省不渲染入口）。 */
-  onManageFiles?: () => void;
-  /** 对话页头部图标列插槽（chat-header-panels）：提供时取代文件入口图标位，行为由页面装配。 */
-  headerActions?: ReactNode;
-  /** 待定位高亮的消息 id（历史面板结果点击）；由消息列表滚动至该消息并短暂高亮。 */
-  highlightMessageId?: string | null;
-}
 export function ChatPanel({
   target,
   viewer,
@@ -112,7 +59,10 @@ export function ChatPanel({
   onManageFiles,
   headerActions,
   highlightMessageId,
-}: Props) {
+  sidePaneOpen,
+  onToggleSidePane,
+  onSidePaneIsOpenChange,
+}: ChatPanelProps) {
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
     messages,
@@ -220,7 +170,8 @@ export function ChatPanel({
   };
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
         <ChatPanelHeader
           target={target}
@@ -308,8 +259,15 @@ export function ChatPanel({
           />
         </div>
 
-        <ChatLayout.Panel ref={panelRef} onAction={onPanelAction} bridge={chatBridge} />
+        <ChatLayoutPanelSlot
+          ref={panelRef}
+          onAction={onPanelAction}
+          bridge={chatBridge}
+          onOpenStateChange={onSidePaneIsOpenChange}
+        />
       </ChatLayout>
+      {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
+      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
     </section>
   );
 }

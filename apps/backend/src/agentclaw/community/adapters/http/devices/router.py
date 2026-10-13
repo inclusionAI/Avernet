@@ -50,8 +50,8 @@ from agentclaw.community.adapters.http.devices.schemas import (
 )
 from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.devices.models import OperatorContext
-from agentclaw.community.core.skills_pool.native_confirmation import (
-    PoolNativeLayoutConfirmationError,
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConfirmationError,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -828,7 +828,7 @@ async def report_device_status(
             error_code=40302,
             data=None,
         )
-    except PoolNativeLayoutConfirmationError as e:
+    except LayoutInitializationConfirmationError as e:
         return ApiResponse(
             success=False,
             message=str(e),

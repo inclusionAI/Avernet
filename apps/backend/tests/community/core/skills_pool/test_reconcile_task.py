@@ -110,6 +110,7 @@ def _listener(
             binding_repository=bindings,
             bot_repository=bots,
             task_queue_service=queue,
+            layout_repository=MagicMock(),
         ),
         queue,
     )

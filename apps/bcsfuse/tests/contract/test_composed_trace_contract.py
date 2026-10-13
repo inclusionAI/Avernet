@@ -5,7 +5,7 @@ import logging
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.testclient import TestClient
 from src.bootstrap.opensource_app import create_opensource_app
 from src.infra.public.observability.trace_middleware import TraceIdMiddleware
@@ -16,8 +16,14 @@ def test_online_request_logs_server_duration_with_trace(caplog):
     app = FastAPI()
     app.add_middleware(TraceIdMiddleware)
 
+    def background_probe():
+        logging.getLogger("src.infra.public.observability.trace_middleware").info(
+            "[ONLINE-TIMING] phase=background_probe observed_trace_id=%s", get_trace_id(),
+        )
+
     @app.put("/v1/workers/{worker_id}/online")
-    async def online(worker_id: str):
+    async def online(worker_id: str, background_tasks: BackgroundTasks):
+        background_tasks.add_task(background_probe)
         return {"worker_id": worker_id}
 
     caplog.set_level(logging.INFO, logger="src.infra.public.observability.trace_middleware")
@@ -28,6 +34,12 @@ def test_online_request_logs_server_duration_with_trace(caplog):
     messages = [record.getMessage() for record in caplog.records]
     assert any("phase=request_start" in message and "trace_id=online-probe" in message for message in messages)
     assert any("phase=request_end" in message and "status=200" in message and "elapsed_ms=" in message for message in messages)
+    response_index = next(index for index, message in enumerate(messages) if "phase=response_sent" in message)
+    background_index = next(index for index, message in enumerate(messages) if "phase=background_probe" in message)
+    complete_index = next(index for index, message in enumerate(messages) if "phase=request_end" in message)
+    assert response_index < background_index < complete_index
+    assert "observed_trace_id=online-probe" in messages[background_index]
+    assert "post_response_ms=" in messages[complete_index]
 
 
 @pytest.mark.parametrize("headers,expected", [

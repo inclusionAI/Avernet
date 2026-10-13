@@ -33,8 +33,11 @@ from agentclaw.community.core.bot_management.create_flow import (
     create_bot_with_authorization,
 )
 from agentclaw.community.core.bot_management.errors import (
+    BotCreationRetainedError,
     BotCombinationUnsupportedError,
 )
+from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 
 pytestmark = pytest.mark.unit
 
@@ -257,6 +260,52 @@ def test_coding_service_create_completes_directly_on_issued():
     assert result.status == AuthStatus.ISSUED
     assert bot_service.create_bot.call_args.kwargs["bot_type"] == "service"
     assert result.bot["bot_type"] == "service"
+
+
+def test_issued_completion_failure_returns_retained_bot_retry_handle():
+    bot_service = _bot_service()
+    bot_service.create_bot.side_effect = BotServiceError("device allocation failed")
+    bot_service.get_bot.return_value = {
+        "bot_id": _BOT_ID,
+        "status": "PROVISIONING",
+    }
+
+    with pytest.raises(BotCreationRetainedError) as error:
+        complete_bot_authorization(
+            user_id="85020",
+            nick_name="Alice",
+            bot_id=_BOT_ID,
+            spec=_factory_snapshot_spec(bot_type="service"),
+            context=_cloud_context(),
+            bot_service=bot_service,
+            passport_plugin=_passport(),
+            auth_rel_plugin=MagicMock(),
+        )
+
+    assert error.value.bot_id == _BOT_ID
+
+
+def test_issued_relationship_failure_returns_retained_bot_retry_handle():
+    bot_service = _bot_service()
+    auth_relationship = MagicMock()
+    auth_relationship.create_relationship.side_effect = AuthRelationshipError(
+        "relationship write failed"
+    )
+
+    with pytest.raises(BotCreationRetainedError) as error:
+        complete_bot_authorization(
+            user_id="85020",
+            nick_name="Alice",
+            bot_id=_BOT_ID,
+            spec=_factory_snapshot_spec(bot_type="service"),
+            context=_cloud_context(),
+            bot_service=bot_service,
+            passport_plugin=_passport(),
+            auth_rel_plugin=auth_relationship,
+        )
+
+    assert error.value.bot_id == _BOT_ID
+    bot_service.get_bot.assert_not_called()
 
 
 def test_coding_service_create_completion_refused_for_legacy():

@@ -236,6 +236,16 @@ Replaceable vector persistence providers follow the versioned
 when they expose incremental synchronization. Baseline providers that do not
 implement that optional protocol remain compatible with full index rebuilds.
 
+Single-vector consumers may use `PointLookupVectorPersistenceBackend.load_by_id`
+to read an exact active ID. Providers without this optional extension retain
+the existing full-read fallback. `WorkerScopedProfileSource.scan_for_workers`
+preserves `scan()` lifecycle/runtime filtering, active-record conversion, source
+priority, and legacy `bot_` alias merging while limiting results to exact owners.
+Built-in stores implement `WorkerScopedProfileContentStore.get_active_by_workers`
+with a Worker ID predicate at the SQL boundary. Worker index builds retain
+active-profile preference and the existing first-profile fallback; these lookup
+extensions do not change HTTP responses or embedding/update policy.
+
 The composed application exposes the canonical Worker/Profile lifecycle under
 `/v1`: worker creation and lookup, online/offline transitions, profile upsert,
 activation and lookup, and worker deletion. Missing workers use HTTP 404 with
@@ -305,8 +315,17 @@ numbered skill fragments. Existing vectors and other payload fields are retained
 the transition does not re-embed existing profiles. Initial online publication
 still builds an index when no owned vectors exist. Repeating a transition repairs
 payload synchronization even when the Worker already has the requested state.
-An existing-vector write failure propagates through `RUNTIME_STATE_UPDATE_ERROR`;
-the saved Worker state is not rolled back, and callers can retry the same request.
+The composed `/online` and `/offline` routes wait for their Worker state writes
+and vector synchronization before returning the existing response. Synchronous
+service work runs in a thread pool so it does not block the server event loop.
+Before publishing online vector payloads, the service re-reads the Worker's
+current runtime and lifecycle state and skips work for a missing, offline,
+inactive, or disabled Worker. This preserves the earlier deferred path's check;
+it does not make the state check and vector write atomic across processes.
+Vector write failures retain the existing route error behavior. Slow callers
+should dispatch their lifecycle HTTP requests in the background rather than
+relying on BCSFuse to acknowledge incomplete work. Repeating a transition retries
+payload synchronization; initial online publication still builds missing vectors.
 
 Durable vector providers use `update_payload_by_worker(worker_id, updates)` when
 available: it must match exact payload ownership, enumerate the durable source

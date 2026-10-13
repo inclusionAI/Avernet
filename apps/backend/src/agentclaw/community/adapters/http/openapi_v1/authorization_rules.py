@@ -19,6 +19,9 @@ from .rule_shape_audit import assert_member_writes_name_explicit_origin
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
+        "authenticated minimal classification before establishing Bot collaboration"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
         "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
@@ -40,7 +43,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"): ServiceChecked(
@@ -175,15 +180,21 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(
         PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.ADMIN),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"): Check(
         PermissionLevel.ADMIN
     ),
@@ -204,7 +215,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
@@ -296,7 +309,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"): NoCheck(
         "share and group viewers must render panels without an Editor relation"
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER, explicit=True),
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(
+        PermissionLevel.MEMBER, explicit=True
+    ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
@@ -922,46 +937,78 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ``authorization_rules_retiring`` for the rows.
     **RETIRING_AUTHORIZATION,
     # ── BBS content routes (community iteration) ──────────────────────────
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"):
-        NoCheck("tenant-wide BBS Topic catalogue; no addressed bot"),
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"):
-        NoCheck("tenant-wide BBS Topic read; no addressed bot"),
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"):
-        NoCheck("tenant-wide BBS reply read; no addressed bot"),
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"):
-        NoCheck("public BBS write; author declared in the body, no addressed bot"),
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"):
-        NoCheck("public BBS reply write; author declared in the body, no addressed bot"),
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"):
-        NoCheck("public BBS Topic close; author declared in the body, handler verifies the stored author"),
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
+        "tenant-wide BBS Topic catalogue; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "tenant-wide BBS Topic read; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
+        "tenant-wide BBS reply read; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
+        "public BBS write; author declared in the body, no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
+        "public BBS reply write; author declared in the body, no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"): NoCheck(
+        "public BBS Topic close; author declared in the body, handler verifies the stored author"
+    ),
     # BBS Browse-Loop toggle: addressed-Bot writes; owner declared via owner_user_id query
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"):
-        NoCheck("public BBS browse-subscription join; operator declared as owner_user_id query, no addressed-owner grant on the wire"),
-    ("DELETE", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"):
-        NoCheck("public BBS browse-subscription cancel; bot_id path-only, no addressed-owner grant on the wire"),
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"):
-        NoCheck("per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"),
-    ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"):
-        NoCheck("public per-Bot subscription read; owner is not assumed from the principal, no addressed owner on the wire"),
-    ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"):
-        NoCheck("public per-Bot Browse-Loop feed read; no addressed owner on the wire"),
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework"):
-        NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"):
-        NoCheck("public B-mode one-shot Browse trigger; no addressed owner on the wire"),
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register"):
-        NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove"):
-        NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/browse-reports"):
-        NoCheck("public BBS browse-run outcome report; bot_id declared in the body, no addressed bot"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
+    ): NoCheck(
+        "public BBS browse-subscription join; operator declared as owner_user_id query, no addressed-owner grant on the wire"
+    ),
+    (
+        "DELETE",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
+    ): NoCheck(
+        "public BBS browse-subscription cancel; bot_id path-only, no addressed-owner grant on the wire"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"): NoCheck(
+        "per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
+    ): NoCheck(
+        "public per-Bot subscription read; owner is not assumed from the principal, no addressed owner on the wire"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"): NoCheck(
+        "public per-Bot Browse-Loop feed read; no addressed owner on the wire"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
+    ): NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self",
+    ): NoCheck("public B-mode one-shot Browse trigger; no addressed owner on the wire"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register",
+    ): NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove",
+    ): NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/browse-reports"): NoCheck(
+        "public BBS browse-run outcome report; bot_id declared in the body, no addressed bot"
+    ),
     # Feedback channel (BBS experimental feedback shared by every module)
-    ("GET", "/openapi/v1/collaboration/tasks/feedback"):
-        NoCheck("tenant-wide feedback read; no addressed bot"),
-    ("POST", "/openapi/v1/collaboration/tasks/feedback"):
-        NoCheck("public feedback write; reporter declared in the body, no addressed bot"),
-    ("GET", "/openapi/v1/collaboration/tasks/trajectory"):
-        NoCheck("a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"),
+    ("GET", "/openapi/v1/collaboration/tasks/feedback"): NoCheck(
+        "tenant-wide feedback read; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/feedback"): NoCheck(
+        "public feedback write; reporter declared in the body, no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/trajectory"): NoCheck(
+        "a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"
+    ),
 }
 
 

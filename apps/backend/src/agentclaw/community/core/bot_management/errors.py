@@ -25,6 +25,14 @@ class BotCreateError(Exception):
     """Base error for Bot creation policy failures."""
 
 
+class BotCreationRetainedError(Exception):
+    """Creation failed after its Bot row became the durable retry handle."""
+
+    def __init__(self, *, bot_id: str, message: str) -> None:
+        self.bot_id = bot_id
+        super().__init__(message)
+
+
 class BotTemplateInvalidError(BotCreateError):
     """The supplied Bot template attributes are malformed or unsupported."""
 

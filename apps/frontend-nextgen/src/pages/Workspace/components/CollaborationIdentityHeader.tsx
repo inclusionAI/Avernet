@@ -2,7 +2,12 @@ import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelect
 import { IdentityAvatar, IdentityDetails } from '@/components/Workspace/IdentitySelector/IdentitySelectorParts';
 import { useWorkspaceIdentitySwitcherModel } from '@/hooks/useWorkspaceIdentitySwitcherModel';
 
-/** 协作群列表顶部的当前身份装配区；身份状态与切换均由共享模型提供。 */
+/**
+ * 协作群列表顶部的当前身份装配区；身份状态与切换均由共享模型提供。
+ * v2 重构（dmore artboard-010 Frame 1912056221）：身份行换 sidebarChip 紧凑形态
+ * （16px 头像 + 名称 + (短ID) + 用户|Bot 分段 + 设置入口，整行打开切换 Popover），
+ * readOnly 单群视图保持只读卡片不变。
+ */
 export function CollaborationIdentityHeader({ readOnly = false }: { readOnly?: boolean }) {
   const model = useWorkspaceIdentitySwitcherModel();
 
@@ -22,17 +27,16 @@ export function CollaborationIdentityHeader({ readOnly = false }: { readOnly?: b
       </section>
     );
   return (
-    <section aria-label="当前协作身份" className="border-b border-border bg-background px-3 py-4">
+    <section aria-label="当前协作身份" className="flex h-12 shrink-0 items-center border-b border-border px-3">
       <WorkspaceIdentitySelector
         identities={model.identities}
         activeId={model.activeIdentityId}
         onChange={model.switchIdentity}
         userAvatarUrl={model.userAvatarUrl}
-        layout="collaboration"
+        layout="sidebarChip"
         identityStatus={model.humanIdentityStatus}
         identityError={model.humanIdentityError}
         identityListLoading={model.identityListLoading}
-        triggerClassName="bg-background hover:bg-accent hover:text-foreground"
       />
     </section>
   );

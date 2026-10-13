@@ -14,7 +14,7 @@ import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { parseDebugChatMessageContent } from '@/services/botWorkshop/debugChatFiles';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { FileText, Loader2, Plus, RefreshCw } from 'lucide-react';
+import { FileText, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -68,10 +68,12 @@ export function DebugChatPanel({
   bot,
   runtimeStage,
   ownerId,
+  onClose,
 }: {
   bot: BotDomain;
   runtimeStage?: BotRuntimeStage;
   ownerId?: string;
+  onClose?: () => void;
 }) {
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
@@ -197,6 +199,15 @@ export function DebugChatPanel({
             ))}
           </SelectContent>
         </Select>
+        {onClose ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭调试对话"
+            leftIcon={<X className="size-4" />}
+            onClick={onClose}
+          />
+        ) : null}
       </div>
       <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
         {loading ? (

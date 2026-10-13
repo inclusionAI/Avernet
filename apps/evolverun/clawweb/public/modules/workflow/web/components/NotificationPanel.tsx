@@ -1,9 +1,35 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@avernet/clawweb-shared/web/api/client'
-import type { NotificationConfig, DingTalkUserTarget, DingTalkGroupTarget } from '@avernet/clawweb-shared/web/types'
+import type {
+  NotificationConfig,
+  DingTalkUserTarget,
+  DingTalkGroupTarget,
+  DingTalkNotifyEvent,
+  DingTalkEventOptions,
+} from '@avernet/clawweb-shared/web/types'
 
 interface NotificationPanelProps {
   workflowId: string
+}
+
+const ALL_NOTIFY_EVENTS: { value: DingTalkNotifyEvent; label: string }[] = [
+  { value: 'workflow_started', label: '工作流启动' },
+  { value: 'node_started', label: '节点开始' },
+  { value: 'node_succeeded', label: '节点成功' },
+  { value: 'node_failed', label: '节点失败' },
+  { value: 'node_skipped', label: '节点跳过' },
+  { value: 'workflow_succeeded', label: '工作流成功' },
+  { value: 'workflow_failed', label: '工作流失败' },
+]
+
+const MVP_NOTIFY_EVENTS: DingTalkNotifyEvent[] = [
+  'node_failed',
+  'workflow_failed',
+  'workflow_succeeded',
+]
+
+function isMvpEvent(event: DingTalkNotifyEvent): boolean {
+  return MVP_NOTIFY_EVENTS.includes(event)
 }
 
 export default function NotificationPanel({ workflowId }: NotificationPanelProps) {
@@ -18,6 +44,8 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
   const [groups, setGroups] = useState<DingTalkGroupTarget[]>([])
   const [messageTitle, setMessageTitle] = useState('')
   const [includeRunLink, setIncludeRunLink] = useState(true)
+  const [notifyOn, setNotifyOn] = useState<DingTalkNotifyEvent[]>(MVP_NOTIFY_EVENTS)
+  const [eventOptions, setEventOptions] = useState<Partial<Record<DingTalkNotifyEvent, DingTalkEventOptions>>>({})
   const [saving, setSaving] = useState(false)
 
   const loadConfig = useCallback(async () => {
@@ -33,14 +61,10 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         setGroups(data.onFailureGroups)
         setMessageTitle(data.onFailureMessageTitle ?? '')
         setIncludeRunLink(data.onFailureMessageIncludeRunLink)
+        setNotifyOn(data.notifyOn != null ? data.notifyOn : MVP_NOTIFY_EVENTS)
+        setEventOptions(data.eventOptions ?? {})
       } else {
-        setConfig(null)
-        setRobotCode('')
-        setAppSecret('')
-        setUsers([])
-        setGroups([])
-        setMessageTitle('')
-        setIncludeRunLink(true)
+        resetForm()
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载通知配置失败')
@@ -48,6 +72,18 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
       setLoading(false)
     }
   }, [workflowId])
+
+  const resetForm = useCallback(() => {
+    setConfig(null)
+    setRobotCode('')
+    setAppSecret('')
+    setUsers([])
+    setGroups([])
+    setMessageTitle('')
+    setIncludeRunLink(true)
+    setNotifyOn(MVP_NOTIFY_EVENTS)
+    setEventOptions({})
+  }, [])
 
   useEffect(() => {
     void loadConfig()
@@ -68,6 +104,8 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         onFailureGroups: groups,
         onFailureMessageTitle: messageTitle.trim() || null,
         onFailureMessageIncludeRunLink: includeRunLink,
+        notifyOn,
+        eventOptions,
       })
       await loadConfig()
     } catch (err) {
@@ -75,26 +113,20 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
     } finally {
       setSaving(false)
     }
-  }, [workflowId, robotCode, appSecret, users, groups, messageTitle, includeRunLink, loadConfig])
+  }, [workflowId, robotCode, appSecret, users, groups, messageTitle, includeRunLink, notifyOn, eventOptions, loadConfig])
 
   const handleDelete = useCallback(async () => {
     setSaving(true)
     setError(null)
     try {
       await api.workflows.notificationConfig.delete(workflowId)
-      setConfig(null)
-      setRobotCode('')
-      setAppSecret('')
-      setUsers([])
-      setGroups([])
-      setMessageTitle('')
-      setIncludeRunLink(true)
+      resetForm()
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除失败')
     } finally {
       setSaving(false)
     }
-  }, [workflowId])
+  }, [workflowId, resetForm])
 
   // User list management
   const addUser = useCallback(() => {
@@ -126,6 +158,26 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
     setGroups((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  // Event subscription management
+  const toggleEvent = useCallback((event: DingTalkNotifyEvent) => {
+    setNotifyOn((prev) => {
+      if (prev.includes(event)) {
+        return prev.filter((e) => e !== event)
+      }
+      return [...prev, event]
+    })
+  }, [])
+
+  const updateEventOption = useCallback((event: DingTalkNotifyEvent, field: keyof DingTalkEventOptions, value: string | boolean | number | undefined) => {
+    setEventOptions((prev) => ({
+      ...prev,
+      [event]: {
+        ...prev[event],
+        [field]: value,
+      },
+    }))
+  }, [])
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-4 text-sm text-gray-400">
@@ -138,7 +190,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <h4 className="text-sm font-medium text-gray-700">失败通知配置（钉钉）</h4>
+        <h4 className="text-sm font-medium text-gray-700">钉钉工作流通知配置</h4>
         {config && (
           <button
             onClick={() => void handleDelete()}
@@ -189,10 +241,94 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         </div>
       </div>
 
+      {/* Event subscription */}
+      <div className="mb-4 rounded-lg border border-indigo-200 bg-white p-4">
+        <h5 className="mb-2 text-xs font-semibold text-indigo-700">📡 订阅事件</h5>
+        <div className="grid grid-cols-2 gap-2">
+          {ALL_NOTIFY_EVENTS.map((item) => {
+            const checked = notifyOn.includes(item.value)
+            const disabled = !isMvpEvent(item.value)
+            return (
+              <label
+                key={item.value}
+                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
+                  checked ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                } ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                title={disabled ? '该事件将在后续版本支持' : undefined}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => toggleEvent(item.value)}
+                  className="rounded border-gray-300"
+                />
+                <span>{item.label}</span>
+                {!isMvpEvent(item.value) && (
+                  <span className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">即将支持</span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Per-event options (Phase 1 MVP: only selected events) */}
+      {notifyOn.some((e) => isMvpEvent(e)) && (
+        <div className="mb-4 rounded-lg border border-teal-200 bg-white p-4">
+          <h5 className="mb-2 text-xs font-semibold text-teal-700">⚙️ 事件消息配置</h5>
+          <div className="space-y-3">
+            {notifyOn.filter(isMvpEvent).map((event) => (
+              <div key={event} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                <div className="mb-2 text-xs font-medium text-gray-700">
+                  {ALL_NOTIFY_EVENTS.find((e) => e.value === event)?.label ?? event}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500">自定义标题</label>
+                    <input
+                      type="text"
+                      value={eventOptions[event]?.title ?? ''}
+                      onChange={(e) => updateEventOption(event, 'title', e.target.value || undefined)}
+                      placeholder="留空使用默认标题"
+                      className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={eventOptions[event]?.includeRunLink ?? true}
+                        onChange={(e) => updateEventOption(event, 'includeRunLink', e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      包含运行链接
+                    </label>
+                  </div>
+                </div>
+                {(event === 'node_succeeded' || event === 'node_failed') && (
+                  <div className="mt-2 flex items-center gap-4">
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={eventOptions[event]?.includeNodeOutput ?? false}
+                        onChange={(e) => updateEventOption(event, 'includeNodeOutput', e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      包含节点输出
+                    </label>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Failure notification users */}
       <div className="mb-4 rounded-lg border border-blue-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h5 className="text-xs font-semibold text-blue-700">👤 单聊通知人（onFailure.users）</h5>
+          <h5 className="text-xs font-semibold text-blue-700">👤 单聊通知人</h5>
           <button
             onClick={addUser}
             className="rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
@@ -235,7 +371,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
       {/* Failure notification groups */}
       <div className="mb-4 rounded-lg border border-purple-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between">
-          <h5 className="text-xs font-semibold text-purple-700">👥 群聊通知群（onFailure.groups）</h5>
+          <h5 className="text-xs font-semibold text-purple-700">👥 群聊通知群</h5>
           <button
             onClick={addGroup}
             className="rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 hover:bg-purple-100"
@@ -275,9 +411,9 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         )}
       </div>
 
-      {/* Message customization */}
+      {/* Legacy message customization */}
       <div className="mb-4 rounded-lg border border-green-200 bg-white p-4">
-        <h5 className="mb-2 text-xs font-semibold text-green-700">💬 消息自定义</h5>
+        <h5 className="mb-2 text-xs font-semibold text-green-700">💬 默认失败消息自定义</h5>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-gray-600">通知标题</label>
@@ -313,9 +449,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
           {saving ? '保存中…' : config ? '更新配置' : '保存配置'}
         </button>
         {config && (
-          <span className="text-xs text-gray-400">
-            已配置 · 更新于 {new Date(config.onFailureMessageTitle ?? '').toLocaleString('zh-CN') || '—'}
-          </span>
+          <span className="text-xs text-gray-400">已配置</span>
         )}
       </div>
     </div>

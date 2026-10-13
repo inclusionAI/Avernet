@@ -7,7 +7,9 @@ from collections.abc import Callable
 from typing import Any
 
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceBindingStatus
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import BAAS_DEVICE_PROVIDER
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.log import get_logger
 
 
@@ -15,6 +17,11 @@ logger = get_logger()
 
 _PUBLISH_POLL_INTERVAL_SECONDS = 5
 _PUBLISH_POLL_TIMEOUT_SECONDS = 600
+
+
+def create_publish_poll_idempotency_key(*, binding_id: int, publish_id: int) -> str:
+    """Return the stable key for one live create-publish poll lifecycle."""
+    return f"baas-create-poll:{binding_id}:{publish_id}"
 
 
 def enqueue_create_publish_poll(
@@ -44,6 +51,10 @@ def enqueue_create_publish_poll(
             started_at_epoch_s=time.time(),
         ),
         deadline_seconds=86400,
+        idempotency_key=create_publish_poll_idempotency_key(
+            binding_id=binding_id,
+            publish_id=publish_id,
+        ),
     )
     return True
 
@@ -91,6 +102,38 @@ def handle_after_binding_persisted(
             error=f"enqueue BaaS create publish poll failed: {exc}",
         )
     return True
+
+
+def dispatch_pool_layout_confirmation(
+    *,
+    binding: DeviceBindingRecord,
+    startup_identity: str,
+    dispatch_watchdog: Callable[..., None],
+) -> tuple[bool, str]:
+    """Reuse the authenticated startup callback after create recovery or restart."""
+    props = binding.device_props or {}
+    envs = props.get("envs")
+    if not isinstance(envs, dict) or envs.get("AGENTCLAW_SKILLS_LAYOUT") != "pool":
+        return True, "layout confirmation not required"
+    if envs.get("AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION") != "skills-pool-p3-v1":
+        return False, "unsupported Skills Pool startup contract"
+    if resolve_startup_identity(props) != startup_identity:
+        return False, "stale Skills Pool startup identity"
+    bot_uuid = str(props.get("bot_uuid") or "")
+    client_id = str(props.get("client_id") or binding.device_id)
+    callback_token = str(props.get("callback_token") or "")
+    if not bot_uuid or not client_id or not callback_token:
+        return False, "incomplete Skills Pool startup callback context"
+    try:
+        dispatch_watchdog(
+            bot_uuid=bot_uuid,
+            client_id=client_id,
+            token=callback_token,
+            startup_identity=startup_identity,
+        )
+    except Exception as exc:
+        return False, f"Skills Pool startup callback dispatch failed: {exc}"
+    return True, "Skills Pool startup callback dispatched"
 
 
 def run_start_service_polling(
@@ -165,6 +208,7 @@ def run_start_service_polling(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     callback_token=callback_token,
+                    startup_identity=str(publish_id),
                     admins=admins,
                     codefuse_token=codefuse_token,
                 )

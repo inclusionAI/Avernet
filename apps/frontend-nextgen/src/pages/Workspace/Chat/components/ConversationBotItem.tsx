@@ -236,19 +236,21 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle)。语义与键盘仍由
             主按钮承载,故不参与 Tab 序、对读屏隐藏,避免一行两个等价控件。 */}
         {interactive && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             aria-hidden="true"
             tabIndex={-1}
             onClick={handleToggle}
-            className="my-auto flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-muted"
+            className="my-auto h-6 w-6 shrink-0 rounded-md hover:bg-muted"
           >
             {expanded ? (
               <ChevronDown className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
             ) : (
               <ChevronRight className="h-3.5 w-3.5 text-content-icon" aria-hidden="true" />
             )}
-          </button>
+          </Button>
         )}
       </div>
       {expanded && interactive && (

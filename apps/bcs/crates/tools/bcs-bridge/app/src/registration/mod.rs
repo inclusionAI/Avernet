@@ -129,6 +129,9 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     bot.insert("engine".into(), args.engine.clone().into());
     bot.insert("cwd".into(), cwd.to_str().context("Engine working directory must be UTF-8")?.into());
     if let Some(model) = args.model { bot.insert("model".into(), model.into()); }
+    if let Some(mode) = app.registration_permission_mode(&args.engine) {
+        bot.insert("permission_mode".into(), mode.into());
+    }
     if let Some(engine_bin) = engine_bin {
         bot.insert("engine_bin".into(), engine_bin.to_str().context("Engine executable path must be UTF-8")?.into());
     }

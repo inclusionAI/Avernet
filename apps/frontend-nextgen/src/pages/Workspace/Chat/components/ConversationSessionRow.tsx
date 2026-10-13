@@ -109,37 +109,46 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         </div>
       )}
       {!readOnly && onToggleFavorite && (
-        <IconButton
-          label={
-            session.favorite === undefined
-              ? '收藏状态暂不可用，请重新加载会话列表'
-              : session.favorite
-              ? '取消收藏'
-              : '收藏会话'
-          }
-          ariaLabel={session.favorite ? '取消收藏' : '收藏会话'}
-          size="sm"
-          icon={
-            <Star
-              className={cn(
-                'h-4 w-4',
-                session.favorite === undefined || !session.favorite ? 'text-muted-foreground' : 'fill-star text-star',
-              )}
-            />
-          }
-          disabled={favoritePending || session.favorite === undefined || Boolean(actions?.pending)}
-          aria-busy={favoritePending || Boolean(actions?.pending)}
+        // 显隐挂外层 span(与 ConversationSessionActions 平齐形态同款):Button 基类的
+        // disabled:opacity-50(加载更多在途时全列表星标 disabled)特异性高于行内 opacity-0,
+        // 挂在按钮上会把它顶穿 → 未 hover 也全部显影;套嵌 opacity 相乘,隐藏态不再被破防。
+        <span
           className={cn(
-            'absolute right-7 top-1/2 -translate-y-1/2 rounded-md',
+            'absolute right-7 top-1/2 -translate-y-1/2',
             !favorite &&
               !selected &&
               'opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
           )}
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleFavorite();
-          }}
-        />
+        >
+          <IconButton
+            label={
+              session.favorite === undefined
+                ? '收藏状态暂不可用，请重新加载会话列表'
+                : session.favorite
+                ? '取消收藏'
+                : '收藏会话'
+            }
+            ariaLabel={session.favorite ? '取消收藏' : '收藏会话'}
+            size="sm"
+            icon={
+              <Star
+                className={cn(
+                  'h-4 w-4',
+                  session.favorite === undefined || !session.favorite
+                    ? 'text-muted-foreground'
+                    : 'fill-star text-star',
+                )}
+              />
+            }
+            disabled={favoritePending || session.favorite === undefined || Boolean(actions?.pending)}
+            aria-busy={favoritePending || Boolean(actions?.pending)}
+            className="rounded-md"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFavorite();
+            }}
+          />
+        </span>
       )}
     </div>
   );

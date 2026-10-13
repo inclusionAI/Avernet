@@ -209,6 +209,32 @@ class OrmBotDeviceRelRepository(OrmConnectionMixin, BotDeviceRelRepository):
         return result
 
     @with_orm_session
+    def max_live_bot_id_for_bot_ids(self, bot_ids: list[int]) -> int | None:
+        """MAX(bot_id) over live (is_deleted==0) rel rows for the given bot_ids.
+
+        Cross-env admin semantics: no tenant/env filter, mirroring the restore
+        endpoint's deliberately env-agnostic contract (``get_by_id_only`` /
+        ``restore_bot_record_by_id`` precedent). Returns None for an empty
+        id list or when every matching rel row is tombstoned (D-04).
+        """
+        log.info("max_live_bot_id_for_bot_ids: bot_ids=%s", bot_ids)
+        if not bot_ids:
+            return None
+        from sqlalchemy import func as sa_func
+
+        result = (
+            self._session.query(sa_func.max(BotDeviceRelModel.bot_id))
+            .filter(
+                BotDeviceRelModel.bot_id.in_(bot_ids),
+                BotDeviceRelModel.is_deleted == 0,
+            )
+            .scalar()
+        )
+        resolved = int(result) if result is not None else None
+        log.info("[bot-device-rel:max_live_bot_id_for_bot_ids] result: %s", resolved)
+        return resolved
+
+    @with_orm_session
     def batch_insert_rels(
         self,
         *,

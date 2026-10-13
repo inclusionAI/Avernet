@@ -208,6 +208,12 @@ describe('Open Core default capabilities', () => {
     useExternalAuthStore.getState().reset();
   });
 
+  test('getBbsApiBase 默认 /openapi/v1/collaboration/tasks/bbs/topics（BBS 已发布公开面）', () => {
+    const r = defaultCapabilities.getBbsApiBase();
+    expect(r.status).toBe('available');
+    expect(r.value).toBe('/openapi/v1/collaboration/tasks/bbs/topics');
+  });
+
   test('getTaskClaimGrantStrategy 默认 skip（Open Core api-key 直发,secbaas grant 短路 no-op）', () => {
     const r = defaultCapabilities.getTaskClaimGrantStrategy();
     expect(r.status).toBe('available');

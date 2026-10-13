@@ -21,18 +21,8 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
-    ("GET", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/links"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/{bot_id}/links"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    (
-        "PUT",
-        "/openapi/v1/bots/{bot_id}/links/{resource_id}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    (
-        "DELETE",
-        "/openapi/v1/bots/{bot_id}/links/{resource_id}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # Minimal classification requires a verified human, but no Bot grant.
+    ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/local/start-progress",
@@ -163,8 +153,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # BBS reads are tenant-wide and available to every authenticated principal.
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
+    ): AdmissionMode.OPEN,
     # Public BBS unified writes. The author is declared explicitly in the
     # request body (``author_type`` + ``author_id``); this is a backend API
     # reached by humans, Bots and app-to-app callers alike, so the surface does
@@ -175,8 +171,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # there is no addressed bot. The close handler still verifies the declared
     # author is the stored topic author.
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close",
+    ): AdmissionMode.OPEN,
     # BBS Browse-Loop toggle: addressed-Bot writes. The bot is named in the
     # path, so these take the addressed-owner grant (a collaborator managing a
     # bot may switch its scheduled forum tour on or off) rather than tenant-wide
@@ -192,18 +194,39 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # BBS Browse-Loop per-owner list: a backend read keyed by the explicit
     # ``owner_id`` query (subscription owner), not the logged-in user, so an
     # application caller may query any owner just like the unified BBS writes.
-    ("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions",
+    ): AdmissionMode.OPEN,
     # BBS Browse-Loop per-Bot reads + manual triggers exposed on the public
     # surface so the product can render state and drive a one-shot Browse.
     # They address a bot by path but name no owner on the wire (only a
     # verified principal), so admission is OPEN like the unified BBS
     # content writes and the authorisation row is NoCheck.
-    ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register"): AdmissionMode.OPEN,
-    ("POST", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove"): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove",
+    ): AdmissionMode.OPEN,
     # Public BBS browse-run outcome report; bot_id declared in the body, no
     # addressed bot on the wire (mirrors the unified BBS content writes and
     # the authorisation row's NoCheck).

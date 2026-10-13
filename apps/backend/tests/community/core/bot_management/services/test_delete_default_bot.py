@@ -53,6 +53,10 @@ def _make_bot_service(repository) -> BotService:
         ),
         device_status_client=MagicMock(),
         cron_auto_setup_service_provider=lambda: MagicMock(),
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        skill_layout_repository=MagicMock(),
     )
 
 

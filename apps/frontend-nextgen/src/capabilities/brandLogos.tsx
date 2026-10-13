@@ -1,5 +1,7 @@
 import AvernetWordmark from '@/assets/Images/avernet-header-logo.png';
+import AvernetClawMark from '@/assets/Images/avernet-mark-claw.png';
 import AvernetMark from '@/assets/Images/avernet-label-logo.png';
+import { cn } from '@/utils/cn';
 
 /**
  * Avernet 品牌视觉组件（Open Core 默认，经 getProductBrand capability 下发消费）。
@@ -7,8 +9,11 @@ import AvernetMark from '@/assets/Images/avernet-label-logo.png';
  * internal overlay 的 TeamClaw 视觉组件在 src/extensions/internal.ts 内自带（随其剥离）。
  */
 
-/** 横版 wordmark（mark + "Avernet" 字标一张图），页头等横向场景使用。 */
-export function AvernetWordmarkLogo({ className }: { className?: string }) {
+/** 横版 wordmark（mark + "Avernet" 字标一张图），页头等横向场景使用。
+ *  compact（左侧导航宽松态顶部紧凑位）渲染设计稿爪形锁版（24×21.5，artboard-016 顶部品牌位）。 */
+export function AvernetWordmarkLogo({ className, compact }: { className?: string; compact?: boolean }) {
+  if (compact)
+    return <img src={AvernetClawMark} alt="Avernet" className={cn('w-6 shrink-0', className)} />;
   return <img src={AvernetWordmark} alt="Avernet" className={className} />;
 }
 

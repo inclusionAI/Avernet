@@ -36,19 +36,22 @@ describe('GroupSidebar', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('v1.4：未收藏星标默认隐藏，悬停/键盘聚焦时显现', () => {
+  it('v2：未收藏星标默认隐藏，悬停/键盘聚焦时显现（/row 作用域显隐）', () => {
     render(<GroupSidebar {...makeProps()} />);
     const stars = screen.getAllByRole('button', { name: '收藏会话' });
     for (const star of stars) {
-      expect(star).toHaveClass('opacity-0', 'group-hover:opacity-100', 'group-focus-within:opacity-100');
+      expect(star.parentElement).toHaveClass('opacity-0');
+      // 显隐规则挂在星标外层 span（对话行同款 /row 作用域）。
+      expect(star.parentElement?.className).toContain('group-hover/row:opacity-100');
+      expect(star.parentElement?.className).toContain('group-focus-within/row:opacity-100');
     }
   });
 
-  it('v1.4：群会话未收藏星标隐藏态仍可交互，更多菜单不再承载收藏项', () => {
+  it('v2：群会话未收藏星标隐藏态仍可交互，更多菜单不再承载收藏项', () => {
     render(<GroupSidebar {...makeProps()} />);
     const stars = screen.getAllByRole('button', { name: '收藏会话' });
     expect(stars[0].querySelector('svg.lucide-star')).toBeInTheDocument();
-    expect(stars[0]).toHaveClass('opacity-0');
+    expect(stars[0].parentElement).toHaveClass('opacity-0');
 
     fireEvent.click(screen.getAllByRole('button', { name: '会话更多操作' })[0]);
     expect(screen.getByRole('button', { name: '管理会话' }).querySelector('svg')).toBeInTheDocument();

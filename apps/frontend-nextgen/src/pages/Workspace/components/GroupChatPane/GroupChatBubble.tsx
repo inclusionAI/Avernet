@@ -62,6 +62,9 @@ export function GroupChatBubble({
     onStop,
   };
   const messageActions = <MessageInteractionToolbar showCopy={false} {...messageActionsProps} />;
+  // dmore 协作群聊操作行显隐口径：仅回复对话最后一项(末尾的 Bot 回复)默认展示
+  // 全部操作图标，其余回复项与用户发送的消息都只在悬停/键盘聚焦时展示。
+  const shouldAlwaysShowActions = message.role === 'assistant' && isLastMessage;
 
   return (
     <>
@@ -83,7 +86,8 @@ export function GroupChatBubble({
               role: message.role,
               align: message.role === 'user' ? 'right' : 'left',
               name: undefined,
-              bubbleColor: message.role === 'user' ? 'hsl(var(--primary) / 0.1)' : undefined,
+              // dmore 用户气泡口径：与 chat 页一致（#F5F5F5 灰底 rx12，替代 v1 的 primary/0.1）。
+              bubbleColor: message.role === 'user' ? 'hsl(var(--muted))' : undefined,
               maxWidth: '48rem',
             }}
             timestamp={undefined}
@@ -102,6 +106,7 @@ export function GroupChatBubble({
             onCopy={() => onCopy?.(messageText)}
             onEdit={onEdit}
             isEditable={message.role === 'user' && isEditable && Boolean(messageText.trim())}
+            revealOnHover={!shouldAlwaysShowActions}
           />
         ) : null}
       </div>
