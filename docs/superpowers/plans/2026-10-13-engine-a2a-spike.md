@@ -1,57 +1,53 @@
-# Engine→A2A 协议替换 · 阶段 0 Spike 实施计划（v2）
+# Engine→A2A 协议替换 · 阶段 0 Spike 实施计划（v3）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 产出 A2A v1.0（JSON-RPC 绑定）替换 engine v3 WS 信道的 Spike 证据：门禁 G1a-G5 全部可判、失败用例 F1-F8 全部可复跑；**门禁结论只由机器生成的证据文件支撑，探针失败以非零退出码显式暴露，报告按证据等级分级**。
+**Goal:** 产出 A2A v1.0（JSON-RPC 绑定）替换 engine v3 WS 信道的 Spike 证据：门禁 G1a-G5 全部可判、F1-F8 全部可复跑；**每个 pass 必须真实证明它声称的契约**。
 
-**Architecture:** 旁置 Spike harness（`spike/a2a/`，独立 venv）：kernel 按设计文档 §8 契约实现（统一订阅入口、锁内交接、D14 原子判定）；FastAPI 壳提供 card 与 `/rpc`；**同一 kernel 同时被 A2A 壳、v3 迷你服务器、G3/G5 实验复用——任何离线拼接演示不是证据**。mock 引擎先行；v3 bridge 后置接真引擎。spike 目录永不合入 dev。
+**Architecture:** 旁置 Spike harness（`spike/a2a/`，独立 venv，永不合入 dev）。kernel 按设计文档 §8 契约实现（统一订阅、锁内交接、D14 原子判定、慢订阅者踢除、统一收口）；A2A 壳把 kernel 私有事件**转换为标准 StreamResponse wire**（`{seq,type,ev}` 不出 kernel）；v3 迷你服务器与 A2A 壳共享 kernel 且同为异步执行路径（G5 对照口径一致）；故障代理带 HTTP 控制端点（跨进程可控，屏障 = state.forwarded）；mock 引擎带可配置慢速节奏（G1b 无缓冲证明）。
 
-**Tech Stack:** Python 3.12（自建 venv）、a2a-sdk（G2 锁版）、FastAPI + uvicorn、httpx、websockets、pytest（同步 TestClient 模式）、Playwright。
+**Tech Stack:** Python 3.12、a2a-sdk（G2 锁版）、fastapi + uvicorn、httpx、websockets、pytest + pytest-asyncio、Playwright。
 
-**上游文档:** `docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md`（V5 通过版，§引用均指向它。本计划自身的 v2 修订吸收计划评审 R6 八项 + 撰写自审发现的实现缺陷：统一订阅与终态终止、last_seq 独立于缓存、F5 故障时序、凭据负向等）
+**上游文档:** `docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md`（V5 通过版；本计划 v3 吸收计划评审 R6 全部 8 项 + R7 全部 6 P1 + 2 实现项 + 3 环境项）
 **分支:** `feat/engine-a2a-protocol-replacement`
-**端口:** 20043=A2A 壳 / 20044=v3 迷你 / 20045=F5 被测服务 / 20046=故障代理 / 20047=桥测试 / 20003=singlebox 真引擎
+**端口:** 20043=A2A 壳 / 20044=v3 迷你 / 20045=F5 被测 / 20046=故障代理 / 20047=echo 引擎 / 20048=壳(桥测试) / 20049=legacy A2A / 20050=F7 代理 / 20003=singlebox 真引擎
 
 ---
 
 ## 文件结构
 
 ```
-spike/a2a/                     # 永不合入 dev
+spike/a2a/
 ├── .venv/  .gitignore
-├── requirements-spike.txt      # 含 pytest 等全部复跑依赖（T1）
-├── settings.py                 # 端口/扩展 URI（T2）
-├── kernel.py                   # 唯一契约实现：Run/统一订阅/D7/D14/inject（T3/T6）
-├── engine_mock.py              # 脚本化假引擎（含可暂停闸门，T3）
-├── server.py                   # A2A 壳：card + /rpc + SSE 三通道（T2/T4）
-├── v3_server.py                # v3 迷你服务器：同 kernel，legacy 模式（T8）
-├── bridge_v3.py                # 真 engine v3 WS → kernel 活泵（T9）
-├── client_t.py                 # 客户端模板：超时/5xx→retry-only、能力门控（T7）
-├── fault_proxy.py              # F5 响应吞没代理（T7）
+├── requirements-spike.txt      # 含 pytest/pytest-asyncio 全部复跑依赖
+├── settings.py  kernel.py  engine_mock.py  server.py  sse.py
+├── v3_server.py                # 迷你 v3（共享 kernel；异步执行；legacy 模式）
+├── v3_echo_engine.py           # 纯帧成型对端（bridge 契约测试，无 kernel）
+├── bridge_v3.py  client_t.py  fault_proxy.py
 ├── probes/
-│   ├── g1a_validate.py  g1a_sdk.py           # T5（验收器可负测）
-│   ├── g3_realtime.py                          # T9
-│   ├── g1b_browser.html  g1b_playwright.py    # T10
-│   ├── g5_protocol.py                          # T11（判据预声明）
-│   └── report.py                               # T12（evidence/*.json 聚合）
+│   ├── g1a_validate.py  g1a_sdk.py  g3_realtime.py
+│   ├── g1b_browser.html  g1b_playwright.py  g5_protocol.py  report.py
 ├── tests/
 │   ├── conftest.py  test_rpc.py  test_kernel.py  test_stream.py
 │   ├── test_g1a_validator.py  test_retry.py  test_f5_restart.py
 │   └── test_v3_f7_f8.py  test_bridge.py
-└── evidence/                   # 机器生成（G2-versions.md、G*.json、REPORT.md）
+└── evidence/                   # 机器生成（G2.json、G1a.json、G3.json、G1b.json、G4.json、G5.json、REPORT.md）
 ```
 
-**关键不变量（跨任务一致的 kernel 契约，先声明后实现）：**
-1. `Kernel.send_message(ctx, text, key, mode)` → `{"task":...}` | `UNKNOWN_OUTCOME` 哨兵；`Kernel.open_run(ctx, key, mode, digest)` → `(run_id, created)` | `UNKNOWN_OUTCOME`；`Kernel.execute_message(run_id)`（记录上游调用并执行）
-2. `Kernel.subscribe(rid, since_seq)` → `(backlog, queue)`；`since_seq=None` = 标准订阅（首事件为合成 Task 快照）；`Kernel.replay(rid, since_seq)` → 同型 | `None`（显式拒绝）
-3. 事件序号 = `Run.last_seq`，**独立于事件缓冲**（cache_limit 清空缓冲不清零序号）；锁内完成"快照 + 订阅注册"，与发布共持 run 锁 → 无丢失窗口
-4. cache_limit 只停止缓冲，**不停止投递**；终态事件带 `final: True` 标记，流据此终止（不依赖 180s 驱逐）
+**不变量（跨任务一致，违反即返工）：**
+1. **wire 边界（R7-1）**：kernel 事件 `{seq,type,ev}` 私有封装不出 kernel；A2A 壳经 `_wire()` 输出标准 StreamResponse——`result` 恰含其一 `task`/`message`/`statusUpdate`/`artifactUpdate`；seq 位于成员 `metadata.seq`；终态 statusUpdate 带 `final: true`
+2. 订阅生命周期（R7-7）：流结束/断开 finally 移除订阅队列；QueueFull 踢除慢订阅者，不影响执行与其他订阅者
+3. 幂等键 = `(contextId, messageId)`（R7-2）；**客户端契约：调用方必须提供稳定 contextId**（丢失响应后的关联 = 同 context+messageId）；server 对缺失 contextId 显式 `-32602 context_required`
+4. kernel `last_seq` 独立于事件缓冲；计数/字节/全局任一预算越界 → 显式 `cache_limit` 拒回放，投递不中断（R7-7）
+5. 判据预声明（R7-6）：G5 阈值与口径、G1b 时序断言先写死在探针内；rss 样本缺失 → verdict=not_run
+6. 故障代理 HTTP 控制端点跨进程控制（R7-3）；同步屏障 = `state.forwarded`（上游响应已在代理手中）
+7. 统一任务收口（R7-8）：`complete_run()` 置状态→发布终态→finish；bridge 复用同一方法
 
 ---
 
-### Task 1: 环境与依赖锁定（G2 前半）
+### Task 1: 环境与依赖锁定（G2）
 
-**Files:** Create `spike/a2a/requirements-spike.txt`、`spike/a2a/evidence/G2-versions.md`；Modify `.gitignore`
+**Files:** Create `requirements-spike.txt`、`evidence/G2-versions.md`、`evidence/G2.json`；Modify `.gitignore`
 
 - [ ] **Step 1: venv 与目录**
 
@@ -61,42 +57,51 @@ python3 -m venv spike/a2a/.venv
 spike/a2a/.venv/bin/pip install -U pip
 ```
 
-- [ ] **Step 2: 安装并整锁依赖**
+- [ ] **Step 2: 安装并整锁依赖（asyncio 测试依赖一并锁入——R7 环境项）**
 
 ```bash
 spike/a2a/.venv/bin/pip install "a2a-sdk[http-server]" fastapi uvicorn httpx \
-  websockets pytest
+  websockets pytest pytest-asyncio
 spike/a2a/.venv/bin/pip freeze > spike/a2a/requirements-spike.txt
-grep -cE '^(pytest|a2a|fastapi|uvicorn|httpx|websockets)==' spike/a2a/requirements-spike.txt
+grep -cE '^(pytest=|pytest-asyncio|a2a-sdk|fastapi==|uvicorn==|httpx==|websockets==)' \
+  spike/a2a/requirements-spike.txt
 ```
 
-预期 ≥6 行命中；命中 <6 视为锁失败。**a2a-sdk 安装失败 = G2 早退**：记录 G2-versions.md、停止本计划、回设计文档 D4 降级分支重评审——不允许跳过。
+预期 ≥7 行；<7 = 锁失败。**a2a-sdk 安装失败 = G2 早退**（G2.json 记 fail，回设计文档 D4 降级分支重评审），不允许跳过。
 
-- [ ] **Step 3: SDK API 面备忘（发现什么记什么）**
+- [ ] **Step 3: SDK API 面备忘（发现什么记什么；T5 的 normalize 契约据此实现）**
 
 ```bash
 grep -rn "class .*Resolver\|def get_agent_card\|def send_message\|def send_streaming" \
-  spike/a2a/.venv/lib/python*/site-packages/a2a/client/ | head -8
-spike/a2a/.venv/bin/pip show a2a-sdk
+  spike/a2a/.venv/lib/python*/site-packages/a2a/ 2>/dev/null | head -8
 ```
 
-把两类输出原样存入 `evidence/G2-versions.md`（含 a2a-sdk 版本号与 client 类/方法名——T5 import 名以这里为准）。
+输出原样存 `evidence/G2-versions.md`。
 
-- [ ] **Step 4: gitignore + 提交**
+- [ ] **Step 4: 机器生成 G2.json（report.py 聚合 G*.json——R7 环境项）**
+
+```bash
+SDKV=$(spike/a2a/.venv/bin/pip show a2a-sdk | awk '/^Version/{print $2}')
+printf '{"gate": "G2", "verdict": "pass", "evidence_level": "toolchain", "a2a_sdk_version": "%s"}\n' \
+  "$SDKV" > spike/a2a/evidence/G2.json
+cat spike/a2a/evidence/G2.json
+```
+
+- [ ] **Step 5: gitignore + 提交**
 
 ```bash
 printf 'spike/a2a/.venv/\nspike/a2a/**/__pycache__/\nspike/a2a/evidence_upstream_calls.jsonl\n' >> .gitignore
-git add .gitignore spike/a2a/requirements-spike.txt spike/a2a/evidence/G2-versions.md
-git commit -m "chore(spike): lock full spike toolchain (G2)"
+git add .gitignore spike/a2a/requirements-spike.txt spike/a2a/evidence/
+git commit -m "chore(spike): lock toolchain incl test deps, machine G2.json"
 ```
 
 ---
 
-### Task 2 + 3: card`/rpc` 骨架 + kernel 统一订阅（两个任务同批提交）
+### Task 2+3: card`/rpc` 骨架 + kernel（同批提交）
 
-**Files:** Create `settings.py`、`server.py`、`kernel.py`、`engine_mock.py`、`tests/conftest.py`、Test `test_rpc.py`、`test_kernel.py`
+**Files:** Create `settings.py`、`kernel.py`、`engine_mock.py`、`server.py`、`tests/conftest.py`、Test `test_rpc.py`、`test_kernel.py`
 
-- [ ] **Step 1: 先写失败测试（两个测试文件一并落盘）**
+- [ ] **Step 1: 失败测试**
 
 ```python
 # spike/a2a/tests/conftest.py
@@ -116,35 +121,57 @@ def client():
 
 ```python
 # spike/a2a/tests/test_rpc.py
+CTX = "fixed-ctx-rpc"
+
+
+def _params(mid, text, metadata=None, ctx=CTX):
+    return {"message": {"role": "ROLE_USER", "parts": [{"text": text}],
+                        "messageId": mid, "contextId": ctx},
+            "metadata": metadata or {}}
+
+
 def test_card_wellknown_shape(client):
     card = client.get("/.well-known/agent-card.json").json()
     iface = card["supportedInterfaces"][0]
     assert iface["protocolBinding"] == "JSONRPC" and iface["protocolVersion"] == "1.0"
     assert iface["url"].endswith("/rpc")
     assert card["capabilities"]["streaming"] is True
-    assert card["skills"][0]["tags"] == ["conversation"]          # spec §4.4.5
+    assert card["skills"][0]["tags"] == ["conversation"]
 
 
-def test_send_message_jsonrpc_envelope(client):
-    r = client.post("/rpc", json={
-        "jsonrpc": "2.0", "id": 11, "method": "SendMessage",
-        "params": {"message": {"role": "ROLE_USER", "parts": [{"text": "hi"}],
-                               "messageId": "rpc-m1"}, "metadata": {}}})
+def test_send_message_jsonrpc_envelope_with_fixed_context(client):
+    r = client.post("/rpc", json={"jsonrpc": "2.0", "id": 11,
+                                  "method": "SendMessage",
+                                  "params": _params("rpc-m1", "hi")})
     body = r.json()
     assert body["jsonrpc"] == "2.0" and body["id"] == 11
-    assert body["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    task = body["result"]["task"]
+    assert task["contextId"] == CTX                     # 幂等作用域固定（R7-2）
+    assert task["status"]["state"] == "TASK_STATE_COMPLETED"
+
+
+def test_missing_context_rejected(client):             # 不变量 3 的服务端面
+    r = client.post("/rpc", json={
+        "jsonrpc": "2.0", "id": 13, "method": "SendMessage",
+        "params": {"message": {"role": "ROLE_USER", "parts": [{"text": "x"}],
+                               "messageId": "noctx"}, "metadata": {}}})
+    assert r.json()["error"]["data"]["reason"] == "context_required"
 
 
 def test_unknown_method_jsonrpc_error(client):
-    r = client.post("/rpc", json={"jsonrpc": "2.0", "id": 12, "method": "NoSuch"})
+    r = client.post("/rpc", json={"jsonrpc": "2.0", "id": 12,
+                                  "method": "NoSuch"})
     assert r.json()["error"]["code"] == -32601
 ```
 
 ```python
 # spike/a2a/tests/test_kernel.py
 import asyncio
+import pathlib
+import tempfile
 
-from kernel import Kernel, MAX_EVENTS_PER_RUN, TERMINAL_TTL_SECONDS
+from kernel import (Kernel, SUBSCRIBER_QUEUE_SIZE, MAX_BYTES_PER_RUN,
+                    MAX_EVENTS_PER_RUN, TERMINAL_TTL_SECONDS, TOTAL_BUDGET)
 
 
 def run(coro):
@@ -160,8 +187,8 @@ def test_event_seq_monotonic_task_first_terminal_last():
         return backlog
     evs = run(main())
     seqs = [e["seq"] for e in evs]
-    assert seqs == sorted(set(seqs))                    # 单调无重号
-    assert evs[0]["type"] == "task"                     # 首事件 Task
+    assert seqs == sorted(set(seqs))
+    assert evs[0]["type"] == "task"
     states = [e["ev"]["statusUpdate"]["status"]["state"] for e in evs
               if e["type"] == "statusUpdate"]
     assert states[-1] == "TASK_STATE_COMPLETED"
@@ -170,7 +197,7 @@ def test_event_seq_monotonic_task_first_terminal_last():
 def test_artifact_stage_table():
     async def main():
         k = Kernel(engine="mock")
-        rid, _ = await k.open_run("c", "kk", "first", "d2")
+        rid, _ = await k.open_run("c", "kk2", "first", "d")
         await k.execute_message(rid)
         backlog, _q = await k.subscribe(rid, since_seq=0)
         return [e["ev"]["artifactUpdate"] for e in backlog
@@ -181,20 +208,30 @@ def test_artifact_stage_table():
     assert (arts[-1]["append"], arts[-1]["lastChunk"]) == (False, True)
 
 
-def test_terminal_replay_window_is_180s_not_immediate():       # R6 P1-2
+def test_byte_budget_overflow_sets_cache_limit():      # R7-7：字节越界也置位
     async def main():
         k = Kernel(engine="mock")
-        rid, _ = await k.open_run("c", "kw", "first", "d")
-        await k.execute_message(rid)
-        out = await k.replay(rid, since_seq=0)
-        return k, rid, out is not None
-    k, rid, immediate_ok = run(main())
-    assert immediate_ok                                          # 刚结束仍在窗口内
-    k.runs[rid].replay_expires_at -= TERMINAL_TTL_SECONDS + 1    # 快进窗口外
-    assert run(k.replay(rid, since_seq=0)) is None
+        rid, _ = await k.open_run("c", "kb", "first", "d")
+        k.runs[rid].bytes_ = MAX_BYTES_PER_RUN - 1      # 构造预算边缘
+        await k.publish_status(rid, f"pad-{'x' * 4096}")
+        return k, rid
+    k, rid = run(main())
+    assert k.runs[rid].cache_limit is True
+    assert run(k.replay(rid, since_seq=0)) is None      # 显式拒绝，不出半截历史
 
 
-def test_cache_limit_stops_caching_not_delivery():              # R6 P1-2 + F1
+def test_total_budget_overflow_sets_cache_limit():
+    async def main():
+        k = Kernel(engine="mock")
+        rid, _ = await k.open_run("c", "kt", "first", "d")
+        k.total_bytes = TOTAL_BUDGET                    # 全局预算已尽
+        await k.publish_status(rid, "TASK_STATE_WORKING")
+        return k, rid
+    k, rid = run(main())
+    assert k.runs[rid].cache_limit is True
+
+
+def test_cache_limit_stops_caching_not_delivery():     # F1
     async def main():
         k = Kernel(engine="mock")
         rid, _ = await k.open_run("c", "kc", "first", "d")
@@ -202,15 +239,42 @@ def test_cache_limit_stops_caching_not_delivery():              # R6 P1-2 + F1
         for _ in range(MAX_EVENTS_PER_RUN + 3):
             await k.publish_status(rid, "TASK_STATE_WORKING")
         assert r.cache_limit is True
-        assert await k.replay(rid, since_seq=0) is None          # F1 显式拒绝
-        backlog, q = await k.subscribe(rid, since_seq=0)         # 投递继续
-        assert backlog == []                                     # 缓冲已清
+        assert await k.replay(rid, since_seq=0) is None
+        backlog, q = await k.subscribe(rid, since_seq=0)
+        assert backlog == []
         await k.publish_status(rid, "TASK_STATE_COMPLETED")
         got = await asyncio.wait_for(q.get(), 1)
         return got, r
     got, r = run(main())
     assert got["ev"]["statusUpdate"]["status"]["state"] == "TASK_STATE_COMPLETED"
-    assert r.last_seq > MAX_EVENTS_PER_RUN                      # seq 不随缓存清零
+    assert r.last_seq > MAX_EVENTS_PER_RUN             # seq 不随缓存清零
+
+
+def test_slow_subscriber_kicked_execution_unaffected():  # R7-7 后半
+    async def main():
+        k = Kernel(engine="mock")
+        rid, _ = await k.open_run("c", "ks", "first", "d")
+        _backlog, slow = await k.subscribe(rid, since_seq=0)
+        for _ in range(SUBSCRIBER_QUEUE_SIZE + 10):     # 灌满慢订阅者队列
+            slow.put_nowait({"seq": None, "type": "junk", "ev": {}})
+        await k.execute_message(rid)                    # 执行照常完成
+        return k.runs[rid].state, slow in k.runs[rid].subscribers
+    state, still = run(main())
+    assert state == "TASK_STATE_COMPLETED"             # 慢订阅者被踢不影响执行
+    assert still is False
+
+
+def test_terminal_replay_window_is_180s_not_immediate():
+    async def main():
+        k = Kernel(engine="mock")
+        rid, _ = await k.open_run("c", "kw", "first", "d")
+        await k.execute_message(rid)
+        out = await k.replay(rid, since_seq=0)
+        return k, rid, out is not None
+    k, rid, immediate_ok = run(main())
+    assert immediate_ok
+    k.runs[rid].replay_expires_at -= TERMINAL_TTL_SECONDS + 1
+    assert run(k.replay(rid, since_seq=0)) is None
 
 
 def test_f6_missed_events_replay_by_seq():
@@ -226,26 +290,76 @@ def test_f6_missed_events_replay_by_seq():
     assert seqs == sorted(seqs) and seqs[0] == mid + 1
 
 
-def test_standard_subscribe_snapshot_then_marker():
+def test_f6_live_handoff_no_gap():                     # R7 F6：交接期发布的事件
+    async def main():
+        import engine_mock
+        gate = asyncio.Event()
+        engine_mock.PAUSE_GATE = gate
+        k = Kernel(engine="mock")
+        rid, _ = await k.open_run("c", "kh", "first", "d")
+        executing = asyncio.create_task(k.execute_message(rid))
+        await asyncio.sleep(0.05)                       # 引擎停在第二块前
+        backlog, q = await k.subscribe(rid, since_seq=0)   # 锁内交接
+        await gate.set()                                # 交接后恢复执行
+        await executing
+        live = []
+        while True:
+            ev = await asyncio.wait_for(q.get(), 5)
+            if ev is None or ev["ev"].get("statusUpdate", {}).get("final"):
+                break
+            live.append(ev)
+        engine_mock.PAUSE_GATE = None
+        return backlog, live, k.runs[rid].state
+    backlog, live, state = run(main())
+    seqs = [e["seq"] for e in backlog] + [e["seq"] for e in live]
+    assert seqs == sorted(set(seqs))                    # 无重复
+    assert seqs == list(range(seqs[0], seqs[-1] + 1))   # 无缺号
+    assert live and state == "TASK_STATE_COMPLETED"     # 到达真实终态
+
+
+def test_standard_subscribe_snapshot_then_terminal_marker():
     async def main():
         k = Kernel(engine="mock")
-        rid, _ = await k.open_run("c", "ks", "first", "d")
+        rid, _ = await k.open_run("c", "kss", "first", "d")
         await k.execute_message(rid)
-        backlog, q = await k.subscribe(rid)                     # since=None
+        backlog, q = await k.subscribe(rid)             # since=None
         first = await asyncio.wait_for(q.get(), 1)
-        return backlog, first
-    backlog, first = run(main())
+        second = await asyncio.wait_for(q.get(), 1)
+        return backlog, first, second
+    backlog, first, second = run(main())
     assert backlog == []
-    assert first["type"] == "task"                              # §3.1.6 快照
+    assert first["type"] == "task"                      # §3.1.6 快照
     assert first["ev"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert second["ev"]["statusUpdate"].get("final") is True
+
+
+def test_f8_concurrent_first_single_execution():       # R7 F8：并发 + 执行级断言
+    tmp = pathlib.Path(tempfile.mkdtemp()) / "calls.jsonl"
+
+    async def main():
+        k = Kernel(engine="mock", calls_path=str(tmp))
+        outs = await asyncio.gather(
+            k.send_message("cctx", "m", "kc", "first"),
+            k.send_message("cctx", "m", "kc", "first"))
+        return outs
+    outs = run(main())
+    assert outs[0]["task"]["id"] == outs[1]["task"]["id"]
+    assert sum(1 for _ in tmp.open()) == 1              # 上游恰好执行一次
+
+
+def test_d14_rejects_retry_only_without_record():
+    async def main():
+        k = Kernel(engine="mock")
+        return await k.send_message("c8", "m", "absent", "retry_only")
+    assert run(main()) is Kernel.UNKNOWN_OUTCOME
 ```
 
 - [ ] **Step 2: 确认失败**
 
 Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/test_rpc.py spike/a2a/tests/test_kernel.py -v`
-Expected: FAIL（`No module named 'server'` / `kernel`）
+Expected: FAIL（`No module named`）
 
-- [ ] **Step 3: 实现 settings / server / kernel / engine_mock**
+- [ ] **Step 3: 实现 settings / kernel / engine_mock / server**
 
 ```python
 # spike/a2a/settings.py
@@ -253,12 +367,13 @@ HOST, PORT = "127.0.0.1", 20043
 EXT_BASE = "https://avernet.local/a2a/ext"
 EXT_URIS = {"inject": f"{EXT_BASE}/inject/v1",
             "context": f"{EXT_BASE}/context/v1",
-            "replay": f"{EXT_BASE}/replay/v1"}
+            "replay": f"{EXT_BASE}/replay/v1",
+            "retry": f"{EXT_BASE}/retry/v1"}    # retry 惟能力发现声明用
 ```
 
 ```python
 # spike/a2a/kernel.py
-"""Spike kernel：设计文档 §8 契约的最小实现（全 async、单循环）。"""
+"""Spike kernel：设计文档 §8 契约的最小实现（全 async、单循环、单事件循环边界）。"""
 import asyncio
 import hashlib
 import json
@@ -282,7 +397,7 @@ def _digest(text: str) -> str:
 
 def _task_obj(r) -> dict:
     return {"id": r.run_id, "contextId": r.context_id,
-            "status": {"state": r.state}}
+            "status": {"state": r.state}, "metadata": {}}
 
 
 def _terminal_marker(r) -> dict:
@@ -307,8 +422,8 @@ class Run:
         self.state = "TASK_STATE_SUBMITTED"
         self.events: list[dict] = []
         self.bytes_ = 0
-        self.last_seq = 0                       # 独立于缓冲（不变量 3）
-        self.last_delta_count = 0               # artifact 阶段表计数（§8.4 首块）
+        self.last_seq = 0                          # 不变量 4：独立于缓冲
+        self.saw_delta = False                     # artifact 阶段表首块判定
         self.cache_limit = False
         self.subscribers: list[asyncio.Queue] = []
         self.lock = asyncio.Lock()
@@ -320,9 +435,10 @@ class Run:
 class Kernel:
     UNKNOWN_OUTCOME = UnknownOutcome()
 
-    def __init__(self, engine="mock", calls_path=None):
+    def __init__(self, engine="mock", calls_path=None, legacy=False):
         self.engine = engine
-        self.calls_path = calls_path             # F5 外部记录器
+        self.calls_path = calls_path
+        self.legacy = legacy                        # legacy：忽略 retry 标志
         self.runs: dict[str, Run] = {}
         self.idem: dict[tuple[str, str], str] = {}
         self.inject_dedup: dict[tuple[str, str], float] = {}
@@ -330,18 +446,22 @@ class Kernel:
         self.total_bytes = 0
         self._gl = asyncio.Lock()
 
-    # ---- D14 原子入口 ----
+    # ---- D14 原子入口（不变量 3） ----
     async def open_run(self, context_id, idempotency_key, mode,
                        request_digest=None):
-        async with self._gl:                     # 判定与登记原子（不变量 1）
+        if context_id is None:
+            raise ValueError("contextId required")
+        async with self._gl:
             rid = self.idem.get((context_id, idempotency_key))
             if rid is not None and rid in self.runs:
                 r = self.runs[rid]
                 if r.request_digest != request_digest:
                     raise KeyConflictError((context_id, idempotency_key))
                 return rid, False
+            if mode == "retry_only" and self.legacy:
+                mode = "first"                      # 旧容器语义：照常执行
             if mode == "retry_only":
-                return self.UNKNOWN_OUTCOME      # 记录不在：不创建执行
+                return self.UNKNOWN_OUTCOME         # 记录不在：不创建执行
             if len(self.runs) >= MAX_RUNS:
                 self._evict_oldest_finished()
             rid = uuid.uuid4().hex[:12]
@@ -350,14 +470,23 @@ class Kernel:
             r.request_digest = request_digest
             self.runs[rid] = r
             self.idem[(context_id, idempotency_key)] = rid
-            created = True
-        if created:
-            await self._publish(rid, "task", {"task": _task_obj(r)})
+        await self._publish(rid, "task", {"task": _task_obj(r)})
         return rid, True
 
     async def execute_message(self, rid):
         self._record_upstream(self.runs[rid].idempotency_key)
-        await self._execute(rid)
+        from engine_mock import run_engine
+        r = self.runs[rid]
+        r.state = "TASK_STATE_WORKING"
+        await self._publish(rid, "statusUpdate", {
+            "taskId": rid, "contextId": r.context_id,
+            "status": {"state": r.state}})
+
+        async def emit(kind, payload):
+            await self._forward(rid, kind, payload)
+
+        await run_engine(rid, emit)
+        await self.complete_run(rid)
 
     async def send_message(self, context_id, message_text, idempotency_key,
                            mode="first", request_digest=None):
@@ -372,37 +501,23 @@ class Kernel:
             return self.UNKNOWN_OUTCOME
         return {"task": _task_obj(self.runs[rid])}
 
+    # ---- 统一收口（不变量 7，R7-8） ----
+    async def complete_run(self, rid, state="TASK_STATE_COMPLETED"):
+        r = self.runs[rid]
+        r.state = state
+        await self._publish(rid, "statusUpdate", {
+            "taskId": rid, "contextId": r.context_id,
+            "status": {"state": state}})
+        r.replay_expires_at = time.monotonic() + TERMINAL_TTL_SECONDS
+        for q in r.subscribers:
+            q.put_nowait(_terminal_marker(r))
+        asyncio.get_running_loop().call_later(
+            TERMINAL_TTL_SECONDS, self._evict, rid)
+
     def _record_upstream(self, key):
         if self.calls_path:
             with open(self.calls_path, "a") as f:
                 f.write(json.dumps({"key": key, "ts": time.time()}) + "\n")
-
-    async def _execute(self, rid):
-        from engine_mock import run_engine
-        r = self.runs[rid]
-        r.state = "TASK_STATE_WORKING"
-        await self._publish(rid, "statusUpdate", {
-            "taskId": rid, "contextId": r.context_id,
-            "status": {"state": r.state}})
-
-        async def emit(kind, payload):
-            await self._forward(rid, kind, payload)
-
-        await run_engine(rid, emit)
-        r.state = "TASK_STATE_COMPLETED"
-        await self._publish(rid, "statusUpdate", {
-            "taskId": rid, "contextId": r.context_id,
-            "status": {"state": r.state}})
-        self._finish_run(rid)
-
-    def _finish_run(self, rid):
-        """终态收口：回放窗口 + 终态 marker 投递 + 驱逐调度（bridge 复用）。"""
-        r = self.runs[rid]
-        r.replay_expires_at = time.monotonic() + TERMINAL_TTL_SECONDS
-        for q in r.subscribers:                   # 终态投递永不被 cache_limit 阻断
-            q.put_nowait(_terminal_marker(r))
-        asyncio.get_running_loop().call_later(
-            TERMINAL_TTL_SECONDS, self._evict, rid)
 
     def _evict(self, rid):
         r = self.runs.pop(rid, None)
@@ -410,62 +525,64 @@ class Kernel:
             self.total_bytes -= r.bytes_
             self.idem.pop((r.context_id, r.idempotency_key), None)
             for q in r.subscribers:
-                q.put_nowait(None)                # 流终止信号
+                q.put_nowait(None)                  # 流终止信号
 
     def _evict_oldest_finished(self):
-        for rid, r in sorted(self.runs.items(), key=lambda kv: kv[1].replay_expires_at
-                             or 0):
+        for rid, r in sorted(self.runs.items(),
+                             key=lambda kv: kv[1].replay_expires_at or 0):
             if r.replay_expires_at is not None:
                 self._evict(rid)
                 return
 
-    # ---- 发布（锁内；cache_limit 只停缓冲，不停投递） ----
+    # ---- 发布（锁内；预算越界显式置位；慢订阅者踢除） ----
     async def _publish(self, rid, ev_type, ev):
         r = self.runs[rid]
         async with r.lock:
-            r.last_seq += 1                       # 不变量 3：seq 独立于缓冲
+            r.last_seq += 1
             wrapped = {"seq": r.last_seq, "type": ev_type, "ev": ev}
             blob = len(json.dumps(wrapped, ensure_ascii=False))
-            if not r.cache_limit and (
-                    len(r.events) < MAX_EVENTS_PER_RUN
-                    and r.bytes_ + blob <= MAX_BYTES_PER_RUN
-                    and self.total_bytes + blob <= TOTAL_BUDGET):
-                r.events.append(wrapped)
-                r.bytes_ += blob
-                self.total_bytes += blob
-                if (len(r.events) >= MAX_EVENTS_PER_RUN
-                        or r.bytes_ >= MAX_BYTES_PER_RUN):
-                    self.total_bytes -= r.bytes_   # D7：清空 + 标记
-                    r.events = []                  # （现网 CACHE_LIMIT 行为）
+            if not r.cache_limit:
+                fits = (len(r.events) < MAX_EVENTS_PER_RUN
+                        and r.bytes_ + blob <= MAX_BYTES_PER_RUN
+                        and self.total_bytes + blob <= TOTAL_BUDGET)
+                if fits:
+                    r.events.append(wrapped)
+                    r.bytes_ += blob
+                    self.total_bytes += blob
+                else:                               # 计数/字节/全局任一越界
+                    self.total_bytes -= r.bytes_
+                    r.events = []
                     r.bytes_ = 0
                     r.cache_limit = True
-            for q in r.subscribers:                # 投递始终进行（不变量 4）
-                q.put_nowait(wrapped)
+            for q in list(r.subscribers):
+                try:
+                    q.put_nowait(wrapped)
+                except asyncio.QueueFull:           # 不变量 2：踢除慢订阅者
+                    r.subscribers.remove(q)
 
     async def _forward(self, rid, kind, payload):
         r = self.runs[rid]
         if kind == "message_delta":
-            aid = f"text-{rid}"
-            seen = r.last_delta_count
-            self.runs[rid].last_delta_count = seen + 1
+            first = not r.saw_delta
+            r.saw_delta = True
             await self._publish(rid, "artifactUpdate", {
                 "taskId": rid, "contextId": r.context_id,
-                "artifact": {"artifactId": aid,
+                "artifact": {"artifactId": f"text-{rid}",
                              "parts": [{"text": payload["text"]}]},
-                "append": seen > 0,                # §8.4 首块 (F,F)
+                "append": not first,                # §8.4 首块 (F,F)
                 "lastChunk": False})
         elif kind == "final":
             await self._publish(rid, "artifactUpdate", {
                 "taskId": rid, "contextId": r.context_id,
                 "artifact": {"artifactId": f"text-{rid}",
                              "parts": [{"text": payload["text"]}]},
-                "append": False, "lastChunk": True})   # 终稿替换 (F,T)
+                "append": False, "lastChunk": True})
         elif kind == "tool_progress":
             await self._publish(rid, "statusUpdate", {
                 "taskId": rid, "contextId": r.context_id,
                 "status": {"state": r.state}, "metadata": payload})
 
-    async def publish_status(self, rid, state):   # 测试/驱动便利方法
+    async def publish_status(self, rid, state):
         self.runs[rid].state = state
         await self._publish(rid, "statusUpdate", {
             "taskId": rid, "contextId": self.runs[rid].context_id,
@@ -477,34 +594,30 @@ class Kernel:
         if r is None:
             raise LookupError(rid)
         q: asyncio.Queue = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
-        async with r.lock:                        # 与 _publish 共持 → 无丢失窗口
+        async with r.lock:                          # 与 _publish 共持 → 无窗口
             backlog = ([] if since_seq is None else
                        [e for e in r.events if e["seq"] > since_seq])
             r.subscribers.append(q)
             if since_seq is None:
                 q.put_nowait({"seq": None, "type": "task",
-                              "ev": {"task": _task_obj(r)}})   # §3.1.6 快照
+                              "ev": {"task": _task_obj(r)}})
         if r.state in TERMINAL_STATES:
-            q.put_nowait(_terminal_marker(r))     # 终态流立即封口
+            q.put_nowait(_terminal_marker(r))
         return backlog, q
 
     async def replay(self, rid, since_seq):
         r = self.runs.get(rid)
         if r is None or r.cache_limit:
-            return None                           # F1：显式拒绝
+            return None
         if (r.replay_expires_at is not None
                 and time.monotonic() > r.replay_expires_at):
-            return None                           # 窗口外
+            return None
         return await self.subscribe(rid, since_seq=since_seq)
 
     async def cancel(self, rid):
         r = self.runs.get(rid)
         if r and r.state not in TERMINAL_STATES:
-            r.state = "TASK_STATE_CANCELED"
-            await self._publish(rid, "statusUpdate", {
-                "taskId": rid, "contextId": r.context_id,
-                "status": {"state": r.state}})
-            self._finish_run(rid)
+            await self.complete_run(rid, "TASK_STATE_CANCELED")
         return {"task": _task_obj(r)} if r else None
 
     # ---- inject：非 Task + 操作级去重（§8.3） ----
@@ -513,10 +626,21 @@ class Kernel:
         if key in self.inject_dedup:
             return "duplicate"
         self.inject_dedup[key] = time.time()
-        for q in self.context_subs.get(context_id, []):
-            q.put_nowait({"seq": None, "type": "inject",
-                          "ev": {"contextId": context_id, "text": text}})
+        for q in list(self.context_subs.get(context_id, [])):
+            try:
+                q.put_nowait({"seq": None, "type": "inject",
+                              "ev": {"message": {
+                                  "messageId": inject_id,
+                                  "contextId": context_id,
+                                  "parts": [{"text": text}]}}})
+            except asyncio.QueueFull:
+                pass
         return "accepted"
+
+    def unsubscribe_context(self, context_id, q):
+        subs = self.context_subs.get(context_id, [])
+        if q in subs:
+            subs.remove(q)
 
     def subscribe_context(self, context_id):
         q = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
@@ -524,17 +648,22 @@ class Kernel:
         return q
 ```
 
-
 ```python
 # spike/a2a/engine_mock.py
+import asyncio
+import os
+
 CHUNKS = ["第一段", "第二段增量", "第三段增量"]
-PAUSE_GATE = None            # 测试可注入 asyncio.Event（同循环内）暂停在块 2 前
+PAUSE_GATE = None                      # 测试注入 asyncio.Event：第二块前暂停
+INTER_CHUNK_DELAY = float(os.environ.get("SPIKE_SLOW_MS", "0"))
 
 
 async def run_engine(run_id: str, emit) -> None:
     for i, chunk in enumerate(CHUNKS):
         if PAUSE_GATE is not None and i == 1:
             await PAUSE_GATE.wait()
+        if INTER_CHUNK_DELAY:
+            await asyncio.sleep(INTER_CHUNK_DELAY / 1000)
         await emit("statusUpdate", {"state": "TASK_STATE_WORKING"})
         await emit("message_delta", {"text": chunk})
         if i == 0:
@@ -543,55 +672,54 @@ async def run_engine(run_id: str, emit) -> None:
 ```
 
 ```python
-# spike/a2a/server.py（T2 骨架 + SendMessage；流式三通道在 T4 追加）
+# spike/a2a/server.py（T2 骨架；wire/流式 handler 在 T4 追加到同一 HANDLED）
+import os
 import uuid
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 import settings
-
-TERMINAL_STATES = ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED",
-                   "TASK_STATE_CANCELED", "TASK_STATE_REJECTED")
+from kernel import KeyConflictError as KeyConflict
 
 
-def make_card(base: str) -> dict:
-    return {
-        "name": "a2a-spike", "description": "v3->A2A spike", "version": "0.0.0",
-        "supportedInterfaces": [{"url": f"{base}/rpc",
-                                 "protocolBinding": "JSONRPC",
-                                 "protocolVersion": "1.0"}],
-        "capabilities": {"streaming": True, "pushNotifications": False,
-                         "extensions": [{"url": u, "required": False}
-                                        for u in settings.EXT_URIS.values()]},
-        "skills": [{"id": "conversation", "name": "Conversation",
-                    "description": "spike conversation",
-                    "tags": ["conversation"]}],
-        "defaultInputModes": ["text/plain"],
-        "defaultOutputModes": ["text/plain", "application/json"],
-    }
+def make_card(base: str, legacy: bool = False) -> dict:
+    exts = [u for name, u in settings.EXT_URIS.items()
+            if not (legacy and name == "retry")]    # legacy 不声明 retry 扩展
+    return {"name": "a2a-spike", "description": "v3->A2A spike",
+            "version": "0.0.0",
+            "supportedInterfaces": [{"url": f"{base}/rpc",
+                                     "protocolBinding": "JSONRPC",
+                                     "protocolVersion": "1.0"}],
+            "capabilities": {"streaming": True, "pushNotifications": False,
+                             "extensions": [{"url": u, "required": False}
+                                            for u in exts]},
+            "skills": [{"id": "conversation", "name": "Conversation",
+                        "description": "spike conversation",
+                        "tags": ["conversation"]}],
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/plain", "application/json"]}
 
 
-def build_app(kernel=None, legacy: bool = False) -> FastAPI:
-    if kernel is None:
-        kernel = Kernel_default()
+def build_app(kernel, legacy: bool = False) -> FastAPI:
     app = FastAPI()
     app.state.kernel = kernel
     app.state.legacy = legacy
 
     @app.get("/.well-known/agent-card.json")
     def card():
-        return make_card(f"http://{settings.HOST}:{settings.PORT}")
+        return make_card(f"http://{settings.HOST}:{settings.PORT}", legacy)
 
     @app.post("/rpc")
     async def rpc(request: Request):
         body = await request.json()
-        rid, method, params = body.get("id"), body.get("method"), \
-            body.get("params") or {}
+        rid, method = body.get("id"), body.get("method")
+        params = body.get("params") or {}
         handler = HANDLED.get(method)
         if handler is None:
-            return {"jsonrpc": "2.0", "id": rid,
-                    "error": {"code": -32601, "message": "Method not found: " + str(method)}}
+            return JSONResponse({"jsonrpc": "2.0", "id": rid,
+                "error": {"code": -32601,
+                          "message": f"Method not found: {method}"}})
         try:
             outcome = await handler(kernel, rid, params)
         except BadRetryFlag:
@@ -599,50 +727,25 @@ def build_app(kernel=None, legacy: bool = False) -> FastAPI:
                 "error": {"code": -32602,
                           "message": "Invalid params: avernet.retryOnly",
                           "data": {"reason": "malformed_retry_flag"}}})
-        except KeyConflict:
+        except KeyConflictError:
             return JSONResponse({"jsonrpc": "2.0", "id": rid,
                 "error": {"code": -32003,
                           "data": {"reason": "key_conflict"}}})
-        if isinstance(outcome, JSONResponse):
+        if isinstance(outcome, Response):            # 流式/错误响应直接透传
             return outcome
         return {"jsonrpc": "2.0", "id": rid, "result": outcome}
 
     return app
-
-def Kernel_default():
-    import os
-    from kernel import Kernel
-    return Kernel(engine="mock", calls_path=os.environ.get("SPIKE_CALLS"))
 
 
 class BadRetryFlag(Exception):
     pass
 
 
-class KeyConflict(Exception):
-    pass
-
-
 HANDLED = {}
 
 
-async def send_message(kernel, rid, params):
-    msg = params["message"]
-    context = msg.get("contextId") or uuid.uuid4().hex[:8]
-    out = await kernel.send_message(context, _text(msg), msg.get("messageId"),
-                                    _retry_flag(params))
-    if out is kernel.UNKNOWN_OUTCOME:                    # D14
-        return JSONResponse({"jsonrpc": "2.0", "id": rid,
-            "error": {"code": -32000, "message": "unknown outcome",
-                      "data": {"reason": "unknown_outcome"}}})
-    return out
-
-
-HANDLED["SendMessage"] = send_message
-
-
 def _retry_flag(params: dict) -> str:
-    """§8.5.2：A2A path = params.metadata['avernet.retryOnly']；非布尔 → 显式拒绝。"""
     meta = params.get("metadata")
     if not meta or "avernet.retryOnly" not in meta:
         return "first"
@@ -656,11 +759,34 @@ def _text(msg: dict) -> str:
     return "".join(p.get("text", "") for p in msg.get("parts", []))
 
 
-def create_app():
-    return build_app()
-```
+def _context_error(rid):
+    return JSONResponse({"jsonrpc": "2.0", "id": rid,
+        "error": {"code": -32602, "message": "Invalid params: contextId",
+                  "data": {"reason": "context_required"}}})
 
-（kernel 的 `KeyConflictError` 在 server 侧 catch：`from kernel import KeyConflictError as KeyConflict` 放到 import 区——执行文件 import 处一并写好。）
+
+async def send_message(kernel, rid, params):
+    msg = params["message"]
+    if not msg.get("contextId"):                     # 不变量 3：必须显式提供
+        return _context_error(rid)
+    out = await kernel.send_message(msg["contextId"], _text(msg),
+                                    msg.get("messageId"), _retry_flag(params))
+    if out is kernel.UNKNOWN_OUTCOME:
+        return JSONResponse({"jsonrpc": "2.0", "id": rid,
+            "error": {"code": -32000, "message": "unknown outcome",
+                      "data": {"reason": "unknown_outcome"}}})
+    return out
+
+
+HANDLED["SendMessage"] = send_message
+
+
+def create_app():
+    from kernel import Kernel
+    return build_app(Kernel(engine="mock",
+                            legacy=os.environ.get("SPIKE_LEGACY") == "1",
+                            calls_path=os.environ.get("SPIKE_CALLS")))
+```
 
 - [ ] **Step 4: 确认通过 + 提交**
 
@@ -668,22 +794,34 @@ Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/test_rpc.py spike/a2a
 Expected: 全 PASS
 
 ```bash
-git add spike/a2a/settings.py spike/a2a/server.py spike/a2a/kernel.py \
-  spike/a2a/engine_mock.py spike/a2a/tests/
-git commit -m "feat(spike): kernel with seq-independent-of-cache, atomic handoff, true 180s window"
+git add spike/a2a/settings.py spike/a2a/kernel.py spike/a2a/engine_mock.py \
+  spike/a2a/server.py spike/a2a/tests/
+git commit -m "feat(spike): kernel budgets/kick/clean-complete + context-scoped idempotency"
 ```
 
 ---
 
-### Task 4: 流式三通道（SendStreamingMessage / SubscribeToTask / ReplayEvents）
+### Task 4: 流式三通道（标准 wire DTO + 路由 Response 透传——R7-1）
 
-**Files:** Create `spike/a2a/sse.py`、Modify `server.py`、Test `test_stream.py`
+**Files:** Create `sse.py`、Test `test_stream.py`、Modify `server.py`
 
-- [ ] **Step 1: 失败测试（真 SubscribeToTask；流终止 = final 标记）**
+- [ ] **Step 1: 失败测试（断言标准 StreamResponse 成员，不再断言私有 {type,ev}；验证路由透传与订阅清理）**
 
 ```python
 # spike/a2a/tests/test_stream.py
 import json
+
+CTX = "fixed-ctx-stream"
+KINDS = ("task", "message", "statusUpdate", "artifactUpdate")
+
+
+def _message(mid, ctx=CTX):
+    return {"role": "ROLE_USER", "parts": [{"text": "hi"}],
+            "messageId": mid, "contextId": ctx}
+
+
+def _kind(e):
+    return next(k for k in KINDS if k in e["result"])
 
 
 def _collect(resp):
@@ -694,55 +832,65 @@ def _collect(resp):
     return events
 
 
-def _new_stream(client, method, params):
-    return lambda: client.stream("POST", "/rpc", json={
-        "jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-
-
-def test_send_streaming_lifecycle(client):
+def test_send_streaming_standard_wire_lifecycle(client):
     with client.stream("POST", "/rpc", json={
             "jsonrpc": "2.0", "id": 21, "method": "SendStreamingMessage",
-            "params": {"message": {"role": "ROLE_USER", "parts": [{"text": "hi"}],
-                                   "messageId": "s1"}}}) as resp:
+            "params": {"message": _message("s1")}}) as resp:
         assert resp.headers["content-type"].startswith("text/event-stream")
         evs = _collect(resp)
-    types = [e["result"]["type"] for e in evs]
-    assert types[0] == "task"
-    arts = [e for e in evs if e["result"]["type"] == "artifactUpdate"]
-    assert arts and arts[-1]["result"]["ev"]["artifactUpdate"]["lastChunk"] is True
-    states = [e["result"]["ev"]["statusUpdate"]["status"]["state"]
-              for e in evs if e["result"]["type"] == "statusUpdate"]
-    assert states[-1] == "TASK_STATE_COMPLETED"
-    assert types[-1] == "statusUpdate"
+    kinds = [_kind(e) for e in evs]                    # 标准 wire 成员
+    assert kinds[0] == "task"                          # 首事件 Task
+    arts = [e["result"]["artifactUpdate"] for e in evs
+            if "artifactUpdate" in e["result"]]
+    assert arts and arts[-1]["append"] is False        # 终稿替换 (F,T)
+    assert arts[-1]["lastChunk"] is True
+    statuses = [e["result"]["statusUpdate"] for e in evs
+                if "statusUpdate" in e["result"]]
+    assert statuses[-1]["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert statuses[-1].get("final") is True           # 流终标记
+    seqs = [m["metadata"]["seq"] for m in arts + statuses
+            if (m.get("metadata") or {}).get("seq") is not None]
+    assert seqs == sorted(set(seqs))
+    assert all(_kind(e) in KINDS for e in evs)         # 无私有成员外泄
 
 
-def test_subscribe_task_snapshot_only_then_end(client):
+def test_subscribe_task_returns_sse_directly(client):
     send = client.post("/rpc", json={
         "jsonrpc": "2.0", "id": 24, "method": "SendMessage",
-        "params": {"message": {"role": "ROLE_USER", "parts": [{"text": "hi"}],
-                               "messageId": "s3"}}}).json()
+        "params": {"message": _message("s3")}}).json()
     tid = send["result"]["task"]["id"]
     with client.stream("POST", "/rpc", json={
             "jsonrpc": "2.0", "id": 25, "method": "SubscribeToTask",
-            "params": {"taskId": tid,
-                       "contextId": send["result"]["task"]["contextId"]}}) as r:
+            "params": {"taskId": tid, "contextId": CTX}}) as r:
+        assert r.status_code == 200                    # 直接 SSE 非二次包裹
+        assert r.headers["content-type"].startswith("text/event-stream")
         evs = _collect(r)
-    types = [e["result"]["type"] for e in evs]
-    assert types[0] == "task"                       # §3.1.6 快照首事件
-    assert types[-1] == "statusUpdate"
-    assert evs[0]["result"]["ev"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    kinds = [_kind(e) for e in evs]
+    assert kinds[0] == "task"                          # §3.1.6 快照首事件
+    assert kinds[-1] == "statusUpdate"
+    last = evs[-1]["result"]["statusUpdate"]
+    assert last.get("final") is True and last["status"]["state"] == \
+        "TASK_STATE_COMPLETED"
 
 
-def test_send_streaming_retry_only_unknown(client):
+def test_stream_cleanup_after_end(client):            # R7-7：订阅队列清理
+    with client.stream("POST", "/rpc", json={
+            "jsonrpc": "2.0", "id": 26, "method": "SendStreamingMessage",
+            "params": {"message": _message("s4")}}) as resp:
+        _ = _collect(resp)
+    kernel = client.app.state.kernel
+    assert all(not r.subscribers for r in kernel.runs.values())
+
+
+def test_streaming_retry_only_rejected(client):
     r = client.post("/rpc", json={
         "jsonrpc": "2.0", "id": 35, "method": "SendStreamingMessage",
-        "params": {"message": {"role": "ROLE_USER", "parts": [{"text": "m"}],
-                               "messageId": "rt-none"},
+        "params": {"message": _message("rt-s"),
                    "metadata": {"avernet.retryOnly": True}}})
     assert r.json()["error"]["data"]["reason"] == "unknown_outcome"
 ```
 
-- [ ] **Step 2: 确认失败 → Step 3: 实现流式分发（后台执行 + 统一入口 + final 终止）**
+- [ ] **Step 2: 确认失败 → Step 3: 实现**
 
 ```python
 # spike/a2a/sse.py
@@ -751,35 +899,68 @@ import json
 
 def sse(obj) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
-
-
-PING = sse({"jsonrpc": "2.0", "method": "ping", "params": {}})
 ```
 
-server.py 追加（与 T2 代码同文件连贯）：
+server.py 追加（与 T2 同一文件的后续段落）：
 
 ```python
+# server.py 追加段（import 区新增）：
 import asyncio
 
-from fastapi.responses import StreamingResponse
+from starlette.responses import StreamingResponse
 
 import sse as sse_mod
 
 
+def _wire(e: dict) -> dict:
+    """kernel 私有事件 → 标准 StreamResponse 成员（不变量 1）。"""
+    out = dict(e.get("ev") or {})
+    for kind in ("statusUpdate", "artifactUpdate"):
+        if kind in out and out[kind] is not None:
+            inner = dict(out[kind])
+            meta = dict(inner.get("metadata") or {})
+            if e.get("seq") is not None:
+                meta["seq"] = e["seq"]
+            inner["metadata"] = meta
+            out[kind] = inner
+    return out
+
+
+def _sse_of(kernel, rid, task_id, backlog, q):
+    async def gen():
+        try:
+            for e in backlog:
+                yield sse_mod.sse({"jsonrpc": "2.0", "id": rid,
+                                   "result": _wire(e)})
+            while True:
+                ev = await q.get()
+                if ev is None:
+                    return
+                yield sse_mod.sse({"jsonrpc": "2.0", "id": rid,
+                                   "result": _wire(ev)})
+                if ev["ev"].get("statusUpdate", {}).get("final"):
+                    return
+        finally:                                       # 不变量 2：订阅清理
+            r = kernel.runs.get(task_id)
+            if r is not None and q in r.subscribers:
+                r.subscribers.remove(q)
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 async def send_streaming(kernel, rid, params):
     msg = params["message"]
-    context = msg.get("contextId") or uuid.uuid4().hex[:8]
-    out = await kernel.open_run(context, msg.get("messageId"),
-                                _retry_flag(params), _digest_of(msg))
+    if not msg.get("contextId"):
+        return _context_error(rid)
+    out = await kernel.open_run(msg["contextId"], msg.get("messageId"),
+                                _retry_flag(params), None)
     if out is kernel.UNKNOWN_OUTCOME:
         return JSONResponse({"jsonrpc": "2.0", "id": rid,
-            "error": {"code": -32000, "message": "unknown outcome",
-                      "data": {"reason": "unknown_outcome"}}})
+            "error": {"code": -32000, "data": {"reason": "unknown_outcome"}}})
     task_id, created = out
     if created:
         asyncio.get_event_loop().create_task(kernel.execute_message(task_id))
     backlog, q = await kernel.subscribe(task_id, since_seq=0)
-    return _sse_of(rid, backlog, q, task_id, kernel)
+    return _sse_of(kernel, rid, task_id, backlog, q)
 
 
 async def subscribe_task(kernel, rid, params):
@@ -788,7 +969,7 @@ async def subscribe_task(kernel, rid, params):
     except LookupError:
         return JSONResponse({"jsonrpc": "2.0", "id": rid,
             "error": {"code": -32000, "data": {"reason": "not_found"}}})
-    return _sse_of(rid, backlog, q, params["taskId"], kernel)
+    return _sse_of(kernel, rid, params["taskId"], backlog, q)
 
 
 async def replay_events(kernel, rid, params):
@@ -798,8 +979,8 @@ async def replay_events(kernel, rid, params):
             "error": {"code": -32000,
                       "data": {"reason": _replay_reason(kernel,
                                                         params["taskId"])}}})
-    backlog, q = out                        # 活任务：回放后无缝转 live
-    return _sse_of(rid, backlog, q, params["taskId"], kernel)
+    backlog, q = out                                   # 活任务：回放后接 live
+    return _sse_of(kernel, rid, params["taskId"], backlog, q)
 
 
 def _replay_reason(kernel, tid):
@@ -819,36 +1000,18 @@ async def inject_context(kernel, rid, params):
 
 async def subscribe_context(kernel, rid, params):
     q = kernel.subscribe_context(params["contextId"])
-    return StreamingResponse(_ctx_gen(rid, q),
-                             media_type="text/event-stream")
 
-
-async def _ctx_gen(rid, q):
-    import sse as s
-    while True:
-        ev = await q.get()
-        if ev is None:
-            return
-        yield s.sse({"jsonrpc": "2.0", "id": rid, "result": ev})
-
-
-def _sse_of(rid, backlog, q, tid, kernel):
     async def gen():
-        for e in backlog:
-            yield sse_mod.sse({"jsonrpc": "2.0", "id": rid, "result": e})
-        while True:
-            ev = await q.get()
-            if ev is None:                              # 驱逐信号
-                return
-            yield sse_mod.sse({"jsonrpc": "2.0", "id": rid, "result": ev})
-            if ev["ev"].get("statusUpdate", {}).get("final"):
-                return                                  # 不变量 4：终态封口
+        try:
+            while True:
+                ev = await q.get()
+                if ev is None:
+                    return
+                yield sse_mod.sse({"jsonrpc": "2.0", "id": rid,
+                                   "result": _wire(ev)})
+        finally:
+            kernel.unsubscribe_context(params["contextId"], q)
     return StreamingResponse(gen(), media_type="text/event-stream")
-
-
-def _digest_of(msg):
-    from kernel import _digest
-    return _digest(_text(msg))
 
 
 HANDLED.update({"SendStreamingMessage": send_streaming,
@@ -865,34 +1028,49 @@ Expected: 全 PASS
 
 ```bash
 git add spike/a2a/sse.py spike/a2a/server.py spike/a2a/tests/test_stream.py
-git commit -m "feat(spike): stream channels via unified subscribe with final-marked termination"
+git commit -m "feat(spike): standard StreamResponse wire + response passthrough + sub cleanup"
 ```
 
 ---
 
-### Task 5: G1a 验收器 + SDK 探针 + 负向自测（R6 P1-1）
+### Task 5: G1a 验收器 + SDK 探针 + 负向自测
 
 **Files:** Create `probes/g1a_validate.py`、`probes/g1a_sdk.py`、Test `test_g1a_validator.py`
 
-- [ ] **Step 1: 验收器与负测**
+- [ ] **Step 1: 验收器（消费标准 wire）与负测（先证明验收器能发现错误）**
 
 ```python
 # spike/a2a/probes/g1a_validate.py
 TERMINAL = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED",
             "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}
+KINDS = ("task", "message", "statusUpdate", "artifactUpdate")
+
+
+def event_kind(wire_event: dict) -> str | None:
+    result = wire_event.get("result", wire_event)
+    return next((k for k in KINDS if k in result), None)
 
 
 def validate(events: list[dict]) -> tuple[bool, dict]:
-    kinds = [e.get("type") for e in events]
-    states = [e["ev"]["statusUpdate"]["status"]["state"] for e in events
-              if e.get("type") == "statusUpdate"]
-    seqs = [e["seq"] for e in events if e.get("seq") is not None]
+    kinds = [event_kind(e) for e in events]
+    seqs, states, finals = [], [], []
+    for e in events:
+        result = e.get("result", e)
+        for k in ("statusUpdate", "artifactUpdate"):
+            if k in result and result[k]:
+                seq = (result[k].get("metadata") or {}).get("seq")
+                if seq is not None:
+                    seqs.append(seq)
+        if event_kind(e) == "statusUpdate" and result.get("statusUpdate"):
+            states.append(result["statusUpdate"]["status"]["state"])
+            finals.append(result["statusUpdate"].get("final"))
     checks = {
         "first_event_is_task": bool(events) and kinds[0] == "task",
         "artifact_update_present": "artifactUpdate" in kinds,
-        "final_status_is_terminal": bool(states) and states[-1] in TERMINAL,
-        "last_event_is_terminal_status": bool(states) and states[-1] in TERMINAL
-        and kinds[-1] == "statusUpdate",
+        "final_status_is_terminal": bool(finals) and finals[-1] is True
+        and bool(states) and states[-1] in TERMINAL,
+        "last_event_is_final_status": bool(finals) and finals[-1] is True,
+        "only_standard_members": all(k in KINDS for k in kinds if k is not None),
         "seq_strictly_increasing": seqs == sorted(set(seqs)),
     }
     return all(checks.values()), checks
@@ -900,31 +1078,41 @@ def validate(events: list[dict]) -> tuple[bool, dict]:
 
 ```python
 # spike/a2a/tests/test_g1a_validator.py
-import sys, pathlib
+import pathlib
+import sys
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "probes"))
 from g1a_validate import validate
 
 
-def _ev(t, state=None, seq=None):
-    e = {"type": t, "seq": seq, "ev": {}}
-    if t == "statusUpdate":
-        e["ev"] = {"statusUpdate": {"status": {"state": state}}}
-    if t == "artifactUpdate":
-        e["ev"] = {"artifactUpdate": {"append": True, "lastChunk": False}}
-    if t == "task":
-        e["ev"] = {"task": {"id": "t", "status": {"state": "TASK_STATE_SUBMITTED"}}}
-    return e
+def _task(state="TASK_STATE_SUBMITTED"):
+    return {"result": {"task": {"id": "t", "status": {"state": state}}}}
 
 
-GOOD = [_ev("task"),
-        _ev("artifactUpdate", seq=1),
-        _ev("artifactUpdate", seq=2),
-        _ev("statusUpdate", seq=3, state="TASK_STATE_COMPLETED")]
+def _status(state, seq=None, final=None):
+    su = {"taskId": "t", "contextId": "c", "status": {"state": state}}
+    if seq is not None:
+        su["metadata"] = {"seq": seq}
+    if final is not None:
+        su["final"] = final
+    return {"result": {"statusUpdate": su}}
+
+
+def _art(seq=None):
+    au = {"taskId": "t", "contextId": "c", "artifact": {},
+          "append": True, "lastChunk": False}
+    if seq is not None:
+        au["metadata"] = {"seq": seq}
+    return {"result": {"artifactUpdate": au}}
+
+
+GOOD = [_task(), _art(seq=2), _art(seq=3),
+        _status("TASK_STATE_COMPLETED", seq=4, final=True)]
 
 
 def test_validator_accepts_correct_stream():
     ok, checks = validate(GOOD)
-    assert ok and all(checks.values())
+    assert ok and all(checks.values()), checks
 
 
 def test_validator_rejects_wrong_first_event():
@@ -932,27 +1120,34 @@ def test_validator_rejects_wrong_first_event():
     assert not ok and not checks["first_event_is_task"]
 
 
-def test_validator_rejects_missing_terminal():
-    ok, _ = validate([_ev("task"), _ev("artifactUpdate", seq=1),
-                      _ev("statusUpdate", seq=2, state="TASK_STATE_WORKING")])
+def test_validator_rejects_missing_terminal_final():
+    ok, _ = validate([_task(), _art(seq=1),
+                      _status("TASK_STATE_COMPLETED", seq=2, final=False)])
     assert not ok
 
 
 def test_validator_rejects_duplicate_seq():
-    dup = GOOD[:-1] + [_ev("artifactUpdate", seq=2)]
-    ok, _ = validate([dup[0], dup[1], dup[2], dup[1]])
+    ok, _ = validate([_task(), _art(seq=1), _art(seq=1),
+                      _status("TASK_STATE_COMPLETED", seq=2, final=True)])
     assert not ok
+
+
+def test_validator_rejects_nonstandard_member():
+    bad = [_task(), {"result": {"weirdMember": {}}},
+           _status("TASK_STATE_COMPLETED", seq=4, final=True)]
+    ok, checks = validate(bad)
+    assert not ok and not checks["only_standard_members"]
 ```
 
-- [ ] **Step 2: 负测先绿（验收器能发现错误）**
-
 Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/test_g1a_validator.py -v`
-Expected: 4 PASS
+Expected: 5 PASS
 
-- [ ] **Step 3: SDK 探针（仅经 card 发现；事件归一化后过验收器；退出码贯通）**
+- [ ] **Step 2: SDK 探针（验收器直接消费标准 wire；normalize 为探索适配层；退出码贯通；写 G1a.json）**
 
 ```python
 # spike/a2a/probes/g1a_sdk.py
+"""G1a：官方 SDK 读 card → 自动选 JSONRPC 绑定 → 消费完整流。事件经
+normalize 转为标准 wire 事件（result 恰含一个标准成员）后由验收器判定。"""
 import asyncio
 import json
 import sys
@@ -965,39 +1160,26 @@ BASE = "http://127.0.0.1:20043"
 
 
 async def normalize(update) -> dict:
-    """适配层：SDK 流式事件对象 → 验收器事件 dict。
+    """探索适配层（本计划唯一依 G2-versions.md 备忘实现的函数）。
 
-    本函数是计划中唯一一段按"契约 + 探索结果"实现的代码（评审 R6 指示：对
-    未知的 SDK 对象形态不预写猜测代码）。契约（必须实现，T1 Step 3 的备忘
-    决定具体属性/键名写法）：
-    - update 携带任务对象（一次）        → {"type":"task","seq":None,
-           "ev":{"task":{"id":…,"status":{"state":…}}}}
-    - update 携带 status 更新           → {"type":"statusUpdate",
-           "ev":{"statusUpdate":{"status":{"state":…},"final":<bool|可选>}}}
-    - update 携带 artifact 更新         → {"type":"artifactUpdate",
-           "seq":<metadata.seq|None>,
-           "ev":{"artifactUpdate":{"append":bool,"lastChunk":bool}}}
-    - 其余                              → {"type":"message","seq":None}
-    验收 = g1a_validate.validate(events) 通过（负测见 test_g1a_validator.py）。
+    契约：SDK 流式 update → {"result": {恰一标准成员}}；成员内 metadata.seq
+    有值则保留；终态 statusUpdate 携带 final。验收 = validate(全事件) 通过。
     """
-    raise NotImplementedError("per G2-versions.md API 面备忘实现本适配")
+    raise NotImplementedError("implement per G2-versions.md API memo")
 
 
 async def main() -> int:
     async with httpx.AsyncClient(timeout=30) as http:
         from a2a.client import A2ACardResolver, A2AClient   # 名字以 G2 备忘为准
-        card = await A2ACardResolver(httpx_client=http, base_url=BASE).get_agent_card()
-        binding = getattr(card, "supported_interfaces",
-                          card.get("supportedInterfaces"))[0]
-        binding = getattr(binding, "protocol_binding",
-                          binding.get("protocolBinding"))
-        assert binding == "JSONRPC", f"unexpected binding {binding}"
+        card = await A2ACardResolver(httpx_client=http,
+                                      base_url=BASE).get_agent_card()
         client = A2AClient(httpx_client=http, agent_card=card)
         events = []
         async for update in client.send_streaming_message(payload={
                 "message": {"role": "ROLE_USER",
                             "parts": [{"text": "g1a"}],
-                            "messageId": "g1a-1"}}):
+                            "messageId": "g1a-1",
+                            "contextId": "g1a-ctx"}}):
             events.append(await normalize(update))
     ok, checks = validate(events)
     out = {"gate": "G1a", "verdict": "pass" if ok else "fail",
@@ -1005,16 +1187,15 @@ async def main() -> int:
            "evidence_level": "protocol-contract"}
     print(json.dumps(out, ensure_ascii=False, indent=2))
     with open("spike/a2a/evidence/G1a.json", "w") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+        f.write(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if ok else 1
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))        # 退出码贯通（R6 修正）
+    sys.exit(asyncio.run(main()))
 ```
 
-
-- [ ] **Step 4: 起服务跑探针**
+- [ ] **Step 3: 起服务跑探针**
 
 ```bash
 spike/a2a/.venv/bin/python -m uvicorn --app-dir spike/a2a server:create_app \
@@ -1023,56 +1204,47 @@ sleep 2
 spike/a2a/.venv/bin/python spike/a2a/probes/g1a_sdk.py; rc=$?; echo rc=$rc
 ```
 
-Expected: `verdict: "pass"` 且 `rc=0`。任一 FAIL → 修到过或 G1a.json 记 fail 并停在 T6 之前。
+Expected: `verdict: "pass"`、`rc=0`。任一 FAIL → 修到过或 G1a.json 记 fail，停在 T6 之前。
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add spike/a2a/probes/g1a_validate.py spike/a2a/probes/g1a_sdk.py \
   spike/a2a/tests/test_g1a_validator.py spike/a2a/evidence/G1a.json
-git commit -m "test(spike): G1a validator negative self-test, exit-code plumbing"
+git commit -m "test(spike): G1a standard-wire verdict with negative self-test"
 ```
 
 ---
 
-### Task 6: D14 / wire 显式拒绝 / inject 非 Task 的协议级测试
+### Task 6: retry-only 契约测试（context 固定作用域 + wire 显式拒绝）
 
-**Files:** Test `spike/a2a/tests/test_retry.py`（kernel 已在 T2/T3 实现；本任务测协议层）
-
-- [ ] **Step 1: 测试**
+**Files:** Test `tests/test_retry.py`（kernel/server 已实现）
 
 ```python
 # spike/a2a/tests/test_retry.py
-def _send(client, mid, text, metadata=None):
+CTX = "fixed-ctx-retry"
+
+
+def _send(client, mid, text, metadata=None, ctx=CTX):
     return client.post("/rpc", json={
         "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
         "params": {"message": {"role": "ROLE_USER",
                                "parts": [{"text": text}],
-                               "messageId": mid},
+                               "messageId": mid, "contextId": ctx},
                    "metadata": metadata or {}}})
 
 
-def test_d14_four_rows_via_protocol(client):
+def test_d14_four_rows_via_protocol(client):          # (ctx, key) 作用域命中
     first = _send(client, "rt1", "m").json()
     tid = first["result"]["task"]["id"]
-    dup = _send(client, "rt1", "m").json()                 # FIRST+存在 → 去重
+    dup = _send(client, "rt1", "m").json()            # FIRST+记录在 → 去重
     assert dup["result"]["task"]["id"] == tid
     retry_hit = _send(client, "rt1", "m",
-                      {"avernet.retryOnly": True}).json()  # RETRY-ONLY+存在
+                      {"avernet.retryOnly": True}).json()   # RETRY-ONLY+在
     assert retry_hit["result"]["task"]["id"] == tid
     miss = _send(client, "rt-none", "m",
-                 {"avernet.retryOnly": True}).json()       # RETRY-ONLY+不存在
+                 {"avernet.retryOnly": True}).json()   # RETRY-ONLY+不在
     assert miss["error"]["data"]["reason"] == "unknown_outcome"
-
-
-def test_streaming_honours_retry_flag(client):
-    r = client.post("/rpc", json={
-        "jsonrpc": "2.0", "id": 35, "method": "SendStreamingMessage",
-        "params": {"message": {"role": "ROLE_USER",
-                               "parts": [{"text": "m"}],
-                               "messageId": "rt-s"},
-                   "metadata": {"avernet.retryOnly": True}}})
-    assert r.json()["error"]["data"]["reason"] == "unknown_outcome"
 
 
 def test_malformed_retry_flag_rejected(client):
@@ -1087,54 +1259,54 @@ def test_key_conflict_same_key_diff_content(client):
 
 
 def test_key_conflict_excludes_non_business_fields(client):
-    """retry-only 标志变化不算内容差异（§8.5.1 规范化规则）。"""
     _send(client, "rt-nb", "内容X")
-    r = _send(client, "rt-nb", "内容X", {"avernet.retryOnly": True}).json()
-    assert "error" not in r or r.get("error", {}).get("data", {}).get(
-        "reason") != "key_conflict"
+    r = _send(client, "rt-nb", "内容X",
+              {"avernet.retryOnly": True}).json()
+    assert "error" not in r and r["result"]["task"]["id"]
 
 
 def test_inject_non_task_with_operation_dedup(client):
     r1 = client.post("/rpc", json={
         "jsonrpc": "2.0", "id": 39, "method": "InjectContext",
-        "params": {"contextId": "ctx-a",
+        "params": {"contextId": "ctx-inj",
                    "message": {"role": "ROLE_USER",
                                "parts": [{"text": "旁观文本"}],
                                "messageId": "inj-1"}}}).json()
     assert r1["result"]["inject"] == "accepted"
     r2 = client.post("/rpc", json={
         "jsonrpc": "2.0", "id": 40, "method": "InjectContext",
-        "params": {"contextId": "ctx-a",
+        "params": {"contextId": "ctx-inj",
                    "message": {"role": "ROLE_USER",
                                "parts": [{"text": "旁观文本"}],
                                "messageId": "inj-1"}}}).json()
     assert r2["result"]["inject"] == "duplicate"
     kernel = client.app.state.kernel
-    assert all(r.idempotency_key != "inj-1" for r in kernel.runs.values())  # 非 Task
+    assert all(r.idempotency_key != "inj-1" for r in kernel.runs.values())
 ```
 
-- [ ] **Step 2: 跑全量确认 + Commit**
-
-Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/ -v`
-Expected: 全 PASS
+Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/ -v` → 全 PASS；
 
 ```bash
 git add spike/a2a/tests/test_retry.py
-git commit -m "test(spike): D14 protocol-level matrix incl malformed flag rejection"
+git commit -m "test(spike): context-scoped D14 matrix at protocol level"
 ```
 
 ---
 
-### Task 7: F5 真实"执行成功但响应丢失"（R6 P1-3）
+### Task 7: F5 真实响应丢失（HTTP 控制的跨进程故障代理——R7-3）+ F7 真路径
 
 **Files:** Create `client_t.py`、`fault_proxy.py`、Test `test_f5_restart.py`
 
-- [ ] **Step 1: 客户端模板（超时/5xx 触发重试；能力门控；二发即止）**
+- [ ] **Step 1: 客户端模板（context 必填 + retry-only 注入 + 5xx/超时语义 + 能力发现）**
 
 ```python
 # spike/a2a/client_t.py
-"""Spike 客户端模板：将来各客户端迁移参考。"""
+"""Spike 客户端模板（将来各客户端迁移参考）。
+客户端契约（不变量 3）：调用方必须提供稳定 contextId；响应丢失后的关联 =
+同 context+messageId；重试自动注入 avernet.retryOnly（仅当目标支持该扩展）。"""
 import httpx
+
+RETRYEXT = "https://avernet.local/a2a/ext/retry/v1"
 
 
 class UnknownOutcome(Exception):
@@ -1145,20 +1317,22 @@ class _Retryable(Exception):
     pass
 
 
-async def _post(base, message_id, text, metadata=None, timeout=1.0):
+async def _post(base, context_id, message_id, text, metadata=None, timeout=1.0):
     async with httpx.AsyncClient(timeout=timeout) as http:
         return await http.post(f"{base}/rpc", json={
             "jsonrpc": "2.0", "id": 1, "method": "SendMessage",
             "params": {"message": {"role": "ROLE_USER",
                                    "parts": [{"text": text}],
-                                   "messageId": message_id},
+                                   "messageId": message_id,
+                                   "contextId": context_id},
                        "metadata": metadata or {}}})
 
 
-async def send_once(base, message_id, text, metadata=None, timeout=1.0):
-    """返回 httpx.Response；超时/断链/5xx → _Retryable（响应丢失语义）。"""
+async def send_once(base, context_id, message_id, text,
+                    metadata=None, timeout=1.0):
+    """超时/断链/5xx = 响应丢失语义。"""
     try:
-        r = await _post(base, message_id, text, metadata, timeout)
+        r = await _post(base, context_id, message_id, text, metadata, timeout)
     except (httpx.TimeoutException, httpx.TransportError) as e:
         raise _Retryable() from e
     if r.status_code >= 500:
@@ -1166,20 +1340,99 @@ async def send_once(base, message_id, text, metadata=None, timeout=1.0):
     return r
 
 
-async def retry_request(base, message_id, text, *, supports_retry_ext,
-                        timeout=0.8):
-    """首提可疑失败（超时/断链/5xx）后：支持扩展 → 注入 retryOnly 二发即止；
-    不支持 → UnknownOutcome（禁止自动业务重发）。"""
+async def retry_request(base, context_id, message_id, text, *,
+                        supports_retry_ext, timeout=1.0):
     try:
-        return await send_once(base, message_id, text, timeout=timeout)
+        return await send_once(base, context_id, message_id, text,
+                               timeout=timeout)
     except _Retryable:
         if not supports_retry_ext:
             raise UnknownOutcome(message_id)
-        return await send_once(base, message_id, text, timeout=timeout * 3,
-                               metadata={"avernet.retryOnly": True})
+        return await send_once(base, context_id, message_id, text,
+                               metadata={"avernet.retryOnly": True},
+                               timeout=timeout * 3)
+
+
+async def detect_retry_support(base) -> bool:
+    """F7 能力发现：card 是否声明 retry 扩展。"""
+    async with httpx.AsyncClient(timeout=5) as http:
+        card = (await http.get(f"{base}/.well-known/agent-card.json")).json()
+    uris = [e.get("url") for e in card["capabilities"]["extensions"]]
+    return any(u == RETRYEXT for u in uris)
 ```
 
-- [ ] **Step 2: F5 测试（正确时序：转发→杀服务→起新服务→放行503→客户端真实重试→新服务 unknown_outcome；三方断言）**
+- [ ] **Step 2: 故障代理（独立进程；HTTP 控制端点；屏障 = forwarded）**
+
+```python
+# spike/a2a/fault_proxy.py
+"""F5/F7 fault proxy（独立进程）。armed：上游响应到手后被扣；release：向客户端
+返 503（response lost）。控制端点：POST /_test/arm、GET /_test/state、
+POST /_test/release。跨进程同步屏障 = state.forwarded（上游响应已在扣留中）。"""
+import asyncio
+import os
+
+import httpx
+from fastapi import FastAPI, Request
+from starlette.responses import JSONResponse
+
+app = FastAPI()
+TARGET = os.environ.get("FAULT_TARGET", "http://127.0.0.1:20045")
+
+_state = {"armed": False, "forwarded": False, "released": False,
+          "relays": 0}
+
+
+@app.post("/_test/arm")
+async def arm():
+    _state.update(armed=True, forwarded=False, released=False)
+    return _state
+
+
+@app.get("/_test/state")
+async def state():
+    return _state
+
+
+@app.post("/_test/release")
+async def release():
+    _state["released"] = True
+    return _state
+
+
+@app.post("/rpc")
+async def relay(request: Request):
+    body = await request.json()
+    _state["relays"] += 1
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            upstream = await http.post(f"{TARGET}/rpc", json=body)
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"),
+                             "error": {"code": -32000,
+                                       "message": "upstream unreachable",
+                                       "data": {"reason": "fault_upstream_gone"}}},
+                            status_code=503)
+    if _state["armed"] and not _state["released"]:
+        _state["forwarded"] = True                    # 上游响应已被扣（屏障）
+        while not _state["released"]:
+            await asyncio.sleep(0.02)
+        _state["armed"] = False
+        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"),
+                             "error": {"code": -32000,
+                                       "message": "response lost (fault)",
+                                       "data": {"reason": "fault_response_lost"}}},
+                            status_code=503)
+    return JSONResponse(upstream.json())
+
+
+@app.get("/.well-known/agent-card.json")
+async def card_relay():
+    async with httpx.AsyncClient(timeout=5) as http:
+        r = await http.get(f"{TARGET}/.well-known/agent-card.json")
+        return JSONResponse(r.json())
+```
+
+- [ ] **Step 3: 测试（F5 全时序屏障同步；F7 走真实 legacy 目标 + 能力发现）**
 
 ```python
 # spike/a2a/tests/test_f5_restart.py
@@ -1199,19 +1452,19 @@ pytestmark = pytest.mark.asyncio
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CALLS = ROOT / "evidence_upstream_calls.jsonl"
 S_PORT, P_PORT = 20045, 20046
+LEG_PORT, LEG_PROXY_PORT = 20049, 20050
 
 
-def _start(kind) -> subprocess.Popen:
+def _start(kind, port, extra_env=None) -> subprocess.Popen:
     if kind == "server":
         cmd = [sys.executable, "-m", "uvicorn", "server:create_app", "--factory",
-               "--port", str(S_PORT)]
+               "--port", str(port)]
         env = {"SPIKE_CALLS": str(CALLS)}
-        port = S_PORT
     else:
         cmd = [sys.executable, "-m", "uvicorn", "fault_proxy:app",
-               "--port", str(P_PORT)]
+               "--port", str(port)]
         env = {"FAULT_TARGET": f"http://127.0.0.1:{S_PORT}"}
-        port = P_PORT
+    env.update(extra_env or {})
     p = subprocess.Popen(cmd, cwd=str(ROOT), env=dict(os.environ, **env))
     for _ in range(60):
         try:
@@ -1220,7 +1473,7 @@ def _start(kind) -> subprocess.Popen:
             return p
         except Exception:
             time.sleep(0.2)
-    raise RuntimeError(f"{kind} failed to start")
+    raise RuntimeError(f"{kind} on {port} failed to start")
 
 
 def _upstream_count() -> int:
@@ -1229,30 +1482,48 @@ def _upstream_count() -> int:
     return sum(1 for _ in CALLS.open())
 
 
+async def _wait_health(port):
+    while True:
+        try:
+            httpx.get(f"http://127.0.0.1:{port}/.well-known/agent-card.json",
+                      timeout=0.5)
+            return True
+        except Exception:
+            await asyncio.sleep(0.1)
+
+
 async def test_f5_real_response_loss_real_retry_no_double_execution():
     CALLS.unlink(missing_ok=True)
-    srv1 = _start("server")
-    proxy = _start("proxy")
+    srv1 = _start("server", S_PORT)
+    proxy = None
     srv2 = None
     try:
         from client_t import retry_request
-        from fault_proxy import arm, release_killed
+        proxy = _start("proxy", P_PORT)
+        assert (await httpx.post(
+            f"http://127.0.0.1:{P_PORT}/_test/arm")).json()["armed"] is True
 
-        arm()
         task = asyncio.ensure_future(retry_request(
-            f"http://127.0.0.1:{P_PORT}", "f5-key", "must-run-once",
-            supports_retry_ext=True, timeout=1.5))
-        # "上游已执行、响应被扣"以外部记录器轮询判定（确定性优于进程内事件等待）
-        deadline = time.time() + 5
-        while _upstream_count() < 1 and time.time() < deadline:
-            await asyncio.sleep(0.05)
-        assert _upstream_count() == 1                 # 断言1：原请求已执行
+            f"http://127.0.0.1:{P_PORT}", "f5-ctx", "f5-key", "must-run-once",
+            supports_retry_ext=True, timeout=20.0))
 
-        srv1.send_signal(signal.SIGKILL)              # 记录清零、外部记录器幸存
+        deadline = time.time() + 10                   # 屏障：上游响应已扣留
+        st = {}
+        while time.time() < deadline:
+            st = (await httpx.get(
+                f"http://127.0.0.1:{P_PORT}/_test/state")).json()
+            if st["forwarded"]:
+                break
+            await asyncio.sleep(0.05)
+        assert st["forwarded"] and _upstream_count() == 1   # 断言1：已执行一次
+
+        srv1.send_signal(signal.SIGKILL)              # registry 清零
         srv1.wait()
-        srv2 = _start("server")                       # 重启（空 registry）
-        release_killed()                              # 首请求得 503 → 客户端真实进重试
-        resp = await asyncio.wait_for(task, 10)
+        srv2 = _start("server", S_PORT)               # 新进程空 registry
+        await asyncio.wait_for(_wait_health(S_PORT), 10)
+
+        await httpx.post(f"http://127.0.0.1:{P_PORT}/_test/release")
+        resp = await asyncio.wait_for(task, 10)       # 客户端真实重试
         body = resp.json()
         assert body["error"]["data"]["reason"] == "unknown_outcome"  # 断言2
         assert _upstream_count() == 1                 # 断言3：上游恰好一次
@@ -1260,89 +1531,68 @@ async def test_f5_real_response_loss_real_retry_no_double_execution():
         for p in (srv1, srv2, proxy):
             if p is not None and p.poll() is None:
                 p.kill()
-```
-
-- [ ] **Step 3: 故障代理（armed → 上游先执行、响应被扣；release → 返 503；armed 一次性自清）**
-
-```python
-# spike/a2a/fault_proxy.py
-"""F5 fault proxy: forwards /rpc; when armed, upstream executes but the client
-gets a 503 after release — genuine 'response lost' semantics."""
-import asyncio
-import os
-
-import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-
-app = FastAPI()
-TARGET = os.environ.get("FAULT_TARGET", "http://127.0.0.1:20045")
-
-_fwd = asyncio.Event()
-_rel = asyncio.Event()
-_armed = False
 
 
-def arm():
-    global _armed
-    _armed = True
-    _fwd.clear()
-    _rel.clear()
-
-
-async def wait_forwarded():
-    await _fwd.wait()
-
-
-def release_killed():
-    _rel.set()
-
-
-@app.post("/rpc")
-async def relay(request: Request):
-    body = await request.json()
+async def test_f7_legacy_target_no_auto_retry_real_path():
+    """F7（真实路径）：legacy A2A 目标（card 无 retry 扩展 → 能力发现 False）
+    + 故障代理扣首响应 → 客户端不自动重发；屏障时序与 F5 相同（先证实
+    首请求已达 legacy 且响应被扣，再释放），外部记录器证明确实只有一次。"""
+    CALLS.unlink(missing_ok=True)
+    legacy = _start("server", LEG_PORT, extra_env={"SPIKE_LEGACY": "1"})
+    proxy = None
     try:
-        async with httpx.AsyncClient(timeout=30) as http:
-            upstream = await http.post(f"{TARGET}/rpc", json=body)
-    except Exception:
-        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"),
-                             "error": {"code": -32000,
-                                       "message": "upstream unreachable",
-                                       "data": {"reason": "fault_upstream_gone"}}},
-                            status_code=503)
-    if _armed:
-        _fwd.set()
-        await _rel.wait()
-        global _armed
-        _armed = False
-        return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"),
-                             "error": {"code": -32000,
-                                       "message": "response lost (fault)",
-                                       "data": {"reason": "fault_response_lost"}}},
-                            status_code=503)
-    return JSONResponse(upstream.json())
+        from client_t import retry_request, detect_retry_support
+        proxy = _start("proxy", LEG_PROXY_PORT,
+                       extra_env={"FAULT_TARGET": f"http://127.0.0.1:{LEG_PORT}"})
+        await asyncio.wait_for(_wait_health(LEG_PROXY_PORT), 10)
 
+        supports = await detect_retry_support(
+            f"http://127.0.0.1:{LEG_PROXY_PORT}")
+        assert supports is False                      # 能力发现走真实 card
 
-@app.get("/.well-known/agent-card.json")
-async def card_relay():
-    async with httpx.AsyncClient(timeout=5) as http:
-        r = await http.get(f"{TARGET}/.well-known/agent-card.json")
-        return JSONResponse(r.json())
+        assert (await httpx.post(
+            f"http://127.0.0.1:{LEG_PROXY_PORT}/_test/arm")).json()["armed"]
+        task = asyncio.ensure_future(retry_request(
+            f"http://127.0.0.1:{LEG_PROXY_PORT}", "f7-ctx", "f7-key", "m",
+            supports_retry_ext=supports, timeout=20.0))
+
+        deadline = time.time() + 10                   # 屏障：首请求已执行且被扣
+        st = {}
+        while time.time() < deadline:
+            st = (await httpx.get(
+                f"http://127.0.0.1:{LEG_PROXY_PORT}/_test/state")).json()
+            if st["forwarded"]:
+                break
+            await asyncio.sleep(0.05)
+        assert st["forwarded"] and _upstream_count() == 1   # 首请求已达 legacy
+
+        await httpx.post(f"http://127.0.0.1:{LEG_PROXY_PORT}/_test/release")
+        try:
+            await asyncio.wait_for(task, 10)
+            raise AssertionError("expected UnknownOutcome")
+        except Exception as e:
+            assert type(e).__name__ == "UnknownOutcome"  # 客户端不自动重发
+        await asyncio.sleep(0.2)
+        assert _upstream_count() == 1 and st["relays"] == 1  # 无第二次业务请求
+    finally:
+        for p in (proxy, legacy):
+            if p is not None and p.poll() is None:
+                p.kill()
 ```
 
 - [ ] **Step 4: 跑绿 + Commit**
 
 Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/test_f5_restart.py -v`
-Expected: PASS
+Expected: 2 PASS
 
 ```bash
 git add spike/a2a/client_t.py spike/a2a/fault_proxy.py spike/a2a/tests/test_f5_restart.py
-git commit -m "test(spike): F5 response-loss via fault proxy, real client retry, external counter"
+git commit -m "test(spike): F5 cross-process fault control + F7 real legacy path"
 ```
 
 ---
 
-### Task 8: v3 迷你服务器（双协议共享 registry + legacy）→ F7/F8 真协议测试
+### Task 8: v3 迷你服务器（共享 registry；异步执行路径与 A2A 一致——R7-6）+ F8 跨协议
 
 **Files:** Create `v3_server.py`、Test `test_v3_f7_f8.py`
 
@@ -1356,68 +1606,28 @@ import pytest
 
 from v3_server import make_v3_app
 
+CTX = "xproto-ctx"
+
 
 @pytest.fixture
 def v3pair(client):
     return client, make_v3_app(client.app.state.kernel)
 
 
-def test_f8_cross_protocol_first_v3_then_retry_a2a(v3pair):
+def test_f8_cross_protocol_same_context_hits_same_run(v3pair):
     a2a, v3app = v3pair
-    rid = asyncio.run(v3_send_and_collect(v3app, "xproto-1", "跨协议内容"))
+    rid = asyncio.run(_v3_send_and_collect(v3app, CTX, "xproto-1", "跨协议内容"))
     r = a2a.post("/rpc", json={
         "jsonrpc": "2.0", "id": 41, "method": "SendMessage",
         "params": {"message": {"role": "ROLE_USER",
                                "parts": [{"text": "跨协议内容"}],
-                               "messageId": "xproto-1"},
+                               "messageId": "xproto-1", "contextId": CTX},
                    "metadata": {"avernet.retryOnly": True}}}).json()
-    assert r["result"]["task"]["id"] == rid       # 共享 registry 命中同一 run
-
-
-def v3_send_and_collect(app, key, text):
-    from fastapi.testclient import TestClient
-    with TestClient(app) as tc:
-        with tc.websocket_connect("/ws") as ws:
-            ws.send_json({"method": "chat.send", "id": "r1", "params": {
-                "sessionKey": "v3-ctx", "idempotency_key": key,
-                "message": {"role": "user",
-                            "content": [{"type": "text", "text": text}]}}})
-            frame = ws.receive_json()
-            assert frame["type"] == "res" and frame["ok"] and frame["task"]
-            rid = frame["task"]["id"]
-            while True:
-                ev = ws.receive_json()
-                payload = ev.get("payload")
-                if payload is None or payload.get("ev", {}).get(
-                        "statusUpdate", {}).get("final"):
-                    return rid
-    return None
-
-
-def test_f7_legacy_target_client_decides_not_server():
-    """legacy v3 替身忽略 retry 标志（旧容器语义=忽略未知字段照常 FIRST 执行）。
-    被测的是客户端：目标不支持扩展 → 不自动重发。"""
-    import client_t
-    from kernel import Kernel
-    counts = {"n": 0}
-
-    async def fake_send(base, mid, text, metadata=None, timeout=1.0):
-        counts["n"] += 1
-        raise client_t._Retryable()
-
-    real = client_t.send_once
-    client_t.send_once = fake_send
-    try:
-        with pytest.raises(client_t.UnknownOutcome):
-            asyncio.run(client_t.retry_request(
-                "ignored-base", "k-legacy", "m", supports_retry_ext=False))
-        assert counts["n"] == 1                   # 第二次请求从未发出
-    finally:
-        client_t.send_once = real
+    assert r["result"]["task"]["id"] == rid       # 同 (ctx,key) 命中同一 run
 
 
 def test_g3_g4_observer_sees_inject_and_no_new_task(v3pair):
-    a2a, v3app = v3pair
+    a2a, _v3app = v3pair
     kernel = a2a.app.state.kernel
 
     async def scenario():
@@ -1428,17 +1638,43 @@ def test_g3_g4_observer_sees_inject_and_no_new_task(v3pair):
         return status, ev, before, len(kernel.runs)
     status, ev, before, after = asyncio.run(scenario())
     assert status == "accepted"
-    assert ev["type"] == "inject" and ev["ev"]["text"] == "旁观样例文本"
-    assert after == before                        # inject 不产生 Task（§8.3）
+    assert ev["type"] == "inject"
+    assert ev["ev"]["message"]["parts"][0]["text"] == "旁观样例文本"
+    assert after == before                        # inject 非 Task（§8.3）
+
+
+def _v3_send_and_collect(app, ctx, key, text):
+    """同步外壳：TestClient 内完成 ws 首提并收全事件（run 已终态）。"""
+    from fastapi.testclient import TestClient
+    with TestClient(app) as tc:
+        with tc.websocket_connect("/ws") as ws:
+            ws.send_json({"method": "chat.send", "id": "r1", "params": {
+                "sessionKey": ctx, "idempotency_key": key,
+                "message": {"role": "user",
+                            "content": [{"type": "text", "text": text}]}}})
+            frame = ws.receive_json()
+            assert frame["type"] == "res" and frame["ok"], frame
+            rid = frame["task"]["id"]
+            while True:
+                payload = ws.receive_json().get("payload")
+                if payload is None or payload.get("ev", {}).get(
+                        "statusUpdate", {}).get("final"):
+                    return rid
 ```
 
-- [ ] **Step 2: 确认失败 → Step 3: v3 迷你服务器**
+- [ ] **Step 2: 确认失败 → Step 3: v3 迷你服务器（异步执行与 A2A 同轨迹）**
 
 ```python
 # spike/a2a/v3_server.py
-"""v3 mini-server on the SAME kernel as the A2A shell. legacy=True 模拟
-旧容器：忽略 extensions.retry_only，一律按 FIRST 执行。帧={"type","method","id","params"}。"""
+"""v3 mini-server on the SAME kernel as the A2A shell。chat.send 与
+SendStreamingMessage 同为后台执行 + 订阅流式（G5 对照口径一致，R7-6）。
+legacy=True：忽略 extensions.retry_only 照常 FIRST（旧容器语义）。"""
+import asyncio
+
 from fastapi import FastAPI, WebSocket
+
+TERMINAL = ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED",
+            "TASK_STATE_CANCELED", "TASK_STATE_REJECTED")
 
 
 def make_v3_app(kernel, legacy: bool = False) -> FastAPI:
@@ -1454,47 +1690,61 @@ def make_v3_app(kernel, legacy: bool = False) -> FastAPI:
         while True:
             frame = await sock.receive_json()
             if frame.get("method") == "chat.subscribe":
-                q = kernel.subscribe_context(frame["params"]["sessionKey"])
-                while True:
-                    ev = await q.get()
-                    if ev is None:
-                        return
-                    await sock.send_json({"type": "event", "payload": ev})
+                await _pump_context(kernel, sock, frame["params"]["sessionKey"])
+                return
             if frame.get("method") != "chat.send":
                 continue
             params = frame.get("params", {})
             retry = bool(params.get("extensions", {}).get("retry_only"))
             mode = "first" if (app.state.legacy or not retry) else "retry_only"
-            out = await kernel.send_message(
-                params.get("sessionKey", "v3-ctx"),
-                _text(params),
-                params.get("idempotency_key", params.get("clientRequestId",
-                                                        "v3-k")), mode)
+            ctx = params.get("sessionKey") or "v3-ctx"
+            key = params.get("idempotency_key") or "v3-k"
+            out = await kernel.open_run(ctx, key, mode, None)
             if out is kernel.UNKNOWN_OUTCOME:
                 await sock.send_json({"type": "res", "id": frame.get("id"),
                                       "ok": False,
                                       "error": {"reason": "unknown_outcome"}})
                 continue
-            rid = out["task"]["id"]
+            rid, created = out
+            if created:
+                asyncio.get_event_loop().create_task(
+                    kernel.execute_message(rid))    # 后台执行（与 A2A 一致）
             backlog, q = await kernel.subscribe(rid, since_seq=0)
             await sock.send_json({"type": "res", "id": frame.get("id"),
-                                  "ok": True, "task": out["task"]})
-            for e in backlog:
-                await sock.send_json({"type": "event", "payload": e})
-            r = kernel.runs[rid]
-            while True:
-                ev = await q.get()
-                if ev is None:
-                    return
-                await sock.send_json({"type": "event", "payload": ev})
-                if ev["ev"].get("statusUpdate", {}).get("final"):
-                    return
+                                  "ok": True, "task": {"id": rid}})
+            await _drain_run(kernel, sock, rid, backlog, q)
+            return
 
     return app
 
 
-TERMINAL = ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED",
-            "TASK_STATE_CANCELED", "TASK_STATE_REJECTED")
+async def _pump_context(kernel, sock, context_id):
+    q = kernel.subscribe_context(context_id)
+    try:
+        while True:
+            ev = await q.get()
+            if ev is None:
+                return
+            await sock.send_json({"type": "event", "payload": ev})
+    finally:
+        kernel.unsubscribe_context(context_id, q)
+
+
+async def _drain_run(kernel, sock, rid, backlog, q):
+    try:
+        for e in backlog:
+            await sock.send_json({"type": "event", "payload": e})
+        while True:
+            ev = await q.get()
+            if ev is None:
+                return
+            await sock.send_json({"type": "event", "payload": ev})
+            if ev["ev"].get("statusUpdate", {}).get("final"):
+                return
+    finally:                                          # 订阅清理（不变量 2）
+        r = kernel.runs.get(rid)
+        if r is not None and q in r.subscribers:
+            r.subscribers.remove(q)
 
 
 def _text(params):
@@ -1502,21 +1752,20 @@ def _text(params):
     return "".join(p.get("text", "") for p in msg.get("content", []))
 ```
 
-- [ ] **Step 4: 确认全绿 + Commit**
+- [ ] **Step 4: 全绿 + Commit**
 
-Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/ -v`
-Expected: 全 PASS
+Run: `spike/a2a/.venv/bin/python -m pytest spike/a2a/tests/ -v` → 全 PASS
 
 ```bash
 git add spike/a2a/v3_server.py spike/a2a/tests/test_v3_f7_f8.py
-git commit -m "feat(spike): shared-registry v3 mini-server, legacy mode, real F7/F8"
+git commit -m "feat(spike): shared-kernel async-exec v3 mini server (F8 real protocols)"
 ```
 
 ---
 
 ### Task 9: bridge→kernel 活管线（G3 真引擎实时证据）
 
-**Files:** Create `bridge_v3.py`、Test `test_bridge.py`、Probe `g3_realtime.py`
+**Files:** Create `v3_echo_engine.py`、`bridge_v3.py`、Test `test_bridge.py`、Probe `g3_realtime.py`
 
 - [ ] **Step 0: 发现真 v3 帧字段（产出固化为 bridge 常量）**
 
@@ -1526,11 +1775,13 @@ grep -n '_handle_chat_send' -A 15 engine/adapter/src/engine/community/api/transp
 grep -n 'send_event(' engine/adapter/src/engine/community/api/transport/ws_server.py | head -15
 ```
 
-- [ ] **Step 1: 回声引擎（独立 v3 帧成型对端，无 kernel）+ 失败测试（桥经 ws 收流实时入 kernel，A2A 侧可消费）**
+（字段名 delta/state/text 若与发现不符，修正 `_pump` 分类键；connect 帧若需鉴权字段，按发现补 `CONNECT_FRAME`。）
+
+- [ ] **Step 1: 回声引擎（纯帧成型对端，无 kernel——避免"自己测自己"）+ 失败测试**
 
 ```python
 # spike/a2a/v3_echo_engine.py
-"""独立的 v3 帧回声引擎（不含 kernel）——bridge 契约测试的对端。"""
+"""独立 v3 帧回声引擎（无 kernel）——bridge 契约测试对端。"""
 from fastapi import FastAPI, WebSocket
 
 app = FastAPI()
@@ -1585,16 +1836,16 @@ async def test_bridge_pumps_live_into_kernel():
     for port in (20047, 20048):
         for _ in range(50):
             try:
-                r, w = await asyncio.open_connection("127.0.0.1", port)
-                r.close(); w.close()
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", port)
+                writer.close()
                 break
             except OSError:
                 await asyncio.sleep(0.1)
     try:
         br = BridgeV3(kernel=kernel)
         await br.connect("ws://127.0.0.1:20047/ws")
-        rid = await br.chat_send("br-ctx", "测试桥接")     # 执行入口 = echo 引擎
-        # 消费用 ReplayEvents（回放+live 接力）——与订阅时序解耦，确定性依赖 kernel
+        rid = await br.chat_send("br-ctx", "测试桥接")   # echo 引擎为执行源
         arrivals = []
         async with httpx.AsyncClient(timeout=10) as http:
             async with http.stream("POST", "http://127.0.0.1:20048/rpc",
@@ -1605,26 +1856,28 @@ async def test_bridge_pumps_live_into_kernel():
                     if line.startswith("data: "):
                         ev = json.loads(line[6:])["result"]
                         arrivals.append(ev)
-                        if ev.get("ev", {}).get("statusUpdate", {}).get("final"):
+                        if "statusUpdate" in ev and ev["statusUpdate"].get(
+                                "final"):
                             break
-        assert arrivals[0]["type"] == "task"
-        arts = [a for a in arrivals if a.get("type") == "artifactUpdate"]
-        assert len(arts) >= 3, "A2A 消费侧应看到 artifact 流"
-        assert arts[0]["ev"]["artifactUpdate"]["append"] is False
-        assert arts[-1]["ev"]["artifactUpdate"]["lastChunk"] is True
+        assert "task" in arrivals[0]                     # 标准 wire 首事件
+        arts = [e["artifactUpdate"] for e in arrivals if "artifactUpdate" in e]
+        assert len(arts) >= 3                            # 实时泵入生效
+        assert arts[0]["append"] is False                # §8.4 首块
+        assert arts[-1]["append"] is False and arts[-1]["lastChunk"] is True
+        final = [e for e in arrivals if "statusUpdate" in e][-1]["statusUpdate"]
+        assert final.get("final") is True and final["status"]["state"] == \
+            "TASK_STATE_COMPLETED"                      # R7-8：终态真到位
     finally:
         a2a_srv.should_exit = True
         echo_srv.should_exit = True
         await asyncio.gather(t1, t2)
 ```
 
-（echo 引擎与 v3 迷你服务器分工：前者是纯帧成型对端，供 bridge 契约测试——bridge 不允许把入 kernel 的责任转嫁给共享 kernel 的对端；后者（T8）是双协议共享 registry 目标，供 F7/F8。两者不混用。）
-
-- [ ] **Step 2: bridge 实现（bridge 侧 pump=消费 ws 帧转 kernel 事件）**
+- [ ] **Step 2: bridge 实现（统一收口 complete_run——R7-8）**
 
 ```python
 # spike/a2a/bridge_v3.py
-"""真 engine v3 WS → spike kernel 活泵。分类按 payload 键（delta/text/state）。"""
+"""真 engine v3 WS → spike kernel 活泵。分类按 payload 键（delta/state/text）。"""
 import asyncio
 import json
 
@@ -1632,13 +1885,12 @@ import websockets
 
 CONNECT_FRAME = {"type": "req", "method": "connect",
                  "params": {"minProtocol": 3, "maxProtocol": 3}}
-# Step 0 发现如需补鉴权字段，在此常量补齐；禁止依赖未确认字段
+# Step 0 发现如需鉴权字段在此补齐；禁止依赖未确认字段
 
 
 class BridgeV3:
-    def __init__(self, kernel=None, engine_ws=None):
+    def __init__(self, kernel=None):
         self.kernel = kernel
-        self.engine_ws = engine_ws
         self.ws = None
 
     async def connect(self, url: str):
@@ -1648,16 +1900,17 @@ class BridgeV3:
         assert hello.get("type") == "res" and hello.get("ok"), hello
 
     async def chat_send(self, context_key, text, key=None):
-        """经真实 v3 协议发起 run；ws 事件帧实时泵入 kernel。"""
+        """kernel 建 run（唯一 registry 入口）→ 经 v3 协议要求执行 → 泵事件。"""
         key = key or f"v3-{context_key}"
         out = await self.kernel.open_run(context_key, key, "first", None)
-        rid, _ = out
+        rid, _created = out
         self._reader = asyncio.create_task(self._pump(rid))
         await self.ws.send(json.dumps({
             "type": "req", "method": "chat.send", "id": rid,
             "params": {"sessionKey": context_key, "idempotency_key": key,
                        "message": {"role": "user",
-                                   "content": [{"type": "text", "text": text}]}}}))
+                                   "content": [{"type": "text",
+                                                "text": text}]}}}))
         return rid
 
     async def _pump(self, rid):
@@ -1665,11 +1918,8 @@ class BridgeV3:
         async for raw in self.ws:
             frame = json.loads(raw) if isinstance(raw, str) else raw
             if frame.get("type") != "event":
-                if frame.get("type") == "res":
-                    continue
-                continue
-            p = frame.get("payload", {})
-            inner = p.get("ev", p)
+                continue                                # 跳过 res/握手帧
+            inner = frame.get("payload", {})
             aid = f"text-{rid}"
             if "delta" in inner:
                 await self.kernel._publish(rid, "artifactUpdate", {
@@ -1684,18 +1934,19 @@ class BridgeV3:
                     "artifact": {"artifactId": aid,
                                  "parts": [{"text": inner["text"]}]},
                     "append": False, "lastChunk": True})
-                await self.kernel._finish_run(rid)
+                await self.kernel.complete_run(rid)     # R7-8：统一收口
                 return
             elif "state" in inner:
                 await self.kernel.publish_status(rid, inner["state"])
 ```
 
-（kernel `_finish_run` 已在 T2/T3 实现并在 `_execute`/`cancel` 复用。字段名 `delta/state/text` 若与 Step 0 grep 结果不同，按发现修正 `_pump` 分类键。）
+（echo 引擎与 v3 迷你服务器分工：前者是纯帧成型对端（bridge 不允许把入 kernel 的责任转嫁给共享 kernel 的对端）；后者（T8）是双协议共享 registry 目标。两者不混用。）
 
-- [ ] **Step 3: G3 探针（singlebox 真引擎 → bridge → kernel → SSE → 消费者；每事件时间戳）**
+- [ ] **Step 3: G3 探针（singlebox 真引擎 → bridge → kernel → SSE → 消费者；逐事件时间戳 + 终态校验）**
 
 ```python
 # spike/a2a/probes/g3_realtime.py
+"""G3：真引擎→bridge→kernel→SSE 活管线，消费者逐事件记时戳。"""
 import asyncio
 import json
 import sys
@@ -1725,33 +1976,35 @@ async def main() -> int:
                 break
             except Exception:
                 await asyncio.sleep(0.1)
-        br = BridgeV3(kernel=kernel, engine_ws=V3_REAL)
+        br = BridgeV3(kernel=kernel)
         await br.connect(V3_REAL)
         t0 = time.monotonic()
         rid = await br.chat_send("g3-ctx", "请用三句话介绍 A2A 协议")
-        arrivals = await consume(http, rid)         # ReplayEvents 回放+live 接力
+        arrivals = await consume(http, rid)
     srv.should_exit = True
     await t
-    arts = [a for a in arrivals if a["type"] == "artifactUpdate"]
+    arts = [a for a in arrivals if "artifactUpdate" in a]
+    finals = [a for a in arrivals if "statusUpdate" in a
+              and a["statusUpdate"].get("final")]
     checks = {
-        "first_event_is_task": arrivals[0]["type"] == "task",
+        "first_event_is_task": bool(arrivals) and "task" in arrivals[0],
         "artifact_stream_live": len(arts) >= 2,
         "first_chunk_latency_ms": round((arts[0]["t"] - t0) * 1000, 1),
-        "final_is_replace_update": (arts[-1]["ev"]["artifactUpdate"]["append"] is
-                                    False and arts[-1]["ev"]["artifactUpdate"]
-                                    ["lastChunk"] is True),
+        "final_replace_update": bool(arts) and arts[-1]["artifactUpdate"]
+        ["append"] is False and arts[-1]["artifactUpdate"]["lastChunk"] is True,
         "three_stage_case": _three_stage(arts),
+        "task_terminal_completed": bool(finals) and finals[-1]["statusUpdate"]
+        ["status"]["state"] == "TASK_STATE_COMPLETED",    # R7-8
     }
-    verdict = (checks["first_event_is_task"] and checks["artifact_stream_live"]
-               and checks["final_is_replace_update"] and checks["three_stage_case"]
-               and checks["first_chunk_latency_ms"] < 3000)
+    verdict = all(bool(v) for v in checks.values()) and \
+        checks["first_chunk_latency_ms"] < 3000
     out = {"gate": "G3", "verdict": "pass" if verdict else "fail",
            "checks": checks,
            "arrival_timestamps": [round(a["t"] - t0, 3) for a in arts],
            "evidence_level": "real-engine"}
     print(json.dumps(out, ensure_ascii=False, indent=2))
-    json.dump(out, open("spike/a2a/evidence/G3.json", "w"),
-              ensure_ascii=False, indent=2)
+    with open("spike/a2a/evidence/G3.json", "w") as f:
+        f.write(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if verdict else 1
 
 
@@ -1763,9 +2016,9 @@ async def consume(http, rid) -> list[dict]:
                        "contextId": "g3-ctx"}}) as resp:
         async for line in resp.aiter_lines():
             if line.startswith("data: "):
-                ev = json.loads(line[6:])["result"]
+                ev = json.loads(line[6:]).get("result", {})
                 arrivals.append({"t": time.monotonic(), **ev})
-                if ev.get("ev", {}).get("statusUpdate", {}).get("final"):
+                if "statusUpdate" in ev and ev["statusUpdate"].get("final"):
                     break
     return arrivals
 
@@ -1773,8 +2026,8 @@ async def consume(http, rid) -> list[dict]:
 def _three_stage(arts) -> bool:
     if len(arts) < 3:
         return False
-    vals = [(a["ev"]["artifactUpdate"]["append"],
-             a["ev"]["artifactUpdate"]["lastChunk"]) for a in arts]
+    vals = [(a["artifactUpdate"]["append"],
+             a["artifactUpdate"]["lastChunk"]) for a in arts]
     return vals[0] == (False, False) and all(v[1] is False for v in vals[1:-1]) \
         and vals[-1] == (False, True)
 
@@ -1783,33 +2036,35 @@ if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
 ```
 
-（consumer 时序注：ReplayEvents 使证据获取与订阅竞态解耦——事件序列与时间戳在回放+live 接力下与先订阅后到达等价；首个 artifact 块延迟以消费者实际收到时刻计。）
-
-singlebox 启动（发现式）：
+singlebox 启动（发现式，先看再跑）：
 
 ```bash
 ls singlebox/ && head -40 singlebox/README* 2>/dev/null
 grep -rn "def start\|'start'" singlebox/*.py 2>/dev/null | head -5
-# 按 README 启动含 gateway+adapter 的组;验证:
 curl -s http://127.0.0.1:20003/health && echo ENGINE-OK
 ```
 
 - [ ] **Step 4: 跑探针 + Commit**
 
 Run: `spike/a2a/.venv/bin/python spike/a2a/probes/g3_realtime.py; rc=$?; echo rc=$rc`
-Expected: verdict pass、rc=0（首个 artifact 块延迟与时戳进 evidence）
+Expected: verdict pass、rc=0
 
 ```bash
-git add spike/a2a/bridge_v3.py spike/a2a/tests/test_bridge.py \
-  spike/a2a/probes/g3_realtime.py spike/a2a/evidence/G3.json
-git commit -m "test(spike): G3 live pipeline real-engine->bridge->kernel->SSE"
+git add spike/a2a/v3_echo_engine.py spike/a2a/bridge_v3.py \
+  spike/a2a/tests/test_bridge.py spike/a2a/probes/g3_realtime.py \
+  spike/a2a/evidence/G3.json
+git commit -m "test(spike): G3 live pipeline with terminal-state validation"
 ```
 
 ---
 
-### Task 10: G1b 真链路浏览器（R6 P1-5）
+### Task 10: G1b 真链路浏览器（收紧验收——R7-5）
 
 **Files:** Create `probes/g1b_browser.html`、`probes/g1b_playwright.py`
+
+**判据预声明（写死于探针内）**：慢引擎 `SPIKE_SLOW_MS=250`；浏览器侧
+inter-arrival ≥ 100ms 的事件对 ≥ 2（证明非整体缓冲）；abort 必须精确为
+`AbortError`；恢复后两段 seq 并集 = 连续无缺号且含终态；负向 401。
 
 - [ ] **Step 1: 发现代理入口与凭据（发现式）**
 
@@ -1819,69 +2074,72 @@ grep -rn "x-proxypass-token\|HS256" apps/proxy/src/sandboxproxy/community/adapte
 grep -rn "LOCAL_\|@1:20003" apps/proxy/src/sandboxproxy/community/adapters/web/resolvers/test_resolver.py | head
 ```
 
-产出：代理 target 写法（LOCAL_ 前缀）、凭据签发办法（若 spike 语境无法签出 → **G1b 记 BLOCKED 与缺失条件**，不降级直连冒充通过）。
+产出代理 target 写法与凭据签发办法；**签不出 → G1b.json 记 BLOCKED 与缺失条件，不降级直连**。
 
-- [ ] **Step 2: 浏览器页面（经真实代理入口；第 3 事件后真 abort；同 task sinceSeq 续拉；无凭据负向）**
+- [ ] **Step 2: 浏览器页面（经真实代理；到达时间戳；真实 abort；同 task 续拉）**
 
 ```html
 <!-- spike/a2a/probes/g1b_browser.html -->
 <!doctype html><meta charset="utf-8"><title>G1b</title><script type="module">
 const q = new URLSearchParams(location.search);
-const PROXY = q.get("proxy");           // http://127.0.0.1:<gateway-port>
-const TARGET = q.get("target");         // Step 1 发现的 target
-const TOKEN = q.get("token");           // 可为空 = 负向用例
+const PROXY = q.get("proxy");
+const TARGET = q.get("target");
+const TOKEN = q.get("token");
 const streamURL = `${PROXY}/proxypass/${TARGET}/rpc`;
-const rpc = (id, method, params) => ({"jsonrpc": "2.0", id, method, params});
 
 async function streamOnce(body, headers, abortAfter) {
   const ac = new AbortController();
-  const results = {n: 0, lastSeq: 0, taskId: null, aborted: null};
+  const r = {n: 0, lastSeq: 0, firstSeq: null, taskId: null, aborted: null,
+             httpStatus: null, arrivals: []};
   try {
-    const r = await fetch(streamURL, {method: "POST", signal: ac.signal,
+    const resp = await fetch(streamURL, {method: "POST", signal: ac.signal,
       headers: {"Content-Type": "application/json", ...(headers || {})},
       body: JSON.stringify(body)});
-    if (r.status !== 200) { results.httpStatus = r.status; return results; }
-    const reader = r.body.getReader(); const dec = new TextDecoder();
+    if (resp.status !== 200) { r.httpStatus = resp.status; return r; }
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
     let buf = "";
     for (;;) {
       const {done, value} = await reader.read();
       if (done) break;
       buf += dec.decode(value, {stream: true});
-      let i;
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-        if (chunk.startsWith("data: ")) {
-          const ev = JSON.parse(chunk.slice(6)).result;
-          results.n += 1;
-          if (ev.type === "task") results.taskId = ev.ev.task.id;
-          if (ev.seq != null) results.lastSeq = ev.seq;
-          if (abortAfter && results.n >= abortAfter) { ac.abort(); }
-        }
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        if (!chunk.startsWith("data: ")) continue;
+        const ev = JSON.parse(chunk.slice(6)).result;
+        const seq = ev.statusUpdate?.metadata?.seq ??
+                    ev.artifactUpdate?.metadata?.seq ?? null;
+        r.n += 1;
+        if (ev.task && !r.taskId) r.taskId = ev.task.id;
+        if (seq != null) { r.lastSeq = seq; if (r.firstSeq == null) r.firstSeq = seq; }
+        r.arrivals.push({t: performance.now(), seq});
+        if (abortAfter && r.n >= abortAfter) ac.abort();
       }
     }
-  } catch (e) { results.aborted = e.name === "AbortError" || String(e); }
-  return results;
+  } catch (e) { r.aborted = e.name; }
+  return r;
 }
 
 const message = id => ({message: {role: "ROLE_USER",
-  parts: [{text: "g1b-browser"}], messageId: id}});
+  parts: [{text: "g1b-browser"}], messageId: id, contextId: "g1b-ctx"}});
 window.__results = {};
 
 (async () => {
-  // 负向：无凭据
-  const neg = await streamOnce(rpc(1, "SendMessage", message("neg-1")), {});
-  window.__results.noauth = neg.httpStatus || neg.aborted || "unexpected-ok";
-  const auth = TOKEN ? {...({"Authorization": `Bearer ${TOKEN}`})} : {};
-  // 主流程：流式 + 第 3 事件 abort
-  const first = await streamOnce(rpc(2, "SendStreamingMessage", message("g1b-1")),
-                                  auth, 3);
-  window.__results.first = {n: first.n, lastSeq: first.lastSeq,
-                            aborted: first.aborted};
-  // 续拉：同 task 按 sinceSeq 补齐
+  const neg = await streamOnce(
+      {"jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+       "params": message("neg-1")}, {});
+  window.__results.noauth = neg.httpStatus ?? `unexpected:${JSON.stringify(neg)}`;
+  const auth = TOKEN ? {"Authorization": `Bearer ${TOKEN}`} : {};
+  const first = await streamOnce(
+      {"jsonrpc": "2.0", "id": 2, "method": "SendStreamingMessage",
+       "params": message("g1b-1")}, auth, 3);
+  window.__results.first = first;
   if (first.taskId) {
-    const resumed = await streamOnce(rpc(3, "ReplayEvents",
-      {taskId: first.taskId, sinceSeq: first.lastSeq}), auth, 0);
-    window.__results.resume = {n: resumed.n, lastSeq: resumed.lastSeq};
+    const resumed = await streamOnce(
+        {"jsonrpc": "2.0", "id": 3, "method": "ReplayEvents",
+         "params": {taskId: first.taskId, sinceSeq: first.lastSeq,
+                    contextId: "g1b-ctx"}}, auth, 0);
+    window.__results.resumed = resumed;
   }
   window.__results.done = true;
 })();
@@ -1899,36 +2157,53 @@ from playwright.async_api import async_playwright
 
 BASE = {"proxy": "http://127.0.0.1:8892",        # Step 1 发现后替换
         "target": "LOCAL_spike@1:20043",         # Step 1 发现后替换
-        "token": ""}                              # Step 1 发现后替换
+        "token": ""}                              # Step 1 发现后替换（可空=负向）
+
+
+def _inter_gaps_ms(arrivals) -> list[float]:
+    return [arrivals[i + 1]["t"] - arrivals[i]["t"]
+            for i in range(len(arrivals) - 1)]
 
 
 async def main() -> int:
     page_url = (pathlib.Path(__file__).parent / "g1b_browser.html").as_uri()
-    url = (f"{page_url}?proxy={BASE['proxy']}&target={BASE['target']}"
-           f"&token={BASE['token']}")
+    url = f"{page_url}?proxy={BASE['proxy']}&target={BASE['target']}" \
+          f"&token={BASE['token']}"
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         page = await browser.new_page()
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        page.on("console", lambda m: errors.append(m.text)
+                if m.type == "error" else None)
         await page.goto(url)
-        await page.wait_for_function("window.__results && window.__results.done")
+        await page.wait_for_function(
+            "window.__results && window.__results.done")
         res = await page.evaluate("window.__results")
+        first, resumed = res["first"], res.get("resumed")
+        seqs = [a["seq"] for a in first.get("arrivals", [])
+                if a.get("seq") is not None] + \
+               [a["seq"] for a in (resumed or {}).get("arrivals", [])
+                if a.get("seq") is not None]
+        gaps = _inter_gaps_ms(first.get("arrivals", []))
         checks = {
-            "unauth_rejected": res["noauth"] in (401, 403),
-            "stream_chunked_via_proxy": res["first"]["n"] >= 2,
-            "abort_after_events": isinstance(res["first"]["aborted"], (str, bool))
-            and bool(res["first"]["aborted"]),
-            "resume_filled_missed": res["resume"]["n"] > 0
-            and res["resume"]["lastSeq"] > res["first"]["lastSeq"],
+            "unauth_rejected_401": res["noauth"] in (401, 403),
+            "chunked_not_buffered": sum(1 for g in gaps if g >= 100) >= 2,
+            "abort_is_aborterror": first.get("aborted") == "AbortError",
+            "resume_covers_missing_no_gap": bool(seqs)
+            and seqs == sorted(set(seqs))
+            and seqs == list(range(seqs[0], seqs[-1] + 1)),
+            "resume_reaches_terminal": bool(resumed)
+            and resumed["n"] > 0,
             "no_console_errors": not errors,
         }
-        out = {"gate": "G1b", "verdict": "pass" if all(checks.values()) else "fail",
-               "checks": checks, "raw": res, "consoles": errors[:5],
+        out = {"gate": "G1b", "verdict": "pass" if all(checks.values())
+               else "fail", "checks": checks,
+               "gaps_ms": [round(g) for g in gaps],
+               "seq_count": len(seqs), "consoles": errors[:5],
                "evidence_level": "proxy-e2e"}
         print(json.dumps(out, ensure_ascii=False, indent=2))
-        json.dump(out, open("spike/a2a/evidence/G1b.json", "w"),
-                  ensure_ascii=False, indent=2)
+        with open("spike/a2a/evidence/G1b.json", "w") as f:
+            f.write(json.dumps(out, ensure_ascii=False, indent=2))
         await browser.close()
     return 0 if all(checks.values()) else 1
 
@@ -1937,37 +2212,39 @@ if __name__ == "__main__":
     sys.exit(asyncio.run(main()))
 ```
 
-- [ ] **Step 3: 安装 Playwright、跑探针、锁版、提交**
+- [ ] **Step 3: Playwright 安装、慢引擎起服务、跑探针、锁版、提交**
 
 ```bash
 spike/a2a/.venv/bin/pip install playwright && \
   spike/a2a/.venv/bin/python -m playwright install chromium
-spike/a2a/.venv/bin/pip freeze >> spike/a2a/requirements-spike.txt
+spike/a2a/.venv/bin/pip freeze > spike/a2a/requirements-spike.txt
+SPIKE_SLOW_MS=250 spike/a2a/.venv/bin/python -m uvicorn \
+  --app-dir spike/a2a server:create_app --factory --port 20043 \
+  > /tmp/spike-slow.log 2>&1 &
+sleep 2
 spike/a2a/.venv/bin/python spike/a2a/probes/g1b_playwright.py; rc=$?; echo rc=$rc
 git add spike/a2a/probes/g1b_browser.html spike/a2a/probes/g1b_playwright.py \
   spike/a2a/evidence/G1b.json spike/a2a/requirements-spike.txt
-git commit -m "test(spike): G1b real-proxy browser probe, abort/resume, auth-negative"
+git commit -m "test(spike): G1b tightened assertions via real proxy chain"
 ```
 
 ---
 
-### Task 11: G5 基准（同源双通道；判据预声明）
+### Task 11: G5 基准（同源双通道；判据预声明；rss 缺失判 not_run——R7-6）
 
 **Files:** Create `probes/g5_protocol.py`
 
-- [ ] **Step 1: 判据预先声明（写死在探针 docstring 与 evidence,跑后不许改）**
+- [ ] **Step 1: 探针（双方同口径：每轮新建连接、后台执行、同一语义首事件；rss 必备）**
 
 ```python
 # spike/a2a/probes/g5_protocol.py
-"""实验A（协议性能，G5 判定实验）：同一 kernel + 同一 mock 引擎事件脚本，
-两个前门（A2A /rpc SSE 与 v3 迷你 WS）消费同一 run 广播。判据（预声明，
-跑后不得改阈值）：
-- 冷连接口径 N=30 轮，每轮新 run + 新连接；指标 = P50 首事件延迟与整轮时长
-- P50(SSE) − P50(WS) ≤ 50ms
-- 吞吐比 = median(轮时长 WS) / median(轮时长 SSE) ≥ 0.9（事件到达口径）
-- rss：`--single sse|ws` 两进程采样 ru_maxrss，|Δ| ≤ max(10%·ws, 16MiB)，
-  聚合进 G5.json 的 rss 字段后参与 verdict
-真引擎差异不进 G5 判定（真引擎侧只作 G3 兼容性观察）。"""
+"""实验A（协议性能，G5 判定实验）。判据（预声明，跑后不得改阈值）：
+- 同一 kernel + 同一 mock 引擎事件脚本；两前门均为"新 run + 新连接 + 后台执行 + 流式输出"
+- N=30 轮冷连接。指标：P50 首业务事件延迟（SSE=首个 data 行；WS=res 帧）；P50 整轮时长
+- P50(SSE) − P50(WS) ≤ 50ms；吞吐比 median(WS whole)/median(SSE whole) ≥ 0.9
+- rss：--single sse|ws 两个独立进程采样 ru_maxrss 写 G5-rss.jsonl；样本不足 2 条
+  → verdict=not_run（不允许缺证据判 pass）
+真引擎差异不进 G5 判定（真引擎侧属 G3 兼容性观察）。"""
 import argparse
 import asyncio
 import json
@@ -1985,6 +2262,9 @@ from server import build_app
 from v3_server import make_v3_app
 
 N = 30
+P50_LIMIT_MS = 50.0
+TPUT_MIN = 0.9
+RSS_TOLERANCE_KB = 16 * 1024
 
 
 async def bench_sse() -> dict:
@@ -1993,28 +2273,31 @@ async def bench_sse() -> dict:
                                         log_level="error"))
     task = asyncio.create_task(srv.serve())
     first, whole = [], []
-    async with httpx.AsyncClient(timeout=10) as http:
-        for _ in range(50):
-            try:
+    for _ in range(50):
+        try:
+            async with httpx.AsyncClient(timeout=2) as http:
                 await http.get("http://127.0.0.1:20043"
                                "/.well-known/agent-card.json")
-                break
-            except Exception:
-                await asyncio.sleep(0.1)
-        for i in range(N):
-            t0 = time.monotonic()
+            break
+        except Exception:
+            await asyncio.sleep(0.1)
+    for i in range(N):
+        t0 = time.monotonic()
+        async with httpx.AsyncClient(timeout=10) as http:    # 每轮新连接（冷口径）
             async with http.stream("POST", "http://127.0.0.1:20043/rpc", json={
-                    "jsonrpc": "2.0", "id": i, "method": "SendStreamingMessage",
+                    "jsonrpc": "2.0", "id": i,
+                    "method": "SendStreamingMessage",
                     "params": {"message": {"role": "ROLE_USER",
                                            "parts": [{"text": "bench"}],
-                                           "messageId": f"b-sse-{i}"}}}) as resp:
+                                           "messageId": f"b-sse-{i}",
+                                           "contextId": f"g5-sse-{i}"}}}) as resp:
                 async for line in resp.aiter_lines():
                     if line.startswith("data: "):
                         first.append(time.monotonic() - t0)
                         break
                 async for _ in resp.aiter_lines():
-                    pass                       # 流至终态封口
-            whole.append(time.monotonic() - t0)
+                    pass                          # 至终态封口
+        whole.append(time.monotonic() - t0)
     srv.should_exit = True
     await task
     return {"p50_first_ms": statistics.median(first) * 1000,
@@ -2029,8 +2312,9 @@ async def bench_ws() -> dict:
     task = asyncio.create_task(srv.serve())
     for _ in range(50):
         try:
-            r, w = await asyncio.open_connection("127.0.0.1", 20044)
-            r.close(); w.close()
+            reader, writer = await asyncio.open_connection(
+                "127.0.0.1", 20044)
+            writer.close()
             break
         except OSError:
             await asyncio.sleep(0.1)
@@ -2038,18 +2322,21 @@ async def bench_ws() -> dict:
     for i in range(N):
         t0 = time.monotonic()
         async with websockets.connect("ws://127.0.0.1:20044/ws") as ws:
-            await ws.recv()                    # greeting：连接建立首个响应
-            await ws.send(json.dumps({"method": "chat.send", "id": i, "params": {
-                "sessionKey": f"b-ws-{i}", "idempotency_key": f"b-ws-{i}",
-                "message": {"role": "user",
-                            "content": [{"type": "text", "text": "bench"}]}}}))
+            await ws.recv()                       # greeting
+            await ws.send(json.dumps({
+                "method": "chat.send", "id": i,
+                "params": {"sessionKey": f"g5-ws-{i}",
+                           "idempotency_key": f"g5-ws-{i}",
+                           "message": {"role": "user",
+                                       "content": [{"type": "text",
+                                                    "text": "bench"}]}}}))
+            first.append(time.monotonic() - t0)   # res 帧=首个业务响应
             while True:
                 frame = json.loads(await ws.recv())
                 payload = frame.get("payload", {})
                 if payload.get("ev", {}).get("statusUpdate", {}).get("final"):
                     break
         whole.append(time.monotonic() - t0)
-        first.append(whole[-1])   # WS 首事件延迟以整轮为上界近似（与 SSE 口径对齐注释）
     srv.should_exit = True
     await task
     return {"p50_first_ms": statistics.median(first) * 1000,
@@ -2057,27 +2344,36 @@ async def bench_ws() -> dict:
             "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
 
 
-def aggregate(sse: dict, ws: dict, rss_samples: list | None) -> dict:
+def aggregate(sse: dict, ws: dict) -> dict:
     p50_delta = sse["p50_first_ms"] - ws["p50_first_ms"]
     tput_ratio = ws["p50_whole_ms"] / max(sse["p50_whole_ms"], 1e-9)
-    checks = {"p50_delta_ms": round(p50_delta, 1), "p50_pass": p50_delta <= 50.0,
-              "tput_ratio": round(tput_ratio, 3), "tput_pass": tput_ratio >= 0.9}
-    if rss_samples and len(rss_samples) == 2:
-        delta_kb = abs(rss_samples[0]["rss_kb"] - rss_samples[1]["rss_kb"])
-        checks["rss_delta_kb"] = delta_kb
+    checks = {"p50_delta_ms": round(p50_delta, 1),
+              "p50_pass": p50_delta <= P50_LIMIT_MS,
+              "tput_ratio": round(tput_ratio, 3),
+              "tput_pass": tput_ratio >= TPUT_MIN}
+    verdict = "not_run"                            # rss 样本不足 → not_run
+    try:
+        samples = [json.loads(line) for line
+                   in open("spike/a2a/evidence/G5-rss.jsonl")]
+    except FileNotFoundError:
+        samples = []
+    if len(samples) == 2:
+        delta_kb = abs(samples[0]["rss_kb"] - samples[1]["rss_kb"])
+        checks["rss_delta_kb"] = round(delta_kb, 1)
         checks["rss_pass"] = delta_kb <= max(
-            0.1 * max(s["rss_kb"] for s in rss_samples), 16 * 1024)
-    verdict = all(v for k, v in checks.items() if k.endswith("_pass"))
-    return {"gate": "G5", "verdict": "pass" if verdict else "fail",
+            0.1 * max(s["rss_kb"] for s in samples), RSS_TOLERANCE_KB)
+        verdict = "pass" if all(v for k, v in checks.items()
+                                if k.endswith("_pass")) else "fail"
+    return {"gate": "G5", "verdict": verdict,
             "predefined_criteria":
-                "P50Δ≤50ms; tput_ratio≥0.9; |Δrss|≤max(10%,16MiB)",
+                f"P50Δ≤{P50_LIMIT_MS}ms; tput≥{TPUT_MIN}; "
+                f"|Δrss|≤max(10%, {RSS_TOLERANCE_KB}KB)",
             "results": checks, "evidence_level": "protocol-perf-same-source"}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--single", choices=("sse", "ws"),
-                        help="rss 采样模式：单通道进程运行")
+    parser.add_argument("--single", choices=("sse", "ws"))
     args = parser.parse_args()
     if args.single:
         stats = asyncio.run(bench_sse() if args.single == "sse" else bench_ws())
@@ -2086,18 +2382,10 @@ def main() -> int:
         with open("spike/a2a/evidence/G5-rss.jsonl", "a") as f:
             f.write(line + "\n")
         return 0
-    sse_stats = asyncio.run(bench_sse())
-    ws_stats = asyncio.run(bench_ws())
-    rss_samples = None
-    try:
-        rss_samples = [json.loads(l) for l in
-                       open("spike/a2a/evidence/G5-rss.jsonl")]
-    except FileNotFoundError:
-        pass
-    out = aggregate(sse_stats, ws_stats, rss_samples)
+    out = aggregate(asyncio.run(bench_sse()), asyncio.run(bench_ws()))
     print(json.dumps(out, ensure_ascii=False, indent=2))
-    json.dump(out, open("spike/a2a/evidence/G5.json", "w"),
-              ensure_ascii=False, indent=2)
+    with open("spike/a2a/evidence/G5.json", "w") as f:
+        f.write(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if out["verdict"] == "pass" else 1
 
 
@@ -2105,29 +2393,29 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: 跑基准（三步：双通道机判 + 两进程 rss 采样）+ Commit**
+- [ ] **Step 2: 跑基准（双通道 + 两进程 rss + 复跑聚合）+ Commit**
 
 ```bash
-spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py            # P50+吞吐机判
+spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py              # P50+吞吐
 spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py --single sse
 spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py --single ws
-spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py            # 复跑聚合 rss
+spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py              # 聚合 rss
 ```
 
-Expected: 最终 `verdict: "pass"`（未过 → 记 fail、触发 R3 风险预案，不弱化数据）
+Expected: 最终 `verdict: "pass"`（rss 样本不足 → not_run 且退出码 1；未过判据 → fail；**任何情况不允许改探针内阈值**）
 
 ```bash
 git add spike/a2a/probes/g5_protocol.py spike/a2a/evidence/G5.json
-git commit -m "test(spike): G5 same-source dual channel, predefined criteria"
+git commit -m "test(spike): G5 symmetric cold-channel benchmark, rss required"
 ```
 
 ---
 
-### Task 12: 机器化汇总 + 附录回填
+### Task 12: 机器化汇总（证据分级 + F 用例分项）+ 附录回填
 
-**Files:** Create `probes/report.py`、`evidence/REPORT.md`、`evidence/G4.json`
+**Files:** Create `probes/report.py`、`evidence/G4.json`、`evidence/REPORT.md`
 
-- [ ] **Step 1: report.py（聚合 evidence/*.json；缺的 = NOT RUN；pytest 全量并入）**
+- [ ] **Step 1: report.py（聚合 G*.json；F 用例按分项映射多测试；NOT RUN 不放行）**
 
 ```python
 # spike/a2a/probes/report.py
@@ -2139,15 +2427,21 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EV = ROOT / "evidence"
 F_MAP = {
-    "F1": "tests/test_kernel.py::test_cache_limit_stops_caching_not_delivery",
-    "F2": "tests/test_kernel.py::test_terminal_replay_window_is_180s_not_immediate",
-    "F3": "tests/test_v3_f7_f8.py::test_g3_g4_observer_sees_inject_and_no_new_task",
-    "F4": "tests/test_retry.py::test_d14_four_rows_via_protocol",
-    "F5": "tests/test_f5_restart.py::test_f5_real_response_loss_real_retry_no_double_execution",
-    "F6": "tests/test_kernel.py::test_f6_missed_events_replay_by_seq",
-    "F7": "tests/test_v3_f7_f8.py::test_f7_legacy_target_client_decides_not_server",
-    "F8": "tests/test_v3_f7_f8.py::test_f8_cross_protocol_first_v3_then_retry_a2a",
+    "F1": ["tests/test_kernel.py::test_cache_limit_stops_caching_not_delivery",
+           "tests/test_kernel.py::test_byte_budget_overflow_sets_cache_limit"],
+    "F2": ["tests/test_kernel.py::test_terminal_replay_window_is_180s_not_immediate"],
+    "F3": ["tests/test_v3_f7_f8.py::test_g3_g4_observer_sees_inject_and_no_new_task"],
+    "F4": ["tests/test_retry.py::test_d14_four_rows_via_protocol"],
+    "F5": ["tests/test_f5_restart.py::test_f5_real_response_loss_real_retry_no_double_execution"],
+    "F6": ["tests/test_kernel.py::test_f6_missed_events_replay_by_seq",
+           "tests/test_kernel.py::test_f6_live_handoff_no_gap"],
+    "F7": ["tests/test_f5_restart.py::test_f7_legacy_target_no_auto_retry_real_path"],
+    "F8": ["tests/test_v3_f7_f8.py::test_f8_cross_protocol_same_context_hits_same_run",
+           "tests/test_kernel.py::test_f8_concurrent_first_single_execution"],
 }
+LEVELS = {"kernel-unit": "内核单测", "protocol-contract": "协议契约",
+          "proxy-e2e": "代理端到端", "real-engine": "真引擎实测",
+          "toolchain": "工具链", "protocol-perf-same-source": "同源协议性能"}
 
 
 def main() -> int:
@@ -2167,24 +2461,32 @@ def main() -> int:
              "", "| 门禁 | verdict | 证据等级 |", "|---|---|---|"]
     for name, verdict, level in rows:
         lines.append(f"| {name} | {verdict} | {level} |")
-    lines += ["", f"- pytest 全量: {'PASS' if rc == 0 else 'FAIL'} (rc={rc})", "",
-              "| F 用例 | 测试 |", "|---|---|"]
-    for k, v in F_MAP.items():
-        lines.append(f"| {k} | `{v}` |")
-    lines += ["", "任何 NOT RUN/BLOCKED 门即未知数：kernel 单测绿 ≠ 代理端到端通过。"]
+    lines += ["", f"- pytest 全量: {'PASS' if rc == 0 else 'FAIL'} (rc={rc})",
+              "", "| F 用例 | 分项测试 |", "|---|---|"]
+    for k, items in F_MAP.items():
+        lines.append(f"| {k} | " + "<br>".join(f"`{i}`" for i in items) + " |")
+    lines += ["", "NOT RUN/BLOCKED 的门 = 未知数：kernel 单测绿 ≠ 代理端到端通过。",
+              "放行条件：全部 verdict=pass 且 pytest rc=0。"]
     (EV / "REPORT.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
-    all_ok = rc == 0 and all(v == "pass" for _, v, _ in rows)
-    return 0 if all_ok else 1
+    gates_ok = all(v == "pass" for _, v, _ in rows)
+    return 0 if (gates_ok and rc == 0) else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: G4 证据**
+- [ ] **Step 2: G4 证据（双客户端真链路进程级）**
 
-跑一次进程级双客户端场景（uvicorn 起 A2A 壳 + v3 迷你对同一 kernel；观察者 `SubscribeToContext`，注入方 `InjectContext`），把断言结果机写 `evidence/G4.json`：`{"gate":"G4","verdict":...,"checks":{"observer_witnessed":true,"no_new_task":true},"evidence_level":"protocol-contract"}`。脚本可以就是 `test_v3_f7_f8.py::test_g3_g4_...` 的进程级包装（同一断言）。
+uvicorn 起 A2A 壳 + v3 迷你（同一 kernel）；客户端甲 `SubscribeToContext`（SSE），客户端乙经 v3/`InjectContext` 注入；断言观察者收到 inject 事件且 kernel.runs 数量不变。结果机写 `evidence/G4.json`：
+
+```json
+{"gate": "G4", "verdict": "pass", "evidence_level": "protocol-contract",
+ "checks": {"observer_witnessed": true, "no_new_task": true}}
+```
+
+实测脚本 = `tests/test_v3_f7_f8.py::test_g3_g4_observer_sees_inject_and_no_new_task` 的进程级包装（同一断言），BLOCKED 不降级。
 
 - [ ] **Step 3: 汇总 + 设计文档附录 A 回填**
 
@@ -2192,26 +2494,46 @@ if __name__ == "__main__":
 spike/a2a/.venv/bin/python spike/a2a/probes/report.py; rc=$?; echo rc=$rc
 ```
 
-Modify `docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md`：
-- 附录 A 头部：a2a-sdk 实际版本（G2-versions.md 抄录）
-- 附录 A.3：extension URI 以 settings.EXT_URIS 值定版（关闭 O8）
-- 状态行追加：`> 2026-10-XX Spike 阶段 0 证据与分级结论：spike/a2a/evidence/REPORT.md（spike 代码不合入 dev）`
+Modify `docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md`：附录 A 头部抄录 a2a-sdk 实际版本（G2.json）；附录 A.3 以 `settings.EXT_URIS` 定版 extension URI（关闭 O8）；状态行追加 Spike 结论指引（REPORT.md，spike 代码不合入 dev）。
 
 - [ ] **Step 4: 提交推送**
 
 ```bash
 git add spike/a2a/probes/report.py spike/a2a/evidence/ \
   docs/superpowers/specs/2026-10-13-engine-a2a-protocol-replacement-design.md
-git commit -m "docs(spike): machine-generated phase-0 report with evidence levels"
+git commit -m "docs(spike): machine report with evidence levels and per-case F map"
 AVERNET_PRE_PUSH_MERGE_TARGET=origin/dev git push
 ```
 
-**放行规则**：阶段 1a 放行 = REPORT.md 全门 `pass` + pytest 全绿。任何门 NOT RUN/BLOCKED → 不放行。证据等级决定结论能支撑的决策层（kernel-unit 绿 ≠ proxy-e2e 通过）。
+**放行规则**：阶段 1a 放行 = REPORT.md 全门 `pass` + pytest rc=0；NOT RUN/BLOCKED 任一存在即不放行；证据等级决定该结论支撑的决策层。
 
 ---
 
-## 自审记录（v2 第二稿）
+## 自审记录（v3）
 
-1. **R6 覆盖**：G1a(T5) G1b(T10) G2(T1) G3(T9) G4(T8,T12) G5(T11)；F1(T2/3) F2(T2/3) F3(T8) F4(T6) F5(T7) F6(T2/3) F7(T7/8) F8(T8)；8 项评审映射如各 Task 标注。
-2. **残留检查**：上一稿发现并已修：极简死代码/残迹、F5 时序（先起新服务再放行 503）、kernel seq 随缓存清零、SSE 终态不封口（180s 挂起）、subscribe 于终态 run 无终止、`str(P_PORT]]` 括号笔误等。本稿所有代码为单一干净版本；环境发现类（SDK API 名/单框启动/代理 target）保留"先发现后写"的探索步骤——这是计划可执行性的边界而非待定项。
-3. **类型一致性**：kernel 方法签名（open_run/execute_message/send_message/subscribe/replay/publish_status/inject）全程一致；`client_t.send_once(base,mid,text,metadata,timeout)` 在 T7/T8 一致；v3_server.make_v3_app(kernel, legacy) 在 T8/T9/T11 一致。
+1. **评审覆盖**：R6 8 项 + R7 6 P1 + 2 实现项 + 3 环境项 → R7-1 wire（T4 `_wire`/路由透传/标准断言）；R7-2 context（T2/T6/T7/T8 全链固定 + `context_required` + 客户端契约入不变量 3）；R7-3 跨进程控制（T7 `/_test/*` 端点 + forwarded 屏障 + 全时序）；R7-4 F6/F7/F8 实路径（T3 live-handoff、T7 legacy 真访问+能力发现、T3/T8 并发+执行级断言、T12 分项 F_MAP）；R7-5 G1b（T10 inter-arrival/AbortError/seq 并集连续性）；R7-6 G5（T11 同口径冷连接/同语义首事件/rss 必备）；R7-7 预算/慢订阅者/清理（T3 kernel + 测试）；R7-8 complete_run 统一收口（T3/T9 bridge/G3 终态断言）；环境项（T1 pytest-asyncio/G2.json/锁 grep）。
+2. **成稿方法修订**：v2 单次成稿三连出现同类缺陷后改为四段分段拼装；提交前对全文 python 代码块执行机器提取 + `py_compile` 语法校验（见下方校验命令）与残留标记扫描（`if False`/`残迹`/`（最终版）`/占位 等零命中才提交）。
+3. **类型一致性**：`kernel`（open_run/execute_message/send_message/complete_run/subscribe/replay/publish_status/inject/unsubscribe_context）；`server.HANDLED` handler 签名 `(kernel, rid, params)`；`client_t.send_once/retry_request/detect_retry_support`；`v3_server.make_v3_app(kernel, legacy)`；`fault_proxy.非代码块控制端点`（HTTP，无进程内 import）。
+4. **已知留白**：`g1a_sdk.py::normalize` 为显式探索适配层（NotImplementedError + 契约注释，依 G2-versions.md 实现——R6/R7 指示的处理方式）；singlebox 启动命令与 proxy target 格式为发现式步骤。
+
+## 机器校验（执行本计划前，评审者可复跑）
+
+```bash
+python3 - <<'EOF'
+import re, pathlib, subprocess, sys, tempfile
+md = pathlib.Path("docs/superpowers/plans/2026-10-13-engine-a2a-spike.md").read_text()
+blocks = re.findall(r"```python\n(.*?)```", md, re.S)
+failed = 0
+for i, b in enumerate(blocks):
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+        f.write(b)
+    rc = subprocess.run([sys.executable, "-m", "py_compile", f.name]).returncode
+    if rc != 0:
+        failed += 1
+        print(f"BLOCK {i} FAILED py_compile")
+print(f"blocks={len(blocks)} failed={failed}")
+EOF
+```
+
+预期：`blocks=N failed=0`。任一失败 → 修复后重跑，fails>0 的计划不得作为执行底本。
+
