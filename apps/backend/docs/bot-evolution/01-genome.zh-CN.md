@@ -15,8 +15,8 @@
 **Bot 基因组**是一个 Bot 的可进化、声明式定义：人设文件、技能、精选记忆、
 资源、工具、引擎配置，以及一个不可进化的 `policy` 部分。**基因组修订版**
 （Genome Revision）是它的一个已记录的、不可变的版本。基因组是进化的单位：
-每个进化策略都读取一个修订版并提出对它的变更，而每一个到达运行中 Bot 的变更
-都是对某个修订版的应用。
+每个进化策略都读取一个修订版并提出对它的变更，而每一个经由基因组到达运行中
+Bot 的变更都是对某个修订版的应用。
 
 一句话概括：基因组修订版是**一份完整、已固定版本的 Manifest，加上精选记忆，
 再加上一个父代指针和锁定的策略配置，且只能通过补丁变更**。
@@ -56,6 +56,11 @@
 已经位于此处。内容复用 manifest 内容存储
 （`core/bot_config_manifest/content/service.py`）。晋升同样位于 Backend 中、
 与其相邻，因为晋升必须与应用放在一起。
+
+**分层。** 基因组构建在 Manifest 之上。Manifest 不感知修订版：它只获得格式特性
+以及一项自身的事实，即每次应用所应用文档的摘要（§8）。某个摘要属于哪个修订版，
+只有基因组注册表知道。直接的 Manifest 编辑会绕过基因组，并作为漂移被检测到
+（§5.5）。
 
 **可独立使用。** 基因组注册表属于 P1 阶段：带版本的 Bot、可归因的应用，以及
 回到任意更早修订版，这些能力独立于任何进化策略都有价值。
@@ -354,9 +359,9 @@ class GenomePolicy:
 
 ```python
 class ProvenanceKind(StrEnum):
-    USER = "user"                    # a person edited the bot (UI, API, or CLI)
+    USER = "user"                    # a person edited the bot through the genome API (UI, API, or CLI);
+                                     # a direct PUT /config-manifest records no revision (§5.5)
     STRATEGY_RUN = "strategy_run"    # a strategy submitted it as a candidate during an Evolution Run
-    MANIFEST_PUT = "manifest_put"    # recorded through the existing PUT /config-manifest (§5.5)
     BOT = "bot"                      # postponed with DR-3
 
 @dataclass(frozen=True)
@@ -619,13 +624,16 @@ Always apologise first.                                                         
 class CompiledManifest:
     revision_id: RevisionId          # bookkeeping: which revision this was compiled from (not inside the document)
     document: dict                   # a plain Manifest document, exactly what apply consumes (shape below)
-    document_digest: Digest          # bookkeeping: digest of that document, to tell later which bytes were applied
+    document_digest: Digest          # digest of that document; apply reports record it (§8 item 5), and the
+                                     # Registry maps it back to `revision_id`
 ```
 
 `document` 就是一份 Manifest 文档。除 §8 列出的 Manifest 变更外，编译不会给
-Manifest 格式增加任何东西：每个类别都存在，文件条目按摘要指向内容存储（§8 第 6
-项），精选记忆就是 Manifest 新增的 `memory` 类别（§8 第 5 项）。另外两个字段是
-放在文档旁边用于记账的信息，不会发送给应用。
+Manifest 格式增加任何东西：每个类别都存在，文件条目按摘要指向内容存储（§8 第 1
+项），精选记忆就是 Manifest 新增的 `memory` 类别（§8 第 3 项）。另外两个字段是
+放在文档旁边用于记账的信息，不会发送给应用。当晋升应用该文档时，应用报告会记录
+其摘要（§8 第 5 项），注册表也会记录该修订版编译出了这个摘要，因此该摘要可以
+映射回该修订版（§5.5）。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -641,7 +649,7 @@ Manifest 格式增加任何东西：每个类别都存在，文件条目按摘�
       "resources": [{"path": "data/kb/", "source": {"content_store": "sha256:d4a7…"}}],
       "mcp": [],
       "cli_tools": [{"name": "shopctl", "source": {"content_store": "sha256:a613…"}}],
-      "memory": {"mode": "seed", "items": {"source": {"content_store": "sha256:9e20…"}}}   // new category, §8 item 5
+      "memory": {"mode": "seed", "items": {"source": {"content_store": "sha256:9e20…"}}}   // new category, §8 item 3
     }
   }
 }
@@ -672,11 +680,11 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 | 每个 Bot 一行可变记录，没有修订历史，没有内容哈希 | 谱系、归档、可复现性、回到任意时间点 | 修订版（§4） |
 | 没有父代指针 | 谱系树；感知后代的选择 | `parent` |
 | 没有乐观并发控制。HTTP 通过 `ETag`（服务器随文档返回的版本标签）和 `If-Match` 请求头（客户端回传其读取到的标签；若文档自那以后已变更，服务器以 `412 Precondition Failed` 拒绝写入）提供这一能力。`PUT /config-manifest` 两者都没有 | 进化策略与人同时编辑时会静默地互相覆盖；最后写入者在不知情的情况下胜出 | 引用上的比较并交换（§5） |
-| 应用时重新读取当前文档；报告不说明应用的是哪些字节 | 无法将行为或经验归因到某个版本 | 应用报告记录 `revision_id` 和文档摘要（§8） |
+| 应用时重新读取当前文档；报告不说明应用的是哪些字节 | 无法将行为或经验归因到某个版本 | 应用报告记录所应用文档的摘要；注册表将其映射到修订版（§8） |
 | 来源是可移动的引用（git 分支、OSS 键），每次应用都重新解析 | 基因组必须不可变：每个来源都固定到提交 SHA / 摘要 | 固定版本的内容（§4.2） |
 | 整份文档 PUT，按类别原子替换 | 进化策略必须提交小型、可评审、逐项的补丁 | 基因组补丁（§6） |
 | `MEMORY.md` / `IDENTITY.md` 被保留并拒绝 | 习得的记忆是自我改进产出的一半 | 精选记忆（§7） |
-| v1 中拒绝 `engine_config` | 模型 / 温度 / 推理预算是合理的可调参数 | 白名单化的 `engine_config`（§8） |
+| `engine_config` 由模式校验，但没有任何东西应用它（已移出第一批；没有物化器） | 模型 / 温度 / 推理预算是合理的可调参数 | 为白名单中的 `engine_config` 键提供物化器（§8） |
 | 文档中省略的类别表示“保持不变” | 修订版必须完全确定 Bot；否则同一修订版的两次应用可能因先前状态不同而产生不同的 Bot | 完整性（§4.3） |
 | 没有存放元数据的位置：未知键会被拒绝 | 进化需要**来源**（谁或什么产生了某个版本、依据哪些证据、使用哪个补丁）和**注解**（自由格式的标签，例如评审备注或实验标签） | 保存在修订版记录上，而不是 Manifest 文档内，因此 Manifest 模式无需为此改变 |
 | 个人 Bot 无法回到更早的配置；服务 Bot 有自己的发布回滚（只能回退一步） | 回到旧版本必须对每个 Bot 都可用，并且可以回到任意更早的修订版 | 回到旧版本 = 晋升一个更早的修订版（§5.4） |
@@ -685,8 +693,10 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 - **一个通过独立路径交付的单独进化产物（例如 ClawEvolve Pack）。** 否决原因：
   两个事实来源，而且 Pack 是 OpenClaw 专属的工作区快照，无法触达 teclaw。
-- **保持 Manifest v1 不变，在其外部做版本管理。** 否决原因：应用仍会重新读取一份
-  可变文档，因此行为无法归因到某个版本。
+- **在 Manifest 之外做版本管理，并让 Manifest 完全保持不变。** 否决原因：如果
+  没有内容存储来源以及应用报告上的已应用文档摘要，应用仍会重新获取可移动的来源，
+  也无法说明它应用了哪份文档，因此行为无法归因到某个版本。基因组确实构建在
+  Manifest 之上，但 Manifest 会获得这些格式特性（§8）。
 - **每个 Bot 一个 Git 仓库作为事实来源。** 暂缓；见 §9.2。
 
 ## 4. 修订版
@@ -703,9 +713,10 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
    产生相同的字节（§4.2）。
 4. **完整性**：每个修订版中都包含所有类别（§4.3）。
 5. **自动化参与者只能通过补丁变更**：进化策略针对具名基础修订版提交带类型的
-   逐项补丁（§6）。人仍然可以从一份完整的 **Manifest 文档**记录修订版，而不是使用
-   补丁：Manifest 文档即 Bot Config Manifest API 所接受的完整 YAML 文档（目前通过
-   `PUT /config-manifest`）。这样的修订版没有 `patch_digest`。
+   逐项补丁（§6）。人仍然可以通过基因组 API（`POST …/genome/revisions` 并携带
+   `{manifest}`，§12），从一份完整的 **Manifest 文档**（Bot Config Manifest API
+   所接受的完整 YAML 文档）记录修订版，而不是使用补丁。这样的修订版没有
+   `patch_digest`。直接发送到 `PUT /config-manifest` 的文档不会记录修订版（§5.5）。
 6. **一个新的内容类别：精选记忆**（§7），这需要新的引擎契约。
 
 刻意**不**增加的内容：
@@ -713,8 +724,8 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 - **评估分数。** 它们存放在[验证](07-verification.zh-CN.md)中，仅以链接方式
   关联（`evaluations`）；[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)
   中实验记录的归档视图会将它们关联起来。基因组保持为纯粹的定义。
-- **作为基因组专属新增项的 `engine_config`。** Manifest 已经有这个类别；启用一个
-  白名单子集是一项对进化有益的 Manifest 变更（§8）。
+- **作为基因组专属新增项的 `engine_config`。** Manifest 模式已经有这个类别；应用
+  一个白名单子集是一项对进化有益的 Manifest 变更（§8）。
 
 ### 4.2 摘要与固定版本
 
@@ -753,7 +764,7 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 | 状态 | 含义（提议） | 设置者 |
 | --- | --- | --- |
-| `draft` | 由所有者的手动编辑记录（UI/API、`PUT /config-manifest`） | 基因组注册表 |
+| `draft` | 由所有者通过基因组 API 进行的手动编辑记录（UI、API、CLI） | 基因组注册表 |
 | `candidate` | 由运行期间提交的补丁记录，尚未决定 | 基因组注册表 |
 | `accepted` | 门禁已接受它（它可能还在等待评审或发布） | [晋升](08-promotion.zh-CN.md) |
 | `rejected` | 验证或门禁拒绝了它；保留在归档中 | [晋升](08-promotion.zh-CN.md) |
@@ -797,8 +808,9 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 贯穿本节的示例：一个支持 Bot 正在运行 `r41`。夜间运行 `run_7f3` 提出了两个候选，
 同时所有者也在手动编辑该 Bot。
 
-**`active`：Bot 正在运行的内容。** 每次应用（个人 Bot）和每次发布（服务 Bot）
-都使用 `active` 指向的修订版，因此只要 Bot 被应用过，它就是每个 Bot 都有的那个引用。
+**`active`：Bot 正在运行的内容。** 经由基因组进行的每次应用（个人 Bot）和每次
+发布（服务 Bot）都使用 `active` 指向的修订版（直接的 Manifest 编辑属于漂移，§5.5），
+因此只要 Bot 被应用过，它就是每个 Bot 都有的那个引用。
 只有晋升会移动它：在某个修订版被晋升时，无论该修订版更新还是更旧
 （[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 *示例：* 门禁接受了 `r42`，所有者批准了它；晋升将 `active` 从 `r41` 移到 `r42`，
@@ -815,11 +827,10 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 金丝雀实例重新运行 `active`（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。
 *示例：* `canary` = `r42`，在 10% 的实例上运行一天，然后 `active` 移到 `r42`。
 
-**`draft`：所有者正在进行的工作。** 每次手动编辑（UI、API、CLI）都会记录一个修订版，
-并将 `draft` 移到它。在所有者晋升之前，没有任何东西运行 `draft`，因此所有者可以
+**`draft`：所有者正在进行的工作。** 每次通过基因组 API 进行的手动编辑（UI、API、
+CLI）都会记录一个修订版，并将 `draft` 移到它。在所有者晋升之前，没有任何东西运行 `draft`，因此所有者可以
 保存未完成的工作。*示例：* 所有者两次编辑 `SOUL.md`；这会记录 `r43` 和 `r44`，
-`draft` = `r44`，而 `active` 保持为 `r42`，直到所有者晋升 `r44`。（为了向后兼容，
-现有的 `PUT /config-manifest` 也会移动 `active`，§5.5。）
+`draft` = `r44`，而 `active` 保持为 `r42`，直到所有者晋升 `r44`。
 
 **`candidate/<run_id>/<n>`：某次运行的一个候选。** 进化运行 `run_id` 提交的第 `n`
 个候选（从 1 开始，按提交顺序计数）。当进化策略提交候选时，由进化运行创建它
@@ -849,19 +860,57 @@ Manifest”一节：每个 Bot 一行可变记录 `ac_bot_config_manifest`，
 
 - **个人 Bot：** 修订版通过 Manifest 应用进行应用。
 - **服务 Bot：** 修订版通过现有的 草稿 → 验证 → 发布 流程，作为**下一个发布版本**
-  发出，并在发布记录上存储 `revision_id`。
+  发出。发布记录会记录所发布文档的摘要，注册表将其映射到该修订版。
 
 现有的服务 Bot 回滚功能保持不变。本设计既不替代也不扩展它。晋升端点
 （`POST /bots/{bot_id}/genome/promotions`）和发布规则在
 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 中定义；基因组注册表提供它所使用的
 CAS 引用移动和编译步骤。
 
-### 5.5 与当前 Manifest 记录行的关系
+### 5.5 直接的 Manifest 编辑与漂移
 
-在 P1 中，现有的 `PUT /config-manifest` 继续可用，并成为以下操作的语法糖：
-“从这份文档记录一个修订版，将 `draft`（以及为了向后兼容，`active`）移到它，然后
-应用”。现有客户端看不到任何变化；该记录行变成 `active` 的一个投影。现有的
-`/config-manifest` 端点保留，并成为注册表之上的视图。
+Manifest 不感知修订版，现有的 `/config-manifest` 端点也与今天完全一样继续工作。
+直接的 `PUT /config-manifest` 会绕过基因组：它不记录修订版，也不移动任何引用。
+想要保留历史的所有者应改为通过基因组 API 编辑：记录一个修订版（这会移动 `draft`），
+然后晋升它。基因组 API 也可以从一份完整的 Manifest 文档记录修订版
+（`POST …/genome/revisions` 并携带 `{manifest}`，§12）；那是一项基因组操作，而不是
+Manifest 操作。
+
+**注册表如何知道 Bot 在运行什么。** 每份应用报告（个人 Bot）和每条发布记录（服务
+Bot）都会记录它所应用的 Manifest 文档的摘要（§8 第 5 项）。当晋升应用一个已编译的
+修订版时，注册表会记录该修订版编译出了这个摘要（`CompiledManifest.document_digest`，
+§2.7）。给定 Bot 最近一次应用的摘要，注册表就知道 Bot 运行的是哪个修订版。
+
+**漂移。** 当 Bot 最近一次应用的文档摘要（来自最新的应用报告，或正在提供服务的
+版本的发布记录）与 `active` 编译出的摘要不同时，该 Bot 就*发生了漂移*。漂移通常
+发生在直接的 Manifest 编辑之后。漂移是被检测的，而不是被阻止的。注册表在运行开始
+和晋升时检查漂移：
+
+- **运行开始。** 运行不会在已漂移的 Bot 上启动：进化运行以结束原因
+  `out_of_band_change` 结束它（[06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)）。
+- **晋升。** 由门禁、评审队列批准以及自动回滚规则发起的晋升会以 `409 drifted`
+  被拒绝（[08-promotion.zh-CN.md](08-promotion.zh-CN.md)）。所有者的晋升是允许的，
+  因为这正是所有者进行调和的方式。
+
+所有者可以通过以下两种方式之一进行调和：
+
+1. **保留直接编辑。** 将 Bot 当前的 Manifest 记录为一个修订版，并晋升它。
+2. **丢弃直接编辑。** 再次晋升 `active`，这会重新应用它并覆盖直接编辑。
+
+无论哪种方式，新的应用都会记录新的 `active` 编译出的摘要，漂移随之结束。Bot 处于
+漂移状态期间记录的经验保持未归因（[02-experience.zh-CN.md](02-experience.zh-CN.md)
+§3）。
+
+*示例：* `bot_123` 运行 `r42`，它编译为 `sha256:f27a…`。
+
+1. 10 月 9 日，所有者编辑 `SOUL.md`，并把文档直接发送到 `PUT /config-manifest`。
+   应用成功；其报告记录 `sha256:b7e3…`，没有任何修订版编译为该摘要。Bot 发生了漂移。
+2. 10 月 10 日 02:00，夜间绑定触发。注册表报告漂移，因此 `run_8a1` 在预留任何预算
+   之前就以 `out_of_band_change` 结束。
+3. 所有者将当前的 Manifest 记录为一个修订版（`POST …/genome/revisions` 并携带
+   `{manifest}`，base 为 `r42`），它成为 `r46`，然后晋升 `r46`。其应用报告记录
+   `r46` 编译出的摘要，也正是 `active` 现在编译出的摘要。下一次夜间运行从 `r46`
+   开始。
 
 ## 6. 基因组补丁
 
@@ -962,7 +1011,7 @@ CAS 引用移动和编译步骤。
   对一个大文件的编辑则两者都做不到。
 
 **精选记忆如何到达引擎。** 它和其他每个类别一样传递：编译进 Manifest 文档的
-`memory` 类别（§8 第 5 项），并由 Manifest 应用来应用，后者把条目和模式交给引擎
+`memory` 类别（§8 第 3 项），并由 Manifest 应用来应用，后者把条目和模式交给引擎
 适配器。到引擎上的投影由引擎负责：依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用），Backend 不得知晓引擎路径。提议的
 **引擎记忆投影契约**（工作项 RSI-05），一个由引擎适配器实现的 Plugin API：
 
@@ -988,22 +1037,29 @@ class EngineMemoryProjection(Protocol):
 - **过渡方案：** 在 RSI-05 落地之前，记忆进化仅限于一个由平台管理、并声明为人设
   文件的文件（例如 `LESSONS.md`）。这无需引擎变更；在此之前 `spec.memory` 保持为空。
 
-## 8. Manifest v2 变更
+## 8. Manifest 变更
 
-与 schema v1 文档保持向后兼容：
+Manifest 保持对修订版无感知（§1、§5.5）。它获得格式特性以及一项自身的事实，全部
+与 schema v1 文档保持向后兼容。完整清单如下：
 
-1. 修订版表 + 引用 + CAS（P1）。
-2. 应用报告记录 `revision_id` 和编译后文档的摘要（P1）。
-3. 固定版本的解析结果记录在修订版上（P1）；即使从不完整的文档记录，修订版也是完整的。
-4. 为白名单中的键启用 `engine_config` 类别（P3/P4）。
-5. 带模式的 `memory` 类别（P5，依赖 RSI-05）。
-6. 用于应用的**内容存储来源**：条目可以指向平台自身内容存储中的摘要，而不是外部
-   来源。应用在每次获取之后本来就会读取该存储，因此这只是跳过了获取步骤
-   （P1）。
-7. manifest 内容存储接受带补丁来源的**产出型**（非获取得到的）内容（P2）。
+1. **内容存储来源。** 条目可以指向平台自身 manifest 内容存储中的摘要，而不是外部
+   来源。应用从存储中读取字节，并跳过获取步骤。已编译的修订版总是使用它，因此
+   已编译的文档是完全可复现的（P1）。
+2. **`engine_config` 生效。** 该类别已经存在于 Manifest 模式中
+   （`schema/validator.py` 会校验 `engine_config.config` 映射），但目前没有任何东西
+   应用它：它已被移出第一批，也没有物化器。这项变更是为白名单中的键提供一个物化器
+   （待定决策 G-4；P3/P4）。
+3. **`memory` 类别**：精选条目加一种模式，由应用交给引擎适配器
+   （`EngineMemoryProjection`，§7；P5，依赖 RSI-05）。
+4. **产出型内容写入路径。** manifest 内容存储接受带补丁来源的**产出型**（非获取
+   得到的）内容，例如由补丁创建的内容（§9.1；P2）。
+5. **应用报告上的已应用文档摘要。** 应用完成时，应用报告记录它所应用的确切
+   Manifest 文档的哈希（例如 `sha256:f27a…`）。对于服务 Bot，发布记录记录所发布
+   文档的摘要。这是一项不含修订版概念的 Manifest 事实；基因组注册表把摘要映射到
+   修订版（§5.5）（P1）。
 
-来源和注解无需修改 Manifest：它们存放在修订版记录上。对于服务 Bot，发布记录引用
-修订版 id（RSI-04）。
+修订版、引用、比较并交换、固定版本、来源和注解都无需修改 Manifest：它们存放在
+基因组注册表中，位于 Manifest 之上。
 
 ## 9. 存储
 
@@ -1030,7 +1086,7 @@ manifest 应用流水线已经为其获取的所有内容保留了平台自己�
   `GET /bots/{bot_id}/genome/content/{digest}`。它会针对 Bot 进行访问检查，因此摘要
   本身并不是一种访问凭证。新内容通过 `PUT /bots/{bot_id}/genome/content` 上传，该接口
   返回其摘要。
-- **在应用时，** 编译修订版会输出按摘要指向内容存储的 Manifest 条目（§8 第 6 项）。
+- **在应用时，** 编译修订版会输出按摘要指向内容存储的 Manifest 条目（§8 第 1 项）。
   应用将这些字节交给物化器，方式与目前处理获取到的内容完全相同。
 - **Center 技能**在修订版中没有摘要；它们通过其固定版本经由 Skill Center 解析。
 
@@ -1101,7 +1157,7 @@ JSON），`ac_genome_ref`（owner_id、bot_id、名称、修订版、用于 CAS 
 ## 11. 服务接口
 
 基因组注册表是一个 Backend 核心服务，与传输无关，提供 `GenomeRegistry` Protocol。
-Backend 中的调用方（晋升、`/config-manifest` 兼容层）在进程内使用它；
+Backend 中的调用方（晋升）在进程内使用它；
 `apps/evolution` 中的调用方（进化运行、验证）通过 §12 中的 API 使用它。
 
 ```python
@@ -1178,6 +1234,12 @@ class GenomeRegistry(Protocol):
     def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
         """Pinned, total Manifest document (curated memory in its `memory` category). Used by Promotion (apply,
         service-bot publish) and Verification (eval bot materialisation)."""
+
+    def applied_revision(self, bot: BotRef) -> RevisionId | None:
+        """The revision the bot runs: its last applied document digest (Manifest apply report or service-bot
+        publish record) mapped back through the digests recorded at promotion. None when that digest maps to
+        no revision. The bot is drifted when this differs from `active` (§5.5); Evolution Run checks it at run
+        start and Promotion before promoting."""
 ```
 
 错误是带类型的，并映射到 §12 中的 HTTP 状态码：`NotFound` → 404，
@@ -1424,8 +1486,7 @@ def lookup(order_id): ...
 
 ### 内部接口
 
-- 进程内的 `GenomeRegistry`（§11），供 Backend 中的晋升和 `/config-manifest`
-  兼容层使用。
+- 进程内的 `GenomeRegistry`（§11），供 Backend 中的晋升使用。
 - 引擎记忆投影契约（§7），一个由引擎适配器实现的 Plugin API（RSI-05）。
 
 ## 13. 示例
@@ -1500,8 +1561,10 @@ registry.move_ref(bot, RefUpdate(name="previous", revision=current_active,
                   expected_revision=current_previous, reason=reason), actor=actor)
 registry.move_ref(bot, RefUpdate(name="active", revision=compiled.revision_id,
                   expected_revision=current_active, reason=reason), actor=actor)
-apply_service.apply(bot=bot, document=compiled.document,
-                    revision_id=compiled.revision_id, document_digest=compiled.document_digest)
+apply_service.apply(bot=bot, document=compiled.document)
+# The apply report records the digest of the applied document (compiled.document_digest, §8 item 5);
+# the Manifest knows nothing about r42. Promotion keeps the revision <-> digest mapping on its own
+# record and in the Registry (§5.5).
 ```
 
 顺序、失败处理和服务 Bot 发布路径由 [08-promotion.zh-CN.md](08-promotion.zh-CN.md) 负责。
@@ -1510,15 +1573,15 @@ apply_service.apply(bot=bot, document=compiled.document,
 
 | 其他组件 / 服务 | 方向 | 传递内容 |
 | --- | --- | --- |
-| Bot Config Manifest（现有） | 双向 | 从 Manifest 文档记录修订版；编译后的修订版通过 Manifest 应用进行应用；`/config-manifest` 成为 `active` 之上的视图；应用报告记录 `revision_id` |
+| Bot Config Manifest（现有） | 基因组 → Manifest | 通过基因组 API 从 Manifest 文档记录修订版；编译后的修订版通过 Manifest 应用进行应用；应用报告携带所应用文档的摘要，由注册表映射到修订版；直接的 Manifest 编辑会绕过基因组，并作为漂移被检测到（§5.5） |
 | Manifest 内容存储（现有） | 基因组 → 存储 | 按摘要的字节；面向产出型内容的新写入路径 |
 | Skill Center（现有） | 基因组 → Center | 在编译/应用时解析固定的 Center 版本 |
-| [经验](02-experience.zh-CN.md) | 经验 → 基因组（按 id） | 每个片段和反馈记录都携带产生它的修订版 id |
+| [经验](02-experience.zh-CN.md) | 经验 → 基因组（按 id） | 每个片段和反馈记录都携带产生它的修订版 id，该 id 通过注册表的摘要 → 修订版映射归因得到；Bot 处于漂移状态期间为 `null` |
 | [进化策略](03-strategy.zh-CN.md) | 经由进化运行 | 进化策略读取父修订版（`ctx.parent`），物化工作区并计算差异，将补丁作为候选提交 |
 | [实验记录](05-experiment-ledger.zh-CN.md) | 基因组 → 实验记录 | 修订版记录、引用移动事件、供实验记录归档视图和审计使用的谱系 |
-| [进化运行](06-evolution-run.zh-CN.md) | 运行 → 基因组 | 解析绑定的 `parent`；以 `allowed_genes` 记录候选；上传产出型内容；针对 `policy` 检查绑定 |
+| [进化运行](06-evolution-run.zh-CN.md) | 运行 → 基因组 | 运行开始时的漂移检查（§5.5）；解析绑定的 `parent`；以 `allowed_genes` 记录候选；上传产出型内容；针对 `policy` 检查绑定 |
 | [验证](07-verification.zh-CN.md) | 验证 → 基因组 | 将父代和候选编译/物化为评估 Bot；将评估链接到修订版 |
-| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；在发布记录上记录 `revision_id` |
+| [晋升](08-promotion.zh-CN.md) | 晋升 → 基因组 | 通过 CAS 移动 `active`/`previous`/`canary`；设置状态；编译并应用；记录已应用的修订版编译出了哪个文档摘要；发生漂移时拒绝（§5.5） |
 | [进化 API](09-evolution-api.zh-CN.md) | 客户端 → 基因组 | 公共基因组端点、SDK、`avn genome` |
 | [元进化](10-meta-evolution.zh-CN.md) | 之后 | 用于机制修订版的同一套修订版/引用/补丁机制 |
 | 引擎适配器 | 基因组 → 引擎 | 记忆投影（`project_memory`、`export_memory`）；物理布局 |
@@ -1541,5 +1604,5 @@ apply_service.apply(bot=bot, document=compiled.document,
 | G-10 | `memory.update` 操作 | 在 §6.1 中为记忆整合而提议；等级与 `memory.add` / `memory.retire` 相同，为 T1。替代方案：将更新表示为 retire + add |
 
 相关：在 RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
-（Manifest v2 兼容层）开始之前，DR-1 必须被接受（RSI-01）；见
+（面向基因组的 Manifest 变更）开始之前，DR-1 必须被接受（RSI-01）；见
 [work-items.zh-CN.md](work-items.zh-CN.md)。

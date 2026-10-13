@@ -89,7 +89,8 @@ overrides `design.zh-CN.md`). Code: `apps/backend/src/agentclaw/community/core/b
 - Top-level keys `schema_version` (only 1), `sources`, `manifest`, `script`;
   unknown keys rejected (`schema/validator.py:58`).
 - Categories: `mcp`, `resources`, `skills`, `identity`, `engine_config`
-  (rejected at PUT in v1), `cli_tools` (`capabilities.py:77-89`).
+  (validated by the schema, but no materialiser applies it, so the support
+  matrix refuses it), `cli_tools` (`capabilities.py:77-89`).
 - `MEMORY.md`, `IDENTITY.md` reserved: rejected, never written or deleted.
 - Storage: one mutable row per bot, `ac_bot_config_manifest`
   (`repository/models.py:64`); no revision, hash, parent, or ETag

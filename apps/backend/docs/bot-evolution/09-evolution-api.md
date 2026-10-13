@@ -547,8 +547,10 @@ Two writers changing the same resource must not silently overwrite each
 other. The API uses two mechanisms, chosen per resource by its owning doc:
 
 **ETag and `If-Match`** for whole-resource replacement (`PUT`). Today's
-`PUT /config-manifest` has neither, which is one of the gaps the Genome
-Registry closes ([01-genome.md](01-genome.md)).
+`PUT /config-manifest` has neither. The genome does not change that
+endpoint: edits made through the genome API are protected by
+compare-and-swap on refs instead, and a direct Manifest edit is detected
+afterwards as drift ([01-genome.md](01-genome.md) §5.5).
 
 - A `GET` of a mutable resource returns an `ETag` header (a strong,
   opaque, quoted tag).

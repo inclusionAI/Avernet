@@ -256,7 +256,7 @@ Each contract needs docs and conformance tests in the same change (R1, R25).
 | Phase | Outcome | Usable on its own? |
 | --- | --- | --- |
 | P0 Contracts | DR-1 and DR-2 accepted (DR-3 postponed); genome schema, strategy port and capability catalog, Job Protocol, API conventions reviewed | — |
-| P1 Genome | The Manifest gains revisions, refs, compare-and-swap, pinned resolution, apply-records-revision, and going back to any earlier revision | **Yes**: versioned bots, independent of evolution |
+| P1 Genome | The Genome Registry, on top of the Manifest, adds revisions, refs, compare-and-swap, pinned resolution, and going back to any earlier revision; the Manifest gains a content-store source and records the applied document digest, which the Registry maps to a revision; direct Manifest edits are detected as drift | **Yes**: versioned bots, independent of evolution |
 | P2 Evolution core | `apps/evolution` skeleton, Evolution Run, Job Protocol, Strategy Registry, API + SDK + CLI skeleton, a trivial reference strategy (manual patch + deterministic checks) passing conformance | Yes, for scripted improvement |
 | P3 Default strategy | ClawEvolve onboarded as a black-box strategy: session-export provider, sandboxed tune emitting patches, ClawBench graders in Verification | Yes: today's AgentEvolve on any OpenClaw bot through the platform |
 | P4 Verification and promotion | Verification (paired statistics, sealed holdout, must-pass suites, judge ensembles), publish-flow verify gate, review queue, risk tiers, shadow and canary, offline replay over the ledger | Hardening; the verify gate is useful for service bots on its own |

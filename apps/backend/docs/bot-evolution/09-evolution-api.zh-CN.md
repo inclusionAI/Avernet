@@ -517,8 +517,9 @@ SDK 在每个响应和每个错误上都暴露请求 id；`avn` 在失败时打�
 资源的负责文档按资源选择：
 
 **ETag 与 `If-Match`** 用于整个资源的替换（`PUT`）。目前的
-`PUT /config-manifest` 两者都没有，这是基因组注册表要弥补的缺口之一
-（[01-genome.zh-CN.md](01-genome.zh-CN.md)）。
+`PUT /config-manifest` 两者都没有。基因组不改变该端点：通过基因组 API 进行的
+编辑改由引用（ref）上的比较并交换保护，而直接的 Manifest 编辑会在事后作为漂移
+被检测到（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 
 - 对可变资源的 `GET` 返回一个 `ETag` 响应头（一个强的、不透明的、带引号的
   标签）。

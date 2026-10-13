@@ -87,7 +87,7 @@ OpenAI cookbook ↔ GEPA 的关联；ShinkaEvolve；LangMem 版本。上文中 2
 - 顶层键 `schema_version`（仅为 1）、`sources`、`manifest`、`script`；
   未知键会被拒绝（`schema/validator.py:58`）。
 - 类别：`mcp`、`resources`、`skills`、`identity`、`engine_config`
-  （v1 中 PUT 时拒绝）、`cli_tools`（`capabilities.py:77-89`）。
+  （由 schema 校验，但没有物化器应用它，因此支持矩阵会拒绝它）、`cli_tools`（`capabilities.py:77-89`）。
 - `MEMORY.md`、`IDENTITY.md` 为保留项：会被拒绝，从不写入或删除。
 - 存储：每个 Bot 一行可变记录，`ac_bot_config_manifest`
   （`repository/models.py:64`）；没有修订版、哈希、父版本或 ETag

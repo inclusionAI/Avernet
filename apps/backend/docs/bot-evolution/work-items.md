@@ -99,7 +99,11 @@ the rest.
 - **Module**: backend
 - **Goal**: Revisions table, refs with CAS, patch apply/validate, diff,
   pinned source resolution into the content store, lineage queries.
-  Promotion API that moves `active` and invokes Manifest apply.
+  Promotion API that moves `active` and invokes Manifest apply (personal
+  bots) or publishes the revision as the next published version (service
+  bots). The
+  applied-digest → revision mapping and the drift check
+  ([01-genome.md](01-genome.md) §5.5).
 - **Depends on**: RSI-02.
 - **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
 - **Done when**: create revision from manifest, from patch; diff any two;
@@ -107,17 +111,31 @@ the rest.
   acceptance story "edit → revision → apply → go back two revisions by
   promoting an earlier one".
 
-### RSI-04 Manifest v2 compatibility layer
+### RSI-04 Manifest changes for the genome
 - **Module**: backend
-- **Goal**: Existing `/config-manifest` endpoints become views over the
-  registry; apply reports record `revision_id`; content-store source so apply
-  can read pinned content by digest; promoting any earlier revision works for
-  personal bots (via apply) and service bots (as the next published version,
-  with `revision_id` on the publish record). The existing service-bot
+- **Goal**: The Manifest stays revision-unaware; it gains only these
+  format features and one fact of its own
+  ([01-genome.md](01-genome.md) §8):
+  1. content-store source: an entry may point at a digest in the manifest
+     content store; apply reads the bytes from the store and skips the
+     fetch;
+  2. `engine_config` applies: a materialiser for an allowlist of keys
+     (open decision G-4; may land in P3/P4);
+  3. `memory` category: curated items plus a mode, handed by apply to the
+     engine adapter (`EngineMemoryProjection`; lands after RSI-05);
+  4. produced-content write path for the content store (content created by
+     a patch, not fetched);
+  5. applied-document digest: the apply report records the digest of the
+     exact document it applied; for service bots, the publish record
+     records the digest of the published document.
+  No revision table, refs, or `revision_id` in the Manifest; the
+  `/config-manifest` endpoints are unchanged. The existing service-bot
   rollback feature is not changed.
 - **Depends on**: RSI-03.
-- **Done when**: all existing manifest tests pass unchanged; new tests for
-  revision attribution and going back by promoting an earlier revision.
+- **Done when**: all existing manifest tests pass unchanged; new tests show
+  that a document using content-store sources applies without any fetch and
+  that apply reports and publish records carry the applied document digest;
+  `engine_config` and `memory` tests land with their items.
 
 ## P2 — Evolution core
 

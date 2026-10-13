@@ -287,6 +287,9 @@ class EndReason(StrEnum):
     CANCELLED_BY_OWNER = "cancelled_by_owner"          # a caller cancelled it (POST …/runs/{run}:cancel)
     KILL_SWITCH = "kill_switch"                        # a strategy, bot, or global kill switch stopped it (§11.3)
     CONSECUTIVE_REJECTIONS = "consecutive_rejections"  # the escalation rule stopped it (§11.2)
+    OUT_OF_BAND_CHANGE = "out_of_band_change"          # proposed: the bot has drifted (its Manifest was changed directly,
+                                                       # outside the genome), so the run did not start (§5.1;
+                                                       # 01-genome.md §5.5)
 
 class TriggerKind(StrEnum):
     SCHEDULE = "schedule"
@@ -614,7 +617,7 @@ operation is `running`, and that time counts against its wall clock.
 | `running` | A worker holds the lease and `run(ctx)` is executing |
 | `completed` | `run(ctx)` returned a `RunSummary` |
 | `failed` | The strategy reported a non-retryable failure, or `max_attempts` was reached |
-| `cancelled` | A caller, a kill switch, or an escalation rule stopped it |
+| `cancelled` | A caller, a kill switch, or an escalation rule stopped it, or a drift check refused to start it (§5.1) |
 | `budget_exhausted` | A budget dimension ran out |
 
 ### 5.1 Start
@@ -623,10 +626,18 @@ At submission the service:
 
 1. Runs the binding checks again ([§3.2](#32-binding-checks)) and the
    kill-switch checks ([§11.3](#113-kill-switches)).
-2. **Freezes** the strategy version, params, parent, allowed genes,
-   verification profile, and budget. The parent ref (`active`) is resolved
-   to a revision id now, so a promotion during the run does not change what
-   the run started from.
+2. **Checks for drift and freezes** the strategy version, params, parent,
+   allowed genes, verification profile, and budget. Before the parent ref
+   (`active`) is resolved, the Genome Registry checks whether the bot has
+   drifted (`GenomeRegistry.applied_revision` differs from `active`): its last applied Manifest document digest differs from the
+   digest `active` compiles to, usually after a direct
+   `PUT /config-manifest` ([01-genome.md](01-genome.md) §5.5). If it has,
+   the run does not start: it is recorded and ended at once as `cancelled`
+   with end reason `out_of_band_change` (proposed), and no budget is
+   reserved and no job is created. Runs are refused this way until the owner
+   reconciles the bot. Otherwise the parent ref is resolved to a revision id
+   now, so a promotion during the run does not change what the run started
+   from.
 3. Records the agent definition digests of the strategy version, so results
    are attributable to the exact prompts used.
 4. **Reserves** the budget against per-bot and per-tenant ceilings.
@@ -1129,7 +1140,7 @@ Ports this service depends on (defined by the owning docs):
 
 | Port | Used for | Owner |
 | --- | --- | --- |
-| Genome Registry (create revision from `{base, patch}`, move `candidate/<run>/<n>`, resolve `active`, read content) | Freezing the parent; recording candidates; materialising workspaces | [01-genome.md](01-genome.md) |
+| Genome Registry (drift check, create revision from `{base, patch}`, move `candidate/<run>/<n>`, resolve `active`, read content) | Refusing to start a run on a drifted bot; freezing the parent; recording candidates; materialising workspaces | [01-genome.md](01-genome.md) |
 | Experience queries | Serving `experience.sessions` / `experience.feedback` | [02-experience.md](02-experience.md) |
 | Strategy Registry (registration record, conformance status, agent definition digests, capability providers per engine) | Binding checks; building the context; loading agent definitions | [03-strategy.md](03-strategy.md) |
 | Ledger append | Recording runs, submissions, verdicts, costs, models used | [05-experiment-ledger.md](05-experiment-ledger.md) |
@@ -2245,7 +2256,7 @@ queue ([08-promotion.md](08-promotion.md)); the run itself never moves
 
 | Other part | Direction | What flows |
 | --- | --- | --- |
-| [01-genome.md](01-genome.md) Genome Registry | Run → Genome | Resolve `active` to the frozen parent; read revisions and content for `ctx.parent`, workspaces, and `content/{digest}`; create candidate revisions from `{base, patch}`; move `candidate/<run>/<n>` refs |
+| [01-genome.md](01-genome.md) Genome Registry | Run → Genome | Drift check at run start; resolve `active` to the frozen parent; read revisions and content for `ctx.parent`, workspaces, and `content/{digest}`; create candidate revisions from `{base, patch}`; move `candidate/<run>/<n>` refs |
 | [01-genome.md](01-genome.md) | Genome → Run | The bot's genome `policy` (locked genes, pins) for binding checks |
 | [02-experience.md](02-experience.md) Experience | Run → Experience | Queries behind `experience.sessions` / `experience.feedback`, redacted |
 | [03-strategy.md](03-strategy.md) Strategy Registry | Registry → Run | Registration records, conformance status, capability providers per engine, agent definitions by digest, strategy kill switch |

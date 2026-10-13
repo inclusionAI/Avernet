@@ -355,6 +355,8 @@ class Promotion:
     revision_id: str                # what the ref now points at
     revision_seq: int
     from_revision_id: str           # what the ref pointed at before
+    document_digest: str            # digest of the compiled Manifest document applied for `revision_id`; the
+                                    # apply report or publish record carries only this digest (01-genome.md §8)
     going_back: bool                # informational: target is an ancestor that was promoted before
     candidate_id: str | None        # set when the promotion came from a candidate
     gate_decision_id: str | None
@@ -374,6 +376,7 @@ class Promotion:
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "from_revision_id": "sha256:a90b…",
+  "document_digest": "sha256:f27a…",    // r42 compiles to this; the apply report records it
   "going_back": false,
   "candidate_id": "sha256:c41e…",
   "gate_decision_id": "gd_204",
@@ -824,20 +827,34 @@ the only way evolution changes a bot.
    curated memory in its `memory` category ([01-genome.md](01-genome.md)),
    and applied:
    - **Personal bot:** through Manifest apply. Manifest apply is a one-shot
-     command, not a controller (ADR 0018); the apply report records
-     `revision_id` and the compiled document digest.
+     command, not a controller (ADR 0018); the apply report records the
+     digest of the applied document and nothing about revisions.
    - **Service bot:** as the **next published version** through the existing
-     draft → verify → publish flow, with `revision_id` stored on the publish
-     record. The VERIFY stage of that flow is where shadow verification
+     draft → verify → publish flow; the publish record records the digest
+     of the published document. The VERIFY stage of that flow is where shadow verification
      attaches (§8.1), and an optional automated verification gate on the
      `VALIDATING → ONLINE_PUB` transition is work item RSI-22
      ([07-verification.md](07-verification.md)).
 4. **Record.** A `Promotion` record and a ledger entry with actor, reason,
    gate decision, approval, and links to evaluations
-   ([05-experiment-ledger.md](05-experiment-ledger.md)).
+   ([05-experiment-ledger.md](05-experiment-ledger.md)). The `Promotion`
+   record keeps the applied document digest next to the revision id, and
+   the Genome Registry records that the revision compiled to that digest,
+   so the digest on the apply report or publish record maps back to the
+   revision ([01-genome.md](01-genome.md) §5.5).
 5. **Attribution.** From now on, episodes carry the new revision id
    ([02-experience.md](02-experience.md)), which is what makes online
    comparison of `r41` and `r42` possible.
+
+**Drift.** Before step 1, Promotion asks the Genome Registry whether the
+bot has drifted (`GenomeRegistry.applied_revision` differs from `active`): its last applied document digest differs from the digest
+`active` compiles to, usually after a direct `PUT /config-manifest`
+([01-genome.md](01-genome.md) §5.5). On drift, promotions by the gate
+(`gate_policy`), by review-queue approvals, and by an auto-rollback rule
+(`rollout_policy`) are refused with `409 drifted`. An owner promotion is
+allowed, because it is how the owner reconciles: promote a revision recorded
+from the bot's current Manifest (keeping the direct edit), or promote
+`active` again (re-applying it and overwriting the direct edit).
 
 If apply fails, the promotion's status is `apply_failed`, the apply report
 says why, and the owner goes back by promoting `previous` (§8.4). For
@@ -984,7 +1001,8 @@ class PromotionService(Protocol):
         Raises NotReviewable (not in the queue), AlreadyDecided (decided with
         another idempotency key), PolicyDenied (actor may not approve this
         tier), StaleParent (`active` is no longer the candidate's parent and
-        override_stale_parent is False), EvolutionFrozen.
+        override_stale_parent is False), EvolutionFrozen, Drifted (the bot's Manifest was
+        changed directly, §7.1).
         """
 
     def reject(self, bot: BotRef, candidate_id: str, actor: Actor, reason: str,
@@ -995,7 +1013,8 @@ class PromotionService(Protocol):
                 actor: Actor, reason: str, idempotency_key: str) -> Promotion:
         """Move `ref` ("active" or "canary") to `revision_id` with CAS on
         `expected_revision`, then apply. Going back is this call with an
-        earlier revision. Raises RefConflict, NotPromotable, PolicyDenied."""
+        earlier revision. Raises RefConflict, NotPromotable, PolicyDenied, and Drifted
+        when the bot has drifted and `actor` is not the owner or a tenant admin (§7.1)."""
 
 
 class FloorCheckName(StrEnum):      # one per row of §4.2
@@ -1194,6 +1213,7 @@ Example response (`200`):
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
     "from_revision_id": "sha256:a90b…",
+    "document_digest": "sha256:f27a…",
     "going_back": false,
     "candidate_id": "sha256:c41e…",
     "gate_decision_id": "gd_204",
@@ -1210,6 +1230,7 @@ Notable errors: `404 not_found`; `409 not_reviewable` (the candidate is not
 in the queue, for example it was auto-promoted or is `not_promotable`);
 `409 already_decided` (decided earlier under a different idempotency key);
 `409 stale_parent` (`active` moved since verification; see §6.2);
+`409 drifted` (the bot's Manifest was changed directly; see §7.1);
 `403 policy_denied` (a pipeline approving above its allowed tier);
 `403 evolution_frozen` (per-bot kill switch).
 
@@ -1287,6 +1308,7 @@ Example response (`201`):
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
   "from_revision_id": "sha256:7c1e…",
+  "document_digest": "sha256:91d4…",  // what r41 compiles to
   "going_back": true,
   "candidate_id": null,
   "gate_decision_id": null,
@@ -1300,7 +1322,9 @@ Example response (`201`):
 
 The ref moves at once; apply progress is visible on the promotion's
 `apply` field through the existing Manifest apply report (personal bots) or
-publish record (service bots), both of which record the `revision_id`.
+publish record (service bots). Both record only the digest of the applied
+document; the promotion's `document_digest` ties that digest to the
+revision.
 
 Notable errors: `404 not_found` (unknown revision or not this bot's);
 `409 ref_conflict` (`expected_revision` does not match; nothing changed);
@@ -1308,6 +1332,9 @@ Notable errors: `404 not_found` (unknown revision or not this bot's);
 `not_promotable`); `403 policy_denied` (caller may not promote);
 `400 invalid_argument` (`ref` other than `active` or `canary`;
 `canary` on a single-instance bot).
+
+On a drifted bot this endpoint stays available to owners and tenant
+admins: an owner promotion is how drift is reconciled (§7.1).
 
 ### 10.2 Internal interfaces
 
@@ -1402,7 +1429,7 @@ wait in the review queue.
 
 | Other part | Direction | What flows |
 | --- | --- | --- |
-| Genome ([01-genome.md](01-genome.md)) | Promotion → Genome | CAS moves of `active`, `previous`, `canary`; revision status changes (`promoted`, `rejected`); reading patches, diffs, and `policy` |
+| Genome ([01-genome.md](01-genome.md)) | Promotion → Genome | Drift check before a promotion; CAS moves of `active`, `previous`, `canary`; revision status changes (`promoted`, `rejected`); recording which document digest an applied revision compiled to; reading patches, diffs, and `policy` |
 | Genome ([01-genome.md](01-genome.md)) | Genome → Promotion | Patch-level floor results at record time (base, locked genes, pins, rewrite flag) |
 | Experience ([02-experience.md](02-experience.md)) | Promotion → Experience (indirect) | After promotion, episodes carry the new revision id |
 | Strategy ([03-strategy.md](03-strategy.md)) | none directly | Strategies submit candidates and read verdicts only; they never see gate decisions or the queue |
@@ -1413,7 +1440,7 @@ wait in the review queue.
 | Verification ([07-verification.md](07-verification.md)) | Promotion → Verification | `verify(candidate, profile)` when a holdout or baseline result is missing |
 | Evolution API ([09-evolution-api.md](09-evolution-api.md)) | API → Promotion | Public endpoints of §10; SDK and `avn` commands |
 | Meta-evolution ([10-meta-evolution.md](10-meta-evolution.md)) | Meta → Promotion | Mechanism adoption through a separate gate profile (T3 default, comparison report required) |
-| Existing Manifest apply and service-bot publish flow (Backend) | Promotion → existing | Apply of the promoted revision; `revision_id` on apply reports and publish records |
+| Existing Manifest apply and service-bot publish flow (Backend) | Promotion → existing | Apply of the promoted revision's compiled document; apply reports and publish records carry the applied document digest, never a revision id |
 
 ## 13. Open decisions
 

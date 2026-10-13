@@ -76,6 +76,7 @@ ADR number:
 | **Bot Genome** | The evolvable, declarative definition of one bot: persona files, skills, memory, resources, tools, engine config. Immutable once recorded; identified by content hash. |
 | **Genome Revision** | One recorded version of a Genome, with a parent pointer, provenance, and status. |
 | **Genome Patch** | A typed, itemized change from one revision to another. The only thing a strategy may submit. |
+| **Drift** | The bot's last applied Manifest document differs from what `active` compiles to, usually after a direct Manifest edit; evolution pauses until the owner reconciles. |
 | **Phenotype** | The running bot (engine + workspace) produced by applying a revision. Observed, never edited by evolution. |
 | **Experience** | Normalized episodes (sessions or trajectories) and feedback collected from running bots, each tagged with the revision that produced it. |
 | **Strategy** | Versioned code with one method, `run(ctx)`, that proposes candidates for a bot; registered with the catalog capabilities it `needs`. |

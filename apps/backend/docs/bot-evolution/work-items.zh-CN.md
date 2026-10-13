@@ -88,22 +88,34 @@ RSI-11 → RSI-22 可独立于其余部分，为服务型 Bot 提供自动化的
 ### RSI-03 Backend 中的基因组注册表
 - **模块**：backend
 - **目标**：修订版表、带 CAS 的引用（ref）、补丁应用/校验、diff、将钉住的源
-  解析进内容存储、谱系查询。提供晋升 API：移动 `active` 并调用 Manifest apply。
+  解析进内容存储、谱系查询。提供晋升 API：移动 `active` 并调用 Manifest apply
+  （个人 Bot），或把修订版作为下一个发布版本发布（服务型 Bot）。已应用摘要 →
+  修订版的映射，以及漂移检查（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 - **依赖**：RSI-02。
 - **先读**：[01-genome.zh-CN.md](01-genome.zh-CN.md)；`core/bot_config_manifest/`。
 - **完成标准**：可从 manifest、从补丁创建修订版；可对任意两个修订版做 diff；
   移动引用时能检测冲突；一致性测试 + 单元测试；singlebox 验收故事「编辑 →
   修订版 → apply → 通过晋升一个更早的修订版回到两个修订版之前」。
 
-### RSI-04 Manifest v2 兼容层
+### RSI-04 面向基因组的 Manifest 变更
 - **模块**：backend
-- **目标**：现有 `/config-manifest` 端点成为注册表之上的视图；apply 报告记录
-  `revision_id`；提供内容存储源，使 apply 可以按摘要读取钉住的内容；晋升任意
-  更早的修订版对个人 Bot（通过 apply）和服务型 Bot（作为下一个发布版本，并在
-  发布记录上带有 `revision_id`）都可用。现有的服务型 Bot 回滚功能不做改变。
+- **目标**：Manifest 保持对修订版无感知；它只获得以下格式特性以及一项自身的事实
+  （[01-genome.zh-CN.md](01-genome.zh-CN.md) §8）：
+  1. 内容存储源：条目可以指向 manifest 内容存储中的某个摘要；apply 从存储中读取
+     字节，并跳过拉取；
+  2. `engine_config` 生效：为允许列表中的键提供物化器（待定决策 G-4；可能在
+     P3/P4 落地）；
+  3. `memory` 类别：策展条目加一种模式，由 apply 交给引擎适配器
+     （`EngineMemoryProjection`；在 RSI-05 之后落地）；
+  4. 内容存储的产出内容写入路径（由补丁创建、而非拉取的内容）；
+  5. 已应用文档摘要：apply 报告记录它所应用的确切文档的摘要；对服务型 Bot，
+     发布记录记录所发布文档的摘要。
+  Manifest 中没有修订版表、引用或 `revision_id`；`/config-manifest` 端点保持
+  不变。现有的服务型 Bot 回滚功能不做改变。
 - **依赖**：RSI-03。
-- **完成标准**：所有现有 manifest 测试无需修改即通过；新增修订版归属与通过晋升
-  更早修订版回到旧版本的测试。
+- **完成标准**：所有现有 manifest 测试无需修改即通过；新增测试表明，使用内容
+  存储源的文档在应用时无需任何拉取，并且 apply 报告和发布记录携带所应用文档的
+  摘要；`engine_config` 和 `memory` 的测试随各自条目一起落地。
 
 ## P2 — 进化核心
 

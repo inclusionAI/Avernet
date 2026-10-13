@@ -269,6 +269,9 @@ class EndReason(StrEnum):
     CANCELLED_BY_OWNER = "cancelled_by_owner"          # a caller cancelled it (POST …/runs/{run}:cancel)
     KILL_SWITCH = "kill_switch"                        # a strategy, bot, or global kill switch stopped it (§11.3)
     CONSECUTIVE_REJECTIONS = "consecutive_rejections"  # the escalation rule stopped it (§11.2)
+    OUT_OF_BAND_CHANGE = "out_of_band_change"          # proposed: the bot has drifted (its Manifest was changed directly,
+                                                       # outside the genome), so the run did not start (§5.1;
+                                                       # 01-genome.md §5.5)
 
 class TriggerKind(StrEnum):
     SCHEDULE = "schedule"
@@ -575,7 +578,7 @@ queued → running → completed | failed | cancelled | budget_exhausted
 | `running` | 某个 worker 持有租约，`run(ctx)` 正在执行 |
 | `completed` | `run(ctx)` 返回了 `RunSummary` |
 | `failed` | 策略报告了不可重试的失败，或达到了 `max_attempts` |
-| `cancelled` | 调用方、紧急停止开关或升级规则终止了它 |
+| `cancelled` | 调用方、紧急停止开关或升级规则终止了它，或者漂移检查拒绝启动它（§5.1） |
 | `budget_exhausted` | 某个预算维度耗尽 |
 
 ### 5.1 启动
@@ -584,8 +587,15 @@ queued → running → completed | failed | cancelled | budget_exhausted
 
 1. 再次执行绑定检查（[§3.2](#32-绑定检查)）和紧急停止开关检查
    （[§11.3](#113-紧急停止开关)）。
-2. **冻结**策略版本、参数、父版本、允许的基因、验证配置和预算。父引用
-   （`active`）此时被解析为修订版 id，因此运行期间的晋升不会改变运行的起点。
+2. **检查漂移并冻结**策略版本、参数、父版本、允许的基因、验证配置和预算。在
+   解析父引用（`active`）之前，基因组注册表会检查 Bot 是否发生了漂移
+   （`GenomeRegistry.applied_revision` 与 `active` 不同）：其最近一次应用的
+   Manifest 文档摘要与 `active` 编译出的摘要不同，通常发生在直接
+   `PUT /config-manifest` 之后（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+   如果已漂移，运行不会启动：它被记录并立即以 `cancelled` 结束，结束原因为
+   `out_of_band_change`（提议），不预留预算，也不创建作业。在所有者完成调和之前，
+   运行都会以这种方式被拒绝。否则，父引用此时被解析为修订版 id，因此运行期间的
+   晋升不会改变运行的起点。
 3. 记录该策略版本的智能体定义摘要（digest），使结果可以归因到实际使用的提示词。
 4. 针对 Bot 级和租户级上限**预留**预算。
 5. 将运行连同其第一个作业记录为 `queued`，并返回运行 id。
@@ -1019,7 +1029,7 @@ class KillSwitches(Protocol):
 
 | 端口 | 用途 | 负责方 |
 | --- | --- | --- |
-| Genome Registry（从 `{base, patch}` 创建修订版、移动 `candidate/<run>/<n>`、解析 `active`、读取内容） | 冻结父版本；记录候选；物化工作区 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
+| Genome Registry（漂移检查、从 `{base, patch}` 创建修订版、移动 `candidate/<run>/<n>`、解析 `active`、读取内容） | 拒绝在已漂移的 Bot 上启动运行；冻结父版本；记录候选；物化工作区 | [01-genome.zh-CN.md](01-genome.zh-CN.md) |
 | 经验查询 | 提供 `experience.sessions` / `experience.feedback` | [02-experience.zh-CN.md](02-experience.zh-CN.md) |
 | Strategy Registry（注册记录、一致性状态、智能体定义摘要、各引擎的能力提供方） | 绑定检查；构建上下文；加载智能体定义 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) |
 | 实验记录追加 | 记录运行、提交、判定、成本、所用模型 | [05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md) |
@@ -2092,7 +2102,7 @@ ClawEvolve 自身的代码见 [04-default-strategies.zh-CN.md](04-default-strate
 
 | 其他部分 | 方向 | 流转内容 |
 | --- | --- | --- |
-| [01-genome.zh-CN.md](01-genome.zh-CN.md) Genome Registry | 运行 → 基因组 | 将 `active` 解析为冻结的父版本；为 `ctx.parent`、工作区和 `content/{digest}` 读取修订版与内容；从 `{base, patch}` 创建候选修订版；移动 `candidate/<run>/<n>` 引用 |
+| [01-genome.zh-CN.md](01-genome.zh-CN.md) Genome Registry | 运行 → 基因组 | 运行开始时的漂移检查；将 `active` 解析为冻结的父版本；为 `ctx.parent`、工作区和 `content/{digest}` 读取修订版与内容；从 `{base, patch}` 创建候选修订版；移动 `candidate/<run>/<n>` 引用 |
 | [01-genome.zh-CN.md](01-genome.zh-CN.md) | 基因组 → 运行 | 用于绑定检查的 Bot 基因组 `policy`（锁定基因、固定项） |
 | [02-experience.zh-CN.md](02-experience.zh-CN.md) 经验 | 运行 → 经验 | `experience.sessions` / `experience.feedback` 背后的查询，已脱敏 |
 | [03-strategy.zh-CN.md](03-strategy.zh-CN.md) Strategy Registry | Registry → 运行 | 注册记录、一致性状态、各引擎的能力提供方、按摘要的智能体定义、策略紧急停止开关 |
