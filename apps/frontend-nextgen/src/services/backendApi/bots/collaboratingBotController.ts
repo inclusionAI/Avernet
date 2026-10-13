@@ -9,6 +9,7 @@ export interface CollaboratingBotDto {
   entity_id: string;
   owner_id: string;
   engine: string;
+  template_name?: string;
   cluster_name: string;
   bot_type: string;
   status: string;

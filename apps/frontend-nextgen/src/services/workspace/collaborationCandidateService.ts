@@ -26,6 +26,8 @@ export interface CollaborationBotView {
   isFriend?: boolean;
   engine?: string;
   botType?: string;
+  templateType?: string;
+  templateName?: string;
   detailsResolved?: boolean;
 }
 
@@ -75,6 +77,8 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
     isFriend: true,
     engine: dto.engine,
     botType: dto.bot_type,
+    templateType: dto.template_type,
+    templateName: dto.template_name,
   };
 }
 

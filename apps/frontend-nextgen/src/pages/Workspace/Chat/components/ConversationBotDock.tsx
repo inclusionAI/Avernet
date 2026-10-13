@@ -27,8 +27,8 @@ export function ConversationBotDock({ items, selectedBotId, onQuickOpen, onExpan
     <div className="flex items-center gap-0.5 px-3 pt-0.5 pb-1">
       {visible.map((view) => {
         const { bot } = view;
-        // 与行内 handleToggle 同口径:AgentCoding / 不可聊 Bot 不建会话,泊位呈降权占位。
-        const interactive = !bot.isAgentCodingBot && bot.chatable;
+        // 外跳 Bot 也保持可点击;不可聊普通 Bot 才降权。
+        const interactive = Boolean(bot.isAgentCodingBot) || bot.chatable;
         const selected = bot.botId === selectedBotId;
         const tile = (
           <AvatarTile

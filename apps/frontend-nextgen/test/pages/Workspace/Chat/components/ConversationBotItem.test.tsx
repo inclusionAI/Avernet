@@ -97,18 +97,54 @@ describe('ConversationBotItem 展开箭头', () => {
         selectedSessionId={null}
         origin="mine"
         scope="all"
-      onToggle={noop}
-      onOriginChange={noop}
-      onScopeChange={noop}
-      onCreateSession={noop}
-      onSelectSession={noop}
-      onLoadMore={noop}
-      onToggleFavorite={noop}
-      isFavoritePending={() => false}
-      onOpenAgentCodingBot={noop}
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={noop}
       />,
     );
     // 整行只剩主按钮,无展开箭头按钮。
     expect(container.querySelectorAll('button').length).toBe(1);
+  });
+});
+
+describe('ConversationBotItem 外跳 Bot', () => {
+  it.each([['managed'], ['team'], ['friend']] as const)('%s 分组 Coding Bot 可点且不出现普通会话操作区', (section) => {
+    const onOpenAgentCodingBot = jest.fn();
+    const { container, getByRole } = render(
+      <ConversationBotItem
+        bot={{
+          ...bot,
+          isAgentCodingBot: true,
+          templateName: 'Coding Bot',
+          chatable: false,
+        }}
+        section={section}
+        expanded={false}
+        selectedSessionId={null}
+        origin="mine"
+        scope="all"
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        onOpenAgentCodingBot={onOpenAgentCodingBot}
+      />,
+    );
+
+    const trigger = getByRole('button', { name: '测试 Bot' });
+    expect(trigger).not.toHaveClass('opacity-50', 'cursor-not-allowed');
+    fireEvent.click(trigger);
+    expect(onOpenAgentCodingBot).toHaveBeenCalled();
+    expect(container.querySelector('button[aria-hidden="true"]')).toBeNull();
   });
 });

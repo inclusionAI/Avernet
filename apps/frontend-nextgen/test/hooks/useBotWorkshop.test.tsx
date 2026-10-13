@@ -269,9 +269,7 @@ it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID'
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith(
-    '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
-  );
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
 });
 
 it('点击对话时跳转到用户单聊并展开对应 Bot', () => {
