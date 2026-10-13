@@ -86,6 +86,7 @@ def _make_service(
     record_repo: MagicMock | None = None,
     device_repo: MagicMock | None = None,
     bot_repo: MagicMock | None = None,
+    rel_repo: MagicMock | None = None,
 ) -> DefaultPublishAdminService:
     return DefaultPublishAdminService(
         publish_repo=publish_repo or MagicMock(),
@@ -93,6 +94,7 @@ def _make_service(
         record_repo=record_repo or MagicMock(),
         device_repo=device_repo or MagicMock(),
         bot_repo=bot_repo or MagicMock(),
+        rel_repo=rel_repo or MagicMock(),
     )
 
 
@@ -800,6 +802,135 @@ class TestRestoreBot:
             "secbaas.community.core.service.publish_manage._admin_service.get_current_env"
         ) as mock_get_env:
             await service.restore_bot(bot_id=7, operator="ops.alice")
+
+        mock_get_env.assert_not_called()
+
+
+class TestRestoreBotByUuid:
+    """restore_bot(bot_uuid=...): resolution then the shared by-id restore."""
+
+    def _make_generation(self, id: int) -> MagicMock:
+        record = MagicMock()
+        record.id = id
+        return record
+
+    async def test_resolves_via_rel_max_and_restores_resolved_id(self):
+        records = [self._make_generation(30), self._make_generation(10)]
+        bot_repo = MagicMock()
+        bot_repo.list_by_bot_uuid_only_including_deleted.return_value = records
+        snapshot = _make_restored_snapshot(bot_id=30)
+        bot_repo.restore_bot_record_by_id.return_value = snapshot
+        rel_repo = MagicMock()
+        rel_repo.max_live_bot_id_for_bot_ids.return_value = 30
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        result = await service.restore_bot(bot_uuid="bot-abc-123", operator="ops.alice")
+
+        bot_repo.list_by_bot_uuid_only_including_deleted.assert_called_once_with(
+            "bot-abc-123"
+        )
+        rel_repo.max_live_bot_id_for_bot_ids.assert_called_once_with([30, 10])
+        bot_repo.restore_bot_record_by_id.assert_called_once_with(
+            30, modifier="ops.alice"
+        )
+
+        assert isinstance(result, RestoreBotResult)
+        assert result.bot_id == 30
+        assert result.bot_uuid == "bot-abc-123"
+        assert result.new_status == "ACTIVE"
+
+    async def test_unknown_uuid_raises_publish_not_found(self):
+        bot_repo = MagicMock()
+        bot_repo.list_by_bot_uuid_only_including_deleted.return_value = []
+        rel_repo = MagicMock()
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        with pytest.raises(PublishNotFoundError) as exc_info:
+            await service.restore_bot(bot_uuid="bot-none", operator="ops.alice")
+
+        assert "No bot records found for bot_uuid=bot-none" in str(exc_info.value)
+        rel_repo.max_live_bot_id_for_bot_ids.assert_not_called()
+        bot_repo.restore_bot_record_by_id.assert_not_called()
+
+    async def test_uuid_without_live_rel_raises_publish_not_found(self):
+        records = [self._make_generation(7)]
+        bot_repo = MagicMock()
+        bot_repo.list_by_bot_uuid_only_including_deleted.return_value = records
+        rel_repo = MagicMock()
+        rel_repo.max_live_bot_id_for_bot_ids.return_value = None
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        with pytest.raises(PublishNotFoundError) as exc_info:
+            await service.restore_bot(bot_uuid="bot-no-rel", operator="ops.alice")
+
+        assert "No non-deleted device relation found for bot_uuid=bot-no-rel" in str(
+            exc_info.value
+        )
+        bot_repo.restore_bot_record_by_id.assert_not_called()
+
+    async def test_both_selectors_raises_value_error(self):
+        service = _make_service()
+
+        with pytest.raises(ValueError, match="exactly one of bot_id or bot_uuid"):
+            await service.restore_bot(
+                bot_id=7, bot_uuid="bot-abc-123", operator="ops.alice"
+            )
+
+    async def test_neither_selector_raises_value_error(self):
+        service = _make_service()
+
+        with pytest.raises(ValueError, match="exactly one of bot_id or bot_uuid"):
+            await service.restore_bot(operator="ops.alice")
+
+    async def test_uuid_path_emits_audit_log_with_resolved_id(self):
+        records = [self._make_generation(30), self._make_generation(10)]
+        bot_repo = MagicMock()
+        bot_repo.list_by_bot_uuid_only_including_deleted.return_value = records
+        snapshot = _make_restored_snapshot(
+            bot_id=30,
+            bot_uuid="bot-abc-123",
+            previous_status="PENDING",
+            retired_sibling_count=1,
+        )
+        bot_repo.restore_bot_record_by_id.return_value = snapshot
+        rel_repo = MagicMock()
+        rel_repo.max_live_bot_id_for_bot_ids.return_value = 30
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._admin_service.logger"
+        ) as mock_logger:
+            await service.restore_bot(bot_uuid="bot-abc-123", operator="ops.alice")
+
+        mock_logger.warning.assert_called_once_with(
+            "ADMIN_RESTORE_BOT: operator=%s bot_id=%s bot_uuid=%s %s->ACTIVE, retired=%s",
+            "ops.alice",
+            30,
+            "bot-abc-123",
+            "PENDING",
+            1,
+        )
+
+    async def test_uuid_path_does_not_call_get_current_env(self):
+        records = [self._make_generation(30)]
+        bot_repo = MagicMock()
+        bot_repo.list_by_bot_uuid_only_including_deleted.return_value = records
+        bot_repo.restore_bot_record_by_id.return_value = _make_restored_snapshot(
+            bot_id=30
+        )
+        rel_repo = MagicMock()
+        rel_repo.max_live_bot_id_for_bot_ids.return_value = 30
+
+        service = _make_service(bot_repo=bot_repo, rel_repo=rel_repo)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._admin_service.get_current_env"
+        ) as mock_get_env:
+            await service.restore_bot(bot_uuid="bot-abc-123", operator="ops.alice")
 
         mock_get_env.assert_not_called()
 

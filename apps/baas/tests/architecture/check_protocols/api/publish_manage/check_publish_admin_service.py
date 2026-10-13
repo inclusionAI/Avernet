@@ -4,6 +4,7 @@ from secbaas.community.api.publish_manage import (
     PublishAdminService as PublishAdminServiceProtocol,
 )
 from secbaas.community.core.repository.bot import BotRepository
+from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
 from secbaas.community.core.repository.device import DeviceRepository
 from secbaas.community.core.repository.publish import PublishRepository
 from secbaas.community.core.repository.publish_batch import PublishBatchRepository
@@ -17,4 +18,5 @@ _publish_admin_service: PublishAdminServiceProtocol = DefaultPublishAdminService
     record_repo=MagicMock(spec=PublishRecordRepository),
     device_repo=MagicMock(spec=DeviceRepository),
     bot_repo=MagicMock(spec=BotRepository),
+    rel_repo=MagicMock(spec=BotDeviceRelRepository),
 )
