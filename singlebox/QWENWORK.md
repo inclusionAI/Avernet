@@ -56,9 +56,9 @@ URL/Bot ID/channel Secret in QwenWork's WeCom Bot channel, and start the bridge.
 Provider authorization belongs to this script; bridge initialization only owns
 local desktop settings and Hooks.
 
-The currently recommended `0.1.4-beta.1` does not include `init`. Full packaged
-onboarding requires publishing and verifying `0.1.4-beta.2`, then updating the
-frontend download metadata; this script does not publish or replace releases.
+The recommended `0.1.4-beta.2` distribution includes `init`. Its prerelease, both
+macOS archives and installer have been verified. This script does not publish
+or replace releases.
 
 ```bash
 ./singlebox/qwenwork.sh verify   # recheck ordinary-user discovery/token issuance

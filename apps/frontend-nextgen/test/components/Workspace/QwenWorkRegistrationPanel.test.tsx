@@ -27,7 +27,7 @@ it('provides a pinned installer download and separate installation before regist
   render(<QwenWorkRegistrationPanel open />);
   expect(screen.getByRole('link', { name: '下载安装脚本' })).toHaveAttribute(
     'href',
-    'https://github.com/inclusionAI/Avernet/releases/download/bcs-bridge-v0.1.4-beta.1/bcs-bridge-installer.sh',
+    'https://github.com/inclusionAI/Avernet/releases/download/bcs-bridge-v0.1.4-beta.2/bcs-bridge-installer.sh',
   );
   expect(screen.getByRole('button', { name: '复制下载命令' })).toBeEnabled();
   expect(screen.getByRole('button', { name: '复制校验与安装命令' })).toBeEnabled();
@@ -37,5 +37,6 @@ it('provides a pinned installer download and separate installation before regist
   expect(screen.getByRole('button', { name: '复制启动命令' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '复制初始化命令' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '复制Bridge 配置模板' })).not.toBeInTheDocument();
-  expect(screen.getByText(/0.1.4-beta.1 尚不支持/)).toBeInTheDocument();
+  expect(screen.getByText(/0.1.4-beta.2 已包含 init/)).toBeInTheDocument();
+  expect(screen.queryByText(/尚不支持/)).not.toBeInTheDocument();
 });

@@ -129,7 +129,7 @@ export function QwenWorkRegistrationPanel({ open }: { open: boolean }) {
         <h3 className="font-medium">3. 初始化 Bridge，填写千问渠道信息</h3>
         <p>注册后运行一次初始化命令。Bridge 会识别千问数据库、生成并保存本机密钥，备份并合并工具与生命周期 Hooks。</p>
         <p className="text-muted-foreground">
-          自动初始化需要包含 init 命令的新版 Bridge。当前发布的 0.1.4-beta.1 尚不支持，请先安装包含此功能的更新版本。
+          推荐的 0.1.4-beta.2 已包含 init 命令。若本机仍是旧版本，请先执行上面的安装命令。
         </p>
         <Command label="初始化命令" value={QWEN_INIT_COMMAND} />
         <p>

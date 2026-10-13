@@ -21,8 +21,7 @@ In a binary with the `init` command, register a QwenWork Bot first, then run:
 bcs-bridge --config ~/.bcn-bridge/qwenwork.toml init --engine qwenwork
 ```
 
-The released `0.1.4-beta.1` binary predates this command. A new distribution is
-required before advertising automatic initialization for downloadable releases.
+Use `0.1.4-beta.2` or newer; that distribution includes the initializer.
 
 Initialization detects exactly one installed `QwenWorkCN` or `QwenWork` database,
 validates its chat metadata schema read-only, generates separate channel and Hook

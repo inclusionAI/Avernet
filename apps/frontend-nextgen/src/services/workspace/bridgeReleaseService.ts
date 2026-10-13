@@ -10,8 +10,8 @@ export interface BridgeRelease {
 
 // Maintainers update this version after verifying a new published distribution.
 export const VERIFIED_BRIDGE_BETA: BridgeRelease = {
-  version: '0.1.4-beta.1',
-  url: `${REPOSITORY}/releases/tag/bcs-bridge-v0.1.4-beta.1`,
-  installerUrl: `${REPOSITORY}/releases/download/bcs-bridge-v0.1.4-beta.1/bcs-bridge-installer.sh`,
-  checksumUrl: `${REPOSITORY}/releases/download/bcs-bridge-v0.1.4-beta.1/sha256.sum`,
+  version: '0.1.4-beta.2',
+  url: `${REPOSITORY}/releases/tag/bcs-bridge-v0.1.4-beta.2`,
+  installerUrl: `${REPOSITORY}/releases/download/bcs-bridge-v0.1.4-beta.2/bcs-bridge-installer.sh`,
+  checksumUrl: `${REPOSITORY}/releases/download/bcs-bridge-v0.1.4-beta.2/sha256.sum`,
 };

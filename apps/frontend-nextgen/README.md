@@ -43,7 +43,7 @@ plugin token, initialize local settings and fill the printed WeCom channel infor
 start the bridge and check connectivity. No shell commands run inside the browser.
 Download and install are separate commands; SHA-256 is verified before the
 installer executes. The recommended version is explicitly shown as
-`0.1.4-beta.1`. Users can open the release page for other versions. The page does
+`0.1.4-beta.2`. Users can open the release page for other versions. The page does
 not query the GitHub API or claim that its pinned version is the latest.
 Maintainers update the public distribution links after validating a new release.
 
@@ -55,6 +55,6 @@ authorize ordinary-user registration and start the four required services. The g
 `static-bearer` resolver and explicit BCS endpoints. It writes to a separate
 `~/.bcn-bridge/qwenwork.toml` and does not start until the user supplies local
 initialization with the registered engine callback. Initialization owns secrets,
-database detection, backups and Hook merging. The UI explicitly states that
-the released 0.1.4-beta.1 lacks `init` until a new distribution is published. The local health endpoint
+database detection, backups and Hook merging. The recommended beta.2 distribution includes `init`; its native archives and
+installer initialization smoke were verified before updating download links. The local health endpoint
 checks QwenWork connectivity; the external Bot list reports BCN reachability.
