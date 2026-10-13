@@ -7,6 +7,7 @@ Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
 - POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
 - POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
+- POST /api/v1/admin/bots/{bot_id}/restore - Restore a bot record to live ACTIVE
 """
 
 from typing import Annotated
@@ -19,7 +20,9 @@ from secbaas.community.api import ApiResponse
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
+    PublishConflictError,
     PublishNotFoundError,
+    RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
@@ -235,3 +238,88 @@ async def update_bot_status_endpoint(
             detail=f"Bot {bot_id} not found",
         )
     return ApiResponse(data=_to_update_bot_status_response(result))
+
+
+class RestoreBotRequest(BaseModel):
+    operator: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="User performing the restore operation",
+    )
+
+
+class RestoreBotResponse(BaseModel):
+    bot_id: int = Field(..., description="Bot ID that was restored")
+    bot_uuid: str = Field(..., description="Bot UUID shared by the version group")
+    previous_status: str = Field(..., description="Status of the bot before restore")
+    previous_is_deleted: int = Field(
+        ..., ge=0, description="Tombstone value of the bot before restore (0 = live)"
+    )
+    new_status: str = Field(..., description="Status after restore (ACTIVE)")
+    retired_sibling_count: int = Field(
+        ...,
+        ge=0,
+        description="Other live records sharing the bot_uuid retired by this call",
+    )
+
+
+def _to_restore_bot_response(result: RestoreBotResult) -> RestoreBotResponse:
+    return RestoreBotResponse(
+        bot_id=result.bot_id,
+        bot_uuid=result.bot_uuid,
+        previous_status=result.previous_status,
+        previous_is_deleted=result.previous_is_deleted,
+        new_status=result.new_status,
+        retired_sibling_count=result.retired_sibling_count,
+    )
+
+
+@router.post(
+    "/bots/{bot_id}/restore",
+    response_model=ApiResponse[RestoreBotResponse],
+)
+@inject
+async def restore_bot_endpoint(
+    bot_id: Annotated[
+        int,
+        Path(description="Bot ID (primary key) to restore"),
+    ],
+    request: RestoreBotRequest,
+    admin_service: PublishAdminService = Depends(
+        Provide[ApplicationContainer.services.publish_admin_service]
+    ),
+) -> ApiResponse[RestoreBotResponse]:
+    """Restore a bot record to live ACTIVE, retiring its sibling records.
+
+    In one atomic transaction: sets the bot_id target to ``is_deleted=0``
+    and ``status=ACTIVE`` and retires every OTHER live record sharing its
+    ``bot_uuid`` (``status=RELEASED``, soft-deleted with the tombstone
+    convention). Conflicting unique-key states (e.g. a concurrent restore
+    or publish race) roll the whole transaction back and surface as 409.
+
+    **WARNING**: This is a state-machine-bypassing admin recovery tool —
+    it intentionally deviates from "RELEASED is terminal" and performs no
+    lifecycle validation. Cross-env by design: target lookup is by
+    primary key and sibling matching by ``bot_uuid`` only; the request
+    requires no tenant/env input and no env filtering is applied.
+    """
+    try:
+        result = await admin_service.restore_bot(
+            bot_id=bot_id,
+            operator=request.operator,
+        )
+    except PublishConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Bot {bot_id} restore conflicts with a live unique-key slot; "
+                f"no changes applied: {exc.message}"
+            ),
+        )
+    except PublishNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bot {bot_id} not found",
+        )
+    return ApiResponse(data=_to_restore_bot_response(result))
