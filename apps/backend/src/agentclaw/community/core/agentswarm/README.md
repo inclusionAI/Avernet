@@ -67,7 +67,7 @@ httpx lives only inside `plugins/*/agentswarm/` (the LLM client). The
 avernet subagent reaches the host platform through the in-process
 `BotPlatform` seam (one `BotCreateSpec` + idempotency key; the host adapter
 composes the platform document) — no socket leaves the module. Enforced by
-`tests/community/architecture/test_agentswarm_isolation.py`, which also
+`tests/community/architecture/agentswarm/test_isolation.py`, which also
 gate-checks D18 (closed-set StrEnums in the Protocol surface).
 
 ## Domain model (D18, D43)
