@@ -3,7 +3,7 @@
 from ._orm_model import BotModel
 from ._orm_repository import BotRecordConflictError, OrmBotRepository
 from ._protocol import BotRepository
-from ._record import BotRecord
+from ._record import BotRecord, RestoredBotRecord
 
 __all__ = [
     "BotRecord",
@@ -11,4 +11,5 @@ __all__ = [
     "BotRepository",
     "OrmBotRepository",
     "BotModel",
+    "RestoredBotRecord",
 ]
