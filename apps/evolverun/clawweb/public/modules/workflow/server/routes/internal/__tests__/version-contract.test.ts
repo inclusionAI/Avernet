@@ -56,6 +56,19 @@ describe("ClawMind workflow version wire contract", () => {
     expect(row).toEqual({ workflow_version: 2, workflow_deploy_number: 5 });
   });
 
+  it("inserts the initial state in the same write as the run", async () => {
+    const stateJson = JSON.stringify({ workflowId: "demo", nodeStates: {} });
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "state-run", workflow_id: "demo", status: "running", state_json: stateJson }) });
+    expect(response.status).toBe(201);
+    expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'state-run'").get()).toEqual({ state_json: stateJson });
+  });
+
+  it("rejects a double-encoded initial state", async () => {
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "invalid-state", workflow_id: "demo", status: "running", state_json: JSON.stringify('{"workflowId":"demo"}') }) });
+    expect(response.status).toBe(400);
+    expect(raw.prepare("SELECT flow_id FROM flow_runs WHERE flow_id = 'invalid-state'").get()).toBeUndefined();
+  });
+
   it("keeps legacy inserts without version metadata compatible", async () => {
     const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "legacy", workflow_id: "demo", status: "running" }) });
     expect(response.status).toBe(201);
