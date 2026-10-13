@@ -669,8 +669,10 @@ class TestInsertBotRecord:
         assert result is not None
         repo._rel_repo.soft_delete_by_bot_id.assert_not_called()
 
-    def test_clone_with_soft_deleted_pending_revives_row(self, repo, mock_session):
-        """A soft-deleted PENDING row is revived into the UK slot, not duplicated."""
+    def test_clone_with_soft_deleted_pending_inserts_fresh_row(
+        self, repo, mock_session
+    ):
+        """A soft-deleted PENDING row is left untouched; the clone is a fresh INSERT (previously reviving it deadlocked the live UK slot)."""
         source_model, source_record = _make_mock_bot_model(
             id_val=5, bot_uuid="bot-src", status="ACTIVE"
         )
@@ -678,8 +680,8 @@ class TestInsertBotRecord:
         mock_session.query.return_value.filter.return_value.first.return_value = (
             source_model
         )
-        revive_chain = mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value
-        revive_chain.id = 77
+        dead_pending = mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value
+        dead_pending.id = 77
         mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repo.insert_bot_record(
@@ -687,7 +689,10 @@ class TestInsertBotRecord:
         )
 
         assert result is not None
-        mock_session.query.return_value.filter.return_value.update.assert_called()
+        mock_session.query.return_value.filter.return_value.update.assert_not_called()
+        mock_session.add.assert_called_once()
+        added_model = mock_session.add.call_args[0][0]
+        assert added_model.status == "PENDING"
 
     def test_clone_with_name_override(self, repo, mock_session):
         source_model, source_record = _make_mock_bot_model(

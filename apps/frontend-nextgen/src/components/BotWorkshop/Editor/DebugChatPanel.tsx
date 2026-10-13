@@ -143,12 +143,12 @@ export function DebugChatPanel({
       : { text: '未连接', tone: 'neutral' as const };
 
   return (
-    <aside className="flex h-full min-w-0 flex-1 flex-col border-l border-border bg-card">
-      <div className="flex items-center gap-3 border-b border-border p-4">
-        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} />
+    <aside className="flex h-full min-w-0 flex-1 flex-col bg-card">
+      <div className="flex min-h-14 items-center gap-3 border-b border-border px-5 py-3">
+        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} className="size-7 rounded-full" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="m-0 truncate text-sm font-semibold">调试对话</p>
+            <p className="m-0 truncate text-base font-semibold">调试对话</p>
             <Badge tone={connection.tone}>{connection.text}</Badge>
           </div>
           <p className="m-0 mt-1 truncate text-xs text-muted-foreground">
@@ -198,7 +198,7 @@ export function DebugChatPanel({
           </SelectContent>
         </Select>
       </div>
-      <div className="app-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+      <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
         {loading ? (
           <Spin tip="加载调试会话…" />
         ) : !session ? (

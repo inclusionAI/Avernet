@@ -156,12 +156,17 @@ class AicodingDurableRestartMixin:
             "operation_id": uuid.uuid4().hex,
             "engine": bot["active_engine"],
             "binding_id": bot.get("binding_id"),
-            "previous_status": bot["status"],
+            "previous_status": "PENDING",  # Admission persists this before enqueue.
             "device_id": binding.get("device_id"),
             "provider": binding.get("device_provider"),
             "nick_name": kwargs.get("nick_name"),
             "started_at": time.time(),
         }
+        if bot["status"] != "PENDING":
+            if services.repository.update_by_owner(
+                bot_id, owner_id, {"status": "PENDING"}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
         task, _created = services.task_queue.enqueue(
             TASK_TYPE,
             payload,
@@ -311,7 +316,7 @@ class AicodingRestartHandler:
             ):
                 return Reschedule(POLL_SECONDS)
             message = (
-                "备份已完成，但重启提交前准备失败；本次重启已终止，旧容器未执行替换"
+                "重启提交前准备失败；本次重启已终止，旧容器未执行替换"
                 if execution.verify_backup is not None
                 else _failure_message(error, fenced=execution.fenced)
             )
