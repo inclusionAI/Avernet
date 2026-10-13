@@ -6,13 +6,19 @@ CREATE TABLE IF NOT EXISTS `task_intake_session` (
     `status` varchar(32) NOT NULL,
     `result_json` text NOT NULL,
     `version` bigint NOT NULL DEFAULT 0,
+    `gmt_create` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`session_id`),
     KEY `idx_task_intake_owner` (`owner_user_id`, `status`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='任务澄清会话状态';
 
+-- ODC's OceanBase MySQL-mode parser cannot reliably classify a standalone
+-- CREATE UNIQUE INDEX statement. Keep the index in ALTER TABLE syntax so the
+-- statement stays on the MySQL parser path. This is a one-time migration;
+-- inspect information_schema before retrying a partially applied execution.
 ALTER TABLE `task_info`
-    ADD COLUMN `intake_session_id` varchar(128) DEFAULT NULL;
-CREATE UNIQUE INDEX `uk_task_info_intake_session` ON `task_info` (`intake_session_id`);
+    ADD COLUMN `intake_session_id` varchar(128) DEFAULT NULL,
+    ADD UNIQUE KEY `uk_task_info_intake_session` (`intake_session_id`);
 
 CREATE TABLE IF NOT EXISTS `task_delivery_intent` (
     `id` bigint NOT NULL AUTO_INCREMENT,

@@ -131,6 +131,10 @@ class TaskIntakeSessionModel(Base):
     status = Column(String(32), nullable=False)
     result_json = Column(Text, nullable=False)
     version = Column(BigInteger, nullable=False, default=0)
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
 
     __table_args__ = (Index("idx_task_intake_owner", "owner_user_id", "status"),)
 
