@@ -42,6 +42,7 @@ pub struct BridgeApp {
     credentials: Arc<dyn CredentialSource>,
     identities: BTreeMap<String, Arc<dyn IdentityResolver>>,
     defaults: CliDefaults,
+    registration_permission_modes: BTreeMap<String, String>,
 }
 
 impl BridgeApp {
@@ -56,6 +57,7 @@ impl BridgeApp {
             credentials: Arc::new(EnvCredentials),
             identities,
             defaults: CliDefaults::default(),
+            registration_permission_modes: BTreeMap::new(),
         })
     }
 
@@ -63,6 +65,12 @@ impl BridgeApp {
     pub fn profile(&self) -> &dyn DeployProfile { self.profile.as_ref() }
     pub fn credentials(&self) -> &dyn CredentialSource { self.credentials.as_ref() }
     pub fn defaults(&self) -> CliDefaults { self.defaults }
+
+    /// Permission mode written for a newly registered Bot using this engine.
+    /// None leaves the permission mode to the engine's own defaults.
+    pub fn registration_permission_mode(&self, engine: &str) -> Option<&str> {
+        self.registration_permission_modes.get(engine).map(String::as_str)
+    }
 
     /// The identity resolver selected by `--provider-auth`.
     pub fn identity(&self, id: &str) -> anyhow::Result<&dyn IdentityResolver> {
@@ -117,6 +125,13 @@ impl BridgeAppBuilder {
 
     pub fn defaults(mut self, defaults: CliDefaults) -> Self {
         self.0.defaults = defaults;
+        self
+    }
+
+    /// Set a registration permission default for one engine id.
+    /// Existing runtime configurations are unaffected.
+    pub fn registration_permission_mode(mut self, engine: impl Into<String>, mode: impl Into<String>) -> Self {
+        self.0.registration_permission_modes.insert(engine.into(), mode.into());
         self
     }
 
