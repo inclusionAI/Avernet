@@ -298,6 +298,10 @@ from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.api.agentcompute_service import (
+    AgentComputeServiceProtocol,
+)
+from agentclaw.community.core.agentcompute.service import AgentComputeService
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -316,6 +320,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (AgentComputeServiceProtocol, AgentComputeService),
     (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
