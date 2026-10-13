@@ -738,6 +738,9 @@ two applies of the same revision always produce the same bot.
   so it becomes `r42`; a retry of the same submission returns `r42` again
   instead of creating `r43`. It is never an identity and never used in
   hashes: two bots both have an `r42`, and other records store the `id`.
+  `seq` is the order of recording, not ancestry: `r42`'s parent is
+  whatever its base was, which can be `r39` (for example, a run that
+  started from `r39` while it was `active`), while `r41`'s parent is `r38`.
 - **Parent.** Every revision except the bot's first has exactly one
   `parent`: the base the patch was written against, or the `base` given
   when a whole document was recorded. Following `parent` links gives a bot's
