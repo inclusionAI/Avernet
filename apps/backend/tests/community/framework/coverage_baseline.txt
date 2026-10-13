@@ -468,3 +468,18 @@ POST /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-frame
 POST /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self: missing [happy, error]
 POST /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription: missing [happy, error]
 POST /openapi/v1/collaboration/tasks/feedback: missing [happy, error]
+
+# 2026-10-09: agentswarm swarm surface (/agentswarm/v1). Router-level happy
+# and error paths are covered by tests/community/core/agentswarm/
+# test_http_adapter.py, but the singlebox endpoint harness has no agentswarm
+# stack (LLM config, durable job queue) to drive these against yet — the module
+# is exempt from singlebox flow coverage the same way (flow_coverage.py). The
+# Stage-B singlebox story backfills these cases; shrink this block then.
+GET /agentswarm/v1/health: missing [happy, error]
+GET /agentswarm/v1/ready: missing [happy, error]
+GET /agentswarm/v1/runs: missing [happy, error]
+GET /agentswarm/v1/runs/{run_id}: missing [happy, error]
+GET /agentswarm/v1/runs/{run_id}/events: missing [happy, error]
+GET /agentswarm/v1/runs/{run_id}/report: missing [happy, error]
+POST /agentswarm/v1/runs: missing [happy, error]
+POST /agentswarm/v1/runs/{run_id}/cancel: missing [happy, error]
