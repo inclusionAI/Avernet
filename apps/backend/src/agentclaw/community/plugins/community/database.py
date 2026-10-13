@@ -28,6 +28,9 @@ from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.models.local_skill_security_observation import (
+    LocalSkillSecurityObservationModel,
+)
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -35,11 +38,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 logger = get_logger()
 
 _SECURITY_TABLE = "ac_local_skill_security_observation"
-_SECURITY_COLUMNS = {
-    "observation_id", "upload_order", "provider_skill_id", "skill_id",
-    "incarnation_id", "snapshot_ref", "handoff_stage", "observation_committed", "snapshot_verified",
-    "processing_status", "sync_status", "report_json",
-}
+_SECURITY_COLUMNS = set(LocalSkillSecurityObservationModel.__table__.columns.keys())
 
 
 def _check_security_schema(engine: Engine, *, dialect: str) -> None:

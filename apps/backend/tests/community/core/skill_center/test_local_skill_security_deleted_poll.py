@@ -23,7 +23,7 @@ def _delete_formal_asset(db: _Database, repository: LocalSkillSecurityObservatio
     with avernet_tenant_scope("teamclaw"):
         assert repository.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b",
+            skill_id=42, actor_id="deleter-b", incarnation_id="incarnation-a",
         ) is not None
 
 
@@ -80,4 +80,28 @@ def test_deleted_skill_without_check_id_is_not_submitted_for_scan():
     )
 
     assert isinstance(handler.handle(_payload()), Fail)
+    assert provider.submitted == []
+
+
+def test_deletion_after_worker_load_prevents_scan_submission():
+    package = b"canonical package A"
+    db = _Database()
+    repository = LocalSkillSecurityObservationRepository(db)
+    _record(repository, package)
+    provider = _Provider()
+    handler = LocalSkillSecurityScanTaskHandler(
+        repository=repository,
+        snapshots=_Snapshots(package),
+        provider=provider,
+        env_provider=lambda: "pre",
+        enabled=True,
+    )
+    original_claim = repository.claim_scan_submission
+
+    def delete_before_claim(*, env: str, observation_id: str) -> bool:
+        _delete_formal_asset(db, repository)
+        return original_claim(env=env, observation_id=observation_id)
+
+    repository.claim_scan_submission = delete_before_claim
+    assert isinstance(handler.handle(_payload()), Reschedule)
     assert provider.submitted == []

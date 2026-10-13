@@ -426,9 +426,12 @@ class _CapturedSecurityObserver:
         self.guard = guard
         self.error = error
         self.calls = []
+        self.incarnation_id = "test-local-incarnation"
 
     def current_incarnation_id(self, **_kwargs):
-        return self.calls[-1]["incarnation_id"] if self.calls else None
+        if self.guard is not None:
+            assert self.guard._lock.locked()
+        return self.calls[-1]["incarnation_id"] if self.calls else self.incarnation_id
 
     def observe(self, **kwargs):
         if self.guard is not None:
@@ -436,6 +439,14 @@ class _CapturedSecurityObserver:
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
+
+
+class _FormalIdentityBinding:
+    def get_formal_incarnation_id(self, **_kwargs):
+        return getattr(self, "_formal_incarnation_id", None)
+
+    def bind_formal_incarnation_id(self, **kwargs):
+        self._formal_incarnation_id = kwargs["incarnation_id"]
 
 
 class _Cleanup:
@@ -789,6 +800,26 @@ async def test_successful_upload_hands_exact_package_to_security_under_edit_guar
 
 
 @pytest.mark.asyncio
+async def test_formal_security_identity_failure_does_not_undo_successful_upload():
+    class _FailedIdentity(_CapturedSecurityObserver):
+        def current_incarnation_id(self, **_kwargs):
+            raise RuntimeError("security identity store unavailable")
+
+    guard = _Guard()
+    observer = _FailedIdentity()
+    service = _service(
+        _Filesystem(), guard=guard, security_observer=observer,
+    )
+    result = await service.upload_local_skill(
+        bot_id="bot", owner_id="owner", actor_id="collaborator",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+    assert result["operation"] == "created"
+    assert observer.calls == []
+    assert not guard._lock.locked()
+
+
+@pytest.mark.asyncio
 async def test_upload_saves_exact_snapshot_and_schedules_independent_security_work():
     class _Objects:
         def __init__(self):
@@ -802,7 +833,7 @@ async def test_upload_saves_exact_snapshot_and_schedules_independent_security_wo
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _SecurityRepository:
+    class _SecurityRepository(_FormalIdentityBinding):
         def __init__(self):
             self.identity_calls = []
             self.observations = []
@@ -913,7 +944,7 @@ async def test_scan_enqueue_failure_is_recorded_and_does_not_cancel_sync():
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.saved[key])
 
-    class _Repository:
+    class _Repository(_FormalIdentityBinding):
         def __init__(self):
             self.errors = []
 
@@ -975,7 +1006,7 @@ def test_first_observed_replacement_uses_only_recorded_security_identity(
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _Repository:
+    class _Repository(_FormalIdentityBinding):
         def __init__(self):
             self.creator_id = None
 
@@ -1101,7 +1132,7 @@ async def test_timed_out_snapshot_cannot_make_older_replacement_current(
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _SecurityRepository:
+    class _SecurityRepository(_FormalIdentityBinding):
         def __init__(self):
             self.current = None
             self.failures = []
@@ -1183,7 +1214,7 @@ async def test_ambiguous_snapshot_write_retains_reconcilable_failure_fact():
         def read_object(self, *_args):
             raise AssertionError("must not read")
 
-    class _FailureRepository:
+    class _FailureRepository(_FormalIdentityBinding):
         def __init__(self):
             self.failures = []
 
@@ -1229,7 +1260,7 @@ async def test_identity_failure_keeps_verified_exact_snapshot_for_repair():
         def read_object(self, key):
             return ObjectReadResult(ObjectReadStatus.FOUND, self.values[key])
 
-    class _Repository:
+    class _Repository(_FormalIdentityBinding):
         def __init__(self):
             self.failures = []
 
@@ -1274,7 +1305,7 @@ async def test_reservation_finishing_after_timeout_cannot_observe_older_upload(
 ):
     monkeypatch.setattr(upload_module, "SECURITY_HANDOFF_TIMEOUT_SECONDS", 0.05)
 
-    class _OrderingRepository:
+    class _OrderingRepository(_FormalIdentityBinding):
         def __init__(self):
             self.entered = threading.Event()
             self.release = threading.Event()

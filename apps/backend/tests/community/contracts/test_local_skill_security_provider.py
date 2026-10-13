@@ -134,6 +134,10 @@ def _wired_observation(world, package: bytes, *, enabled: bool = True):
             }
         )
         skill_id = int(skill["id"])
+        repository.bind_formal_incarnation_id(
+            env=env, bot_id="bot-a", owner_id="owner-a", skill_id=skill_id,
+            incarnation_id=incarnation_id,
+        )
         order = repository.reserve_handoff(
             env=env, bot_id="bot-a", owner_id="owner-a", skill_id=skill_id,
             incarnation_id=incarnation_id, observation_id="observation-a",

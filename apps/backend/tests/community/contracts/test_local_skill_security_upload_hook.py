@@ -41,6 +41,7 @@ def test_public_noop_hook_accepts_exact_upload_and_timeout_facts(world):
     )
     hook.record_deletion(
         bot_id="bot", owner_id="owner", actor_id="uploader", skill_id=9,
+        incarnation_id="local-incarnation-9",
     )
 
 

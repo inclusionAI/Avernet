@@ -79,6 +79,22 @@ async def test_old_observation_draft_requires_migration(tmp_path):
         await database.bootstrap()
 
 
+@pytest.mark.asyncio
+async def test_operator_owned_sqlite_rejects_any_missing_observation_column(tmp_path):
+    database = CommunityDatabase(
+        f"sqlite:///{tmp_path}/partial.db", create_schema=False,
+        security_schema_required=True,
+    )
+    Skill.__table__.create(database._engine)
+    LocalSkillSecurityObservationModel.__table__.create(database._engine)
+    with database._engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE ac_local_skill_security_observation DROP COLUMN modifier_id"
+        )
+    with pytest.raises(RuntimeError, match="modifier_id"):
+        await database.bootstrap()
+
+
 @pytest.fixture
 def db(tmp_path) -> CommunityDatabase:
     url = f"sqlite:///{tmp_path}/b3.db"

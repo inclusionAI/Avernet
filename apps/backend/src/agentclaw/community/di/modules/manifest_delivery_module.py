@@ -101,6 +101,9 @@ from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServic
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import LocalSkillDeleteServiceProtocol
 from agentclaw.community.core.skill_center.local_skill_security_upload_hook import LocalSkillSecurityUploadHook
+from agentclaw.community.core.skill_center.services.local_skill_security_upload_observer import (
+    NoopLocalSkillSecurityUploadHook,
+)
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -115,6 +118,9 @@ from agentclaw.community.core.skill_center.local_skill_upload_service_protocol i
 )
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 
 
 class ManifestDeliveryModule(Module):
@@ -192,6 +198,7 @@ class ManifestDeliveryModule(Module):
         self,
         injector: Injector,
         store: ManagedFilesStore,
+        security_config: LocalSkillSecurityObservationConfig,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
@@ -224,7 +231,11 @@ class ManifestDeliveryModule(Module):
                     store,
                     validator=validator,
                     skill_repository=injector.get(SkillRepository),
-                    security_hook=injector.get(LocalSkillSecurityUploadHook),
+                    security_hook=(
+                        injector.get(LocalSkillSecurityUploadHook)
+                        if security_config.enabled
+                        else injector.get(NoopLocalSkillSecurityUploadHook)
+                    ),
                 ),
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,

@@ -34,6 +34,7 @@ class _Database:
             session.add(Skill(
                 id=42, name="sample", git_path="local://bot-a/sample",
                 user_id="owner-a", bolt_id="bot-a", env="pre",
+                skill_uuid=INCARNATION,
                 avernet_tenant="teamclaw",
             ))
 
@@ -217,7 +218,7 @@ def test_delete_without_verified_snapshot_records_syncable_tombstone(state):
     with avernet_tenant_scope("teamclaw"):
         identity = repo.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b",
+            skill_id=42, actor_id="deleter-b", incarnation_id=INCARNATION,
         )
         pending = repo.list_pending_sync_identities(
             env="pre", after_provider_skill_id=None, limit=10,
@@ -267,7 +268,7 @@ def test_upload_order_conflict_retries_reservation_and_deletion(state, monkeypat
     with avernet_tenant_scope("teamclaw"):
         identity = repo.record_asset_deleted(
             env="pre", bot_id="bot-a", owner_id="owner-a",
-            skill_id=42, actor_id="deleter-b",
+            skill_id=42, actor_id="deleter-b", incarnation_id=INCARNATION,
         )
     assert identity is not None
     assert identity.sync_target_observation_id is not None
@@ -315,6 +316,106 @@ def test_old_sync_cannot_replace_new_target(state):
             env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
             incarnation_id=INCARNATION, observation_id="upload-b",
         )
+
+
+def test_late_errors_cannot_downgrade_completed_scan_or_sync(state):
+    _, repo = state
+    with avernet_tenant_scope("teamclaw"):
+        _record(repo, "upload-a")
+        repo.save_report(
+            env="pre", observation_id="upload-a", check_id="check-a",
+            risk_status="PASS", report={"risk": "PASS"}, detail_url=None,
+        )
+        after_error = repo.mark_scan_error(
+            env="pre", observation_id="upload-a", error_code="LATE_ERROR",
+            error_message="stale worker failed",
+        )
+        assert repo.mark_sync_completed(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id=INCARNATION, observation_id="upload-a",
+        )
+        assert not repo.mark_sync_error(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id=INCARNATION, observation_id="upload-a",
+            error_code="LATE_ERROR", error_message="stale worker failed",
+        )
+        identity = repo.get_identity_for_asset(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id=INCARNATION,
+        )
+    assert after_error.processing_status == "COMPLETED"
+    assert after_error.risk_status == "PASS"
+    assert after_error.error_code is None
+    assert identity is not None and identity.sync_status == "COMPLETED"
+    assert identity.sync_error_code is None
+
+
+def test_sqlite_reused_numeric_id_starts_a_new_formal_incarnation(state):
+    db, repo = state
+    with avernet_tenant_scope("teamclaw"):
+        old = _record(repo, "upload-old")
+        with db.transactional_orm_session() as session:
+            session.add(Skill(
+                id=41, name="other", git_path="local://bot-a/other",
+                user_id="owner-a", bolt_id="bot-a", env="pre",
+                avernet_tenant="teamclaw",
+            ))
+        with db.transactional_orm_session() as session:
+            session.query(Skill).filter_by(id=42).delete()
+        old_identity = repo.record_asset_deleted(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            actor_id="deleter", incarnation_id=INCARNATION,
+        )
+        with db.transactional_orm_session() as session:
+            replacement = Skill(
+                name="new", git_path="local://bot-a/new",
+                user_id="owner-a", bolt_id="bot-a", env="pre",
+                avernet_tenant="teamclaw",
+            )
+            session.add(replacement)
+            session.flush()
+            assert replacement.id == 42
+        assert repo.get_formal_incarnation_id(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+        ) is None
+        repo.bind_formal_incarnation_id(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id="new-incarnation",
+        )
+        with pytest.raises(AssetIncarnationMismatchError):
+            repo.bind_formal_incarnation_id(
+                env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+                incarnation_id=INCARNATION,
+            )
+        new = _record(repo, "upload-new", incarnation="new-incarnation")
+        current = repo.get_current_for_asset(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id="new-incarnation",
+        )
+        new_history = repo.list_for_asset(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id="new-incarnation",
+        )
+        old_history = repo.list_for_asset(
+            env="pre", bot_id="bot-a", owner_id="owner-a", skill_id=42,
+            incarnation_id=INCARNATION,
+        )
+        pending_sync = repo.list_pending_sync_identities(
+            env="pre", after_provider_skill_id=None, limit=10,
+        )
+        recoverable_scans = repo.list_recoverable_scans(
+            env="pre", after_observation_id=None, limit=10,
+        )
+    assert old_identity is not None
+    assert old.provider_skill_id != new.provider_skill_id
+    assert current is not None and current.observation_id == "upload-new"
+    assert [item.observation_id for item in new_history] == ["upload-new"]
+    assert old_history[0].asset_deleted
+    assert [item.observation_id for item in old_history][1:] == ["upload-old"]
+    assert [item.provider_skill_id for item in pending_sync] == [
+        old_identity.provider_skill_id
+    ]
+    assert [item.observation_id for item in recoverable_scans] == ["upload-new"]
 
 
 def test_asset_and_tenant_scope(state):

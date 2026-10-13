@@ -133,6 +133,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                     self._security_hook_provider().record_deletion(
                         bot_id=bot_id, owner_id=owner_id,
                         actor_id=user_id, skill_id=int(skill_id),
+                        incarnation_id=skill.get("skill_uuid"),
                     )
                 except Exception:
                     logger.exception(

@@ -62,30 +62,37 @@ class LocalSkillSecurityObservationRepository(
         )
 
     def _latest_row(self, session: Session, tenant: str, env: str,
-                    bot_id: str, owner_id: str, skill_id: int) -> ObservationRow | None:
-        return self._asset_rows(
-            session, tenant, env, bot_id, owner_id, skill_id
-        ).order_by(ObservationRow.upload_order.desc(), ObservationRow.id.desc()).first()
+                    bot_id: str, owner_id: str, skill_id: int,
+                    incarnation_id: str | None = None) -> ObservationRow | None:
+        query = self._asset_rows(session, tenant, env, bot_id, owner_id, skill_id)
+        if incarnation_id is not None:
+            query = query.filter(ObservationRow.incarnation_id == incarnation_id)
+        return query.order_by(
+            ObservationRow.upload_order.desc(), ObservationRow.id.desc()
+        ).first()
 
     @staticmethod
     def _formal_matches(session: Session, tenant: str, env: str, bot_id: str,
-                        owner_id: str, skill_id: int) -> bool:
-        return session.query(Skill.id).filter(
+                        owner_id: str, skill_id: int,
+                        incarnation_id: str | None = None) -> bool:
+        query = session.query(Skill.id).filter(
             Skill.id == skill_id,
             Skill.avernet_tenant == tenant,
             Skill.env == env,
             Skill.bolt_id == bot_id,
             Skill.user_id == owner_id,
             Skill.git_path.like("local://%"),
-        ).first() is not None
+        )
+        if incarnation_id is not None:
+            query = query.filter(Skill.skill_uuid == incarnation_id)
+        return query.first() is not None
 
     def _assert_incarnation(self, session: Session, *, tenant: str, env: str,
                             bot_id: str, owner_id: str, skill_id: int,
                             incarnation_id: str) -> None:
-        latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
-        if not self._formal_matches(session, tenant, env, bot_id, owner_id, skill_id):
-            raise AssetIncarnationMismatchError("formal Local Skill is unavailable")
-        if latest is not None and latest.incarnation_id != incarnation_id:
+        if not self._formal_matches(
+            session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+        ):
             raise AssetIncarnationMismatchError(
                 "formal Local Skill no longer matches the security identity"
             )
@@ -95,20 +102,48 @@ class LocalSkillSecurityObservationRepository(
     ) -> str | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            if not self._formal_matches(session, tenant, env, bot_id, owner_id, skill_id):
-                return None
-            latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
-            return latest.incarnation_id if latest is not None else None
+            return session.query(Skill.skill_uuid).filter(
+                Skill.id == skill_id,
+                Skill.avernet_tenant == tenant,
+                Skill.env == env,
+                Skill.bolt_id == bot_id,
+                Skill.user_id == owner_id,
+                Skill.git_path.like("local://%"),
+            ).scalar()
+
+    def bind_formal_incarnation_id(
+        self, *, env: str, bot_id: str, owner_id: str, skill_id: int,
+        incarnation_id: str,
+    ) -> None:
+        """Bind the existing formal UUID column after the upload succeeds."""
+        tenant = get_current_avernet_tenant()
+        with self._db.transactional_orm_session() as session:
+            session.query(Skill).filter(
+                Skill.id == skill_id,
+                Skill.avernet_tenant == tenant,
+                Skill.env == env,
+                Skill.bolt_id == bot_id,
+                Skill.user_id == owner_id,
+                Skill.git_path.like("local://%"),
+                Skill.skill_uuid.is_(None),
+            ).update({Skill.skill_uuid: incarnation_id}, synchronize_session=False)
+            if not self._formal_matches(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            ):
+                raise AssetIncarnationMismatchError(
+                    "formal Local Skill no longer matches the security identity"
+                )
 
     def record_asset_deleted(
         self, *, env: str, bot_id: str, owner_id: str,
-        skill_id: int, actor_id: str,
+        skill_id: int, actor_id: str, incarnation_id: str,
     ) -> LocalSkillSecurityIdentity | None:
         for attempt in range(3):
             try:
                 return self._record_asset_deleted_once(
                     env=env, bot_id=bot_id, owner_id=owner_id,
                     skill_id=skill_id, actor_id=actor_id,
+                    incarnation_id=incarnation_id,
                 )
             except IntegrityError as exc:
                 if attempt == 2 or not _upload_order_conflict(exc):
@@ -117,11 +152,13 @@ class LocalSkillSecurityObservationRepository(
 
     def _record_asset_deleted_once(
         self, *, env: str, bot_id: str, owner_id: str,
-        skill_id: int, actor_id: str,
+        skill_id: int, actor_id: str, incarnation_id: str,
     ) -> LocalSkillSecurityIdentity | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            latest = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
             if latest is None:
                 return None
             if latest.handoff_stage == "DELETED":
@@ -157,7 +194,9 @@ class LocalSkillSecurityObservationRepository(
                 owner_id=owner_id, skill_id=skill_id,
                 incarnation_id=incarnation_id,
             )
-            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            row = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
             if row is None:
                 raise ValueError("security handoff must be reserved before identity lookup")
             return _identity(row)
@@ -168,11 +207,13 @@ class LocalSkillSecurityObservationRepository(
     ) -> LocalSkillSecurityIdentity | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
-            if row is None or row.incarnation_id != incarnation_id:
+            row = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
+            if row is None:
                 return None
             if row.handoff_stage != "DELETED" and not self._formal_matches(
-                session, tenant, env, bot_id, owner_id, skill_id
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
             ):
                 return None
             return _identity(row)
@@ -253,10 +294,14 @@ class LocalSkillSecurityObservationRepository(
     ) -> LocalSkillSecurityHandoffAttempt | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            if not self._formal_matches(session, tenant, env, bot_id, owner_id, skill_id):
+            if not self._formal_matches(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            ):
                 return None
-            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
-            return _handoff(row) if row is not None and row.incarnation_id == incarnation_id else None
+            row = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
+            return _handoff(row) if row is not None else None
 
     def get_handoff_failure(
         self, *, env: str, observation_id: str
@@ -368,11 +413,15 @@ class LocalSkillSecurityObservationRepository(
     ) -> LocalSkillSecurityObservation | None:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            if not self._formal_matches(session, tenant, env, bot_id, owner_id, skill_id):
+            if not self._formal_matches(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            ):
                 return None
-            row = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            row = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
             if (
-                row is None or row.incarnation_id != incarnation_id
+                row is None
                 or row.handoff_stage != "OBSERVED" or not row.observation_committed
             ):
                 return None
@@ -421,14 +470,17 @@ class LocalSkillSecurityObservationRepository(
     def _mutate(self, env: str, observation_id: str, values: dict[str, Any]) -> LocalSkillSecurityObservation:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            row = session.query(ObservationRow).filter_by(
+            query = session.query(ObservationRow).filter_by(
                 avernet_tenant=tenant, env=env, observation_id=observation_id,
                 handoff_stage="OBSERVED",
-            ).with_for_update().one()
-            for key, value in values.items():
-                setattr(row, key, value)
-            session.flush()
-            return _observation(row)
+            )
+            # Queue leases can overlap. The database predicate makes the first
+            # terminal report win even when a former worker writes late.
+            query.filter(ObservationRow.processing_status != "COMPLETED").update(
+                {getattr(ObservationRow, key): value for key, value in values.items()},
+                synchronize_session=False,
+            )
+            return _observation(query.one())
 
     def save_external_artifact(
         self, *, env: str, observation_id: str, artifact: dict[str, Any]
@@ -447,7 +499,15 @@ class LocalSkillSecurityObservationRepository(
                 handoff_stage="OBSERVED", check_id=None,
             ).filter(ObservationRow.processing_status.in_(
                 ("PENDING", "ARTIFACT_READY", "FAILED")
-            )).update({
+            )).filter(session.query(Skill.id).filter(
+                Skill.id == ObservationRow.skill_id,
+                Skill.avernet_tenant == ObservationRow.avernet_tenant,
+                Skill.env == ObservationRow.env,
+                Skill.bolt_id == ObservationRow.bot_id,
+                Skill.user_id == ObservationRow.owner_id,
+                Skill.skill_uuid == ObservationRow.incarnation_id,
+                Skill.git_path.like("local://%"),
+            ).exists()).update({
                 ObservationRow.processing_status: "SUBMITTING",
                 ObservationRow.scan_started_at: _utc_now(),
                 ObservationRow.error_code: None,
@@ -509,16 +569,21 @@ class LocalSkillSecurityObservationRepository(
     ) -> bool:
         tenant = get_current_avernet_tenant()
         with self._db.transactional_orm_session() as session:
-            latest = self._latest_row(session, tenant, env, bot_id, owner_id, skill_id)
+            latest = self._latest_row(
+                session, tenant, env, bot_id, owner_id, skill_id, incarnation_id
+            )
             if latest is None or latest.observation_id != observation_id:
                 return False
-            updated = session.query(ObservationRow).filter_by(
+            query = session.query(ObservationRow).filter_by(
                 avernet_tenant=tenant, env=env, bot_id=bot_id,
                 owner_id=owner_id, skill_id=skill_id,
                 incarnation_id=incarnation_id, observation_id=observation_id,
             ).filter(ObservationRow.handoff_stage.in_(
                 ("OBSERVED", "DELETED")
-            )).update({
+            ))
+            if status == "FAILED":
+                query = query.filter(ObservationRow.sync_status != "COMPLETED")
+            updated = query.update({
                 ObservationRow.sync_status: status,
                 ObservationRow.sync_error_code: error_code,
                 ObservationRow.sync_error_message: error_message,

@@ -73,6 +73,9 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.local_skill_security_observation import (
     LocalSkillSecurityObservation,
 )
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.skill_center_client import (
@@ -417,6 +420,9 @@ async def get_skill_security_observations(
     page: PageParamsDep,
     request: Request,
     query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
+    security_config: LocalSkillSecurityObservationConfig = Injected(
+        LocalSkillSecurityObservationConfig
+    ),
     repository: LocalSkillSecurityObservationRepositoryProtocol = Injected(
         LocalSkillSecurityObservationRepositoryProtocol
     ),
@@ -436,11 +442,19 @@ async def get_skill_security_observations(
     ):
         raise LocalSkillNotFoundError()
     _require_skills_grant(caller, record)
+    if not security_config.enabled:
+        return envelope(
+            SkillSecurityObservations(
+                provider_skill_id=None, current=None, current_status="UNKNOWN",
+                current_failure=None, history=Page(total=0, items=[]),
+            ),
+            request,
+        )
     incarnation_id = repository.get_formal_incarnation_id(
         env=get_current_env(), bot_id=bot_id, owner_id=owner_id,
         skill_id=int(skill_id),
     )
-    if incarnation_id is None:
+    if not incarnation_id:
         return envelope(
             SkillSecurityObservations(
                 provider_skill_id=None, current=None, current_status="UNKNOWN",

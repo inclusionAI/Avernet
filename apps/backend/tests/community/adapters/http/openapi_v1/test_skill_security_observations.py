@@ -15,6 +15,9 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
     LocalSkillSecurityObservationRepositoryProtocol,
 )
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
 from tests.community.adapters.http.openapi_v1.conftest import (
     bind_bot_access_seam,
     user_scoped_client,
@@ -100,11 +103,18 @@ class _UploadService:
         return self.digest
 
 
-def _client(query: _Query, repository: _Repository, *, digest="sha256:" + "a" * 64):
+def _client(
+    query: _Query, repository: _Repository, *, digest="sha256:" + "a" * 64,
+    observation_enabled=True,
+):
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(SkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillSecurityObservationRepositoryProtocol, to=repository)
+            binder.bind(
+                LocalSkillSecurityObservationConfig,
+                to=LocalSkillSecurityObservationConfig(enabled=observation_enabled),
+            )
             binder.bind(BotRepository, to=_BotRepository())
             binder.bind(LocalSkillUploadServiceProtocol, to=_UploadService(digest))
             bind_bot_access_seam(binder)
@@ -114,6 +124,17 @@ def _client(query: _Query, repository: _Repository, *, digest="sha256:" + "a" * 
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
     return user_scoped_client(app, "actor")
+
+
+def test_disabled_observation_returns_unknown_without_querying_security_table():
+    repository = _Repository()
+    response = _client(
+        _Query(), repository, observation_enabled=False
+    ).get("/openapi/v1/bots/bot-1/skills/42/security-observations")
+    assert response.status_code == 200
+    assert response.json()["data"]["current_status"] == "UNKNOWN"
+    assert response.json()["data"]["history"] == {"total": 0, "items": []}
+    assert repository.calls == []
 
 
 def test_current_attempt_stays_pending_while_older_pass_is_in_history():

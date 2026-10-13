@@ -6,6 +6,7 @@ import hashlib
 import logging
 from collections.abc import Callable
 from threading import Event
+from uuid import uuid4
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
@@ -95,19 +96,38 @@ class LocalSkillSecurityUploadObserver:
     def current_incarnation_id(
         self, *, bot_id: str, owner_id: str, skill_id: int
     ) -> str | None:
-        return self._repository.get_formal_incarnation_id(
-            env=self._env_provider(), bot_id=bot_id, owner_id=owner_id,
-            skill_id=skill_id,
+        env = self._env_provider()
+        existing = self._repository.get_formal_incarnation_id(
+            env=env, bot_id=bot_id, owner_id=owner_id, skill_id=skill_id,
         )
+        if existing is not None:
+            if not existing.strip():
+                raise ValueError("formal Local Skill UUID is empty")
+            return existing
+        candidate = str(uuid4())
+        self._repository.bind_formal_incarnation_id(
+            env=env, bot_id=bot_id, owner_id=owner_id, skill_id=skill_id,
+            incarnation_id=candidate,
+        )
+        return candidate
 
     def record_deletion(
-        self, *, bot_id: str, owner_id: str, actor_id: str, skill_id: int
+        self, *, bot_id: str, owner_id: str, actor_id: str, skill_id: int,
+        incarnation_id: str | None,
     ) -> None:
+        if not incarnation_id:
+            logger.warning(
+                "Local Skill deletion has no formal security UUID "
+                "bot_id=%s skill_id=%s; manual identity reconciliation may be needed",
+                bot_id, skill_id,
+            )
+            return
         tenant = get_current_avernet_tenant()
         env = self._env_provider()
         identity = self._repository.record_asset_deleted(
             env=env, bot_id=bot_id, owner_id=owner_id,
             skill_id=skill_id, actor_id=actor_id,
+            incarnation_id=incarnation_id,
         )
         if identity is None:
             logger.warning(

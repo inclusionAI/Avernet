@@ -70,6 +70,7 @@ class _Skills:
             "user_id": "owner",
             "bolt_id": "bot",
             "git_path": "local:///skills/one",
+            "skill_uuid": "security-uuid-9",
         }
 
     def get_bot_local_skill(self, **_kwargs):
@@ -228,6 +229,7 @@ async def test_security_deletion_handoff_runs_only_after_formal_delete():
     await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
     assert calls == [{
         "bot_id": "bot", "owner_id": "owner", "actor_id": "owner", "skill_id": 9,
+        "incarnation_id": "security-uuid-9",
     }]
 
 

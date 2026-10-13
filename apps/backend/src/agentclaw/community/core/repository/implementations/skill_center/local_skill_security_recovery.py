@@ -107,6 +107,7 @@ def _live_local_asset_match(row: ObservationRow):
         skill.bolt_id == row.bot_id,
         skill.user_id == row.owner_id,
         skill.git_path.like("local://%"),
+        skill.skill_uuid == row.incarnation_id,
     )
 
 
@@ -147,7 +148,7 @@ class LocalSkillSecurityRecoveryQueries:
             )
             cursor = after_observation_id
             result: list[LocalSkillSecurityObservation] = []
-            latest_identity: dict[tuple[str, str, int], ObservationRow | None] = {}
+            latest_identity: dict[tuple[str, str, int, str], ObservationRow | None] = {}
             while len(result) < limit:
                 page = query
                 if cursor is not None:
@@ -156,11 +157,11 @@ class LocalSkillSecurityRecoveryQueries:
                 if not rows:
                     break
                 for row, live_skill_id in rows:
-                    key = (row.bot_id, row.owner_id, int(row.skill_id))
+                    key = (row.bot_id, row.owner_id, int(row.skill_id), row.incarnation_id)
                     if key not in latest_identity:
                         latest_identity[key] = self._latest_row(
                             session, tenant, env, row.bot_id, row.owner_id,
-                            int(row.skill_id),
+                            int(row.skill_id), row.incarnation_id,
                         )
                     latest = latest_identity[key]
                     if (
@@ -229,7 +230,7 @@ class LocalSkillSecurityRecoveryQueries:
                         continue
                     latest = self._latest_row(
                         session, tenant, env, row.bot_id, row.owner_id,
-                        int(row.skill_id),
+                        int(row.skill_id), row.incarnation_id,
                     )
                     if latest is not None and latest.observation_id == row.observation_id:
                         result.append(_identity(row))
