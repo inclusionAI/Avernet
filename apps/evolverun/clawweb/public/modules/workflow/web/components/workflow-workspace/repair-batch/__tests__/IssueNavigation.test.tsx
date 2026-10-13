@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import EvolutionTab from '../../EvolutionTab'
 import IssueRepairSuggestions from '../IssueRepairSuggestions'
+import RepairSelectionWorkspace from '../RepairSelectionWorkspace'
 import type { RepairCandidatesResponse, RepairInboxItem } from '../../../../../server/contracts/repair-workbench'
 const accessState = vi.hoisted(() => ({ ready: true }))
 
@@ -29,6 +30,7 @@ const result: RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2', workflowId: 'wf', inputDigest: 'd'.repeat(64), items: [item('retry'), item('timeout')],
   tasks: [], capabilities: { generation: true, diff: false, publication: false, reason: null }, canEdit: true,
   includeHistorical: false, activeLookbackDays: 30, repairSignatureKeys: [],
+  facets: { nodes: [], failureModes: [] },
   counts: { all: 2, pending: 2, processing: 0, awaiting_verification: 0, closed: 0, no_action: 0 },
   page: { page: 1, pageSize: 20, total: 2, totalPages: 1 }, limits: { maxItems: 100, maxRequestBytes: 65536 },
 }
@@ -49,6 +51,7 @@ beforeEach(() => {
   result.inputDigest = 'd'.repeat(64)
   result.tasks = []
   result.items = [item('retry'), item('timeout')]
+  result.facets = { nodes: [], failureModes: [] }
   vi.stubGlobal('fetch', vi.fn(async (raw: string, init?: RequestInit) => {
     const url = new URL(raw, 'http://localhost'); requests.push(url)
     let body: unknown
@@ -342,6 +345,23 @@ it('retains selections across issue pages and reviews their actual titles before
   expect(within(confirmation).getAllByText('retry')[0]).toBeVisible()
   expect(within(confirmation).getAllByText('timeout')[0]).toBeVisible()
   expect(within(confirmation).getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled()
+})
+
+it('offers later-page node and problem-type facets on the first selection page', async () => {
+  result.items = Array.from({ length: 25 }, (_, index) => ({ ...item(String(index)),
+    context: { nodeId: index < 20 ? 'first-node' : 'later-node', failureMode: index < 20 ? 'timeout' : 'output' } }))
+  result.facets = { nodes: ['first-node', 'later-node'], failureModes: ['timeout', 'output'] }
+  render(<RepairSelectionWorkspace workflowId="wf" includeHistorical={false} selected={[]} selectedItems={[]}
+    instructions="" busy={false} reason="" error="" onInstructions={vi.fn()} onToggle={vi.fn()} onResult={vi.fn()}
+    onDetail={vi.fn()} onGenerate={vi.fn()} onBack={vi.fn()} />)
+  expect(await screen.findByRole('option', { name: 'later-node' })).toBeVisible()
+  expect(screen.getByRole('option', { name: 'output' })).toBeVisible()
+  expect(screen.queryByText('24', { selector: 'p' })).not.toBeInTheDocument()
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: '修复节点' }), 'later-node')
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: '修复问题类型' }), 'output')
+  await waitFor(() => expect(requests.at(-1)?.searchParams.get('failureMode')).toBe('output'))
+  expect(requests.at(-1)?.searchParams.get('nodeId')).toBe('later-node')
+  expect(requests.at(-1)?.searchParams.get('page')).toBe('1')
 })
 
 it('retains conflicting sources for candidate review without silently choosing a proposal', async () => {

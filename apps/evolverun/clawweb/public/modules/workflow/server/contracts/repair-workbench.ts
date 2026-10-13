@@ -24,6 +24,8 @@ export type RepairCandidatesResponse = {
   issuePreviews?: Array<{ signature: string; total: number; items: RepairInboxItem[] }>;
   includeHistorical: boolean; activeLookbackDays: number;
   repairSignatureKeys: string[];
+  /** Complete visible scope, independent of node/type filters and pagination. */
+  facets: { nodes: string[]; failureModes: string[] };
   counts: Record<RepairInboxFilter, number>;
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;

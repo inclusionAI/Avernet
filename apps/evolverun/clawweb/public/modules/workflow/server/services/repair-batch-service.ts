@@ -56,13 +56,17 @@ function preferredStored(left: StoredRepairItem, right: StoredRepairItem): Store
 function inboxMatch(item: RepairInboxItem, state: RepairInboxFilter): boolean {
   return state === 'all' || (state === 'closed' ? item.state === 'verified' || item.state === 'ineffective' : item.state === state);
 }
-function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
-  if (query.signature && item.context?.signature !== query.signature) return false;
+function itemFacets(item: RepairInboxItem) {
   const diagnoses = Array.isArray(item.context?.diagnoses) ? item.context.diagnoses as Record<string, unknown>[] : [];
   const suggestions = Array.isArray(item.context?.suggestions) ? item.context.suggestions as Record<string, unknown>[] : [];
   const node = item.context?.nodeId ?? diagnoses[0]?.nodeId ?? suggestions[0]?.nodeId;
   const mode = item.context?.failureMode ?? diagnoses[0]?.failureMode;
-  return (!query.nodeId || node === query.nodeId || query.nodeId === '未知节点' && !node)
+  return { node: typeof node === 'string' && node ? node : '未知节点', mode: typeof mode === 'string' ? mode : '' };
+}
+function matchesScope(item: RepairInboxItem, query: RepairCandidatesQuery): boolean {
+  if (query.signature && item.context?.signature !== query.signature) return false;
+  const { node, mode } = itemFacets(item);
+  return (!query.nodeId || node === query.nodeId)
     && (!query.failureMode || mode === query.failureMode);
 }
 function sourceDigest(current: Awaited<ReturnType<RepairSourcePort['load']>>): string {
@@ -182,8 +186,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         fail('INVALID_INPUT', 'Invalid issue preview scope');
       }
       const snapshot = await this.readSnapshot(workflowId, includeHistorical);
-      const scopedItems = snapshot.items.filter(item => matchesScope(item, query) && (includeHistorical ||
+      const visibleItems = snapshot.items.filter(item => matchesScope(item, { signature: query.signature }) && (includeHistorical ||
         item.sourceAvailable || item.state === 'processing' || item.state === 'awaiting_verification'));
+      const facets = { nodes: [...new Set(visibleItems.map(item => itemFacets(item).node))].sort(),
+        failureModes: [...new Set(visibleItems.map(item => itemFacets(item).mode).filter(Boolean))].sort() };
+      const scopedItems = visibleItems.filter(item => matchesScope(item, query));
       const revisions = await repairStage('revisions', () => new RepairBatchRepository(this.db).listRevisions(workflowId));
       const heads = new Map<string, RepairRevision>();
       for (const revision of revisions) if (!heads.has(revision.taskId)) heads.set(revision.taskId, revision);
@@ -197,7 +204,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       const items = filtered.slice((selectedPage - 1) * pageSize, selectedPage * pageSize);
       const response: Omit<RepairCandidatesResponse, 'canEdit'> = { schemaVersion: 'workflow-repair/v2', workflowId, inputDigest: snapshot.inputDigest, items,
         tasks: [...heads.values()].map(r => ({ taskId: r.taskId, revision: r.revision, phase: r.phase, updatedAtMs: r.updatedAtMs, itemCount: r.input.items.length })),
-        repairSignatureKeys,
+        repairSignatureKeys, facets,
         counts, page: { page: selectedPage, pageSize, total: filtered.length, totalPages },
         includeHistorical, activeLookbackDays: REPAIR_ACTIVE_LOOKBACK_DAYS,
         capabilities: this.capabilities(), limits: { maxItems: MAX_ITEMS, maxRequestBytes: MAX_REQUEST_BYTES } };

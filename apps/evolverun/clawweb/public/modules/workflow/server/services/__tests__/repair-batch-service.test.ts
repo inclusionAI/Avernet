@@ -71,6 +71,21 @@ describe('repair workbench control service', () => {
     expect(load).toHaveBeenCalledTimes(1);
     expect(await f.db.query('SELECT * FROM workflow_repair_items')).toEqual([]);
   });
+  it('returns complete suggestion facets before filtering and pagination', async () => {
+    const f = await setup(25, false);
+    f.items.forEach((item, index) => { item.context = { diagnoses: [{
+      nodeId: index < 20 ? 'fetch' : 'write', failureMode: index < 20 ? 'timeout' : 'output',
+    }] }; });
+    const first = await f.service.candidates('wf-1', { pageSize: 20 });
+    expect(first.items).toHaveLength(20);
+    expect(first.facets).toEqual({ nodes: ['fetch', 'write'], failureModes: ['output', 'timeout'] });
+    const filtered = await f.service.candidates('wf-1', { nodeId: 'write', failureMode: 'output' });
+    expect(filtered.items).toHaveLength(5);
+    expect(filtered.facets).toEqual(first.facets);
+    const empty = await f.service.candidates('wf-1', { nodeId: 'missing' });
+    expect(empty.items).toHaveLength(0);
+    expect(empty.facets).toEqual(first.facets);
+  });
   it('applies node, problem type and signature filters before counts and pagination without changing the selection digest', async () => {
     const f = await setup(4, false);
     f.items.forEach((item, i) => { item.context = { signature: `issue-${i}`, diagnoses: [{ nodeId: i < 3 ? 'fetch' : 'write', failureMode: i === 2 ? 'other' : 'timeout' }] }; });
