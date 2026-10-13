@@ -1,6 +1,6 @@
 from typing import Any, Protocol, runtime_checkable
 
-from ._record import BotRecord
+from ._record import BotRecord, RestoredBotRecord
 
 
 @runtime_checkable
@@ -225,5 +225,37 @@ class BotRepository(Protocol):
         2. Create new relationships linking devices to new bot
         3. Set new bot to ACTIVE
         4. Set old bot to RELEASED and soft-delete
+        """
+        ...
+
+    def restore_bot_record_by_id(
+        self,
+        bot_id: int,
+        *,
+        modifier: str,
+    ) -> RestoredBotRecord | None:
+        """Atomically restore a bot record to live ACTIVE by primary key.
+
+        Deliberate, UK-ordered admin revival (``uk_tnt_bot_uuid_env_status_del``):
+        within ONE transaction, (1) select the target by PK with NO
+        is_deleted/tenant/env predicate, (2) retire every OTHER live row
+        sharing its ``bot_uuid`` (``status=RELEASED``, ``is_deleted=<own
+        row id>``), then (3) revive the target (``is_deleted=0``,
+        ``status=ACTIVE``). Retiring siblings FIRST frees the live UK
+        slot before the revive re-occupies it — the re-revival ordering
+        warned about by ``try_insert_pending_bot`` (the historical MySQL
+        1205 self-deadlock) must never be inverted. No SELECT ... FOR
+        UPDATE is used (gap-lock deadlock class); the unique key is the
+        final arbiter.
+
+        Cross-env by requirement: sibling matching is on ``bot_uuid`` and
+        ``id != bot_id`` only — no tenant/env filtering on the PK lookup
+        or the sibling retirement.
+
+        Returns None when no record exists for ``bot_id`` (live or
+        soft-deleted) — the service layer maps that to its not-found
+        error. Returns a :class:`RestoredBotRecord` on success. A unique
+        key violation raises :class:`BotRecordConflictError` after the
+        transaction has rolled back (no partial state).
         """
         ...
