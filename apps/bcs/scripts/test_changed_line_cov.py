@@ -50,6 +50,51 @@ class ParseDiffTest(unittest.TestCase):
                          {"crates/a/src/lib.rs": {4, 5, 11}})
 
 
+class GitPathEncodingTest(unittest.TestCase):
+    """Paths with spaces or non-ASCII characters must not drop out of the denominator."""
+
+    def test_real_git_diff_keeps_space_and_non_ascii_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+
+            def git(*args):
+                subprocess.run(["git", "-C", str(root), *args], check=True,
+                               capture_output=True, env=env)
+
+            git("init", "-q")
+            git("config", "core.quotePath", "true")  # Git's default: C-quote non-ASCII
+            src = root / "apps" / "bcs" / "crates" / "a" / "src"
+            src.mkdir(parents=True)
+            names = ["plain.rs", "with space.rs", "中文.rs"]
+            for name in names:
+                (src / name).write_text("fn a() {}\n")
+            git("add", ".")
+            git("commit", "-q", "-m", "base")
+            for name in names:
+                (src / name).write_text("fn a() {}\nfn b() {}\n")
+            git("commit", "-q", "-am", "change")
+
+            changed = changed_line_cov.git_changed_lines(str(root), "HEAD~1")
+            self.assertEqual(set(changed), {"crates/a/src/" + n for n in names})
+            coverage = {"crates/a/src/plain.rs": {2: 1},
+                        "crates/a/src/with space.rs": {2: 0},
+                        "crates/a/src/中文.rs": {2: 0}}
+            result = changed_line_cov.measure(changed, coverage, IGNORE)
+            self.assertEqual((result.covered, result.instrumentable), (1, 3))
+
+            # Unmapped variants of the same paths are reported, not silently dropped.
+            missing = changed_line_cov.measure(changed, {"crates/a/src/plain.rs": {2: 1}}, IGNORE)
+            self.assertEqual(missing.unmapped, ["crates/a/src/with space.rs", "crates/a/src/中文.rs"])
+
+    def test_decodes_c_quoted_escapes(self):
+        decode = changed_line_cov._decode_git_path
+        self.assertEqual(decode('"b/a\\"q\\".rs"'), 'b/a"q".rs')
+        self.assertEqual(decode('"b/\\344\\270\\255.rs"'), "b/中.rs")
+        self.assertEqual(decode("b/with space.rs\t"), "b/with space.rs")
+
+
 class LoadCoberturaTest(unittest.TestCase):
     def test_normalizes_relative_absolute_and_prefixed_paths(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -162,6 +207,22 @@ class GateIsReportOnlyTest(unittest.TestCase):
         proc = self.run_gate()
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("no base ref provided", proc.stdout)
+
+    def test_failed_calculation_replaces_a_previous_report(self):
+        report = self.root / "cobertura.xml"
+        report.write_text(cobertura(str(self.bcs), [
+            ("crates/a/src/lib.rs", [(1, 1), (2, 1), (3, 1)]),
+        ]))
+        out = self.root / "changed.json"
+        self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1", "--changed-json", str(out))
+        self.assertEqual(json.loads(out.read_text())["rate"], 100.0)
+
+        proc = self.run_gate("--cobertura", str(self.root / "missing.xml"), "--base-ref", "HEAD~1",
+                             "--changed-json", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        details = json.loads(out.read_text())
+        self.assertEqual(details["status"], "unavailable")
+        self.assertNotIn("rate", details)
 
     def test_line_threshold_still_gates(self):
         self.summary.write_text(json.dumps({"data": [{"totals": {

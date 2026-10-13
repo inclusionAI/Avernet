@@ -338,7 +338,8 @@ run_bcs_e2e() {
     summary.json \
     endpoint_coverage.xml \
     endpoint_coverage.txt \
-    cli_command_coverage.txt; do
+    cli_command_coverage.txt \
+    changed_line_coverage.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi

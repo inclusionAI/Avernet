@@ -96,10 +96,34 @@ def report(label, covered, count, minimum):
     return True
 
 
+def write_changed_json(path, payload):
+    if not path:
+        return
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except OSError as e:
+        gh("::warning::cannot write %s: %s" % (path, e))
+
+
 def report_changed_lines(args):
-    """Report E2E changed-line coverage. Report-only: never affects the exit code."""
+    """Report E2E changed-line coverage. Report-only: never affects the exit code.
+
+    Any previous --changed-json output is removed first, so a failed or skipped
+    calculation never leaves an older run's result looking current.
+    """
+    if args.changed_json:
+        try:
+            os.remove(args.changed_json)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            gh("::warning::cannot remove stale %s: %s" % (args.changed_json, e))
     if not args.cobertura or not args.base_ref:
         gh("::notice::E2E changed-line coverage: no base ref provided — skipped")
+        write_changed_json(args.changed_json, {
+            "status": "unavailable", "reason": "no base ref provided",
+            "base_ref": args.base_ref})
         return
     bcs_dir = os.getcwd()
     try:
@@ -111,6 +135,8 @@ def report_changed_lines(args):
         coverage = changed_line_cov.load_cobertura(args.cobertura, bcs_dir)
     except (OSError, subprocess.CalledProcessError, changed_line_cov.ET.ParseError) as e:
         gh("::warning::E2E changed-line coverage could not be computed: %s" % e)
+        write_changed_json(args.changed_json, {
+            "status": "unavailable", "reason": str(e), "base_ref": args.base_ref})
         return
     result = changed_line_cov.measure(changed, coverage, args.ignore_filename_regex)
 
@@ -134,12 +160,9 @@ def report_changed_lines(args):
         gh("::warning::%d changed Rust file(s) missing from the e2e report (not counted): %s"
            % (len(result.unmapped), ", ".join(result.unmapped[:10])))
 
-    if args.changed_json:
-        try:
-            with open(args.changed_json, "w", encoding="utf-8") as f:
-                json.dump({"base_ref": args.base_ref, **result.to_dict()}, f, indent=2)
-        except OSError as e:
-            gh("::warning::cannot write %s: %s" % (args.changed_json, e))
+    write_changed_json(args.changed_json, {
+        "status": "ok" if rate is not None else "not_applicable",
+        "base_ref": args.base_ref, **result.to_dict()})
 
 
 def main():

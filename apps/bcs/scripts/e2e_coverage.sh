@@ -327,6 +327,8 @@ if [[ "$no_stop" -eq 0 ]]; then
   # With a base ref, also report changed-line coverage from cobertura.xml.
   # That metric is report-only: e2e_cov_gate.py never fails on it.
   changed_args=()
+  # Never ship a previous run's changed-line report as this run's result.
+  rm -f "$cov_dir/changed_line_coverage.json"
   if [[ -n "$changed_base_ref" ]]; then
     changed_args=(--cobertura "$out_xml" --base-ref "$changed_base_ref"
       --ignore-filename-regex "$cov_ignore_regex"

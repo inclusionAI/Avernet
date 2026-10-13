@@ -25,6 +25,27 @@ from dataclasses import dataclass, field
 BCS_PREFIX = "apps/bcs/"
 _HUNK = re.compile(r"\+(\d+)(?:,(\d+))?")
 _TEST_PATH = re.compile(r"(^|/)(tests|benches|examples)/|_tests?\.rs$")
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _decode_git_path(token):
+    """Decode a path from a ``+++`` header: C-quoted, or raw with a trailing TAB."""
+    if not (len(token) >= 2 and token.startswith('"') and token.endswith('"')):
+        # Git appends a TAB to unquoted header paths that contain spaces.
+        return token.rstrip("\t")
+    body, out, i = token[1:-1], bytearray(), 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\" or i + 1 == len(body):
+            out += ch.encode("utf-8")
+            i += 1
+        elif body[i + 1] in "01234567":
+            out.append(int(body[i + 1:i + 4], 8))  # octal byte of a UTF-8 sequence
+            i += 4
+        else:
+            out.append(_C_ESCAPES.get(body[i + 1], ord(body[i + 1])))
+            i += 2
+    return out.decode("utf-8", errors="surrogateescape")
 
 
 @dataclass
@@ -81,7 +102,7 @@ def parse_diff(diff_text):
     current = None
     for line in diff_text.splitlines():
         if line.startswith("+++ "):
-            target = line[4:]
+            target = _decode_git_path(line[4:])
             if target.startswith("b/") and target[2:].startswith(BCS_PREFIX):
                 current = target[2 + len(BCS_PREFIX):]
             else:
@@ -102,7 +123,7 @@ def parse_diff(diff_text):
 def git_changed_lines(repo_root, base_ref):
     diff = subprocess.run(
         ["git", "-C", repo_root, "diff", "--no-renames", "-U0", base_ref, "--", "apps/bcs"],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
     ).stdout
     return parse_diff(diff)
 

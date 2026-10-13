@@ -104,7 +104,9 @@ run_singlebox_coverage_once() {
     echo "singlebox coverage already ran; skipping duplicate"
     return 0
   fi
-  run_required "$repo_root/singlebox/ci/singlebox_coverage.sh"
+  # Forward the push base so BCS E2E reports changed-line coverage
+  # (report-only; it never blocks the push).
+  run_required env BCS_E2E_CHANGED_BASE_REF="$base" "$repo_root/singlebox/ci/singlebox_coverage.sh"
   run_required python3 "$repo_root/singlebox/ci/verify_singlebox_coverage_artifacts.py" \
     --reports-dir "$repo_root/singlebox/.dependencies/coverage/singlebox/reports"
   singlebox_coverage_ran=1

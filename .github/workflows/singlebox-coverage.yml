@@ -45,6 +45,9 @@ jobs:
       # PR: compare against the checked-out merge commit's exact base tree.
       # push/dispatch: compare against dev (repo default branch) instead.
       SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
+      # Same base for the report-only BCS E2E changed-line coverage, which
+      # e2e_coverage.sh reads from this variable (never fails the job).
+      BCS_E2E_CHANGED_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
 
     defaults:
       run:
