@@ -100,7 +100,6 @@ from agentclaw.community.api.bot_config_manifest_apply_service import (
 from agentclaw.community.core.task_queue.types import (
     Complete, DEFAULT_APP, Fail, Reschedule, TaskStatus,
 )
-from agentclaw.community.core.agentcompute.config.settings import AgentComputePlatformConfig
 from agentclaw.community.plugins.community.agentcompute_platform import AvernetBotPlatform
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -404,9 +403,7 @@ class TestAvernetKindEndToEnd:
 
         created = _stand_in_for_provisioning(world)
         grt = _ScriptedGrtChat(reply='{"answer": "survey ok"}')
-        platform = AvernetBotPlatform(
-            config=AgentComputePlatformConfig(default_engine="openclaw"),
-            owner_id=OWNER,
+        platform = AvernetBotPlatform(            owner_id=OWNER,
             manifest_seam=world.get(ManifestCreationSeam),
             bot_service=world.get(BotServiceProtocol),
             passport_plugin=world.get(PassportPlugin),

@@ -30,21 +30,12 @@ import agentclaw.community.core.bot_management.create_flow as create_flow
 from agentclaw.community.plugins.community.agentcompute_platform import (
     AvernetBotPlatform,
 )
-from agentclaw.community.plugins.community.agentcompute_platform import (
-    AgentComputePlatformConfig,
-)
 
 CREATE_FLOW_SUBMIT = (
     "agentclaw.community.core.bot_management.create_flow"
     ".submit_bot_creation_with_manifest"
 )
 
-
-def _config():
-    # The config is now a single default-engine knob — engine/bot_type/
-    # identity_file are per-agent spec fields, and owner comes from the
-    # caller (the submitter), not from a static config.
-    return AgentComputePlatformConfig(default_engine="openclaw")
 
 
 class _Seam:
@@ -119,7 +110,6 @@ def _job(status, last_error=None):
 
 def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None, grt=None):
     return AvernetBotPlatform(
-        config=config or _config(),
         owner_id="owner-1",
         manifest_seam=seam or _Seam(),
         bot_service=bot_svc or _BotSvc(),

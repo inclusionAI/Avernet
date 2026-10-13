@@ -217,30 +217,6 @@ class AgentComputeRetentionConfig:
 
 
 
-@dataclass(frozen=True)
-class AgentComputePlatformConfig:
-    """Bot-provision placement — the create-with-manifest parameters the
-    host adapter supplies when the seam has no per-spec values.
-
-    Sourced from the ``agentcompute.platform`` sub-block. ``owner_work_no``
-    is the account swarm-created bots belong to (required — no
-    service-account fallback); ``engine_type``/``cluster_name`` are the
-    placement pair (teclaw↔ANDC, everything else↔ACRA); ``identity_file``
-    is the per-engine persona identity file type (engine-gated;
-    claude_code takes only CLAUDE.md).
-    """
-
-    default_engine: str = "openclaw"
-
-    @classmethod
-    def from_block(cls, block: dict) -> "AgentComputePlatformConfig":
-        """Default engine for specs that don't name one."""
-        block = block or {}
-        d = cls()
-        return cls(
-            default_engine=_as_str(block, "default_engine", d.default_engine),
-        )
-
 
 @dataclass(frozen=True)
 class AgentComputeConfig:
@@ -270,9 +246,6 @@ class AgentComputeConfig:
     artifact_inline_threshold: int = 16384
     message_retention_tail: int = 50
     enabled: bool = True
-    platform: "AgentComputePlatformConfig" = field(
-        default_factory=AgentComputePlatformConfig
-    )
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentComputeConfig":
@@ -308,7 +281,5 @@ class AgentComputeConfig:
                 block, "message_retention_tail",
                 cls().message_retention_tail, minimum=0),
             enabled=_as_bool(block, "enabled", True),
-            platform=AgentComputePlatformConfig.from_block(
-                block.get("platform") or {}),
         )
 

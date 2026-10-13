@@ -48,9 +48,6 @@ import yaml
 from agentclaw.community.core.agentcompute.domain.models import (
     BotCreateSpec, BotId, BotState, IdempotencyKey,
 )
-from agentclaw.community.core.agentcompute.config.settings import (
-    AgentComputePlatformConfig,
-)
 from agentclaw.community.core.agentcompute.spi.bot import BotPlatform
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
@@ -99,7 +96,6 @@ class AvernetBotPlatform(BotPlatform):
     def __init__(
         self,
         *,
-        config: AgentComputePlatformConfig,
         owner_id: str = "",
         manifest_seam: ManifestCreationSeam,
         bot_service: Any,
@@ -113,7 +109,6 @@ class AvernetBotPlatform(BotPlatform):
         # owner_id is the run's provisioning identity (the submitter);
         # per-call: per_run when the swarm identity arrives via Run.user_id
         self._default_owner = owner_id
-        self._default_engine = config.default_engine
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
         self._passport = passport_plugin

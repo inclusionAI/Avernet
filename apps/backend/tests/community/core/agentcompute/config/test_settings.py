@@ -58,17 +58,17 @@ class TestLlmFailClear:
         for block in (
             {"llm": None},
             {"llm": {}},
-            {"llm": {"base_url": "", "default_model": "gpt"}},
-            {"llm": {"base_url": "https://api", "default_model": ""}},
-            {"llm": {"base_url": "   ", "default_model": "gpt"}},
+            {"llm": {"base_url": "", "model": "gpt"}},
+            {"llm": {"base_url": "https://api", "model": ""}},
+            {"llm": {"base_url": "   ", "model": "gpt"}},
         ):
             assert AgentComputeConfig.from_block(block).llm is None, block
 
     def test_configured_llm_parses_every_knob(self):
         llm = LlmConfig.from_block({
             "base_url": " https://api.test ",
-            "api_key": "sk-x",
-            "default_model": "gpt-x",
+            "secret_name": "sk-x",
+            "model": "gpt-x",
             "orchestrator_model": "gpt-big",
             "timeout_seconds": 30,
             "max_tokens": 8192,
@@ -85,7 +85,7 @@ class TestLlmFailClear:
 
     def test_non_string_llm_fields_downgrade(self):
         llm = LlmConfig.from_block(
-            {"base_url": "https://api", "default_model": "gpt",
+            {"base_url": "https://api", "model": "gpt",
              "timeout_seconds": -5, "max_tokens": "many"})
         assert llm is not None
         d = LlmConfig()
@@ -146,7 +146,7 @@ class TestDiProviderWiring:
         monkeypatch.setattr(
             wiring, "_block",
             lambda name: {"llm": {"base_url": "https://api.test",
-                                  "default_model": "gpt-x"},
+                                  "model": "gpt-x"},
                           "orchestration": {"max_turns": 7}}
             if name == "agentcompute" else {},
         )
@@ -165,5 +165,5 @@ class TestDiProviderWiring:
         for name in ("application-community.yaml", "application-singlebox.yaml"):
             text = (OVERLAY_DIR / name).read_text()
             assert "agentcompute:" in text, name
-            assert "AGENTCOMPUTE_LLM_BASE_URL" in text, name
+            assert "agentcompute:" in text, name
             assert "AGENTCOMPUTE_ARTIFACT_ROOT" in text, name

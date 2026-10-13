@@ -214,14 +214,10 @@ class AgentComputeModule(Module):
         from agentclaw.community.core.grt_chat.services import GrtChatService
         from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
         from agentclaw.community.plugin_api.passport import PassportPlugin
-        cfg = injector.get(AgentComputeConfig).platform
-        if not cfg.default_engine:
-            return None
         from agentclaw.community.plugins.community.agentcompute_platform import (
             AvernetBotPlatform,
         )
         return AvernetBotPlatform(
-            config=cfg,
             manifest_seam=injector.get(ManifestCreationSeam),
             bot_service=injector.get(BotServiceProtocol),
             passport_plugin=injector.get(PassportPlugin),
