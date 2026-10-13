@@ -31,6 +31,7 @@ ROUTE = [
     ("# spike/a2a/fault_proxy.py", "fault_proxy.py", "w"),
     ("# spike/a2a/probes/g1a_validate.py", "probes/g1a_validate.py", "w"),
     ("# spike/a2a/probes/g1b_checks.py", "probes/g1b_checks.py", "w"),
+    ("# spike/a2a/probes/g5_failure_paths.py", "probes/g5_failure_paths.py", "w"),
 ]
 TEST_PREFIX = "# spike/a2a/tests/"
 

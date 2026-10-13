@@ -273,20 +273,24 @@ def test_slow_subscriber_kicked_with_termination_signal():  # R7-7/R8-7 后半
     assert run(drain(slow)) is True                     # 流有限时间内结束
 
 
-def test_completion_marker_survives_queue_boundary():  # R9-2 复现场景
-    """队列差一位满 → 终态 status 占满 → marker 投递撞 QueueFull：终止必达。"""
+def test_completion_marker_survives_queue_boundary():  # R9-2/R10-1 复现
+    """真边界：q 由 subscribe 新建（backlog 承载历史，q 从 0 起）→
+    预填 SIZE-1 → 终态 status 占满 → marker 撞 QueueFull：终止必达。"""
     async def main():
         k = Kernel(engine="mock")
         rid, _ = await k.open_run("c", "kq2", "first", "d")
-        _b, q = await k.subscribe(rid, since_seq=0)    # task 事件已占 1
+        _backlog, q = await k.subscribe(rid, since_seq=0)   # backlog 持历史，q 空
         junk = {"seq": None, "type": "junk", "ev": {}}
-        for _ in range(SUBSCRIBER_QUEUE_SIZE - 2):     # 恰留 1 空位
+        for _ in range(SUBSCRIBER_QUEUE_SIZE - 1):     # 预填至差一位（R10-1）
             q.put_nowait(junk)
-        await k.complete_run(rid)                      # 终态 status 添满 → marker 边界
+        assert q.qsize() == SUBSCRIBER_QUEUE_SIZE - 1  # 前置边界断言
+        await k.complete_run(rid)                      # 终态 status 添满 → marker 撞满
         return rid, q
 
     async def consume(q):
-        """消费边界队列直到有限终止：final 标记或 None 关流信号。"""
+        """消费边界队列直到有限终止：final 标记或 None 关流信号。
+        若实现退回"满队列吞掉 marker"（评审变异验证），final 永不出现 →
+        q.get() 超时 → 测试失败。"""
         while True:
             ev = await asyncio.wait_for(q.get(), 5)
             if ev is None:
@@ -2532,7 +2536,118 @@ git commit -m "test(spike): G1b tightened assertions via real proxy chain"
 
 ### Task 11: G5 基准（同源双通道；判据预声明；rss 缺失判 not_run——R7-6）
 
-**Files:** Create `probes/g5_protocol.py`
+**Files:** Create `probes/g5_failure_paths.py`、`probes/g5_protocol.py`、Test `tests/test_g5_failure_paths.py`
+
+- [ ] **Step 0: 失败路径子模块（纯函数；供探针与负测共用——R10-2）**
+
+```python
+# spike/a2a/probes/g5_failure_paths.py
+"""G5 失败路径的纯函数子集：空样本不计算 median（直接结构化失败）、
+WS 断开/超时统一归入不完整轮。g5_protocol 导入使用；负测直接测此处。"""
+import json
+import statistics
+import time
+
+
+def finalize_stats(first: list, whole: list, incomplete: int, rss_kb: int,
+                   n_total: int) -> dict:
+    """聚合单通道轮次。空/部分样本：不计算 median，保留 incomplete 计数。"""
+    out = {"incomplete_rounds": incomplete, "samples": len(first),
+           "n_total": n_total, "rss_kb": rss_kb}
+    if first and whole:
+        out["p50_first_ms"] = statistics.median(first) * 1000
+        out["p50_whole_ms"] = statistics.median(whole) * 1000
+    else:
+        out["p50_first_ms"] = None
+        out["p50_whole_ms"] = None
+        out["all_failed"] = True                      # 全失败时不许 median 崩
+    return out
+
+
+async def ws_round(ws, i: int, t0: float):
+    """单轮 WS：返回 (first_s | None, whole_s | None, seen_terminal)。
+    连接关闭/超时/解析异常一律归入不完整轮（except Exception 不放行崩出）。"""
+    first = None
+    try:
+        while True:                                   # 业务 res（id 匹配）
+            msg = json.loads(await ws.recv())
+            if msg.get("type") == "res" and "task" in msg \
+                    and msg.get("id") == i:
+                first = time.monotonic() - t0
+                break
+        while True:                                   # 至终态
+            frame = json.loads(await ws.recv())
+            payload = frame.get("payload", {})
+            if payload.get("ev", {}).get("statusUpdate", {}).get("final"):
+                return first, time.monotonic() - t0, True
+    except Exception:                                 # R10-2：断开=不完整轮
+        return first, None, False
+    return first, None, False
+```
+
+```python
+# spike/a2a/tests/test_g5_failure_paths.py（R10-2 两负测 + 正路径）
+import asyncio
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "probes"))
+from g5_failure_paths import finalize_stats, ws_round
+
+
+def test_finalize_all_failed_returns_structured_failure():
+    """全部提前 EOF：不计算 median、不崩、all_failed=True。"""
+    s = finalize_stats([], [], incomplete=30, rss_kb=100_000, n_total=30)
+    assert s["all_failed"] is True
+    assert s["p50_first_ms"] is None and s["incomplete_rounds"] == 30
+
+
+def test_finalize_partial_still_reports_median():
+    s = finalize_stats([0.1, 0.2, 0.3], [1.0, 1.2], incomplete=1,
+                       rss_kb=100_000, n_total=3)
+    assert s["p50_first_ms"] == 200.0
+    assert s["incomplete_rounds"] == 1
+
+
+class _WS:
+    """recv 按 script 顺序返回文本或抛异常。"""
+
+    def __init__(self, script):
+        self._items = list(script)
+        self._i = 0
+
+    async def recv(self):
+        if self._i >= len(self._items):
+            raise RuntimeError("connection closed")
+        item = self._items[self._i]
+        self._i += 1
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+RES = '{"type":"res","id":0,"ok":true,"task":{"id":"t"}}'
+EV_FINAL = ('{"type":"event","payload":{"ev":{"statusUpdate":'
+            '{"final":true}}}}')
+
+
+def test_ws_round_normal_path():
+    first, whole, term = asyncio.run(ws_round(_WS([RES, EV_FINAL]), 0, 0.0))
+    assert term is True and first is not None and whole is not None
+
+
+def test_ws_round_disconnect_after_first_response():  # R10-2 负测
+    """首响应后断开 → seen_terminal=False、不崩、first 保序丢弃。"""
+    first, whole, term = asyncio.run(
+        ws_round(_WS([RES, RuntimeError("conn closed")]), 0, 0.0))
+    assert term is False and whole is None
+
+
+def test_ws_round_disconnect_before_first_response():
+    first, whole, term = asyncio.run(
+        ws_round(_WS([RuntimeError("conn closed")]), 0, 0.0))
+    assert term is False and first is None and whole is None
+```
 
 - [ ] **Step 1: 探针（双方同口径：每轮新建连接、后台执行、同一语义首事件；rss 必备）**
 
@@ -2549,7 +2664,6 @@ import argparse
 import asyncio
 import json
 import resource
-import statistics
 import sys
 import time
 
@@ -2557,6 +2671,7 @@ import httpx
 import uvicorn
 import websockets
 
+from g5_failure_paths import finalize_stats, ws_round
 from kernel import Kernel
 from server import build_app
 from v3_server import make_v3_app
@@ -2572,51 +2687,53 @@ async def bench_sse() -> dict:
     srv = uvicorn.Server(uvicorn.Config(build_app(kernel), port=20043,
                                         log_level="error"))
     task = asyncio.create_task(srv.serve())
-    first, whole = [], []
-    for _ in range(50):
-        try:
-            async with httpx.AsyncClient(timeout=2) as http:
-                await http.get("http://127.0.0.1:20043"
-                               "/.well-known/agent-card.json")
-            break
-        except Exception:
-            await asyncio.sleep(0.1)
-    incomplete = 0
-    for i in range(N):
-        t0 = time.monotonic()
-        first_t = None
-        seen_terminal = False
-        async with httpx.AsyncClient(timeout=10) as http:    # 每轮新连接（冷口径）
-            async with http.stream("POST", "http://127.0.0.1:20043/rpc", json={
-                    "jsonrpc": "2.0", "id": i,
-                    "method": "SendStreamingMessage",
-                    "params": {"message": {"role": "ROLE_USER",
-                                           "parts": [{"text": "bench"}],
-                                           "messageId": f"b-sse-{i}",
-                                           "contextId": f"g5-sse-{i}"}}}) as resp:
-                if resp.status_code != 200:
-                    incomplete += 1                      # 非成功轮不计入（R9-4）
-                    continue
-                async for line in resp.aiter_lines():    # 单循环：首事件+至终态
-                    if not line.startswith("data: "):
+    try:                                              # R10-2：异常路径也关服务器
+        for _ in range(50):
+            try:
+                async with httpx.AsyncClient(timeout=2) as http:
+                    await http.get("http://127.0.0.1:20043"
+                                   "/.well-known/agent-card.json")
+                break
+            except Exception:
+                await asyncio.sleep(0.1)
+        first, whole, incomplete = [], [], 0
+        for i in range(N):
+            t0 = time.monotonic()
+            first_t = None
+            seen_terminal = False
+            async with httpx.AsyncClient(timeout=10) as http:  # 每轮新连接
+                async with http.stream("POST",
+                        "http://127.0.0.1:20043/rpc", json={
+                        "jsonrpc": "2.0", "id": i,
+                        "method": "SendStreamingMessage",
+                        "params": {"message": {"role": "ROLE_USER",
+                                               "parts": [{"text": "bench"}],
+                                               "messageId": f"b-sse-{i}",
+                                               "contextId": f"g5-sse-{i}"}}) as resp:
+                    if resp.status_code != 200:
+                        incomplete += 1                  # 非成功轮（R9-4）
                         continue
-                    if first_t is None:
-                        first_t = time.monotonic() - t0  # 首业务事件（接收时）
-                    ev = json.loads(line[6:]).get("result", {})
-                    if "statusUpdate" in ev and ev["statusUpdate"].get("final"):
-                        seen_terminal = True
-                        break
-        if not seen_terminal:                            # 提前 EOF 不算成功样本
-            incomplete += 1
-            continue
-        first.append(first_t)
-        whole.append(time.monotonic() - t0)
-    srv.should_exit = True
-    await task
-    return {"p50_first_ms": statistics.median(first) * 1000,
-            "p50_whole_ms": statistics.median(whole) * 1000,
-            "incomplete_rounds": incomplete,
-            "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+                    async for line in resp.aiter_lines():  # 首事件+至终态单循环
+                        if not line.startswith("data: "):
+                            continue
+                        if first_t is None:
+                            first_t = time.monotonic() - t0
+                        ev = json.loads(line[6:]).get("result", {})
+                        if "statusUpdate" in ev and ev["statusUpdate"].get(
+                                "final"):
+                            seen_terminal = True
+                            break
+            if not seen_terminal:
+                incomplete += 1
+                continue
+            first.append(first_t)
+            whole.append(time.monotonic() - t0)
+        return finalize_stats(first, whole, incomplete,
+                              resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                              n_total=N)               # 空样本不 median（R10-2）
+    finally:
+        srv.should_exit = True
+        await task
 
 
 async def bench_ws() -> dict:
@@ -2624,56 +2741,50 @@ async def bench_ws() -> dict:
     v3app = make_v3_app(kernel)
     srv = uvicorn.Server(uvicorn.Config(v3app, port=20044, log_level="error"))
     task = asyncio.create_task(srv.serve())
-    for _ in range(50):
-        try:
-            reader, writer = await asyncio.open_connection(
-                "127.0.0.1", 20044)
-            writer.close()
-            break
-        except OSError:
-            await asyncio.sleep(0.1)
-    first, whole, incomplete = [], [], 0
-    for i in range(N):
-        t0 = time.monotonic()
-        seen_terminal = False
-        async with websockets.connect("ws://127.0.0.1:20044/ws") as ws:
-            await ws.recv()                       # greeting（连接即发）
-            await ws.send(json.dumps({
-                "method": "chat.send", "id": i,
-                "params": {"sessionKey": f"g5-ws-{i}",
-                           "idempotency_key": f"g5-ws-{i}",
-                           "message": {"role": "user",
-                                       "content": [{"type": "text",
-                                                    "text": "bench"}]}}}))
-            while True:                           # 首业务响应 = 携 task 且 id 匹配的 res
-                res = json.loads(await ws.recv())
-                if res.get("type") == "res" and "task" in res \
-                        and res.get("id") == i:
-                    first.append(time.monotonic() - t0)
-                    break
-            while True:                           # 完整消费至终态（R9-4）
-                frame = json.loads(await ws.recv())
-                payload = frame.get("payload", {})
-                if payload.get("ev", {}).get("statusUpdate", {}).get("final"):
-                    seen_terminal = True
-                    break
-        if not seen_terminal:                     # 不完整轮不进统计
-            incomplete += 1
-            continue
-        whole.append(time.monotonic() - t0)
-    srv.should_exit = True
-    await task
-    return {"p50_first_ms": statistics.median(first) * 1000,
-            "p50_whole_ms": statistics.median(whole) * 1000,
-            "incomplete_rounds": incomplete,
-            "rss_kb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+    try:
+        for _ in range(50):
+            try:
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", 20044)
+                writer.close()
+                break
+            except OSError:
+                await asyncio.sleep(0.1)
+        first, whole, incomplete = [], [], 0
+        for i in range(N):
+            t0 = time.monotonic()
+            async with websockets.connect("ws://127.0.0.1:20044/ws") as ws:
+                await ws.recv()                  # greeting（连接即发）
+                await ws.send(json.dumps({
+                    "method": "chat.send", "id": i,
+                    "params": {"sessionKey": f"g5-ws-{i}",
+                               "idempotency_key": f"g5-ws-{i}",
+                               "message": {"role": "user",
+                                           "content": [{"type": "text",
+                                                        "text": "bench"}]}}}))
+                f, w, term = await ws_round(ws, i, t0)   # 断开=不完整轮（R10-2）
+            if not term:
+                incomplete += 1
+                continue
+            first.append(f)
+            whole.append(w)
+        return finalize_stats(first, whole, incomplete,
+                              resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                              n_total=N)
+    finally:                                          # R10-2：异常也关服务器
+        srv.should_exit = True
+        await task
 
 
 def aggregate(sse: dict, ws: dict) -> dict:
     if sse["incomplete_rounds"] > 0 or ws["incomplete_rounds"] > 0:
-        return {"gate": "G5", "verdict": "fail",    # R9-4：不完整样本即失败
+        return {"gate": "G5", "verdict": "fail",    # R9-4/R10-2：失败也出证据
                 "results": {"incomplete_sse": sse["incomplete_rounds"],
-                            "incomplete_ws": ws["incomplete_rounds"]},
+                            "samples_sse": sse.get("samples"),
+                            "incomplete_ws": ws["incomplete_rounds"],
+                            "samples_ws": ws.get("samples"),
+                            "all_failed": sse.get("all_failed", False)
+                            or ws.get("all_failed", False)},
                 "evidence_level": "protocol-perf-same-source"}
     p50_delta = sse["p50_first_ms"] - ws["p50_first_ms"]
     tput_ratio = ws["p50_whole_ms"] / max(sse["p50_whole_ms"], 1e-9)
@@ -2712,9 +2823,14 @@ def main() -> int:
         with open("spike/a2a/evidence/G5-rss.jsonl", "a") as f:
             f.write(line + "\n")
         return 0
-    out = aggregate(asyncio.run(bench_sse()), asyncio.run(bench_ws()))
+    out = None
+    try:
+        out = aggregate(asyncio.run(bench_sse()), asyncio.run(bench_ws()))
+    except Exception as exc:                  # R10-2：任何异常也覆盖写 fail 证据
+        out = {"gate": "G5", "verdict": "fail", "error": repr(exc)[:400],
+               "evidence_level": "protocol-perf-same-source"}
     print(json.dumps(out, ensure_ascii=False, indent=2))
-    with open("spike/a2a/evidence/G5.json", "w") as f:
+    with open("spike/a2a/evidence/G5.json", "w") as f:   # 总是覆盖，不保旧 pass
         f.write(json.dumps(out, ensure_ascii=False, indent=2))
     return 0 if out["verdict"] == "pass" else 1
 
@@ -2735,8 +2851,9 @@ spike/a2a/.venv/bin/python spike/a2a/probes/g5_protocol.py              # 聚合
 Expected: 最终 `verdict: "pass"`（rss 样本不足 → not_run 且退出码 1；未过判据 → fail；**任何情况不允许改探针内阈值**）
 
 ```bash
-git add spike/a2a/probes/g5_protocol.py spike/a2a/evidence/G5.json
-git commit -m "test(spike): G5 symmetric cold-channel benchmark, rss required"
+git add spike/a2a/probes/g5_failure_paths.py spike/a2a/probes/g5_protocol.py \
+  spike/a2a/tests/test_g5_failure_paths.py spike/a2a/evidence/G5.json
+git commit -m "test(spike): G5 failure-path evidence (empty samples, ws disconnects)"
 ```
 
 ---
@@ -2879,7 +2996,7 @@ spike/a2a/.harness/venv/bin/pip install \
 # 复跑关卡：
 python3 spike/a2a/.harness/assemble.py           # 计划 → src/ 装配 + py_compile
 spike/a2a/.harness/venv/bin/python -m pytest \
-  spike/a2a/.harness/src/tests -q --no-header    # 期望全 PASS（R9 后 55+）
+  spike/a2a/.harness/src/tests -q --no-header    # 期望全 PASS（数量以实际输出为准）
 ```
 
 装配器 `spike/a2a/.harness/assemble.py` **随仓库跟踪**（ignore 只作用于
