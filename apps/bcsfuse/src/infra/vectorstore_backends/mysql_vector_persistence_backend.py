@@ -265,7 +265,7 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
 
     @_synchronized_connection
     def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
-        """Read exact-owner vectors, including IDs outside the usual prefix."""
+        """Read one Worker's active vectors using the ID primary-key prefix."""
         self._ensure_connection()
         cursor = self._conn.cursor()
         # LIKE wildcards can occur in Worker IDs; the colon separates the
@@ -279,29 +279,8 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
                 WHERE `id` LIKE %s ESCAPE '!'
                   AND `is_deleted` = 0
             """, (pattern,))
-            rows = cursor.fetchall()
-            # VectorPoint permits arbitrary IDs. Scan only metadata for the
-            # uncommon non-prefixed case, then load full rows by primary key.
-            cursor.execute(f"""
-                SELECT `id`
-                FROM {TABLE_NAME}
-                WHERE `is_deleted` = 0
-                  AND `id` NOT LIKE %s ESCAPE '!'
-                  AND JSON_UNQUOTE(JSON_EXTRACT(`payload`, '$.worker_id')) = %s
-            """, (pattern, worker_id))
-            exceptional_ids = [row[0] for row in cursor.fetchall()]
-            for point_id in exceptional_ids:
-                cursor.execute(f"""
-                    SELECT `id`, `vector`, `payload`
-                    FROM {TABLE_NAME}
-                    WHERE `id` = %s AND `is_deleted` = 0
-                """, (point_id,))
-                row = cursor.fetchone()
-                if row is not None:
-                    rows.append(row)
-
             points = []
-            for row in rows:
+            for row in cursor.fetchall():
                 try:
                     payload = json.loads(row[2]) if row[2] else {}
                     if payload.get("worker_id") != worker_id:

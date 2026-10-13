@@ -103,7 +103,7 @@ def test_worker_payload_update_uses_scoped_durable_read(tmp_path) -> None:
     class ScopedBackend(FakePersistenceBackend):
         def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
             return [point for point in self.points.values()
-                    if point.payload.get("worker_id") == worker_id]
+                    if point.id.startswith(f"{worker_id}:")]
 
         def load_all(self) -> list[VectorPoint]:
             raise AssertionError("worker update must not scan all vectors")
@@ -114,13 +114,11 @@ def test_worker_payload_update_uses_scoped_durable_read(tmp_path) -> None:
         f"{owner}:nested:full": _point(
             f"{owner}:nested:full", "other", worker_id=f"{owner}:nested",
         ),
-        "legacy-random-id": _point("legacy-random-id", "legacy", worker_id=owner),
     })
     store = _store(backend, tmp_path)
     try:
-        assert store.update_payload_by_worker(owner, {"runtime_state": "online"}) == 2
+        assert store.update_payload_by_worker(owner, {"runtime_state": "online"}) == 1
         assert backend.points[f"{owner}:default:full"].payload["runtime_state"] == "online"
-        assert backend.points["legacy-random-id"].payload["runtime_state"] == "online"
         assert "runtime_state" not in backend.points[f"{owner}:nested:full"].payload
     finally:
         store.close()
