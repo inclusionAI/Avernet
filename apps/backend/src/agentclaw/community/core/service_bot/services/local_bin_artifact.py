@@ -13,6 +13,17 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+# CodeFuse creates and upgrades these launchers in the runtime home. Their
+# symlinks can be absolute while the draft home is mounted under a merge-NAS
+# path, so materializing them during a host-side build can reference the
+# build host rather than the published bot. Excluding only these fixed
+# runtime-managed names lets unrelated broken symlinks still fail loudly.
+_RUNTIME_MANAGED_LOCAL_BIN_NAMES = (
+    "cfuse",
+    "cfuse-claude",
+    "cfuse-codex",
+)
+
 
 def _validate_home_dirs(home: Path) -> None:
     # COSEC: fixed home metadata directories must not redirect copying outside
@@ -76,14 +87,16 @@ def sync_local_bin_artifact(
         if not source_bin.is_dir():
             raise NotADirectoryError("draft .local/bin is not a directory")
         target_bin.mkdir(parents=True, exist_ok=True)
+        exclude_paths = (
+            *extra_root_rules(build_ignore_paths, ".local/bin"),
+            *_RUNTIME_MANAGED_LOCAL_BIN_NAMES,
+        )
         # CLI installers commonly link into sibling tool directories. Match
         # the existing runtime copy's -L policy to publish standalone files.
         run_command(
             cmd=[
                 "sudo", "rsync", "-avL", "--delete", "--delete-excluded",
-                *(f"--exclude=/{path}" for path in extra_root_rules(
-                    build_ignore_paths, ".local/bin",
-                )),
+                *(f"--exclude=/{path}" for path in exclude_paths),
                 f"{source_bin}/", f"{target_bin}/",
             ],
             command_name="rsync local bin artifact",
@@ -137,6 +150,7 @@ def restore_local_bin_artifact(
         run_command(
             cmd=[
                 "sudo", "rsync", "-avL", "--chown=1000:1000",
+                *(f"--exclude=/{path}" for path in _RUNTIME_MANAGED_LOCAL_BIN_NAMES),
                 f"{source_bin}/", f"{target_bin}/",
             ],
             command_name="rsync draft restore local bin",
