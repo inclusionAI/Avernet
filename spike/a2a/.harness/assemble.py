@@ -32,6 +32,11 @@ ROUTE = [
     ("# spike/a2a/probes/g1a_validate.py", "probes/g1a_validate.py", "w"),
     ("# spike/a2a/probes/g1b_checks.py", "probes/g1b_checks.py", "w"),
     ("# spike/a2a/probes/g5_failure_paths.py", "probes/g5_failure_paths.py", "w"),
+    ("# spike/a2a/probes/g5_protocol.py", "probes/g5_protocol.py", "w"),
+    ("# spike/a2a/probes/g1a_sdk.py", "probes/g1a_sdk.py", "w"),
+    ("# spike/a2a/probes/g1b_playwright.py", "probes/g1b_playwright.py", "w"),
+    ("# spike/a2a/probes/g3_realtime.py", "probes/g3_realtime.py", "w"),
+    ("# spike/a2a/probes/report.py", "probes/report.py", "w"),
 ]
 TEST_PREFIX = "# spike/a2a/tests/"
 

@@ -2709,7 +2709,7 @@ async def bench_sse() -> dict:
                         "params": {"message": {"role": "ROLE_USER",
                                                "parts": [{"text": "bench"}],
                                                "messageId": f"b-sse-{i}",
-                                               "contextId": f"g5-sse-{i}"}}) as resp:
+                                               "contextId": f"g5-sse-{i}"}}}) as resp:
                     if resp.status_code != 200:
                         incomplete += 1                  # 非成功轮（R9-4）
                         continue
@@ -2967,7 +2967,7 @@ AVERNET_PRE_PUSH_MERGE_TARGET=origin/dev git push
 
 两层：
 
-**第一层：语法编译。（v3.1 实测 28 块全绿——R9 文案同步）**
+**第一层：语法编译。（v3.4 实测 30 块全绿；失败必须非零退出——R11-1）**
 
 ```bash
 python3 - <<'EOF'
@@ -2983,6 +2983,7 @@ for i, b in enumerate(blocks):
         failed += 1
         print(f"BLOCK {i} FAILED")
 print(f"blocks={len(blocks)} failed={failed}")
+sys.exit(1 if failed else 0)     # R11-1：仅打印不退出会漏过 pytest 绿的假象
 EOF
 ```
 
