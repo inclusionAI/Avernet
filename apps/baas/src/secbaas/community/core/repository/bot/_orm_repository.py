@@ -540,6 +540,72 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
             ) from exc
 
     @with_orm_session
+    def reconcile_unclaimed_pending_bots(
+        self,
+        bot_uuid: str,
+        tenant: str,
+        env: str,
+        modifier: str = "system",
+        exclude_bot_id: int | None = None,
+    ) -> int:
+        """Soft-delete live PENDING clones for the uuid (see Protocol docstring)."""
+        log.info(
+            "reconcile_unclaimed_pending_bots: bot_uuid=%s, tenant=%s, env=%s",
+            bot_uuid,
+            tenant,
+            env,
+        )
+        from sqlalchemy import func as sa_func
+
+        from secbaas.community.core.repository.bot_device_rel import BotDeviceRelModel
+
+        query = (
+            self._session.query(BotModel)
+            .filter(
+                BotModel.bot_uuid == bot_uuid,
+                BotModel.tenant == tenant,
+                BotModel.env == env,
+                BotModel.status == "PENDING",
+                BotModel.is_deleted == 0,
+            )
+            .order_by(BotModel.id.desc())
+        )
+        if exclude_bot_id is not None:
+            query = query.filter(BotModel.id != exclude_bot_id)
+        rows = query.all()
+        for row in rows:
+            self._session.query(BotDeviceRelModel).filter(
+                BotDeviceRelModel.bot_id == row.id,
+                BotDeviceRelModel.tenant == tenant,
+                BotDeviceRelModel.env == env,
+                BotDeviceRelModel.is_deleted == 0,
+            ).update(
+                {
+                    "is_deleted": BotDeviceRelModel.id,
+                    "modifier": modifier,
+                    "gmt_modified": sa_func.now(),
+                },
+                synchronize_session=False,
+            )
+            self._session.query(BotModel).filter(
+                BotModel.id == row.id,
+                BotModel.tenant == tenant,
+                BotModel.env == env,
+                BotModel.is_deleted == 0,
+            ).update(
+                {
+                    "is_deleted": row.id,
+                    "modifier": modifier,
+                    "gmt_modified": sa_func.now(),
+                },
+                synchronize_session=False,
+            )
+        log.info(
+            "[bot:reconcile_unclaimed_pending_bots] reconciled=%s rows", len(rows)
+        )
+        return len(rows)
+
+    @with_orm_session
     def list_bots(
         self,
         *,
