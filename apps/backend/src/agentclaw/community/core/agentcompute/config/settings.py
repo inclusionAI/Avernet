@@ -58,26 +58,25 @@ class LlmConfig:
 
     @classmethod
     def from_block(cls, block: dict) -> "LlmConfig | None":
-        """Parse the ``agentcompute.llm`` block; ``None`` when unconfigured.
+        """Parse the ``llm`` yaml block — the SAME block the harness reads.
 
-        ``None`` is the fail-clear state the submit gate answers with a 400 —
-        an empty ``base_url``/``default_model`` after env expansion means no
-        LLM is wired, whether the block is absent or its placeholders came up
-        empty. A configured block parses every knob defensively.
+        ``base_url`` and ``secret_name`` come from the existing llm yaml
+        configuration; ``api_key`` carries the secret_name (DI resolves via
+        SecretResolver). ``model`` and ``timeout_ms`` read the block's
+        per-deployment knobs. None gravitates to the fail-clear 400.
         """
         block = block or {}
         base_url = _as_str(block, "base_url").strip()
-        model = _as_str(block, "default_model").strip()
+        model = _as_str(block, "model").strip() or "glm-5.2"
         if not base_url or not model:
             return None
-        orchestrator_model = _as_str(block, "orchestrator_model").strip()
-        key = _as_str(block, "api_key")
+        secret_name = _as_str(block, "secret_name").strip()
         return cls(
             base_url=base_url,
-            api_key=key,
+            api_key=secret_name,
             default_model=model,
-            orchestrator_model=orchestrator_model or None,
-            timeout_seconds=_as_float(block, "timeout_seconds", cls().timeout_seconds, minimum=0.0),
+            orchestrator_model=_as_str(block, "orchestrator_model").strip() or None,
+            timeout_seconds=_as_float(block, "timeout_ms", cls().timeout_seconds * 1000.0) / 1000.0,
             max_tokens=_as_int(block, "max_tokens", cls().max_tokens, minimum=1),
             max_retries=_as_int(block, "max_retries", cls().max_retries, minimum=0),
         )

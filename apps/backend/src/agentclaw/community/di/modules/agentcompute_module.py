@@ -101,13 +101,13 @@ class AgentComputeModule(Module):
     @provider
     @singleton
     def provide_config(self) -> AgentComputeConfig:
-        # The `agentcompute` user_config block, not a bare construction: a
-        # deployment that ships no block parses to the bare defaults, one
-        # that ships it gets every knob wired (llm env-injected by the
-        # overlay; missing LLM stays fail-clear at submit). from_block is
-        # defensive end to end — a bad value downgrades to its default
-        # rather than wedging boot.
-        return AgentComputeConfig.from_block(_block("agentcompute"))
+        # The `agentcompute` block carries the operational knobs; the LLM
+        # comes from the TOP-LEVEL `llm` yaml block (the same one the
+        # harness reads — base_url + secret_name, resolved via
+        # SecretResolver). No agentcompute-specific LLM config exists.
+        block = _block("agentcompute")
+        block["llm"] = _block("llm")
+        return AgentComputeConfig.from_block(block)
 
     @provider
     @singleton
