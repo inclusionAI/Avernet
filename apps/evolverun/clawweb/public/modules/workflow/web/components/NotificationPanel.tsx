@@ -61,7 +61,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         setGroups(data.onFailureGroups)
         setMessageTitle(data.onFailureMessageTitle ?? '')
         setIncludeRunLink(data.onFailureMessageIncludeRunLink)
-        setNotifyOn(data.notifyOn && data.notifyOn.length > 0 ? data.notifyOn : MVP_NOTIFY_EVENTS)
+        setNotifyOn(data.notifyOn != null ? data.notifyOn : MVP_NOTIFY_EVENTS)
         setEventOptions(data.eventOptions ?? {})
       } else {
         resetForm()
