@@ -42,6 +42,7 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.tracer import (
         TestTracerModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.metrics import TestMetricsModule
     from agentclaw.community.di.modules.infrastructure.test.drm import TestDRMModule
     from agentclaw.community.di.modules.infrastructure.test.sandbox_runtime import (
         TestSandboxRuntimeModule,
@@ -91,6 +92,7 @@ def _common_test_doubles() -> list[Module]:
         TestIdentityModule(),
         TestHealthModule(),
         TestTracerModule(),
+        TestMetricsModule(),
         TestDRMModule(),
         TestSandboxRuntimeModule(),
         TestSkillCenterClientModule(),
@@ -319,6 +321,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.tracer import (
             CommunityTracerModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.metrics import (
+            CommunityMetricsModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.outbound_rules import (
             CommunityOutboundRulesModule,
         )
@@ -366,6 +371,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityHealthModule(),
             CommunityHarnessModule(),
             CommunityTracerModule(),
+            CommunityMetricsModule(),
             CommunityOutboundRulesModule(),
             CommunityDRMModule(),
             CommunitySandboxRuntimeModule(),
