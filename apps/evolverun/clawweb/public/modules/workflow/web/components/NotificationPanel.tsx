@@ -22,15 +22,11 @@ const ALL_NOTIFY_EVENTS: { value: DingTalkNotifyEvent; label: string }[] = [
   { value: 'workflow_failed', label: '工作流失败' },
 ]
 
-const MVP_NOTIFY_EVENTS: DingTalkNotifyEvent[] = [
+const DEFAULT_NOTIFY_EVENTS: DingTalkNotifyEvent[] = [
   'node_failed',
   'workflow_failed',
   'workflow_succeeded',
 ]
-
-function isMvpEvent(event: DingTalkNotifyEvent): boolean {
-  return MVP_NOTIFY_EVENTS.includes(event)
-}
 
 export default function NotificationPanel({ workflowId }: NotificationPanelProps) {
   const [config, setConfig] = useState<NotificationConfig | null>(null)
@@ -44,7 +40,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
   const [groups, setGroups] = useState<DingTalkGroupTarget[]>([])
   const [messageTitle, setMessageTitle] = useState('')
   const [includeRunLink, setIncludeRunLink] = useState(true)
-  const [notifyOn, setNotifyOn] = useState<DingTalkNotifyEvent[]>(MVP_NOTIFY_EVENTS)
+  const [notifyOn, setNotifyOn] = useState<DingTalkNotifyEvent[]>(DEFAULT_NOTIFY_EVENTS)
   const [eventOptions, setEventOptions] = useState<Partial<Record<DingTalkNotifyEvent, DingTalkEventOptions>>>({})
   const [saving, setSaving] = useState(false)
 
@@ -61,7 +57,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         setGroups(data.onFailureGroups)
         setMessageTitle(data.onFailureMessageTitle ?? '')
         setIncludeRunLink(data.onFailureMessageIncludeRunLink)
-        setNotifyOn(data.notifyOn != null ? data.notifyOn : MVP_NOTIFY_EVENTS)
+        setNotifyOn(data.notifyOn != null ? data.notifyOn : DEFAULT_NOTIFY_EVENTS)
         setEventOptions(data.eventOptions ?? {})
       } else {
         resetForm()
@@ -81,7 +77,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
     setGroups([])
     setMessageTitle('')
     setIncludeRunLink(true)
-    setNotifyOn(MVP_NOTIFY_EVENTS)
+    setNotifyOn(DEFAULT_NOTIFY_EVENTS)
     setEventOptions({})
   }, [])
 
@@ -247,38 +243,32 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
         <div className="grid grid-cols-2 gap-2">
           {ALL_NOTIFY_EVENTS.map((item) => {
             const checked = notifyOn.includes(item.value)
-            const disabled = !isMvpEvent(item.value)
             return (
               <label
                 key={item.value}
-                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
+                className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
                   checked ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
-                } ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-                title={disabled ? '该事件将在后续版本支持' : undefined}
+                }`}
               >
                 <input
                   type="checkbox"
                   checked={checked}
-                  disabled={disabled}
                   onChange={() => toggleEvent(item.value)}
                   className="rounded border-gray-300"
                 />
                 <span>{item.label}</span>
-                {!isMvpEvent(item.value) && (
-                  <span className="ml-auto rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">即将支持</span>
-                )}
               </label>
             )
           })}
         </div>
       </div>
 
-      {/* Per-event options (Phase 1 MVP: only selected events) */}
-      {notifyOn.some((e) => isMvpEvent(e)) && (
+      {/* Per-event options */}
+      {notifyOn.length > 0 && (
         <div className="mb-4 rounded-lg border border-teal-200 bg-white p-4">
           <h5 className="mb-2 text-xs font-semibold text-teal-700">⚙️ 事件消息配置</h5>
           <div className="space-y-3">
-            {notifyOn.filter(isMvpEvent).map((event) => (
+            {notifyOn.map((event) => (
               <div key={event} className="rounded-md border border-gray-100 bg-gray-50 p-3">
                 <div className="mb-2 text-xs font-medium text-gray-700">
                   {ALL_NOTIFY_EVENTS.find((e) => e.value === event)?.label ?? event}
@@ -316,6 +306,19 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
                         className="rounded border-gray-300"
                       />
                       包含节点输出
+                    </label>
+                  </div>
+                )}
+                {event === 'workflow_succeeded' && (
+                  <div className="mt-2 flex items-center gap-4">
+                    <label className="flex items-center gap-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={eventOptions[event]?.includeFinalOutput ?? false}
+                        onChange={(e) => updateEventOption(event, 'includeFinalOutput', e.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      包含最终总结输出
                     </label>
                   </div>
                 )}
