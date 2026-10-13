@@ -1,0 +1,29 @@
+{
+  "gate": "G1b-lite",
+  "proxy_mode": "shim",
+  "verdict": "pass",
+  "checks": {
+    "no_token_401": true,
+    "good_token_200": true,
+    "stream_200": true,
+    "at_least_5_events": true,
+    "events_not_single_batch": true,
+    "final_present": true,
+    "replay_seq_sorted": true,
+    "replay-reaches-final": true
+  },
+  "gaps_ms": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "event_count": 10,
+  "evidence_level": "protocol-contract",
+  "note": "httpx-based lightweight; real proxy + browser Playwright deferred to formal singlebox"
+}
