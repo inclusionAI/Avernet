@@ -1171,3 +1171,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/provider_scope.rs"]
+mod collaboration_scope_tests;

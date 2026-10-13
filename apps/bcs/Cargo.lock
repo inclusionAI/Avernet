@@ -1628,6 +1628,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-domain",
  "bcs-group",
  "bcs-message-store",
@@ -1637,6 +1638,7 @@ dependencies = [
  "bcs-system-message",
  "bcs-test-support",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
