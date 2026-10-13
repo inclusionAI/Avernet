@@ -586,3 +586,5 @@ mod history;
 mod fallback;
 mod visibility;
 mod loop_output;
+
+mod provider_scope;

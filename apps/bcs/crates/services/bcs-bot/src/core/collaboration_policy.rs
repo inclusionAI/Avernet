@@ -62,6 +62,12 @@ mod tests {
         assert!(matches!(enforce_owner_scope(&[disabled], &["local".into()]), Err(ServiceError::Forbidden(_))));
     }
     #[test]
+    fn a_shared_restricted_provider_does_not_make_different_owners_equal() {
+        let config = Some(r#"{"collaboration_scope":"same_owner"}"#);
+        let actors = [actor("local-alice", Some("alice"), config), actor("local-bob", Some("bob"), config)];
+        assert!(matches!(enforce_owner_scope(&actors, &["local-alice".into(), "local-bob".into()]), Err(ServiceError::Forbidden(_))));
+    }
+    #[test]
     fn legacy_policy_preserves_behavior_but_unknown_owner_and_bad_policy_fail_closed() {
         assert_eq!(enforce_owner_scope(&[actor("legacy", None, Some("{}"))], &["legacy".into()]).unwrap(), None);
         for config in [r#"{"collaboration_scope":"same_owner"}"#, r#"{"collaboration_scope":"unknown"}"#, "[]"] {

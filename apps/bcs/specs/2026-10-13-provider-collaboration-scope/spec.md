@@ -73,5 +73,14 @@ real MySQL execution and sustained-load testing remain CI/deployment validation.
 - `bcs-group/tests/provider_collaboration_scope.rs`: actual Human invitation is
   denied while a restricted Bot participates and resumes legacy behavior after
   it leaves, using the same valid invitation token.
+- Group scope tests also exercise fenced public/private membership mutations and
+  Workbench access with a stale foreign Session grant, including recovery after
+  the last restricted group participant leaves.
+- `bcs-http/tests/unit/provider_scope.rs`: omitted/null request compatibility,
+  exact scope values, HTTP 400 for invalid values, effective policy responses
+  and corrupt Provider configuration rejection.
+- `bcs-message/src/tests/provider_scope.rs`: actual group/session history reads
+  reject Public/foreign callers even with an owned-Bot view, accept the owner
+  and an owned Bot, and reject a mixed-owner Session while the group is restricted.
 - Bot/group/message-flow/edge-permission/message/HTTP suites preserve standard
   Provider and unbound legacy behavior.
