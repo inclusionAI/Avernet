@@ -838,6 +838,8 @@ dependencies = [
 name = "bcs-bridge-qwenwork"
 version = "0.1.3"
 dependencies = [
+ "anyhow",
+ "dirs",
  "async-trait",
  "axum",
  "bcs-bridge-core",

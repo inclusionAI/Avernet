@@ -13,6 +13,36 @@ BCS WS / Provider webhook
   <- bridge encoder (chat / agent stream and terminal)
 ```
 
+## Initialize the desktop connection
+
+In a binary with the `init` command, register a QwenWork Bot first, then run:
+
+```sh
+bcs-bridge --config ~/.bcn-bridge/qwenwork.toml init --engine qwenwork
+```
+
+The released `0.1.4-beta.1` binary predates this command. A new distribution is
+required before advertising automatic initialization for downloadable releases.
+
+Initialization detects exactly one installed `QwenWorkCN` or `QwenWork` database,
+validates its chat metadata schema read-only, generates separate channel and Hook
+credentials, and writes the registered Bot's engine options. It backs up both
+files, atomically writes private files, merges the required Hooks while preserving
+other Hooks, and reuses credentials on repeat execution. It never edits the
+WeCom channel database. Conflicting existing HTTP Hooks on the selected listener
+fail without modifying configuration.
+
+Fill the printed WebSocket URL, Bot ID and Secret in the desktop's WeCom Bot
+channel. Reload desktop Hooks, start bridge and enable the channel. The Secret
+is printed deliberately for local setup; do not paste that output into issues.
+
+If detection is ambiguous or your installation uses different paths, append
+`--option database_path=/absolute/path/agents.db` and/or
+`--option settings_path=/absolute/path/settings.json`. An alternate loopback
+listener can be chosen with `--option listen=127.0.0.1:52493`; use the resulting
+printed URL and health command. The command requires exactly one QwenWork Bot
+in the selected bridge configuration.
+
 ## Configure
 
 Register using the normal bridge flow with `--mode plugin --engine qwenwork`,

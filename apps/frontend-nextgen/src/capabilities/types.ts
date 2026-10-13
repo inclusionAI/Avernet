@@ -387,6 +387,8 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint: string) => CapabilityResult<{ providerSlug: string; apiUrl: string }>;
+
   /**
    * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。
    * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。

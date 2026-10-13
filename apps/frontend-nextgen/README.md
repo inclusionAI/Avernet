@@ -34,3 +34,24 @@ npm run ci
 ## License
 
 Apache-2.0. See the Avernet repository root license and `LEGAL.md`.
+
+### QwenWork external Bot onboarding
+
+The external Bot dialog includes a QwenWork tab with four steps: download the
+version-pinned bridge installer and checksum file, register with a provider-scoped
+plugin token, initialize local settings and fill the printed WeCom channel information, then
+start the bridge and check connectivity. No shell commands run inside the browser.
+Download and install are separate commands; SHA-256 is verified before the
+installer executes. The recommended version is explicitly shown as
+`0.1.4-beta.1`. Users can open the release page for other versions. The page does
+not query the GitHub API or claim that its pinned version is the latest.
+Maintainers update the public distribution links after validating a new release.
+
+`getQwenWorkBotRegistrationConfig` supplies the deployment-specific provider slug
+(default `local`) and API URL. The generated command uses the public bridge's
+`static-bearer` resolver and explicit BCS endpoints. It writes to a separate
+`~/.bcn-bridge/qwenwork.toml` and does not start until the user supplies local
+initialization with the registered engine callback. Initialization owns secrets,
+database detection, backups and Hook merging. The UI explicitly states that
+the released 0.1.4-beta.1 lacks `init` until a new distribution is published. The local health endpoint
+checks QwenWork connectivity; the external Bot list reports BCN reachability.

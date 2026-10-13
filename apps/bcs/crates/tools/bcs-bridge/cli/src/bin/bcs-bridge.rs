@@ -51,5 +51,6 @@ use std::process::ExitCode;
 use bcs_bridge_app::BridgeApp;
 
 fn main() -> ExitCode {
-    BridgeApp::builder().engine(bcs_bridge_qwenwork::QwenWorkFactory).build().main()
+    BridgeApp::builder().engine(bcs_bridge_qwenwork::QwenWorkFactory)
+        .initializer("qwenwork", bcs_bridge_qwenwork::setup::initialize).build().main()
 }

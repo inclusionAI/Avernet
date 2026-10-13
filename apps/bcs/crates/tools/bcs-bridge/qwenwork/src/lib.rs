@@ -1,4 +1,5 @@
 //! QwenWork desktop adapter. BCN transport and run ownership remain in bridge core.
+pub mod setup;
 mod lifecycle;
 mod questions;
 mod desktop_control;

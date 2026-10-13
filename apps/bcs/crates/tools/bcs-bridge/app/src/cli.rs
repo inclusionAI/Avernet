@@ -18,13 +18,24 @@ pub struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Register this agent as a BCS Bot and save a gateway or plugin configuration
-    Register(registration::RegisterArgs),
+    Register(Box<registration::RegisterArgs>),
+    /// Initialize registered engine configuration and print desktop connection instructions
+    Init(InitArgs),
     /// Run the bridge in the foreground, or detach with --daemon
     Start(StartArgs),
     /// Show this user's bridge instance without loading configuration
     Status,
     /// Gracefully stop this user's bridge instance without loading configuration
     Stop,
+}
+
+#[derive(Args)]
+struct InitArgs {
+    #[arg(long)]
+    engine: String,
+    /// Optional initializer setting, e.g. database_path=/absolute/path/agents.db
+    #[arg(long = "option")]
+    options: Vec<String>,
 }
 
 #[derive(Args)]
@@ -79,7 +90,18 @@ pub async fn run(cli: Cli, app: &BridgeApp) -> anyhow::Result<()> {
             .join(".bcn-bridge/bridge.toml"),
     };
     match cli.command {
-        Commands::Register(args) => registration::register(args, &config_path, app).await,
+        Commands::Register(args) => registration::register(*args, &config_path, app).await,
+        Commands::Init(args) => {
+            let mut options = toml::Table::new();
+            for option in args.options {
+                let (key, value) = option.split_once('=').context("--option must use key=value")?;
+                if key.is_empty() || value.is_empty() || options.insert(key.to_owned(), value.into()).is_some() {
+                    bail!("Initializer options must be nonempty and unique");
+                }
+            }
+            println!("{}", app.initialize(&args.engine, &config_path, &options)?);
+            Ok(())
+        }
         Commands::Start(args) => {
             if !config_path.try_exists().context("Cannot inspect bridge configuration")? {
                 bail!("Configuration not found at {}. Provide bridge.toml or pass --config.", config_path.display());

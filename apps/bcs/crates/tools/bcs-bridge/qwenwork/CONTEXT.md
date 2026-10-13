@@ -60,3 +60,12 @@ Hooks cannot execute while the original answer is being delivered. Secret forms
 are denied before stream publication. This does not add execution approval
 support or change any BCS contract. See README for bounded metadata/query costs
 and the current desktop IM policy limitation.
+
+## Desktop initialization
+
+The CLI composition root registers `setup::initialize` with the application's
+engine initializer callback API. It runs only for explicit `init --engine
+qwenwork`, not while loading an engine or serving a turn. It owns local TOML and
+user settings bootstrap, never writes the desktop database, and reads its schema
+once before modifying configuration. Existing secrets and unrelated Hooks are
+preserved; ambiguous installations and conflicting listeners fail closed.
