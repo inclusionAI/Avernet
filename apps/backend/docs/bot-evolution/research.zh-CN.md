@@ -162,4 +162,4 @@ Quality Task 会部署隔离的服务型 Bot 副本，但把评分委托给外�
   `plugin_api/eval_env/`（EvalEnvLifecycle、VersionSync、…）。
 - OpenAPI v1 拒绝 `bot` 主体（有意移除了 bot→owner 回退）—— 因此有 DR-3。
 - `bcs-cli` 是面向 Bot、带 SKILL.md 与会话文件认证的 CLI 先例。
-- 引擎拥有物理布局（ADR 0014、0017）；后端不得添加引擎路径。
+- 引擎拥有物理布局，依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用）；后端不得添加引擎路径。

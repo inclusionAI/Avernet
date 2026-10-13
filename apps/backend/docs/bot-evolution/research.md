@@ -173,5 +173,5 @@ gates exist but are advisory or unreachable from the canonical round.
   fallback) — hence DR-3.
 - `bcs-cli` is the precedent for a bot-facing CLI with a SKILL.md and
   session-file auth.
-- Engine owns physical layout (ADR 0014, 0017); Backend must not add engine
+- Engine owns physical layout, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it); Backend must not add engine
   paths.

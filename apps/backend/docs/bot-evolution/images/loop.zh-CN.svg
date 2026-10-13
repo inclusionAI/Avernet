@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650" font-family="&apos;PingFang SC&apos;,&apos;Hiragino Sans GB&apos;,&apos;Microsoft YaHei&apos;,&apos;Noto Sans CJK SC&apos;,&apos;Source Han Sans SC&apos;,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="第 2 层改进循环与快循环收件箱">
-<title>第 2 层改进循环与快循环收件箱</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650" font-family="&apos;PingFang SC&apos;,&apos;Hiragino Sans GB&apos;,&apos;Microsoft YaHei&apos;,&apos;Noto Sans CJK SC&apos;,&apos;Source Han Sans SC&apos;,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" role="img" aria-label="第 2 层改进循环">
+<title>第 2 层改进循环</title>
 <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#475569"/></marker><marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
 <rect width="1000" height="650" fill="#ffffff"/>
 <rect x="250" y="20" width="500" height="60" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
@@ -44,12 +44,7 @@
 <text x="718" y="460" font-size="10.5" font-weight="700" fill="#64748b" text-anchor="end" dominant-baseline="middle">平台</text>
 <rect x="250" y="525" width="500" height="70" rx="8" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="500.0" y="552.2375000000001" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">晋升（平台）</text>
-<text x="500.0" y="569.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">风险等级 → 自动或评审  ·  影子 → 金丝雀 → active  ·  回滚 = 移动引用</text>
-<rect x="800" y="255" width="175" height="80" rx="8" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="887.5" y="272.72499999999997" font-size="14" font-weight="600" fill="#0f172a" text-anchor="middle" dominant-baseline="middle">提议收件箱</text>
-<text x="887.5" y="289.59999999999997" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">快循环：被改进 Bot</text>
-<text x="887.5" y="304.45" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">经 avn CLI 提交的</text>
-<text x="887.5" y="319.3" font-size="11" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">观察与补丁草稿</text>
+<text x="500.0" y="569.45" font-size="11.5" font-weight="400" fill="#475569" text-anchor="middle" dominant-baseline="middle">风险等级 → 自动或评审  ·  影子 → 金丝雀 → active  ·  回到旧版本 = 重新晋升旧修订版</text>
 <path d="M 115 258 L 115 50 L 248 50" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="103" y="155" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 103 155)">采集（经验源）</text>
 <path d="M 500 80 L 500 108" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
@@ -58,7 +53,6 @@
 <text x="508" y="507" font-size="11.5" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">被接纳的候选</text>
 <path d="M 250 560 L 115 560 L 115 332" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <text x="103" y="446" font-size="11.5" font-weight="400" fill="#334155" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 103 446)">经 Manifest / 发布生效</text>
-<path d="M 800 295 L 752 295" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#ah)"/>
 <rect x="250" y="615" width="16" height="16" rx="3" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.5"/>
 <text x="274" y="623" font-size="12" font-weight="400" fill="#334155" text-anchor="start" dominant-baseline="middle">策略（可插拔）</text>
 <rect x="455" y="615" width="16" height="16" rx="3" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>

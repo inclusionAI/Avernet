@@ -93,10 +93,13 @@ variation and contribute to selection.
 
 ![Level-2 improvement loop](images/loop.svg)
 
-The loop as shown also has a fast, in-session path (a bot recording
-observations or draft patches into an inbox). That path needs bots to call
-the platform, so it is postponed with DR-3; the first iteration has only the
-slow path: a strategy run, batch, budgeted, and verified.
+In the first iteration every improvement comes from this loop: a strategy
+run that is triggered, budgeted, and verified, as shown above. An earlier
+draft also had a "fast path", in which a bot would note a lesson during a
+conversation (for example "this tool call failed three times") and file it
+for the next strategy run. That needs bots to call the platform, which is
+postponed with [DR-3](decisions/0003-bot-principal-for-evolution-surface.md),
+so the fast path is not part of this design.
 
 ## 4. Architecture
 
@@ -203,7 +206,7 @@ summarized here; the details live in the doc that implements it.
 | **Budgets and kill switches** | Per-run budgets (model spend, wall clock, rollouts) charged through the context; per-bot and per-tenant ceilings; kill switches per strategy, per bot, and global. | [06-evolution-run.md §11](06-evolution-run.md#11-budgets-and-kill-switches) |
 | **Risk tiers and approval** | Each patch gets the highest risk tier of its edits; low tiers may auto-promote under owner policy; persona and skill changes need review; tools, scripts, and policy are locked by default. | [08-promotion.md §5](08-promotion.md#5-risk-tiers) |
 | **Audit** | Every revision, verdict, gate decision, approval, and promotion is an append-only event with actor, reason, and links to evidence; nothing is deleted. | [05-experiment-ledger.md §6](05-experiment-ledger.md#6-audit) |
-| **Bounds on recursion** *(later)* | The verifier is fixed and human-owned, recursion depth is at most 2, and adopting a new mechanism needs human approval. | [10-meta-evolution.md §10](10-meta-evolution.md#10-bounds-what-recursion-may-not-touch) |
+| **Bounds on recursion** *(later)* | The verifier is fixed and human-owned; recursion depth is at most 2 (a mechanism improves bots, and a meta-strategy may improve that mechanism, but nothing automatically improves the meta-strategy or the verifier); adopting a new mechanism needs human approval. | [10-meta-evolution.md §10](10-meta-evolution.md#10-bounds-what-recursion-may-not-touch) |
 
 ## 6. Ownership and module placement
 
@@ -213,7 +216,7 @@ wants clear ownership and a transport-agnostic core. Proposed split:
 | Concern | Owner | Why |
 | --- | --- | --- |
 | Genome, Promotion | **Backend** | Owns desired state, the Manifest, the publish chain, tenancy, and approvals. Promotion must sit beside apply. |
-| Physical projection of a genome onto a workspace, memory import/export, session export | **Engine adapter** | The engine owns workspace layout (ADR 0014/0017) and chat history. New engine-side contracts, no Backend paths. |
+| Physical projection of a genome onto a workspace, memory import/export, session export | **Engine adapter** (`engine/adapter/`, Python package `engine.community`) | The engine owns workspace layout and chat history, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it). New engine-side contracts, no Backend paths. |
 | Evolution Run, Strategy Registry, Experience, Verification, Experiment Ledger, Meta-evolution | **New module `apps/evolution`** (recommended) | Long-running, model-heavy, bursty work that should scale and fail independently of Backend request serving. |
 | Strategy implementations | **Strategy authors** (`apps/evolverun` for ClawEvolve) | Pluggable by definition. |
 | Sandbox eval bots | **Backend `eval_publish` + eval_env plugins + BaaS** | Eval-env deployment exists (Quality Task); the plugin seams are no-op stubs today. |

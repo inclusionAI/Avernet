@@ -35,7 +35,10 @@ The **Genome Registry** is the component that implements this. It owns:
 - content addressing: file bytes referenced by digest in the existing
   manifest content store;
 - **compiling** a revision into a pinned Manifest document plus a memory
-  projection, which is what apply and eval bots consume;
+  projection, which is what apply and eval bots consume. The *memory
+  projection* is the genome's curated memory items, handed to the engine
+  adapter to write into the engine's own memory format (for OpenClaw, its
+  memory files); see §7;
 - diffs between any two revisions.
 
 It explicitly does **not** own:
@@ -49,7 +52,7 @@ It explicitly does **not** own:
 | Episodes and feedback that carry a revision id | [02-experience.md](02-experience.md) |
 | The audit log of revisions, ref moves, gate decisions; the archive view of the ledger; lineage-aware parent selectors | [05-experiment-ledger.md](05-experiment-ledger.md) |
 | Mechanism (strategy) revisions, which reuse this revision/ref/patch machinery | [10-meta-evolution.md](10-meta-evolution.md) |
-| Physical projection of a revision onto an engine workspace, runtime memory | Engine adapter (ADR 0014/0017: Backend must not know engine paths) |
+| Physical projection of a revision onto an engine workspace, runtime memory | Engine adapter (`engine/adapter/`); Backend must not know engine paths, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it) |
 
 **Placement.** Backend, as a new core package `core/bot_genome/` next to
 `core/bot_config_manifest/`, because Backend owns desired state and the
@@ -603,6 +606,15 @@ Refs are named, movable pointers to immutable revisions, git-style:
 | `candidate/<run>/<n>` | The n-th candidate of a run | [Evolution Run](06-evolution-run.md) |
 | `inbox/<id>` | Bot-submitted draft patches (fast loop) | Postponed: bot callers are a later, separate design |
 
+Refs are names, not identity. Every revision has its own identity, the
+content-hash id (plus the per-bot `seq`, e.g. `r42`), whether or not any ref
+points at it. Refs are optional, movable pointers: a revision can have no
+ref, or several. `candidate/<run>/<n>` is the same kind of label as
+`active`, only scoped to one run: Evolution Run creates one for each
+candidate a run submits, so the run's candidates are addressable by name and
+kept until the gate decides. A revision made by an owner's manual edit gets
+no candidate ref.
+
 ### 5.2 Compare-and-swap
 
 Every ref update carries `expected_revision`: the revision the caller
@@ -742,8 +754,8 @@ needs part of memory to be evolvable, so memory is split:
 | **Episodic / runtime memory**: what the bot writes as it works | Engine runtime | No | Captured into [Experience](02-experience.md) as evidence |
 | **Curated memory (seed)**: facts, rules, lessons the bot should start with | Genome | **Yes**, itemized | Proposed by consolidation ("dream") strategies, gated, promoted |
 
-Projection onto the engine is engine-owned (ADR 0014/0017: Backend must not
-know engine paths). Proposed **engine memory projection contract** (work item
+Projection onto the engine is engine-owned: Backend must not know engine
+paths, per the repository rule in `AGENTS.md` ("Physical layout ownership belongs to Engine Runtime and its versioned layout contract"; ADR 0014 is one application of it). Proposed **engine memory projection contract** (work item
 RSI-05), a Plugin API implemented by the engine adapter:
 
 ```python
