@@ -20,6 +20,25 @@ export type NotificationConfigRow = {
   gmt_modified: number;
 };
 
+export type DingTalkNotifyEvent =
+  | "workflow_started"
+  | "node_started"
+  | "node_succeeded"
+  | "node_failed"
+  | "node_rejected"
+  | "node_skipped"
+  | "workflow_succeeded"
+  | "workflow_failed"
+  | "workflow_cancelled";
+
+export type DingTalkEventOptions = {
+  title?: string;
+  includeRunLink?: boolean;
+  includeNodeOutput?: boolean;
+  maxOutputFields?: number;
+  maxOutputValueLen?: number;
+};
+
 export type NotificationConfigUpsert = {
   robotCode: string;
   appSecret: string;
@@ -27,8 +46,8 @@ export type NotificationConfigUpsert = {
   onFailureGroups: Array<{ openConversationId: string; name?: string }>;
   onFailureMessageTitle?: string | null;
   onFailureMessageIncludeRunLink: boolean;
-  notifyOn?: import("../../../../shared/web/types.js").DingTalkNotifyEvent[];
-  eventOptions?: Partial<Record<import("../../../../shared/web/types.js").DingTalkNotifyEvent, import("../../../../shared/web/types.js").DingTalkEventOptions>>;
+  notifyOn?: DingTalkNotifyEvent[];
+  eventOptions?: Partial<Record<DingTalkNotifyEvent, DingTalkEventOptions>>;
 };
 
 const SELECT_COLUMNS = "id, workflow_id, robot_code, app_secret, on_failure_users, on_failure_groups, on_failure_message_title, on_failure_message_include_run_link, notify_on, event_options, gmt_create, gmt_modified" as const;

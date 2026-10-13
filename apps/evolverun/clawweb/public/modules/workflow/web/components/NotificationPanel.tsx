@@ -449,9 +449,7 @@ export default function NotificationPanel({ workflowId }: NotificationPanelProps
           {saving ? '保存中…' : config ? '更新配置' : '保存配置'}
         </button>
         {config && (
-          <span className="text-xs text-gray-400">
-            已配置 · 更新于 {config.gmtModified ? new Date(config.gmtModified).toLocaleString('zh-CN') : '—'}
-          </span>
+          <span className="text-xs text-gray-400">已配置</span>
         )}
       </div>
     </div>

@@ -835,7 +835,7 @@ export function createWorkflowsRouter(
         onFailureGroups,
         onFailureMessageTitle: onFailureMessageTitle ?? null,
         onFailureMessageIncludeRunLink: onFailureMessageIncludeRunLink !== false,
-        notifyOn: notifyOn && notifyOn.length > 0 ? notifyOn as import("../../../../shared/web/types.js").DingTalkNotifyEvent[] : undefined,
+        notifyOn: notifyOn && notifyOn.length > 0 ? (notifyOn as import("../repositories/workflow-notification-config-repository.js").DingTalkNotifyEvent[]) : undefined,
         eventOptions: eventOptions && Object.keys(eventOptions).length > 0 ? eventOptions : undefined,
       });
 
