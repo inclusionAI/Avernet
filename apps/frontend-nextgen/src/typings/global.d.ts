@@ -18,3 +18,6 @@ declare const TEAMCLAW_WS_GW_PROD: string;
 /** BCS endpoint（define 注入）：注册 CLI 按 PRE/PROD 选择其一。 */
 declare const BCS_ENDPOINT_PRE: string;
 declare const BCS_ENDPOINT_PROD: string;
+
+/** Deployment opt-in after Provider provisioning; empty disables QwenWork onboarding. */
+declare const QWENWORK_PROVIDER_SLUG: string;

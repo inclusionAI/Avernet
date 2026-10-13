@@ -1,5 +1,6 @@
 import {
   getBotRegistrationToken,
+  getRegistrationProvider,
   type BotRegistrationTokenDto,
 } from '@/services/backendApi/collaboration/collaborationRegistrationController';
 import type { BackendApiEnvelope } from '@/services/backendApi/types';
@@ -14,6 +15,8 @@ jest.mock('@/services/backendApi/collaboration/collaborationRegistrationControll
 
 const getBotRegistrationTokenMock = getBotRegistrationToken as jest.MockedFunction<typeof getBotRegistrationToken>;
 
+const getProviderMock = getRegistrationProvider as jest.MockedFunction<typeof getRegistrationProvider>;
+
 function successResponse(data: BotRegistrationTokenDto) {
   return { code: 20000, message: 'OK', data } satisfies BackendApiEnvelope<BotRegistrationTokenDto>;
 }
@@ -21,6 +24,7 @@ function successResponse(data: BotRegistrationTokenDto) {
 describe('botRegistrationService', () => {
   beforeEach(() => {
     getBotRegistrationTokenMock.mockReset();
+    getProviderMock.mockReset();
   });
 
   it('selects BCS endpoint by runtime environment', () => {
@@ -74,6 +78,50 @@ describe('botRegistrationService', () => {
         note: 'Use this token for bot registration within 6 hours',
       },
     });
+  });
+
+  it('resolves the local slug before requesting its provider-scoped token', async () => {
+    getProviderMock.mockResolvedValue({ provider_id: 'prv_local_test', slug: 'local', enabled: true });
+    getBotRegistrationTokenMock.mockResolvedValue(
+      successResponse({
+        token: 'scoped-token',
+        expires_at: 1788272686000,
+        registration: {
+          token_version: 2,
+          provider_id: 'prv_local_test',
+          allowed_modes: ['plugin'],
+        },
+      }),
+    );
+    const signal = new AbortController().signal;
+    const result = await botRegistrationService.getRegistrationToken(signal, 'local');
+    expect(result.ok).toBe(true);
+    expect(getProviderMock).toHaveBeenCalledWith('local', signal);
+    expect(getBotRegistrationTokenMock).toHaveBeenCalledWith(signal, 'prv_local_test');
+  });
+
+  it.each([
+    undefined,
+    { token_version: 1, provider_id: 'prv_local_test', allowed_modes: ['plugin'] },
+    { token_version: 2, provider_id: 'prv_other', allowed_modes: ['plugin'] },
+    { token_version: 2, provider_id: 'prv_local_test', allowed_modes: ['gateway'] },
+  ])('rejects an incompatible Codex token: %j', async (scope) => {
+    getProviderMock.mockResolvedValue({ provider_id: 'prv_local_test', slug: 'local', enabled: true });
+    getBotRegistrationTokenMock.mockResolvedValue(
+      successResponse({
+        token: 'incompatible-token',
+        expires_at: 1788272686000,
+        registration: scope,
+      }),
+    );
+    const result = await botRegistrationService.getRegistrationToken(undefined, 'local');
+    expect(result.ok).toBe(false);
+  });
+
+  it('does not request a token for a disabled local provider', async () => {
+    getProviderMock.mockResolvedValue({ provider_id: 'prv_local_test', slug: 'local', enabled: false });
+    expect((await botRegistrationService.getRegistrationToken(undefined, 'local')).ok).toBe(false);
+    expect(getBotRegistrationTokenMock).not.toHaveBeenCalled();
   });
 
   it('rejects malformed token data', async () => {

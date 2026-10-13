@@ -206,6 +206,19 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: true,
   }),
+  getQwenWorkBotRegistrationConfig: (bcsEndpoint) => {
+    const runtime =
+      typeof window === 'undefined'
+        ? undefined
+        : (window as { AVERNET_RUNTIME_CONFIG?: { QWENWORK_PROVIDER_SLUG?: string } }).AVERNET_RUNTIME_CONFIG;
+    const providerSlug = (
+      runtime?.QWENWORK_PROVIDER_SLUG ?? (typeof QWENWORK_PROVIDER_SLUG === 'string' ? QWENWORK_PROVIDER_SLUG : '')
+    ).trim();
+    return {
+      status: providerSlug && bcsEndpoint ? 'available' : 'unsupported',
+      value: { providerSlug, apiUrl: bcsEndpoint },
+    };
+  },
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',

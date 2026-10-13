@@ -1,0 +1,7 @@
+[package]
+name = "bcs-bridge"
+repository = "https://github.com/inclusionAI/Avernet"
+
+[dist]
+auto-includes = false
+include = ["../../../../../../LICENSE", "QUICKSTART.md"]
