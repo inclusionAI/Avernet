@@ -1,5 +1,7 @@
 # Restore service Bot routing during group creation
 
+PR: [#2662](https://github.com/inclusionAI/Avernet/pull/2662).
+
 Status: implemented and locally verified.
 
 Owner: Frontend next-gen. Scope: migrate the existing open-claw group creation

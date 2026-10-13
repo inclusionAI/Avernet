@@ -1,5 +1,7 @@
 # Bot classification through Gateway
 
+PR: [#2662](https://github.com/inclusionAI/Avernet/pull/2662).
+
 Status: implemented; authorized by the user on 2026-10-13.
 Owners: Backend, Gateway, Frontend next-gen. No ADR change.
 
