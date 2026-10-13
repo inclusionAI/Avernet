@@ -332,11 +332,26 @@ class TaskModule(Module):
             staff_dept = injector.get(StaffDeptPlugin)
         except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
             staff_dept = None
+        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+            BcsBotTokenProvider,
+            NullBcsBotTokenProvider,
+        )
+
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
+            bot_token_provider = NullBcsBotTokenProvider()
         intake_handler = None
         if intake_repo is not None and bot is not None and bot_service is not None:
             intake_handler = TaskIntakeHandler(
                 intake_repo,
-                BotTaskIntakeSkill(bot, bot_service),
+                BotTaskIntakeSkill(
+                    bot,
+                    bot_service,
+                    bcs=bcs,
+                    bot_tokens=bot_token_provider,
+                    intake_repository=intake_repo,
+                ),
                 DefaultIntakeTargetResolver(
                     bot_service, staff_profile=staff_dept,
                     search=TaskSearch(discover_port),
@@ -354,15 +369,6 @@ class TaskModule(Module):
                 exc,
             )
             task_auth_gate = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
-        try:
-            bot_token_provider = injector.get(BcsBotTokenProvider)
-        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
-            bot_token_provider = NullBcsBotTokenProvider()
         from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
             NotifyMessagesProvider,
             NullNotifyMessagesProvider,

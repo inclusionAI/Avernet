@@ -198,10 +198,11 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             return info.graph_version
 
     def create_intake_graph(self, task_info, graph, session_id: str) -> int:
-        """One transaction commits the confirmed source, root and delivery intent.
+        """One transaction commits the confirmed source and root graph.
 
         The unique ``intake_session_id`` index arbitrates concurrent /start
-        attempts. A loser reads the existing task after rollback in the service.
+        attempts. Relay additionally commits the root delivery intent; centralized
+        execution continues through its existing semantic-planning lifecycle.
         """
         with self._transaction() as db:
             intake = db.get(TaskIntakeSessionModel, session_id)
@@ -228,13 +229,14 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             ))
             db.flush()
             self._upsert_current_rows(db, graph)
-            db.add(TaskDeliveryIntentModel(
-                task_id=task_info.task_id,
-                node_id=task_info.task_id,
-                relay_token=graph.tasks[0].run_info.extend_props["relay_token"],
-                state="PENDING",
-                attempt=0,
-            ))
+            if graph.is_relay:
+                db.add(TaskDeliveryIntentModel(
+                    task_id=task_info.task_id,
+                    node_id=task_info.task_id,
+                    relay_token=graph.tasks[0].run_info.extend_props["relay_token"],
+                    state="PENDING",
+                    attempt=0,
+                ))
             db.flush()
         return 1
 

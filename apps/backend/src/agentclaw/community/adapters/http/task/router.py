@@ -19,12 +19,12 @@ from agentclaw.community.adapters.http.task.schemas_relay_report import (
 )
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
-    TaskCallbackRequest,
+    TaskCallbackRequest, TaskExecutionGraphDTO,
     TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
     TaskNodeUpdateDTO, TaskOpResultDTO,
     TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
     TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
-    op_result_to_dto, task_info_request_from_dto,
+    graph_to_dto, op_result_to_dto, task_info_request_from_dto,
     trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
@@ -729,3 +729,19 @@ async def set_dingtalk_config(
         card_template_id,
     )
     return {"success": True, "message": "; ".join(injected) + " injected"}
+
+
+# Keep this dynamic route after every static task route so names such as
+# ``benchmark_execute`` and ``discovery`` can never be consumed as task IDs.
+@router.get("/{task_id}", response_model=Envelope[TaskExecutionGraphDTO])
+@envelope_errors
+async def get_task_internal(
+    task_id: str,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[TaskExecutionGraphDTO]:
+    """Return one task dashboard for authenticated Goal clients."""
+    del user
+    graph = service.get_task_dashboard(task_id)
+    return envelope(graph_to_dto(graph), request)

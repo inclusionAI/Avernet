@@ -27,11 +27,18 @@ class TaskIntakeAction(StrEnum):
     CANCEL = "CANCEL"
 
 
+class TaskExecutionMode(StrEnum):
+    RELAY = "relay"
+    CENTRALIZED = "centralized"
+
+
 @dataclass(frozen=True)
 class TaskIntakeCommand:
     action: TaskIntakeAction
     message: str | None = None
+    requested_a2a_proxy_bot_ref: str | None = None
     requested_target: IntakeTarget | None = None
+    requested_mode: TaskExecutionMode | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,12 @@ class TaskIntakeResult:
     source_type: TaskSourceType
     status: TaskIntakeStatus
     target: IntakeTarget | None = None
+    execution_mode: TaskExecutionMode = TaskExecutionMode.RELAY
+    a2a_proxy_bot_id: str | None = None
+    # Backend-only recovery controls. HTTP DTOs deliberately do not expose them.
+    a2a_run_id: str | None = None
+    a2a_session_id: str | None = None
+    a2a_run_version: int = 0
     task_spec: TaskSpec | None = None
     missing_fields: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)

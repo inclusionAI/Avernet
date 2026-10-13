@@ -461,10 +461,17 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
             if previous is not None:
                 if previous.owner_user_id != request.owner_user_id:
                     raise TaskStateError("intake owner mismatch")
+                previous_mode = str(
+                    (previous.execution_config or {}).get("orchestration_mode")
+                    or "centralized"
+                )
                 return TaskOpResult(
                     task_id=previous.task_id, node_id=previous.task_id, success=True,
                     run_id=int(previous.graph_run_id or 0),
-                    extend_props={"orchestration_mode": "relay", "root_node_id": previous.task_id},
+                    extend_props={
+                        "orchestration_mode": previous_mode,
+                        "root_node_id": previous.task_id,
+                    },
                 )
         else:
             request = self._normalize_owner_bot_id(request)
@@ -519,10 +526,17 @@ class TaskService(TaskServiceIntakeMixin, TaskServiceDeliveryMixin,
                 previous = self._task_info_repo.get_by_intake_session(intake_session_id)
                 if previous is None:
                     raise
+                previous_mode = str(
+                    (previous.execution_config or {}).get("orchestration_mode")
+                    or "centralized"
+                )
                 return TaskOpResult(
                     task_id=previous.task_id, node_id=previous.task_id, success=True,
                     run_id=int(previous.graph_run_id or 0),
-                    extend_props={"orchestration_mode": "relay", "root_node_id": previous.task_id},
+                    extend_props={
+                        "orchestration_mode": previous_mode,
+                        "root_node_id": previous.task_id,
+                    },
                 )
         else:
             graph = self._graph.initialize_graph(task_info)

@@ -21,7 +21,6 @@ from agentclaw.community.core.task.domain.errors import (
 from agentclaw.community.core.task.domain.models import (
     DoneOutput,
     NodeOpResult,
-    Relation,
     RelationType,
     RuntimeInfo,
     Status,
@@ -146,24 +145,23 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
 
 
 def initialize_intake_graph(self, task_info: TaskInfo, session_id: str) -> TaskExecutionGraph:
-    """Atomically create TaskInfo, root graph and root delivery intent."""
+    """Atomically create TaskInfo and root graph for either orchestration mode."""
     task_id = task_info.task_id
     with self._lock_for(task_id):
         if task_id in self._graphs:
             raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
         if self._graph_repo is None:
             raise TaskStateError("intake task creation requires a durable graph repository")
-        if task_info.execution_config.get("orchestration_mode") != "relay":
-            raise TaskStateError("intake task requires relay orchestration")
         graph = _build_initial_graph(self, task_info)
         target = task_info.execution_config.get("initial_target") or {}
         root = graph.tasks[0]
-        root.run_info.run_mode = (
-            "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
-        )
-        root.run_info.assignee = (
-            str(target.get("target_id") or task_info.owner_bot_id)
-        )
+        if graph.is_relay:
+            root.run_info.run_mode = (
+                "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
+            )
+            root.run_info.assignee = (
+                str(target.get("target_id") or task_info.owner_bot_id)
+            )
         version = self._graph_repo.create_intake_graph(task_info, graph, session_id)
         self._graph_versions[task_id] = version
         self._graphs[task_id] = graph

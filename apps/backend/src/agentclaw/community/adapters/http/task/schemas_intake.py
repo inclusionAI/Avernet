@@ -9,7 +9,7 @@ from agentclaw.community.adapters.http.task.schemas import (
 )
 from agentclaw.community.core.task.domain.intake import (
     IntakeTarget, IntakeTargetType, TaskIntakeAction, TaskIntakeCommand,
-    TaskIntakeResult, TaskIntakeStatus,
+    TaskExecutionMode, TaskIntakeResult, TaskIntakeStatus,
 )
 
 
@@ -23,16 +23,20 @@ class TaskIntakeCommandDTO(BaseModel):
 
     action: TaskIntakeAction
     message: str | None = None
+    requested_a2a_proxy_bot_ref: str | None = None
     requested_target: IntakeTargetDTO | None = None
+    requested_mode: TaskExecutionMode | None = None
 
     def to_domain(self) -> TaskIntakeCommand:
         target = self.requested_target
         return TaskIntakeCommand(
             action=self.action,
             message=self.message,
+            requested_a2a_proxy_bot_ref=self.requested_a2a_proxy_bot_ref,
             requested_target=(
                 IntakeTarget(target.target_type, target.target_id) if target else None
             ),
+            requested_mode=self.requested_mode,
         )
 
 
@@ -42,6 +46,8 @@ class TaskIntakeResultDTO(BaseModel):
     source_type: str
     status: TaskIntakeStatus
     target: IntakeTargetDTO | None = None
+    execution_mode: TaskExecutionMode = TaskExecutionMode.RELAY
+    processing: bool = False
     task_spec: TaskSpecDTO | None = None
     missing_fields: list[str] = Field(default_factory=list)
     questions: list[str] = Field(default_factory=list)
@@ -65,6 +71,8 @@ def intake_result_to_dto(result: TaskIntakeResult) -> TaskIntakeResultDTO:
         target=(IntakeTargetDTO(
             target_type=result.target.target_type, target_id=result.target.target_id,
         ) if result.target else None),
+        execution_mode=result.execution_mode,
+        processing=result.a2a_run_id is not None,
         task_spec=(TaskSpecDTO(
             context=ContextDTO(
                 title=spec.context.title,

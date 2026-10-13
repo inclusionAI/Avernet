@@ -10,6 +10,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.intake import (
     IntakeTarget, IntakeTargetType, TaskIntakeContext,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 
 logger = logging.getLogger("task.intake.target")
 
@@ -33,8 +34,23 @@ class DefaultIntakeTargetResolver:
             page += 1
         return items
 
+    def resolve_a2a_proxy(
+        self, requested_ref: str, context: TaskIntakeContext,
+    ) -> str:
+        requested = str(requested_ref or "").strip()
+        if not requested:
+            raise TaskStateError("A2A proxy Bot reference is required")
+        product_bot_id = requested.partition(":")[0]
+        bot = self._bots.get_bot(product_bot_id, context.owner_user_id)
+        if not isinstance(bot, dict) or bot.get("owner_id") != context.owner_user_id:
+            raise TaskStateError("A2A proxy Bot is not owned by the caller")
+        if str(bot.get("status") or "").upper() != "ACTIVE":
+            raise TaskStateError("A2A proxy Bot is not active")
+        return compose_bot_identity(product_bot_id, context.owner_user_id)
+
     async def resolve(
         self, requested: IntakeTarget | None, message: str, context: TaskIntakeContext,
+        *, allow_external: bool = False,
     ) -> IntakeTarget:
         owner = context.owner_user_id
         if requested is not None:
@@ -42,10 +58,22 @@ class DefaultIntakeTargetResolver:
                 raise TaskStateError("Bot caller cannot select another intake target")
             if requested.target_type == IntakeTargetType.GROUP:
                 raise TaskStateError("Group intake requires a user-authorized group resolver")
-            bot = self._bots.get_bot(requested.target_id, owner)
+            product_bot_id, separator, target_owner_id = requested.target_id.partition(":")
+            if separator and target_owner_id and target_owner_id != owner:
+                if not allow_external:
+                    raise TaskStateError("external target requires an A2A proxy Bot")
+                bot = self._bots.get_bot(product_bot_id, target_owner_id)
+                if not isinstance(bot, dict) or bot.get("owner_id") != target_owner_id:
+                    raise TaskStateError("requested Bot is unavailable")
+            else:
+                bot = self._bots.get_bot(product_bot_id, owner)
             if str(bot.get("status") or "").upper() != "ACTIVE":
                 raise TaskStateError("requested Bot is not active")
-            return requested
+            stable_owner = target_owner_id if separator and target_owner_id else owner
+            return IntakeTarget(
+                IntakeTargetType.BOT,
+                compose_bot_identity(product_bot_id, stable_owner),
+            )
 
         if context.caller_bot_id is not None:
             bot = self._bots.get_bot(context.caller_bot_id, owner)

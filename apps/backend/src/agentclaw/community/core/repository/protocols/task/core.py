@@ -300,7 +300,10 @@ class TaskGraphRepositoryProtocol(Protocol):
 
     @abstractmethod
     def create_intake_graph(self, task_info, graph, session_id: str) -> int:
-        """Atomically persist confirmed TaskInfo, root graph and root delivery intent."""
+        """Atomically persist confirmed TaskInfo and root graph.
+
+        Relay graphs also create their root delivery intent in the same transaction.
+        """
         ...
 
     @abstractmethod

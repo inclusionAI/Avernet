@@ -32,22 +32,31 @@ class _Repository:
 
 
 class _Resolver:
-    async def resolve(self, requested, message, context):
+    async def resolve(self, requested, message, context, *, allow_external=False):
         return requested or IntakeTarget(IntakeTargetType.BOT, "bot-1")
+
+    def resolve_a2a_proxy(self, requested_ref, context):
+        return f"{requested_ref.partition(':')[0]}:{context.owner_user_id}"
 
 
 class _Skill:
     def __init__(self):
         self.calls = 0
 
-    async def recognize(self, message, target, owner_user_id):
+    async def recognize(
+        self, message, target, owner_user_id, *, a2a_proxy_bot_id=None,
+        intake_session_id=None,
+    ):
         self.calls += 1
         return TaskSpec(
             context=Context(title="上线模型", extend_props={}),
             goal=Goal(objective=message, acceptances=[]),
         ), []
 
-    async def clarify(self, existing_spec, message, target, owner_user_id):
+    async def clarify(
+        self, existing_spec, message, target, owner_user_id, *,
+        a2a_proxy_bot_id=None, intake_session_id=None,
+    ):
         self.calls += 1
         return TaskSpec(
             context=Context(title=existing_spec.context.title, extend_props={
@@ -57,6 +66,9 @@ class _Skill:
                 AcceptanceCriteria(id="", description="灰度达到 10%"),
             ]),
         ), []
+
+    async def resume_pending(self, result):
+        return None
 
 
 def _context(session_id=None, owner="owner-1"):

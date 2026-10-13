@@ -10,6 +10,10 @@ class TaskStateError(TaskError):
     """非法状态流转(如 DONE→RUNNING、缺失 acceptance_result 翻态、违反 6 态机)。"""
 
 
+class TaskA2AStatusUnknownError(TaskError):
+    """A2A Intake was accepted, but its durable Chat Run is still in progress."""
+
+
 class GraphIntegrityError(TaskError):
     """分解树完整性违反:单入防环/汇聚、结构父不存在、本批互为父子。"""
 

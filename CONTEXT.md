@@ -2,6 +2,28 @@
 
 OCB 是一个多 Bot AI 工作台，用户可以在其中组织、协作维护可复用能力，并将这些能力提供给 Bot 使用。本词汇表定义产品方案、接口合同、代码、数据迁移和评审共同使用的领域语言。
 
+## Goal 与任务执行
+
+**Goal（任务目标）**:
+用户或 Agent 希望完成的一项独立任务目标。一个批量提交可以包含多个 Goal；每个 Goal 独立识别、澄清、确认和恢复。
+_避免使用_: 用 Goal 表示某个执行节点、某个 Bot 会话或一组不相关任务
+
+**Goal Intake Session（任务澄清会话）**:
+一个 Goal 面向一个执行目标时，在创建正式任务之前进行的多轮识别、补充和确认过程。同一 Goal 指定多个执行目标时，每个目标分别拥有自己的 Goal Intake Session，并可形成不同的任务规格。
+_避免使用_: Runner 执行会话、把多个执行目标的澄清过程合并成一个 Intake Session
+
+**Target Execution（目标执行实例）**:
+一个输入 Goal 在一个 Bot 或协作群目标上的独立“澄清 + 正式执行”实例。多个 Target Execution 不共享 Intake Session、确认后的任务规格、任务图状态、输出、验收结果、缺口或接力链。
+_避免使用_: 多根共享任务图、Goal Intake Session、目标执行者引用
+
+**A2A 代理 Bot（A2A Proxy Bot）**:
+Human 在 CLI 中授权使用的自有 Bot，只用于证明该 Human 可以通过 Bot-to-Bot 关系向其他人的 Bot 发起请求。A2A 代理 Bot 不负责目标任务的澄清与执行，也不成为任务的归属 Bot；真正的澄清与执行者仍是目标执行者。
+_避免使用_: 任务发送者、任务 owner、Intake Bot、目标执行者
+
+**Runner 执行会话（Runner Execution Session）**:
+一个执行者运行某个任务节点的运行时会话。一个 Target Execution 至少产生根节点执行会话，并可能在接力过程中产生后继节点执行会话。
+_避免使用_: Goal Intake Session、完整任务图、把一次任务的全部接力过程称为单个 Bot 会话
+
 ## 技能
 
 **技能（Skill）**:

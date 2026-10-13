@@ -287,3 +287,33 @@ def test_send_message_a2a_maps_4xx_to_request_error():
             target_bot_id="bot-a", target_user_id="u1", message="hi",
             caller_bearer="drv-session-token",
         ))
+
+
+def test_send_message_a2a_forwards_idempotency_key():
+    def h(req):
+        assert req.headers["idempotency-key"] == "intake-digest"
+        return httpx.Response(202, json={"run_id": "run-a2a"})
+
+    _run(_adapter(h).send_message_a2a(
+        target_bot_id="bot-a", target_user_id="u1", message="hi",
+        caller_bearer="drv-session-token", idempotency_key="intake-digest",
+    ))
+
+
+def test_get_chat_run_long_polls_with_bot_identity():
+    def h(req):
+        assert req.method == "GET"
+        assert req.url.path == "/chat/runs/run-a2a"
+        assert req.url.params["since_version"] == "4"
+        assert req.url.params["wait_ms"] == "5000"
+        assert req.headers["authorization"] == "Bearer drv-session-token"
+        return httpx.Response(200, json={
+            "run_id": "run-a2a", "state": "completed", "version": 5,
+            "response": {"content": "done"},
+        })
+
+    result = _run(_adapter(h).get_chat_run(
+        "run-a2a", since_version=4, wait_ms=5000,
+        caller_bearer="drv-session-token",
+    ))
+    assert result["state"] == "completed"

@@ -9,7 +9,8 @@ from injector import inject
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.intake import (
-    IntakeTarget, IntakeTargetType, TaskIntakeResult, TaskIntakeStatus,
+    IntakeTarget, IntakeTargetType, TaskExecutionMode, TaskIntakeResult,
+    TaskIntakeStatus,
 )
 from agentclaw.community.core.task.domain.models import TaskSourceType
 from agentclaw.community.core.task.repository.models import TaskIntakeSessionModel
@@ -29,6 +30,11 @@ def _encode(result: TaskIntakeResult) -> str:
         "owner_user_id": result.owner_user_id,
         "source_type": result.source_type.value,
         "status": result.status.value,
+        "execution_mode": result.execution_mode.value,
+        "a2a_proxy_bot_id": result.a2a_proxy_bot_id,
+        "a2a_run_id": result.a2a_run_id,
+        "a2a_session_id": result.a2a_session_id,
+        "a2a_run_version": result.a2a_run_version,
         "target": (
             {"target_type": result.target.target_type.value, "target_id": result.target.target_id}
             if result.target else None
@@ -52,6 +58,15 @@ def _decode(raw: str) -> TaskIntakeResult:
         status=TaskIntakeStatus(data["status"]),
         target=(IntakeTarget(IntakeTargetType(target["target_type"]), target["target_id"])
                 if target else None),
+        execution_mode=TaskExecutionMode(
+            data.get("execution_mode") or TaskExecutionMode.RELAY.value
+        ),
+        a2a_proxy_bot_id=(
+            str(data.get("a2a_proxy_bot_id") or "").strip() or None
+        ),
+        a2a_run_id=str(data.get("a2a_run_id") or "").strip() or None,
+        a2a_session_id=str(data.get("a2a_session_id") or "").strip() or None,
+        a2a_run_version=int(data.get("a2a_run_version") or 0),
         task_spec=task_spec_from_dict(spec) if spec else None,
         missing_fields=list(data.get("missing_fields") or []),
         questions=list(data.get("questions") or []),

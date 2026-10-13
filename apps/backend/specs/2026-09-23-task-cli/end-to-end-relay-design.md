@@ -1,8 +1,8 @@
-# task-cli 到分布式接力执行：端到端设计稿
+# avernet-goal-cli 到分布式接力执行：端到端设计稿
 
-> 汇报版实现合同，2026-10-12。依据 [task-cli 发起与澄清设计](design.md) 和 [Bot S1–S6 函数式执行协议](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md) 整理。若两份来源冲突，以本文列出的对齐决策为准。
+> Relay 单个 Target Execution 的实现合同，2026-10-12。CLI 命令、Batch Schema、一个 Goal 多目标、Intake 和 `/start` 聚合响应以 [avernet-goal-cli 发起与澄清设计](design.md) 为唯一权威；本文只描述其中一个独立 Target Execution 进入 [Bot S1–S6 函数式执行协议](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md) 后的执行链路。本文残留的单目标命令和单结果示例不构成 CLI 合同。
 
-> 分支核对（2026-10-12）：当前 `merge_to_dev` 的 Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已按本文合同重构；独立 Rust `task-cli` 尚未进入本轮实现范围。
+> 分支核对（2026-10-12）：当前 Backend 实现位于 `apps/backend/`。Relay、intake/start、节点级 context、统一 report 和 S6 dispatch 已完成上一阶段重构；独立 Rust `avernet-goal-cli` 及最新多目标/Batch 合同尚未实现。
 
 ## 1. 一页结论
 

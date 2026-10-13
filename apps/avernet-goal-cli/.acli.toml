@@ -1,0 +1,50 @@
+api_version = "v1"
+
+[metadata]
+name = "avernet-goal-cli"
+command = "avernet-goal-cli"
+description = "avernet-goal-cli CLI 工具"
+language = "rust"
+readme_file = "README.md"
+
+[version]
+source = "cargo_toml"
+file = "Cargo.toml"
+field = "version"
+
+[build]
+mode = "pipeline"
+template = "rust-cli"
+commands = ["cargo build", "make build"]
+
+[publish]
+strategy = "pipeline"
+
+[[publish.artifacts]]
+type = "binary"
+package_name = "avernet-goal-cli"
+default = true
+
+[[api.dependencies]]
+method = "POST"
+path = "/api/v1/collaboration/tasks/intake"
+source = "src/api/client.rs"
+line = 120
+confidence = "high"
+client = "self.post"
+
+[[api.dependencies]]
+method = "POST"
+path = "/api/v1/collaboration/tasks/start"
+source = "src/api/client.rs"
+line = 124
+confidence = "high"
+client = "self.post"
+
+[[api.dependencies]]
+method = "GET"
+path = "/api/v1/collaboration/tasks/{task_id}"
+source = "src/api/client.rs"
+line = 130
+confidence = "high"
+client = "self.get"

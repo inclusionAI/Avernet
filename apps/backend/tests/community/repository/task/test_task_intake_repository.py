@@ -11,7 +11,8 @@ from sqlalchemy.pool import StaticPool
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.intake import (
-    IntakeTarget, IntakeTargetType, TaskIntakeResult, TaskIntakeStatus,
+    IntakeTarget, IntakeTargetType, TaskExecutionMode, TaskIntakeResult,
+    TaskIntakeStatus,
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, TaskSourceType, TaskSpec,
@@ -48,6 +49,8 @@ def _result() -> TaskIntakeResult:
         session_id="tis-1", owner_user_id="owner-1", source_type=TaskSourceType.API,
         status=TaskIntakeStatus.CLARIFYING,
         target=IntakeTarget(IntakeTargetType.BOT, "bot-1"),
+        execution_mode=TaskExecutionMode.CENTRALIZED,
+        a2a_proxy_bot_id="proxy:owner-1",
         task_spec=TaskSpec(
             context=Context(title="上线", extend_props={"deliverables": ["记录"], "constraints": []}),
             goal=Goal(objective="上线模型", acceptances=[

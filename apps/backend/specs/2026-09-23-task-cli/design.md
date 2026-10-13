@@ -1,50 +1,132 @@
-# task-cli 任务发起与澄清设计
+# avernet-goal-cli 任务发起、批量提交与澄清设计
 
-任务确认后的 Bot 执行函数契约见 [`bot-s1-s8-functional-contract.md`](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md)。
+任务确认后的 Bot 接力执行函数契约见
+[`bot-s1-s8-functional-contract.md`](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md)。
 
-Claude Code 与 Codex CLI 的官方交互模式调研见
-[`2026-10-07-task-cli-claude-codex-cli-patterns.md`](../../../../docs/research/2026-10-07-task-cli-claude-codex-cli-patterns.md)。本文仅采用其可迁移的 CLI 交互原则；Task Intake 的领域契约仍以本文为准。
+本文采用成熟 Agent CLI 的“命令单一语义、结构化输出、可恢复会话”原则，但 Task Intake、批量 Goal 和多目标展开的领域合同以本文为准。
 
-## 1. 目标
+> 目录名保留历史名称 `2026-09-23-task-cli`，产品和命令名称统一为
+> `avernet-goal-cli`。旧 `task-cli` 命令和单目标字段合同不再作为兼容接口保留。
 
-`task-cli` 提供统一任务发起入口，支持 Human、Bot 和协作群场景，通过同一个 intake 会话完成：
+## 1. 目标与范围
+
+`avernet-goal-cli` 是面向 Human 和第三方 Agent 的 Goal 提交入口，负责：
 
 ```text
-目标执行者解析
--> 任务识别
--> 信息澄清
--> 用户确认
--> TaskInfoRequest 构造
--> TaskService.execute
--> 向 CLI 返回 task_id、node_id
--> 将根节点 task_id/node_id 随启动指令交给目标 Bot；Bot S1 拉取 TaskContext
+解析可选 A2A 代理 Bot 和执行目标
+-> 创建 Goal Intake Session
+-> 任务识别与信息澄清
+-> 用户或 Agent 明确确认
+-> 按执行目标展开正式任务
+-> 为每个目标创建独立 TaskExecutionGraph
+-> 返回每个目标对应的 task_id、node_id
 ```
 
-## 2. Module 与 seam
+首版支持：
 
-### 2.1 CLI Adapter
+- 单个 Goal；
+- 单个 Goal 指定一个或多个 `to`；
+- 文件中批量提交多个 Goal；
+- Human 直接发起；
+- Human 授权名下 Bot 作为 A2A 权限代理；
+- `relay` 与 `centralized` 两种执行模式；
+- Human 与第三方 Agent 共用交互式会话控制器，并支持 Agent 的非交互单次状态读取与结构化输出。
 
-CLI 只负责：
+首版不向 CLI 用户开放以下内部运行策略：
 
-- 解析命令行参数；
-- 调用 `TaskService.intake` 对外接口；
-- 根据返回状态渲染问题、候选项、确认摘要和任务状态；
-- 在交互模式下保存当前 `session_id`。
-- 将交互结果渲染为问题、选择卡或确认卡，并回显已解析的 target；
-- 在 `--json` / `--no-interactive` 模式输出稳定机器结果。
+```text
+dispatcher_strategy
+runner_strategy
+allowed_run_modes
+```
 
-CLI 不负责：
+CLI 不提供通用 `--runtime` 参数。Backend 根据执行模式、目标类型和服务端配置加载 Runtime Profile，调用者不能直接组合内部策略。
 
-- Bot 或 Group 选择策略；
-- 从自然语言判断“确认”或“取消”；
-- 任务字段完整性判断；
+## 2. 统一领域语言与数量关系
+
+### 2.1 Goal
+
+Goal 是用户或 Agent 希望完成的一项任务目标。一个 Batch 文件可以包含多个 Goal；每个 Goal 独立识别、澄清、确认和恢复。
+
+### 2.2 Goal Intake Session
+
+Goal Intake Session 是“一个输入 Goal 面向一个执行目标”在正式创建任务之前的多轮识别与澄清会话，使用 `session_id` 标识。
+
+同一输入 Goal 指定多个 `to` 时，CLI 先展开为多个 Target Execution；每个 Target Execution 分别创建 Intake Session、由自己的目标执行者参与澄清并单独确认。
+
+### 2.3 Target Execution
+
+Target Execution 是“一个输入 Goal 在一个目标上的独立澄清和执行实例”。每个 Target Execution 拥有：
+
+- 独立 `session_id`；
+- 独立澄清过程和确认后的 `TaskSpec`；
+- 独立 `task_id`；
+- 独立根 `node_id`；
+- 独立 `TaskExecutionGraph`；
+- 独立根节点 Runner 执行会话；
+- 独立状态、输出、验收结果、gaps 和 Relay 接力链。
+
+多个 Target Execution 只共享最初输入的 Goal 文本及公共 CLI 参数，不共享澄清结果、确认后的 `TaskSpec` 或任务图运行状态。
+
+### 2.4 Runner 执行会话
+
+Runner 执行会话是 Bot 或 Group 执行一个 `TaskNode` 的运行时会话。它不是 Goal Intake Session。
+
+Relay 模式下，一个 Target Execution 除根节点会话外，还可能为后继节点创建更多 Runner 执行会话。
+
+### 2.5 数量关系
+
+对于一个 Goal 和 N 个最终解析出的目标：
+
+```text
+Goal 数量                 = 1
+Goal Intake Session 数量  = N
+Target Execution 数量     = N
+TaskExecutionGraph 数量   = N
+根 TaskNode 数量          = N
+初始 Runner 执行会话数量  = N
+```
+
+对于包含 M 个 Goal 的 Batch：
+
+```text
+Goal Intake Session 数量 = Σ resolved_target_count(goal)
+TaskExecutionGraph 数量  = Σ resolved_target_count(goal)
+```
+
+如果某个 Goal 没有显式 `to`，Backend 必须解析出一个默认目标；解析失败时该 Goal 不创建任务。
+
+## 3. Module 与 seam
+
+### 3.1 CLI Adapter
+
+CLI Adapter 负责：
+
+- 解析命令和 Batch 文件；
+- 将 `bot:<ref>` 用户引用传给 Backend 解析；
+- 调用 Task Intake 与 `/start` HTTP Service API；
+- 在交互模式中保存当前 `session_id`；
+- 渲染澄清问题和确认摘要；
+- 在 Agent 模式输出稳定 JSON；
+- 对 Batch 文件执行无副作用的本地 Schema 校验；
+- 在进入 Backend Intake 前按 `Goal × target` 展开独立 Target Execution；
+- 编排多个独立 Target Execution 的 Intake/Start 调用并聚合结果。
+
+CLI Adapter 不负责：
+
+- 将客户端 Bot 引用视为可信身份；
+- Bot 权限判定；
+- 默认目标选择策略；
+- `TaskSpec` 完整性判断；
 - `TaskInfoRequest` 构造；
-- 直接调用 `TaskService.execute()`；CLI 只请求 HTTP `/start`；
-- 生成 `task_id` 或 `node_id`。
+- Runtime Profile 或内部执行策略选择；
+- 生成 `session_id`、`task_id`、`node_id`；
+- 把多个目标拼成一个多根任务图；
+- 在 Batch 部分失败时回滚已成功创建的任务。
 
-### 2.2 TaskService 中的澄清接口
+### 3.2 TaskService Service API
 
-任务澄清与正式任务创建共用 `TaskService` 对外接口，但保持两个独立操作：
+任务澄清和正式任务创建使用同一个 `TaskService` Module 的两个操作：
 
 ```python
 class TaskService:
@@ -59,175 +141,452 @@ class TaskService:
         ...
 ```
 
-`intake` 隐藏：
+`TaskService.intake()` 隐藏：
 
-- 默认 Bot 解析；
-- 权限校验；
-- intake session 持久化；
-- task-loop 识别与澄清调用；
-- 草稿状态迁移；
-- 确认幂等。
+- A2A 代理 Bot 与目标引用解析后的权限校验；
+- 默认目标解析；
+- Intake Session 持久化；
+- Task Intake Skill 调用；
+- `TaskSpec` 完整性校验；
+- 状态迁移和确认幂等。
 
-`CONFIRM` 只更新并返回 `TaskIntakeResult(CONFIRMED)`，不调用 `execute`。确认后的独立 HTTP `/start` 创建链路由应用层读取并校验已确认 Result、组装 `TaskInfoRequest`，再调用同一个 `TaskService.execute()`。HTTP Adapter 只做协议转换，不承担会话状态、任务创建幂等或执行策略决策。第一棒 `TaskContext` 投影与根节点派发由 Task Module 的图谱与 Runner 实现，澄清方法不接管执行编排。
+`TaskService.execute()` 仍是唯一正式任务创建入口。每个 Intake Session 只绑定一个 target；HTTP `/start` 读取一个已确认 `TaskIntakeResult`，构造一个 `TaskInfoRequest` 并调用一次 `execute()`。
 
-### 2.3 内部 seams
+### 3.3 内部 Repository seam
 
 ```python
 class TaskIntakeRepository(Protocol):
     def get(self, session_id: str) -> TaskIntakeResult: ...
     def create(self, result: TaskIntakeResult) -> TaskIntakeResult: ...
     def save(
-        self, previous: TaskIntakeResult, updated: TaskIntakeResult,
+        self,
+        previous: TaskIntakeResult,
+        updated: TaskIntakeResult,
     ) -> TaskIntakeResult: ...
 ```
 
-`TaskIntakeRepository` 是 `TaskService` 实现内部的持久化依赖，不作为另一个对外澄清 Service。Production 使用 HTTP/Bot Runtime/Repository adapters；测试使用 in-memory adapters。
+Repository 是 `TaskService` 实现内部依赖，不作为第二个对外澄清 Service。
 
-## 3. CLI interface
+## 4. CLI interface
 
-### 3.1 发起任务
+每条命令必须只有一个明确动作，帮助信息必须说明输入、副作用、输出和恢复方式。第三方 Agent 不得依赖自然语言文档猜测文件格式。
 
-```bash
-task-cli "<一句话任务目标>"
-```
-
-显式指定 Bot：
+### 4.1 单 Goal 提交
 
 ```bash
-task-cli "<一句话任务目标>" @<bot-ref> bot
+avernet-goal-cli "<任务目标>"
+  [--from human | bot:<bot-ref>]
+  [--to bot:<bot-ref>]...
+  [--mode relay|centralized]
+  [--output text|json]
+  [--non-interactive]
 ```
 
-显式指定 Group：
-
-```bash
-task-cli "<一句话任务目标>" @<group-ref> group
-```
-
-`bot` 与 `group` 互斥。CLI Adapter 将 `@<target-ref>` 在调用者可见范围内解析为稳定 ID，再构造 `IntakeTarget`；引用不存在或不唯一时请求用户重新选择。领域层只接收稳定 ID，不以展示名称作为身份。
-
-### 3.2 恢复 intake 会话
-
-恢复到交互模式：
-
-```bash
-task-cli resume <session-id>
-```
-
-`resume` 将用户指定的 `session_id` 填入内部 `TaskIntakeAction.RESUME`。CLI 和 Backend 按当前认证调用者校验该 session 的所有权；会话不存在或不属于调用者时拒绝恢复。
-
-`RESUME` 调用本身只读，不创建任务，也不重放 `CONFIRM`。恢复后 CLI 回显 target、状态和 `TaskSpec` 摘要；若状态为 `CONFIRMED`，展示「继续提交/查看任务」操作，由该操作另行调用幂等 `/start`，请求只传 `session_id`。CLI 不凭 Intake Result 猜测任务是否已经创建：服务端若发现已有创建关联就返回原 `TaskOpResult`，否则创建一次。
-
-### 3.3 会话内继续、选择、确认与取消
-
-同一 CLI 进程会持有 active session；跨进程时先执行 `task-cli resume <session-id>`，随后仍进入同一种交互会话。进入会话后，用户不再输入 session ID。
+形式化语义：
 
 ```text
-task-cli> 本次需要交付哪些具体产物？
-user> 上线记录、监控看板链接和回滚预案
-
-任务澄清确认
-目标：@alice bot (bot-payment-diagnosis)
-交付物：上线记录、监控看板链接、回滚预案
-验收：...
-[确认创建任务]  [取消]
-user> 选择「确认创建任务」
+根命令                   = 提交一个 Goal
+--from                   = 可选 A2A 权限代理；默认 human 直连
+重复 --to                = CLI 将同一 Goal 展开为多个独立“澄清 + 执行”实例
+未设置 --to              = 使用 Backend 默认目标解析
+--mode                   = 执行模式；默认 relay
+--output json            = stdout 只输出一个 JSON 对象
+--non-interactive        = 不等待人工输入，也不隐式确认
 ```
 
-CLI 根据当前 `TaskIntakeResult.status` 渲染对应控件，并在用户操作后构造内部 `TaskIntakeCommand`：
-
-| 当前状态 | 用户可见操作 | CLI 内部 action |
-| --- | --- | --- |
-| `CLARIFYING` + TaskSpec 不完整 | 输入补充内容 | `CONTINUE` |
-| `CLARIFYING` + TaskSpec 完整 | 选择确认创建任务或取消 | `CONFIRM` / `CANCEL` |
-| `CONFIRMED` | 继续提交/查看任务 | 不再调用 Intake；单独 `POST /start {session_id}`，服务端返回原结果或创建一次 |
-
-CLI 从 active session 自动填充 `session_id`，不生成或传递业务幂等键。确认和取消是确认卡的结构化选择，不能把用户自由文本“确认提交”“就这样吧”交给 LLM 猜测。
-
-正常路径中，用户点击「确认创建任务」后，CLI 先发送 `CONFIRM`，收到 `TaskIntakeResult(CONFIRMED)` 再自动发送独立的 `POST /start {session_id}`。两次请求之间若中断，恢复会话展示「继续提交/查看任务」；此按钮不重复确认，只调用幂等的 start。
-
-### 3.4 查询任务
+单目标：
 
 ```bash
-task-cli get <task-id>
+avernet-goal-cli "分析支付失败率" --to bot:risk-bot
 ```
 
-调用既有任务 dashboard interface，不属于 Intake Module。
-
-### 3.5 交互与自动化输出
-
-默认 TTY 模式可继续提问和展示确认卡。没有 TTY 或显式指定 `--no-interactive` 时，CLI 不得等待 stdin：
+同一 Goal 多目标：
 
 ```bash
-task-cli "<一句话任务目标>" --no-interactive --json
-task-cli resume <session-id> --no-interactive --json
+avernet-goal-cli "分析支付失败率" \
+  --to bot:risk-bot-a \
+  --to bot:risk-bot-b \
+  --to bot:risk-bot-c
 ```
 
-`--json` 直接输出完整 `TaskIntakeResult`。默认 TTY 同样展示 `session_id`、`owner_user_id`、`source_type` 与时间戳；自动化调用方据 `status` 判断下一动作，不解析人类文案。
+Human 授权名下 Bot 作为 A2A 权限代理：
+
+```bash
+avernet-goal-cli "分析支付失败率" \
+  --from bot:my-assistant \
+  --to bot:risk-bot-a \
+  --to bot:risk-bot-b
+```
+
+`--from bot:...` 不表示 CLI 以 Bot Token 登录，也不表示该 Bot 负责澄清、执行或拥有任务。认证主体仍是当前 Human；Backend 验证该 Bot 属于或已授权给当前 Human，并以该 Bot 的 BCS 身份把 Intake 澄清消息通过 A2A `chat-async` 实际转发给目标 Bot。真正负责澄清与执行、并作为任务归属方的仍是每个 `--to` Bot。
+
+### 4.2 恢复 Goal Intake Session
+
+```bash
+avernet-goal-cli resume <session-id>
+  [--output text|json]
+  [--non-interactive]
+```
+
+`resume` 只读取并恢复一个 Intake Session，不创建新 Session，不重放 `CONFIRM`，也不重复创建任务。
+
+读取成功后，CLI 将该 `session_id` 重新绑定为 active session，并进入与首次 Goal 请求完全相同的会话控制器：
+
+```text
+CLARIFYING + TaskSpec 不完整
+  -> 展示 questions
+  -> 用户或 Agent 在当前进程输入普通补充内容
+  -> CLI 内部构造 TaskIntakeAction.CONTINUE
+
+CLARIFYING + TaskSpec 完整
+  -> 展示确认摘要和确认/取消选择
+  -> CLI 内部构造 TaskIntakeAction.CONFIRM 或 CANCEL
+
+CONFIRMED
+  -> 展示“继续提交/查看任务”
+  -> 调用幂等 /start；不重复确认
+
+CANCELLED
+  -> 展示终态并退出，不允许继续输入
+```
+
+`CONTINUE`、`CONFIRM`、`CANCEL` 是 CLI 会话控制器与 Backend 之间的内部 action，不是公开子命令。首版不提供 `reply`、`confirm`、`cancel`，也不提供 `resume --message/--confirm/--cancel`。
+
+第三方 Agent 需要继续会话时，执行 `resume <session-id>` 并像正常首次会话一样读取问题、发送普通回复、选择确认或取消。`--non-interactive` 是单次状态读取模式；它不会等待回复，也不能修改 Session，返回需要处理的状态后以退出码 `3` 结束。
+
+### 4.3 查询任务
+
+```bash
+avernet-goal-cli get <task-id> [--output text|json]
+```
+
+`get` 查询一个 Target Execution 的任务 dashboard，不属于 Intake Module。
+
+### 4.4 Batch 命令组
+
+Batch 命令面固定为：
+
+```bash
+avernet-goal-cli batch schema  [--output json|yaml]
+avernet-goal-cli batch example [--format yaml|json]
+avernet-goal-cli batch validate --file <path|-> [--output text|json]
+avernet-goal-cli batch submit   --file <path|-> [--output text|json] [--non-interactive]
+```
+
+命令语义：
+
+| 命令 | 输入 | 副作用 | 输出 |
+| --- | --- | --- | --- |
+| `batch schema` | 无 | 无；不访问 Backend | 当前 CLI 支持的标准 JSON Schema |
+| `batch example` | 无 | 无；不创建文件 | 一份可通过当前 Schema 的 YAML/JSON 示例 |
+| `batch validate` | Batch 文件 | 无；不创建 Session 或 Task | 字段级校验结果和归一化摘要 |
+| `batch submit` | 已声明版本的 Batch 文件 | 为每个 `Goal × target` 创建独立 Intake Session；各自确认后创建 Task | Goal、Target、Session 和 Task 的聚合结果 |
+
+不提供语义模糊的：
+
+```bash
+avernet-goal-cli --file goals.yaml
+```
+
+第三方 Agent 的标准调用顺序：
+
+```bash
+avernet-goal-cli batch schema --output json
+avernet-goal-cli batch example --format yaml
+avernet-goal-cli batch validate --file goals.yaml --output json
+avernet-goal-cli batch submit --file goals.yaml --non-interactive --output json
+```
+
+### 4.5 结构化输出约束
+
+使用 `--output json` 时：
+
+- stdout 只包含一个合法 JSON 对象；
+- spinner、进度条、诊断日志和提示文本只能写入 stderr；
+- 字段名、状态枚举和错误码是稳定合同；
+- Agent 同时检查进程退出码和 JSON `status`；
+- `--non-interactive` 只表示不等待输入，不等于自动确认。
+
+建议退出码：
+
+| 退出码 | 语义 |
+| ---: | --- |
+| `0` | 命令完成且全部成功 |
+| `2` | CLI 参数或 Batch 文件无效 |
+| `3` | 至少一个 Goal 需要澄清或确认 |
+| `4` | 部分 Goal 或部分 Target 创建成功 |
+| `5` | 认证或授权失败 |
+| `6` | Gateway/Backend 暂时不可用 |
+| `7` | 所有 Goal 均启动失败 |
+
+## 5. Batch Goal 文件合同
+
+### 5.1 标准 YAML
+
+```yaml
+schema_version: "1"
+
+defaults:
+  from: human
+  mode: relay
+
+goals:
+  - id: goal1
+    goal: 分析支付失败率
+    from: bot:xx
+    to:
+      - bot:bot1
+
+  - id: goal2
+    goal: 分析退款失败率
+    from: bot:yy
+    to:
+      - bot:bot1
+      - bot:bot2
+
+  - id: goal3
+    goal: 输出支付风险分析报告
+    from: bot:zz
+    to:
+      - bot:bot1
+      - bot:bot2
+      - bot:bot3
+```
+
+上述文件表示：
+
+```text
+3 个 Goal
+6 个 Goal Intake Session
+6 个 Target Execution
+6 个 TaskExecutionGraph
+6 个初始 Runner 执行会话
+```
+
+### 5.2 文件对象
+
+```python
+@dataclass(frozen=True)
+class GoalBatchFile:
+    schema_version: str
+    goals: list[GoalBatchItem]
+    defaults: GoalBatchDefaults | None = None
+
+
+@dataclass(frozen=True)
+class GoalBatchDefaults:
+    from_ref: str | None = None
+    mode: TaskExecutionMode | None = None
+
+
+@dataclass(frozen=True)
+class GoalBatchItem:
+    id: str
+    goal: str
+    from_ref: str | None = None
+    to: list[str] | None = None
+    mode: TaskExecutionMode | None = None
+```
+
+这些是独立 Rust CLI 的文件输入模型，不进入 Backend Task 领域模型。CLI 将每个 `GoalBatchItem` 按 `to` 展开；每个目标转换成一次普通的单 target Goal Intake 调用。
+
+### 5.3 字段规则
+
+| 字段 | 必填 | 规则 |
+| --- | ---: | --- |
+| `schema_version` | 是 | 首版固定为字符串 `"1"`；不允许缺省猜测 |
+| `defaults` | 否 | 只允许 `from`、`mode` |
+| `goals` | 是 | 至少一个元素 |
+| `goals[].id` | 是 | 文件内唯一；用于输入、错误和结果关联 |
+| `goals[].goal` | 是 | 去除空白后非空 |
+| `goals[].from` | 否 | `human` 或 `bot:<bot-ref>`；覆盖 defaults |
+| `goals[].to` | 否 | 始终是数组；元素唯一；省略表示默认目标解析 |
+| `goals[].mode` | 否 | `relay` 或 `centralized`；覆盖 defaults |
+
+首版 `defaults` 不允许设置 `to`，避免一个默认目标集合意外放大到全部 Goal。
+
+文件中不允许 `runtime`，未知字段必须报错。相同 Goal 的单目标也必须写成数组：
+
+```yaml
+to:
+  - bot:risk-bot
+```
+
+不能写成：
+
+```yaml
+to: bot:risk-bot
+```
+
+### 5.4 引用语法
+
+```text
+SenderRef := human | bot:<bot-ref>
+TargetRef := bot:<bot-ref>
+Mode      := relay | centralized
+```
+
+解析 `bot:` 时只按第一个 `:` 分割，允许稳定引用本身包含 `:`。首版出现 `group:` 或其他类型前缀时必须在 CLI 本地校验阶段返回 `UNSUPPORTED_TARGET_TYPE`，不创建 Intake Session。
+
+### 5.5 默认值和覆盖
+
+```text
+服务端/CLI 固定默认值
+  < 文件 defaults
+  < 单个 Goal 字段
+```
+
+固定默认值：
+
+```text
+from = human
+mode = relay
+to   = Backend 默认目标解析
+```
+
+### 5.6 校验顺序
+
+`batch validate` 和 `batch submit` 必须在任何网络副作用前校验整个文件：
+
+1. YAML/JSON 语法；
+2. `schema_version`；
+3. 未知字段；
+4. `goals` 非空；
+5. Goal `id` 非空且唯一；
+6. Goal 文本非空；
+7. `from`、`to`、`mode` 格式；
+8. 同一 Goal 中 target 不重复；
+9. defaults 应用后的归一化结果。
+
+静态校验失败时，不创建任何 Intake Session。
+
+字段错误使用稳定路径和错误码：
 
 ```json
 {
-  "session_id": "tis-...",
-  "owner_user_id": "user-...",
-  "source_type": "api",
-  "status": "CLARIFYING",
-  "target": {"target_type": "BOT", "target_id": "bot-..."},
-  "missing_fields": ["deliverables"],
-  "questions": ["需要交付什么？"]
+  "valid": false,
+  "errors": [
+    {
+      "path": "goals[1].to[1]",
+      "code": "DUPLICATE_TARGET",
+      "message": "target bot:bot1 is duplicated"
+    }
+  ]
 }
 ```
 
-`--no-interactive` 遇到 `CLARIFYING` 时输出 `TaskIntakeResult` 并以非零退出码退出；调用方根据 `TaskSpec` 完整性决定继续澄清还是确认。`CONFIRMED` 与 `CANCELLED` 成功退出。确认后的独立 start 链路输出 `TaskOpResult`。HTTP/领域错误沿用既有错误码映射。
+### 5.7 Schema 自发现
 
-人类 CLI 默认输出必须回显最终绑定的稳定 target。例如默认解析或随机选择 Bot 后，都显示：`目标：@<display-name> bot (<stable-id>)`。后续同一 session 不得重新解析或重新随机选择。
+`batch schema --output json` 输出 Draft 2020-12 JSON Schema，至少包含：
 
-当前不引入 `task-cli exec`：Task 创建有明确确认这个领域前置条件，不能把类似 Codex 的无人值守执行命令误导为会绕过确认。自动化调用使用 Task Intake HTTP API 的结构化 action；`--no-interactive --json` 只读取或启动一次 intake 并返回状态，缺少澄清或确认时必须由调用方显式处理。
+- `additionalProperties: false`；
+- `schema_version` 常量 `"1"`；
+- `goals.minItems = 1`；
+- `to.uniqueItems = true`；
+- sender/target pattern；
+- mode enum；
+- 示例。
 
-## 4. 调用者与目标执行者
+Rust 文件输入类型、反序列化、JSON Schema、`batch example` 和 `batch validate` 必须来自同一份类型定义。Golden Test 必须证明：
 
-### 4.1 调用者字段
+```text
+batch example 的输出
+-> 能被当前 CLI 反序列化
+-> 能通过 batch validate
+```
 
-`TaskIntakeCommand` 不携带认证、会话控制或调用来源。HTTP Adapter 不把 Principal 透传进 Core，而是将已经校验的系统事实和本次请求控制信息收敛为一个应用层上下文：
+## 6. 调用者与目标
+
+### 6.1 可信调用上下文
 
 ```python
 @dataclass(frozen=True)
 class TaskIntakeContext:
-    # 当前 intake 会话；START 时为空，由 Task Intake 创建后返回。
     session_id: str | None
-
-    # 已认证调用者所代表的用户；用于 intake 所有权和正式任务 owner。
     owner_user_id: str
-
-    # 当前调用来源；在 START 固化到 TaskIntakeResult。
     source_type: TaskSourceType
-
-    # 仅 Bot 主动发起时存在；用于未指定目标时选择调用 Bot 自身。
+    # 仅真正由 Bot Runtime 调用 Intake 时设置，不来自 CLI --from。
     caller_bot_id: str | None = None
 ```
 
-这不是新的认证领域模型，也不替代既有 `VerifiedCaller`；它是 Task Intake 应用边界所需的最小上下文。HTTP Adapter 复用既有 `caller_owner_id(principal)` 解析 `owner_user_id`，从 CLI/HTTP 会话控制信息取得 `session_id`，并从既有调用上下文取得 `caller_bot_id` 与 `source_type`，再构造 `TaskIntakeContext`：
+字段来源：
 
 ```text
-HTTP 已认证 Principal
-  -> caller_owner_id(principal) -> owner_user_id
-  + CLI/HTTP 会话控制信息 -> session_id
-  + 既有调用上下文 -> caller_bot_id / source_type
-  -> TaskIntakeContext(...)
-  -> TaskService.intake(command, context)
+统一 CLI 认证取得 Human Principal
+-> owner_user_id
+
+可选 --from bot:<ref>
+-> TaskIntakeCommand.requested_a2a_proxy_bot_ref
+-> Backend 验证 Human 对该 Bot 的代理权
+-> Backend 取得该 Bot 的 BCS 身份和运行时 token
+-> 通过 BCS A2A chat-async 向 target 实际发送 Intake 消息
+-> BCS 在发送入口校验 proxy Bot 到 target 的准入权限
+-> 不改变 source_type、owner_bot_id 或目标澄清执行者
+
+未指定 --from
+-> Human 按自身权限直接访问 target
+
+CLI 请求始终：
+-> caller_bot_id=None + source_type=API
 ```
 
-字段用途：
+客户端提交的 A2A 代理 Bot 引用不是可信 `caller_bot_id`。`caller_bot_id` 只描述真正由 Bot Runtime 发起的调用；CLI 的 `--from` 是待校验的权限代理请求，两者不能混用。
 
-- `owner_user_id`：创建 `TaskIntakeResult.owner_user_id`，并校验 `RESUME`、`CONTINUE`、`CONFIRM`、`CANCEL` 的 session owner；确认时写入 `TaskInfoRequest.owner_user_id`。
-- `caller_bot_id`：仅在 Bot 身份且未显式指定目标时作为默认 target；Human 调用时为 `None`。
-- `source_type`：仅在 `START` 时写入 `TaskIntakeResult.source_type`；确认时从 result 写入 `TaskInfoRequest.source_type`。
+### 6.2 A2A Intake 转发
 
-三个字段均不来自 CLI 请求体，不由 Skill/LLM 生成或覆盖。
+`requested_a2a_proxy_bot_ref` 非空时，Intake Skill 不能继续使用 Human/OpenAPI 直连目标 Bot 的发送路径，必须复用现有 BCS A2A 能力：
 
-### 4.2 IntakeTarget
+```text
+Human Principal
+  -> 验证 proxy Bot 归属/代理权
+  -> 解析 proxy Bot BCS UUID
+  -> BcsBotTokenProvider.get_token(proxy_bot_uuid)
+  -> BcsClientPort.send_message_a2a(
+       target_bot_id,
+       target_user_id,
+       intake_prompt,
+       session_id=a2a_intake_session_key,
+       caller_bearer=proxy_bot_token,
+     )
+  -> 轮询 GET /chat/runs/{run_id}
+  -> 解析目标 Bot 返回的 TaskSpec/questions
+```
+
+已有 `BcsClientPort.send_message_a2a()`、`BcsBotTokenProvider` 和 BCS
+`GET /chat/runs/{run_id}` 合同必须复用；Backend 只补齐中性的 Chat Run 查询 Port 和
+Intake Skill Adapter，不复制 BCS CLI 客户端实现，不在 Prompt、日志、TaskSpec 或
+TaskIntakeResult 中保存 token。
+
+具体实现以现有 `POST /api/v1/collaboration/tasks/benchmark_execute` 的 A2A 分支为基线，复用其已经跑通的调用链：
+
+```text
+compose_bot_identity(proxy_bot_id, owner_user_id)
+-> BcsBotTokenProvider.get_token(proxy_bot_identity)
+-> BcsClientPort.send_message_a2a(
+     target_bot_id,
+     target_user_id,
+     message,
+     session_id,
+     caller_bearer,
+   )
+-> BotSendResult(run_id, session_id)
+```
+
+`benchmark_execute` 当前只提交并返回 A2A run handle；Task Intake 在相同 Adapter/Port
+之上增加终态等待和结果解析即可。不得复制 benchmark 路由中的 transport 代码到
+Task Core，应将可复用的“发送并等待 A2A Bot 结果”能力收敛到 transport-agnostic Port
+及其 Adapter，再由 benchmark 和 Intake 各自编排业务语义。
+
+未设置 `--from` 时继续使用 Human 直连目标 Bot 的既有 Intake Skill 路径。两条发送路径必须产生相同的 `TaskSpec + questions` 领域输出。
+
+A2A 发送由 BCS 权威准入检查决定；403 映射为 `TASK_A2A_FORBIDDEN`，proxy Bot token 缺失映射为 `TASK_A2A_PROXY_UNAVAILABLE`。发送成功但本次轮询超时时，Backend 保留 Chat Run handle，并返回同一个 Session 的 `TaskIntakeResult`；HTTP 只额外投影 `processing=true`，不暴露 run ID 或 token。CLI 返回 `session_id` 和退出码 3，调用者稍后执行 `resume <session-id>` 继续轮询，不能盲目重发 START。
+
+### 6.3 目标对象
 
 ```python
 class IntakeTargetType(StrEnum):
     BOT = "BOT"
+    # Backend 任务领域为未来能力保留；avernet-goal-cli 首版不得提交。
     GROUP = "GROUP"
 
 
@@ -237,95 +596,35 @@ class IntakeTarget:
     target_id: str
 ```
 
-Target 在 intake session 创建后不可变。切换目标必须取消当前 session 并重新发起，避免不同 Bot 的识别结果混入同一草稿。
+一个 Intake Session 的单一 target 在创建后不可变。改变 `to` 必须取消对应 Session 并重新发起。
 
-### 4.3 Human 默认目标解析
+### 6.4 默认目标解析
 
-Human 未显式指定 target 时按下列顺序解析：
+Human 未显式设置 `to` 时，Backend 按服务端策略解析一个目标，例如：
 
-1. 当前用户下恰好一个名称与用户展示名完全匹配且可运行的 Bot；
-2. 用户配置的 `default_bot_id`；
-3. 根据一句话任务目标匹配可访问 Bot 的能力，选择最匹配且可运行的 Bot；
-4. 若没有需求匹配结果，从调用者可访问且可运行的 Bot 中随机选择一个；
-5. 若没有任何可用 Bot，提示用户创建或启用 Bot。
+1. 用户同名且可运行的 Bot；
+2. `default` Bot；
+3. 能力最匹配且可运行的 Bot；
+4. 可访问且可运行 Bot 中的受控兜底选择；
+5. 无可用目标时返回 `NO_AVAILABLE_TARGET`。
 
-随机选择必须将最终选中的稳定 Bot ID 写入 `TaskIntakeResult.target`，后续澄清、确认和审计均以该 ID 为准；不得在同一 session 中重新抽取。
+解析出的稳定目标 ID 必须写入 `TaskIntakeResult.target`，同一 Session 后续不得重新选择。
 
-如果没有任何可用 Bot，返回 `NO_AVAILABLE_TARGET` 并提示用户创建或启用 Bot。
+`GROUP` 是 Backend 既有/未来任务能力的保留类型，不属于 `avernet-goal-cli` 首版公开合同。CLI help、JSON Schema 和 example 只允许 `bot:<bot-ref>`；任何 `group:` 输入均以 `UNSUPPORTED_TARGET_TYPE` 失败，且不能静默退化为 Bot。
 
-### 4.4 Bot 默认目标解析
+## 7. Intake 领域对象
 
-Bot 身份调用：
-
-```bash
-task-cli "<一句话任务目标>"
-```
-
-默认 target 为调用 Bot 自身。第一版不允许 Bot 通过 `@xxx bot` 或 `@xxx group` 指向其他目标；跨 Bot 接力由 Relay S1-S6 协议完成。
-
-### 4.5 Group 目标
-
-显式 Group 必须满足：
-
-- 调用者对 Group 可见且有发起权限；
-- Group 状态可运行；
-- Group 存在唯一 manager/master；
-- manager/master 是 intake recognition 和后续 Relay 的 holder。
-
-## 5. Intake 任务规格与对象职责
-
-确认前不得使用 `TaskInfo`。`TaskInfo` 含正式 `task_id`，而 intake session 在确认前没有任务实体。
-
-确认前的任务内容直接复用既有 `TaskSpec`，不新增草稿规格模型。`TaskSpec` 是任务纯业务规格，不包含 `task_id`、调用者、目标执行者或运行配置；其字段承载关系如下：
+### 7.1 执行模式
 
 ```python
-TaskSpec(
-    context=Context(
-        title="",
-        background="",
-        extend_props={
-            "deliverables": [],
-            "constraints": [],
-            "resources": [],
-        },
-    ),
-    goal=Goal(
-        objective="",
-        acceptances=[AcceptanceCriteria(id="ac1", description="")],
-    ),
-)
+class TaskExecutionMode(StrEnum):
+    RELAY = "relay"
+    CENTRALIZED = "centralized"
 ```
 
-完整性约束：
+执行模式在 Intake Session 创建时冻结。Backend 根据它选择服务端 Runtime Profile；它不是客户端可展开的策略对象。
 
-```text
-TaskSpec.goal.objective 非空
-TaskSpec.context.extend_props.deliverables 非空
-TaskSpec.goal.acceptances 非空
-constraints 已明确；允许 []，但必须经过用户确认
-```
-
-识别阶段首次写入验收项时，由 Task Intake Module 分配稳定 ID（例如 `ac1`）；后续澄清更新同一验收项时必须保留该 ID。
-
-对象职责和数据关系：
-
-```text
-TaskIntakeResult
-  任务澄清唯一的持久化状态对象，也是 TaskService.intake() 的返回对象
-  └── 表示任务识别与澄清的当前结果；只用于恢复、补充与完整性判断
-
-TaskInfoRequest
-  完整 TaskIntakeResult 经用户确认后由 HTTP /start 应用层转换为 TaskService.execute() 的创建命令
-  └── 由 TaskIntakeResult + 服务端策略组装
-
-TaskOpResult
-  TaskService.execute() 创建正式任务的结果
-  └── 唯一承载 task_id、node_id
-```
-
-## 6. Intake command
-
-### 6.1 Command 类型
+### 7.2 Command
 
 ```python
 class TaskIntakeAction(StrEnum):
@@ -334,104 +633,47 @@ class TaskIntakeAction(StrEnum):
     CONTINUE = "CONTINUE"
     CONFIRM = "CONFIRM"
     CANCEL = "CANCEL"
-```
 
-### 6.2 Command 对象
 
-```python
 @dataclass(frozen=True)
 class TaskIntakeCommand:
     action: TaskIntakeAction
     message: str | None = None
+    requested_a2a_proxy_bot_ref: str | None = None
     requested_target: IntakeTarget | None = None
+    requested_mode: TaskExecutionMode | None = None
 ```
 
-`TaskIntakeCommand` 的边界是“调用者本次希望 Intake 做什么”，而不是“谁在调用”、在哪个会话中调用，或“最终任务归谁”。它只包含用户意图：`message`、显式目标请求和结构化 action；最终 `TaskIntakeResult.target` 仍由服务端解析并固化。字段来源固定如下：
+`--from bot:<ref>` 是用户请求的 A2A 权限代理，因此进入 Command 的 `requested_a2a_proxy_bot_ref`；它必须由 Backend 结合 `TaskIntakeContext.owner_user_id` 校验，不能直接当作可信 Bot ID。
 
-```text
-用户输入
-  任务文本 / 澄清文本 / @bot 或 @group / 确认或取消卡片操作
-    -> Adapter
-    -> TaskIntakeCommand
+字段有效性：
 
-认证与调用链解析
-  Principal + 调用入口 + CLI/HTTP 控制信息
-    -> Adapter
-    -> TaskIntakeContext
-
-TaskService.intake
-  TaskIntakeCommand + TaskIntakeContext
-    -> TaskIntakeResult.target + TaskIntakeResult.task_spec
-```
-
-| 字段 | 填充者 | 规则 |
-| --- | --- | --- |
-| `message` | 用户 | 一句话任务目标或澄清补充内容；由 CLI 原样传递。 |
-| `requested_target` | 用户 + CLI / HTTP Adapter | 用户显式写 `@bot` / `@group`；Adapter 在调用者可见范围内解析为稳定 ID。未显式指定时为空，由服务端根据 `TaskIntakeContext` 解析默认 target。 |
-| `action` | CLI / HTTP Adapter | CLI 根据启动、补充、选择、确认、取消或恢复等结构化交互动作填写；不得从自由文本猜测确认或取消。 |
-
-HTTP 请求体直接反序列化为 `TaskIntakeCommand`；HTTP Adapter 完成相同的 target 解析和 action 字段校验，并构造 `TaskIntakeContext`。领域服务接收稳定 ID、已校验的 command 和已认证的 intake context。
-
-`session_id` 位于 `TaskIntakeContext`，不是 command 字段；它是服务端生成的会话续接标识，不是每次动作的幂等键。字段有效性由 `action` 决定：
-
-| action | 必填字段 |
+| action | 必填/允许字段 |
 | --- | --- |
-| `START` | `message`；`requested_target` 可选 |
-| `RESUME` | `context.session_id` |
-| `CONTINUE` | `context.session_id`、`message` |
-| `CONFIRM` / `CANCEL` | `context.session_id` |
+| `START` | `message` 必填；`requested_a2a_proxy_bot_ref`、`requested_target`、`requested_mode` 可选 |
+| `RESUME` | `context.session_id` 必填；其他 Command 字段为空 |
+| `CONTINUE` | `context.session_id`、`message` 必填 |
+| `CONFIRM` / `CANCEL` | `context.session_id` 必填；其他 Command 字段为空 |
 
-### 6.3 会话标识生成与传递责任
+`requested_a2a_proxy_bot_ref` 和 `requested_target` 只在 `START` 接受；不得通过 `CONTINUE` 更改权限代理或目标。CLI 的重复 `--to` 必须在调用 Backend 前展开，不能把目标列表传入单次 Intake。
 
-`session_id` 是控制面会话标识，不是用户输入、`TaskSpec` 字段或 Skill 推理结果。
-
-| 字段 | 首次设置者 | 设置时机 | 后续传递与重试 | 默认 TTY 用户可见性 |
-| --- | --- | --- | --- | --- |
-| `session_id` | Task Intake Module | 成功处理 `START` 时，创建并持久化 `TaskIntakeResult` 前 | 写入同一 `TaskIntakeResult` 返回给 CLI；CLI 在 active session 中自动原样携带。跨进程恢复时，作为 `task-cli resume <session-id>` 的参数。 | 正常会话内不展示；会话暂停提示和 JSON/API 可显示，供用户跨进程复制恢复。 |
-
-伪代码：
-
-```python
-# CLI Adapter：正常会话内自动携带 session_id；仅 resume 由用户指定。
-def send_user_action(action, *, active_session_id, **fields):
-    command = TaskIntakeCommand(
-        action=action,
-        **fields,
-    )
-    context = TaskIntakeContext(
-        session_id=active_session_id,
-        owner_user_id=authenticated_owner_id(),
-        source_type=resolved_source_type(),
-        caller_bot_id=resolved_caller_bot_id(),
-    )
-    return post_intake(command, context)
-
-
-```
-
-`START` 的完整 Backend 处理见第 8 节。`session_id` 标识跨多轮澄清的业务会话，并作为确认后任务创建的唯一持久关联。它不能区分同一会话内两次 `CONTINUE` 是否为重试；CLI 对 `START/CONTINUE` 不做盲目自动重放。响应丢失时，`CONTINUE` 先 `RESUME` 读取最新结果；`START` 尚未取得 `session_id` 时无法严格判定是否创建成功，必须把结果标为未知，不能直接声称再次发送必然返回同一会话。
-
-## 7. Intake result
-
-### 7.1 状态
+### 7.3 Result
 
 ```python
 class TaskIntakeStatus(StrEnum):
     CLARIFYING = "CLARIFYING"
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
-```
 
-### 7.2 Result 对象
 
-```python
 @dataclass
 class TaskIntakeResult:
     session_id: str
     owner_user_id: str
     source_type: TaskSourceType
     status: TaskIntakeStatus
-    target: IntakeTarget | None = None
+    target: IntakeTarget
+    execution_mode: TaskExecutionMode
     task_spec: TaskSpec | None = None
     missing_fields: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
@@ -439,653 +681,607 @@ class TaskIntakeResult:
     update_time_ms: int = 0
 ```
 
-`TaskIntakeResult` 是任务澄清唯一的持久化状态对象，也是所有 `TaskService.intake()` 动作的直接返回值；包括 `CONFIRM`。所有 Result 字段均可返回给用户。字段有效性由 `status` 约束：
+约束：
 
 ```text
-CLARIFYING -> 尚未由用户确认；TaskSpec 可完整或不完整
-CLARIFYING + TaskSpec 不完整 -> missing_fields、questions 非空
-CLARIFYING + TaskSpec 完整 -> target、task_spec 非空；展示确认卡
-CONFIRMED -> target、task_spec 非空；代表用户已确认该完整 TaskSpec，不代表正式任务已创建
-CANCELLED -> 不创建 TaskInfo 和 TaskExecutionGraph
+target 和 execution_mode 在 Session 创建后不可变
+CLARIFYING + TaskSpec 不完整 -> missing_fields/questions 非空
+CLARIFYING + TaskSpec 完整   -> 展示确认摘要
+CONFIRMED                    -> TaskSpec 完整；不代表正式任务已创建
+CANCELLED                    -> 不再创建新的 Task
 ```
 
-`TaskIntakeResult` 的完备性只由 `task_spec` 是否满足完整性约束决定，与是否已创建 `TaskInfo`、是否生成 `task_id/node_id` 无关。它不持有也不返回这两个标识。`TaskIntakeResult` 持久化在 Backend；CLI 退出不丢失澄清状态。
+`TaskIntakeResult` 不持有 `task_id`、`node_id` 或 Runner 会话 ID。它只描述一个 Target Execution 的 Goal 是否已完整、确认以及绑定到哪个目标。
 
-## 8. `TaskService.intake()` 处理伪代码
+HTTP DTO 额外提供只读派生字段 `processing: bool`。它由 Backend 内部是否存在未终态 A2A Chat Run 推导，不进入 Intake 领域状态机，也不暴露内部 `a2a_run_id`、`a2a_session_id` 或 Bot bearer。
 
-输入固定为 `TaskIntakeCommand + TaskIntakeContext`，输出固定为 `TaskIntakeResult`；非法输入、无可用目标、无权限和状态冲突以领域错误返回，不伪造一个成功 Result。以下 `resolve_target`、`intake_skill`、`missing_fields` 和 `intake_repository` 是 Service 的内部依赖/函数，不新增领域对象。`intake_skill` 只生成或修订 `TaskSpec` 与追问文案，不能设置 owner、source、target、状态或任务 ID。
+### 7.4 TaskSpec 完整性
+
+确认前复用既有 `TaskSpec`，不新增 TaskDraft：
+
+```text
+TaskSpec.goal.objective 非空
+TaskSpec.context.extend_props.deliverables 非空
+TaskSpec.goal.acceptances 非空
+constraints 已明确；允许 []，但必须经过确认
+```
+
+同一输入 Goal 展开的多个 Target Execution 各自澄清，因此允许形成不同 `TaskSpec`。CLI 不负责合并或强制对齐这些规格。
+
+## 8. `TaskService.intake()` 处理逻辑
 
 ```python
 async def intake(
-    self,
     command: TaskIntakeCommand,
     context: TaskIntakeContext,
 ) -> TaskIntakeResult:
-    require_nonempty(context.owner_user_id)
-    validate_action_fields(command, context)  # 按第 6.2 节校验必填与禁止字段
-
     if command.action == TaskIntakeAction.START:
         require(context.session_id is None)
-        # 显式目标先做可见性/运行状态/发起权限校验；未指定时执行第 4 节
-        # 的 Human/Bot 默认规则。无可用 Bot 抛 NO_AVAILABLE_TARGET。
-        target = self.resolve_target(command.requested_target, command.message, context)
-        spec, proposed_questions = await self.intake_skill.recognize(
-            message=command.message,
-            target=target,
+        require_nonempty(command.message)
+
+        target = await resolve_and_authorize_target(
+            owner_user_id=context.owner_user_id,
+            caller_bot_id=context.caller_bot_id,
+            requested_a2a_proxy_bot_ref=command.requested_a2a_proxy_bot_ref,
+            requested_target=command.requested_target,
+            goal_message=command.message,
         )
-        spec = assign_stable_acceptance_ids(spec)
-        missing = missing_fields(spec)
-        now = now_ms()
+
         result = TaskIntakeResult(
             session_id=new_session_id(),
             owner_user_id=context.owner_user_id,
             source_type=context.source_type,
             status=TaskIntakeStatus.CLARIFYING,
             target=target,
-            task_spec=spec,
-            missing_fields=missing,
-            questions=questions_for(missing, proposed_questions),
-            create_time_ms=now,
-            update_time_ms=now,
+            execution_mode=command.requested_mode or TaskExecutionMode.RELAY,
+            task_spec=None,
+            create_time_ms=now_ms(),
+            update_time_ms=now_ms(),
         )
-        # 原子创建会话；没有动作标识时无法识别响应丢失后的重复 START。
-        return self.intake_repository.create(result)
 
-    session = self.intake_repository.get(context.session_id)
-    require(session.owner_user_id == context.owner_user_id)  # 否则拒绝访问
+        task_spec, missing_fields, questions = await intake_skill.start(
+            message=command.message,
+            target=target,
+        )
+        return intake_repository.create(
+            replace(
+                result,
+                task_spec=task_spec,
+                missing_fields=missing_fields,
+                questions=questions,
+            )
+        )
+
+    session = intake_repository.get(require(context.session_id))
+    require_owner(session, context.owner_user_id)
 
     if command.action == TaskIntakeAction.RESUME:
-        return session  # 不重新识别、不更新时间、不创建任务
+        return session
+
+    if command.action == TaskIntakeAction.CONTINUE:
+        require(session.status == TaskIntakeStatus.CLARIFYING)
+        require_nonempty(command.message)
+        require(not task_exists_for_session(session.session_id))
+
+        task_spec, missing_fields, questions = await intake_skill.continue_(
+            task_spec=session.task_spec,
+            message=command.message,
+            target=session.target,
+        )
+        return intake_repository.save(
+            session,
+            replace(
+                session,
+                task_spec=task_spec,
+                missing_fields=missing_fields,
+                questions=questions,
+                update_time_ms=now_ms(),
+            ),
+        )
 
     if command.action == TaskIntakeAction.CONFIRM:
         if session.status == TaskIntakeStatus.CONFIRMED:
-            return session  # 按会话状态幂等确认
-        require(session.status == TaskIntakeStatus.CLARIFYING, conflict=409)
-        require(session.target is not None and session.task_spec is not None)
-        require(missing_fields(session.task_spec) == [])
-        updated = replace(
+            return session
+        require(session.status == TaskIntakeStatus.CLARIFYING)
+        require_complete(session.task_spec)
+        return intake_repository.save(
             session,
-            status=TaskIntakeStatus.CONFIRMED,
-            missing_fields=[],
-            questions=[],
-            update_time_ms=now_ms(),
+            replace(
+                session,
+                status=TaskIntakeStatus.CONFIRMED,
+                missing_fields=[],
+                questions=[],
+                update_time_ms=now_ms(),
+            ),
         )
-        # 只持久化 Result 状态；不调用 start，不构造 TaskInfoRequest。
-        return self.intake_repository.save(session, updated)
-
-    if command.action == TaskIntakeAction.CANCEL and session.status == TaskIntakeStatus.CANCELLED:
-        return session  # 按会话状态幂等取消
-
-    require(session.status == TaskIntakeStatus.CLARIFYING, conflict=409)
-    # 正式任务已按此 session_id 创建后，不允许继续或取消澄清。
-    require(not self.task_exists_for_intake(session.session_id), conflict=409)
 
     if command.action == TaskIntakeAction.CANCEL:
-        updated = replace(session, status=TaskIntakeStatus.CANCELLED, update_time_ms=now_ms())
-        return self.intake_repository.save(session, updated)
+        if session.status == TaskIntakeStatus.CANCELLED:
+            return session
+        require(session.status == TaskIntakeStatus.CLARIFYING)
+        require(not task_exists_for_session(session.session_id))
+        return intake_repository.save(
+            session,
+            replace(
+                session,
+                status=TaskIntakeStatus.CANCELLED,
+                update_time_ms=now_ms(),
+            ),
+        )
 
-    require(command.action == TaskIntakeAction.CONTINUE)
-    spec, proposed_questions = await self.intake_skill.clarify(
-        existing_spec=session.task_spec,
-        message=command.message,
-        target=session.target,
-    )
-    # Skill 返回修订后的完整 TaskSpec，不另定义 patch 领域对象；未提到的
-    # 字段沿用旧值，不能清空用户已经确认过的上下文。
-    spec = preserve_acceptance_ids(session.task_spec, spec)
-    missing = missing_fields(spec)
-    updated = replace(
-        session,
-        task_spec=spec,
-        missing_fields=missing,
-        questions=questions_for(missing, proposed_questions),
-        update_time_ms=now_ms(),
-    )
-    # 仅保存用户澄清后的业务规格；保留 owner/source/target/session ID。
-    return self.intake_repository.save(session, updated)
+    raise InvalidTaskIntakeAction(command.action)
 ```
 
-`missing_fields(spec)` 必须同时校验 objective、deliverables、acceptances 和 constraints 是否**已明确**：`constraints` 键缺失表示未澄清；键存在且值为 `[]` 表示用户明确无约束。Skill 不能在用户尚未回答时预填 `constraints=[]` 来绕过确认。`questions_for` 在缺项为空时返回 `[]`，有缺项但 Skill 未给追问时必须根据缺项生成追问；CLI 据完整性展示确认卡，状态仍是 `CLARIFYING`。
+Task Intake Skill 只生成或修订当前 target 对应的 `TaskSpec` 和追问文案，不能设置 owner、source、target、execution mode、状态或任务 ID。
 
-`create/save` 是内部持久化操作；`save` 必须以读取时的会话版本做条件更新，防止两个并发修改互相覆盖。版本仅在 Backend 内部保存，不进入请求领域对象。持久化失败必须抛错，不能返回未保存的 Result。`CONFIRM/CANCEL` 可按终态返回已保存的 Result；`START/CONTINUE` 不承诺仅凭相同文本严格识别重试。`intake()` 永远不隐式调用 `TaskService.execute()`。
+## 9. 确认后的单 Target `/start`
 
-## 9. 状态迁移
+每个 Intake Session 只绑定一个 target，因此 Backend `/start` 保持单任务合同，直接返回现有 `TaskOpResult`。多目标聚合属于 CLI，不进入 Backend Task Service API。
 
-```text
-START
-  -> CLARIFYING
-
-任意已持久化 session
-  --RESUME----------> 保持原 status；只返回当前 TaskIntakeResult，不写状态、不创建任务
-
-CLARIFYING
-  --CONTINUE-------> CLARIFYING
-  --CONFIRM--------> CONFIRMED（前置：TaskSpec 完整）
-  --CANCEL---------> CANCELLED
-
-CONFIRMED
-  --再次 CONFIRM---> 返回同一 TaskIntakeResult，不重复更新
-  --CONTINUE/CANCEL--> 409；正式任务由独立 start 链路创建或重试
-
-CANCELLED
-  --任何写命令--> 409
-```
-
-非法 command 与当前 session 状态不匹配时返回 `409`，不得猜测调用方意图。
-
-## 10. 确认与 start
-
-### 10.1 组装 TaskInfoRequest
+### 9.1 TaskInfoRequest 转换
 
 ```python
 def build_task_info_request(
     result: TaskIntakeResult,
+    runtime_profile: RuntimeProfile,
 ) -> TaskInfoRequest:
-    ...
-```
-
-该函数位于确认后的任务创建链路，不是 `TaskService.intake(CONFIRM)` 的内部实现。`target_resolver` 与 `execution_policy` 是该创建链路的内部依赖，不是调用方传入的领域包装对象。
-
-```python
-def build_task_info_request(result: TaskIntakeResult) -> TaskInfoRequest:
     require(result.status == TaskIntakeStatus.CONFIRMED)
     require(result.task_spec is not None)
-    require(result.target is not None)
 
-    if result.target.target_type == IntakeTargetType.BOT:
-        owner_bot_id = result.target.target_id
-    else:
-        # 校验 Group 仍可运行、调用者仍有发起权限，并取得唯一 manager/master Bot。
-        owner_bot_id = target_resolver.resolve_group_manager_bot_id(
-            result.target.target_id,
-            result.owner_user_id,
-        )
+    owner_bot_id = resolve_target_owner_bot_id(result.target)
 
     return TaskInfoRequest(
-        # 同一份已确认的 TaskSpec，不重新解析、不复制、不由 LLM 重写。
         task_spec=result.task_spec,
         source_type=result.source_type,
         owner_user_id=result.owner_user_id,
         owner_bot_id=owner_bot_id,
         execution_config={
-            **execution_policy.for_new_task(),
-            "session_id": result.session_id,
+            **runtime_profile.to_execution_config(),
+            "intake_session_id": result.session_id,
             "initial_target": {
                 "target_type": result.target.target_type.value,
                 "target_id": result.target.target_id,
             },
+            "orchestration_mode": result.execution_mode.value,
         },
     )
 ```
 
-转换期间不改变 `result.task_spec`、`result.target`、`result.owner_user_id` 或 `result.source_type`。`TaskService.execute()` 成功后也不回写 `TaskIntakeResult`：任务标识只存在于该次 `TaskOpResult` 和 Task Module 内部持久化的创建幂等关联中。
+`RuntimeProfile` 由 Backend 根据 `execution_mode` 加载。客户端不能提交 `execution_config`、dispatcher strategy 或 runner strategy。
 
-映射规则：
+### 9.2 Start 逻辑
 
-| 权威来源 | TaskInfoRequest |
-| --- | --- |
-| `result.task_spec` | `task_spec`；直接传递同一份已确认的 `TaskSpec` |
-| `result.source_type` | `source_type`；Human task-cli 为 `API`，Bot 为 `BOT`，协作群为 `COOP_GROUP` |
-| `result.target` 经服务端解析 | `owner_bot_id`；Group 解析为其 manager/master Bot ID，仅表示归属 Bot |
-| `result.target` 原始类型与 ID | `execution_config.initial_target`；冻结首棒实际执行目标，Group 不得退化为 manager Bot |
-| `result.owner_user_id` | `owner_user_id` |
-| 服务端任务运行策略 | `execution_config` |
-| `result.session_id` | `execution_config.session_id`，作为创建幂等键 |
+```python
+async def start_confirmed_goal(
+    session_id: str,
+    owner_user_id: str,
+) -> TaskOpResult:
+    result = intake_repository.get(session_id)
+    require_owner(result, owner_user_id)
+    require(result.status == TaskIntakeStatus.CONFIRMED)
 
-目标设计将 `TaskInfoRequest.task_spec` 收敛为 `TaskSpec`，删除与其语义重复的 `RequestContext`、`RequestGoal`、`RequestAcceptance` 和 `RequestTaskSpec`。现有实现仍使用这些请求规格类型，实施时须同步完成该合同迁移。
-
-### 10.2 确认后调用 `TaskService.execute()`
-
-`CONFIRM` 只更新并持久化 `TaskIntakeResult.status=CONFIRMED`，不创建任务、不构造 `TaskInfoRequest`，也不写入 `task_id/node_id`。确认后的独立 HTTP `/start` 请求**只传 `session_id`**；应用层据此读取并校验已确认 Result，组装内部 `TaskInfoRequest` 并调用 `TaskService.execute()`。创建链路直接返回既有 `TaskOpResult`，不新增包装对象。intake 来源的创建必须在同一持久化事务中提交 `TaskInfo`、图谱根节点、`session_id` 唯一创建关联及根节点投递意图；任一步失败都不返回成功，Backend 随后异步唤起首棒。
-
-处理顺序：
-
-```text
-校验 session owner
--> 校验 status == CLARIFYING 且 TaskSpec 完整
--> 持久化 TaskIntakeResult(status=CONFIRMED)
--> 返回 TaskIntakeResult
-
-独立任务创建链路：
-  CLI/HTTP 调用 POST /start，body 仅为 {session_id}
--> Backend 按认证用户读取 TaskIntakeResult(status=CONFIRMED)
--> TaskIntakeResult 与服务端执行策略组装为 TaskInfoRequest
--> TaskService.execute(TaskInfoRequest)
--> 同事务提交 TaskInfo、图谱根节点、session_id 唯一创建关联和待投递意图
--> 获得 TaskOpResult(task_id, node_id)
--> 直接返回 TaskOpResult
-
-Backend 首棒启动分支（由 start 原子登记的意图驱动）：
-  认领待投递意图，读取已创建的权威根节点
-  -> TaskDispatcher.dispatch(root_node)
-     -> 接力派发策略内部调用 TaskRunner.start_run(root_node)
-  -> 投递含 task_id/node_id 的指令
-  -> Bot S1 调节点级 context API
+    runtime_profile = runtime_profiles.load(result.execution_mode)
+    request = build_task_info_request(
+        result=result,
+        runtime_profile=runtime_profile,
+    )
+    return await task_service.execute(request)
 ```
 
-`TaskService.execute(TaskInfoRequest)` 是唯一正式任务创建入口，沿用当前方法名，不新增同构的 `TaskService.start()`。HTTP `/start` 的应用层先从 `session_id` 读取已确认 Result 并构造请求；它不能把未经重构的 `execute()` 误认为幂等创建，因为当前实现先插入 TaskInfo、再初始化图谱，尚无 session 唯一创建关联。增强 `execute()` 的可靠提交能力后，intake 来源受已确认 session 的唯一创建约束，既有调用方仍使用同一创建方法。成功的 `TaskOpResult` 必须直接提供 `node_id`。当前 `TaskOpResult` 只有 `task_id`、`success`、`error`、`run_id` 和 `extend_props`，因此实现时需要增加 `node_id: str | None`；Relay 根节点创建成功后必须返回 `node_id == task_id`，不能要求调用方从 `extend_props.root_node_id` 猜测。`execute()` 返回任务已创建，不等于投递已接纳或首棒已完成。
+同一 `session_id` 重试 `/start` 时返回原 `TaskOpResult`，不创建第二个任务。
 
-创建幂等关联不能在 `TaskInfo` 和图谱落盘后另起事务补写：这会在响应丢失时留下“任务已创建但 session 无法定位”的窗口。当前实现的 TaskInfo repository 写入与图谱初始化是两个调用，不能把现有顺序误称为同一事务。目标实现优先让 TaskInfo、图谱根节点、`UNIQUE(session_id)` 关联和投递意图共享一个持久化事务/提交边界；若当前存储层做不到，必须先提交经评审的可恢复提交协议及故障注入证明，再开放 `/start`，不能仅靠事后扫描猜测重复任务。
+### 9.3 Start 后执行
 
-第一棒上下文由 Task Module 在根节点持久化后，根据已持久化的 `TaskInfo` 和根 `TaskNode` 投影；Bot S1 经节点级接口读取，确认处理不得根据 `TaskInfoRequest` 手工拼装上下文。
-
-`execute()` 从已冻结的 `execution_config.initial_target` 初始化根节点：Bot 目标为 `run_mode=single_bot, assignee=target_id`；Group 目标为 `run_mode=coop_group, assignee=target_id`。`owner_bot_id` 仍是归属 Bot，不能代替 Group 执行者；Group 的唯一 manager/master Bot 作为 Relay 协调执行者完成 S1–S5 与上报，S3 只匹配其在群运行时真实可调用的能力，S4 才可内部协调群成员。`source_type` 表示发起来源，不能用来推断目标类型。首棒、后续棒与 harness 恢复均使用同一节点级 API 与 Task Module 上下文投影逻辑；派发指令不是权威上下文。
-
-确认成功约束：
+对成功的 `TaskOpResult`：
 
 ```text
-task_id == node_id
-task_context.task_id == task_id
-task_context.node_id == node_id
-task_context.root_task_spec == task_context.current_task_spec
-task_context.all_done_output == []
+读取权威根 TaskNode
+-> TaskDispatcher.dispatch(root_node)
+-> 对应 Runtime Profile 的 dispatch strategy
+-> TaskRunner.start_run(root_node)
+-> 为该根节点创建独立 Runner 执行会话
+-> 向执行目标发送含 task_id/node_id 的启动指令
+-> 目标 Bot S1 调节点级 context API
 ```
 
-`task_context`、`task_id`、`node_id` 都不进入 `TaskIntakeResult`。任务发起调用方从 `TaskOpResult` 取得任务标识；目标 Bot 从启动指令取得 `task_id/node_id`，S1 调节点级 context API 读取 `TaskContext`。harness 重试也调用同一接口。
+同一输入 Goal 展开的不同 Target Execution 已经拥有不同 `session_id/task_id/node_id`，因此各自 S1 使用自己的节点标识投影 `TaskContext`。
 
-## 11. 确认幂等与崩溃恢复
+## 10. Batch 提交流程
 
-仅保存 `TaskIntakeResult` 不足以避免确认后的崩溃窗口重复创建任务。Task Module 必须建立 intake session 与任务创建的内部持久关联：
+Batch 是 CLI 编排能力，首版不要求新增一个把所有 Goal 一次提交给 Backend 的 HTTP Service API。
+
+```python
+async def submit_batch(file: GoalBatchFile) -> GoalBatchSubmitResult:
+    normalized = validate_and_normalize_entire_file(file)
+    execution_units = expand_goal_targets(normalized)
+
+    execution_results = []
+    for unit in execution_units:
+        intake_result = await start_target_intake(
+            goal=unit.goal,
+            from_ref=unit.from_ref,
+            target=unit.target,
+            mode=unit.mode,
+        )
+
+        if not is_complete(intake_result.task_spec):
+            execution_results.append(from_intake_result(unit, intake_result))
+            continue
+
+        if not batch_interaction.has_explicit_confirmation(unit.key):
+            execution_results.append(
+                ready_for_confirmation(unit, intake_result)
+            )
+            continue
+
+        confirmed = await confirm_intake(intake_result.session_id)
+        execution_results.append(
+            await start_confirmed_execution(unit, confirmed.session_id)
+        )
+
+    return aggregate_batch_result(normalized.goals, execution_results)
+```
+
+交互模式：
+
+- 使用 `Goal id + target` 标识当前澄清对象；
+- 同一 Goal 的不同 target 各自澄清，可以得到不同的 `TaskSpec`；
+- 汇总展示所有完整 Target Execution；
+- 用户在确认界面明确选中要创建的 Target Execution 后，CLI 对各自 Session 发送 `CONFIRM`，随后分别调用 `/start`；
+- 未被确认的完整 Target Execution 保持 `CLARIFYING` 领域状态，但 CLI 聚合视图标记为 `READY_FOR_CONFIRMATION`。
+
+非交互模式：
+
+- 不读取 stdin；
+- 不把 `--non-interactive` 解释为自动确认；
+- TaskSpec 不完整时返回 `CLARIFYING`、`session_id`、`missing_fields`、`questions`；
+- TaskSpec 完整但未确认时返回派生状态 `READY_FOR_CONFIRMATION` 和 `session_id`；
+- Agent 使用交互式 `resume <session-id>` 重新进入同一会话控制器，而不是重新提交整个 Batch 文件；不新增 message/confirm/cancel 命令。
+
+Batch 不具有全局事务语义。一个 Target Execution 失败不回滚其他成功任务。
+
+## 11. HTTP Service API
+
+### 11.1 路径
+
+```http
+POST /api/v1/collaboration/tasks/intake
+POST /api/v1/collaboration/tasks/start
+GET  /api/v1/collaboration/tasks/{task_id}
+```
+
+Batch 的 `schema/example/validate` 均为 CLI 本地能力，不调用 HTTP。`batch submit` 编排多次普通 `/intake` 和 `/start` 调用。
+
+### 11.2 Intake 请求
+
+领域输入仍为：
+
+```python
+TaskIntakeCommand + TaskIntakeContext
+```
+
+HTTP Adapter：
+
+- 从统一认证取得 Human Principal；
+- 将可选 `--from bot:<ref>` 映射为待校验的 `requested_a2a_proxy_bot_ref`；
+- 将 `--to` 引用解析为稳定 `IntakeTarget`；
+- 构造可信 `TaskIntakeContext`；
+- 不接受客户端直接设置 `owner_user_id`、`caller_bot_id` 或 `source_type`；
+- Backend 校验 Human 对 A2A 代理 Bot 的代理权，并通过真实 BCS A2A 发送让 BCS 执行 proxy Bot 到 target 的准入检查；
+- 不要求调用者提交请求级幂等键。
+
+### 11.3 Start 请求和响应
+
+请求只包含：
+
+```json
+{
+  "session_id": "tis_01HXYZ"
+}
+```
+
+客户端不能提交：
+
+- `owner_user_id`；
+- `TaskSpec`；
+- target 执行配置；
+- `execution_config`；
+- Runtime Profile；
+- `task_id`、`node_id`；
+- 幂等键。
+
+响应保持既有 `TaskOpResult`：
+
+```json
+{
+  "task_id": "task-101",
+  "node_id": "task-101",
+  "success": true,
+  "run_id": 1
+}
+```
+
+CLI 使用自己的聚合输出把 `Goal id + target + session_id` 与该 `TaskOpResult` 关联；Backend 不新增多目标 Start 响应对象。
+
+## 12. 幂等、并发与崩溃恢复
+
+### 12.1 Intake
+
+- `session_id` 由 Backend 在 `START` Intake 时生成；
+- `RESUME` 只读；
+- 同一 Session 的并发更新使用版本条件更新；
+- `CONFIRM`、`CANCEL` 对相同终态重复调用返回已保存 Result；
+- `CONTINUE` 响应未知时先 `RESUME`，不盲目重发文本。
+
+### 12.2 单 Target Start
+
+每个 target 已有独立 `session_id`，因此继续使用：
 
 ```text
 UNIQUE(session_id)
 ```
 
-`TaskInfoRequest.execution_config.session_id` 必须进入 TaskInfo 持久化。TaskService 在创建任务的同一事务中写入具有 `UNIQUE(session_id)` 约束的幂等记录；命中已有记录时返回原 `TaskOpResult`，不能再次创建 TaskInfo 或根节点。幂等元数据属于执行控制面，不写入业务 `TaskSpec`。
+每个目标的创建提交边界必须原子包含：
 
-一旦该内部关联存在，Task Intake 拒绝该 `session_id` 的 `CONTINUE` 和 `CANCEL`；它不把“已提交”状态、`task_id` 或 `node_id` 反写到 `TaskIntakeResult`。因此 intake 结果始终只回答“这份 TaskSpec 是否完备”，而任务是否已创建只由 Task Module 的幂等关联和 `TaskOpResult` 表示。
-
-重试与恢复规则：
-
-- `RESUME` 只读；再次 `CONFIRM/CANCEL` 同一对应终态 session 返回已保存的 `TaskIntakeResult`；并发冲突由 Backend 的会话版本条件更新处理；
-- `START/CONTINUE` 不具有严格的动作级去重保证：响应丢失时不可仅凭相同文本盲目重发。已知 `session_id` 的 `CONTINUE` 先 `RESUME` 检查最新规格；尚未取得 `session_id` 的 `START` 结果为未知，不能声称再次发送一定返回原会话；
-- 对同一 CONFIRMED Result 重试 HTTP `/start`：通过 session 创建关联返回同一 `TaskOpResult`，不重复创建；
-- start 成功后进程崩溃：通过 `session_id` 命中已创建任务并返回同一 `TaskOpResult`；
-- 不允许第二次生成新 `task_id`。
-
-## 12. HTTP Service API
-
-### 12.1 路径
-
-```http
-POST /api/v1/collaboration/tasks/intake
-POST /api/v1/collaboration/tasks/start
+```text
+TaskInfo
+根 TaskNode / TaskExecutionGraph
+session_id 唯一创建关联
+根节点待投递意图
 ```
 
-### 12.2 请求对象
+`/start` 重试时：
+
+- 已创建 Session 返回原 `TaskOpResult`；
+- 不为同一 Session 生成第二个 `task_id`；
+- 不同 Session 的部分成功由 CLI 聚合，不进入单次 `/start` 事务。
+
+调用者不传 `request_id` 或幂等键。
+
+### 12.3 Batch 重试
+
+重新执行同一个 Batch 文件表示一次新的 Batch 提交，不能被 CLI 静默视为原请求重试。
+
+如果某个 Target Execution 已返回 `session_id`，调用者必须使用：
+
+```bash
+avernet-goal-cli resume <session-id>
+```
+
+继续该目标的澄清，避免因为重新提交文件创建新的 Intake Session。
+
+## 13. Agent 自发现合同
+
+第三方 Agent 只需预先知道二进制名称，不应依赖外部语雀或 README 才能构造 Batch 文件。
+
+发现流程：
+
+```text
+avernet-goal-cli batch --help
+-> 了解四个 Batch 子命令及副作用
+
+avernet-goal-cli batch schema --output json
+-> 获取机器可读 JSON Schema
+
+avernet-goal-cli batch example --format yaml
+-> 获取合法示例
+
+avernet-goal-cli batch validate --file <file> --output json
+-> 无副作用预校验
+
+avernet-goal-cli batch submit --file <file> --non-interactive --output json
+-> 提交并解析结构化结果
+```
+
+`batch --help` 必须明确说明：
+
+- 每个 `Goal × target` 创建一个 Intake Session；
+- N 个最终 target 分别澄清并创建 N 个独立任务；
+- `to` 省略时由 Backend 默认解析；
+- Batch 不保证全局原子性；
+- `--non-interactive` 不自动确认；
+- 失败后的恢复方式是 `resume <session-id>`，恢复后沿用正常会话交互。
+
+## 14. Batch 输出模型
+
+以下模型属于 CLI 聚合输出，不进入 Task Core：
 
 ```python
-TaskIntakeCommand
+@dataclass(frozen=True)
+class BatchExecutionResult:
+    goal_id: str
+    target: IntakeTarget
+    session_id: str | None
+    status: str
+    task_result: TaskOpResult | None = None
+    missing_fields: list[str] = field(default_factory=list)
+    questions: list[str] = field(default_factory=list)
+    error_code: str | None = None
+
+
+@dataclass(frozen=True)
+class GoalBatchSubmitResult:
+    status: str
+    executions: list[BatchExecutionResult]
 ```
 
-HTTP 请求体只按 `TaskIntakeCommand` 的字段反序列化。`session_id` 由 CLI/HTTP 的会话控制元数据传递，不进入请求体；`START` 时为空。Adapter 负责 HTTP 格式校验、target 解析和按 `action` 校验字段有效性，并从认证/调用上下文取得 `owner_user_id`、`caller_bot_id`、`source_type`，统一构造 `TaskIntakeContext` 后调用 `TaskService.intake()`。请求不要求动作幂等键。
-
-独立 `/start` 请求体只有 `{"session_id": "..."}`。Backend 应用层按认证用户校验该会话属于调用者且状态为 `CONFIRMED`，从已保存的 `TaskIntakeResult` 和服务端策略构造 `TaskInfoRequest`；不接受客户端提供 `task_spec`、owner、target 或 `execution_config`。内部调用 `TaskService.execute(TaskInfoRequest)`；HTTP Adapter 只映射协议，不负责业务校验、构造策略或事务编排。
-
-### 12.3 响应对象
-
-所有 intake action（包括 `CONFIRM`）的 HTTP 响应 `data` 都直接序列化 `TaskIntakeResult`；它不包含任务标识。独立的 `TaskService.execute()` 调用直接返回 `TaskOpResult`。不定义同构 Response DTO 或包装结果：
-
-```python
-TaskIntakeResult
-```
-
-若现有 HTTP Envelope 自动附带请求追踪 ID，它只用于日志关联，不作为 Intake 的请求字段或幂等依据。字段有效性由 action 与 intake status 校验；Adapter 只做 JSON 与既有领域对象之间的序列化/反序列化。
-
-`CONFIRM` 的 `TaskIntakeResult` 示例：
+示例：
 
 ```json
 {
-  "code": 200000,
-  "message": "OK",
-  "data": {
-    "session_id": "tis_01HXYZ",
-    "owner_user_id": "user-alice",
-    "source_type": "api",
-    "status": "CONFIRMED",
-    "target": {"target_type": "BOT", "target_id": "bot-risk-owner"},
-    "missing_fields": [],
-    "questions": []
-  }
+  "command": "batch.submit",
+  "status": "PARTIALLY_COMPLETED",
+  "executions": [
+    {
+      "goal_id": "goal1",
+      "target": {"target_type": "BOT", "target_id": "bot1"},
+      "session_id": "tis-101",
+      "status": "STARTED",
+      "task_result": {"task_id": "task-101", "node_id": "task-101"}
+    },
+    {
+      "goal_id": "goal2",
+      "target": {"target_type": "BOT", "target_id": "bot1"},
+      "session_id": "tis-102",
+      "status": "CLARIFYING",
+      "missing_fields": ["acceptance_criteria"],
+      "questions": ["任务完成的验收标准是什么？"]
+    }
+  ]
 }
 ```
 
-## 13. 完整调用流程
+## 15. 错误语义
 
-```text
-Human/Bot
-  -> task-cli "<一句话任务目标>"
-  -> POST /api/v1/collaboration/tasks/intake action=START
-  -> TaskService.intake
-  -> CLARIFYING
-
-Human
-  -> 当前 task-cli 交互会话中补充或取消
-  -> CLI 按当前 status 构造 CONTINUE / CANCEL action
-  -> POST /api/v1/collaboration/tasks/intake
-  -> TaskService.intake
-  -> 更新持久化 TaskIntakeResult
-  -> CLARIFYING；TaskSpec 完整时展示确认卡
-
-Human/Bot
-  -> 当前 task-cli 确认卡中选择「确认创建任务」
-  -> CLI 构造 POST /api/v1/collaboration/tasks/intake action=CONFIRM
-  -> TaskService.intake
-  -> TaskIntakeResult(CONFIRMED)
-
-Task 创建链路
-  -> CLI POST /api/v1/collaboration/tasks/start，body={session_id}
-  -> Backend 读取并校验 TaskIntakeResult(CONFIRMED)
-  -> build_task_info_request
-  -> TaskService.execute(TaskInfoRequest)
-  -> TaskOpResult(task_id, node_id)
-  -> Backend 认领 start 同事务登记的根节点投递意图，直接调用 TaskDispatcher.dispatch(root_node)
-     -> 接力派发策略内部通过 Runner 投递 task_id/node_id
-  -> CLI 获得 task_id、node_id
-
-目标 Bot
-  -> 从根节点启动指令获得 task_id/node_id
-  -> S1 调节点级 context API 获得 TaskContext
-  -> Bot 进入 S1–S5.5；命中后继执行者时 Skill 调 S6 /dispatch
-  -> Backend 校验并投递；待投递意图供首棒唤起和失败恢复
-```
-
-### 13.1 分布式接力执行示例：支付失败峰值复盘
-
-本例 HTTP Adapter 已从既有认证 Principal 解析出调用者字段：
-
-```text
-owner_user_id = "user-alice"
-caller_bot_id = None
-source_type = API
-```
-
-`user-alice` 可访问的可运行 Bot 中，`bot-payment-diagnosis` 的展示名与用户展示名均为 `alice`，因此命中默认解析规则 1；CLI 将稳定 ID 写入 session：
-
-```python
-IntakeTarget(
-    target_type=IntakeTargetType.BOT,
-    target_id="bot-payment-diagnosis",
-)
-```
-
-用户不需要输入 `start` 或 target 参数：
-
-```shell
-$ task-cli "复盘昨晚支付失败率峰值，给出可验证根因、影响范围和处置建议"
-```
-
-CLI Adapter 构造并提交：
-
-```python
-TaskIntakeCommand(
-    action=TaskIntakeAction.START,
-    message="复盘昨晚支付失败率峰值，给出可验证根因、影响范围和处置建议",
-)
-```
-
-`TaskService.intake` 持久化 `TaskIntakeResult(target=bot-payment-diagnosis)`。任务识别已确定目标和任务主题，但还缺少资源、约束和验收标准，因此返回：
-
-```python
-TaskIntakeResult(
-    session_id="tis-pay-001",
-    owner_user_id="user-alice",
-    source_type=TaskSourceType.API,
-    status=TaskIntakeStatus.CLARIFYING,
-    target=IntakeTarget(BOT, "bot-payment-diagnosis"),
-    task_spec=TaskSpec(
-        context=Context(title="支付失败率峰值复盘"),
-        goal=Goal(
-            objective="复盘昨晚支付失败率峰值，给出可验证根因、影响范围和处置建议",
-            acceptances=[],
-        ),
-    ),
-    questions=["可使用哪些数据源？", "需要交付什么？", "如何验收？"],
-)
-```
-
-用户补充澄清内容；同一交互进程自动携带 `tis-pay-001`，跨进程则使用 `task-cli resume tis-pay-001` 回到该会话。Intake Skill 补全 `TaskSpec` 后，Result 仍为 `CLARIFYING`，但由完整性校验形成确认卡片；其 `task_spec` 为：
-
-```python
-TaskSpec(
-    context=Context(
-        title="支付失败率峰值复盘",
-        extend_props={
-            "deliverables": ["证据清单", "影响范围", "处置建议"],
-            "constraints": ["只使用已授权的日志和指标数据"],
-            "resources": ["支付日志", "支付指标看板"],
-        },
-    ),
-    goal=Goal(
-        objective="复盘昨晚支付失败率峰值，给出可验证根因、影响范围和处置建议",
-        acceptances=[
-            AcceptanceCriteria("ac1", "给出失败率峰值的时间范围和影响订单范围"),
-            AcceptanceCriteria("ac2", "给出至少一条可复核的根因证据"),
-            AcceptanceCriteria("ac3", "给出按优先级排序的处置建议"),
-        ],
-    ),
-)
-```
-
-用户在确认卡片中选择「确认创建任务」。CLI 从 active session 读取 `tis-pay-001` 并构造 `CONFIRM` action，用户不输入 session ID。
-
-确认、创建与第一棒派发：
-
-```text
-TaskIntakeCommand(CONFIRM)
-+ TaskIntakeContext(
-    session_id="tis-pay-001",
-    owner_user_id="user-alice",
-    source_type=API,
-  )
-+ TaskIntakeResult(CLARIFYING, target=bot-payment-diagnosis, task_spec=完整)
-  -> TaskService.intake(...)
-  -> TaskIntakeResult(CONFIRMED, target=bot-payment-diagnosis)
-  -> 独立任务创建链路读取该 CONFIRMED Result
-  -> build_task_info_request(...)
-  -> TaskInfoRequest(
-       owner_bot_id="bot-payment-diagnosis",
-       owner_user_id="user-alice",
-       task_spec=TaskSpec(
-         acceptances=[ac1, ac2, ac3],
-       ),
-       execution_config={"session_id":"tis-pay-001"},
-     )
-  -> TaskService.execute(...)
-  -> TaskOpResult(task_id="task-pay-001", node_id="task-pay-001")
-  -> Backend 消费根节点投递意图，向目标 Bot 交付 task_id + node_id
-  -> Bot S1 调节点级 context API，取得 TaskContext
-```
-
-第一棒 `bot-payment-diagnosis` 只具备日志、指标分析能力，不具备编制处置方案的能力。Backend 首棒投递直接调用内部 `TaskDispatcher.dispatch(root_node)`；接力派发策略在内部调用 `TaskRunner.start_run(root_node)`，只交付节点标识，不交付权威 `TaskContext`：
-
-```text
-S1  GET /tasks/task-pay-001/nodes/task-pay-001/context
-      -> TaskContext(root_task_spec=TaskSpec(ac1, ac2, ac3),
-                     current_task_spec=TaskSpec(ac1, ac2, ac3), all_done_output=[])
-
-S2  TaskContext.root_task_spec + []
-      -> task_gaps = ["ac1：影响范围", "ac2：根因证据", "ac3：处置建议"]
-
-S3  current_task_spec + task_gaps + BotCapability(日志、指标)
-      -> CapabilityMatchResult(
-           ACCEPTED,
-           actual_goal=Goal("定位峰值影响范围和根因证据", [ac1, ac2])
-         )
-
-S4  TaskContext + CapabilityMatchResult
-      -> TaskExecutor 执行
-      -> TaskNodePatch(
-           task_id="task-pay-001", node_id="task-pay-001",
-           actual_goal=Goal(..., [ac1, ac2]),
-           output_patch={"peak_window":"21:15-21:42", "affected_orders":1248,
-                         "evidence":["issuer_timeout 指标较基线 +320%"]},
-           local_acceptance_result=AcceptanceResult(DONE, done_items=[ac1, ac2]),
-           execution_decision=ACCEPTED,
-         )
-      -> TaskReportCommand(
-           event_type=EXECUTION_RESULT,
-           event=TaskNodePatch,
-         )
-      -> TaskReportResult(APPLIED)
-
-S5.1  TaskContext.all_done_output + 当前 TaskNodePatch
-      -> 临时 DoneOutput(ac1, ac2 的事实)
-      -> (task_gaps = ["ac3：按优先级排序的处置建议"],
-          task_acceptance_result = None)
-
-S5.2  TaskContext + [ac3] + TaskNodePatch
-      -> next_node=TaskNode(node_id=None, status=None, node_run_graph=None,
-           task_spec=TaskSpec(goal=Goal("基于已验证证据制定支付失败处置建议", [ac3])),
-           run_info=RuntimeInfo())
-
-S5.3  query = next_node.task_spec.goal.objective.strip()
-      -> TaskService.search_bots(query, task_id="task-pay-001", node_id="task-pay-001")
-      -> POST /search；task_id/node_id 只用于归属当前棒搜索轨迹
-      -> candidates: list[BotCandidate]
-
-S5.4  next_node + candidates: list[BotCandidate]
-      -> SearchResult(outcome=HIT_SINGLE, bot_id="bot-incident-response")
-      -> next_node.run_info.run_mode="single_bot"
-      -> next_node.run_info.assignee="bot-incident-response"
-      -> 输出仍是同一个 next_node，不另建 selected_node
-
-S5.5  TaskService.report(TaskReportCommand(
-          task_id="task-pay-001", node_id="task-pay-001",
-          event_type=PLAN_RESULT, event=next_node))
-      -> TaskReportResult(APPLIED, target_node_id="node-pay-002")
-      # Backend 此时才创建节点并写入执行者决策；仅一次规划节点上报
-
-S6  Skill 在 S5.5 接纳后 POST /api/v1/collaboration/tasks/dispatch
-         {task_id="task-pay-001", target_node_id="node-pay-002"}
-      -> Backend 认领待投递意图、校验身份
-      -> TaskGraphService.get_node("task-pay-001", "node-pay-002") -> next_node（已落图）
-      -> TaskDispatcher.dispatch(next_node) -> dispatched_node
-         # 接力派发策略内部调用 TaskRunner.start_run(next_node)
-         # Runner 未接纳则抛出投递失败，不返回成功节点
-      -> 下一棒收到含 task_id/node_id 的接力 Prompt
-      -> 下一棒 S1 从节点级 context API 获取 TaskContext
-```
-
-第二棒 `bot-incident-response` 具备故障处置和 runbook 编制能力：
-
-```text
-S1  以 task_id/node_id 调节点级 context API，取得 node-pay-002 的 TaskContext。
-S2  root_task_spec + all_done_output -> task_gaps = ["ac3：按优先级排序的处置建议"]。
-S3  -> CapabilityMatchResult(ACCEPTED, actual_goal=Goal(..., [ac3]))。
-S4  -> TaskNodePatch(output_patch={"actions":["P0：限流", "P1：联系发卡行"]},
-                     local_acceptance_result=AcceptanceResult(DONE, done_items=[ac3]))
-      -> TaskReportResult(APPLIED)。
-S5.1  历史 DoneOutput(ac1/ac2) + 当前 TaskNodePatch(ac3)
-      -> task_gaps=[]，task_acceptance_result=AcceptanceResult(DONE, done_items=[ac1, ac2, ac3])。
-S5.2～S5.4  无 gaps，跳过。
-S5.5  -> TaskService.report(TaskReportCommand(
-             task_id="task-pay-001", node_id="node-pay-002",
-             event_type=PLAN_RESULT, event=None,
-             task_acceptance_result=上述根任务验收))
-      -> TaskReportResult(APPLIED, task_completed=True)。
-S6  不执行。
-```
-
-若任一棒在 S5.2 有缺口却无法生成下一棒节点，`plan_next_node` 抛出 `PlanningUnavailable`；Runtime 捕获后以非空 `failure_reason=str(exc).strip()` 构造 `PLAN_RESULT(event=None, task_acceptance_result=None)`，调用同一个 `TaskService.report` 进入 HUNG。该失败原因不来自 `TaskContext` 或 S5.1；S5.3 搜索故障由 Runtime 重试，不走此分支。
-
-用户查询最终任务：
-
-```shell
-$ task-cli get task-pay-001
-task-pay-001  DONE
-  task-pay-001  DONE     bot-payment-diagnosis
-  node-pay-002  SUCCESS  bot-incident-response
-```
-
-本例未触发 harness 恢复。若第一棒在 S4 上报前后崩溃，Runner 以同一任务和节点标识恢复；正常执行与恢复均调用：
-
-```text
-GET /api/v1/collaboration/tasks/task-pay-001/nodes/task-pay-001/context
-  -> TaskContext(task-pay-001, task-pay-001, root_task_spec,
-                 current_task_spec, all_done_output=[])
-  -> 重新进入 S1；上下文仍由同一投影逻辑构造。
-```
-
-同一根节点在 S4b 前后读取到的 `all_done_output` 都是 `[]`：它只投影**本棒之前**的已接纳事实，不包含本棒或后继节点。S1 同时从图谱投影 `accepted_execution_patch` 与 `accepted_plan_report`：前者非空则跳过本棒业务执行并以该 patch 继续 S5；后者非空则跳过 S2–S5，命中后继时直接恢复 S6。最终只持久化图谱中的节点执行事实和上报接纳记录，不持久化 `TaskContext` 或任务级 `task_gaps`。
-
-## 14. 错误语义
-
-| 条件 | HTTP | 错误码 |
+| 条件 | HTTP/CLI | 错误码 |
 | --- | --- | --- |
+| Batch Schema 不支持 | CLI exit 2 | `UNSUPPORTED_SCHEMA_VERSION` |
+| Batch 未知字段 | CLI exit 2 | `UNKNOWN_FIELD` |
+| Goal ID 重复 | CLI exit 2 | `DUPLICATE_GOAL_ID` |
+| 同一 Goal target 重复 | CLI exit 2 | `DUPLICATE_TARGET` |
+| 首版使用 `group:` 或其他 target 类型 | CLI exit 2 | `UNSUPPORTED_TARGET_TYPE` |
 | session 不存在 | 404 | `TASK_INTAKE_NOT_FOUND` |
 | session 不属于 caller | 403 | `TASK_INTAKE_FORBIDDEN` |
-| command 与当前状态不匹配 | 409 | `TASK_INTAKE_STATE_CONFLICT` |
+| action 与状态冲突 | 409 | `TASK_INTAKE_STATE_CONFLICT` |
+| 发送 Bot 未授权 | 403 | `TASK_SENDER_FORBIDDEN` |
+| A2A proxy Bot 到 target 无准入权限 | 403 | `TASK_A2A_FORBIDDEN` |
+| A2A proxy Bot 运行时身份不可用 | 409 | `TASK_A2A_PROXY_UNAVAILABLE` |
+| A2A Intake 已提交但仍在处理 | HTTP 200 + `processing=true` / CLI exit 3 | `TASK_A2A_STATUS_UNKNOWN`（CLI 派生提示） |
 | target 不存在或不可访问 | 404/403 | `TASK_TARGET_NOT_FOUND` / `TASK_TARGET_FORBIDDEN` |
-| 没有可用目标 | 409 | `NO_AVAILABLE_TARGET` |
-| candidate ID 无效 | 409 | `TASK_INTAKE_CANDIDATE_INVALID` |
-| READY 前确认 | 409 | `TASK_INTAKE_NOT_READY` |
-| execute 失败 | 透传映射 | `TASK_EXECUTE_FAILED` |
-| 并发修改同一 session | 409 | `TASK_INTAKE_STATE_CONFLICT` |
+| 没有可用默认目标 | 409 | `NO_AVAILABLE_TARGET` |
+| TaskSpec 未完整时确认 | 409 | `TASK_INTAKE_NOT_READY` |
+| 单个 target 创建失败 | CLI 聚合结果 | 对应 BatchExecutionResult 错误码 |
+| 所有 target 创建失败 | CLI exit 7 | `GOAL_START_FAILED` |
 
-## 15. 安全约束
+错误响应必须提供稳定 `code` 和字段 `path`；Agent 不应依赖自然语言 message 做控制流判断。
 
-- 调用者身份来自认证上下文。
-- session 所有读写都校验 `owner_user_id` 和 caller。
-- 显式 Bot/Group target 必须校验可见性和发起权限。
-- Bot 身份默认只能以自身为 target。
-- `confirm` 只确认创建领域任务；它不授予 Bot 任意工具、目录、网络或资源访问权限。运行时权限必须由独立、可审计的执行策略决定；无人交互时缺少运行时许可默认拒绝。
-- 日志不得记录完整用户会话、凭证或私有资源内容。
-- `TaskSpec.context.extend_props["resources"]` 只保存用户明确提供的资源引用，不自动抓取内容。
+## 16. 安全约束
 
-## 16. 测试矩阵
+- CLI 使用统一 Human 认证，不自建 token/login/keychain 体系；
+- `--from bot:<ref>` 必须由 Backend 验证 Human 对代理 Bot 的权限以及代理 Bot 到 target 的 A2A 权限；
+- A2A 代理 Bot 不得写入 `TaskInfoRequest.owner_bot_id`，不得代替 target 执行澄清或任务；
+- 客户端 Bot 引用不作为可信 ID；
+- 每个 Intake Session 的读写校验 `owner_user_id`；
+- 每个 target 在 Session 创建时校验并冻结；
+- CLI 首版拒绝所有 `group:` 目标，不创建 Intake Session；
+- CLI 不接受内部 Runtime Profile 字段；
+- `--non-interactive` 不绕过确认；
+- 日志不得记录凭证或完整私有资源内容；
+- Batch 文件未知字段必须拒绝，不能静默忽略。
 
-### 16.1 Module interface tests
+## 17. 测试矩阵
 
-- Human 显式 Bot 发起并一次 READY；
-- Human 默认同名 Bot 命中；
-- Human 默认 Bot 命中；
-- Human 按一句话目标匹配 Bot；
-- 无需求匹配时随机选择可运行 Bot，并在 session 固化目标；
-- 无目标返回 `NO_AVAILABLE_TARGET`；
-- `resume <session-id>` 恢复指定的同一 session，不创建新任务；
-- 跨进程 `resume` 后，补充、候选选择、确认和取消均在 active session 内完成，CLI 不再要求用户输入 session ID，也不暴露 reply/select/confirm/cancel 子命令；
-- `--no-interactive --json` 在需要澄清或确认时返回结构化 status 并非零退出；
-- Bot caller 自动使用自身；
-- 多轮澄清保持同一 session 和 target；
-- `START` 响应丢失且未取得 `session_id` 时报告结果未知，不自动重发并声称原会话被复用；
-- `CONTINUE` 响应丢失时先 `RESUME` 读取最新 `TaskIntakeResult`，不自动再次调用 Skill；
-- 同一 session 的并发 `CONTINUE` 由仓储条件更新拦截，不能互相覆盖；
-- 重复 `CONFIRM` 或重复 `CANCEL` 返回对应已保存的终态 Result；
-- CLARIFYING 阶段修改后仍为 CLARIFYING；确认卡是否展示由 TaskSpec 完整性重新推导；
+### 17.1 CLI Parser 与 Schema
+
+- 根命令提交单 Goal；
+- `--from` 仅接受 `human` 或 `bot:<ref>`；
+- `--to` 可重复并保持输入顺序；
+- `--to` 首版只接受 `bot:<ref>`，`group:` 在联网前拒绝；
+- target 重复时拒绝；
+- `--mode` 默认 `relay`；
+- 不存在 `--runtime`；
+- `batch schema` 输出可解析 Draft 2020-12 JSON Schema；
+- `batch example` 输出通过 `batch validate`；
+- YAML 与 JSON 使用同一输入模型；
+- 未知字段、错误版本、重复 ID、空 Goal、错误 target 格式均在联网前失败；
+- `to` 标量而非数组时失败；
+- `defaults.to` 和 `runtime` 字段失败。
+
+### 17.2 Intake
+
+- 一个 Goal 多 target 创建多个独立 Intake Session；
+- 每个 Session 只冻结一个 target 和 execution mode；
+- 多轮澄清保持同一 Session 和 target；
+- 同一输入 Goal 的不同 target 可以形成不同 TaskSpec；
 - CONFIRM 只返回 `TaskIntakeResult(CONFIRMED)`；
-- 对 CONFIRMED Result 的 start 重试返回同一任务；
-- Human 指定 Group 时，`TaskInfoRequest.execution_config.initial_target` 保留 Group ID，根节点 `run_mode=coop_group/assignee=Group ID`；manager Bot 仅写入 `owner_bot_id`；Bot 目标则是 `single_bot/assignee=Bot ID`；
-- CANCEL 后拒绝继续；
-- 非 owner 访问 session 被拒绝。
+- `TaskIntakeResult` 不含 task/node/Runner session ID；
+- `resume` 只读，不创建 Session 或 Task；
+- `resume` 读取成功后绑定 active session，并复用首次请求的 CONTINUE/CONFIRM/CANCEL 会话控制器；
+- CLI 不暴露 `reply/confirm/cancel` 子命令或 `resume --message/--confirm/--cancel` 参数；
+- `resume --non-interactive` 只返回当前状态，不修改 Session；
+- 非 owner 访问拒绝；
+- Human 默认目标解析后固化稳定 ID；
+- `--from bot` 未授权时拒绝。
+- A2A 代理 Bot 对 target 没有发起权限时拒绝；
+- `--from bot` 不改变 `source_type=API`、任务 owner 或 Intake Skill 使用的目标 Bot；
+- `--from bot` 的 Intake 消息实际经过 BCS A2A，不能只做权限探测后走 Human/OpenAPI 直连；
+- A2A token 不进入日志、Prompt、TaskSpec、Result 或 CLI 输出；
+- A2A 状态轮询覆盖完成、失败、超时和提交结果未知；
 
-### 16.2 Adapter conformance tests
+### 17.3 单 Target Start 与 CLI 多目标展开
 
-- CLI 参数映射到正确 command；
-- HTTP DTO 按 action 的字段校验；
-- 正常确认后 CLI 自动 `POST /start {session_id}`；恢复 `CONFIRMED` 会话时 RESUME 只读，用户选择「继续提交/查看任务」后才以同一 session_id 调 start；HTTP 不接受客户端提交 `TaskInfoRequest`；
-- Backend 从已确认 Result 构造 `TaskInfoRequest` 并调用 `TaskService.execute(TaskInfoRequest)`；
-- start 返回的 `TaskOpResult.task_id == TaskOpResult.node_id`；
-- 首棒、后续棒与 harness 恢复均经节点级 API 取得 `TaskContext`；派发指令只提供节点标识；
-- 同一棒 S4b 前后读取的 `all_done_output` 完全相同且不含本棒，第二棒只看到前序棒事实；空 `output_patch={}` 仍投影为已接纳执行；
-- S4b/S5.5 响应丢失后，S1 分别投影原 `accepted_execution_patch/accepted_plan_report` 并续跑，不能重执行业务或因重新规划产生第二个后继节点；
-- 同节点 harness 重试递增服务端 attempt，当前 S1 不返回旧失败 patch，旧 Runner 会话的迟到 report 被拒绝；
-- `start` 在事务故障注入下不留下缺少 `session_id` 唯一关联或缺少根节点投递意图的孤儿任务；
-- Relay 首版 S5.4 拒绝 `HIT_GROUP`，`HIT_MULTI_BOTS` 只接受有唯一协调 Bot 的 `manager_worker` 组群；显式已有 Group 目标仍可作为根节点执行；Relay 轮次达到冻结 `max_rounds` 时不创建后继；
-- BBS 报告仅确认发布意图已持久化；S6 `DELIVERING` 不返回成功节点；
-- `TaskIntakeResult` 不暴露或转发 `TaskContext`。
+- 每个 `/start` 返回一个 `TaskOpResult`；
+- N 个 target 创建 N 个不同 `task_id` 和根 `node_id`；
+- 每个 Task 拥有独立 `TaskExecutionGraph`；
+- 各根节点分别产生 Runner 执行会话；
+- 多目标不共享 Intake Session、TaskSpec 或运行时状态；
+- 单个 target 失败由 CLI 聚合为部分成功，不回滚其他任务；
+- 同一 `session_id` 重试返回原任务；
+- 成功目标不会因 `/start` 重试产生第二个 task；
+- TaskInfo、根节点、唯一关联和投递意图故障注入验证原子提交；
+- Relay 与 Centralized 根据服务端 Runtime Profile 选择不同策略。
 
-## 17. 与现有实现的变更
+### 17.4 Batch 与 Agent
 
-| 当前对象/行为 | 调整 |
+- Batch 创建的 Intake Session 数量等于所有 Goal 的最终 target 数量之和；
+- Batch 的 Task 数量等于各 Goal 目标数量之和；
+- Batch 部分失败不回滚成功项；
+- `--output json` stdout 不混入日志或进度文本；
+- `--non-interactive` 遇到澄清或确认时返回结构化状态，不自动确认；
+- Agent 可只通过 `batch --help/schema/example/validate` 构造合法文件；
+- 返回结果可通过 Goal `id`、`session_id`、target、`task_id` 完整关联；
+- 已有 `session_id` 的恢复使用 `resume`，不要求重跑整个文件。
+- Agent 通过交互式 `resume` 回复问题和选择确认/取消，不需要学习第二套命令协议；
+
+### 17.5 执行链路回归
+
+- 根节点、后继节点和 harness 恢复均通过节点级 Context Service API 读取 `TaskContext`；
+- 一个 Target Execution 的 `all_done_output` 不包含其他 target 的输出；
+- S4b/S5.5 重试不重复执行业务或创建第二个后继节点；
+- 同节点旧 Runner 会话的迟到 report 由 `event_id/relay_token` fencing 拒绝；
+- Relay trajectory 继续记录 Context、执行、验收、规划、搜索、决策、上报和派发事实；
+- Centralized 模式既有规划和 Runner 行为不因多目标展开而改变。
+
+## 18. 实现边界
+
+### 18.1 Avernet Repository
+
+负责：
+
+- Task Intake/Start 领域合同；
+- 单 Target Intake/Start 领域合同；
+- HTTP Service API；
+- TaskExecutionGraph、TaskDispatcher、TaskRunner；
+- Runtime Profile；
+- 授权、持久化、幂等和轨迹。
+
+### 18.2 独立 avernet-goal-cli Rust Package
+
+位于 `apps/avernet-goal-cli/`，通过 Ant CLI 工程初始化；它与 Backend 领域代码解耦，负责：
+
+- Rust 命令解析；
+- 统一认证 SDK；
+- API Gateway Client；
+- Batch 文件类型、Schema、example、validate；
+- TTY 交互；
+- Agent JSON 输出和退出码；
+- Batch 编排与结果聚合。
+
+CLI 只调用 Gateway 相对路径，不暴露或读取 Backend URL。
+
+## 19. 相对旧设计的合同变化
+
+| 旧设计 | 新设计 |
 | --- | --- |
-| 确认前返回 `TaskInfo` | 改为既有 `TaskSpec` |
-| `message="确认提交"` 触发确认 | 改为 `action=CONFIRM` |
-| 多套 intake action/result 派生类型 | intake 动作复用 `TaskIntakeCommand` 与 `TaskIntakeResult`；CONFIRM 返回 `TaskIntakeResult(CONFIRMED)` |
-| 旧 `intake_session_id` 命名 | 在 Intake Context/Result、CLI、HTTP 控制面、`TaskInfoRequest.execution_config` 与任务创建唯一关联中统一为 `session_id`；实施时迁移或兼容读取旧持久化会话 |
-| 每次动作的请求级幂等键 | 从 Intake 领域合同与 CLI 自动生成逻辑中删除；以服务端状态/条件更新处理可判定的重试，明确 `START/CONTINUE` 的未知结果窗口 |
-| 未匹配需求 Bot 时的目标选择 | 从可运行 Bot 中随机选择，并将稳定 ID 固化到 intake session |
-| TaskIntakeResult 绑定任务标识 | TaskIntakeResult 只表示 TaskSpec 完备性；start 的 `TaskOpResult` 返回 task_id、node_id |
-| 澄清与任务创建使用不同 Service | 统一为 `TaskService.intake` 与既有 `TaskService.execute` 两个独立操作；前者不隐式调用后者，HTTP `/start` 只是确认后的会话提交入口 |
-| 确认后创建可能重复 | 以 `session_id` 建立唯一任务创建关联；`CONFIRM/CANCEL` 按会话终态幂等 |
-| START/CONTINUE 响应丢失 | 不盲目自动重放；已知 `session_id` 时先恢复会话查看最新结果，未知时明确提示结果不确定 |
+| 命令名 `task-cli` | 统一为 `avernet-goal-cli` |
+| `@bot bot` / `@group group` | 首版只开放 `--to bot:<ref>`；Group 延后 |
+| Backend 接收多 target | CLI 在 Intake 前展开，Backend 保持单 `requested_target` |
+| 一个 Goal 多 target 共用澄清 | 每个 `Goal × target` 各自澄清、确认和执行 |
+| `/start` 聚合多个任务 | Backend 保持返回单个 `TaskOpResult`，CLI 聚合 |
+| 修改 `UNIQUE(session_id)` | 保留现有 `UNIQUE(session_id)` |
+| 无 Batch 合同 | 明确 `batch schema/example/validate/submit` |
+| Batch 格式依赖外部文档 | CLI 自带 JSON Schema、示例和校验 |
+| `--non-interactive` 语义不完整 | 明确不等待输入且不自动确认 |
+| CLI 可传 runtime 策略 | 首版不开放 `--runtime`，策略由 Runtime Profile 选择 |
+
+Backend 只保留单 target Intake/Start 合同；重复 `--to` 和 Batch 聚合只存在于独立 CLI Adapter。

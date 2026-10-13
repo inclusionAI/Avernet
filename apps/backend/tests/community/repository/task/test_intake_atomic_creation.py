@@ -13,6 +13,7 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.task.task_graph_repository import TaskGraphRepository
 from agentclaw.community.core.repository.implementations.task.task_info_repository import TaskInfoRepository
 from agentclaw.community.core.task.domain.intake import TaskIntakeStatus
+from agentclaw.community.core.task.domain.intake import TaskExecutionMode
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult, AcceptanceVerdict, Context, Goal, NodeAction, RuntimeInfo,
     TaskInfo, TaskNode, TaskNodePatch, TaskReportCommand, TaskReportEventType,
@@ -51,9 +52,11 @@ class _DB:
     transactional_orm_session = orm_session
 
 
-def _setup():
+def _setup(*, mode: TaskExecutionMode = TaskExecutionMode.RELAY):
     db = _DB()
-    result = replace(_result(), status=TaskIntakeStatus.CONFIRMED)
+    result = replace(
+        _result(), status=TaskIntakeStatus.CONFIRMED, execution_mode=mode,
+    )
     TaskIntakeRepository(db).create(result)
     repo = TaskGraphRepository(db)
     graph_service = TaskGraphService(graph_repo=repo)
@@ -61,7 +64,10 @@ def _setup():
         task_id="task-1", task_spec=result.task_spec,
         source_type=TaskSourceType.API.value,
         owner_user_id=result.owner_user_id, owner_bot_id="bot-1",
-        execution_config={"orchestration_mode": "relay", "intake_session_id": result.session_id},
+        execution_config={
+            "orchestration_mode": mode.value,
+            "intake_session_id": result.session_id,
+        },
     )
     return db, graph_service, repo, task_info, result
 
@@ -160,6 +166,30 @@ def test_execute_confirmed_intake_reuses_the_same_root() -> None:
         assert session.query(TaskInfoModel).count() == 1
         assert session.query(TaskNodeModel).count() == 1
         assert session.query(TaskDeliveryIntentModel).count() == 1
+
+
+def test_execute_confirmed_centralized_intake_reuses_root_without_delivery_intent() -> None:
+    db, graph_service, repo, _, result = _setup(mode=TaskExecutionMode.CENTRALIZED)
+    service = TaskService(
+        graph_service, task_info_repo=TaskInfoRepository(db),
+        delivery_intents=repo, task_id_provider=lambda: "task-centralized",
+    )
+    request = build_task_info_request(result)
+
+    async def create_twice():
+        first = await service.execute(request)
+        second = await service.execute(request)
+        return first, second
+
+    first, second = asyncio.run(create_twice())
+    assert first.success and second.success
+    assert first.task_id == second.task_id == "task-centralized"
+    assert first.extend_props is None
+    assert second.extend_props["orchestration_mode"] == "centralized"
+    with db.orm_session() as session:
+        assert session.query(TaskInfoModel).count() == 1
+        assert session.query(TaskNodeModel).count() == 1
+        assert session.query(TaskDeliveryIntentModel).count() == 0
 
 
 def test_dispatch_node_acknowledges_only_after_real_dispatch() -> None:

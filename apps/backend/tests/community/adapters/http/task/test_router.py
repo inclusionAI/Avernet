@@ -24,7 +24,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskReportResult, TaskReportStatus,
 )
 from agentclaw.community.core.task.domain.intake import (
-    IntakeTarget, IntakeTargetType, TaskIntakeResult, TaskIntakeStatus,
+    IntakeTarget, IntakeTargetType, TaskExecutionMode, TaskIntakeResult,
+    TaskIntakeStatus,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
@@ -72,6 +73,7 @@ class _StubService:
         self.callback = _StubCallback()
         self._node_status: dict[tuple[str, str], Status] = {}
         self._execution_config: dict = {}
+        self.intake_result: TaskIntakeResult | None = None
 
     def set_node_status(self, task_id, node_id, status) -> None:
         self._node_status[(task_id, node_id)] = status
@@ -109,7 +111,7 @@ class _StubService:
 
     async def intake(self, command, context):
         self.callback.calls.append(("intake", (command, context)))
-        return self._confirmed_intake()
+        return self.intake_result or self._confirmed_intake()
 
     def get_confirmed_intake(self, session_id, owner_user_id):
         self.callback.calls.append(("get_confirmed_intake", (session_id, owner_user_id)))
@@ -284,6 +286,41 @@ class TestRouter:
         assert context.session_id == "tis-1"
         assert context.owner_user_id == "owner-1"
 
+    def test_intake_accepts_mode_and_a2a_proxy_request(self, human_task_client):
+        client, svc = human_task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/intake",
+            json={
+                "action": "START",
+                "message": "分析支付失败率",
+                "requested_a2a_proxy_bot_ref": "proxy",
+                "requested_target": {"target_type": "BOT", "target_id": "risk:owner-2"},
+                "requested_mode": "centralized",
+            },
+        )
+        assert response.status_code == 200, response.text
+        _, (command, context) = svc.callback.calls[0]
+        assert command.requested_a2a_proxy_bot_ref == "proxy"
+        assert command.requested_target.target_id == "risk:owner-2"
+        assert command.requested_mode == TaskExecutionMode.CENTRALIZED
+        assert context.source_type == TaskSourceType.API
+
+    def test_intake_exposes_processing_without_run_credentials(self, human_task_client):
+        client, svc = human_task_client
+        result = svc._confirmed_intake()
+        result.status = TaskIntakeStatus.CLARIFYING
+        result.a2a_run_id = "run-secret"
+        svc.intake_result = result
+        response = client.post(
+            "/api/v1/collaboration/tasks/intake",
+            json={"action": "RESUME"},
+            headers={"X-Task-Intake-Session-ID": "tis-1"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["processing"] is True
+        assert "a2a_run_id" not in data
+
     def test_start_uses_only_confirmed_session_to_build_request(self, human_task_client):
         client, svc = human_task_client
         response = client.post(
@@ -306,6 +343,14 @@ class TestRouter:
         )
         assert response.status_code == 422
         assert svc.callback.calls == []
+
+    def test_get_task_returns_dashboard(self, human_task_client):
+        client, svc = human_task_client
+        svc.set_node_status("task-1", "task-1", Status.RUNNING)
+        response = client.get("/api/v1/collaboration/tasks/task-1")
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["tasks"][0]["task_id"] == "task-1"
 
     def test_legacy_callback_rejected_for_relay_task(self, task_client):
         client, svc = task_client
