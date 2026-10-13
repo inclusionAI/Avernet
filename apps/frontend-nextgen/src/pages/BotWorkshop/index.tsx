@@ -100,6 +100,8 @@ const BotWorkshopPage: React.FC = () => {
                     getHealthCheckAvailability={workshop.getHealthCheckAvailability}
                     onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
                     getLogAction={showBotLogs ? workshop.logActionFor : undefined}
+                    onOpenTaskInstances={workshop.openTaskInstances}
+                    canOpenTaskInstances={workshop.canOpenTaskInstances}
                     onChangeSpace={(bot) => {
                       if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
                     }}
