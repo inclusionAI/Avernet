@@ -23,6 +23,7 @@ from src.domain.services.vector_persistence_backend import (
     BatchedIncrementalVectorPersistenceBackend,
     BatchedVectorPersistenceBackend,
     IncrementalVectorPersistenceBackend,
+    PointLookupVectorPersistenceBackend,
     VectorPersistenceBackend,
     WorkerScopedVectorPersistenceBackend,
 )
@@ -309,6 +310,8 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
 
     def get(self, id: str) -> Optional[VectorPoint]:
         """Get a single vector point from MySQL durable backend."""
+        if isinstance(self._persistence, PointLookupVectorPersistenceBackend):
+            return self._persistence.load_by_id(id)
         for point in self._persistence.load_all():
             if point.id == id:
                 return point
