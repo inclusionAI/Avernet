@@ -476,8 +476,14 @@ class TestAvernetKindEndToEnd:
         seam = world.get(ManifestCreationSeam)
         assert len(created) == 1
         bot = created[0]
+        # The platform identity is the SPAWN's identity: the runtime-minted
+        # agent_id, not the persona name — stable across D16 respawns (rebind
+        # keyed), unique between same-named spawns (no shared bot, no
+        # teardown-under-the-other). The e2e asserts the exact derivation
+        # against the agent row the swarm itself just persisted.
+        spawned_agent = agents[0].agent_id
         expected_id = "ac_" + hashlib.sha1(
-            f"{run_id}:surveyor".encode("utf-8")
+            f"{run_id}:{spawned_agent}".encode("utf-8")
         ).hexdigest()[:16]
         assert bot["bot_id"] == expected_id
         assert bot["status"] == "ACTIVE"

@@ -112,7 +112,7 @@ class _RaisingFactory:
     def __init__(self) -> None:
         self.creates = 0
 
-    def create(self, spec, run):
+    def create(self, spec, run, agent_id=None):
         self.creates += 1
         return _RaisingSubagent()
 

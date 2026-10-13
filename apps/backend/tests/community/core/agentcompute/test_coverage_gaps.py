@@ -749,7 +749,8 @@ class _RecordingFactory:
     def __init__(self) -> None:
         self.created_specs: list[str] = []
 
-    def create(self, spec: dm.AgentSpec, run: dm.Run) -> _InstantSubagent:
+    def create(self, spec: dm.AgentSpec, run: dm.Run,
+                 agent_id: dm.AgentId | None = None) -> _InstantSubagent:
         self.created_specs.append(spec.name)
         return _InstantSubagent(spec.name)
 
@@ -1062,7 +1063,7 @@ class TestRuntimeEdges:
                 raise RuntimeError("run exploded")
 
         class FailingFactory:
-            def create(self, spec, run):
+            def create(self, spec, run, agent_id=None):
                 return FailingSubagent()
 
         runtime = SubagentRuntime(

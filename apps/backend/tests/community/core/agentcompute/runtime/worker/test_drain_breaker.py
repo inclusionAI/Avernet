@@ -148,7 +148,8 @@ class _CountingFactory:
         self.creates: dict[str, int] = {}
         self._make = make
 
-    def create(self, spec: dm.AgentSpec, run: dm.Run):
+    def create(self, spec: dm.AgentSpec, run: dm.Run,
+                 agent_id: dm.AgentId | None = None):
         self.creates[spec.name] = self.creates.get(spec.name, 0) + 1
         return self._make(spec.name)
 

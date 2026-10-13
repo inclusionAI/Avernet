@@ -133,10 +133,18 @@ class Orchestrator:
         if isinstance(decision, SpawnDecision):
             accepted_any = False
             for envelope in decision.agents:
-                cohort_position = state.total_agents_spawned
+                # Width is concurrency, not census: the guard admits spawns
+                # while agents are IN FLIGHT and completed work (a routed
+                # shard) retires from the count — a run that wants 20
+                # sequential agents runs fine at max_width=8. The total
+                # budget is max_total_agents, owned by the termination
+                # evaluator; depth keeps the census reading because the
+                # flat swarm's depth axis is the spawn sequence itself.
+                cohort_position = state.total_agents_spawned - state.routed_shard_count
+                depth_position = state.total_agents_spawned
                 guard = self._guards.check_dedup(state, envelope.objective)
                 if guard is None:
-                    guard = self._guards.check_depth(state, cohort_position)
+                    guard = self._guards.check_depth(state, depth_position)
                 if guard is None:
                     guard = self._guards.check_width(state, cohort_position)
                 if guard is not None:

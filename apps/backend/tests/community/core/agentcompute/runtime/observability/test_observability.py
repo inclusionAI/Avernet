@@ -695,7 +695,8 @@ class _ObsRecordingSubagent:
 
 
 class _ObsRecordingFactory:
-    def create(self, spec: dm.AgentSpec, run: dm.Run):
+    def create(self, spec: dm.AgentSpec, run: dm.Run,
+                 agent_id: dm.AgentId | None = None):
         return _ObsRecordingSubagent(spec.name, {"did": spec.name})
 
 

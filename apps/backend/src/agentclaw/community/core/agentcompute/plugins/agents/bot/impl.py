@@ -13,7 +13,7 @@ import json
 import time
 
 from agentclaw.community.core.agentcompute.domain.models import (
-    AgentSpec, BotCreateSpec, BotState, IdempotencyKey, Run,
+    AgentId, AgentSpec, BotCreateSpec, BotState, IdempotencyKey, Run,
     SubagentResult, TaskEnvelope,
 )
 from agentclaw.community.core.agentcompute.runtime.observability import (
@@ -36,11 +36,13 @@ class AvernetSubagent:
 
     def __init__(self, spec: AgentSpec, run: Run,
                  platform: BotPlatform,
-                 observability: AgentComputeObservability | None = None) -> None:
+                 observability: AgentComputeObservability | None = None,
+                 agent_id: AgentId | None = None) -> None:
         self._spec = spec
         self._run = run
         self._platform = platform
         self._obs = observability
+        self._agent_id = agent_id
         self._bot_id: str | None = None
         self.name = spec.name
 
@@ -56,8 +58,16 @@ class AvernetSubagent:
                     model=self._spec.model,
                     metadata=dict(self._spec.metadata),
                 ),
+                # Platform identity follows the spawn's durable identity:
+                # agent_id is stable across attempts AND across D16
+                # respawns (rebind, not duplicate), and unique between two
+                # same-named spawns (each spawns its own bot; one's
+                # teardown can never delete the other's). The name remains
+                # only as the fallback for hand construction with no agent
+                # row behind it.
                 idempotency_key=IdempotencyKey(
-                    f"{self._run.run_id}:{self._spec.name}"),
+                    f"{self._run.run_id}:"
+                    f"{self._agent_id or self._spec.name}"),
             )
         except Exception:
             if self._obs is not None:

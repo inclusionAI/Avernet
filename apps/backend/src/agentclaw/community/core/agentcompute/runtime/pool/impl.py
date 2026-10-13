@@ -265,7 +265,7 @@ class SubagentRuntime:
                 # inside the attempt's guard so a malformed spec degrades to
                 # a FAILED result instead of killing the worker task
                 # (its exception would never surface in a fire-and-forget loop).
-                subagent = self._factory.create(spec, item.run)
+                subagent = self._factory.create(spec, item.run, item.agent_id)
                 await subagent.setup()
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),

@@ -398,6 +398,32 @@ class TestOrchestrator:
         assert any(ge.kind.value == "width_exceeded" for ge in result["guard_events"])
         assert result["terminate"] is None
 
+    def test_width_retires_completed_agents_not_the_census(self):
+        # Width is concurrency: two spawned-and-completed agents (routed
+        # shards) retire from the in-flight count, so a third spawn is
+        # admitted at max_width=2. The census bug this pins read cumulative
+        # spawn totals instead and hard-killed runs past max_width TOTAL.
+        script = json.dumps({
+            "kind": "spawn_agent",
+            "agents": [{"name": "r3", "objective": "o3"}],
+        })
+        stub = StubLLMProvider(script=[script])
+        orch = Orchestrator(
+            llm=stub, parser=DecisionParser(),
+            guards=GuardService(max_width=2, max_depth=99),
+            config=AgentComputeConfig(
+                orchestration=AgentComputeOrchestrationConfig(repair_max=2),
+            ),
+        )
+        run = _mk_run()
+        state = RunState(run=run)
+        state.total_agents_spawned = 2
+        state.routed_shard_count = 2  # retired: concurrency is zero again
+        result = asyncio.run(orch.run_slice(run, state, lambda rid: []))
+        assert [e.name for e in result["spawn"]] == ["r3"]
+        assert not any(ge.kind.value == "width_exceeded"
+                       for ge in result["guard_events"])
+
     def test_spawn_all_envelopes_skipped_terminates_no_progress(self):
         script = json.dumps({
             "kind": "spawn_agent",

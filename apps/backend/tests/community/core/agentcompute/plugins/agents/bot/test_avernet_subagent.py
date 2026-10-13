@@ -17,6 +17,7 @@ import time
 
 import pytest
 
+from agentclaw.community.core.agentcompute.domain import models as dm
 from agentclaw.community.core.agentcompute.domain.models import (
     AgentSpec, EpochMillis, ProviderKind, RequestMetadata, Run, RunId,
     RunStatus, TaskEnvelope, TenantId,
@@ -187,6 +188,40 @@ class TestLifecycle:
             with pytest.raises(RuntimeError, match="invalid bot_id"):
                 await sub.setup()
             assert gw.status_queries == []
+
+        asyncio.run(main())
+
+    def test_same_name_agents_get_distinct_identities(self):
+        # The key is the spawn's agent identity, not the persona name: two
+        # spawns of one catalog persona provision two bots, and one's
+        # teardown cannot delete the other's.
+        async def main():
+            gw = FakePlatform()
+            spec = _mk_spec(name="scout")
+            first = AvernetSubagent(
+                spec, _mk_run(), gw, agent_id=dm.AgentId("agent-one"))
+            second = AvernetSubagent(
+                spec, _mk_run(), gw, agent_id=dm.AgentId("agent-two"))
+            await first.setup()
+            await second.setup()
+            idems = [idem for _, idem in gw.created]
+            assert len(idems) == 2 and len(set(idems)) == 2
+
+        asyncio.run(main())
+
+    def test_same_agent_identity_rebinds_across_teardown(self):
+        async def main():
+            gw = FakePlatform()
+            spec = _mk_spec()
+            first = AvernetSubagent(
+                spec, _mk_run(), gw, agent_id=dm.AgentId("agent-1"))
+            await first.setup()
+            first_idem = gw.created[0][1]
+            await first.teardown()
+            second = AvernetSubagent(
+                spec, _mk_run(), gw, agent_id=dm.AgentId("agent-1"))
+            await second.setup()
+            assert gw.created[1][1] == first_idem
 
         asyncio.run(main())
 

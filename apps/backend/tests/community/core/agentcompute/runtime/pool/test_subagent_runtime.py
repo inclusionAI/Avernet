@@ -18,6 +18,7 @@ from collections import deque
 import pytest
 
 from agentclaw.community.core.agentcompute.domain.models import (
+    AgentId,
     AgentSpec, AgentStatus, EpochMillis, ProviderKind, RequestMetadata,
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
     TerminationReason, TokenUsage,
@@ -130,7 +131,8 @@ class FakeFactory:
             "envelopes": [],
         }
 
-    def create(self, spec: AgentSpec, run: Run) -> ScriptedSubagent:
+    def create(self, spec: AgentSpec, run: Run,
+                 agent_id: AgentId | None = None) -> ScriptedSubagent:
         self.creates += 1
         self.created_specs.append(spec)
         self.created_runs.append(run)
@@ -289,7 +291,7 @@ class TestRetryAndExhaustion:
         # surface and the run would hang to its slice budget.
         async def main():
             class ExplodingFactory(FakeFactory):
-                def create(self, spec, run):
+                def create(self, spec, run, agent_id=None):
                     self.creates += 1
                     raise TypeError("spec malformed")
 
