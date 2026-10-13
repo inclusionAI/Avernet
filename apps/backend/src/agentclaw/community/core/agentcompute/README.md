@@ -151,7 +151,10 @@ Kinds: `serial_collapse`, `spurious_parallelism`, `dedupe_reject`, `depth_exceed
 ## Service / HTTP / CLI surface
 
 Service Protocol (`service/protocols.py`): `submit_async`, `submit_sync`,
-`get_run`, `list_runs`, `run_events`, `cancel`. The HTTP router prefix is
+`get_run`, `list_runs`, `run_events`, `cancel`, `purge_run`,
+`content_classification` (the last two are service-plane only — data
+protection driving hard erasure and PII classification reports; no route,
+no CLI). The HTTP router prefix is
 `/agentcompute/v1`; reads and per-run routes take the tenant from the
 `X-Tenant-Id` header.
 
@@ -201,7 +204,7 @@ DEPLOY_PROFILE=test PYTHONPATH=src:. .venv/bin/python -m pytest tests/community/
   -q --cov=agentclaw.community.core.agentcompute --cov-branch --cov-fail-under=90
 ```
 
-Current: 285 tests, 97.30% branch coverage (gate ≥90%). Architecture
+Current: 705 tests, 96.48% branch coverage (gate ≥90%). Architecture
 isolation + conformance gates live in `tests/community/architecture/`
 (incl. `test_agentcompute_isolation.py`); the single-process E2E is
 `tests/community/core/agentcompute/test_e2e.py`.

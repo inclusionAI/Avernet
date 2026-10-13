@@ -8,9 +8,12 @@ public surface exactly the way an operator would: submit over HTTP,
 advance the durable job with the real worker, poll status, stream SSE to
 the terminal event, and re-check persistence through the repositories.
 
-The worker component has no auto-start in the app lifecycle — this test
-owns it explicitly (a thread ticking run_once()), matching production
-topology where the worker loop is a separate actor.
+The fixture's config sets AgentComputeConfig(enabled=False): the worker
+component DOES auto-attach in the app lifecycle, and without this switch a
+second worker would run on the uvicorn event loop — the cross-loop
+interleave the wire battery once randomized on. This test instead drives
+exactly one worker explicitly (a persistent event loop ticking
+run_once()), which is production topology: one worker actor, one loop.
 """
 from __future__ import annotations
 

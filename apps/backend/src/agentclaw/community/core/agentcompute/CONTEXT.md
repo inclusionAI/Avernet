@@ -29,6 +29,7 @@ provides:
   - Subagent / SubagentFactory     # SPI Protocols
   - ArtifactStore                  # SPI Protocol (filesystem plugin)
   - DecisionParser                 # fenced-JSON decision parsing
+  - BotPlatform                    # in-process provision seam (community adapter binds it)
   - RunEvents / AgentEvent / RoundEvent / GuardEventSummary   # SSE read model
 consumes:
   - DatabasePlugin     # repositories run on orm_session (D19: no await inside)
@@ -92,6 +93,14 @@ adapter composes the platform document) — no socket leaves the module. Enforce
 `tests/community/architecture/test_agentcompute_isolation.py`.
 
 ## Operation knobs (`AgentComputeConfig`)
+
+All groups parse from the `agentcompute` user_config block
+(`AgentComputeConfig.from_block` — defensive per knob; the overlays ship
+`llm` env-injected, `artifact_store_root`, `orchestration`, and every
+group below). Knobs: `orchestration.*`, `tenant_limits`, `admission`,
+`drain`, `upstream_breaker`, `retention`, `egress`,
+`artifact_store_root`, `artifact_inline_threshold`,
+`message_retention_tail`, `enabled`.
 
 | Knob | Default | Meaning |
 | --- | --- | --- |

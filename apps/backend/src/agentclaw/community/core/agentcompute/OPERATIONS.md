@@ -38,7 +38,7 @@ defaults — `pool_size=5`, `max_overflow=10`, `pool_timeout=30s`. The
 engine-kwargs edit in that plugin plus a provider field, not a yaml value.
 
 **Where connections actually go per pod.** The worker is a single loop
-(`runtime/worker.py`): one `claim_batch` (+`reclaim_batch` at 2× batch) per
+(`runtime/worker/impl.py`): one `claim_batch` (+`reclaim_batch` at 2× batch) per
 poll tick, then slices run sequentially — so at most **one slice** per pod is
 in flight regardless of `batch_size` (default 10). Inside a slice, D23's
 bounded queue (`maxsize = max_width`, default 8) caps in-flight subagents and

@@ -129,7 +129,6 @@ class AgentComputeOrchestrationConfig:
 @dataclass(frozen=True)
 class AgentComputeTenantLimits:
     max_concurrent_runs: int = 8
-    max_fanout_width: int = 8
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentComputeTenantLimits":
@@ -137,7 +136,6 @@ class AgentComputeTenantLimits:
         block = block or {}
         return cls(
             max_concurrent_runs=_as_int(block, "max_concurrent_runs", d.max_concurrent_runs, minimum=1),
-            max_fanout_width=_as_int(block, "max_fanout_width", d.max_fanout_width, minimum=1),
         )
 
 
