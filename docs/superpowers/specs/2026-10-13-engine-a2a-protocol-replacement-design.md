@@ -325,7 +325,9 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
 1. 幂等键：A2A 侧 = `messageId`；v3 侧 = `ChatSendParams.idempotency_key`。
    逻辑请求 ID 由客户端生成（BCS = `A2aChatCommand.run_id`，D13：重试不得再生成），
    映射到两协议的键字段；帧级断言：发送键非空且跨重试一致（contract test）；
-   同键不同内容 → 显式键冲突错误（防止不同请求被误判为同一操作）
+   同键不同内容 → 显式键冲突错误（防止不同请求被误判为同一操作）。内容比较
+   基于**规范化后的业务请求**：排除 retry-only 标志、传输层请求 ID、协议封装
+   差异等非业务字段；跨协议映射后的同一业务请求视为相同
 2. **retry-only 判定机制（D14，服务端原子）**：请求分两类，判定与处理在 kernel
    内原子完成——客户端**无需**（也无法）预判服务端记录是否存活：
 
@@ -397,7 +399,7 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
    故障恢复场景（见 §10.1 门禁顺序）；禁手工指定端点 + 自研解析器先跑通 happy
    path（会掩盖绑定/生命周期类缺陷，R2 两轮教训）
 3. flow coverage：singlebox a2a profile；changed-line ≥80% 走 `ci_test.sh` 同口径
-4. Spike 失败用例 F1-F6（§10.1）
+4. Spike 失败用例 F1-F8（§10.1）
 5. BCS（阶段 3）：Rust mock A2A server contract test + 帧级幂等键断言
 6. arch 结构测试：kernel 无 transport import、A2A 壳无状态所有权
 
@@ -432,7 +434,9 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
   retry-only 退化为 FIRST——不支持该扩展的目标按"结果未知"处理而非换路重发；
   通用 HTTP/SDK 自动重试不得绕过（自动重试请求须注入 retry-only 或直接禁用）
 - F8：**并发首次与键冲突**：两个相同逻辑请求（同键）并发 FIRST 到达 → 只创建
-  一个执行；同键不同内容 → 显式键冲突错误
+  一个执行；同键不同内容 → 显式键冲突错误（判定基于规范化业务请求，排除
+  retry-only 标志、传输请求 ID、协议封装差异）；**跨协议断言**：v3 首提 →
+  A2A retry-only 重发（同键、同业务内容）→ 命中既有结果，而非键冲突
 - F6：活任务断线期间产生多条 delta / tool progress / interaction 事件；重连按
   `seq` 逐事件补齐（不只是终稿文本或当前快照）
 
