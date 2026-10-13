@@ -17,6 +17,7 @@ from ._models import (
     PublishConfig,
     PublishProgressResponse,
     PublishResponse,
+    RestoreBotResult,
     UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
@@ -50,6 +51,29 @@ class PublishAdminService(Protocol):
         status: str,
         operator: str,
     ) -> UpdateBotStatusResult: ...
+
+    async def restore_bot(
+        self,
+        *,
+        bot_id: int,
+        operator: str,
+    ) -> RestoreBotResult:
+        """Restore a soft-deleted bot record to live ACTIVE, atomically.
+
+        Admin recovery tool that deliberately bypasses the state machine
+        ("RELEASED is terminal"): revives the target record
+        (``is_deleted=0``, ``status=ACTIVE``) and retires every OTHER live
+        record sharing its ``bot_uuid`` (``status=RELEASED``,
+        soft-deleted) in ONE transaction.
+
+        Cross-env by design: no ``env`` parameter, no env validation, and
+        no env/tenant filtering on the PK lookup or sibling matching.
+        Raises ``PublishNotFoundError`` when the ``bot_id`` matches no
+        record (live or soft-deleted); unique-key conflicts (concurrent
+        restore or publish race) surface as ``PublishConflictError`` after
+        the repository transaction rolled back — no partial state.
+        """
+        ...
 
 
 @runtime_checkable
