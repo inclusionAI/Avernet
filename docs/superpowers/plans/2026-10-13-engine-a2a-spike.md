@@ -296,8 +296,9 @@ def test_completion_marker_survives_queue_boundary():  # R9-2/R10-1 复现
             if ev is None:
                 return False
             su = ev.get("ev", {}).get("statusUpdate", {})
-            if su.get("final"):
-                assert su["metadata"]["lastSeq"] >= 1   # R9-1：标记承载数
+            meta = (su.get("metadata") or {})
+            if meta.get("final"):
+                assert meta["lastSeq"] >= 1             # R9-1：标记承载数
                 return True
     rid, q = run(main())
     assert run(consume(q)) is True                     # 有限时间耗尽且见终态
@@ -320,14 +321,15 @@ def test_standard_subscribe_on_live_task():            # R8 P2-8：活任务标�
         while True:
             ev = await asyncio.wait_for(q.get(), 5)
             evs.append(ev)
-            if ev["ev"].get("statusUpdate", {}).get("final"):
+            su = ev["ev"].get("statusUpdate", {})
+            if (su.get("metadata") or {}).get("final"):
                 break
         engine_mock.PAUSE_GATE = None
         return first, evs, k.runs[rid].state
     first, evs, state = run(main())
     assert first["type"] == "task"                      # 快照=当时状态
     assert first["ev"]["task"]["status"]["state"] == "TASK_STATE_WORKING"
-    assert evs[-1]["ev"]["statusUpdate"].get("final") is True
+    assert (evs[-1]["ev"]["statusUpdate"].get("metadata") or {}).get("final") is True
     assert state == "TASK_STATE_COMPLETED"
 
 
@@ -372,7 +374,8 @@ def test_f6_live_handoff_no_gap():                     # R7 F6：交接期发布
         live = []
         while True:
             ev = await asyncio.wait_for(q.get(), 5)
-            if ev is None or ev["ev"].get("statusUpdate", {}).get("final"):
+            su = ev["ev"].get("statusUpdate", {}) if ev else {}
+            if ev is None or (su.get("metadata") or {}).get("final"):
                 break
             live.append(ev)
         engine_mock.PAUSE_GATE = None
@@ -381,7 +384,7 @@ def test_f6_live_handoff_no_gap():                     # R7 F6：交接期发布
     seqs = [e["seq"] for e in backlog] + [e["seq"] for e in live]
     assert seqs == sorted(set(seqs))                    # 无重复
     assert seqs == list(range(seqs[0], seqs[-1] + 1))   # 无缺号
-    assert live and state == "TASK_STATE_COMPLETED"     # 到达真实终态
+    assert live and state == "TASK_STATE_COMPLETED"     # 到达真实终态（终态 marker 见 metadata.final）
 
 
 def test_standard_subscribe_snapshot_then_terminal_marker():
@@ -397,8 +400,9 @@ def test_standard_subscribe_snapshot_then_terminal_marker():
     assert backlog == []
     assert first["type"] == "task"                      # §3.1.6 快照
     assert first["ev"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
-    assert second["ev"]["statusUpdate"].get("final") is True
-    marker_seq = second["ev"]["statusUpdate"].get("metadata", {}).get("lastSeq")
+    su2 = second["ev"]["statusUpdate"]
+    assert (su2.get("metadata") or {}).get("final") is True
+    marker_seq = (su2.get("metadata") or {}).get("lastSeq")
     assert marker_seq is not None and marker_seq >= 1   # 标记承接最终序号
 
 
@@ -473,8 +477,9 @@ def _terminal_marker(r) -> dict:
     return {"seq": None, "type": "statusUpdate",
             "ev": {"statusUpdate": {
                 "taskId": r.run_id, "contextId": r.context_id,
-                "status": {"state": r.state}, "final": True,
-                "metadata": {"lastSeq": r.last_seq}}}}   # 尾部完整性可判（R9-1）
+                "status": {"state": r.state},
+                "metadata": {"final": True,
+                             "lastSeq": r.last_seq}}}}  # R11-G1a：final 入 metadata
 
 
 class UnknownOutcome:
@@ -941,7 +946,7 @@ def test_send_streaming_standard_wire_lifecycle(client):
     assert kinds[-1] == "statusUpdate"                 # 流终于终态 status
     last = evs[-1]["result"]["statusUpdate"]
     assert last["status"]["state"] == "TASK_STATE_COMPLETED"
-    assert last.get("final") is True
+    assert (last.get("metadata") or {}).get("final") is True
     arts = [e["result"]["artifactUpdate"] for e in evs
             if "artifactUpdate" in e["result"]]
     assert arts and arts[-1]["append"] is False        # 终稿替换 (F,T)
@@ -983,7 +988,8 @@ def test_replay_events_terminal_window_returns_stream(client):
     kinds = [_kind(e) for e in evs]
     assert kinds[0] == "task"
     assert kinds[-1] == "statusUpdate"
-    assert evs[-1]["result"]["statusUpdate"].get("final") is True
+    assert (evs[-1]["result"]["statusUpdate"].get("metadata")
+            or {}).get("final") is True
 
 
 def test_stream_cleanup_after_end(client):            # R7-7：订阅队列清理
@@ -1052,7 +1058,8 @@ def _sse_of(kernel, rid, task_id, backlog, q):
                     return
                 yield sse_mod.sse({"jsonrpc": "2.0", "id": rid,
                                    "result": _wire(ev)})
-                if ev["ev"].get("statusUpdate", {}).get("final"):
+                su = ev["ev"].get("statusUpdate", {})
+                if (su.get("metadata") or {}).get("final"):
                     return
         finally:                                       # 不变量 2：订阅清理
             r = kernel.runs.get(task_id)
@@ -1194,9 +1201,9 @@ def validate(events: list[dict]) -> tuple[bool, dict]:
         "every_event_exactly_one_member": all(member_count(e) == 1
                                               for e in events),
         "last_event_is_final_status": last_kind == "statusUpdate"
-        and last["statusUpdate"].get("final") is True,    # 流的末条事件本身
+        and (last["statusUpdate"].get("metadata") or {}).get("final") is True,
         "last_final_status_is_terminal": last_kind == "statusUpdate"
-        and last["statusUpdate"].get("final") is True
+        and (last["statusUpdate"].get("metadata") or {}).get("final") is True
         and last["statusUpdate"]["status"]["state"] in TERMINAL,
         "seq_strictly_increasing": seqs == sorted(set(seqs)),
     }
@@ -1218,10 +1225,13 @@ def _task(state="TASK_STATE_SUBMITTED"):
 
 def _status(state, seq=None, final=None):
     su = {"taskId": "t", "contextId": "c", "status": {"state": state}}
+    meta = {}
     if seq is not None:
-        su["metadata"] = {"seq": seq}
+        meta["seq"] = seq
     if final is not None:
-        su["final"] = final
+        meta["final"] = final            # R11-G1a：final 属性 wire 位置在 metadata
+    if meta:
+        su["metadata"] = meta
     return {"result": {"statusUpdate": su}}
 
 
@@ -1813,8 +1823,8 @@ def _v3_send_and_collect(app, ctx, key, text):
                     rid = frame["task"]["id"]
             while True:
                 payload = ws.receive_json().get("payload")
-                if payload is None or payload.get("ev", {}).get(
-                        "statusUpdate", {}).get("final"):
+                su = (payload or {}).get("ev", {}).get("statusUpdate", {})
+                if payload is None or (su.get("metadata") or {}).get("final"):
                     return rid
 ```
 
@@ -1897,7 +1907,8 @@ async def _drain_run(kernel, sock, rid, backlog, q):
             if ev is None:
                 return
             await sock.send_json({"type": "event", "payload": ev})
-            if ev["ev"].get("statusUpdate", {}).get("final"):
+            su = ev["ev"].get("statusUpdate", {})
+            if (su.get("metadata") or {}).get("final"):
                 return
     finally:                                          # 订阅清理（不变量 2）
         r = kernel.runs.get(rid)
@@ -2028,8 +2039,8 @@ async def test_bridge_pumps_live_into_kernel():
                     assert e[k]["contextId"] == "br-ctx", (k, e[k])
                     assert e[k].get("taskId") in (None, rid), (k, e[k])
         final = [e for e in arrivals if "statusUpdate" in e][-1]["statusUpdate"]
-        assert final.get("final") is True and final["status"]["state"] == \
-            "TASK_STATE_COMPLETED"                      # R7-8：终态真到位
+        assert (final.get("metadata") or {}).get("final") is True
+        assert final["status"]["state"] == "TASK_STATE_COMPLETED"
     finally:
         a2a_srv.should_exit = True
         echo_srv.should_exit = True
@@ -2154,7 +2165,7 @@ async def main() -> int:
     await t
     arts = [a for a in arrivals if "artifactUpdate" in a]
     finals = [a for a in arrivals if "statusUpdate" in a
-              and a["statusUpdate"].get("final")]
+              and (a["statusUpdate"].get("metadata") or {}).get("final")]
     checks = {
         "first_event_is_task": bool(arrivals) and "task" in arrivals[0],
         "artifact_stream_live": len(arts) >= 2,
@@ -2187,7 +2198,8 @@ async def consume(http, rid) -> list[dict]:
             if line.startswith("data: "):
                 ev = json.loads(line[6:]).get("result", {})
                 arrivals.append({"t": time.monotonic(), **ev})
-                if "statusUpdate" in ev and ev["statusUpdate"].get("final"):
+                if "statusUpdate" in ev and (ev["statusUpdate"].get(
+                        "metadata") or {}).get("final"):
                     break
     return arrivals
 
@@ -2423,7 +2435,7 @@ async function streamOnce(body, headers, abortAfterArtifacts) {
         r.arrivals.push({t: performance.now(), seq});
         if (au) r.artifacts += 1;
         r.lastEvent = {kind: kindOf(ev), state: su?.status?.state ?? null,
-                       final: su?.final ?? null,
+                       final: su?.metadata?.final ?? null,
                        lastSeq: su?.metadata?.lastSeq ?? su?.metadata?.seq ?? null};
         if (abortAfterArtifacts && r.artifacts >= abortAfterArtifacts) ac.abort();
       }
@@ -2578,7 +2590,8 @@ async def ws_round(ws, i: int, t0: float):
         while True:                                   # 至终态
             frame = json.loads(await ws.recv())
             payload = frame.get("payload", {})
-            if payload.get("ev", {}).get("statusUpdate", {}).get("final"):
+            su = payload.get("ev", {}).get("statusUpdate", {})
+            if (su.get("metadata") or {}).get("final"):
                 return first, time.monotonic() - t0, True
     except Exception:                                 # R10-2：断开=不完整轮
         return first, None, False
@@ -2628,7 +2641,7 @@ class _WS:
 
 RES = '{"type":"res","id":0,"ok":true,"task":{"id":"t"}}'
 EV_FINAL = ('{"type":"event","payload":{"ev":{"statusUpdate":'
-            '{"final":true}}}}')
+            '{"metadata":{"final":true}}}}}')
 
 
 def test_ws_round_normal_path():
