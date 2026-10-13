@@ -44,3 +44,5 @@ Promoted from `mix/` in Phase 3. Durable repository abstraction is intentionally
 
 - `cargo test --package bcs-proposal --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-proposal --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Proposal target validation checks current Provider collaboration scope before public/friend exemptions, including at confirmation. Same-owner private targets remain reachable; rejection retains the proposal token and produces no Group/Session.

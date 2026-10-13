@@ -80,6 +80,11 @@ pub struct CompleteSessionCallbackCommand {
 
 #[async_trait]
 pub trait SessionManagementService: Send + Sync {
+    /// Check live Provider scope before self-enrollment or accepting chat/input.
+    /// Legacy implementations without Provider policy retain their old behavior.
+    async fn authorize_collaboration(&self, _session_id: &str, _actor_id: &str) -> Result<(), SessionUseCaseError> {
+        Ok(())
+    }
     async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> {
         Err(ServiceError::InternalError("session registry validation unsupported".into()).into())
     }

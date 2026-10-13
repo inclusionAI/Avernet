@@ -63,6 +63,13 @@ pub struct CommitGroupEventfulMutation {
 /// behavior and orchestration.
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
+    /// Process-local membership projection for Provider policy tightening.
+    /// Persistent Provider stores enforce the equivalent condition atomically
+    /// in their metadata UPDATE instead of issuing a separate Group read.
+    async fn has_public_group_with_members(&self, _actor_ids: &[String]) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError("public group membership lookup is not configured".into()))
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
     /// Atomically make a provisioning Group available, activate its pending
     /// inline subscriptions, and append the ordered creation Events.

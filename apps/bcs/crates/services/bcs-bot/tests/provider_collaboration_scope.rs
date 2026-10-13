@@ -16,13 +16,16 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
     let providers = Arc::new(MemoryProviderStore::new());
     let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
+    let metadata_port: Arc<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort> = metadata.clone();
+    let groups = Arc::new(bcs_group_store::MemoryGroupRepo::new());
+    providers.bind_group_scope_source(groups.clone(), Arc::downgrade(&metadata_port));
     let projection = Arc::new(ProviderBindingProjection::new(
         providers.clone(), metadata.clone(), DownlinkDetectionSource::BotConnectionMode,
     ));
     let registry = Arc::new(BotCore::with_provider_repos(
         bots.clone(), providers.clone(), providers.clone(), projection.clone(),
     ).with_bot_provider_repo(metadata.clone()));
-    let admin = ProviderCore::new(providers.clone(), providers, projection, registry.clone())
+    let admin = ProviderCore::new(providers.clone(), providers.clone(), projection, registry.clone())
         .with_bot_provider_repo(metadata);
     let provider = admin.register_provider_with_policy(
         "Local".into(), None, ProviderAuthMode::StaticBearer, "alice".into(),
@@ -74,12 +77,29 @@ async fn current_membership_controls_scope_without_retaining_group_history() {
             connection_mode: ProviderBotConnectionMode::Plugin, ..Default::default()
         },
     ).await.unwrap();
+    use bcs_service_api::{Group, Participant, ParticipantRole, ProviderRepoPort, ServiceError};
+    use bcs_service_api::port::repo::GroupRepoPort;
+    let mut public = Group::new("public", &existing.bot_uuid, vec![Participant::bot(&existing.bot_uuid, ParticipantRole::Driver)]);
+    public.visibility = "public".into(); groups.upsert(public).await.unwrap();
+    assert!(matches!(admin.update_provider_with_policy(
+        &standard.provider.provider_id, &standard.provider_admin_token, "alice",
+        Some("Rejected".into()), None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
+    ).await, Err(ServiceError::Conflict(_))));
+    assert_eq!(providers.get_provider(&standard.provider.provider_id).await.unwrap().unwrap().name, "Initially standard");
+    groups.update_visibility("public", "private").await.unwrap();
     let foreign = vec![existing.bot_uuid, "human_bob".into()];
     assert_eq!(registry.collaboration_owner(&foreign).await.unwrap(), None);
     admin.update_provider_with_policy(
         &standard.provider.provider_id, &standard.provider_admin_token, "alice",
         None, None, None, None, None, None, None, Some(ProviderCollaborationScope::SameOwner),
     ).await.unwrap();
+    let gate = providers.policy_gate();
+    let lease = gate.read().await;
+    let writer = providers.clone(); let id = standard.provider.provider_id.clone();
+    let task = tokio::spawn(async move { writer.update_provider_metadata(&id, Some("Renamed"), None, None, 3).await });
+    tokio::task::yield_now().await;
+    assert!(!task.is_finished(), "policy writes must wait for in-flight group persistence");
+    drop(lease); assert!(task.await.unwrap().is_ok());
     assert!(registry.collaboration_owner(&foreign).await.is_err(),
         "tightening Provider policy must affect already registered Bots immediately");
 

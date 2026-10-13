@@ -4,6 +4,10 @@ use super::*;
 
 #[async_trait]
 impl SessionManagementService for SessionManagementServiceImpl {
+    async fn authorize_collaboration(&self, session_id: &str, actor_id: &str) -> Result<(), SessionUseCaseError> {
+        let session = self.repo.try_get(session_id).await?.ok_or_else(|| SessionUseCaseError::NotFound(session_id.into()))?;
+        self.check_provider_scope(&session.group_id, &[actor_id.into()], &session.participants).await
+    }
     async fn validate_session_registry(&self) -> Result<(), SessionUseCaseError> {
         self.repo.validate_session_registry().await.map_err(SessionUseCaseError::from)
     }
@@ -19,6 +23,13 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         cmd: CreateOrReactivateCommand,
     ) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> {
+        let callers = cmd.params.caller_id.iter().cloned().collect::<Vec<_>>();
+        let existing = match cmd.session_id.as_deref() { Some(id) => self.repo.try_get(id).await?, None => None };
+        if existing.as_ref().is_some_and(|session| session.group_id != cmd.group_id) {
+            return Err(SessionUseCaseError::InvalidParams("session does not belong to the supplied group".into()));
+        }
+        let members = existing.as_ref().map(|s| s.participants.as_slice()).unwrap_or(&cmd.params.participants);
+        self.check_provider_scope(&cmd.group_id, &callers, members).await?;
         if let Some(sid) = cmd.session_id.as_deref() {
             // Pre-check the existing session status so the HTTP layer can
             // return 409 (legacy `session_is_running_cannot_invoke`,
@@ -300,6 +311,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
             std::slice::from_ref(&participant),
         )
         .await?;
+        self.check_provider_scope(&session.group_id, &[participant.bot_uuid.clone()], &session.participants).await?;
         if session
             .participants
             .iter()

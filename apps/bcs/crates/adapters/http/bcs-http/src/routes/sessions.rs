@@ -104,6 +104,9 @@ pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> 
             (StatusCode::BAD_REQUEST, s.clone())
         }
         bcs_service_api::SessionUseCaseError::Conflict(s) => (StatusCode::CONFLICT, s.clone()),
+        bcs_service_api::SessionUseCaseError::Internal(bcs_service_api::ServiceError::Forbidden(message)) => {
+            (StatusCode::FORBIDDEN, message.clone())
+        }
         bcs_service_api::SessionUseCaseError::Internal(e) => {
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
@@ -1416,6 +1419,9 @@ pub async fn session_chat(
         GroupChatCaller::Bot { bot_uuid } => bot_uuid.clone(),
         GroupChatCaller::Human(h) => h.actor_id.clone(),
     };
+    if let Err(error) = state.services.session_management.authorize_collaboration(&sid, &caller_id).await {
+        return session_error_to_response(&error);
+    }
     let is_participant = sess.participants.iter().any(|p| p.bot_uuid == caller_id);
     if !is_participant {
         // COSEC: only the authenticated Human may self-enroll. Bot callers
