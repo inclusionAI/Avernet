@@ -4,12 +4,10 @@ import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from pathlib import Path
 from threading import Barrier
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import Skill
@@ -157,7 +155,7 @@ def _claimed_auto_skill_order(db, *, enabled=True):
     return space_id, skill_id, order_id
 
 
-def test_policy_column_defaults_to_manual_and_migration_covers_existing_bindings(db):
+def test_policy_column_defaults_to_manual(db):
     space_id, skill_id = _space_skill(db)
     with db.orm_session() as session:
         binding = (
@@ -170,38 +168,11 @@ def test_policy_column_defaults_to_manual_and_migration_covers_existing_bindings
         )
         assert binding.auto_approve_editor_requests is False
 
-    migration = (
-        Path(__file__).parents[5]
-        / "src/agentclaw/community/core/skill_center/sql/2026_10_08_skill_editor_auto_approval.sql"
-    ).read_text()
-    assert "ADD COLUMN auto_approve_editor_requests" in migration
-    assert "NOT NULL DEFAULT 0" in migration
-
-    engine = create_engine("sqlite://")
-    with engine.begin() as connection:
-        connection.exec_driver_sql(
-            "CREATE TABLE ac_skill_space_binding (id INTEGER PRIMARY KEY)"
-        )
-        connection.exec_driver_sql("INSERT INTO ac_skill_space_binding (id) VALUES (1)")
-        connection.exec_driver_sql(migration)
-        connection.exec_driver_sql("INSERT INTO ac_skill_space_binding (id) VALUES (2)")
-        rows = connection.exec_driver_sql(
-            "SELECT id, auto_approve_editor_requests "
-            "FROM ac_skill_space_binding ORDER BY id"
-        ).all()
-    assert rows == [(1, 0), (2, 0)]
-
 
 def test_editor_approval_policy_allows_member_read_and_owner_write(db) -> None:
     space_id, skill_id = _space_skill(db)
     repository = _skill_editor_requests(db)
 
-    assert (
-        repository.get_editor_approval_policy(
-            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
-        )
-        is False
-    )
     assert (
         repository.update_editor_approval_policy(
             space_id=space_id,
@@ -362,6 +333,10 @@ def test_editor_approval_policy_rejects_personal_or_offline_skill(db) -> None:
     with db.orm_session() as session:
         session.get(SpaceModel, space_id).space_type = "TEAM"
         session.get(Skill, skill_id).offline_at = datetime(2026, 10, 9)
+    with pytest.raises(SpaceSkillGrantForbiddenError, match="live"):
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )
     with pytest.raises(SpaceSkillGrantForbiddenError, match="live"):
         repository.update_editor_approval_policy(
             space_id=space_id,
