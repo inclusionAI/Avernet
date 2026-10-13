@@ -318,6 +318,10 @@ payload synchronization even when the Worker already has the requested state.
 The composed `/online` and `/offline` routes wait for their Worker state writes
 and vector synchronization before returning the existing response. Synchronous
 service work runs in a thread pool so it does not block the server event loop.
+Before publishing online vector payloads, the service re-reads the Worker's
+current runtime and lifecycle state and skips work for a missing, offline,
+inactive, or disabled Worker. This preserves the earlier deferred path's check;
+it does not make the state check and vector write atomic across processes.
 Vector write failures retain the existing route error behavior. Slow callers
 should dispatch their lifecycle HTTP requests in the background rather than
 relying on BCSFuse to acknowledge incomplete work. Repeating a transition retries
