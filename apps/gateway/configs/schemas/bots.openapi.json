@@ -3266,10 +3266,10 @@
           "approval_mode": {
             "$ref": "#/components/schemas/WorkOrderApprovalMode",
             "default": "MANUAL",
-            "description": "Approval workflow; AUTO is reserved for trusted internal business callers and is rejected by this public endpoint."
+            "description": "Approval workflow, default MANUAL. AUTO completes without human review; the calling business module must validate eligibility before requesting AUTO."
           },
           "approver_user_ids": {
-            "description": "MANUAL approvers; AUTO uses no human approver rows.",
+            "description": "MANUAL: required human approvers. AUTO: ignored; send an empty list. No human approval rights or tasks are created in AUTO.",
             "items": {
               "type": "string"
             },
@@ -3328,7 +3328,7 @@
             "type": "string"
           },
           "recipient_user_ids": {
-            "description": "Recipients for notice events and trusted internal AUTO approval results.",
+            "description": "Required for NOTICE and AUTO success/failure result notifications; IDs are trimmed, blank IDs removed and duplicates removed. MANUAL: empty. AUTO never falls back to approver_user_ids.",
             "items": {
               "type": "string"
             },

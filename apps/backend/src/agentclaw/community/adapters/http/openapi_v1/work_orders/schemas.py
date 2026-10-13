@@ -105,8 +105,8 @@ class CreateWorkOrderEventRequest(BaseModel):
     approval_mode: WorkOrderApprovalMode = Field(
         default=WorkOrderApprovalMode.MANUAL,
         description=(
-            "Approval workflow; AUTO is reserved for trusted internal business "
-            "callers and is rejected by this public endpoint."
+            "Approval workflow, default MANUAL. AUTO completes without human review; "
+            "the calling business module must validate eligibility before requesting AUTO."
         ),
     )
     biz_type: str = Field(
@@ -132,16 +132,16 @@ class CreateWorkOrderEventRequest(BaseModel):
     approver_user_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "MANUAL: required human approvers. Trusted internal AUTO: required nonempty "
-            "result recipients after trimming/deduplication; no human approval rights "
-            "or tasks are created. Public endpoints reject AUTO."
+            "MANUAL: required human approvers. AUTO: ignored; send an empty list. "
+            "No human approval rights or tasks are created in AUTO."
         ),
     )
     recipient_user_ids: list[str] = Field(
         default_factory=list,
         description=(
-            "Recipients for notice events. Ignored for trusted internal AUTO; "
-            "AUTO result recipients come only from approver_user_ids."
+            "Required for NOTICE and AUTO success/failure result notifications; IDs "
+            "are trimmed, blank IDs removed and duplicates removed. MANUAL: empty. "
+            "AUTO never falls back to approver_user_ids."
         ),
     )
     title: str = Field(

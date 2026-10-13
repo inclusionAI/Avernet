@@ -198,8 +198,8 @@ def test_auto_work_order_rejects_applicant_other_than_actor() -> None:
             biz_id="friend-auto",
             event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
             applicant_user_id="someone-else",
-            approver_user_ids=['result-recipient'],
-            recipient_user_ids=[],
+            approver_user_ids=[],
+            recipient_user_ids=["result-recipient"],
             title="friend request",
             content=None,
             apply_reason=None,
@@ -230,8 +230,8 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
         biz_id="friend-auto",
         event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
         applicant_user_id="actor-auto",
-        approver_user_ids=['result-recipient'],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["result-recipient"],
         title="friend request",
         content=None,
         apply_reason=None,
@@ -242,7 +242,7 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
 
     assert result.status is WorkOrderEventStatus.APPROVED
     kwargs = repository.create_work_order_event.call_args.kwargs
-    assert kwargs["approver_user_ids"] == ["result-recipient"]
+    assert kwargs["approver_user_ids"] == []
     assert kwargs["recipient_user_ids"] == ["result-recipient"]
     assert kwargs["callback_source_event_type"] == (
         WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
@@ -268,8 +268,8 @@ def test_auto_mode_is_rejected_for_notice_events() -> None:
             biz_id="group-1:s1",
             event_type=WorkOrderEventType.HUMAN_GROUP_MENTIONED.value,
             applicant_user_id=None,
-            approver_user_ids=['recipient-1'],
-            recipient_user_ids=[],
+            approver_user_ids=[],
+            recipient_user_ids=["recipient-1"],
             title="你被 @ 了",
             content={"text": "hello"},
             apply_reason=None,
@@ -616,8 +616,8 @@ def test_auto_skill_uses_skill_transaction_without_duplicate_work_order_finalize
         biz_id="skill-1",
         event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         applicant_user_id="actor",
-        approver_user_ids=['actor'],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["actor"],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -657,8 +657,8 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
         biz_id="skill-2",
         event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         applicant_user_id="actor",
-        approver_user_ids=['actor'],
-        recipient_user_ids=[],
+        approver_user_ids=[],
+        recipient_user_ids=["actor"],
         title="AUTO request",
         content=None,
         apply_reason=None,
@@ -668,10 +668,7 @@ def test_auto_skill_non_approved_handler_result_marks_order_failed():
 
     assert result.status is WorkOrderEventStatus.FAILED
     repo.fail_auto_approval.assert_called_once()
-    assert (
-        "RuntimeError"
-        in repo.fail_auto_approval.call_args.kwargs["review_remark"]
-    )
+    assert "RuntimeError" in repo.fail_auto_approval.call_args.kwargs["review_remark"]
     assert repo.fail_auto_approval.call_args.kwargs["recipient_user_ids"] == ["actor"]
     repo.complete_auto_approval.assert_not_called()
     assert result.notification_ids == [34]
