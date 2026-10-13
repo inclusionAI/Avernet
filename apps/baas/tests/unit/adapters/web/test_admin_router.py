@@ -5,8 +5,9 @@ Covers:
 - Input validation (negative publish_id, missing tenant, empty modifier)
 - PublishNotFoundError propagation to 404
 - _to_response helper converting ForceSuccessResult → ForceSuccessResponse
-- restore_bot_endpoint (POST /api/v1/admin/bots/restore, bot_id in body):
-  success envelope, 404 not-found, 409 conflict, no tenant/env input
+- restore_bot_endpoint (POST /api/v1/admin/bots/restore, bot_id or bot_uuid in body):
+  success envelope, 404 not-found, 409 conflict, no tenant/env input,
+  exactly-one-selector validation (422)
 """
 
 from unittest.mock import AsyncMock
@@ -788,9 +789,11 @@ class TestRestoreBotRequest:
         assert req.operator == "ops.alice"
 
     def test_request_contracts_has_no_tenant_or_env_fields(self):
-        assert set(RestoreBotRequest.model_fields) == {"bot_id", "operator"}, (
-            "the cross-env restore request must carry ONLY bot_id and operator"
-        )
+        assert set(RestoreBotRequest.model_fields) == {
+            "bot_id",
+            "bot_uuid",
+            "operator",
+        }, "the cross-env restore request must carry ONLY bot_id/bot_uuid and operator"
 
     def test_empty_operator_returns_422(self, client):
         resp = client.post(
@@ -812,6 +815,32 @@ class TestRestoreBotRequest:
             json={"operator": "ops.alice"},
         )
         assert resp.status_code == 422
+
+    def test_valid_uuid_only_request_construction(self):
+        req = RestoreBotRequest(bot_uuid="bot-abc-123", operator="ops.alice")
+        assert req.bot_id is None
+        assert req.bot_uuid == "bot-abc-123"
+        assert req.operator == "ops.alice"
+
+    def test_both_bot_id_and_bot_uuid_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/restore",
+            json={
+                "bot_id": 123,
+                "bot_uuid": "bot-abc-123",
+                "operator": "ops.alice",
+            },
+        )
+        assert resp.status_code == 422
+        assert "exactly one" in resp.json()["detail"][0]["msg"]
+
+    def test_neither_bot_id_nor_bot_uuid_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/restore",
+            json={"operator": "ops.alice"},
+        )
+        assert resp.status_code == 422
+        assert "exactly one" in resp.json()["detail"][0]["msg"]
 
     def test_non_positive_bot_id_returns_422(self, client):
         resp = client.post(
@@ -944,6 +973,7 @@ class TestRestoreBotEndpoint:
 
         mock_admin_svc.restore_bot.assert_awaited_once_with(
             bot_id=123,
+            bot_uuid=None,
             operator="ops.alice",
         )
         kwargs = mock_admin_svc.restore_bot.await_args.kwargs
@@ -1044,4 +1074,79 @@ class TestRestoreBotEndpoint:
         )
         assert resp.status_code == 422, (
             "tenant/env placeholders must NOT substitute for the required operator"
+        )
+
+    def test_uuid_happy_path_returns_200_and_calls_service_with_uuid(self, client):
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.restore_bot.return_value = _make_restore_result()
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/restore"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/restore",
+                json={"bot_uuid": "bot-abc-123", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["data"]["bot_id"] == 123
+        assert body["data"]["bot_uuid"] == "bot-abc-123"
+        mock_admin_svc.restore_bot.assert_awaited_once_with(
+            bot_id=None,
+            bot_uuid="bot-abc-123",
+            operator="ops.alice",
+        )
+        kwargs = mock_admin_svc.restore_bot.await_args.kwargs
+        assert "tenant" not in kwargs
+        assert "env" not in kwargs
+
+    def test_uuid_no_records_returns_404_with_service_detail(self, client):
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.restore_bot.side_effect = PublishNotFoundError(
+            "No bot records found for bot_uuid=bot-none"
+        )
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/restore"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/restore",
+                json={"bot_uuid": "bot-none", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 404
+        assert "No bot records found for bot_uuid=bot-none" in resp.json()["detail"]
+
+    def test_uuid_no_live_rel_returns_404_with_service_detail(self, client):
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.restore_bot.side_effect = PublishNotFoundError(
+            "No non-deleted device relation found for bot_uuid=bot-no-rel"
+        )
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/restore"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/restore",
+                json={"bot_uuid": "bot-no-rel", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 404
+        assert (
+            "No non-deleted device relation found for bot_uuid=bot-no-rel"
+            in resp.json()["detail"]
         )
