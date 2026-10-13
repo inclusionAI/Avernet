@@ -94,6 +94,68 @@ async def test_ready_is_taken_from_current_runtime_inspection():
 
 
 @pytest.mark.asyncio
+async def test_openclaw_steady_active_ready_does_not_require_migration_identity():
+    service, *_ = _service(
+        response={
+            "success": True,
+            "data": {
+                "status": "READY",
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "preparation_id": None,
+                "evidence": {
+                    "activation_state": "active",
+                    "mapping_contract_version": "skills-pool-mapping-v2",
+                    "checks": {
+                        "active_marker_valid": True,
+                        "active_root_valid": True,
+                        "pool_local_valid": True,
+                        "legacy_storage_entries_absent": True,
+                    },
+                },
+            },
+        }
+    )
+
+    result = await service.probe_bot(
+        bot_id="bot-1",
+        user_id="user-1",
+        engine="openclaw",
+    )
+
+    assert result.status is RuntimeLayoutProbeStatus.READY
+    assert result.preparation_id is None
+
+
+@pytest.mark.asyncio
+async def test_ready_without_migration_identity_requires_steady_contract_evidence():
+    service, *_ = _service(
+        response={
+            "success": True,
+            "data": {
+                "status": "READY",
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "preparation_id": None,
+                "evidence": {
+                    "activation_state": "active",
+                    "mapping_contract_version": "skills-pool-mapping-v2",
+                    "checks": {"active_marker_valid": True},
+                },
+            },
+        }
+    )
+
+    result = await service.probe_bot(
+        bot_id="bot-1",
+        user_id="user-1",
+        engine="openclaw",
+    )
+
+    assert result.status is RuntimeLayoutProbeStatus.INVALID
+
+
+@pytest.mark.asyncio
 async def test_claude_code_ready_uses_current_runtime_probe():
     service, resolver, transport, context = _service(
         response={

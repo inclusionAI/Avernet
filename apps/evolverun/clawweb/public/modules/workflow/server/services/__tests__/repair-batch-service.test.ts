@@ -213,10 +213,10 @@ describe('repair workbench control service', () => {
     expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(1);
     await expect(f.service.create('human', { ...f.request, instructions: 'changed' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_MISMATCH' });
   });
-  it('retains a failed dispatch as the same frozen attempt and only retries its idempotent dispatch', async () => {
+  it('retains a rejected dispatch as the same frozen input and retries only after explicit rejection', async () => {
     const f = await setup();
     let attempts = 0;
-    f.executionPort.dispatch = async () => { if (++attempts === 1) throw new Error('network outcome unknown'); return { jobId: 'job-retry' }; };
+    f.executionPort.dispatch = async () => { if (++attempts === 1) throw new Error('AIS executeSnapshot HTTP 400: invalid request'); return { jobId: 'job-retry' }; };
     const revision = await f.service.create('human', f.request);
     expect(revision.phase).toBe('drafting');
     expect(await f.db.query('SELECT status FROM ce_steps')).toEqual([{ status: 'dispatch_failed' }]);
@@ -226,11 +226,33 @@ describe('repair workbench control service', () => {
     expect(attempts).toBe(2);
     expect(await f.db.query('SELECT * FROM ce_tasks')).toHaveLength(1);
   });
-  it('exposes dispatch failure after reload and explicitly retries the same input without resolving sources', async () => {
+  it('prevents duplicate dispatch when the first AIS response is uncertain', async () => {
     const f = await setup();
     f.executionPort.dispatch = async () => { throw new Error('unknown outcome'); };
     const revision = await f.service.create('human', f.request);
-    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_failed', errorCode: 'DISPATCH_UNCERTAIN' });
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', revision.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('treats an AIS HTTP 408 as uncertain because the job may already exist', async () => {
+    const f = await setup();
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 408: request timeout'); };
+    const revision = await f.service.create('human', f.request);
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', revision.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('quarantines an interrupted dispatch instead of blindly sending another AIS job', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    await f.db.exec("UPDATE ce_steps SET status = 'dispatching', gmt_modified = ?", [Math.floor(Date.now() / 1000) - 121]);
+    expect(await f.service.reconcile(10)).toBe(0);
+    expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'dispatch_uncertain', errorCode: 'DISPATCH_UNCERTAIN' });
+    await expect(f.service.retryDispatch('human', created.taskId, 1)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+  });
+  it('retries an explicitly rejected AIS request without resolving sources again', async () => {
+    const f = await setup();
+    f.executionPort.dispatch = async () => { throw new Error('AIS executeSnapshot HTTP 400: invalid request'); };
+    const revision = await f.service.create('human', f.request);
+    expect((await f.service.task(revision.taskId)).execution).toMatchObject({ status: 'dispatch_failed', errorCode: 'DISPATCH_REJECTED' });
     f.executionPort.dispatch = async input => { f.calls.push(input); return { jobId: 'job-retry' }; };
     f.executionPort.resolveBaseline = async () => { throw new Error('must not reload baseline'); };
     f.sourcePort.load = async () => { throw new Error('must not reload sources'); };
@@ -308,6 +330,44 @@ describe('repair workbench control service', () => {
     expect(await f.service.reconcile(10)).toBe(1);
     expect((await f.service.task(created.taskId)).latestAttempt.phase).toBe('review');
     expect((await f.service.task(created.taskId)).execution).toMatchObject({ status: 'succeeded', jobId: 'job-1' });
+  });
+  it('fails after bounded waiting when AIS succeeds but Git never publishes a valid result', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    expect(await f.service.reconcile(10)).toBe(0);
+    const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
+    const output = JSON.parse(row.output_json);
+    expect(output.successObservedAtMs).toEqual(expect.any(Number));
+    await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({ ...output, successObservedAtMs: Date.now() - 301_000 })]);
+    expect(await f.service.reconcile(10)).toBe(1);
+    expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'GIT_RESULT_UNAVAILABLE' } });
+  });
+  it('settles a timed-out AIS job and requests remote stop', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const row = (await f.db.query<{ output_json: string }>('SELECT output_json FROM ce_steps'))[0];
+    await f.db.exec('UPDATE ce_steps SET output_json = ?', [JSON.stringify({
+      ...JSON.parse(row.output_json), requestedAtMs: Date.now() - 2_401_000,
+    })]);
+    expect(await f.service.reconcile(10)).toBe(1);
+    expect(f.stops).toHaveLength(1);
+    expect((await f.service.task(created.taskId)).latestAttempt).toMatchObject({ phase: 'failed', error: { code: 'AIS_TIMEOUT' } });
+  });
+  it('settles an AIS no-change result without offering an unchanged Pack for review', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    const draft = { candidateCommit: 'd'.repeat(40), parentCandidateCommit: created.input.baseline.packCommit, packDigest: 'e'.repeat(40),
+      itemResults: f.items.map(i => ({ itemId: i.itemId, status: 'not_needed', reason: 'No Pack edit required' })) };
+    const checks = { schemaVersion: 'workflow-repair-checks/v1', candidateCommit: draft.candidateCommit, packDigest: draft.packDigest,
+      candidateDigest: digestRepairJson(draft), static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: f.items.map(i => ({ itemId: i.itemId })) };
+    f.setGeneratedResult({ status: 'no_change', draft, checks });
+    f.setRemoteStatus({ status: 'success', rawStatus: 'success', errorMessage: null });
+    expect(await f.service.reconcile(10)).toBe(1);
+    const task = await f.service.task(created.taskId);
+    expect(task.latestAttempt.phase).toBe('no_change');
+    expect(task.execution?.status).toBe('succeeded');
+    expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
   });
   it('persists cancellation before best-effort stopping the exact AIS attempt', async () => {
     const f = await setup();

@@ -49,6 +49,7 @@ from tests.community.framework import (
 def _task_info(task_id: str) -> TaskInfo:
     """A minimal but valid task spec for seeding an in-mem graph."""
     return TaskInfo(
+        task_id=task_id,
         task_spec=TaskSpec(
             context=Context(title="存储尽调", background="存储行业"),
             goal=Goal(

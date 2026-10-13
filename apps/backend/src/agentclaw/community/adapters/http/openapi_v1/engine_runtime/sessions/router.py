@@ -53,6 +53,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.conver
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
@@ -69,9 +70,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
-from agentclaw.community.api.human_bot_friendship_service import (
-    HumanBotFriendshipServiceProtocol,
-)
+from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
 from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
@@ -127,6 +126,7 @@ async def _resolve_session_backend(
     owner_id: str,
     friend_user_id: str | None,
     stage: RuntimeStage,
+    device_uuid: str | None = None,
 ):
     """Select the unchanged operator backend or explicit friend backend."""
     if friend_user_id is None:
@@ -138,6 +138,8 @@ async def _resolve_session_backend(
             stage=stage.value,
             surface="sessions",
         )
+    if device_uuid is not None:
+        raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
     if stage is not RuntimeStage.DRAFT:
         raise EngineResourceNotFoundError("friend chat is available only in draft")
     await authorize_friend_chat(
@@ -164,6 +166,7 @@ async def list_sessions(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     agent_id: Annotated[
         str | None, Query(description="Only sessions belonging to this agent.")
@@ -182,7 +185,7 @@ async def list_sessions(
     """List the bot's sessions."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     params: dict[str, Any] = _window(page)
     if owner_id == user_id:
@@ -213,6 +216,7 @@ async def list_sessions(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path="/api/sessions",
         params=params,
@@ -232,6 +236,7 @@ async def create_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -240,7 +245,7 @@ async def create_session(
     """Create a session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         try:
@@ -277,6 +282,7 @@ async def create_session(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="POST",
         path="/api/sessions",
         body={
@@ -290,7 +296,7 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title)
+    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title, device_uuid=device_uuid)
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
@@ -303,6 +309,7 @@ async def list_session_favorites(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     agent_id: Annotated[
         str | None, Query(description="Only favorites belonging to this agent.")
@@ -314,7 +321,7 @@ async def list_session_favorites(
     """List sessions the acting user has favorited on this bot runtime."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         window = _window(page)
@@ -338,6 +345,7 @@ async def list_session_favorites(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path="/api/session-favorites",
         params=params,
@@ -356,6 +364,7 @@ async def get_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -374,7 +383,7 @@ async def get_session(
     # containing "/" would not be addressable, but no engine id format has one.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         try:
@@ -391,6 +400,7 @@ async def get_session(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}",
     )
@@ -407,6 +417,7 @@ async def _set_session_favorite(
     friend_user_id: str | None,
     owner_id: str,
     stage: RuntimeStage,
+    device_uuid: str | None = None,
     favorited: bool,
     relay: EngineRuntimeRelayProtocol,
     friendships: HumanBotFriendshipServiceProtocol,
@@ -416,7 +427,7 @@ async def _set_session_favorite(
 ) -> SessionFavorite:
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=friend_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=friend_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         try:
@@ -436,6 +447,7 @@ async def _set_session_favorite(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="PUT" if favorited else "DELETE",
         path=f"/api/session-favorites/{encoded_session_id}",
         params={"user_id": user_id},
@@ -452,6 +464,7 @@ async def add_session_favorite(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -466,6 +479,7 @@ async def add_session_favorite(
         friend_user_id=f_user_id,
         owner_id=owner_id,
         stage=stage,
+        device_uuid=device_uuid,
         favorited=True,
         relay=relay,
         friendships=friendships,
@@ -485,6 +499,7 @@ async def remove_session_favorite(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -499,6 +514,7 @@ async def remove_session_favorite(
         friend_user_id=f_user_id,
         owner_id=owner_id,
         stage=stage,
+        device_uuid=device_uuid,
         favorited=False,
         relay=relay,
         friendships=friendships,
@@ -519,6 +535,7 @@ async def update_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -530,7 +547,7 @@ async def update_session(
     # a POST to an /update sub-path.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     if facts is None:
@@ -548,6 +565,7 @@ async def update_session(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
@@ -571,6 +589,7 @@ async def delete_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -580,7 +599,7 @@ async def delete_session(
     """Delete a session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         try:
@@ -596,6 +615,7 @@ async def delete_session(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="DELETE",
         path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}",
     )
@@ -868,6 +888,7 @@ async def list_session_messages(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -885,7 +906,7 @@ async def list_session_messages(
     """
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     _require_within_depth(page)
     if facts is None:
@@ -909,6 +930,7 @@ async def list_session_messages(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="GET",
         path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/messages",
         # The history route tail-limits rather than paginating, so the offset is
@@ -932,6 +954,7 @@ async def clear_session_messages(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
@@ -941,7 +964,7 @@ async def clear_session_messages(
     """Clear a session's message history, keeping the session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
     )
     if facts is None:
         try:
@@ -958,6 +981,7 @@ async def clear_session_messages(
         owner_id=owner_id,
         facts=facts,
         stage=stage.value,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         method="DELETE",
         path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/messages",
     )

@@ -73,18 +73,32 @@ interface MessageCopyActionProps {
   testId?: string;
   onEdit?: () => void;
   isEditable?: boolean;
+  /** 渲染在消息内容列内(气泡紧下方)时置 true：justify 方向即与正文左右缘对齐，
+   *  不再补偿兄弟头像列 44px(群聊场景仍渲染在行布局外，保留默认补偿态)。 */
+  withinContentColumn?: boolean;
 }
 
 const COPY_FEEDBACK_MS = 1600;
 
 /**
  * 消息末尾的常驻操作入口。编辑与复制都直接展示，避免依赖 hover 才能发现；
- * 每个 IconButton 继续通过统一 Tooltip 提供 Codex 风格的悬停文案。
+ * withinContentColumn 时渲染在消息内容列内（气泡紧下方），justify 方向即与正文
+ * 左右缘对齐（dmore 实测：操作图标组 x=36 与正文同起排）；渲染在行布局外时以
+ * 44px inset 补偿兄弟头像列（群聊现状）。每个 IconButton 继续通过统一 Tooltip
+ * 提供 Codex 风格的悬停文案。
  */
-export function MessageCopyAction({ onCopy, align, testId, onEdit, isEditable }: MessageCopyActionProps) {
+export function MessageCopyAction({
+  onCopy,
+  align,
+  testId,
+  onEdit,
+  isEditable,
+  withinContentColumn,
+}: MessageCopyActionProps) {
   const [copyFeedback, setCopyFeedback] = useState<'pending' | 'success' | 'error' | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const alignmentClass = align === 'right' ? 'justify-end pr-11' : 'justify-start pl-11';
+  const insetClass = withinContentColumn ? '' : align === 'right' ? 'pr-11' : 'pl-11';
+  const alignmentClass = `${align === 'right' ? 'justify-end' : 'justify-start'} ${insetClass}`;
 
   useEffect(() => () => clearTimeout(feedbackTimerRef.current), []);
 

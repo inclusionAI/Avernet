@@ -6,7 +6,7 @@ use serde::Deserialize;
 use url::Url;
 
 /// HTTP client for one registration API prefix.
-pub struct RegistrationClient { client: Client, base: Url }
+pub struct RegistrationClient { client: Client, base: Url, headers: reqwest::header::HeaderMap }
 
 pub(crate) fn http_url(value: &str, allow_query: bool) -> anyhow::Result<Url> {
     let url = Url::parse(value).map_err(|_| anyhow::anyhow!("Expected an absolute HTTP(S) URL"))?;
@@ -35,7 +35,13 @@ impl RegistrationClient {
             .redirect(reqwest::redirect::Policy::none()).retry(reqwest::retry::never())
             .build().map_err(|_| anyhow::anyhow!("Cannot initialize registration HTTP client"))?;
         // Preserve system proxy settings: an egress proxy may supply agent authentication.
-        Ok(Self { client, base })
+        Ok(Self { client, base, headers: reqwest::header::HeaderMap::new() })
+    }
+
+    /// Attach headers to every request to this API prefix. Redirects stay disabled.
+    pub fn with_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        self.headers = headers;
+        self
     }
 
     fn endpoint(&self, path: &str) -> anyhow::Result<Url> {
@@ -48,7 +54,7 @@ impl RegistrationClient {
     /// `unreachable` is the error reported when the request cannot be sent;
     /// transport details are not exposed.
     pub async fn get(&self, path: &str, operation: &str, unreachable: &str) -> anyhow::Result<Vec<u8>> {
-        let response = self.client.get(self.endpoint(path)?).send().await
+        let response = self.client.get(self.endpoint(path)?).headers(self.headers.clone()).send().await
             .map_err(|_| anyhow::anyhow!("{unreachable}"))?;
         body(response, operation).await
     }
@@ -60,7 +66,7 @@ impl RegistrationClient {
         ];
         if let Some(webhook) = webhook { pairs.push(("webhook_url", webhook)); }
         url.query_pairs_mut().extend_pairs(pairs);
-        let response = self.client.post(url).send().await
+        let response = self.client.post(url).headers(self.headers.clone()).send().await
             .map_err(|_| anyhow::anyhow!("Registration request failed; its outcome may be unknown. Check registration status before retrying"))?;
         let bytes = body(response, "Registration").await?;
         #[derive(Deserialize)]
@@ -117,4 +123,42 @@ mod tests {
             }
         }
     }
+    #[tokio::test]
+    async fn prepared_auth_headers_are_sent_to_identity_and_registration() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for method in ["GET", "POST"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut bytes = Vec::new();
+                let mut byte = [0u8; 1];
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    bytes.push(byte[0]);
+                }
+                let request = String::from_utf8(bytes).unwrap().to_ascii_lowercase();
+                assert!(request.starts_with(&method.to_ascii_lowercase()));
+                assert!(request.contains("authorization: Bearer test-execution".to_ascii_lowercase().as_str()));
+                assert!(request.contains("x-test-context: test-context"));
+                let body = if method == "GET" { "{}" } else {
+                    r#"{"code":20100,"data":{"bot_uuid":"bot_test","bot_token":"test-bot-token","registration":{"provider_id":"prv_test","provider_bot_ref":"agent_test","mode":"plugin"}}}"#
+                };
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+        });
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::AUTHORIZATION, "Bearer test-execution".parse().unwrap());
+        headers.insert("x-test-context", "test-context".parse().unwrap());
+        let client = RegistrationClient {
+            client: Client::builder().no_proxy().timeout(Duration::from_secs(5)).build().unwrap(),
+            base: Url::parse(&format!("http://{address}/bcs/")).unwrap(),
+            headers: reqwest::header::HeaderMap::new(),
+        }.with_headers(headers);
+        client.get("api/v1/collaboration/bots/me", "Identity", "Request failed").await.unwrap();
+        client.register("test-register-token", "Test Bot", "agent_test", "plugin", None, "prv_test").await.unwrap();
+        server.join().unwrap();
+    }
+
 }

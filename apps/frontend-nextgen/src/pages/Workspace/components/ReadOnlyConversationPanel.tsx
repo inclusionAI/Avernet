@@ -88,15 +88,16 @@ export function ReadOnlyConversationPanel({
     kind: 'single',
   };
 
+  // dmore 复测：消息区头像 24px 圆（与交互式面板 resolveSingleSender 一致）。
   const resolveSender = (message: ChatMessage) =>
     message.role === 'assistant'
       ? {
           name: bot.displayName,
-          avatar: <Avatar name={bot.displayName} src={bot.avatarUrl} size={32} />,
+          avatar: <Avatar name={bot.displayName} src={bot.avatarUrl} size={24} />,
         }
       : {
           name: friend.displayName,
-          avatar: <Avatar name={friend.displayName} size={32} />,
+          avatar: <Avatar name={friend.displayName} size={24} />,
         };
 
   return (

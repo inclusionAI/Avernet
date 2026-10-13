@@ -59,28 +59,21 @@ describe('SessionCard', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it('验收微调：树形导轨——行自带干线、拐角横线紧贴干线接行首，末行干线止于拐角', () => {
+  it('平齐化（restore-design-chat-page-b2-b3 parity 最小同步）：树形 rail/elbow 已移除，选中品牌条保留', () => {
     const { container, rerender } = render(
       <SessionCard title="拐角会话" subtitle="" indicator="message" selected={false} onSelect={jest.fn()} compact />,
     );
     const row = container.firstElementChild as HTMLElement;
-    // 干线由行自带（-left-2 = 容器缩进 16px 处），非末行贯穿整行。
-    const rail = row.querySelector('[data-session-tree-rail]') as HTMLElement | null;
-    expect(rail).toHaveClass('-left-2', 'top-0', 'bottom-0', 'w-px', 'bg-border');
-    // 末行干线止于拐角高度（CSS :last-child 变体驱动，jsdom 无法计算行为，锁定类名契约）。
-    expect(row).toHaveClass('last:[&_[data-session-tree-rail]]:bottom-1/2');
-    // 拐角横线 8px：左端紧贴干线、右端无缝接到会话卡片行首。
-    const elbow = row.querySelector('[data-session-tree-elbow]') as HTMLElement | null;
-    expect(elbow).toHaveClass('-left-2', 'top-1/2', 'h-px', 'w-2', 'bg-border');
-    // 未选中：行首不渲染品牌条（替代原常显 1px 弱灰竖线）。
+    // dmore 平齐化裁决（B1 tasks 6.1 + 本批 1.4 最小同步）：无树形竖线/拐角横线。
+    expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
+    expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
+    expect(row).not.toHaveClass('last:[&_[data-session-tree-rail]]:bottom-1/2');
+    // 未选中：行首不渲染品牌条。
     expect(row.querySelector('[data-session-left-bar]')).toBeNull();
 
     rerender(<SessionCard title="拐角会话" subtitle="" indicator="message" selected onSelect={jest.fn()} compact />);
     const bar = row.querySelector('[data-session-left-bar]') as HTMLElement | null;
     expect(bar).toHaveClass('left-0', 'w-0.5', 'bg-primary');
-    // 导轨在选中态仍保留（从属关系不因选中消失）。
-    expect(row.querySelector('[data-session-tree-rail]')).not.toBeNull();
-    expect(row.querySelector('[data-session-tree-elbow]')).not.toBeNull();
   });
 
   it('v1.4：会话选中态为品牌浅底 + 标题品牌色，与父行灰底异色系分工', () => {

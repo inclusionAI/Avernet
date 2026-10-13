@@ -377,12 +377,13 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         template_uuid: str | None = None,
         modifier: str = "system",
     ) -> int:
-        """Clone a bot record through the restored soft-delete path.
+        """Clone a bot record as a fresh INSERT.
 
-        DEPRECATED for PENDING clones: use :meth:`try_insert_pending_bot`, which
-        is atomic. This method keeps the re-create behaviour that restores a
-        previously soft-deleted ``(tenant, env, bot_uuid, status)`` row, which is
-        still required for non-UPDATE clone flows.
+        DEPRECATED for PENDING clones: use :meth:`try_insert_pending_bot`,
+        which detects live-slot conflicts explicitly. The clone is always a
+        fresh INSERT; previously soft-deleted ``(tenant, env, bot_uuid,
+        status)`` rows are left untouched — reviving one would occupy the
+        live unique-key slot and conflict with the subsequent INSERT.
         """
         log.info(
             "insert_bot_record: source_bot_id=%s, tenant=%s, env=%s, status=%s",
@@ -394,14 +395,6 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         source = self.get_by_id(source_bot_id, tenant, env)
         if source is None:
             raise ValueError(f"Source bot not found: {source_bot_id}")
-
-        if status == "PENDING":
-            self._restore_soft_deleted_pending(
-                bot_uuid=source.bot_uuid,
-                tenant=tenant,
-                env=env,
-                modifier=modifier,
-            )
 
         try:
             return self.insert_bot(
@@ -432,56 +425,6 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
                 f"status={status} tenant={tenant} env={env}"
             ) from exc
 
-    def _restore_soft_deleted_pending(
-        self, *, bot_uuid: str, tenant: str, env: str, modifier: str
-    ) -> None:
-        """Return a soft-deleted PENDING bot row for ``bot_uuid`` to the UK slot.
-
-        The UK is ``(tenant, env, bot_uuid, status, is_deleted)`` and
-        ``soft_delete`` sets ``is_deleted = bot_id``. Reviving the most recently
-        soft-deleted PENDING row (``is_deleted`` back to 0) makes a subsequent
-        insert legal without ever removing a row a concurrent request may still
-        own. The PENDING clone has no device relationships at this stage, so no
-        relationship cleanup is required.
-        """
-        from sqlalchemy import func as sa_func
-
-        candidate = (
-            self._session.query(BotModel)
-            .filter(
-                BotModel.bot_uuid == bot_uuid,
-                BotModel.tenant == tenant,
-                BotModel.env == env,
-                BotModel.status == "PENDING",
-                BotModel.is_deleted != 0,
-            )
-            .order_by(BotModel.id.desc())
-            .first()
-        )
-        if candidate is None:
-            return
-
-        restored = (
-            self._session.query(BotModel)
-            .filter(BotModel.id == candidate.id)
-            .update(
-                {
-                    "is_deleted": 0,
-                    "modifier": modifier,
-                    "gmt_modified": sa_func.now(),
-                },
-                synchronize_session=False,
-            )
-        )
-        if restored:
-            log.info(
-                "[bot:restore_pending] revived soft-deleted PENDING row for "
-                "bot_uuid=%s tenant=%s env=%s",
-                bot_uuid,
-                tenant,
-                env,
-            )
-
     @with_orm_session
     def try_insert_pending_bot(
         self,
@@ -496,15 +439,22 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
     ) -> int:
         """Atomically reserve the PENDING slot for a bot and clone it.
 
-        Conflict detection and insertion run in a single transaction, so a
-        concurrent caller cannot slip between the check and the write:
+        This method's session and the nested ``insert_bot`` session are
+        separate transactions; atomicity is guaranteed by the unique key
+        ``uk_tnt_bot_uuid_env_status_del`` (the final arbiter), not by
+        transaction scope:
 
         * An existing live PENDING row for the same ``bot_uuid`` raises
           :class:`BotRecordConflictError` — the caller must treat that as a
           concurrent UPDATE and abort, never delete the incumbent row.
-        * A soft-deleted PENDING row is revived into the UK slot, because
-          ``uk_tnt_bot_uuid_env_status_del`` includes ``is_deleted`` and
-          ``soft_delete`` sets ``is_deleted = bot_id``.
+        * A soft-deleted PENDING row occupies a distinct UK slot
+          (``soft_delete`` sets ``is_deleted = bot_id``, not 0), so the live
+          slot ``(tenant, env, bot_uuid, PENDING, is_deleted=0)`` is free.
+          The clone is always a fresh INSERT and previously soft-deleted
+          clones are left untouched as history. Reviving such a row would
+          occupy the live slot and conflict with the subsequent INSERT —
+          the historical MySQL 1205 self-deadlock — so revival must not be
+          reintroduced.
         * The unique key remains the final arbiter via :class:`IntegrityError`.
 
         Returns the new record ID.
@@ -536,13 +486,6 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
                 f"PENDING bot record already exists for bot_uuid="
                 f"{source.bot_uuid} (id={live_pending.id})"
             )
-
-        self._restore_soft_deleted_pending(
-            bot_uuid=source.bot_uuid,
-            tenant=tenant,
-            env=env,
-            modifier=modifier,
-        )
 
         try:
             return self.insert_bot(

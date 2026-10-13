@@ -368,6 +368,7 @@ class ResourceFileService(ResourceFilePort):
         path: str,
         publish_id: str | None = None,
         device_uuid: str | None = None,
+        runtime_context: DeviceContext | None = None,
     ) -> list[dict[str, Any]]:
         """List a directory under the workspace, provider-blind.
 
@@ -379,7 +380,7 @@ class ResourceFileService(ResourceFilePort):
         ``device_uuid`` (optional) locks a specific instance for multi-instance
         service bots; omitted → provider auto-selects an active instance.
         """
-        ctx = self._resolve_ctx(
+        ctx = runtime_context or self._resolve_ctx(
             bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
             device_uuid=device_uuid,
         )
@@ -423,6 +424,7 @@ class ResourceFileService(ResourceFilePort):
         publish_id: str | None = None,
         device_uuid: str | None = None,
         enforce_download_limit: bool = False,
+        runtime_context: DeviceContext | None = None,
     ) -> bytes | None:
         """Read a file's bytes via the device, provider-blind.
 
@@ -433,7 +435,7 @@ class ResourceFileService(ResourceFilePort):
         ``device_uuid`` (optional) locks a specific instance for multi-instance
         service bots; omitted → provider auto-selects an active instance.
         """
-        ctx = self._resolve_ctx(
+        ctx = runtime_context or self._resolve_ctx(
             bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
             device_uuid=device_uuid,
         )
@@ -453,6 +455,7 @@ class ResourceFileService(ResourceFilePort):
         bot_id: str,
         engine_type: str,
         path: str,
+        runtime_context: DeviceContext | None = None,
     ) -> AsyncIterator[tuple[str, bytes]]:
         """Walk a directory, yielding ``(name, content)`` for every regular file.
 
@@ -480,7 +483,7 @@ class ResourceFileService(ResourceFilePort):
         alternative is a 200 archive silently missing files, which a public
         API may not serve.
         """
-        ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
@@ -559,13 +562,14 @@ class ResourceFileService(ResourceFilePort):
         path: str,
         publish_id: str | None = None,
         device_uuid: str | None = None,
+        runtime_context: DeviceContext | None = None,
     ) -> bool:
         """Whether ``path`` is present in the bot's workspace, provider-blind.
 
         Same addressing as every other method here — the caller passes a
         workspace-relative path and never learns the container's layout.
         """
-        ctx = self._resolve_ctx(
+        ctx = runtime_context or self._resolve_ctx(
             bot_id=bot_id, entity_id=entity_id, publish_id=publish_id,
             device_uuid=device_uuid,
         )
@@ -583,10 +587,11 @@ class ResourceFileService(ResourceFilePort):
         bot_id: str,
         engine_type: str,
         path: str,
+        runtime_context: DeviceContext | None = None,
     ) -> None:
         """Create a directory by writing a ``.keep`` placeholder (mirrors the arca/
         teclaw strategy — the engine APIs auto-create parents on upload)."""
-        ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
@@ -602,6 +607,7 @@ class ResourceFileService(ResourceFilePort):
         bot_id: str,
         engine_type: str,
         path: str,
+        runtime_context: DeviceContext | None = None,
     ) -> bool:
         """Delete a file or directory; returns False when nothing was deleted.
 
@@ -611,7 +617,7 @@ class ResourceFileService(ResourceFilePort):
         ``delete_file`` made the documented "or directory" half of this method
         silently unable to delete one.
         """
-        ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,
@@ -658,6 +664,7 @@ class ResourceFileService(ResourceFilePort):
         filename: str,
         data: bytes,
         preserve_structure: bool = False,
+        runtime_context: DeviceContext | None = None,
     ) -> dict[str, Any]:
         """Validate and write a single uploaded file under the workspace.
 
@@ -688,7 +695,7 @@ class ResourceFileService(ResourceFilePort):
             rel = f"{target_dir}/{safe}" if target_dir else safe
             final_name = safe
 
-        ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        ctx = runtime_context or self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
         device_fs = self._device_fs(
             ctx, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, engine_type=engine_type,

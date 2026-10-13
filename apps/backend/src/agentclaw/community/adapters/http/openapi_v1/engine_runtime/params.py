@@ -184,6 +184,12 @@ async def resolve_owner_id(
 #: What an engine-runtime handler declares to receive the addressed owner.
 OwnerIdDep = Annotated[str, Depends(resolve_owner_id)]
 
+DeviceUuidQuery = Annotated[
+    str | None,
+    Query(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$",
+          description="Instance id from containers. Omit for automatic instance selection."),
+]
+
 #: What an engine-runtime handler declares to receive the addressed stage.
 #: Declared with a default at each handler (``StageQuery = RuntimeStage.DRAFT``)
 #: rather than inside ``Query(...)``, so the published schema carries the

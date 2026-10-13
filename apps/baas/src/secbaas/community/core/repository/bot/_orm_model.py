@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 
@@ -20,6 +21,21 @@ from ._record import BotRecord
 
 class BotModel(Base):
     __tablename__ = "baas_bot"
+
+    __table_args__ = (
+        # MUST mirror `uk_tnt_bot_uuid_env_status_del` in sqls/baas_schema.sql:
+        # exactly one live (is_deleted=0) row per (tenant, env, bot_uuid, status).
+        # Without this, SQLite/integration test schemas cannot enforce the UK and
+        # regressions like the soft-deleted-revive insert deadlock pass silently.
+        UniqueConstraint(
+            "tenant",
+            "env",
+            "bot_uuid",
+            "status",
+            "is_deleted",
+            name="uk_tnt_bot_uuid_env_status_del",
+        ),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())

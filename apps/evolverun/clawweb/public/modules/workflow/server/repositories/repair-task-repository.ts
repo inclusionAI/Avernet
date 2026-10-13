@@ -58,7 +58,7 @@ export class RepairTaskRepository {
     let prior: { attempt?: unknown } = {};
     try { prior = row.output_json ? JSON.parse(row.output_json) : {}; } catch { /* Start a new explicit attempt. */ }
     const attempt = (Number.isSafeInteger(prior.attempt) ? Number(prior.attempt) : 0) + 1;
-    const output = canonicalRepairJson({ attempt, executionId, rawStatus: null });
+    const output = canonicalRepairJson({ attempt, executionId, rawStatus: null, requestedAtMs: Date.now() });
     const result = await this.db.exec(`UPDATE ce_steps SET status = 'dispatching', gmt_modified = ? WHERE task_id = ? AND step_id = ?
       AND step_type = 'workflow_repair_draft' AND status IN ('created', 'dispatch_failed')`,
     [this.db.dialect.now(), taskId, stepId]);
@@ -66,31 +66,43 @@ export class RepairTaskRepository {
     await this.db.exec("UPDATE ce_steps SET output_json = ? WHERE task_id = ? AND step_id = ? AND status = 'dispatching'", [output, taskId, stepId]);
     return { stepId, attempt, executionId, actorId: row.user_id };
   }
-  async finishDispatch(taskId: string, revision: number, jobId: string | null, failed: boolean): Promise<void> {
+  async finishDispatch(taskId: string, revision: number, jobId: string | null, failure: 'rejected' | 'uncertain' | null): Promise<void> {
     await this.db.exec(`UPDATE ce_steps SET status = ?, bot_run_id = ?, error_code = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status = 'dispatching'`,
-      [failed ? 'dispatch_failed' : 'dispatched', jobId, failed ? 'DISPATCH_UNCERTAIN' : null, this.db.dialect.now(), taskId, this.stepId(taskId, revision)]);
+      [failure === 'uncertain' ? 'dispatch_uncertain' : failure === 'rejected' ? 'dispatch_failed' : 'dispatched', jobId,
+        failure === 'uncertain' ? 'DISPATCH_UNCERTAIN' : failure === 'rejected' ? 'DISPATCH_REJECTED' : null,
+        this.db.dialect.now(), taskId, this.stepId(taskId, revision)]);
   }
-  async active(limit: number): Promise<Array<{ taskId: string; revision: number; jobId: string; identity: RepairExecutionIdentity; actorId: string }>> {
+  async expireStaleDispatches(cutoffMs: number): Promise<number> {
+    const cutoff = this.db.dialect.epochToDb(Math.floor(cutoffMs / 1000));
+    const result = await this.db.exec(`UPDATE ce_steps SET status = 'dispatch_uncertain', error_code = 'DISPATCH_UNCERTAIN', gmt_modified = ?
+      WHERE step_type = 'workflow_repair_draft' AND status = 'dispatching' AND gmt_modified < ?`,
+    [this.db.dialect.now(), cutoff]);
+    return result.affectedRows;
+  }
+  async active(limit: number): Promise<Array<{ taskId: string; revision: number; jobId: string; identity: RepairExecutionIdentity; actorId: string; requestedAtMs: number; successObservedAtMs: number | null }>> {
     const rows = await this.db.query<{ task_id: string; round_no: number; bot_run_id: string; output_json: string; user_id: string }>(`SELECT s.task_id, s.round_no, s.bot_run_id, s.output_json, t.user_id
       FROM ce_steps s JOIN ce_tasks t ON t.task_id = s.task_id
       WHERE s.step_type = 'workflow_repair_draft' AND s.status IN ('dispatched', 'running') AND s.bot_run_id IS NOT NULL
       ORDER BY s.gmt_modified ASC LIMIT ?`, [limit]);
     return rows.flatMap(row => {
       try {
-        const value = JSON.parse(row.output_json) as { attempt?: unknown; executionId?: unknown };
+        const value = JSON.parse(row.output_json) as { attempt?: unknown; executionId?: unknown; requestedAtMs?: unknown; successObservedAtMs?: unknown };
         if (!Number.isSafeInteger(value.attempt) || typeof value.executionId !== 'string') return [];
         return [{ taskId: row.task_id, revision: Number(row.round_no), jobId: row.bot_run_id,
-          identity: { stepId: this.stepId(row.task_id, Number(row.round_no)), attempt: Number(value.attempt), executionId: value.executionId }, actorId: row.user_id }];
+          identity: { stepId: this.stepId(row.task_id, Number(row.round_no)), attempt: Number(value.attempt), executionId: value.executionId }, actorId: row.user_id,
+          requestedAtMs: Number.isSafeInteger(value.requestedAtMs) ? Number(value.requestedAtMs) : Date.now(),
+          successObservedAtMs: Number.isSafeInteger(value.successObservedAtMs) ? Number(value.successObservedAtMs) : null }];
       } catch { return []; }
     });
   }
-  async updateRemoteStatus(taskId: string, revision: number, identity: RepairExecutionIdentity, rawStatus: string): Promise<boolean> {
+  async updateRemoteStatus(taskId: string, revision: number, identity: RepairExecutionIdentity, rawStatus: string, succeeded = false): Promise<boolean> {
     const row = (await this.db.query<{ output_json: string | null }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_id = ?", [taskId, this.stepId(taskId, revision)]))[0];
     if (!row) return false;
     let output: Record<string, unknown>;
     try { output = JSON.parse(row.output_json ?? '{}'); } catch { return false; }
     if (output.executionId !== identity.executionId || output.attempt !== identity.attempt) return false;
     output.rawStatus = rawStatus;
+    if (succeeded && !Number.isSafeInteger(output.successObservedAtMs)) output.successObservedAtMs = Date.now();
     const result = await this.db.exec(`UPDATE ce_steps SET status = CASE WHEN status = 'dispatched' THEN 'running' ELSE status END,
       output_json = ?, gmt_modified = ? WHERE task_id = ? AND step_id = ? AND status IN ('dispatched', 'running')`,
     [canonicalRepairJson(output), this.db.dialect.now(), taskId, identity.stepId]);
@@ -103,12 +115,15 @@ export class RepairTaskRepository {
     const errorCode = !succeeded && typeof revision.error?.code === 'string' && revision.error.code.length <= 128 ? revision.error.code : null;
     await this.db.exec(`UPDATE ce_steps SET status = ?, summary = ?, error_code = ?, completed_at = ?, gmt_modified = ?
       WHERE task_id = ? AND step_id = ? AND step_type = 'workflow_repair_draft'`,
-    [succeeded ? 'succeeded' : 'failed', succeeded ? 'Awaiting review' : 'Draft failed', errorCode, this.db.dialect.now(), this.db.dialect.now(), revision.taskId, this.stepId(revision.taskId, revision.revision)]);
-    await this.db.exec("UPDATE ce_tasks SET status = 'running', config_json = ?, gmt_modified = ? WHERE task_id = ? AND task_type = 'workflow_repair'",
-      [canonicalRepairJson({ ...config, ...(succeeded ? { latestSuccessfulRevision: revision.revision } : {}) }), this.db.dialect.now(), revision.taskId]);
+    [succeeded ? 'succeeded' : 'failed', revision.phase === 'no_change' ? 'No Pack changes needed' : succeeded ? 'Awaiting review' : 'Draft failed', errorCode,
+      this.db.dialect.now(), this.db.dialect.now(), revision.taskId, this.stepId(revision.taskId, revision.revision)]);
+    await this.db.exec("UPDATE ce_tasks SET status = ?, config_json = ?, gmt_modified = ? WHERE task_id = ? AND task_type = 'workflow_repair'",
+      [revision.phase === 'no_change' ? 'completed' : 'running',
+        canonicalRepairJson({ ...config, ...(succeeded && revision.phase !== 'no_change' ? { latestSuccessfulRevision: revision.revision } : {}) }),
+        this.db.dialect.now(), revision.taskId]);
   }
   async cancel(taskId: string): Promise<void> {
     await this.db.exec("UPDATE ce_tasks SET status = 'failed', error_message = 'Repair cancelled by user', gmt_modified = ? WHERE task_id = ? AND task_type = 'workflow_repair'", [this.db.dialect.now(), taskId]);
-    await this.db.exec("UPDATE ce_steps SET status = 'cancelled', completed_at = ?, gmt_modified = ? WHERE task_id = ? AND step_type = 'workflow_repair_draft' AND status IN ('created', 'dispatching', 'dispatch_failed', 'dispatched', 'running')", [this.db.dialect.now(), this.db.dialect.now(), taskId]);
+    await this.db.exec("UPDATE ce_steps SET status = 'cancelled', completed_at = ?, gmt_modified = ? WHERE task_id = ? AND step_type = 'workflow_repair_draft' AND status IN ('created', 'dispatching', 'dispatch_uncertain', 'dispatch_failed', 'dispatched', 'running')", [this.db.dialect.now(), this.db.dialect.now(), taskId]);
   }
 }

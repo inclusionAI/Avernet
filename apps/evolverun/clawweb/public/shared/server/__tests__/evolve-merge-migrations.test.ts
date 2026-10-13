@@ -39,6 +39,9 @@ async function applyHistory(db: SqliteDatabase, history: HistoricalMigration[], 
     await db.exec('INSERT INTO schema_version (version, description) VALUES (?, ?)',
       [migration.version, migration.description]);
   }
+  // The captured Evolve-only history omits the existing Workflow run table.
+  // Later global migrations still need its pre-existing baseline.
+  await db.exec('CREATE TABLE IF NOT EXISTS flow_runs (flow_id TEXT PRIMARY KEY, status TEXT)');
 }
 
 async function columns(db: SqliteDatabase, table: string) {

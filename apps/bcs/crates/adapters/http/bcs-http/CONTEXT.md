@@ -2,9 +2,13 @@
 
 ## Provides
 
-`GET /providers/by-slug/{slug}` is unauthenticated and exposes only Provider
+`GET /api/v1/collaboration/providers/by-slug/{slug}` is unauthenticated and exposes only Provider
 identity, name, auth mode, enabled status, protocol version and audit timestamps.
-It consumes the application service's credential-free projection. Existing
+The legacy `/providers/by-slug/{slug}` remains an alias with identical responses
+and errors. The new frontend uses the collaboration prefix through the existing
+gateway passthrough; BCS must be deployed before that path is available. No new
+persistence calls or authorization rules are introduced. It consumes the
+application service's credential-free projection. Existing
 registration/PATCH accepts optional slug with unchanged authentication; admin
 info responses add nullable slug and effective protocol_version. Core validates
 slugs, stores enforce uniqueness, and the adapter maps absence to 404.

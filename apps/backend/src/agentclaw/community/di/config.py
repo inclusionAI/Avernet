@@ -843,6 +843,11 @@ class TaskQueueConfig:
 # is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
 
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
+
+
 @dataclass(frozen=True)
 class TaskQueueWorkerConfig:
     """In-process distributed-task-queue worker policy.

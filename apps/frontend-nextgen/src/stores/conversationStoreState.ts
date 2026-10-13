@@ -29,6 +29,8 @@ export interface ConversationState {
   effectiveScopeByManagedBotId: Record<string, ConversationSessionScope>;
   /** 管理 Bot others 视角下,按 Bot 记忆的好友用户展开(key 为纯用户 ID,不带 human_)。 */
   expandedFriendUserIdsByBotId: Record<string, Record<string, true>>;
+  /** 侧栏 Bot 分组(我的/好友)收起记忆,key 为分组 ID(managed/friend);缺省展开。 */
+  collapsedBotGroups: Record<string, true>;
 
   /** 主舞台当前选中(全 Store 单选);URL 投影由 Hook 写回 route。 */
   selectedBotId: string | null;
@@ -47,6 +49,7 @@ export interface ConversationState {
   setManagedBotOrigin(botId: string, origin: ConversationOrigin): void;
   setManagedBotScope(botId: string, scope: ConversationSessionScope): void;
   setExpandedFriend(botId: string, friendUserId: string, expanded: boolean): void;
+  setBotGroupCollapsed(groupId: string, collapsed: boolean): void;
   selectConversation(input: {
     botId: string | null;
     section: ConversationBotSection | null;
@@ -67,6 +70,7 @@ export type ConversationInitialData = Omit<
   | 'setManagedBotOrigin'
   | 'setManagedBotScope'
   | 'setExpandedFriend'
+  | 'setBotGroupCollapsed'
   | 'selectConversation'
   | 'setManagedBotCache'
   | 'setFriendBotSessions'
@@ -79,6 +83,7 @@ export const conversationInitialState: ConversationInitialData = {
   scopeByManagedBotId: {},
   effectiveScopeByManagedBotId: {},
   expandedFriendUserIdsByBotId: {},
+  collapsedBotGroups: {},
   selectedBotId: null,
   selectedSection: null,
   selectedOrigin: 'mine',

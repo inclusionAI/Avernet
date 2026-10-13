@@ -63,15 +63,14 @@ describe('GroupSidebar', () => {
     expect(screen.queryByText(/3 个成员/)).not.toBeInTheDocument();
   });
 
-  it('会话区树形导轨（验收微调）：干线由会话行自带，容器不再渲染贯穿线', () => {
+  it('会话区平齐化（parity 最小同步）：树形导轨已移除，容器不再渲染贯穿线', () => {
     render(<GroupSidebar {...makeProps()} />);
     const sessions = screen.getByLabelText('协作群会话列表：主站群');
     expect(sessions).toHaveClass('pl-6');
-    // 容器不再渲染贯穿干线（before:* 已移除），干线与末行截断由每行 SessionCard 自带。
+    // 容器不再渲染贯穿干线（before:* 已移除）；行自带干线也已按 dmore 平齐化裁决移除。
     expect(sessions).not.toHaveClass('before:absolute');
-    const rails = sessions.querySelectorAll('[data-session-tree-rail]');
-    expect(rails.length).toBeGreaterThan(0);
-    expect(rails[0]).toHaveClass('-left-2', 'top-0', 'bottom-0', 'w-px', 'bg-border');
+    expect(sessions.querySelectorAll('[data-session-tree-rail]').length).toBe(0);
+    expect(sessions.querySelectorAll('[data-session-tree-elbow]').length).toBe(0);
   });
 
   it('选中协作群暂无会话时展示明确空态', () => {

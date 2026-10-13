@@ -10,17 +10,24 @@ import logging
 import os
 import re
 import tempfile
+import time
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
 from engine.community.kernel.frames import EventFrame
+from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatAck
 from engine.community.openclaw.config import get_config
 
 log = logging.getLogger("openclaw-port")
 
 _SAFE_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _INJECT_ASSISTANT_ONLY_FIELDS = ("api", "provider", "model", "stopReason", "usage")
+_CACHED_REQUEST_NOTICE = (
+    "系统提示：本次请求命中了已有请求记录，未启动新的执行。"
+    "本次未返回回答正文，请查看原会话。此提示不代表原任务已完成。"
+)
 
 
 # ── chat helpers (relocated from engines/openclaw/chat.py) ───────────────────
@@ -91,6 +98,7 @@ class _ChatPortMixin:
         idempotency_key: str | None = None,
         attachments: list[Any] | None = None,
         token: str | None = None,
+        on_ack: ChatAckCallback | None = None,
     ) -> AsyncGenerator[EventFrame, None]:
         """Stream chat events from the OpenClaw gateway as EventFrames.
 
@@ -111,25 +119,59 @@ class _ChatPortMixin:
             )
 
         client = await self._pooled_client(token)
-        async for event_data in client.chat_stream(
+        ack: OpenClawChatAck | None = None
+
+        async def forward_ack(response):
+            nonlocal ack
+            ack = OpenClawChatAck(response.ok, response.payload or {}, response.error)
+            await on_ack(ack)
+
+        ack_options = {"on_ack": forward_ack} if on_ack is not None else {}
+        upstream = client.chat_stream(
             session_key=session_key,
             message=message,
             timeout_ms=timeout_ms,
             idempotency_key=idempotency_key,
             attachments=attachments,
-        ):
-            event_data.setdefault("sessionKey", session_key)
-            state = event_data.get("state", "")
-            event_name = _derive_event_name(event_data)
-            frame = EventFrame(event=event_name, payload=event_data)
-            yield frame
+            **ack_options,
+        )
+        async with aclosing(upstream):
+            async for event_data in upstream:
+                event_data.setdefault("sessionKey", session_key)
+                state = event_data.get("state", "")
+                event_name = _derive_event_name(event_data)
+                frame = EventFrame(event=event_name, payload=event_data)
+                yield frame
 
-            if state in ("final", "error", "aborted"):
-                run_id = event_data.get("runId", "")
-                if isinstance(run_id, str) and run_id.startswith("inject-"):
-                    continue
-                log.info("[chat_stream] stream ended: state=%s", state)
-                break
+                if state in ("final", "error", "aborted"):
+                    run_id = event_data.get("runId", "")
+                    if isinstance(run_id, str) and run_id.startswith("inject-"):
+                        continue
+                    log.info("[chat_stream] stream ended: state=%s", state)
+                    return
+
+        # Cached status replays have no subsequent upstream events. Close this call,
+        # not the original run: cached dispatch completion need not mean a
+        # queued model execution has finished.
+        if ack is not None and ack.ok and ack.payload.get("status") == "ok":
+            identity = {
+                "sessionKey": session_key,
+                "runId": ack.payload.get("runId") or idempotency_key or "",
+            }
+            notice_message = {
+                "role": "assistant",
+                "content": [{"type": "text", "text": _CACHED_REQUEST_NOTICE}],
+                "timestamp": int(time.time() * 1000),
+            }
+            for state in ("delta", "final"):
+                yield EventFrame(event="chat", payload={
+                    **identity,
+                    "state": state,
+                    "message": notice_message,
+                    **({"deltaText": _CACHED_REQUEST_NOTICE} if state == "delta" else {}),
+                    "cached": True,
+                    "adapterNotice": "cached_request",
+                })
 
     async def chat_abort(
         self,

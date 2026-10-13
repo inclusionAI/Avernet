@@ -71,6 +71,14 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/resources"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/stat"),
+    ("post", "/openapi/v1/bots/{bot_id}/resources/upload"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/download"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/download-dir"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/preview"),
+    ("post", "/openapi/v1/bots/{bot_id}/resources/mkdir"),
+    ("delete", "/openapi/v1/bots/{bot_id}/resources"),
     ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("get", "/openapi/v1/bots/{bot_id}/engine/config"),

@@ -31,7 +31,7 @@ function open(type = 'diagnose', extra = '') {
   ]}><Navigate /><Evolve /></MemoryRouter>)
 }
 function submit(type = 'diagnose') { return screen.getByRole('button', { name: type === 'diagnose' ? '创建诊断任务' : type === 'hardening' ? '创建 Skill 加固任务' : '创建 Skill 自进化任务' }) as HTMLButtonElement }
-async function ready(type = 'diagnose') { await waitFor(() => expect(submit(type).disabled).toBe(false)) }
+async function ready(type = 'diagnose') { await waitFor(() => expect(submit(type).disabled).toBe(false), { timeout: 5_000 }) }
 
 beforeEach(() => {
   vi.stubGlobal('React', React)

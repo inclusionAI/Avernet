@@ -53,3 +53,24 @@ async def test_restart_adopted_workflow_does_not_backup_replacement_again():
         guard.assert_called_once()
         await svc.execute_restart(1, 'online', 'operator')
         guard.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_real_coding_backup_transport_failure_still_issues_published_restart():
+    ledger, baas, build = _ledger(), FakeBaas(), Mock()
+    baas.list_devices_by_bot_uuid = Mock(return_value=[{'provider_device_id': 'physical', 'status': 'ACTIVE'}])
+    baas.post_bots_api = Mock(side_effect=RuntimeError('unreachable sandbox'))
+    record = _record(PublishStatus.SUCCESS.value)
+    record.ext['binding'] = {'online': 42}
+    svc = _restart_flow(ledger, baas, build, record)
+    svc._bot_service.get_bot.return_value = {
+        'bot_id': 'b', 'owner_id': 'u1', 'entity_id': 'u1', 'active_engine': 'aicoding',
+    }
+
+    async def upgrade(**kwargs):
+        return {'publish_id': baas.issue('BOT-live', 'UPDATE'), 'bot_uuid': 'BOT-live'}
+
+    build.upgrade_async = AsyncMock(side_effect=upgrade)
+    await svc.execute_restart(1, 'online', 'operator')
+    baas.post_bots_api.assert_called_once()
+    build.upgrade_async.assert_awaited_once()

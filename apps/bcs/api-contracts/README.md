@@ -26,6 +26,14 @@ uv run --with pytest --with pyyaml --with jsonschema \
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
+`GET /api/v1/collaboration/providers/by-slug/{slug}` is defined in
+`v1/internal/provider-discovery.yaml`. It is a credential-free alias of the
+legacy Provider discovery route: success returns only public Provider metadata,
+including disabled Providers, and errors retain `{error, status}`. Neither response
+uses the collaboration envelope. The contract validator's legacy-error exception
+is restricted to this GET operation and its 400/404/500 schemas; other internal
+operations continue to require envelopes.
+
 `GET /api/v1/collaboration/bots/me` is an internal Agent identity self lookup,
 defined in `v1/internal/bot-self.yaml`. BCS verifies the Bearer token itself;
 Gateway identity chains and a registered Bot Principal are not prerequisites.

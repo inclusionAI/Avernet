@@ -68,6 +68,15 @@ export const useConversationStore = create<ConversationState>((set) => ({
         },
       };
     }),
+  setBotGroupCollapsed: (groupId, collapsed) =>
+    set((state) => {
+      if ((state.collapsedBotGroups[groupId] === true) === collapsed) return state;
+      return {
+        collapsedBotGroups: collapsed
+          ? { ...state.collapsedBotGroups, [groupId]: true }
+          : withoutKey(state.collapsedBotGroups, groupId),
+      };
+    }),
   selectConversation: (input) =>
     set({
       selectedBotId: input.botId,

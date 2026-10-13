@@ -1,0 +1,88 @@
+ProviderDiscoveryPath:
+  get:
+    operationId: get_provider_by_slug
+    tags: ["Collaboration / Providers"]
+    summary: Discover a Provider's public registration metadata by slug.
+    description: >-
+      Credential-free lookup with the same raw response as GET /providers/by-slug/{slug}.
+      Disabled Providers remain discoverable with enabled=false. This read never
+      returns Provider credentials, callback URLs, or configuration. Responses use
+      the legacy Provider JSON format, not the collaboration response envelope.
+    x-avernet-security: {}
+    security: []
+    x-avernet-raw-response: true
+    x-avernet-legacy-provider-errors: true
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          $ref: "#/ProviderSlug"
+    responses:
+      "200":
+        description: Public metadata for the matching Provider, including disabled Providers.
+        content:
+          application/json:
+            schema:
+              $ref: "#/ProviderPublicInfo"
+      "400":
+        description: Invalid slug syntax.
+        x-error-codes: [400]
+        content:
+          application/json:
+            schema:
+              $ref: "#/ProviderLookupError"
+              properties:
+                error: {type: string}
+                status: {type: integer, const: 400}
+      "404":
+        description: No Provider has this slug in the current environment.
+        x-error-codes: [404]
+        content:
+          application/json:
+            schema:
+              $ref: "#/ProviderLookupError"
+              properties:
+                error: {type: string}
+                status: {type: integer, const: 404}
+      "500":
+        description: Provider storage lookup failed.
+        x-error-codes: [500]
+        content:
+          application/json:
+            schema:
+              $ref: "#/ProviderLookupError"
+              properties:
+                error: {type: string}
+                status: {type: integer, const: 500}
+
+ProviderSlug:
+  type: string
+  minLength: 1
+  maxLength: 64
+  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+
+ProviderPublicInfo:
+  type: object
+  additionalProperties: false
+  required: [provider_id, slug, name, auth_mode, enabled, protocol_version, created_at, updated_at]
+  properties:
+    provider_id: {type: string}
+    slug:
+      $ref: "#/ProviderSlug"
+    name: {type: string}
+    auth_mode:
+      type: string
+      enum: [static_bearer, agentpass, provider_admin]
+    enabled: {type: boolean}
+    protocol_version: {type: string}
+    created_at: {type: integer, minimum: 0, description: Unix timestamp in milliseconds.}
+    updated_at: {type: integer, minimum: 0, description: Unix timestamp in milliseconds.}
+
+ProviderLookupError:
+  type: object
+  additionalProperties: false
+  required: [error, status]
+  properties:
+    error: {type: string}
+    status: {type: integer}

@@ -16,7 +16,8 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   children: ReactNode;
   ariaLabel: string;
   className?: string;
-  collapsedContent?: ReactNode;
+  /** 折叠态内容：静态节点，或 (expand) => ReactNode 渲染函数——传入 expand() 供收起条上的入口反展开本栏。 */
+  collapsedContent?: ReactNode | ((expand: () => void) => ReactNode);
   /** 挂载边缘：left=左侧栏（默认，手柄右缘、拖右变宽、含折叠态）；right=右侧副屏（手柄左缘、拖左变宽、方向语义反转、无折叠态、小屏不隐藏）。 */
   side?: 'left' | 'right';
   /** 独立宽度组（默认为对话协作左栏常量）；右侧副屏按需传入。 */
@@ -223,7 +224,17 @@ export function ResizableWorkspaceSidebar({
         {children}
       </div>
 
-      {collapsed && <div className="absolute inset-0 flex overflow-hidden">{collapsedContent}</div>}
+      {collapsed && (
+        <div className="absolute inset-0 flex overflow-hidden">
+          {/* 渲染函数形态把 expand() 交给收起条（如「+N 溢出 / 空位占位」入口反展开本栏），静态节点形态行为不变。 */}
+          {typeof collapsedContent === 'function'
+            ? collapsedContent(() => {
+                setCollapsed(false);
+                persistCollapsed(false);
+              })
+            : collapsedContent}
+        </div>
+      )}
 
       {!isRight && (
         <TooltipProvider delayDuration={300}>

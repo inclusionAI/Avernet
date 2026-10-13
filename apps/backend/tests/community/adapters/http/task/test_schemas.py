@@ -1,3 +1,5 @@
+import types as _types
+
 import pytest
 from pydantic import ValidationError
 
@@ -133,9 +135,6 @@ def test_task_settings_dtos_reject_unknown_setting_type() -> None:
 )
 def test_runtime_status_to_product_status(runtime, product):
     assert runtime_status_to_product_status(runtime) == product
-
-
-import types as _types
 
 
 def _node(node_id, tc=None):

@@ -165,7 +165,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         """
         return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
 
-    def _resolve_device(self, facts: BotFacts, stage: str) -> DeviceContext:
+    def _resolve_device(self, facts: BotFacts, stage: str, device_uuid: str | None = None) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
 
         ``facts`` is the sole source of the bot's identity. It carries the
@@ -207,8 +207,9 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
             # bot, not an unmapped error from the record scan.
             require_stage_addressable(facts.bot_type, stage)
             if facts.bot_type == _SERVICE_BOT_TYPE and stage != STAGE_DRAFT:
-                return self._resolve_published_device(facts, stage)
-            return self._resolver.resolve_for_bot(facts.bot_id, facts.owner_id)
+                return self._resolve_published_device(facts, stage, device_uuid)
+            selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
+            return self._resolver.resolve_for_bot(facts.bot_id, facts.owner_id, **selection)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
                 f"device not ready for bot={facts.bot_id}"
@@ -217,7 +218,7 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
             raise
 
     def _resolve_published_device(
-        self, facts: BotFacts, stage: str
+        self, facts: BotFacts, stage: str, device_uuid: str | None = None
     ) -> DeviceContext:
         """Resolve a ``service`` bot through a published stage's runtime binding.
 
@@ -269,12 +270,14 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         # providers a published bot runs on, the transport fetches the address per
         # binding at call time and this only has to carry the routing fields. It
         # falls through to full resolution for the providers that need it.
+        selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
         return self._resolver.resolve_for_binding_invoke(
-            bind_id, facts.owner_id, bot_id=facts.bot_id
+            bind_id, facts.owner_id, bot_id=facts.bot_id, **selection
         )
 
     def _resolve_bot_and_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts | None, stage: str
+        self, bot_id: str, owner_id: str, facts: BotFacts | None, stage: str,
+        device_uuid: str | None = None,
     ) -> DeviceContext:
         """Prove ownership, then resolve the device — one worker-thread hop.
 
@@ -289,7 +292,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
             if facts is not None
             else self.resolve_bot(bot_id, owner_id, owner_id)
         )
-        return self._resolve_device(resolved, stage)
+        return self._resolve_device(resolved, stage, device_uuid)
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -306,6 +309,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         enveloped: bool = True,
         facts: BotFacts | None = None,
         stage: str,
+        device_uuid: str | None = None,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
 
@@ -359,8 +363,12 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         to lack one is exactly the malformed case that must still fail.
         """
         ctx = await asyncio.to_thread(
-            self._resolve_bot_and_device, bot_id, owner_id, facts, stage
+            self._resolve_bot_and_device, bot_id, owner_id, facts, stage, device_uuid
         )
+        if device_uuid is not None and (
+            ctx.provider not in {"baas", "teclaw"} or ctx.bot_type == "desktop"
+        ):
+            raise EngineResourceNotFoundError("instance selection is unavailable")
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
 

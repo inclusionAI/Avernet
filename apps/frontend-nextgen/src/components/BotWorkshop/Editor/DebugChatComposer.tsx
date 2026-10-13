@@ -62,7 +62,7 @@ export function DebugChatComposer({
   };
 
   return (
-    <div className="border-t border-border p-4">
+    <div className="border-t border-border px-5 py-4">
       {files.length > 0 || upload.tasks.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2" aria-label="调试会话附件">
           {files.map((file) => (
@@ -98,7 +98,7 @@ export function DebugChatComposer({
           ))}
         </div>
       ) : null}
-      <Card className="flex items-center gap-2 rounded-2xl p-2 shadow-none">
+      <Card className="flex min-h-24 items-end gap-2 rounded-2xl p-3 shadow-none">
         <Input
           ref={fileInputRef}
           type="file"

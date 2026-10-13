@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODULE="${ROOT}/modules/model_config.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODULE="${ROOT}/singlebox/modules/model_config.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -37,7 +37,7 @@ setup_env() {
   unset SINGLEBOX_MODEL_CONFIG_HOME_CONFIRMED
 
   export PROJECT_ROOT="$ROOT"
-  export SCRIPT_DIR="${ROOT}/scripts"
+  export SCRIPT_DIR="${ROOT}/singlebox"
   export DEP_DIR="$(mktemp -d)"
   export LOG_DIR="${DEP_DIR}/logs"
   export OPENCLAW_CONFIG_FILE="${DEP_DIR}/home-openclaw/openclaw.json"
@@ -116,9 +116,12 @@ test_manual_rejects_unresolved_openai_key_reference() {
 
   # shellcheck source=/dev/null
   source "$MODULE"
-  if singlebox_model_config_prepare; then
+  local error_log="${DEP_DIR}/manual-error.log"
+  if singlebox_model_config_prepare >"$error_log" 2>&1; then
     fail "manual mode must reject an unresolved OPENAI_API_KEY reference"
   fi
+  grep -Fq "${PROJECT_ROOT}/singlebox/.env.local" "$error_log" \
+    || fail "unresolved manual credential hint must point to the singlebox env file"
 }
 
 test_manual_injects_glm_thinking_override_for_compatible_gateway() {
@@ -148,9 +151,14 @@ test_manual_requires_complete_env() {
 
   # shellcheck source=/dev/null
   source "$MODULE"
-  if singlebox_model_config_prepare; then
+  local error_log="${DEP_DIR}/manual-error.log"
+  if singlebox_model_config_prepare >"$error_log" 2>&1; then
     fail "manual mode should fail without OPENCLAW_OPENAI_MODEL_ID"
   fi
+  grep -Fq "OPENCLAW_OPENAI_MODEL_ID" "$error_log" \
+    || fail "manual error must identify the missing model id"
+  grep -Fq "${PROJECT_ROOT}/singlebox/.env.local" "$error_log" \
+    || fail "missing manual config hint must point to the singlebox env file"
 }
 
 test_home_copies_only_model_fields() {

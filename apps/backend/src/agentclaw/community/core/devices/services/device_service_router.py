@@ -598,24 +598,18 @@ class DeviceServiceRouter(DeviceService):
         status: str,
         message: str | None,
         token: str,
+        startup_identity: str | None = None,
+        layout_initialization: dict[str, object] | None = None,
     ):
-        """设备上报启动状态 - 根据 device_id 路由.
-
-        Args:
-            device_id: 设备 ID
-            status: 启动状态 (STARTING, FAILED, SUCCEEDED)
-            message: 启动信息
-            token: 回调 Token
-
-        Returns:
-            更新后的设备绑定记录
-        """
+        """设备上报启动状态 - 根据 device_id 路由."""
         service = self._get_provider_for_device_id(device_id)
         return service.report_device_status(
             device_id=device_id,
             status=status,
             message=message,
             token=token,
+            startup_identity=startup_identity,
+            layout_initialization=layout_initialization,
         )
 
     @override

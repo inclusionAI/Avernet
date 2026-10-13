@@ -97,12 +97,12 @@ const BotWorkshopDetailPage: React.FC = () => {
     );
   const bot = detail.bot;
   return (
-    <main className="flex h-full min-h-0 flex-col bg-background">
+    <main className="bot-editor-shell flex h-full min-h-0 flex-col bg-background">
       <DetailHeader bot={bot} editable={editable} isOwner={isOwner} onBack={detail.back} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
           aria-label="Bot 编辑模块"
-          className="app-scrollbar flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-muted/30 py-4"
+          className="bot-editor-nav app-scrollbar flex w-20 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-card py-3"
         >
           {mainTabs
             .filter((item) => item.key !== 'routine' || desktopPolicy.routines)
@@ -112,8 +112,8 @@ const BotWorkshopDetailPage: React.FC = () => {
                 variant="ghost"
                 size="icon"
                 className={cn(
-                  'h-11 w-full flex-col gap-1 text-xs font-normal',
-                  tab === item.key && !more && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+                  'h-16 w-[60px] flex-col gap-1 rounded-lg text-xs font-normal text-muted-foreground',
+                  tab === item.key && !more && 'bg-muted text-foreground hover:bg-muted hover:text-foreground',
                 )}
                 aria-label={item.label}
                 onClick={() => {
@@ -142,8 +142,8 @@ const BotWorkshopDetailPage: React.FC = () => {
                 variant="ghost"
                 size="icon"
                 className={cn(
-                  'h-11 w-full flex-col gap-1 text-xs font-normal',
-                  more === item.key && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+                  'h-16 w-[60px] flex-col gap-1 rounded-lg text-xs font-normal text-muted-foreground',
+                  more === item.key && 'bg-muted text-foreground hover:bg-muted hover:text-foreground',
                 )}
                 aria-label={item.label}
                 onClick={() => {
@@ -156,7 +156,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               </Button>
             ))}
         </nav>
-        <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[42%] lg:max-w-[720px] lg:flex-none">
+        <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[56%] lg:max-w-none lg:flex-none">
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
           ) : more === 'md' ? (

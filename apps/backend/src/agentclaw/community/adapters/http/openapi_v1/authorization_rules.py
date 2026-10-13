@@ -1,9 +1,10 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_retiring import RETIRING_AUTHORIZATION
 from .models_authorization import (
     EDIT_LOCK,
-    INHERITED,
+    INHERITED as INHERITED,
     OWNER_SCOPED,
     SCAFFOLDING_MODES as SCAFFOLDING_MODES,
     Authorization,
@@ -11,6 +12,7 @@ from .models_authorization import (
     NoCheck,
     ServiceChecked,
 )
+from .rule_shape_audit import assert_member_writes_name_explicit_origin
 
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
@@ -38,7 +40,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/auth-status"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/authorized-apps"): ServiceChecked(
@@ -171,17 +173,17 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER, explicit=True),
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock/steal"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/editors"): Check(PermissionLevel.ADMIN),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/editors/me"): Check(PermissionLevel.MEMBER, explicit=True),
     ("DELETE", "/openapi/v1/bots/{bot_id}/editors/{editor_id}"): Check(
         PermissionLevel.ADMIN
     ),
@@ -202,7 +204,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine/config"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
@@ -226,8 +228,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # Reading how a bot is set up is part of working on it (the config-manifest
     # read's bar), so any collaborator at MEMBER may; rewriting a persona is an
     # ADMIN act behind the edit lock, like the manifest beside it. The retiring
-    # addresses below mirror these rows explicitly, the way the engine-runtime
-    # legacy rows do.
+    # addresses unioned in at the end mirror these rows explicitly, the way
+    # the engine-runtime legacy rows do.
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): Check(
         PermissionLevel.MEMBER
@@ -240,7 +242,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(
         PermissionLevel.MEMBER
@@ -249,16 +251,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.OWNER, EDIT_LOCK
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
@@ -273,10 +275,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
@@ -294,12 +296,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"): NoCheck(
         "share and group viewers must render panels without an Editor relation"
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER, explicit=True),
     ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     # Resources are the workspace's files — the material a collaborator edits.
     # Reading and moving files is member work; uploading, creating and deleting
@@ -330,7 +332,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # operational work (MEMBER), and a command that applies what somebody is
     # editing waits for the lock like the lifecycle commands do.
     ("POST", "/openapi/v1/bots/{bot_id}/restart"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     # Routines are scheduled bot behaviour: reading them (and the run log) is
     # member work, defining and reshaping them is ADMIN behind the lock, and
@@ -350,7 +352,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): Check(
         PermissionLevel.MEMBER
@@ -367,15 +369,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents",
-    ): Check(PermissionLevel.MEMBER),
+    ): Check(PermissionLevel.MEMBER, explicit=True),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete",
-    ): Check(PermissionLevel.MEMBER),
+    ): Check(PermissionLevel.MEMBER, explicit=True),
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}",
-    ): Check(PermissionLevel.MEMBER),
+    ): Check(PermissionLevel.MEMBER, explicit=True),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",
@@ -417,30 +419,30 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/resources"): Check(
         PermissionLevel.MEMBER
     ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(
         PermissionLevel.MEMBER
     ),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests",
-    ): Check(PermissionLevel.MEMBER),
+    ): Check(PermissionLevel.MEMBER, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions"): Check(
         PermissionLevel.MEMBER
     ),
@@ -450,9 +452,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
-    ): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ): Check(PermissionLevel.MEMBER, EDIT_LOCK, explicit=True),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"): Check(
         PermissionLevel.MEMBER
@@ -460,14 +462,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}",
-    ): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ): Check(PermissionLevel.MEMBER, EDIT_LOCK, explicit=True),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
-    ): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ): Check(PermissionLevel.MEMBER, EDIT_LOCK, explicit=True),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
@@ -486,25 +488,25 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"
     ),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(
         PermissionLevel.MEMBER
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(
         PermissionLevel.MEMBER
     ),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(
-        PermissionLevel.MEMBER
+        PermissionLevel.MEMBER, explicit=True
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(
         PermissionLevel.MEMBER
     ),
     ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
+        PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
     ),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
     # The startup script is workspace configuration the manifest converges: read
@@ -914,77 +916,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"
     ),
-    # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/approvals/{bot_id}/modes"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/connection/{bot_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): Check(PermissionLevel.MEMBER),
-    # Identity's retiring addresses mirror the replacement's new rows, not
-    # INHERITED — a forced move, named as such. The chain has no exit:
-    # a ``Check`` replacement leaves an ``INHERITED`` twin abandoned by the
-    # twin guard unless it is exempted; the exemption exists only for twins
-    # with no ``{bot_id}`` on the path (a ``Check`` row's gate cannot read a
-    # query-string bot), and these paths carry the bot; and a ``Check`` row's
-    # handler must consume ``OwnerIdDep``, so honouring a *pinned* owner is
-    # not available either. So these retiring addresses publish and honour
-    # ``owner_id`` — a capability their frozen contract did not have, the one
-    # the resources/routines retirements below refuse via the pin — recorded
-    # here rather than hidden: the alternative was an unadjudicated owner
-    # read at an address the handler still serves. ``relocate`` does not
-    # carry route-level gate dependencies either, so the rows are what makes
-    # the twin's gate attach at all. The resources and routines retiring
-    # addresses below stay INHERITED for that opposite reason: their bots
-    # travel as query/body parameters these paths cannot offer a ``Check``
-    # row's gate, and their shims pin the owner to the caller instead
-    # (``deprecated._requery``).
-    ("GET", "/openapi/v1/bots/identity/{bot_id}"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(
-        PermissionLevel.ADMIN, EDIT_LOCK
-    ),
-    ("GET", "/openapi/v1/bots/models/{bot_id}"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): Check(
-        PermissionLevel.MEMBER
-    ),
-    ("DELETE", "/openapi/v1/bots/resources"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/download"): INHERITED,
-    ("POST", "/openapi/v1/bots/resources/mkdir"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/preview"): INHERITED,
-    ("GET", "/openapi/v1/bots/resources/stat"): INHERITED,
-    ("POST", "/openapi/v1/bots/resources/upload"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines"): INHERITED,
-    ("POST", "/openapi/v1/bots/routines"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): INHERITED,
-    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/sessions/{bot_id}"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("PATCH", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
-    ("GET", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"): INHERITED,
-    ("GET", "/openapi/v1/bots/skills"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/upload"): INHERITED,
-    ("DELETE", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/skills/{skill_id}"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"): INHERITED,
-    ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"): INHERITED,
-    ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
+    # ── Retiring addresses in ``deprecated/``: the other half of the table,
+    # a same-keyed dict unioned in unchanged — split out to keep this file
+    # inside the module-size cap (Rule 9). See
+    # ``authorization_rules_retiring`` for the rows.
+    **RETIRING_AUTHORIZATION,
     # ── BBS content routes (community iteration) ──────────────────────────
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics"):
         NoCheck("tenant-wide BBS Topic catalogue; no addressed bot"),
@@ -1027,3 +963,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"):
         NoCheck("a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"),
 }
+
+
+# The table asserts its own shape while it imports (Instruction #2551): a
+# MEMBER write/operations row without its explicit origin fails the boot —
+# the audit lives in ``rule_shape_audit.py`` to keep this file within the
+# module-size cap.
+assert_member_writes_name_explicit_origin(AUTHORIZATION)

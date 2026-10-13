@@ -184,9 +184,28 @@ def validate_contract(
                 and status_text.startswith(("2", "3"))
             )
             schema = _response_schema(response)
+            # This alias deliberately preserves the legacy Provider error body.
+            # Keep the exception bound to this operation and its documented statuses.
+            legacy_provider_error = (
+                operation.get("x-avernet-legacy-provider-errors") is True
+                and method == "get"
+                and path == "/api/v1/collaboration/providers/by-slug/{slug}"
+                and status_text in {"400", "404", "500"}
+            )
+            if legacy_provider_error:
+                if (
+                    schema is None
+                    or set(schema.get("required", [])) != {"error", "status"}
+                    or schema.get("additionalProperties") is not False
+                    or set(schema.get("properties", {})) != {"error", "status"}
+                    or schema.get("properties", {}).get("error", {}).get("type") != "string"
+                    or schema.get("properties", {}).get("status", {}).get("type") != "integer"
+                    or schema.get("properties", {}).get("status", {}).get("const") != int(status_text)
+                ):
+                    errors.append(f"{location} {status}: invalid legacy Provider error schema")
             if schema is None and not websocket_upgrade and not raw_success:
                 errors.append(f"{location} {status}: missing JSON response schema")
-            elif schema is not None and not raw_success:
+            elif schema is not None and not raw_success and not legacy_provider_error:
                 required = set(schema.get("required", []))
                 if not ENVELOPE_FIELDS.issubset(required):
                     errors.append(f"{location} {status}: response is not an envelope")

@@ -171,3 +171,15 @@ python3 scripts/bcn_sim.py send "hello"      # in another terminal
 Tests use mock engines, temporary directories and loopback listeners; no real
 engine or BCS service is required. The two `engine::cli` pipe-capacity tests need
 a kernel that permits `F_SETPIPE_SZ` of at least 8 KiB.
+
+### Distribution identity discovery
+
+`IdentityResolver::registration_ref` receives the selected engine, canonical workspace
+and optional `--provider-bot-ref`. The default preserves the explicit reference;
+distributions can discover an existing local identity. Resolved references are
+validated before `registration_client` prepares authentication for both identity
+lookup and registration. `RegistrationClient::with_headers` applies the prepared
+headers to both requests, with redirects disabled. Credentials stay in the
+short-lived client and are not added to saved bridge configuration. Identity
+verification remains the resolver's responsibility; discovery alone is not proof
+of identity. Company-specific SDK implementations belong in their distribution.

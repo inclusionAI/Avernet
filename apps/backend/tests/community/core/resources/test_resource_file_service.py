@@ -44,6 +44,22 @@ def _svc(*, provider: str, device_fs: MagicMock):
 _COORDS = dict(entity_type="staff", entity_id="u1", bot_id="bot-1", engine_type="openclaw")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["list_dir", "read_file", "exists", "create_directory", "delete"])
+async def test_pre_resolved_instance_is_used_without_resolving_draft(operation):
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[])
+    device_fs.read_file = AsyncMock(return_value=b"data")
+    device_fs.exists = AsyncMock(return_value=True)
+    device_fs.write_file = AsyncMock()
+    device_fs.delete_file = AsyncMock(return_value=True)
+    service, dispatcher = _svc(provider="baas", device_fs=device_fs)
+    context = MagicMock(provider="baas", bot_type="service")
+    service._resolve_ctx = MagicMock(side_effect=AssertionError("must not resolve draft"))
+    await getattr(service, operation)(**_COORDS, path="a.txt", runtime_context=context)
+    assert dispatcher.dispatch_addressed.call_args.args[0] is context
+
+
 # ── addressing + absolute_path presentation ──────────────────────────────────
 
 

@@ -219,8 +219,8 @@ describe('ConversationPage(Task 8 组合页)', () => {
   it('ConversationPage uses Human identity and renders no Workspace identity tabs', async () => {
     render(<ConversationPage />);
     expect(screen.queryByRole('tab', { name: '协作群' })).not.toBeInTheDocument();
-    // Human 登录身份用于目录分组标题(而非旧工作身份)。
-    await screen.findByText('张三管理的 Bot');
+    // Human 登录身份用于目录加载(而非旧工作身份);组名按 v2 设计稿固定为「我的 Bot」。
+    await screen.findByText('我的 Bot');
   });
 
   it('点击 AgentCoding Bot 直接进入专用 coding-chat', async () => {

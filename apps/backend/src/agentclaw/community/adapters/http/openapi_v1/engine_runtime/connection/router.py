@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat imp
     authorize_friend_chat,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
@@ -154,6 +155,7 @@ async def get_connection(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    device_uuid: DeviceUuidQuery = None,
     f_user_id: FriendUserIdQuery = None,
     session_id: Annotated[
         str | None,
@@ -169,6 +171,8 @@ async def get_connection(
     gateway: GatewayEndpoint = Injected(GatewayEndpoint),
 ) -> Envelope[DesktopConnection | Connection | FriendConnection]:
     """Get usable socket connections for a bot."""
+    if f_user_id is not None and device_uuid is not None:
+        raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
     if f_user_id is not None:
         if stage is not RuntimeStage.DRAFT or not session_id:
             raise EngineResourceNotFoundError(
@@ -226,6 +230,7 @@ async def get_connection(
     # included — the same on both sides.
     result = await asyncio.to_thread(
         connections.build,
+        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         bot_id=bot_id,
         owner_id=owner_id,
         caller_id=user_id,

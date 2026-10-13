@@ -100,10 +100,10 @@ export function RoutinePanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-4">
         <div>
-          <h2 className="m-0 text-sm font-semibold">定时任务</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">
+          <h2 className="m-0 text-base font-semibold">定时任务</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
             配置执行计划；启停开关位于任务列表，编辑框只修改配置。
           </p>
         </div>
@@ -111,7 +111,7 @@ export function RoutinePanel({
           新建任务
         </Button>
       </div>
-      <div className="space-y-3 px-5 py-4">
+      <div className="space-y-3 px-7 py-5">
         {routines.length ? (
           routines.map((item) => (
             <section key={item.id} className="rounded-lg border border-border bg-card p-4 shadow-sm">

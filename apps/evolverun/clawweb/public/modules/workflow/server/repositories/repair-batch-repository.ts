@@ -165,7 +165,7 @@ export class RepairBatchRepository {
   getRevision(workflowId: string, taskId: string, revision: number): Promise<RepairRevision | null> { return this.readRevision(this.db, workflowId, taskId, revision); }
   private async latest(tx: IDatabase, workflowId: string, taskId: string, successOnly = false): Promise<RepairRevision | null> {
     const row = (await tx.query<Row>(`SELECT * FROM workflow_repair_revisions WHERE workflow_id = ? AND task_id = ?
-      ${successOnly ? 'AND draft_json IS NOT NULL' : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
+      ${successOnly ? "AND draft_json IS NOT NULL AND phase <> 'no_change'" : ''} ORDER BY revision DESC LIMIT 1`, [workflowId, taskId]))[0];
     return row ? revisionFromRow(row) : null;
   }
   latestSuccessfulRevision(workflowId: string, taskId: string): Promise<RepairRevision | null> { return this.latest(this.db, workflowId, taskId, true); }
@@ -228,10 +228,10 @@ export class RepairBatchRepository {
     if (current.stateVersion !== expectedStateVersion || current.phase !== 'drafting') conflict('STATE_CONFLICT', 'Draft result was already settled');
   }
   async completeDraft(tx: IDatabase, input: RevisionIdentity & {
-    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked';
+    draft: Record<string, unknown>; checks: Record<string, unknown>; phase: 'review' | 'blocked' | 'no_change';
   }): Promise<RepairRevision> {
     const current = await this.currentAttempt(tx, input);
-    if (!['review', 'blocked'].includes(input.phase)
+    if (!['review', 'blocked', 'no_change'].includes(input.phase)
       || typeof input.draft.candidateCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(input.draft.candidateCommit)
       || input.checks.candidateCommit !== input.draft.candidateCommit) conflict('INVALID_INPUT', 'Checks must bind the same immutable candidate commit');
     const draftJson = boundedRepairJson(input.draft, MAX_RESULT_BYTES);
@@ -245,6 +245,11 @@ export class RepairBatchRepository {
     [input.phase, draftJson, checksJson, digestRepairJson(input.draft), digestRepairJson(input.checks), Date.now(),
       input.workflowId, input.taskId, input.revision, input.expectedStateVersion]);
     if (result.affectedRows !== 1) conflict('STATE_CONFLICT', 'Draft result was already settled');
+    if (input.phase === 'no_change') {
+      await tx.exec(`UPDATE workflow_repair_items SET state = 'pending', active_task_id = NULL, active_revision = NULL,
+        state_version = state_version + 1, updated_at_ms = ? WHERE workflow_id = ? AND active_task_id = ? AND state = 'processing'`,
+      [Date.now(), input.workflowId, input.taskId]);
+    }
     return (await this.readRevision(tx, input.workflowId, input.taskId, input.revision))!;
   }
   async failDraft(tx: IDatabase, input: RevisionIdentity & { error: Record<string, unknown> }): Promise<RepairRevision> {
