@@ -3,7 +3,7 @@
 Tests cover admin, config, and BCN downlink routers not already tested:
 - Admin API Key management: list/create/revoke/get (via /api/v1/admin/api-keys)
 - Admin Publish management: force-success, device status update (/api/v1/admin/*)
-- Admin Bot restore: POST /api/v1/admin/bots/restore (atomic record restore, bot_id in body)
+- Admin Bot restore: POST /api/v1/admin/bots/restore (atomic record restore, bot_id or bot_uuid in body)
 - System Config management: list/create/update/delete (/api/v1/system-configs)
 - QPM Config management: set/get/delete per bot (/api/v1/bot-qpm)
 - Admin publish: retry non-admin path (/api/v1/publishes/{id}/retry)
@@ -620,6 +620,19 @@ class TestAdminRestoreBot:
             name=name,
         )
 
+    def _insert_rel(
+        self, repo, *, bot_id: int, tenant: str, env: str, device_uuid: str
+    ):
+        return repo.insert_rel(
+            bot_id=bot_id,
+            device_uuid=device_uuid,
+            tenant=tenant,
+            env=env,
+            domain="e2e_test_domain",
+            creator="e2e-test",
+            modifier="e2e-test",
+        )
+
     @pytest.mark.asyncio
     async def test_restore_soft_deleted_matches_final_row_states(
         self, api: APITestHelper, unique_id: str, _testclient_app
@@ -735,5 +748,145 @@ class TestAdminRestoreBot:
         assert "conflict" in response.json()["detail"].lower()
         mock_admin_svc.restore_bot.assert_awaited_once_with(
             bot_id=123,
+            bot_uuid=None,
             operator="e2e-ops",
         )
+
+    @pytest.mark.asyncio
+    async def test_restore_by_uuid_resolves_victim_and_retires_live_sibling(
+        self, api: APITestHelper, unique_id: str
+    ) -> None:
+        """200: bot_uuid restores the newest generation holding a live rel.
+
+        Seeds 3 generations for one uuid across envs "dev" and "gray": A
+        (older, soft-deleted, no rels), C (live in "gray", no rels — the
+        live sibling), and B (newest, soft-deleted — the mistake victim)
+        holding a live rel row in "gray". MAX(bot_id) over live rels must
+        resolve to B; reviving B retires C and leaves every rel row and
+        the already-dead A untouched.
+        """
+        from secbaas.community.bootstrap import get_container
+
+        bot_repo = get_container().repository.bot_repository()
+        rel_repo = get_container().repository.bot_device_rel_repository()
+        tenant = api.tenant
+        bot_uuid = f"BOT-e2e-restore-uuid-{unique_id}"
+
+        gen_a = self._insert_bot(
+            bot_repo,
+            bot_uuid=bot_uuid,
+            env="dev",
+            tenant=tenant,
+            name=f"restore-uuid-old-{unique_id}",
+        )
+        bot_repo.soft_delete(bot_id=gen_a, tenant=tenant, env="dev", modifier="e2e")
+
+        gen_c = self._insert_bot(
+            bot_repo,
+            bot_uuid=bot_uuid,
+            env="gray",
+            tenant=tenant,
+            name=f"restore-uuid-sibling-{unique_id}",
+        )
+
+        victim_id = self._insert_bot(
+            bot_repo,
+            bot_uuid=bot_uuid,
+            env="dev",
+            tenant=tenant,
+            name=f"restore-uuid-victim-{unique_id}",
+        )
+        bot_repo.soft_delete(bot_id=victim_id, tenant=tenant, env="dev", modifier="e2e")
+        victim_rel_id = self._insert_rel(
+            rel_repo,
+            bot_id=victim_id,
+            tenant=tenant,
+            env="gray",
+            device_uuid=f"dev-e2e-restore-{unique_id}",
+        )
+
+        response = await api.client.post(
+            "/api/v1/admin/bots/restore",
+            json={"bot_uuid": bot_uuid, "operator": "e2e-ops"},
+        )
+
+        assert response.status_code == 200, (
+            f"Expected 200 for uuid restore, "
+            f"got {response.status_code}: {response.text[:200]}"
+        )
+        body = response.json()
+        assert body["code"] == 0
+        data = body["data"]
+        assert data["bot_id"] == victim_id
+        assert data["bot_uuid"] == bot_uuid
+        assert data["previous_is_deleted"] == victim_id
+        assert data["new_status"] == "ACTIVE"
+        assert data["retired_sibling_count"] == 1
+
+        victim = bot_repo.get_by_id_including_deleted(victim_id, tenant, "dev")
+        assert victim is not None
+        assert victim.status == "ACTIVE"
+        assert victim.is_deleted == 0
+
+        sibling = bot_repo.get_by_id_including_deleted(gen_c, tenant, "gray")
+        assert sibling is not None
+        assert sibling.status == "RELEASED"
+        assert sibling.is_deleted == gen_c
+
+        old = bot_repo.get_by_id_including_deleted(gen_a, tenant, "dev")
+        assert old is not None
+        assert old.is_deleted == gen_a, "already-dead generations must stay untouched"
+
+        victim_rel = rel_repo.get_by_id(victim_rel_id, tenant, "gray")
+        assert victim_rel is not None
+        assert victim_rel.is_deleted == 0, "restore must not touch rel rows"
+
+    @pytest.mark.asyncio
+    async def test_restore_by_uuid_unknown_returns_404(
+        self, api: APITestHelper, unique_id: str
+    ) -> None:
+        """A uuid matching no record at all 404s with the no-records message."""
+        response = await api.client.post(
+            "/api/v1/admin/bots/restore",
+            json={
+                "bot_uuid": f"BOT-e2e-restore-unknown-{unique_id}",
+                "operator": "e2e-ops",
+            },
+        )
+
+        assert response.status_code == 404, (
+            f"Expected 404 for unknown uuid, "
+            f"got {response.status_code}: {response.text[:200]}"
+        )
+        assert "No bot records found" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_restore_by_uuid_without_live_rel_returns_404(
+        self, api: APITestHelper, unique_id: str
+    ) -> None:
+        """A uuid whose records hold no live rel (fully destroyed) 404s distinctly."""
+        from secbaas.community.bootstrap import get_container
+
+        bot_repo = get_container().repository.bot_repository()
+        tenant = api.tenant
+        bot_uuid = f"BOT-e2e-restore-norel-{unique_id}"
+
+        bot_id = self._insert_bot(
+            bot_repo,
+            bot_uuid=bot_uuid,
+            env="dev",
+            tenant=tenant,
+            name=f"restore-uuid-norel-{unique_id}",
+        )
+        bot_repo.soft_delete(bot_id=bot_id, tenant=tenant, env="dev", modifier="e2e")
+
+        response = await api.client.post(
+            "/api/v1/admin/bots/restore",
+            json={"bot_uuid": bot_uuid, "operator": "e2e-ops"},
+        )
+
+        assert response.status_code == 404, (
+            f"Expected 404 for uuid without live rels, "
+            f"got {response.status_code}: {response.text[:200]}"
+        )
+        assert "No non-deleted device relation" in response.json()["detail"]
