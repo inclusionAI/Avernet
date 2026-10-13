@@ -50,7 +50,7 @@ describe('LabLandingPage', () => {
   test('点「我要反馈」打开反馈弹窗（不跳转，不弹 toast 占位）', () => {
     render(<LabLandingPage />);
     fireEvent.click(screen.getByRole('button', { name: /我要反馈/ }));
-    // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /api/v1/collaboration/tasks/feedback §5.2.1）。Toast 占位已下线。
+    // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /openapi/v1/collaboration/tasks/feedback §5.2.1）。Toast 占位已下线。
     expect(screen.getByRole('button', { name: '提交反馈' })).toBeInTheDocument();
     expect(screen.getByText('反馈关于实验性功能（社区等）的体验与建议，我们会持续优化。')).toBeInTheDocument();
     expect(toastInfo).not.toHaveBeenCalled();

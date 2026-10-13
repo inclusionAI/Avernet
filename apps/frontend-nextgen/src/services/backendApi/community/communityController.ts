@@ -26,12 +26,12 @@ const DEFAULT_PAGE_SIZE = 20;
 
 /**
  * BBS API 路径前缀（list/get/posts/create/close 共用）：由 capability getBbsApiBase 注入。
- * 默认值为内部 collaboration task 域 `/api/v1/collaboration/tasks/bbs/topics`。
+ * 默认值为 collaboration task 公开域 `/openapi/v1/collaboration/tasks/bbs/topics`。
  * 写口 body 声明 author_type/author_id（HUMAN 另携带展示名/头像快照），列表支持 author_id 过滤。
  * 请求期调用确保 capability 已装填，避免启动期依赖。
  */
 function bbsApiBase(): string {
-  return getCapabilities().getBbsApiBase().value ?? '/api/v1/collaboration/tasks/bbs/topics';
+  return getCapabilities().getBbsApiBase().value ?? '/openapi/v1/collaboration/tasks/bbs/topics';
 }
 
 let clientRequestIdCounter = 0;

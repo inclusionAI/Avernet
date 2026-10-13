@@ -7,10 +7,10 @@ import {
 } from '@/services/backendApi/community/communityController';
 import * as http from '@/services/backendApi/httpClient';
 
-// list/get/posts/create/close 均由 capability getBbsApiBase 注入前缀——mock 为当前 内部 task 域路径。
+// list/get/posts/create/close 均由 capability getBbsApiBase 注入前缀——mock 为当前公开 task 域路径。
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
-    getBbsApiBase: () => ({ status: 'available', value: '/api/v1/collaboration/tasks/bbs/topics' }),
+    getBbsApiBase: () => ({ status: 'available', value: '/openapi/v1/collaboration/tasks/bbs/topics' }),
   }),
 }));
 jest.mock('@/services/backendApi/httpClient');
@@ -21,9 +21,9 @@ describe('communityController', () => {
     mockedRequest.mockReset().mockResolvedValue({ code: 200000, data: null });
   });
 
-  test('列表走 /api/v1/collaboration/tasks/bbs，适配 keyword/page/page_size，scope 不下发（我的需 author_id，此处不测）', async () => {
+  test('列表走 /openapi/v1/collaboration/tasks/bbs/topics，适配 keyword/page/page_size，scope 不下发（我的需 author_id，此处不测）', async () => {
     await listCommunityTopics({ search: ' Bot ', scope: 'mine', offset: 10, limit: 10 });
-    expect(mockedRequest).toHaveBeenCalledWith('/api/v1/collaboration/tasks/bbs/topics', {
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/bbs/topics', {
       method: 'GET',
       params: { page: 2, page_size: 10, keyword: 'Bot' },
       signal: undefined,
@@ -37,14 +37,14 @@ describe('communityController', () => {
     expect(args.params).not.toHaveProperty('keyword');
   });
 
-  test('详情与回复路径走 /api/v1/collaboration/tasks/bbs 并编码 topicId；回帖按 page/page_size 分页', async () => {
+  test('详情与回复路径走 /openapi/v1/collaboration/tasks/bbs/topics 并编码 topicId；回帖按 page/page_size 分页', async () => {
     await getCommunityTopic('topic/1');
     await listCommunityReplies('topic/1', { page: 2, pageSize: 15 });
-    expect(mockedRequest).toHaveBeenNthCalledWith(1, '/api/v1/collaboration/tasks/bbs/topics/topic%2F1', {
+    expect(mockedRequest).toHaveBeenNthCalledWith(1, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1', {
       method: 'GET',
       signal: undefined,
     });
-    expect(mockedRequest).toHaveBeenNthCalledWith(2, '/api/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
+    expect(mockedRequest).toHaveBeenNthCalledWith(2, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
       method: 'GET',
       params: { page: 2, page_size: 15 },
       signal: undefined,
@@ -53,14 +53,14 @@ describe('communityController', () => {
 
   test('回帖默认下发 page=1/page_size=20', async () => {
     await listCommunityReplies('topic/1');
-    expect(mockedRequest).toHaveBeenCalledWith('/api/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/posts', {
       method: 'GET',
       params: { page: 1, page_size: 20 },
       signal: undefined,
     });
   });
 
-  test('发布主题走 /api/v1/collaboration/tasks/bbs，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
+  test('发布主题走 /openapi/v1/collaboration/tasks/bbs/topics，HUMAN 写体含 client_request_id/title/body/author_id + 作者快照 author_display_name/author_avatar_url；结帖 body 含 author_id', async () => {
     // §2.1 + §8 填充规则：HUMAN 发帖时把 displayName/avatarUrl 作为写入快照下发，供列表/详情/楼层回放。
     const input = {
       title: '标题',
@@ -73,7 +73,7 @@ describe('communityController', () => {
     await closeCommunityTopic('topic/1', 'u1');
     expect(mockedRequest).toHaveBeenNthCalledWith(
       1,
-      '/api/v1/collaboration/tasks/bbs/topics',
+      '/openapi/v1/collaboration/tasks/bbs/topics',
       expect.objectContaining({
         method: 'POST',
         data: expect.objectContaining({
@@ -88,7 +88,7 @@ describe('communityController', () => {
         signal: undefined,
       }),
     );
-    expect(mockedRequest).toHaveBeenNthCalledWith(2, '/api/v1/collaboration/tasks/bbs/topics/topic%2F1/close', {
+    expect(mockedRequest).toHaveBeenNthCalledWith(2, '/openapi/v1/collaboration/tasks/bbs/topics/topic%2F1/close', {
       method: 'POST',
       data: { author_type: 'HUMAN', author_id: 'u1' },
       signal: undefined,

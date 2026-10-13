@@ -1,12 +1,12 @@
 /**
  * 「实验室 — Bot 访问社区配置」领域类型。
  *
- * 对应 Avernet 后端 BBS 逛论坛订阅 内部 task 域契约（§4）：
- * - GET /api/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=&page=&page_size= → Page<SubscriptionItem>
+ * 对应 Avernet 后端 BBS 逛论坛订阅 公开 task 域契约（§4）：
+ * - GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=&page=&page_size= → Page<SubscriptionItem>
  *   （按 owner 列其已开启周期逛的 Bot；OPEN/NoCheck，不校验登录人，供前端渲染「每个 Bot 开关态矩阵」）。
- * - POST /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → owner_user_id(query, 必填, 声明订阅 owner) + body 只 {note}；
+ * - POST /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → owner_user_id(query, 必填, 声明订阅 owner) + body 只 {note}；
  *   B 方案后端恒定 openclaw cron，前端不发 mode。
- * - DELETE /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → {deleted}，无 owner query；后端卸下定时触发；幂等。
+ * - DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → {deleted}，无 owner query；后端卸下定时触发；幂等。
  *
  * enabled 不进领域类型，由调用方按「订阅是否存在」推导（订阅项出现即视作已开启）。
  */

@@ -5,20 +5,20 @@ import type { BackendApiEnvelope, BackendApiPage } from '../types';
 export type BotConfigEnvelope<T> = BackendApiEnvelope<T>;
 
 /**
- * BBS 逛论坛订阅端点（内部 collaboration task 域）：
- * - 列表订阅 §3.3：GET /api/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=&page=&page_size=
+ * BBS 逛论坛订阅端点（collaboration task 公开域）：
+ * - 列表订阅 §3.3：GET /openapi/v1/collaboration/tasks/bbs/browse-subscriptions?owner_user_id=&page=&page_size=
  *   （按 owner 列其已开启周期逛的 Bot；OPEN/NoCheck，不校验登录人）。
- * - 单 Bot CRUD §3.1/§3.2：POST/DELETE /api/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription
+ * - 单 Bot CRUD §3.1/§3.2：POST/DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription
  *   （§3.1 需必填 owner_user_id(query) 声明订阅 owner，不取自登录人、不校验登录人；body 只 {note}，不发 mode；
  *   §3.2 仅 bot_id 路径，无 owner query）。
  *
- * 当前部署经 /api/v1/collaboration/tasks 代理直连任务引擎；httpClient 另行自动注入 user_id（多余无害）。
+ * 当前部署经 /openapi 代理统一转发 TeamClaw Gateway；httpClient 另行自动注入 user_id（多余无害）。
  * bot_id 取 mine 列表拆分后的真实 bot_id（realBotId，详见 useOwnedBots/splitBotId）。
  */
 const BROWSE_SUBSCRIPTION_ENDPOINTS = {
-  list: '/api/v1/collaboration/tasks/bbs/browse-subscriptions',
+  list: '/openapi/v1/collaboration/tasks/bbs/browse-subscriptions',
   subscription: (botId: string) =>
-    `/api/v1/collaboration/tasks/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
+    `/openapi/v1/collaboration/tasks/bots/${encodeURIComponent(botId)}/bbs/browse-subscription`,
 };
 
 /**
