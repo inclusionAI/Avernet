@@ -6,10 +6,15 @@
 // - 无树形 rail/前置消息图标:文字 13px/18px、x 与一级 bot 行平齐(稿 x=240);
 // - hover 交互热区分级:左缘较 bot 胶囊(全宽 inset-x-2)再内缩 24、右缘再内缩 8,收藏行右缘到边;
 // - 选中胶囊与 bot 行同构:全宽(#EBEBEB → bg-selected) rx6(稿 实测 x208..510);
+//   hover 胶囊与选中胶囊同几何(inset-x-2 全宽)——hover/选中背景长度一致,
+//   行内按钮的热区宽度(左缘内缩/右缘为星标让位)只作用于点击,不再用于背景;
 // - 收藏星标 #F39E1C(--star)常驻右缘 16px 槽位(稿 x267..283),未收藏 hover 才显现。
 //   收藏按 2026-10-10 平齐化终审维持星标直操作;不并入菜单翻转。
 // - 稿注记「hover到更多icon/click更多icon」:PR 454 恢复的操作(编辑标题/清除上下文/删除会话)
 //   由 hover「…」菜单承接,置于星标左侧;稿二级行无消息条数/时间列,故 withMeta=false。
+// - 长标题让位:星标(right 28..56px)/「…」(right 64..92px)绝对定位于行上、与文字 runway 重叠,
+//   文字右界随图标可见性收缩(静默 24px / 星标常驻 60px / hover·聚焦·触屏·菜单开启 96px),
+//   让位只走 pr 不动 mr 热区,pl 恒定保证标题起点不随状态跳动。
 // 行高 32 / 节奏 36(pitch)由列表容器承载,右余部无消息条数列(稿二级行无该元素)。
 import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
@@ -43,17 +48,40 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   const favorite = session.favorite === true;
   return (
     <div className="group/row relative flex min-h-8 items-center">
-      {/* 选中胶囊:全宽,与 bot 行同构(稿「会话目录二级_收藏+选中」实拍 #EBEBEB rx6 全宽)。 */}
-      {selected && <span aria-hidden="true" className="absolute inset-y-0 left-2 right-2 rounded-md bg-selected" />}
+      {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
+          hover = muted/60 弱化底(键盘 focus 与触屏常驻,同星标显现规则)。 */}
+      <span
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-y-0 left-2 right-2 rounded-md',
+          selected
+            ? 'bg-selected'
+            : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
+        )}
+      />
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}
         onClick={onSelect}
         className={cn(
-          'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md px-2 text-left',
-          // 交互/hover 热区分级:左缘 +24px、右缘 +8px(较 bot 胶囊);收藏行右缘到边(稿 271/279 宽)。
+          'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
+          // 交互/点击热区分级:左缘 +24px、右缘 +8px(较 bot 胶囊);收藏行右缘到边(稿 271/279 宽)。
+          // 仅界定点击范围,hover 背景已移交全宽胶囊。
           favorite ? 'ml-8 mr-2' : 'ml-8 mr-4',
-          selected ? 'hover:bg-transparent' : 'hover:bg-muted/60',
+          // 长标题让位(星标/「…」与标题互叠,两者都看不清):文字右界 = mr + pr,须按图标可见性
+          // 提前截断。让位只压缩文字(pr 不动热区 mr、不动胶囊几何),pl-2 恒定 → 标题起点不随状态跳动:
+          // - 静默态(未收藏且未选中)图标全隐 → 基础 pr-2,右界 24px(同原 px-2);
+          // - 星标常驻(收藏行 / 选中行) → 让至星标左界,右界 60px(收藏 mr-2→pr-52,非收藏 mr-4→pr-44);
+          // - hover/键盘聚焦/触屏,以及「…」菜单打开期间(trigger 钉住 data-state=open,鼠标离行仍可见)
+          //   → 让至「…」左界,右界 96px(收藏 mr-2→pr-88,非收藏 mr-4→pr-80)。
+          // 只读行无任何图标,维持基础内边距。
+          !readOnly && [
+            favorite && 'pr-[52px]',
+            !favorite && selected && 'pr-[44px]',
+            'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
+            favorite &&
+              'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
+          ],
         )}
       >
         <span

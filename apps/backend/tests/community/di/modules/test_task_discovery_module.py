@@ -1,176 +1,103 @@
-"""Unit tests for TaskDiscoveryModule — URL resolution + SessionInitiator DI dispatch.
+"""Unit tests for TaskDiscoveryModule's deployment-neutral session wiring."""
 
-Covers _resolve_frontend_url, _resolve_backend_url env branches, and
-_provide_session_initiator corp/singlebox/fallback dispatch.
-"""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
+_NOT_GIVEN = object()
 
-from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
-    OpenApiBotSessionInitiator,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
+    UnavailableSessionInitiator,
+)
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+    BcsTokenProviderImpl,
 )
 from agentclaw.community.di.modules.task_discovery_module import (
     TaskDiscoveryModule,
-    _resolve_backend_url,
-    _resolve_frontend_url,
+    _backend_origin_from_callback_url,
 )
 
 
-# ---------------------------------------------------------------------------
-# _resolve_frontend_url
-# ---------------------------------------------------------------------------
-
-class TestResolveFrontendUrl:
-    def test_frontend_url_env_takes_priority(self, monkeypatch):
-        monkeypatch.setenv("FRONTEND_URL", "http://custom:9999")
-        assert _resolve_frontend_url() == "http://custom:9999"
-
-    def test_singlebox_uses_singlebox_frontend_url(self, monkeypatch):
-        monkeypatch.delenv("FRONTEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        monkeypatch.setenv("SINGLEBOX_FRONTEND_URL", "http://sb-fe:8000")
-        assert _resolve_frontend_url() == "http://sb-fe:8000"
-
-    def test_singlebox_falls_back_to_default(self, monkeypatch):
-        monkeypatch.delenv("FRONTEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        monkeypatch.delenv("SINGLEBOX_FRONTEND_URL", raising=False)
-        assert _resolve_frontend_url() == "http://localhost:8000"
-
-    def test_non_singlebox_returns_default(self, monkeypatch):
-        monkeypatch.delenv("FRONTEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        assert _resolve_frontend_url() == "http://localhost:8000"
+def test_backend_origin_uses_the_standard_task_callback_url() -> None:
+    provider = BcsTokenProviderImpl(
+        task_callback_url="https://backend.example.test/api/callback"
+    )
+    assert _backend_origin_from_callback_url(provider) == "https://backend.example.test"
 
 
-# ---------------------------------------------------------------------------
-# _resolve_backend_url
-# ---------------------------------------------------------------------------
+def test_backend_origin_falls_back_for_missing_or_invalid_callback_url() -> None:
+    assert _backend_origin_from_callback_url(None) == "http://localhost:8888"
+    assert (
+        _backend_origin_from_callback_url(BcsTokenProviderImpl(task_callback_url=""))
+        == "http://localhost:8888"
+    )
+    assert (
+        _backend_origin_from_callback_url(
+            BcsTokenProviderImpl(task_callback_url="not-a-url")
+        )
+        == "http://localhost:8888"
+    )
 
-class TestResolveBackendUrl:
-    def test_backend_url_env_takes_priority(self, monkeypatch):
-        monkeypatch.setenv("BACKEND_URL", "http://custom:7777")
-        assert _resolve_backend_url() == "http://custom:7777"
-
-    def test_singlebox_uses_singlebox_backend_url(self, monkeypatch):
-        monkeypatch.delenv("BACKEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        monkeypatch.setenv("SINGLEBOX_BACKEND_URL", "http://sb-be:8888")
-        assert _resolve_backend_url() == "http://sb-be:8888"
-
-    def test_singlebox_falls_back_to_default(self, monkeypatch):
-        monkeypatch.delenv("BACKEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        monkeypatch.delenv("SINGLEBOX_BACKEND_URL", raising=False)
-        assert _resolve_backend_url() == "http://localhost:8888"
-
-    def test_non_singlebox_returns_default(self, monkeypatch):
-        monkeypatch.delenv("BACKEND_URL", raising=False)
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        assert _resolve_backend_url() == "http://localhost:8888"
-
-
-# ---------------------------------------------------------------------------
-# _provide_session_initiator — DI dispatch
-# ---------------------------------------------------------------------------
 
 class TestProvideSessionInitiator:
-    """Verify _provide_session_initiator dispatches by DEPLOY_PROFILE and
-    OpenApiBotPort availability."""
+    """Verify configuration-driven assembly without deployment-profile branches."""
 
-    def _make_module(self):
-        return TaskDiscoveryModule()
-
-    def _make_cron_relay(self):
-        return MagicMock()
-
-    def test_corp_path_with_openapi_bot_bound(self, monkeypatch):
-        """Non-singlebox + OpenApiBotPort resolves → OpenApiBotSessionInitiator.
-
-        corp 分支还会二次解析 ``FrontendUrlProvider``(corp 绑
-        ``CorpFrontendUrlProvider``;此处 MagicMock 同样返回 fake,
-        传入 initiator 供 _build_session_url 使用)。"""
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-        )
-
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
+    def _make_injector(self, frontend, bcs_provider, port):
         injector = MagicMock()
-        fake_bot = MagicMock()
-        injector.get.return_value = fake_bot
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
+        injector.get.side_effect = [frontend, bcs_provider, port]
+        return injector
+
+    def _make(self, frontend=_NOT_GIVEN, bcs_provider=_NOT_GIVEN, port=_NOT_GIVEN):
+        frontend = MagicMock() if frontend is _NOT_GIVEN else frontend
+        bcs_provider = (
+            BcsTokenProviderImpl(task_callback_url="https://backend.example.test")
+            if bcs_provider is _NOT_GIVEN
+            else bcs_provider
+        )
+        port = MagicMock() if port is _NOT_GIVEN else port
+        injector = self._make_injector(frontend, bcs_provider, port)
+        return TaskDiscoveryModule()._provide_session_initiator(injector), injector
+
+    def test_bound_ports_use_the_production_session_initiator(self):
+        fake_port = MagicMock()
+        provider = BcsTokenProviderImpl(
+            task_callback_url="https://backend.example.test"
+        )
+        fake_frontend = MagicMock()
+        result, injector = self._make(fake_frontend, provider, fake_port)
+
+        assert isinstance(result, OpenApiBotSessionInitiator)
+        assert result._openapi_bot is fake_port
+        assert result._frontend_url_provider is fake_frontend
+        assert result._backend_url == "https://backend.example.test"
+        injector.get.assert_any_call(ConfigFrontendUrlProvider)
+        injector.get.assert_any_call(OpenApiBotPort)
+
+    def test_missing_bcs_provider_uses_the_local_backend_default(self):
+        result, _ = self._make(bcs_provider=None, port=MagicMock())
+        assert isinstance(result, OpenApiBotSessionInitiator)
+        assert result._backend_url == "http://localhost:8888"
+
+    def test_missing_frontend_provider_uses_the_local_static_default(self):
+        result, _ = self._make(
+            frontend=Exception("frontend provider not bound"),
+            port=MagicMock(),
         )
         assert isinstance(result, OpenApiBotSessionInitiator)
-        assert result._frontend_url_provider is fake_bot
-        # 两次 DI 解析:OpenApiBotPort + FrontendUrlProvider
-        assert injector.get.call_count == 2
-        injector.get.assert_any_call(FrontendUrlProvider)
+        assert isinstance(result._frontend_url_provider, ConfigFrontendUrlProvider)
+        assert result._frontend_url == "http://localhost:8000"
 
-    def test_corp_path_frontend_url_provider_unbound_uses_null(self, monkeypatch):
-        """Non-singlebox + FrontendUrlProvider 解析抛错 → Null 兜底(回落构造值)。
-
-        OpenApiBotPort 正常返回,但 FrontendUrlProvider 未绑定(injector.get
-        第二次调用 raise)→ NullFrontendUrlProvider;initiator 仍装配成功。"""
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-            NullFrontendUrlProvider,
+    def test_openapi_port_error_returns_unavailable_placeholder(self):
+        result, _ = self._make(
+            port=Exception("OpenApiBotPort not bound"),
         )
+        assert isinstance(result, UnavailableSessionInitiator)
 
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        injector = MagicMock()
-        fake_bot = MagicMock()
-
-        def _get(interface):
-            if interface is FrontendUrlProvider:
-                raise Exception("not bound")
-            return fake_bot
-
-        injector.get.side_effect = _get
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, OpenApiBotSessionInitiator)
-        assert isinstance(result._frontend_url_provider, NullFrontendUrlProvider)
-
-    def test_corp_path_openapi_bot_none_falls_back(self, monkeypatch):
-        """Non-singlebox + OpenApiBotPort resolves to None → CronRelaySessionInitiator."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        injector = MagicMock()
-        injector.get.return_value = None
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, CronRelaySessionInitiator)
-
-    def test_corp_path_openapi_port_unbound_falls_back(self, monkeypatch):
-        """Non-singlebox + injector.get raises → CronRelaySessionInitiator."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        injector = MagicMock()
-        injector.get.side_effect = Exception("not bound")
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, CronRelaySessionInitiator)
-
-    def test_singlebox_path_returns_cron_relay(self, monkeypatch):
-        """Singlebox → always CronRelaySessionInitiator (no OpenApiBotPort lookup)."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        injector = MagicMock()
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, CronRelaySessionInitiator)
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-        )
-
-        # FrontendUrlProvider is resolved atop (before DEPLOY_PROFILE check);
-        # OpenApiBotPort should never be resolved in singlebox
-        injector.get.assert_called_once_with(FrontendUrlProvider)
+    def test_openapi_port_none_returns_unavailable_placeholder(self):
+        result, _ = self._make(port=None)
+        assert isinstance(result, UnavailableSessionInitiator)

@@ -31,7 +31,7 @@ export type RepairCandidatesResponse = {
 export type RepairTaskDetail = {
   workflowId: string; taskId: string; latestAttempt: RepairRevision;
   latestSuccessful: RepairRevision | null; revisions: RepairRevision[]; capabilities: RepairCapabilities;
-  execution?: { status: 'created' | 'dispatching' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
+  execution?: { status: 'created' | 'dispatching' | 'dispatch_uncertain' | 'dispatched' | 'running' | 'dispatch_failed' | 'succeeded' | 'failed' | 'cancelled';
     errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 };
 export type RepairSelectionRequest = {
@@ -57,7 +57,7 @@ export interface RepairSourcePort {
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
 export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };
 export type RepairGeneratedResult =
-  | { status: 'succeeded'; draft: Record<string, unknown>; checks: Record<string, unknown> }
+  | { status: 'succeeded' | 'blocked' | 'no_change'; draft: Record<string, unknown>; checks: Record<string, unknown> }
   | { status: 'failed'; error: Record<string, unknown> };
 export type RepairJobStatus = { status: 'running' | 'success' | 'failed' | 'stopped'; rawStatus: string; errorMessage: string | null };
 export type RepairExecutionReadRequest = RepairDispatchRequest & { jobId: string };

@@ -57,7 +57,6 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
         pending: sessions.actions.isPending(botId, view.section),
       }}
       expanded={store.expandedBotIds[botId] === true}
-      selected={selectedBot}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
       origin={origin}
       scope={scope}
@@ -90,7 +89,6 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
         pending: sessions.actions.isPending(botId, 'friend'),
       }}
       expanded={store.expandedBotIds[botId] === true}
-      selected={selectedBot}
       selectedSessionId={selectedBot ? store.selectedSessionId : null}
       origin="mine"
       scope="all"

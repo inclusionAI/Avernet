@@ -102,10 +102,13 @@ async def get_iam_token(
     entity_id: str | None = Query(default=None),
     is_test_exchange: bool = False,
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
-    session_key: str | None = Query(default=None, alias="sessionKey"),
+    session_key: str | None = Query(default=None),
+    legacy_session_key: str | None = Query(default=None, alias="sessionKey"),
 ) -> Response:
     # Query defaults are also used by direct adapter tests; only strings are data.
-    session_key = session_key if isinstance(session_key, str) else None
+    session_key = session_key if isinstance(session_key, str) else (
+        legacy_session_key if isinstance(legacy_session_key, str) else None
+    )
     fields = {"system": "backend", "direction": "inbound", "operation": "caller_iam",
               "operation_id": uuid.uuid4().hex, "method": "GET", "route": "/api/v1/token/iam",
               "request_id": request.headers.get("x-request-id"), "bot_id": bot_id,

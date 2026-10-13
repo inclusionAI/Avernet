@@ -233,15 +233,22 @@ async fn hook(
     headers: HeaderMap,
     Json(value): Json<Value>,
 ) -> Response {
-    let status = handle_hook(state, headers, value).await;
+    let question = state.options.mcp_socket_path.is_some()
+        && value["hook_event_name"] == "PreToolUse" && value["tool_name"] == "AskUserQuestion";
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let status = handle_hook(state, headers, value, question.then_some(tx)).await;
     if status == StatusCode::NO_CONTENT {
-        Json(json!({"continue":true})).into_response()
+        if question {
+            Json(rx.await.unwrap_or_else(|_| crate::questions::deny("Question is not owned by an active bridge request"))).into_response()
+        } else {
+            Json(json!({"continue":true})).into_response()
+        }
     } else {
         status.into_response()
     }
 }
 
-async fn handle_hook(state: Arc<State>, headers: HeaderMap, value: Value) -> StatusCode {
+async fn handle_hook(state: Arc<State>, headers: HeaderMap, value: Value, reply: Option<tokio::sync::oneshot::Sender<Value>>) -> StatusCode {
     if headers.get("authorization").and_then(|h| h.to_str().ok())
         != Some(&format!("Bearer {}", state.options.hook_secret))
     {
@@ -286,7 +293,7 @@ async fn handle_hook(state: Arc<State>, headers: HeaderMap, value: Value) -> Sta
             let cached = state.lock().sessions.get(&session).cloned();
             if let Some(request) = cached {
                 drop(_permit);
-                return correlated_hook(&state, &request, &session, value);
+                return correlated_hook(&state, &request, &session, value, reply);
             }
             let database = state.options.database_path.clone();
             let bot = state.options.bot_id.clone();
@@ -316,10 +323,10 @@ async fn handle_hook(state: Arc<State>, headers: HeaderMap, value: Value) -> Sta
             request
         }
     };
-    correlated_hook(&state, &request, &session, value)
+    correlated_hook(&state, &request, &session, value, reply)
 }
 
-fn correlated_hook(state: &State, request: &str, session: &str, value: Value) -> StatusCode {
+fn correlated_hook(state: &State, request: &str, session: &str, value: Value, reply: Option<tokio::sync::oneshot::Sender<Value>>) -> StatusCode {
     let event = value["hook_event_name"].as_str().unwrap_or_default();
     if event == "UserPromptSubmit" || event == "QueryEnd" {
         let Some(query) = value.get("request_set_id").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
@@ -337,13 +344,23 @@ fn correlated_hook(state: &State, request: &str, session: &str, value: Value) ->
             return StatusCode::NO_CONTENT;
         }
     }
-    enqueue(state, request, value)
+    if reply.is_some() {
+        let inner = state.lock();
+        let owned = inner.active.get(request).and_then(|a| a.request_set.as_ref());
+        if !owned.is_some_and(|(sdk, query)| sdk == session && value["request_set_id"].as_str() == Some(query)) {
+            return StatusCode::NO_CONTENT;
+        }
+    }
+    enqueue(state, request, match reply {
+        Some(reply) => Input::Question { hook: value, reply },
+        None => Input::Hook(value),
+    })
 }
 
-fn enqueue(state: &State, request: &str, value: Value) -> StatusCode {
+fn enqueue(state: &State, request: &str, input: Input) -> StatusCode {
     let tx = state.lock().active.get(request).map(|a| a.tx.clone());
     match tx {
-        Some(tx) => match tx.try_send(Input::Hook(value)) {
+        Some(tx) => match tx.try_send(input) {
             Ok(()) => StatusCode::NO_CONTENT,
             Err(mpsc::error::TrySendError::Full(_)) => {
                 // No Hook retry guarantee exists. Fence every affected turn so

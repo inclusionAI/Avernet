@@ -43,6 +43,9 @@ _AICODING_RSYNC_EXCLUDES = [
     "workspace/skills-pool/skill-center",
     "workspace/skills-pool/.skill-center*",
     "workspace/.repos/",
+    # Session-scoped runtime directories are not part of the publishable
+    # workspace; their names are the 8-4-4-4-12 session UUID.
+    "workspace/????????-????-????-????-????????????/",
     "workspace/.prewarm_ready.json",
     "skills/*/.git/",
     "memory/",
@@ -85,7 +88,14 @@ def _make_aicoding_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         extra_sync_source_relpath=".claude",
         extra_sync_target_relpath="claude",
         rsync_excludes=rsync_excludes,
-        extra_include_files=["sessions/cron-tasks.json"],
+        extra_include_files=[
+            "sessions/cron-tasks.json",
+            # This is a scoped container-home path. BotBuildService copies it
+            # from source_dir.parent/.codefuse/... (the mounted draft home)
+            # into artifact/aicoding/home/.codefuse/... during build and reverses
+            # that mapping during restore_draft.
+            "/home/admin/.codefuse/fuse/codefuse.json",
+        ],
     )
 
 

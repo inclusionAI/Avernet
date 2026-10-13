@@ -181,18 +181,18 @@ export function useBotSessionFilesFeature(
         removeTask={upload.removeTask}
       />
       {drawerOpen && (
-        // 验收微调：单聊文件管理由全屏 Modal 改为右侧副屏（与协作群 SessionFilesPanel 同构容器）。
+        // 验收微调：单聊资源管理由全屏 Modal 改为右侧副屏（与协作群 SessionFilesPanel 同构容器）；
+        // 宽度与 dmore artboard-008（387px）对齐，仍可拖拽调整。
         <ResizableWorkspaceSidebar
-          ariaLabel="会话文件面板"
+          ariaLabel="资源管理面板"
           side="right"
           minWidth={320}
           maxWidth={600}
-          defaultWidth={380}
+          defaultWidth={387}
           storageKey="teamclaw:bot-files-panel-width"
           className="z-30 bg-background"
         >
           <BotSessionFilesPanel
-            sessionName={session?.title || bot?.displayName || '当前会话'}
             readyFiles={files.readyFiles}
             isLoadingList={files.isLoadingList}
             botId={botId ?? undefined}

@@ -2,7 +2,7 @@
 
 Binds ``CommunityNotifySender`` (log-only, no real delivery) for the
 community/singlebox profile. 当钉钉凭证就绪（``TASK_DISCOVERY_DINGTALK_*`` /
-回退 ``SINGLEBOX_DINGTALK_*`` + ``TASK_DISCOVERY_CARD_TEMPLATE_ID``）时，
+
 绑定 ``DingTalkNotifySender``（装饰 ``CommunityNotifySender``：先日志再投递
 钉钉交互卡片，两者同时进行）。Corp deployments bind ``DingTalkNotifySender``
 via ``CorpNotifyModule`` instead.
@@ -11,6 +11,7 @@ via ``CorpNotifyModule`` instead.
 (``DiscoveryService`` / ``TaskDiscoveryLifecycle``)。
 ``NotifySenderPlugin`` 保持绑定，供 governance 域注入。
 """
+
 from __future__ import annotations
 
 from injector import Module, provider, singleton
@@ -66,9 +67,13 @@ class CommunityNotifyModule(Module):
     @singleton
     @provider
     def _notify_messages_provider(
-        self, sender: NotifySenderPlugin,
+        self,
+        sender: NotifySenderPlugin,
     ) -> NotifyMessagesProvider:
-        logger.debug("[task_discovery] → CommunityNotifyModule._notify_messages_provider(sender=%s)", type(sender).__name__)
+        logger.debug(
+            "[task_discovery] → CommunityNotifyModule._notify_messages_provider(sender=%s)",
+            type(sender).__name__,
+        )
         """Alias ``NotifyMessagesProvider`` → 同一 ``NotifySenderPlugin`` 实例。
 
         task_discovery 域 (``DiscoveryService`` / ``TaskDiscoveryLifecycle``) 注入

@@ -18,7 +18,8 @@ import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { CommandConfig, FileChipConfig, SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { Sender, ToolbarButton } from '@tc-chat/ui/es/Sender';
 import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
-import { useEffect, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, type ReactNode, type RefObject } from 'react';
+import { ChatEmptyState } from './ChatEmptyState';
 import { ChatMessageList } from './ChatMessageList';
 import { getMessageBlocks, getMessageTime, resolveSingleSender } from './chatPanelPresentation';
 export { resolveSingleSender } from './chatPanelPresentation';
@@ -167,6 +168,16 @@ export function ChatPanel({
   });
   // 空态欢迎文案的产品名经 capability 解析（Open=Avernet；internal=TeamClaw），不硬编码。
   const brand = getCapabilities().getProductBrand().value;
+  // 空态富化（真空会话）：Bot 头像标记 + 主副文案 + 开场指令的常规空态解剖
+  // （不借用消息几何，避免被误读为已有消息）；开场 chips 仅在可交互且命令面板装配时
+  // 提供——点击写入输入框并聚焦，Sender 命令面板随之唤起。
+  const insertDraft = useCallback(
+    (text: string) => {
+      senderRef?.current?.insert(text);
+      senderRef?.current?.focus();
+    },
+    [senderRef],
+  );
   if (!target) {
     return (
       <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
@@ -245,6 +256,13 @@ export function ChatPanel({
             isLoadingMoreHistory={historyPagination?.isLoading}
             onLoadMoreHistory={historyPagination?.onLoadMore}
             highlightMessageId={highlightMessageId}
+            emptyPlaceholder={
+              <ChatEmptyState
+                target={target}
+                command={command}
+                onInsertDraft={isInteractive && target.status === 'available' ? insertDraft : undefined}
+              />
+            }
           />
         )}
 

@@ -30,16 +30,16 @@ export function ChannelConfigPanel({
   const modeLabel = bindingMode === 'plugin' ? '基于开源插件' : '基于BCN';
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
         <div>
-          <h2 className="m-0 text-sm font-semibold">渠道管理</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight">渠道管理</h2>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">分别查看和管理基于开源插件或 BCN 的钉钉机器人。</p>
         </div>
         <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
           新建配置
         </Button>
       </div>
-      <div className="space-y-4 px-5 py-4">
+      <div className="space-y-5 px-7 py-5">
         <section className="rounded-xl border border-border bg-background p-4">
           <div className="mb-3 flex items-start justify-between gap-4">
             <div>

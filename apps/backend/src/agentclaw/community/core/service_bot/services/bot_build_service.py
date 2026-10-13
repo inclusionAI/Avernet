@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -34,6 +34,10 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     extra_root_rules,
     is_excluded,
     validate_required_paths,
+)
+from agentclaw.community.core.service_bot.services.local_bin_artifact import (
+    restore_local_bin_artifact,
+    sync_local_bin_artifact,
 )
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
 from agentclaw.community.core.bot_management.engines.registry import (
@@ -104,6 +108,28 @@ _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 # caller: worst case it times out and we degrade to skipping the file
 # (the pre-fix behavior), never to blocking the publish.
 _SUDO_PROBE_FALLBACK_TIMEOUT_SECONDS = 10.0
+
+# ``extra_include_files`` normally stores paths relative to an engine root
+# (for aicoding, ``.aicoding``). A path under ``/home/admin`` is a scoped
+# home-file marker rather than a host path: build copies it from the mounted
+# draft home into the artifact under ``home/...`` and restore reverses that
+# mapping. This keeps the literal configured /home/admin path explicit while
+# preventing arbitrary absolute source/target paths.
+_EXTRA_INCLUDE_HOME_ROOT = PurePosixPath("/home/admin")
+_EXTRA_INCLUDE_HOME_ARTIFACT_ROOT = "home"
+
+
+@dataclass(frozen=True)
+class _NormalizedExtraIncludeFile:
+    """One extra include after source-root parsing.
+
+    ``artifact_relpath`` is always the path inside the migration artifact.
+    ``source_home_relpath`` is non-empty only for home-scoped files and is
+    the path relative to the source draft's mounted home directory.
+    """
+
+    artifact_relpath: str
+    source_home_relpath: str = ""
 
 
 class BotBuildServiceError(Exception):
@@ -976,13 +1002,61 @@ class BotBuildService:
         return result
 
     @staticmethod
-    def _normalize_extra_include_file(rel_path: str) -> str:
+    def _normalize_extra_include_file(rel_path: str) -> _NormalizedExtraIncludeFile:
+        """Normalize a literal extra-include path, not the OS path itself.
+
+        Relative paths become artifact/engine-root paths. Absolute paths are
+        supported only under the fixed ``/home/admin`` scope and are converted
+        to a home-relative marker; all other absolute paths remain rejected.
+
+        @CfSecAICode 遵循消费金融安全编码 BE-FILE-002 规范:
+        统一做相对化和词法校验，禁止 ``..`` 和任意绝对路径作为拷贝目标。
+        """
         if not rel_path or "\x00" in rel_path:
-            raise BotBuildMigrationError(f"invalid extra include file path: {rel_path!r}")
+            raise BotBuildMigrationError(
+                f"invalid extra include file path: {rel_path!r}"
+            )
         parsed = PurePosixPath(rel_path)
-        if parsed.is_absolute() or ".." in parsed.parts or str(parsed) == ".":
+        if parsed.is_absolute():
+            try:
+                home_relpath = parsed.relative_to(_EXTRA_INCLUDE_HOME_ROOT)
+            except ValueError as exc:
+                raise BotBuildMigrationError(
+                    f"invalid extra include file path: {rel_path}"
+                ) from exc
+            if not home_relpath.parts or ".." in home_relpath.parts:
+                raise BotBuildMigrationError(
+                    f"invalid extra include file path: {rel_path}"
+                )
+            return _NormalizedExtraIncludeFile(
+                artifact_relpath=(
+                    f"{_EXTRA_INCLUDE_HOME_ARTIFACT_ROOT}/{home_relpath}"
+                ),
+                source_home_relpath=str(home_relpath),
+            )
+        if ".." in parsed.parts or str(parsed) == ".":
             raise BotBuildMigrationError(f"invalid extra include file path: {rel_path}")
-        return str(parsed)
+        return _NormalizedExtraIncludeFile(artifact_relpath=str(parsed))
+
+    @staticmethod
+    def _is_path_within_root(path: object, root: object) -> bool:
+        """Return whether a path resolves inside an allowed root.
+
+        Test doubles can deliberately model unreachable NAS paths as
+        non-``Path`` objects; they fall through so the existing root-squashed
+        device fallback remains reachable.
+
+        @CfSecAICode 遵循消费金融安全编码 BE-FILE-002 规范:
+        文件读写路径通过 resolve 后限制在固定根内，防止符号链接逃逸。
+        """
+        if not isinstance(path, Path) or not isinstance(root, Path):
+            return True
+        try:
+            resolved_path = path.resolve()
+            resolved_root = root.resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return resolved_path.is_relative_to(resolved_root)
 
     def _sudo_is_file(
         self,
@@ -1029,18 +1103,19 @@ class BotBuildService:
         return completed.returncode == 0
 
     def _sync_extra_include_files(
-            self,
-            *,
-            source_dir: Path,
-            target_dir: Path,
-            build_plan: EngineBuildPlan | None,
-            command_name: str,
-            error_message: str,
-            device_id: str | None = None,
-            device_source_root: str | None = None,
-            chown: str | None = None,
-            timeout_seconds: float | None = None,
-            build_ignore_paths: tuple[str, ...] = (),
+        self,
+        *,
+        source_dir: Path,
+        target_dir: Path,
+        build_plan: EngineBuildPlan | None,
+        command_name: str,
+        error_message: str,
+        device_id: str | None = None,
+        device_source_root: str | None = None,
+        chown: str | None = None,
+        timeout_seconds: float | None = None,
+        build_ignore_paths: tuple[str, ...] = (),
+        restore: bool = False,
     ) -> None:
         if not build_plan or not build_plan.extra_include_files:
             return
@@ -1048,9 +1123,45 @@ class BotBuildService:
         for rel_path in build_plan.extra_include_files:
             try:
                 normalized = self._normalize_extra_include_file(rel_path)
-                if is_excluded(normalized, build_ignore_paths):
+                if is_excluded(normalized.artifact_relpath, build_ignore_paths):
                     continue
-                source_file = source_dir / normalized
+
+                if normalized.source_home_relpath:
+                    if restore:
+                        # Restore reads the versioned artifact and writes back
+                        # beside the new draft home root.
+                        source_root: object = source_dir
+                        target_root: object = target_dir.parent
+                        source_file = source_dir / normalized.artifact_relpath
+                        target_file = target_dir.parent / normalized.source_home_relpath
+                    else:
+                        # Build reads the mounted draft home, which is one
+                        # level beside the engine source root.
+                        source_root = source_dir.parent
+                        target_root = target_dir
+                        source_file = source_dir.parent / normalized.source_home_relpath
+                        target_file = target_dir / normalized.artifact_relpath
+                else:
+                    source_root = source_dir
+                    target_root = target_dir
+                    source_file = source_dir / normalized.artifact_relpath
+                    target_file = target_dir / normalized.artifact_relpath
+
+                if not self._is_path_within_root(source_file, source_root):
+                    logger.warning(
+                        "[BotBuildService._sync_extra_include_files] "
+                        "Skip extra include source outside allowed root: %s",
+                        source_file,
+                    )
+                    continue
+                if not self._is_path_within_root(target_file, target_root):
+                    logger.warning(
+                        "[BotBuildService._sync_extra_include_files] "
+                        "Skip extra include target outside allowed root: %s",
+                        target_file,
+                    )
+                    continue
+
                 # The service runs as a non-root uid that cannot stat
                 # sandbox-owned files on the NAS merge area (e.g. uid 1000 /
                 # mode 0600): Path.exists()/is_file() then raise
@@ -1064,18 +1175,25 @@ class BotBuildService:
                 except PermissionError:
                     if not self._sudo_is_file(source_file, timeout_seconds):
                         # NFS root_squash: host sudo (root -> nobody) still
-                        # cannot read the uid-1000-owned sandbox file. As a
-                        # last resort, read it from inside the source bot's
-                        # BaaS container (runs as the file owner uid 1000),
+                        # cannot read the uid-1000-owned file. As a last
+                        # resort, read it from inside the source bot's BaaS
+                        # container (runs as the file owner uid 1000),
                         # bypassing root_squash. Only when a device is
                         # available (publish/migrate path); restore_draft
                         # reads host artifacts and never reaches here.
                         if device_id and device_source_root:
+                            fallback_source_root = device_source_root
+                            fallback_relpath = normalized.artifact_relpath
+                            if normalized.source_home_relpath:
+                                fallback_source_root = str(
+                                    Path(device_source_root).parent
+                                )
+                                fallback_relpath = normalized.source_home_relpath
                             if self._sync_extra_include_file_via_device(
                                 device_id=device_id,
-                                device_source_root=device_source_root,
-                                rel_path=normalized,
-                                target_file=target_dir / normalized,
+                                device_source_root=fallback_source_root,
+                                rel_path=fallback_relpath,
+                                target_file=target_file,
                                 chown=chown,
                                 timeout_seconds=timeout_seconds,
                             ):
@@ -1104,7 +1222,6 @@ class BotBuildService:
                     )
                     continue
 
-                target_file = target_dir / normalized
                 target_file.parent.mkdir(parents=True, exist_ok=True)
                 cmd = [
                     "sudo",
@@ -1116,7 +1233,7 @@ class BotBuildService:
                 cmd.extend([str(source_file), str(target_file)])
                 self._run_local_command(
                     cmd=cmd,
-                    command_name=f"{command_name} ({normalized})",
+                    command_name=f"{command_name} ({normalized.artifact_relpath})",
                     error_message=error_message,
                     timeout_seconds=timeout_seconds,
                 )
@@ -1320,6 +1437,16 @@ class BotBuildService:
                 command_name="rsync",
                 error_message="rsync migration failed",
             )
+
+            if is_nas:
+                sync_local_bin_artifact(
+                    source_home=source_dir.parent,
+                    target_dir=target_dir,
+                    device_id=device_id,
+                    version=version_str,
+                    build_ignore_paths=build_ignore_paths,
+                    run_command=self._run_local_command,
+                )
 
             # Device-side fallback for extra-include files that are unreadable
             # on the NAS merge area due to NFS root_squash (uid-1000-owned
@@ -1812,6 +1939,7 @@ class BotBuildService:
             error_message="restore draft extra include file failed",
             chown="1000:1000",
             timeout_seconds=remaining_timeout(),
+            restore=True,
         )
 
         if build_plan.extra_sync_source_relpath and build_plan.extra_sync_target_relpath:
@@ -1835,6 +1963,15 @@ class BotBuildService:
                 error_message="restore draft extra workspace failed",
                 timeout_seconds=remaining_timeout(),
             )
+
+        restore_local_bin_artifact(
+            artifact_dir=artifact_dir,
+            target_home=draft_dir.parent,
+            bot_id=bot_id,
+            version=source_version,
+            run_command=self._run_local_command,
+            timeout_seconds=remaining_timeout(),
+        )
 
         return {
             "restore_type": "migration_path",

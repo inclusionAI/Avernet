@@ -2856,7 +2856,10 @@ export async function handleAssignTask(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }
@@ -2936,7 +2939,10 @@ export async function handleTaskMessage(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }
@@ -3010,7 +3016,10 @@ export async function handleTaskComplete(
   }
 
   const taskInfo = sessionTaskGroupInfo.get(sessionKey);
-  const groupId = taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
+  // task.* RPCs retain the legacy session-scoped group_id wire contract.
+  // V3 separates group and canonical Session IDs on chat.send.
+  const groupId = sessionKeyToBcsSessionId.get(sessionKey)
+    ?? taskInfo?.groupId ?? sessionKeyToGroupId.get(sessionKey);
   if (!groupId) {
     return { ok: false, error: 'No group context for this session' };
   }

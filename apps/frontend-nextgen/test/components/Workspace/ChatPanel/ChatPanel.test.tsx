@@ -3,6 +3,7 @@ import { ChatPanel, resolveSingleSender } from '@/components/Workspace/ChatPanel
 import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { ChatBridge } from '@tc-chat/core';
+import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -660,5 +661,65 @@ describe('ChatPanel interactive', () => {
       />,
     );
     expect(mockPanelRenders.some((p) => p.bridge === bridge)).toBe(true);
+  });
+
+  it('真空会话确认后渲染富化空态：Bot头像标记+主副文案+开场 chips，chip 一键写入输入框', async () => {
+    const insert = jest.fn();
+    const focus = jest.fn();
+    // 真实 <Sender> 经 useImperativeHandle 挂桩,React 不会把 DOM 覆进 ref.current;
+    // 测试桩 <input> 会。以只读 getter 形态保住命令式桩,与真实运行时语义一致。
+    const senderRef = {
+      get current() {
+        return { insert, focus };
+      },
+      set current(_node: unknown) {
+        void _node;
+      },
+    } as unknown as React.RefObject<SenderRef>;
+    const command = {
+      categories: [
+        {
+          key: '__bot_commands__',
+          label: '命令',
+          items: [
+            { id: '__skill_entry__', name: 'skill' },
+            { id: '__file_entry__', name: 'file' },
+          ],
+        },
+      ],
+      onSelect: () => {},
+      format: () => '',
+    } as unknown as CommandConfig;
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        senderRef={senderRef}
+        command={command}
+        {...baseProps}
+      />,
+    );
+
+    // 两态强制：真空会话须等 EMPTY_CONFIRM_MS（1s）确认后才从骨架屏切到富化空态。
+    const heading = await screen.findByText('发送一条消息开始对话', undefined, { timeout: 2500 });
+    expect(heading).toBeInTheDocument();
+    // 副文案取 Bot 摘要（botModeTarget.summary = '单聊'）。
+    expect(screen.getByText('单聊')).toBeInTheDocument();
+    // 开场指令 chips：按命令面板装配物取舍（file/skill 均在），点击写入输入框并聚焦。
+    fireEvent.click(screen.getByRole('button', { name: /引用文件/ }));
+    expect(insert).toHaveBeenCalledWith('/file');
+    expect(focus).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /调用技能/ }));
+    expect(insert).toHaveBeenCalledWith('/skill');
   });
 });

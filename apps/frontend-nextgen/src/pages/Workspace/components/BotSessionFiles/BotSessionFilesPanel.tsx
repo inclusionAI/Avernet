@@ -3,11 +3,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useBotSessionFilePreview } from '@/pages/Workspace/hooks/useBotSessionFilePreview';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { formatFileSize, getPreviewKind } from '@/services/workspace/sessionFileUtils';
-import { Download, Eye, FileText, Reply, Trash2, Upload } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { Download, Eye, FileText, Reply, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PreviewPane } from '../GroupChatPane/SessionFilesPreviewPane';
-import { ManagePanelHeader } from '../ManagePanel/ManagePanelHeader';
-import { ManagePanelTabs, type ManagePanelTabOption } from '../ManagePanel/ManagePanelTabs';
 import {
   getSessionFileCategory,
   SESSION_FILE_CATEGORY_LABELS,
@@ -16,7 +15,6 @@ import {
 } from '../SessionFileTypeIcon';
 
 export interface BotSessionFilesPanelProps {
-  sessionName: string;
   readyFiles: BotSessionFileView[];
   isLoadingList: boolean;
   botId?: string;
@@ -32,13 +30,15 @@ export interface BotSessionFilesPanelProps {
 }
 
 /**
- * 单聊会话文件右侧内嵌面板（与协作群 SessionFilesPanel 同构的副屏）。
- * 容器由父级提供（ResizableWorkspaceSidebar 语义）；内部为下钻式两视图（验收微调三轮）：
- * 列表视图为主，点击文件行整屏切到预览视图（带「返回文件列表」）；列表行/预览内核自
- * BotSessionFilesModal 迁移，数据 Hook 与行为不变（含单聊特有的「引用到输入框」行操作）。
+ * 单聊「资源管理」右侧副屏（dmore artboard-008 对齐）：
+ * 48px 标题行 + 32px 筛选条（下划线 Tabs + 上传图标钮）+ 61px 紧排文件行。
+ * 容器由父级提供（ResizableWorkspaceSidebar 语义）；内部为下钻式两视图：
+ * 列表视图为主，点击文件行本体或行内「预览」按钮切到预览视图（带「返回文件列表」）；
+ * 预览视图头部支持「引用到输入框」与「下载」。
+ * 行/预览内核自 BotSessionFilesModal 迁移，数据 Hook 与行为不变
+ * （含单聊特有的「引用到输入框」行操作）。
  */
 export function BotSessionFilesPanel({
-  sessionName,
   readyFiles,
   isLoadingList,
   botId,
@@ -64,18 +64,15 @@ export function BotSessionFilesPanel({
     onOpenRef.current();
   }, [sessionId]);
 
-  // 类型过滤 Tab（验收微调）：按大类聚合动态生成（带计数），与群聊侧同构；
-  // 单聊无 mimeType，按文件名判定（与其预览 Hook 口径一致）。
-  const categoryOptions = useMemo<ManagePanelTabOption<SessionFileCategory | 'all'>[]>(() => {
-    const counts = new Map<SessionFileCategory, number>();
-    for (const file of readyFiles) {
-      const key = getSessionFileCategory(file.displayName);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    const present = (['media', 'document', 'code', 'sheet', 'other'] as const).filter((c) => counts.has(c));
+  // 类型筛选 Tab（对齐设计稿「全部/文档/代码」形态）：不做设计稿外的计数装饰，
+  // 按实际存在的大类动态生成；单聊无 mimeType，按文件名判定（与其预览 Hook 口径一致）。
+  const categoryOptions = useMemo(() => {
+    const order = ['media', 'document', 'code', 'sheet', 'other'] as const;
+    const present = new Set<SessionFileCategory>();
+    for (const file of readyFiles) present.add(getSessionFileCategory(file.displayName));
     return [
-      { value: 'all', label: `全部 ${readyFiles.length}` },
-      ...present.map((c) => ({ value: c, label: `${SESSION_FILE_CATEGORY_LABELS[c]} ${counts.get(c)}` })),
+      { value: 'all' as const, label: '全部' },
+      ...order.filter((c) => present.has(c)).map((c) => ({ value: c, label: SESSION_FILE_CATEGORY_LABELS[c] })),
     ];
   }, [readyFiles]);
 
@@ -107,7 +104,18 @@ export function BotSessionFilesPanel({
 
   return (
     <aside className="flex h-full flex-col bg-background">
-      <ManagePanelHeader title="会话文件" subtitle={sessionName} statusLabel="可查看" onClose={onClose} />
+      {/* 标题行（设计稿：48px，标题 14px 左起 20px，16px 关闭 X 右起 20px）。 */}
+      <div className="flex h-12 shrink-0 items-center justify-between pl-5 pr-5">
+        <h3 className="m-0 text-sm font-normal leading-5 tracking-[-0.15px] text-foreground">资源管理</h3>
+        <IconButton
+          label="关闭资源管理面板"
+          icon={<X className="h-4 w-4" aria-hidden />}
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          className="h-6 w-6 text-zinc-400 hover:bg-transparent hover:text-foreground"
+        />
+      </div>
 
       {selectedFile ? (
         /* 预览视图（下钻）：返回导航合并进 PreviewPane 头部，预览独享全部可用高度（无独立导航层）。 */
@@ -120,131 +128,196 @@ export function BotSessionFilesPanel({
             onDownload={() => {
               if (selectedFile) onDownload(selectedFile);
             }}
+            onReference={() => {
+              if (selectedFile) onReference(selectedFile);
+            }}
           />
         </div>
       ) : (
-        <div className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {/* 文件列表视图（主视图）：行结构自 BotSessionFilesModal 迁移，含单聊特有的引用操作。 */}
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-            <span className="text-xs font-medium text-muted-foreground">{`会话文件（${readyFiles.length}）`}</span>
+        <>
+          {/* 筛选条（设计稿：32px 高、发丝线下边、左起下划线 Tabs、右端 24px 边框上传钮）。 */}
+          <div className="flex h-[33px] shrink-0 items-center justify-between border-b-[0.5px] border-zinc-300/40 pl-5 pr-5">
+            {readyFiles.length > 0 ? (
+              /* 间距修正：原 w-6 恰好等于二字标签宽度，标签之间零间距；
+                  改按设计稿 40px tab 节奏（8px 左右内距，紧排无额外 gap），
+                  下划线随文字收敛为 inset-x-2。 */
+              <div role="tablist" aria-label="资源类型筛选" className="flex h-8 self-end">
+                {categoryOptions.map((option) => {
+                  const active = option.value === effectiveCategory;
+                  return (
+                    <Button
+                      key={option.value}
+                      type="button"
+                      variant="ghost"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setCategory(option.value)}
+                      className={cn(
+                        'relative h-8 shrink-0 justify-center rounded-none border-0 px-2 text-xs leading-[18px]',
+                        active ? 'font-medium text-zinc-800' : 'font-normal text-muted-foreground hover:bg-transparent',
+                      )}
+                    >
+                      {option.label}
+                      {active && (
+                        <span aria-hidden className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-zinc-800" />
+                      )}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : (
+              <span />
+            )}
             <Button
-              size="sm"
-              variant="ghost"
-              leftIcon={<Upload className="h-3.5 w-3.5" aria-hidden />}
+              variant="outline"
+              aria-label="上传文件"
               onClick={onUploadClick}
-              className="border border-primary/30 bg-primary/10 px-3 text-primary hover:bg-primary/10 hover:text-primary"
+              className="h-6 w-6 shrink-0 rounded-lg border-zinc-200 bg-background p-0 text-muted-foreground hover:bg-background hover:text-foreground"
             >
-              上传文件
+              <Upload className="h-3.5 w-3.5" aria-hidden />
             </Button>
           </div>
 
-          {/* 类型过滤 Tab（验收微调）：全量列表上方，按大类切换过滤（与群聊侧同构）。 */}
-          {readyFiles.length > 0 ? (
-            <ManagePanelTabs value={effectiveCategory} options={categoryOptions} onChange={setCategory} />
-          ) : null}
-
-          <div className="min-h-0 flex-1 p-2">
-            {isLoadingList && readyFiles.length === 0 ? (
-              <div className="space-y-1.5 p-1">
-                {[1, 2, 3, 4].map((i) => (
-                  <Skeleton.Block key={i} className="h-10 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : readyFiles.length === 0 ? (
-              <Empty
-                compact
-                icon={<FileText className="h-5 w-5" aria-hidden />}
-                title="暂无会话文件"
-                description="点击上方「上传文件」上传，或选择本会话已有文件。"
-              />
-            ) : (
-              <TooltipProvider>
-                <ul className="m-0 list-none space-y-1 p-0">
-                  {visibleFiles.map((file) => {
-                    // 下钻模式（验收微调四轮）：预览收敛为行内操作按钮（首位），
-                    // 行本体恢复纯展示（点击无动作）。
-                    // 不可预览类型（非图片/PDF/文本白名单）：按钮禁用并提示原因。
-                    // 用 aria-disabled 而非原生 disabled——禁用态仍需 hover 出 Tooltip，
-                    // 原生 disabled button 不派发 pointer 事件会让提示失效。
-                    const previewable = getPreviewKind(file.displayName) !== 'other';
-                    return (
-                      <li
-                        key={file.resourceId}
-                        className="flex items-center gap-1 rounded-lg px-2.5 py-2 transition-colors hover:bg-muted/50"
-                      >
-                        <div className="flex min-w-0 flex-1 shrink cursor-default items-start justify-start gap-2 rounded-md px-1.5 py-0.5 text-left text-xs text-foreground">
-                          <SessionFileTypeIcon name={file.displayName} className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {/* 文件列表（设计稿：61px 紧排行，图标 20px + 文件名 13px + 元数据 11px；首行顶距 8px）。 */}
+            <div className="min-h-0 flex-1 pt-2">
+              {isLoadingList && readyFiles.length === 0 ? (
+                /* 加载骨架与真实文件行同构：61px 行高 + 20px 图标位 + 文件名/元数据
+                    双条描线，宽度按行错落模拟不同文件名；避免整版灰色实心块，
+                    且加载完成瞬间行位零跳动。 */
+                <ul className="m-0 list-none p-0">
+                  {['w-2/5', 'w-3/5', 'w-1/2', 'w-2/3', 'w-3/5'].map((nameWidth, index) => (
+                    <li key={index} aria-hidden className="flex h-[61px] items-center px-5">
+                      <Skeleton.Block className="h-5 w-5 shrink-0 rounded-md" />
+                      <div className="ml-1 flex min-w-0 flex-1 flex-col">
+                        <Skeleton.Block className={cn('h-[13px] rounded-full', nameWidth)} />
+                        <Skeleton.Block className="mt-1 h-[9px] w-10 rounded-full" />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : readyFiles.length === 0 ? (
+                <Empty
+                  compact
+                  icon={<FileText className="h-5 w-5" aria-hidden />}
+                  title="暂无资源"
+                  description="点击右上「上传文件」，或引用本会话已有文件。"
+                />
+              ) : (
+                <TooltipProvider>
+                  <ul className="m-0 list-none p-0">
+                    {visibleFiles.map((file) => {
+                      // 下钻入口（2026-10-12 验收拍板，替代验收微调四轮的「行本体纯展示」）：
+                      // 可预览文件点击行本体直接下钻，行内「预览」图标按钮保留
+                      // （可见入口 + 禁用语义承载）。
+                      // 不可预览类型（非图片/PDF/文本白名单）：行本体仍为纯展示，
+                      // 按钮禁用并提示原因。
+                      // 用 aria-disabled 而非原生 disabled——禁用态仍需 hover 出 Tooltip，
+                      // 原生 disabled button 不派发 pointer 事件会让提示失效。
+                      const previewable = getPreviewKind(file.displayName) !== 'other';
+                      const rowContent = (
+                        <>
+                          <SessionFileTypeIcon name={file.displayName} className="h-5 w-5 shrink-0" />
                           <div className="min-w-0 flex-1">
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="block truncate">{file.displayName}</span>
+                                <span className="block truncate text-[13px] leading-[21px] text-foreground">
+                                  {file.displayName}
+                                </span>
                               </TooltipTrigger>
                               <TooltipContent>{file.displayName}</TooltipContent>
                             </Tooltip>
                             {/* 元数据模型统一（2026-09-20 用户拍板）：两行结构与群聊侧同构；
                                 单聊文件接口暂不返回上传者/时间，次行仅展示大小，
-                                后端补齐字段后本行自动扩充。 */}
-                            <span className="mt-1 block truncate text-xs leading-4 text-muted-foreground">
+                                后端补齐字段后本行自动扩充（设计稿为「风太 · 09/15 14:22 · 7.0KB」）。 */}
+                            <span className="mt-0.5 block truncate text-[11px] leading-[18px] text-muted-foreground">
                               {file.sizeBytes ? formatFileSize(file.sizeBytes) : '--'}
                             </span>
                           </div>
-                        </div>
-                        {/* 操作按钮常显：不再 hover 悬浮切换（原 opacity/pointer-events 切换系
-                            Tooltip 闪烁缺陷的历史对策，与群聊侧同因同治后统一为常显）。 */}
-                        <div className="flex shrink-0 items-center">
-                          <IconButton
-                            label={previewable ? '预览文件' : '该文件类型暂不支持预览'}
-                            // PR#413 评审跟进 P3（#257104459）：视觉提示精简，读屏名称保留
-                            // 文件名——ariaLabel 恢复含文件名的完整可访问名称，读屏用户可区分行。
-                            ariaLabel={
-                              previewable
-                                ? `预览文件 ${file.displayName}`
-                                : `预览文件 ${file.displayName}（该文件类型暂不支持预览）`
-                            }
-                            icon={<Eye className="h-4 w-4" aria-hidden />}
-                            size="sm"
-                            variant="ghost"
-                            aria-disabled={previewable ? undefined : true}
-                            onClick={previewable ? () => setSelectedId(file.resourceId) : undefined}
-                            className={previewable ? undefined : 'cursor-not-allowed opacity-50'}
-                          />
-                          <IconButton
-                            label="引用到输入框"
-                            icon={<Reply className="h-4 w-4" aria-hidden />}
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => onReference(file)}
-                          />
-                          <IconButton
-                            label="下载文件"
-                            icon={<Download className="h-4 w-4" aria-hidden />}
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => onDownload(file)}
-                          />
-                          <ConfirmDialog
-                            title={`删除文件 ${file.displayName}`}
-                            description="删除后本会话成员将无法再查看该文件。"
-                            confirmText="删除"
-                            confirmVariant="destructive"
-                            onConfirm={() => onDelete(file)}
-                          >
+                        </>
+                      );
+                      return (
+                        <li
+                          key={file.resourceId}
+                          className="group flex h-[61px] items-center rounded-lg px-5 transition-colors hover:bg-zinc-100"
+                        >
+                          {previewable ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedId(file.resourceId)}
+                              className="m-0 flex min-w-0 flex-1 shrink cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left"
+                            >
+                              {rowContent}
+                            </button>
+                          ) : (
+                            <div className="flex min-w-0 flex-1 shrink cursor-default items-center gap-1 text-left">
+                              {rowContent}
+                            </div>
+                          )}
+                          {/* 行操作（设计稿：悬停行底 zinc-100 时出现在右端）：常驻挂载
+                              opacity 切换可见（hover/focus-within），不做布局位移；Tooltip
+                              闪烁的历史对策仅限 pointer-events 切换，此处不受影响。 */}
+                          <div className="flex shrink-0 items-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
                             <IconButton
-                              label="删除文件"
-                              icon={<Trash2 className="h-4 w-4" aria-hidden />}
+                              label={previewable ? '预览文件' : '该文件类型暂不支持预览'}
+                              // PR#413 评审跟进 P3（#257104459）：视觉提示精简，读屏名称保留
+                              // 文件名——ariaLabel 恢复含文件名的完整可访问名称，读屏用户可区分行。
+                              ariaLabel={
+                                previewable
+                                  ? `预览文件 ${file.displayName}`
+                                  : `预览文件 ${file.displayName}（该文件类型暂不支持预览）`
+                              }
+                              icon={<Eye className="h-3.5 w-3.5" aria-hidden />}
                               size="sm"
                               variant="ghost"
+                              aria-disabled={previewable ? undefined : true}
+                              onClick={previewable ? () => setSelectedId(file.resourceId) : undefined}
+                              className={cn(
+                                'h-5 w-5 text-muted-foreground hover:text-foreground',
+                                previewable ? undefined : 'cursor-not-allowed opacity-50',
+                              )}
                             />
-                          </ConfirmDialog>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </TooltipProvider>
-            )}
+                            <IconButton
+                              label="引用到输入框"
+                              icon={<Reply className="h-3.5 w-3.5" aria-hidden />}
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onReference(file)}
+                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                            />
+                            <IconButton
+                              label="下载文件"
+                              icon={<Download className="h-3.5 w-3.5" aria-hidden />}
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onDownload(file)}
+                              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                            />
+                            <ConfirmDialog
+                              title={`删除文件 ${file.displayName}`}
+                              description="删除后本会话成员将无法再查看该文件。"
+                              confirmText="删除"
+                              confirmVariant="destructive"
+                              onConfirm={() => onDelete(file)}
+                            >
+                              <IconButton
+                                label="删除文件"
+                                icon={<Trash2 className="h-3.5 w-3.5" aria-hidden />}
+                                size="sm"
+                                variant="ghost"
+                                className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                              />
+                            </ConfirmDialog>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </TooltipProvider>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </aside>
   );

@@ -1,7 +1,7 @@
 import asyncio
 
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_center.engine import CoopGroupStart, ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CoopGroupStart, CentralizedExecutionAdapter
 
 
 class _FakeRunner:
@@ -12,7 +12,7 @@ class _FakeRunner:
 
 
 def _engine_with_fake_runner():
-    eng = ExecutionEngine.__new__(ExecutionEngine)
+    eng = CentralizedExecutionAdapter.__new__(CentralizedExecutionAdapter)
     eng._runner = _FakeRunner()
     return eng
 

@@ -100,9 +100,6 @@ apps/bcs/testresult/
 **/pytest_report/
 apps/bcs/target
 
-apps/bcs/submodules/
-apps/bcs/testresult/
-apps/bcs/target
 singlebox/.dependencies
 
 .idea
@@ -112,4 +109,4 @@ singlebox/.dependencies
 openspec
 
 scripts/undercover-game.sh
-singlebox/.dependencies
+scripts/.dependencies

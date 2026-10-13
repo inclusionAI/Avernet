@@ -151,7 +151,12 @@ pub async fn register(args: RegisterArgs, path: &Path, app: &BridgeApp) -> anyho
     // (plugin bots require bot_id); its URL was validated above.
     if webhook_token.is_some() { config::runtime(&document, path, webhook_token.as_deref())?; }
     let prepared = PreparedConfig::new(path, bootstrap.original)?;
-    let context = IdentityContext { mode: args.mode, client: &client, explicit_ref: args.provider_bot_ref.as_deref() };
+    let resolved_ref = identity.registration_ref(args.provider_bot_ref.as_deref(), &args.engine, &cwd).await?;
+    if resolved_ref.as_deref().is_some_and(|reference| !valid_provider_bot_ref(reference)) {
+        bail!("The Provider identity is not a valid provider_bot_ref");
+    }
+    let client = identity.registration_client(client, resolved_ref.as_deref()).await?;
+    let context = IdentityContext { mode: args.mode, client: &client, explicit_ref: resolved_ref.as_deref() };
     let provider_bot_ref = identity.provider_bot_ref(&context).await?;
     if !valid_provider_bot_ref(&provider_bot_ref) { bail!("The Provider identity is not a valid provider_bot_ref"); }
     let registration = client.register(&args.token, args.bot_name.trim(), &provider_bot_ref, args.mode.name(), webhook_url, &provider_id).await?;

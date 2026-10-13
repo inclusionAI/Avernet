@@ -1,9 +1,4 @@
-"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ poller 登记入口。
-
-dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 IO,拿到 run_id 即返回
-(不等待结果);BBS 也经统一 dispatch 入口启动。form_coop_group(async):BCS 建群壳。
-poller 为独立 daemon sidecar(同 TaskHarness)。
-"""
+"""TaskExecutor: 单 Bot、协作群和 BBS 三模态投递，并记录执行轨迹。"""
 
 from __future__ import annotations
 
@@ -11,14 +6,19 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import replace
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
+from agentclaw.community.core.task.domain.models import (
+    TaskCallbackData,
+    TaskNode,
+    TaskNodePatch,
+    task_spec_instruction,
+)
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_context.task_context_service import build_task_runner_execution_event_kwargs
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupRequest,
@@ -39,13 +39,18 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_resu
     BcsGroupHandle,
     SingleBotHandle,
 )
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
+    TaskExecutorBbsMixin,
+)
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_relay import (
+    TaskExecutorRelayMixin,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
 
-# 人类观察者(不发言)拉人机制:任务 owner 以 observer 角色被追加进协作群,
-# routing_policy.inject_observers 让终产投递给观察者(观察者不参与发言)。bot_uuid=human_<owner_user_id>。
+# 人类观察者以 observer 角色入群但不发言，终产通过 inject_observers 投递。
 _HUMAN_OBSERVER_ROUTING_POLICY: dict[str, Any] = {"default_bot_final_delivery": "inject_observers"}
 # 走人类观察者拉人的协作模式(state_machine 群 participants 不得带 role,故不在此拉人)。
 _HUMAN_OBSERVER_MODES = {"chat", "manager_worker"}
@@ -65,12 +70,7 @@ def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
 _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 
-from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
-    TaskExecutorBbsMixin,
-)
-
-
-class TaskExecutor(TaskExecutorBbsMixin):
+class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
     def __init__(
         self,
         *,
@@ -87,15 +87,12 @@ class TaskExecutor(TaskExecutorBbsMixin):
         bot_token_provider=None,
         task_settings=None,
         on_bbs_report=None,
+        task_context_service=None,
     ) -> None:
-        """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
-        context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
-        graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
-        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
-        bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
-        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。
-        task_settings: TaskSettingsServiceProtocol|None,读取 skill_report 开关决定
-        所有任务模式的结果回收链路(默认 skill HTTP 上报;关闭后走 poller 拉消息,两者互斥不并存)。"""
+        """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None; context:
+        TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。graph:
+        TaskGraphService|None(动态派发后落 group_id/session_id/run_id 到 run_info.extend_props;None 跳过)。
+        bcn/api_base_url/task_settings: BBS 候选查询身份/任务后端 url/skill_report 开关(默认 skill HTTP 上报,关闭走 poller)。"""
         self._bot = bot
         self._bcs = bcs
         self._bcn = bcn
@@ -109,9 +106,18 @@ class TaskExecutor(TaskExecutorBbsMixin):
         self._bot_token_provider = bot_token_provider
         self._task_settings = task_settings
         self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 BBS dispatch→notify 走引擎收敛)
+        self._task_context_service = task_context_service
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
+
+    def _report_node_patch(self, patch: TaskNodePatch):
+        if self._graph is None:
+            return None
+        return self._graph.report(TaskCallbackData(data={
+            "report_type": "NODE_PATCH",
+            "payload": {"patch": patch},
+        }))
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         sem = asyncio.Semaphore(_DISPATCH_CONCURRENCY)
@@ -138,14 +144,16 @@ class TaskExecutor(TaskExecutorBbsMixin):
                     node.node_id,
                     node.run_info.assignee,
                 )
-                return await self._dispatch_single_bot(node, sem)
+                return await self._dispatch_execution_with_trajectory(
+                    node, mode, self._dispatch_single_bot(node, sem))
             if mode == "coop_group":
                 logger.info(
                     "[task][task-executor] >>> 投递 coop_group task=%s node=%s → form_coop_group(create_group)",
                     node.task_id,
                     node.node_id,
                 )
-                return await self._dispatch_coop_group(node, sem)
+                return await self._dispatch_execution_with_trajectory(
+                    node, mode, self._dispatch_coop_group(node, sem))
             logger.warning(
                 "[task][task-executor] node=%s 未知 run_mode=%s → 不投递",
                 node.node_id,
@@ -155,46 +163,36 @@ class TaskExecutor(TaskExecutorBbsMixin):
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
 
-    async def _dispatch_bbs(
-        self, node: TaskNode, sem: asyncio.Semaphore
-    ) -> bool:
-        """Start a BBS relay through the modal executor using the latest graph snapshot."""
-        if self._graph is None:
-            logger.error(
-                "[task][bbs_mode] dispatch failed: graph missing task=%s node=%s",
-                node.task_id,
-                node.node_id,
-            )
-            return False
-        persisted_graph = self._graph.query_task_dashboard(node.task_id)
-        if not any(current.node_id == node.node_id for current in persisted_graph.tasks):
-            logger.error(
-                "[task][bbs_mode] dispatch failed: node missing task=%s node=%s",
-                node.task_id,
-                node.node_id,
-            )
-            return False
-        execution_graph = replace(
-            persisted_graph,
-            tasks=[
-                node if current.node_id == node.node_id else current
-                for current in persisted_graph.tasks
-            ],
-        )
-        async with sem:
-            from agentclaw.community.core.task.task_runner.modal_executor import bbs_modal_executor
+    def _record_execution_trajectory(
+        self, node: TaskNode, mode: str, action_result: str, *, exception=None, phase: str = "dispatch",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        if self._task_context_service is None:
+            return
+        try:
+            kwargs = build_task_runner_execution_event_kwargs(
+                node, mode, action_result, exception=exception, phase=phase, details=details)
+            self._task_context_service.emit_trajectory_event(node.task_id, node.node_id, "execute", **kwargs)
+        except Exception as exc:  # noqa: BLE001 observational write cannot break dispatch
+            logger.warning(
+                "[task][trajectory] task-runner 轨迹发射失败 task=%s node=%s: %s",
+                node.task_id, node.node_id, exc)
 
-            await bbs_modal_executor.notify(
-                execution_graph=execution_graph,
-                bcn=self._bcn,
-                bot=self._bot,
-                graph=self._graph,
-                backend_url=self._api_base_url,
-                skill_name=bbs_modal_executor._BBS_SKILL_NAME,
-                on_bbs_report=self._on_bbs_report,
-                group_executor=self._bbs_execute_as_manager_worker_group,
-            )
-        return True
+    async def _dispatch_execution_with_trajectory(self, node: TaskNode, mode: str, operation) -> bool:
+        try:
+            result = await operation
+        except Exception as exc:  # noqa: BLE001 记录后保持原执行语义
+            self._record_execution_trajectory(node, mode, f"{mode}_start_failed", exception=exc)
+            if mode == "single_bot" and isinstance(exc, (OpenApiAuthError, OpenApiBadRequestError)):
+                logger.warning(
+                    "[task][task-executor] single_bot 派发失败(%s) task=%s node=%s bot=%s: %s",
+                    type(exc).__name__, node.task_id, node.node_id, node.run_info.assignee, exc)
+                return False
+            raise
+        self._record_execution_trajectory(
+            node, mode, f"{mode}_started" if result else f"{mode}_start_failed",
+            details=None if result else {"failure_reason": "dispatch_returned_false"})
+        return result
 
     def _skill_report_enabled(self) -> bool:
         """统一结果回收开关(默认 True=skill HTTP Push)。
@@ -213,6 +211,22 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 exc,
             )
             return True
+
+    def _node_skill_report_enabled(self, node: TaskNode) -> bool:
+        graph = node.node_run_graph
+        config = graph.extend_props.get("execution_config", {}) if graph is not None else {}
+        return config.get("orchestration_mode") == "relay" or self._skill_report_enabled()
+
+    def _relay_execution_enabled(self, task_id: str) -> bool:
+        """Return whether the task graph is in distributed Relay mode."""
+        if self._graph is None:
+            return False
+        try:
+            snapshot = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph unavailable means it cannot be Relay here
+            return False
+        config = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
+        return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
 
     def _singlebot_2_group_enabled(self, task_id: str) -> bool:
         """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
@@ -249,64 +263,62 @@ class TaskExecutor(TaskExecutorBbsMixin):
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
-        skill_report = self._skill_report_enabled()
+        skill_report = self._node_skill_report_enabled(node)
         session_id: str | None = None
         async with sem:
-            # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
-            # → 建"二人 chat 群"(driver=assignee bot + 人类观察者,不发言),按 coop_group 收敛;不发 send_message。
-            _owner_present = bool(assignee_owner_id)
+            # P2 旁路:singlebot_2_group(默认 true)且提交任务的 Human owner 在场且
+            # bcs/identity_resolver/graph 已接 → 建"二人 chat 群"(driver=assignee bot +
+            # Human observer,不发言),按 coop_group 收敛;不发 send_message。
+            # 注意:assignee_owner_id 是执行 Bot 的实体 owner,不是提交任务的 Human,不能用它
+            # 判断是否应把 Human 拉进协作群。Relay 搜推通常只有纯 bot_id,但只要任务图谱
+            # 中存在 owner_user_id,仍必须走该旁路。
+            _task_owner_present = bool(
+                self._resolve_graph_owner_user_id(node.task_id)
+            )
             _bcs_wired = self._bcs is not None and self._identity_resolver is not None
             _flag = self._singlebot_2_group_enabled(node.task_id)
-            _bypass = _flag and _owner_present and _bcs_wired and self._graph is not None
+            _bypass = _flag and _task_owner_present and _bcs_wired and self._graph is not None
             logger.info(
-                "[task][task-executor] single_bot_dispatch task=%s node=%s assignee=%s owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
-                node.task_id, node.node_id, assignee, _owner_present, _bcs_wired,
-                self._graph is not None, _flag, _bypass,
+                "[task][task-executor] single_bot_dispatch task=%s node=%s assignee=%s task_owner_present=%s assignee_owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
+                node.task_id, node.node_id, assignee, _task_owner_present, bool(assignee_owner_id),
+                _bcs_wired, self._graph is not None, _flag, _bypass,
             )
             if _bypass:
                 try:
                     return await self._dispatch_single_bot_2_group(
                         node, openapi_bot_id, assignee_owner_id, loop_task_id
                     )
-                except Exception:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
+                except Exception as exc:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
                     logger.exception(
                         "[task][task-executor] singlebot_2_group 旁路失败 → 回退老链路 task=%s node=%s",
                         node.task_id, node.node_id,
+                    )
+                    self._record_execution_trajectory(
+                        node, "single_bot", "single_bot_group_fallback", exception=exc,
+                        phase="single_bot_2_group", details={"fallback": True},
                     )
             logger.info(
                 "[task][task-executor] single_bot 走老链路(send_message) task=%s node=%s bot=%s",
                 node.task_id, node.node_id, openapi_bot_id,
             )
-            try:
-                ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-                ctx.update({
-                    "task_id": node.task_id,
-                    "node_id": node.node_id,
-                    "execution_mode": "single_bot",
-                    # 所有任务模式统一由 skill_report_enabled 决定回收链路:
-                    #   False → Bot 不主动 callback，由平台负责回收; True → Bot HTTP Push /callback/report。
-                    "skill_report_enabled": skill_report,
-                    "backend": self._api_base_url,
-                })
-                message = self._formatter.format_execute(ctx, node)
-                sent = await self._bot.send_message(
-                    bot_id=openapi_bot_id,
-                    message=message,
-                    metadata={"biz_task_id": node.task_id},
-                )
-                run_id = sent.run_id
-                session_id = sent.session_id
-            except (OpenApiAuthError, OpenApiBadRequestError) as exc:
-                logger.warning(
-                    "[task][task-executor] single_bot 派发失败(OpenAPI %s)task=%s node=%s bot=%s: %s "
-                    "→ 留 PENDING 交 harness;grep [task][openapi_bot] 看具体哪步(http)失败",
-                    type(exc).__name__,
-                    node.task_id,
-                    node.node_id,
-                    assignee,
-                    exc,
-                )
-                return False
+            ctx = dict(self._context.build(node.task_id, node.node_id) or {})
+            ctx.update({
+                "task_id": node.task_id,
+                "node_id": node.node_id,
+                "execution_mode": "single_bot",
+                # 所有任务模式统一由 skill_report_enabled 决定回收链路:
+                #   False → Bot 不主动 callback，由平台负责回收; True → Bot HTTP Push /callback/report。
+                "skill_report_enabled": skill_report,
+                "backend": self._api_base_url,
+            })
+            message = self._formatter.format_execute(ctx, node)
+            sent = await self._bot.send_message(
+                bot_id=openapi_bot_id,
+                message=message,
+                metadata={"biz_task_id": node.task_id},
+            )
+            run_id = sent.run_id
+            session_id = sent.session_id
             if skill_report:
                 logger.info(
                     "[task][task-executor] single_bot skill-report 开关已开 task=%s node=%s bot=%s "
@@ -323,14 +335,17 @@ class TaskExecutor(TaskExecutorBbsMixin):
                         session_id=session_id,
                     )
                 )
-            self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
+            self._persist_dispatch_ids(
+                node, session_id=session_id, run_id=run_id,
+                exec_request_input=message,  # REQ-5: 下发请求原文(不截断)
+            )
             return True
 
     async def _dispatch_single_bot_2_group(
         self,
         node: TaskNode,
         openapi_bot_id: str,
-        assignee_owner_id: str,
+        assignee_owner_id: str | None,
         loop_task_id: str,
     ) -> bool:
         """P2 旁路:single_bot → "manager_worker 群"(single bot 作 manager,自管自执行,无 worker;
@@ -357,12 +372,13 @@ class TaskExecutor(TaskExecutorBbsMixin):
             extend_props={
                 "manager_bot_id": driver_bot,
                 "dynamic_task_node_protocol": True,
+                "relay_execution": self._relay_execution_enabled(node.task_id),
                 "loop_task_id": loop_task_id,
                 # manager_worker 群在 form_coop_group 统一生成业务节点协议；这里仅透传
                 # 原始节点事实，避免 single_bot 和 multi_bot 产生两份不同的任务指令。
                 "task_id": node.task_id,
                 "task_objective": node.task_spec.goal.objective,
-                "task_instruction": node.task_spec.metadata.instruction,
+                "task_instruction": task_spec_instruction(node.task_spec),
                 "acceptances": [
                     {"id": item.id, "description": item.description}
                     for item in node.task_spec.goal.acceptances
@@ -385,7 +401,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
         )
         # 落库:run_mode single_bot→coop_group(收敛按协作群),extend_props 记 actual_run_mode=single_bot(原模式留痕)。
         if self._graph is not None:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=node.task_id,
                     node_id=node.node_id,
@@ -402,7 +418,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             "[task][task-executor] singlebot_2_group 取 session=%s task=%s node=%s group_id=%s",
             session_id, node.task_id, node.node_id, gid,
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -415,7 +431,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
             )
         node.run_info.assignee = gid
         node.run_info.run_mode = "coop_group"
-        self._persist_dispatch_ids(node, group_id=gid, session_id=session_id, run_id=None)
+        self._persist_dispatch_ids(
+            node, group_id=gid, session_id=session_id, run_id=None,
+            exec_request_input=gf.extend_props,  # REQ-5: 群 context = 下发请求原文
+        )
         logger.info(
             "[task][task-executor] singlebot_2_group 旁路完成 task=%s node=%s group_id=%s session=%s → BcsGroupHandle 收敛",
             node.task_id, node.node_id, gid, session_id,
@@ -425,7 +444,9 @@ class TaskExecutor(TaskExecutorBbsMixin):
     async def _dispatch_coop_group(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
-        group_id = node.run_info.assignee
+        # Relay keeps the business assignee as the next group driver. The actual
+        # BCS delivery identity is infrastructure metadata created by /dispatch.
+        group_id = node.run_info.extend_props.get("group_id") or node.run_info.assignee
         meta = self._group_meta.get(group_id)
         collab_mode = (meta or {}).get("collab_mode", "chat")
         loop_task_id = f"{node.task_id}::{node.node_id}"
@@ -437,7 +458,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             # chat / manager_worker:建群(create_group)已把任务指令作为 context 投入、且自带初始 session;
             # 复用该初始 session(get_group_session),不再 create_session 重复建群里的第二个 session。
             session_id = await self.get_group_session(group_id)
-            if not self._skill_report_enabled():
+            if not self._node_skill_report_enabled(node):
                 self._poller.register(
                     BcsGroupHandle(
                         loop_task_id=loop_task_id,
@@ -448,14 +469,21 @@ class TaskExecutor(TaskExecutorBbsMixin):
                         run_id=None,
                     )
                 )
+            # REQ-5: chat/manager_worker 群 context 在建群(form_coop_group)时已落群;此处 best-effort 落
+            # ``_context.build`` 作请求原文代表(精确群 context 的落点在 form_coop_group,后续迭代可补)。
+            try:
+                _req_ctx = self._context.build(node.task_id, node.node_id)
+            except Exception:  # noqa: BLE001  best-effort; 不阻断投递
+                _req_ctx = None
             self._persist_dispatch_ids(
-                node, group_id=group_id, session_id=session_id, run_id=None
+                node, group_id=group_id, session_id=session_id, run_id=None,
+                exec_request_input=_req_ctx,
             )
             return True
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
         ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-        ctx["skill_report_enabled"] = self._skill_report_enabled()
+        ctx["skill_report_enabled"] = self._node_skill_report_enabled(node)
         ctx["task_id"] = node.task_id
         ctx["node_id"] = node.node_id
         prompt = self._formatter.format_execute(ctx, node)
@@ -467,7 +495,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             session_id=None,
             input={"query": prompt},
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -479,7 +507,8 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 )
             )
         self._persist_dispatch_ids(
-            node, group_id=group_id, session_id=None, run_id=run_id
+            node, group_id=group_id, session_id=None, run_id=run_id,
+            exec_request_input=prompt,  # REQ-5: state_machine 请求原文 = format_execute 的 prompt
         )
         return True
 
@@ -490,11 +519,12 @@ class TaskExecutor(TaskExecutorBbsMixin):
         group_id: str | None = None,
         session_id: str | None = None,
         run_id: str | None = None,
+        exec_request_input: Any = None,
     ) -> None:
-        """动态派发后把 group_id/session_id/run_id 落进节点 run_info.extend_props(dashboard 可见)。
-        协作群(``coop_group``)写 group_id+session_id(chat/manager_worker)或 group_id+run_id(state_machine);
-        单 bot(``single_bot``)无群,只写 session_id 与 run_id(group_id 留空不落键),与协作群链路对齐,
-        便于 dashboard 观测及将来按 session_id 回调收敛。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。"""
+        """动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props(dashboard 可见)。协作群写 group_id+
+        session_id(chat/manager_worker)或 group_id+run_id(state_machine);单 bot 只写 session_id/run_id(group_id 不落键)。
+        仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。REQ-5: ``exec_request_input`` = 下发请求原文(NOT truncated),
+        落 ``_exec_request_input`` 供 engine EXECUTE/VERIFY 闸门读轨迹;serialize 失败 → 跳过该键,绝不阻断投递(观测旁路)。"""
         if self._graph is None:
             return
         ep: dict[str, Any] = {}
@@ -504,38 +534,66 @@ class TaskExecutor(TaskExecutorBbsMixin):
             ep["session_id"] = session_id
         if run_id is not None:
             ep["run_id"] = run_id
-        self._graph.update_task_node_info(
+        if exec_request_input is not None:
+            try:
+                text = exec_request_input if isinstance(exec_request_input, str) else json.dumps(
+                    exec_request_input, ensure_ascii=False, default=str
+                )
+            except Exception:  # noqa: BLE001  观测旁路,绝不阻断投递
+                logger.info(
+                    "[task][task-executor] _exec_request_input serialize failed task=%s node=%s",
+                    node.task_id, node.node_id,
+                )
+                text = None
+            if text is not None:
+                ep["_exec_request_input"] = text
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep
             )
         )
 
+    def _resolve_graph_owner_user_id(self, task_id: str) -> str | None:
+        """从任务图谱解析提交任务的 Human 用户,而不是执行 Bot 的 owner。"""
+        if not task_id or self._graph is None:
+            return None
+        try:
+            snapshot = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群
+            logger.warning("[task][task_executor] resolve graph owner_user_id 查询失败 task=%s", task_id)
+            return None
+        owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
+        logger.info(
+            "[task][task_executor] resolve_graph_owner_user_id task=%s owner=%s",
+            task_id,
+            owner,
+        )
+        return str(owner) if owner else None
+
     def _resolve_owner_user_id(self, gf: GroupFormation) -> str | None:
-        """解析任务 owner_user_id:优先 ``gf.extend_props["owner_user_id"]``(P2 直接注入);
-        否则按 ``loop_task_id``/``task_id`` 反查 ``graph.extend_props["owner_user_id"]``(覆盖 engine._drain
-        协作派发路径[GF 带 loop_task_id] 与 _run_yaml/start_coop_group 路径[GF 带 task_id],不改 dispatch/planning)。
-        无则 None → 不拉人类观察者。"""
+        """解析提交任务的 Human ``owner_user_id``。
+
+        优先使用 GroupFormation 显式透传的 Human owner,否则按
+        ``loop_task_id``/``task_id`` 反查任务图谱。执行 Bot 的
+        ``assignee_owner_id`` 只用于 Bot 身份组装,不能作为 Human observer 身份。
+        """
         explicit = gf.extend_props.get("owner_user_id")
         if explicit:
-            logger.info("[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s", explicit)
+            logger.info(
+                "[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s",
+                explicit,
+            )
             return str(explicit)
         loop_task_id = gf.extend_props.get("loop_task_id") or ""
-        # _drain 协作派发路径 GF 带 loop_task_id(task::node);_run_yaml/start_coop_group 路径 GF 带 task_id(无 loop_task_id)。
-        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (gf.extend_props.get("task_id") or "")
-        if task_id and self._graph is not None:
-            try:
-                snapshot = self._graph.query_task_dashboard(task_id)
-            except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群,仅不拉人
-                logger.warning("[task][task_executor] resolve owner_user_id 查询失败 task=%s", task_id)
-                return None
-            owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
-            logger.info("[task][task_executor] resolve_owner_user_id 反查 graph task=%s owner=%s", task_id, owner)
-            return str(owner) if owner else None
-        logger.info(
-            "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无, graph=%s)→ 不拉人类观察者",
-            self._graph is not None,
+        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (
+            gf.extend_props.get("task_id") or ""
         )
-        return None
+        owner = self._resolve_graph_owner_user_id(task_id)
+        if owner is None:
+            logger.info(
+                "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无或 graph 无 owner)→ 不拉人类观察者"
+            )
+        return owner
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(dict.fromkeys(gf.bot_ids))
@@ -770,10 +828,8 @@ class TaskExecutor(TaskExecutorBbsMixin):
             for a in (gf.extend_props.get("acceptances") or [])
             if isinstance(a, dict) and a.get("id")
         ]
-        # All group members receive the context, but exactly one Bot owns the
-        # terminal acceptance callback. Resolve it from the group semantics:
-        # manager for manager-worker, BCS driver for state-machine, and the
-        # originator/first driver for free-chat groups.
+        # All group members receive the context, but exactly one Bot owns the terminal acceptance callback.
+        # Resolve reporter from group semantics: manager(manager-worker)/BCS driver(state_machine)/originator(chat).
         if mode == "manager_worker":
             _reporter_bot_id = str(
                 gf.extend_props.get("manager_bot_id")
@@ -818,14 +874,13 @@ class TaskExecutor(TaskExecutorBbsMixin):
                     reporter_bot_id=_reporter_bot_id,
                     executor_bot_ids=[str(bot_id) for bot_id in bot_ids],
                     skill_report_enabled=_skill_report,
+                    relay_execution=bool(gf.extend_props.get("relay_execution")),
+                    relay_blackboard=gf.extend_props.get("relay_blackboard"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
-                # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
-                # 缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束——导致协作群 bot 塌缩
-                # 只做执行、跳过接力接自/gap与派发。此处按需(以 '三步缺一不可' 标记判定,避免
-                # singlebot_2_group 的 task_instruction 已含 closure 而重复注入)补齐 closure+中文,
-                # 再补 driver/reporter 定位脚注;不再重复 目标/验收标准(静态接力 acceptances=[] 会打印空)。
+                # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走
+                # format_execute,缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束。此处按需(以 '三步缺一不可'
+                # 标记判定,避免 singlebot_2_group 已含 closure 重复注入)补齐 closure+中文+driver/reporter 脚注,不重复 目标/验收标准。
                 _ctx_body = _task_instruction.rstrip()
                 if "三步缺一不可" not in _ctx_body:
                     _ctx_body = f"{_ctx_body}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
@@ -896,7 +951,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
                                     "acceptance_result": {},
                                     "extend_props": {},
                                 }, ensure_ascii=False)
-                                + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                                + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gap_items 填写具体差距；只有执行失败才使用 FAILED。"
                             )
                         else:
                             req_kwargs["context"] += "\n" + _no_callback_instruction()

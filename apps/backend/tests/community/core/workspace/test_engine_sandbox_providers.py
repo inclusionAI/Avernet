@@ -231,6 +231,9 @@ class TestAICodingProvider:
         assert plan.skill_source_relpath == "workspace/skills"
         assert plan.skill_target_relpath == "workspace/skills"
         assert "workspace/.repos/" in plan.rsync_excludes
+        # Session IDs are the runtime UUID shape; those directories must not be
+        # baked into the published artifact.
+        assert "workspace/????????-????-????-????-????????????/" in plan.rsync_excludes
         assert "workspace/.prewarm_ready.json" in plan.rsync_excludes
 
     def test_build_plan_excludes_pool_skill_center_symmetric_with_skills_repo(self):

@@ -38,7 +38,7 @@ export function CapabilityMembers({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground">
+        <span className="text-sm font-medium text-muted-foreground">
           {kind === 'skill' ? 'Skills' : kind === 'mcp' ? 'MCPs' : 'CLIs'}
         </span>
         {kind !== 'cli' && onAdd ? (
@@ -55,13 +55,14 @@ export function CapabilityMembers({
         ) : null}
       </div>
       {items.length ? (
-        items.map((item) => {
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-3">
+          {items.map((item) => {
           const id = 'serverCode' in item ? item.serverCode : 'code' in item ? item.code : item.id;
           const identity = identities[id] ?? 'owner';
           return (
             <div
               key={id}
-              className="mb-1 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5"
+              className="group flex min-h-12 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm transition-colors hover:bg-muted/40"
             >
               {kind === 'skill' ? (
                 <FileText className="size-3.5 text-primary" />
@@ -188,7 +189,8 @@ export function CapabilityMembers({
               ) : null}
             </div>
           );
-        })
+          })}
+        </div>
       ) : (
         <div className="rounded-md border border-dashed border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
           未添加 {kind === 'skill' ? 'Skill' : kind === 'mcp' ? 'MCP' : 'CLI'}

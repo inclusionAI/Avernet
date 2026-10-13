@@ -548,6 +548,62 @@ button {
 }
 
 /* ==========================================================================
+   会话消息加载骨架（ChatMessageSkeleton）专属动效：
+   chat-skeleton-sweep —— 一道品牌蓝扫光在占位单元上自左向右掠过，组件侧按行
+   施加负 animation-delay 错峰，整幅骨架如「逐行誊写中的对话稿」；
+   chat-skeleton-dot —— 终点行光珠，节奏回声 @tc-chat/ui Bubble LoadingDots
+   （styles.js：9px、bounce 1.2s、0.2s 逐粒延迟），语义为「历史仍在抵达」。
+   prefers-reduced-motion 下全部静止（占位轮廓随 bg-* 保留）。
+   ========================================================================== */
+@keyframes chat-skeleton-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+.chat-skeleton-sweep {
+  background-image: linear-gradient(
+    100deg,
+    transparent 42%,
+    hsl(var(--primary) / 0.12) 50%,
+    transparent 58%
+  );
+  background-size: 200% 100%;
+  animation: chat-skeleton-sweep 2.4s ease-in-out infinite;
+}
+
+@keyframes chat-skeleton-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+.chat-skeleton-dot {
+  animation: chat-skeleton-dot 1.2s ease-in-out infinite;
+}
+.chat-skeleton-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.chat-skeleton-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-skeleton-sweep,
+  .chat-skeleton-dot {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
    qiankun 主应用根容器：开启 qiankun master 后，框架以 #root-master 包裹主应用
    挂载点。需与上方 html/body/#root 一致撑满高度，否则子应用（MicroApp）容器会
    沿着 0 高度的父级塌缩，aix-card 卡片 Tab 不显示。

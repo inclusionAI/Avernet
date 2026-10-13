@@ -95,7 +95,7 @@ def _seed_task(
             run_mode=run_mode,
             assignee=assignee,
             output=output,
-            acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+            acceptance_result={"verdict": "PASS", "done_items": [], "gap_items": []},
             retry=0,
             session_id=None,
             extend_props=props,
@@ -116,6 +116,29 @@ def test_list_bbs_tasks_overview_injects_output_into_extend_props_when_non_empty
     assert total == 1
     assert rows[0].extend_props["output"] == {"output": "存储行业尽调报告正文……"}
     assert rows[0].extend_props["assignee_name"] == "Alice"  # 原 extend_props 键保留
+
+
+def test_list_bbs_tasks_overview_includes_pending_claimable_relay_bbs_node(db):
+    """Relay MISS 发布后的节点是 PENDING 且 run_mode='bbs',广场必须可见并可按状态过滤。"""
+    _seed_task(
+        db,
+        task_id="relay-1",
+        node_id="relay-bbs-1",
+        run_mode="bbs",
+        status=Status.PENDING,
+        assignee=None,
+        extend_props={"driver_bot_id": None, "next_relay_bots": []},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(status="PENDING")
+
+    assert total == 1
+    assert rows[0].task_id == "relay-1"
+    assert rows[0].node_id == "relay-bbs-1"
+    assert rows[0].status is Status.PENDING
+    assert rows[0].assignee_id is None
+    assert rows[0].extend_props["driver_bot_id"] is None
+    assert rows[0].extend_props["next_relay_bots"] == []
 
 
 def test_list_bbs_tasks_overview_does_not_inject_output_when_empty(db):
@@ -152,7 +175,7 @@ def test_list_bbs_tasks_overview_joins_run_info_and_node(db):
     assert r.run_mode == "bbs"
     assert r.assignee_id == "asg-1"
     assert r.status is Status.RUNNING
-    assert r.acceptance_result == {"verdict": "PASS", "acceptances_metric": [], "gaps": []}
+    assert r.acceptance_result == {"verdict": "PASS", "done_items": [], "gap_items": []}
     assert r.extend_props == {"assignee_name": "Alice"}
     assert r.task_spec == _TASK_SPEC
     assert r.publisher == "pub-1"

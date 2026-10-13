@@ -78,6 +78,26 @@ async fn public_slug_lookup_returns_only_basic_info_for_all_auth_modes() {
 }
 
 #[tokio::test]
+async fn collaboration_slug_lookup_preserves_legacy_projection_and_errors() {
+    let app = app();
+    register(&app, json!("local"), "agentpass", "2.0").await;
+    for slug in ["local", "missing", "Invalid_slug"] {
+        let legacy = request(&app, "GET", &format!("/providers/by-slug/{slug}"),
+            None, Value::Null).await;
+        let collaboration = request(&app, "GET",
+            &format!("/api/v1/collaboration/providers/by-slug/{slug}"),
+            None, Value::Null).await;
+        assert_eq!(collaboration, legacy, "{slug}");
+        let expected = match slug {
+            "local" => StatusCode::OK,
+            "missing" => StatusCode::NOT_FOUND,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        assert_eq!(collaboration.0, expected, "{slug}");
+    }
+}
+
+#[tokio::test]
 async fn missing_and_invalid_slugs_have_distinct_errors() {
     let app = app();
     assert_eq!(request(&app, "GET", "/providers/by-slug/missing", None, Value::Null).await.0,

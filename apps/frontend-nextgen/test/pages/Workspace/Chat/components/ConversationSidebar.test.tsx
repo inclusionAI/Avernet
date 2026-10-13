@@ -2,6 +2,7 @@
 import type { ConversationBotView } from '@/domain/conversation/types';
 import type { ConversationSidebarProps } from '@/pages/Workspace/Chat/components/ConversationSidebar';
 import { ConversationSidebar } from '@/pages/Workspace/Chat/components/ConversationSidebar';
+import { WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
 import type { ConversationDirectoryModel } from '@/pages/Workspace/Chat/hooks/useConversationDirectory';
 import type { ConversationSessionsModel } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
 import type { ManagedBotOthersModel } from '@/pages/Workspace/Chat/hooks/useManagedBotOthers';
@@ -28,6 +29,8 @@ beforeEach(() => {
       disconnect() {}
     },
   });
+  // 整栏收起记忆持久化在 localStorage:用例间清掉,避免收起竖轨用例泄漏到其余用例。
+  window.localStorage.removeItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY);
   useConversationStore.getState().reset();
 });
 
@@ -254,19 +257,19 @@ describe('ConversationSidebar', () => {
     // 页面(任务 8)会订阅 Store 并把新快照传回;此处用 rerender 模拟同一契约。
     const { rerender } = render(<ConversationSidebar {...sidebarProps()} />);
     fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
-    fireEvent.click(screen.getByRole('radio', { name: '他人发起的' }));
+    fireEvent.click(screen.getByRole('button', { name: '他人发起' }));
     expect(useConversationStore.getState().originByManagedBotId['bot-a:2088']).toBe('others');
 
     rerender(<ConversationSidebar {...sidebarProps()} />);
     fireEvent.click(screen.getByRole('button', { name: '发起归属与会话范围' }));
-    fireEvent.click(screen.getByRole('radio', { name: '仅看已收藏' }));
+    fireEvent.click(screen.getByRole('button', { name: '已收藏' }));
     expect(useConversationStore.getState().scopeByManagedBotId['bot-a:2088']).toBe('favorite');
   });
 
   it('shows scope filter only on managed rows and keeps friend rows plain', () => {
     render(<ConversationSidebar {...sidebarProps()} />);
     expect(screen.getByRole('button', { name: '发起归属与会话范围' })).toBeInTheDocument();
-    expect(screen.getByText('仅看已收藏')).toBeInTheDocument();
+    expect(screen.getByText('已收藏')).toBeInTheDocument();
     // 仅一个管理 Bot 行有筛选入口；好友 Bot 行没有。
     expect(screen.getAllByRole('button', { name: '发起归属与会话范围' })).toHaveLength(1);
   });
@@ -713,6 +716,44 @@ describe('ConversationSidebar', () => {
       expect(screen.getByRole('button', { name: '打开 管理 Bot A' })).toBeInTheDocument();
     });
 
+    it('整栏收起渲染「Bot 泊位」竖轨:选中带当前态,头像直达走分组泊位同契约,+N 请求反展开整栏', () => {
+      window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, 'true');
+      const sessions = sessionsModel();
+      const manyBots = Array.from({ length: 7 }, (_, i) => botOf(`rail-${i}:2088`, `轨道 Bot ${i}`));
+      useConversationStore.getState().selectConversation({
+        botId: 'rail-0:2088',
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: null,
+      });
+      render(
+        <ConversationSidebar
+          {...sidebarProps({
+            managedBots: manyBots,
+            store: useConversationStore.getState(),
+            sessions,
+            friendBots: [],
+            directory: directoryModel({ managedBots: manyBots, friendBots: [] }),
+          })}
+        />,
+      );
+      const aside = screen.getByRole('complementary', { name: '会话侧栏' });
+      expect(aside).toHaveAttribute('data-collapsed', 'true');
+      // 选中 Bot 在竖轨上留当前态;7 个成员只显 5 个 + 「+2」溢出。
+      expect(screen.getByRole('button', { name: '打开 轨道 Bot 0' })).toHaveAttribute('aria-current', 'true');
+      expect(screen.queryByRole('button', { name: '打开 轨道 Bot 5' })).not.toBeInTheDocument();
+      // 头像直达:与分组泊位同契约(恢复分组可见 + 未展开过的 Bot 补懒加载),侧栏保持收起。
+      fireEvent.click(screen.getByRole('button', { name: '打开 轨道 Bot 2' }));
+      expect(sessions.toggleBot).toHaveBeenCalledWith('rail-2:2088', 'managed');
+      expect(useConversationStore.getState().collapsedBotGroups.managed).toBeUndefined();
+      expect(aside).toHaveAttribute('data-collapsed', 'true');
+      // +N 溢出经 render-prop 拿到 expand():整栏反展开,完整列表回归。
+      fireEvent.click(screen.getByRole('button', { name: '展开侧栏，查看我的 Bot其余 2 个' }));
+      expect(aside).toHaveAttribute('data-collapsed', 'false');
+    });
+
     it('团队 Bot 分组标题不参与收起(未要求,保持静态标题)', () => {
       render(
         <ConversationSidebar
@@ -790,15 +831,13 @@ it.each(['managed', 'team', 'friend'] as const)('hides TEClaw favorites and scop
   expect(screen.getByRole('button', { name: '编辑标题' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '收藏会话' })).not.toBeInTheDocument();
   fireEvent.keyDown(screen.getByRole('button', { name: '编辑标题' }), { key: 'Escape' });
-  expect(screen.queryByText('全部会话')).not.toBeInTheDocument();
-  expect(screen.queryByText('仅看已收藏')).not.toBeInTheDocument();
+  expect(screen.queryByText('全部')).not.toBeInTheDocument();
+  expect(screen.queryByText('已收藏')).not.toBeInTheDocument();
   if (section !== 'friend') {
     fireEvent.click(screen.getByRole('button', { name: '发起归属' }));
   }
-  expect(Boolean(screen.queryByRole('radio', { name: '我发起的' }))).toBe(section !== 'friend');
-  expect(
-    Boolean(screen.queryByRole('radio', { name: section === 'team' ? '他人发起的（开发中）' : '他人发起的' })),
-  ).toBe(section !== 'friend');
+  expect(Boolean(screen.queryByRole('button', { name: '我发起' }))).toBe(section !== 'friend');
+  expect(Boolean(screen.queryByRole('button', { name: '他人发起' }))).toBe(section !== 'friend');
 });
 
 it.each(['managed', 'friend'] as const)(
@@ -882,10 +921,15 @@ it('仅团队筛选禁用他人来源，管理 Bot 保持原有可用项', () =>
   render(<ConversationSidebar {...sidebarProps({ teamBots: [team] })} />);
   const teamGroup = screen.getByRole('group', { name: '团队 Bot' });
   fireEvent.click(within(teamGroup).getByRole('button', { name: '发起归属与会话范围' }));
-  expect(screen.getByRole('radio', { name: '他人发起的（开发中）' })).toBeDisabled();
-  fireEvent.click(within(teamGroup).getByRole('button', { name: '发起归属与会话范围' }));
-  fireEvent.click(
-    within(screen.getByRole('group', { name: '我的 Bot' })).getByRole('button', { name: '发起归属与会话范围' }),
-  );
-  expect(screen.getByRole('radio', { name: '他人发起的' })).toBeEnabled();
+  // 气泡内容常驻挂载(forceMount),管理/团队两行弹层都在 document 上,两侧选项同名
+  // 「他人发起」,以禁用态区分:团队侧禁用、管理侧可用。点击禁用项不写入 Store。
+  const othersOptions = screen
+    .getAllByRole('button', { name: '他人发起' })
+    .map((node) => node as HTMLButtonElement);
+  expect(othersOptions).toHaveLength(2);
+  expect(othersOptions.filter((node) => node.disabled)).toHaveLength(1);
+  fireEvent.click(othersOptions.find((node) => node.disabled)!);
+  expect(useConversationStore.getState().originByManagedBotId['team:entity']).toBeUndefined();
+  fireEvent.click(othersOptions.find((node) => !node.disabled)!);
+  expect(useConversationStore.getState().originByManagedBotId['bot-a:2088']).toBe('others');
 });

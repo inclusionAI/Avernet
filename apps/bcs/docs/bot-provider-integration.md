@@ -76,7 +76,10 @@ with a letter or digit. It is unique within the current environment, including
 disabled Providers. Invalid input returns HTTP 400; a duplicate returns 409
 without changing the supplied name/config/slug. Renaming retires the old key.
 
-`GET /providers/by-slug/{slug}` requires no authentication and returns only:
+The legacy `GET /providers/by-slug/{slug}` remains compatible with identical
+responses and errors.
+
+`GET /api/v1/collaboration/providers/by-slug/{slug}` requires no authentication and returns only:
 
 ```json
 {

@@ -8,7 +8,13 @@
  * Controller 调用收口在 service 层，Hook 不直接 import controller（守卫 TC-G002）。
  */
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
-import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
+import type {
+  ComposerSelection,
+  TaskComposerContext,
+  TaskComposerForm,
+  WorkflowSelection,
+} from '@/services/tasks/taskMapper';
+import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
 import { useTaskStore } from '@/stores/taskStore';
@@ -26,13 +32,7 @@ export interface UseTaskExecutionOptions {
   submitTaskExecutionMessage?: (content: string, holderId: string) => void;
 }
 
-/** 工作流选中态（+ 号 chip + 发送拦截用）。command 来自 facade.command，作为指令 workflow_id 值。 */
-export interface WorkflowSelection {
-  workflowId: string;
-  title: string;
-  /** 详情接口 facade.command，发送指令 workflow_id 用此值；未就绪时兜底 workflowId。 */
-  command?: string;
-}
+export type { ComposerSelection, WorkflowSelection } from '@/services/tasks/taskMapper';
 
 export interface UseTaskExecutionResult {
   submitting: boolean;
@@ -42,14 +42,13 @@ export interface UseTaskExecutionResult {
   workflowsLoading: boolean;
   /** 鼠标进入工作流菜单时按当前 Bot 懒加载工作流列表。 */
   loadWorkflows: () => Promise<void>;
-  /** 受控选中态：工作流 / 动态任务（驱动 + 号 chip 与发送拦截）。 */
-  selectedWorkflow: WorkflowSelection | null;
-  pendingDynamic: boolean;
+  /** 受控选中态（可叠加胶囊）：workflow 按 workflowId 去重、动态任务全场至多一个（驱动输入区 chip 与发送拦截）。 */
+  selections: ComposerSelection[];
   selectWorkflow: (w: WorkflowSelection) => void;
   selectDynamic: () => void;
+  /** 清除指定胶囊（key 见 composerSelectionKey：'dynamic' | workflowId）。 */
+  removeSelection: (key: string) => void;
   clearSelection: () => void;
-  /** 有选中态时：用输入框指令作为标题/目标兜底直接提交（测试阶段跳过 skill 多轮对齐），成功开副屏。 */
-  submitFromComposer: (content: string) => Promise<{ ok: true; taskId: string } | { ok: false; reason: string }>;
   /** 提交任务并打开副屏。form 校验不通过返回明确原因字符串，成功返回 task_id。 */
   submit: (form: TaskComposerForm) => Promise<{ ok: true; taskId: string } | { ok: false; reason: string }>;
   /** 不发请求，仅校验 form 并返回 disabledReason。 */
@@ -138,62 +137,39 @@ export function useTaskExecution({
     [context, panelRef, submitPanelMessage, submitTaskExecutionMessage, submitting, validate],
   );
 
-  // ── 受控选中态（+ 号 chip / 发送拦截）──
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowSelection | null>(null);
-  const [pendingDynamic, setPendingDynamic] = useState(false);
+  // ── 受控选中态（可叠加 chip / 发送拦截）──
+  const [selections, setSelections] = useState<ComposerSelection[]>([]);
   const selectWorkflow = useCallback((w: WorkflowSelection) => {
-    setSelectedWorkflow(w);
-    setPendingDynamic(false);
+    // 同一工作流去重：已有该 workflowId 的胶囊时不重复添加。
+    setSelections((prev) =>
+      prev.some((s) => s.kind === 'workflow' && s.workflow.workflowId === w.workflowId)
+        ? prev
+        : [...prev, { kind: 'workflow', workflow: w }],
+    );
     // 异步取 facade.command 回填，发送指令 workflow_id 用 command（未就绪兜底 workflowId）。
     void resolveWorkflowCommand(w.workflowId).then((res) => {
-      setSelectedWorkflow((prev) =>
-        prev && prev.workflowId === w.workflowId
-          ? { ...prev, command: res.command, title: res.title ?? prev.title }
-          : prev,
+      setSelections((prev) =>
+        prev.map((s) =>
+          s.kind === 'workflow' && s.workflow.workflowId === w.workflowId
+            ? {
+                kind: 'workflow',
+                workflow: { ...s.workflow, command: res.command, title: res.title ?? s.workflow.title },
+              }
+            : s,
+        ),
       );
     });
   }, []);
   const selectDynamic = useCallback(() => {
-    setPendingDynamic(true);
-    setSelectedWorkflow(null);
+    // 动态任务全场至多一个：已有则忽略。
+    setSelections((prev) => (prev.some((s) => s.kind === 'dynamic') ? prev : [...prev, { kind: 'dynamic' }]));
+  }, []);
+  const removeSelection = useCallback((key: string) => {
+    setSelections((prev) => prev.filter((s) => composerSelectionKey(s) !== key));
   }, []);
   const clearSelection = useCallback(() => {
-    setSelectedWorkflow(null);
-    setPendingDynamic(false);
+    setSelections([]);
   }, []);
-
-  // 有选中态时从输入框指令直接提交（测试阶段跳过 skill 多轮对齐，用指令兜底标题/目标）。
-  const submitFromComposer = useCallback(
-    async (content: string) => {
-      const text = content.trim();
-      if (!text) return { ok: false, reason: '请输入任务指令' } as const;
-      let form: TaskComposerForm;
-      if (selectedWorkflow) {
-        form = {
-          title: text.slice(0, 60) || selectedWorkflow.title,
-          objective: text || selectedWorkflow.title,
-          instruction: text,
-          acceptances: [],
-          taskType: 'workflow',
-          workflowId: selectedWorkflow.workflowId,
-        };
-      } else if (pendingDynamic) {
-        form = {
-          title: text.slice(0, 60) || '动态任务',
-          objective: text,
-          instruction: text,
-          acceptances: [],
-          taskType: 'dynamic',
-        };
-      } else {
-        return { ok: false, reason: '未选中任务类型' } as const;
-      }
-      const res = await submit(form);
-      if (res.ok) clearSelection();
-      return res;
-    },
-    [selectedWorkflow, pendingDynamic, submit, clearSelection],
-  );
 
   return {
     submitting,
@@ -202,12 +178,11 @@ export function useTaskExecution({
     workflows,
     workflowsLoading,
     loadWorkflows,
-    selectedWorkflow,
-    pendingDynamic,
+    selections,
     selectWorkflow,
     selectDynamic,
+    removeSelection,
     clearSelection,
-    submitFromComposer,
     submit,
     validate,
   };

@@ -30,6 +30,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起好 singlebox 后跑(改了 task_se
   ``TaskExecutor._state_machine_bindings`` 会归一为 ``{role:{source,bot_ids}}`` 并解析成 BCS UUID。
 - API base url 解析自 ``SINGLEBOX_BACKEND_URL``(singlebox profile),即 BCS 回投目标 = 本后端。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,8 +40,8 @@ import unittest
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
+from tests.community.core.task.support.live_task_bot_provisioner import (
+    LiveTaskBotProvisioner,
 )
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
@@ -48,7 +49,7 @@ _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
 _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "35983")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 
-# 实际 bot 由 _run 运行时经 SingleboxBotProvisioner.create_bot(bot_name=...) 建出并取回 id
+# 实际 bot 由 _run 运行时经 LiveTaskBotProvisioner.create_bot(bot_name=...) 建出并取回 id
 # (服务端生成 bot_id,无法指定固定 id;create_bot 按 bot_name 幂等复用),writer 兼 owner/driver/master,editor 兼润色/最终回复。
 
 # 写作协同模板(仅描述协同策略;逻辑角色 writer/editor 的实际 bot 由创建群接口的
@@ -176,13 +177,16 @@ def _execute_body(writer_id: str, editor_id: str) -> dict:
             },
             "context": {
                 "background": "写作质检协同 yaml e2e:writer 产出初稿→自动质检→通过则 editor 润色/"
-                              "未通过则 writer 修订→editor 生成最终回复。",
+                "未通过则 writer 修订→editor 生成最终回复。",
                 "extend_props": {},
             },
             "goal": {
                 "objective": "就「远程办公协作工具的发展趋势」写一篇短文,经写作质检协同后产出最终回复。",
                 "acceptances": [
-                    {"id": "ac1", "acceptance": "最终回复包含结论、依据、风险和下一步建议"},
+                    {
+                        "id": "ac1",
+                        "acceptance": "最终回复包含结论、依据、风险和下一步建议",
+                    },
                     {"id": "ac2", "acceptance": "最终回复经质检通过且已润色"},
                 ],
             },
@@ -218,7 +222,7 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
     async def _run(self, loop: asyncio.AbstractEventLoop) -> None:
         # 1) 自洽建 writer/editor bot(create_bot 服务端生成 id,按 bot_name 幂等复用)→ 入网 BCN + 开 BCS 可见。
         #    不再依赖外部预置的固定 id bot;singlebox 清库后也能重建(与其它 singlebox e2e 同手法)。
-        prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
+        prov = LiveTaskBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         try:
             writer_id = await prov.create_bot(bot_name="e2e-writing-qc-writer")
             editor_id = await prov.create_bot(bot_name="e2e-writing-qc-editor")
@@ -240,8 +244,10 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 2) POST /api/v1/collaboration/tasks/execute → TaskService.execute → _run_yaml 成立 bcN 协作群
-            r = await cli.post(f"{_BACKEND}/api/v1/collaboration/tasks/execute",
-                               json=_execute_body(writer_id, editor_id))
+            r = await cli.post(
+                f"{_BACKEND}/api/v1/collaboration/tasks/execute",
+                json=_execute_body(writer_id, editor_id),
+            )
             r.raise_for_status()
             body = r.json()
             data = body.get("data") or {}
@@ -254,26 +260,34 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
             g: dict = {}
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
-                pr = await cli.get(f"{_BACKEND}/api/v1/collaboration/tasks/dashboard",
-                                   params={"task_id": task_id})
+                pr = await cli.get(
+                    f"{_BACKEND}/api/v1/collaboration/tasks/dashboard",
+                    params={"task_id": task_id},
+                )
                 pr.raise_for_status()
                 g = pr.json().get("data") or {}
                 tasks = g.get("tasks") or []
                 snap = []
                 for t in tasks:
                     ri = t.get("run_info") or {}
-                    snap.append({
-                        "node_id": t.get("node_id"),
-                        "status": t.get("status"),
-                        "run_mode": ri.get("run_mode") or "",
-                        "assignee": str(ri.get("assignee") or "")[:32],
-                        # extend_props 含 group_id / run_id(state_machine)/ session_id(chat);
-                        # acceptance_result.verdict 看 PASS/FAIL。
-                        "extend_props": ri.get("extend_props") or {},
-                        "exec_error": ri.get("exec_error"),
-                        "verdict": (ri.get("acceptance_result") or {}).get("verdict"),
-                    })
-                print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} nodes={snap}")
+                    snap.append(
+                        {
+                            "node_id": t.get("node_id"),
+                            "status": t.get("status"),
+                            "run_mode": ri.get("run_mode") or "",
+                            "assignee": str(ri.get("assignee") or "")[:32],
+                            # extend_props 含 group_id / run_id(state_machine)/ session_id(chat);
+                            # acceptance_result.verdict 看 PASS/FAIL。
+                            "extend_props": ri.get("extend_props") or {},
+                            "exec_error": ri.get("exec_error"),
+                            "verdict": (ri.get("acceptance_result") or {}).get(
+                                "verdict"
+                            ),
+                        }
+                    )
+                print(
+                    f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} nodes={snap}"
+                )
                 if g.get("status") in ("DONE", "HUNG"):
                     break
                 await asyncio.sleep(6.0)
@@ -284,23 +298,33 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
         root = nodes.get(task_id)
         for nid, nd in nodes.items():
             ri = nd.get("run_info") or {}
-            print(f"  - {str(nid):28} {str(nd.get('status')):8} "
-                  f"mode={ri.get('run_mode') or '-':11} "
-                  f"assignee={str(ri.get('assignee') or '-')[:24]} "
-                  f"verdict={(ri.get('acceptance_result') or {}).get('verdict')}")
+            print(
+                f"  - {str(nid):28} {str(nd.get('status')):8} "
+                f"mode={ri.get('run_mode') or '-':11} "
+                f"assignee={str(ri.get('assignee') or '-')[:24]} "
+                f"verdict={(ri.get('acceptance_result') or {}).get('verdict')}"
+            )
 
-        self.assertEqual(g.get("status"), "DONE",
-                         f"全图未闭环 DONE:status={g.get('status')} (BCS 未自动运行状态机/未回投?)")
+        self.assertEqual(
+            g.get("status"),
+            "DONE",
+            f"全图未闭环 DONE:status={g.get('status')} (BCS 未自动运行状态机/未回投?)",
+        )
         self.assertIsNotNone(root, "根节点(task_id)未出现")
         self.assertEqual(root.get("status"), "DONE", "根未 DONE")
         ri = root.get("run_info") or {}
         self.assertEqual(ri.get("run_mode"), "coop_group", "根非 coop_group")
         # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
-        self.assertTrue(str(ri.get("assignee") or "").startswith(("grp_", "bcs_grp_")),
-                        f"根 assignee 非群 id:{ri.get('assignee')!r}")
+        self.assertTrue(
+            str(ri.get("assignee") or "").startswith(("grp_", "bcs_grp_")),
+            f"根 assignee 非群 id:{ri.get('assignee')!r}",
+        )
         acceptance = ri.get("acceptance_result") or {}
-        self.assertEqual(acceptance.get("verdict"), "DONE",
-                         f"根验收未 PASS:{acceptance} (BCS 回投 success=false?)")
+        self.assertEqual(
+            acceptance.get("verdict"),
+            "DONE",
+            f"根验收未 PASS:{acceptance} (BCS 回投 success=false?)",
+        )
         output = ri.get("output")
         self.assertTrue(output, "根无最终输出(output 为空)")
         print(f"[result] output={str(output)!r}")

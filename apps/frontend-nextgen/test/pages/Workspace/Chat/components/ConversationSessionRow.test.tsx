@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 // 会话行契约测试（restore-design-chat-page-b2-b3 Batch 1，dmore「会话目录二级*」帧 1:1）：
-// 平齐化（无 rail/前置图标/条数列）、hover 热区分级、选中胶囊全宽同构、收藏星标槽位;
+// 平齐化（无 rail/前置图标/条数列）、点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
 // 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话,收藏不入菜单走星标）。
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
@@ -40,14 +40,14 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     expect(title).toHaveClass(...expectation);
   });
 
-  it('hover 交互热区分级：非收藏行左缘内缩 24px、右缘内缩 8px；收藏行右缘到边', () => {
+  it('点击热区分级：非收藏行左缘内缩 24px、右缘内缩 8px；收藏行右缘到边', () => {
     const { container, rerender } = render(
       <ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />,
     );
     const plainButton = screen.getByRole('button', { name: '对话会话' });
-    // 非收藏热区：ml-8（较 bot 胶囊 inset-x-2 再内缩 24px）/ mr-4（再内缩 8px，稿 Button 271px 宽）。
+    // 非收藏点击热区：ml-8（较 bot 胶囊 inset-x-2 再内缩 24px）/ mr-4（再内缩 8px，稿 Button 271px 宽）。
     expect(plainButton).toHaveClass('ml-8', 'mr-4');
-    // hover 反馈交给行内胶囊（muted 弱化），选中不再使用行首品牌指示棒。
+    // hover 背景由全宽胶囊承载（见下条同几何用例），选中不再使用行首品牌指示棒。
     expect(plainButton).not.toHaveClass('bg-primary/10');
 
     rerender(
@@ -69,6 +69,18 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     const row = container.firstElementChild as HTMLElement;
     const capsule = row.querySelector('span[aria-hidden="true"]') as HTMLElement;
     expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-selected');
+  });
+
+  it('hover 胶囊与选中胶囊同几何：同样 inset-x-2 全宽，背景不随热区分级变短', () => {
+    const { container } = render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
+    const row = container.firstElementChild as HTMLElement;
+    const hoverPill = row.querySelector('span[aria-hidden="true"]') as HTMLElement;
+    // 与选中胶囊同一 left-2/right-2/rounded-md 几何；弱化 muted/60 底，hover/focus/触屏显现。
+    expect(hoverPill).toHaveClass('left-2', 'right-2', 'rounded-md', 'bg-muted/60');
+    expect(hoverPill).toHaveClass('opacity-0', 'group-hover/row:opacity-100', 'group-focus-within/row:opacity-100');
+    // 按钮自身不再画 hover 背景，避免双层背景/长度差。
+    const button = screen.getByRole('button', { name: '对话会话' });
+    expect(button).toHaveClass('hover:bg-transparent');
   });
 
   it('选中交互保持：整行可点、aria-current=page', () => {
@@ -94,6 +106,63 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
     // 只读行无写入口:不出「会话更多操作」菜单。
     expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互叠）', () => {
+  it('静默态保持基础 pr-2；hover/聚焦/触屏/菜单开启让至「…」左界（右界 96px）', () => {
+    render(
+      <ConversationSessionRow
+        session={session}
+        selected={false}
+        onSelect={jest.fn()}
+        onToggleFavorite={jest.fn()}
+        actions={createActions()}
+      />,
+    );
+    const button = screen.getByRole('button', { name: '对话会话' });
+    // 静默态图标全隐：右内边距维持基础 8px（文字右界 = mr-4 + pr-2 = 24px）。
+    expect(button).toHaveClass('pl-2', 'pr-2');
+    // 让位通道与图标自身显现条件同构；菜单开启期由 trigger data-state=open 承接（鼠标离行仍钉住可见）。
+    expect(button).toHaveClass(
+      'group-hover/row:pr-[80px]',
+      'group-focus-within/row:pr-[80px]',
+      '[@media(hover:none)]:pr-[80px]',
+      'group-has-[[data-state=open]]/row:pr-[80px]',
+    );
+  });
+
+  it('收藏行星标常驻 → 常驻让位 pr-[52px]（右界 60px）；hover 期连「…」让足 pr-[88px]', () => {
+    const { rerender } = render(
+      <ConversationSessionRow
+        session={{ ...session, favorite: true }}
+        selected={false}
+        onSelect={jest.fn()}
+        onToggleFavorite={jest.fn()}
+        actions={createActions()}
+      />,
+    );
+    const button = screen.getByRole('button', { name: '对话会话' });
+    // 常驻让位替换基础 pr-2（twMerge 取后者）；hover 档覆盖非收藏档 pr-80。
+    expect(button).toHaveClass('pr-[52px]');
+    expect(button).not.toHaveClass('pr-2');
+    expect(button).toHaveClass('group-hover/row:pr-[88px]');
+    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+
+    // 选中且未收藏：星标同样常驻 → 常驻让位 pr-[44px]（mr-4 → 右界同为 60px）。
+    rerender(
+      <ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />,
+    );
+    expect(button).toHaveClass('pr-[44px]');
+    expect(button).not.toHaveClass('pr-2');
+  });
+
+  it('只读行无图标 → 不让位，保持基础内边距', () => {
+    render(<ConversationSessionRow session={session} selected={false} readOnly onSelect={jest.fn()} />);
+    const button = screen.getByRole('button', { name: '对话会话 只读' });
+    // pr-2 存活即证明无任何让位档生效（twMerge 会移除被覆盖的基础值）。
+    expect(button).toHaveClass('pl-2', 'pr-2');
+    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
   });
 });
 

@@ -88,8 +88,8 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
     assert public_operations == 72
-    assert internal_operations == 22
-    assert public_operations + internal_operations == 94
+    assert internal_operations == 24
+    assert public_operations + internal_operations == 96
     assert all(
         path.startswith("/openapi/v1/collaboration/")
         or path.startswith("/openapi/v1/auth/")
@@ -146,6 +146,17 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
         "app": "optional",
         "bot": "optional",
     }
+    provider_path = "/api/v1/collaboration/providers/by-slug/{slug}"
+    assert set(internal_document["paths"][provider_path]) == {"get"}
+    provider = internal_document["paths"][provider_path]["get"]
+    assert provider["operationId"] == "get_provider_by_slug"
+    assert provider["security"] == []
+    assert provider["x-avernet-security"] == {}
+    assert provider["x-avernet-raw-response"] is True
+    assert provider_path not in public_document["paths"]
+    rerun_path = "/api/v1/collaboration/state-machine-runs/{run_id}/reruns"
+    assert set(internal_document["paths"][rerun_path]) == {"post"}
+    assert rerun_path not in public_document["paths"]
     assert (
         "put"
         in internal_document["paths"][

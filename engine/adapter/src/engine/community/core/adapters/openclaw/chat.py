@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 from engine.community.core.adapters.openclaw.intent_eval_observer import IntentEvalObserver
@@ -23,7 +24,7 @@ from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult,
 from engine.community.core.chat.protocol import ChatService
 from engine.community.core.engine.context import AuthContext
 from engine.community.kernel.frames import ErrorShape, EventFrame
-from engine.community.plugin_api.openclaw.chat import OpenClawChatPort
+from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatPort
 
 log = logging.getLogger("openclaw-chat-adapter")
 
@@ -64,6 +65,8 @@ class OpenClawChatAdapter(ChatService):
         self,
         request: ChatRequest,
         auth: AuthContext | None = None,
+        *,
+        on_ack: ChatAckCallback | None = None,
     ) -> AsyncIterator[EventFrame]:
         """Stream chat events as EventFrames.
 
@@ -119,16 +122,20 @@ class OpenClawChatAdapter(ChatService):
         )
 
         try:
-            async for frame in self._port.chat_stream(
+            ack_options = {"on_ack": on_ack} if on_ack is not None else {}
+            upstream = self._port.chat_stream(
                 session_key=session_key,
                 message=request.query,
                 timeout_ms=request.aliveTime,
                 idempotency_key=idempotency_key,
                 attachments=attachments,
                 token=token,
-            ):
-                observer.observe(frame)
-                yield frame
+                **ack_options,
+            )
+            async with aclosing(upstream):
+                async for frame in upstream:
+                    observer.observe(frame)
+                    yield frame
 
             # Normal-completion finalize. Sits inside the try block, after the
             # loop, matching legacy chat.py:199. NEVER called on exception paths.

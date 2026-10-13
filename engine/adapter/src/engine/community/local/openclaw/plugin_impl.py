@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from engine.community.kernel.frames import EventFrame, ResponseFrame
+from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatAck
 from engine.community.plugin_api.openclaw.plugin import OpenClawPlugin
 from engine.community.shared.utils import filter_openclaw_sessions_by_source
 
@@ -143,7 +144,10 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
         idempotency_key: str | None = None,
         attachments: list[Any] | None = None,
         token: str | None = None,
+        on_ack: ChatAckCallback | None = None,
     ) -> AsyncGenerator[EventFrame, None]:
+        if on_ack is not None:
+            await on_ack(OpenClawChatAck(True, {"runId": idempotency_key, "status": "started"}))
         self._history.setdefault(session_key, []).append({"role": "user", "content": message})
         yield EventFrame(event="message", payload={"role": "assistant", "content": "local noop"})
 
