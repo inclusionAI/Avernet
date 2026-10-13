@@ -400,9 +400,10 @@ it("old dispatch cannot attach its job to a replacement execution after a versio
   expect(ais.stopExecution).toHaveBeenCalledWith("job-2");
 });
 
-it("the same tool key cannot identify changed advice, and audit retains the advice", async () => {
+it.each([false, true])("the same tool key cannot identify changed advice, including legacy envelope fields: %s", async legacyEnvelope => {
   const task = await create();
-  const body = { clientRequestId: "advice-content", purpose: "纠正调用后继续", message: "请核对参数并重试原操作" };
+  const body = { clientRequestId: "advice-content", purpose: "纠正调用后继续", message: "请核对参数并重试原操作",
+    ...(legacyEnvelope ? { schemaVersion: "repair-tool-request/v1", runtimeTargetVersion: 1, payload: { unchanged: true } } : {}) };
   const sent = await agent.retryMessage(task, body);
   const call = await agent.toolGet(await current(task.taskId), sent.toolCallId);
   expect(call.request).toMatchObject({ message: body.message, requestDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });

@@ -457,6 +457,11 @@ export function sameRequestPayload(row: AgentToolCallRow, input: NormalizedCreat
   if (row.request_json === input.requestJson) return true;
   const stored = parsePayload(row.request_json, row.call_id, "request_json");
   const retried = parsePayload(input.requestJson, input.callId, "request_json");
+  // A request digest binds the full actual request, including fields outside
+  // legacy envelope.payload. Older requests without a digest keep their contract.
+  const storedDigest = stored && typeof stored === "object" ? (stored as Record<string, unknown>).requestDigest : undefined;
+  const retriedDigest = retried && typeof retried === "object" ? (retried as Record<string, unknown>).requestDigest : undefined;
+  if ((storedDigest !== undefined || retriedDigest !== undefined) && storedDigest !== retriedDigest) return false;
   const storedEnvelope = repairToolRequestEnvelope(stored);
   const retriedEnvelope = repairToolRequestEnvelope(retried);
   if (storedEnvelope == null && retriedEnvelope == null) return false;
