@@ -1,6 +1,7 @@
 import type { DeliveryStatusView, GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
+import type { GroupChatQuestionsModel } from '@/pages/Workspace/hooks/useGroupChatQuestions';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -22,6 +23,11 @@ export interface GroupChatPaneProps {
   /** 会话成员消息可见域更新出口（PATCH participants/{actor} 仅带 scope），经由会话 Hook 注入。 */
   updateMemberScope?: (sessionId: string, actorId: string, scope: MessageViewScope) => Promise<boolean>;
   chat: UseChatResult<unknown>;
+  /**
+   * ask_user 问答模型（useGroupChat 内 useGroupChatQuestions 输出）。
+   * 仅传入即视为当前会话存在问答编排；面板是否渲染由 Human 视角与会话共同决定。
+   */
+  questions?: GroupChatQuestionsModel;
   /** 建群后 Driver/Manager 尚未产生第一条消息时的瞬态处理状态。 */
   groupBootstrapProcessing?: boolean;
   supportState: GroupChatState;

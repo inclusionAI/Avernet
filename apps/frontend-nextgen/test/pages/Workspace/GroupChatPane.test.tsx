@@ -1,8 +1,10 @@
 /** @jest-environment jsdom */
 import { getMessageSpacingClass } from '@/components/Workspace/messagePresentation';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import type { GroupQuestionInteraction } from '@/domain/collaboration/groupQuestions';
 import { GroupChatPane, resolveSender } from '@/pages/Workspace/components/GroupChatPane';
 import { GroupChatBubble, ThinkingBubble } from '@/pages/Workspace/components/GroupChatPane/GroupChatBubble';
+import type { GroupChatQuestionsModel } from '@/pages/Workspace/hooks/useGroupChatQuestions';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { PanelHandle } from '@tc-chat/core';
@@ -180,6 +182,120 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
     </MemoryRouter>,
   );
 }
+
+// ============ ask_user 问答入口（specs/2026-10-13-bcs-ask-user-question Task5）============
+// 问答装配链：useGroupChat.questions → GroupWorkspaceArea → GroupChatPane → GroupQuestionPanel。
+// 这里覆盖入口条件：human 视角渲染 / bot 视角不代答 / humanAbsentOnly 不作为问答授权 /
+// 不禁用输入框 / 无会话不渲染。
+
+const questionInteraction: GroupQuestionInteraction = {
+  key: JSON.stringify(['run-1', 'i1']),
+  runId: 'run-1',
+  interactionId: 'i1',
+  botId: 'bot-a',
+  questions: [
+    {
+      questionId: 'q1',
+      question: '要部署到哪个环境？',
+      header: '环境',
+      multiSelect: false,
+      allowOther: true,
+      options: [
+        { value: 'stage', label: '预发布' },
+        { value: 'prod', label: '生产' },
+      ],
+    },
+  ],
+};
+
+/** 测试用问答模型：默认携带 1 个待处理交互（真实形态由 useGroupChatQuestions 输出）。 */
+function makeQuestionsModel(overrides: Partial<GroupChatQuestionsModel> = {}): GroupChatQuestionsModel {
+  return {
+    interactions: [questionInteraction],
+    drafts: {},
+    submittingKeys: [],
+    connected: true,
+    setDraft: () => {},
+    resolve: async () => true,
+    ...overrides,
+  };
+}
+
+describe('GroupChatPane ask_user 问答入口', () => {
+  const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
+  const questionSession: SessionView = {
+    ...session,
+    participants: [
+      { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+      { actorId: 'bot-a', kind: 'bot', name: 'Alpha', role: 'member', mode: 'auto' },
+    ],
+  };
+
+  it('human 视角有待处理问答时渲染问答面板，位于协作面板之后、输入框之前', () => {
+    renderPane({
+      session: questionSession,
+      activeIdentity: humanIdentity,
+      userIdentityId: humanIdentity.id,
+      questions: makeQuestionsModel(),
+    });
+    expect(screen.getByText('要部署到哪个环境？')).toBeInTheDocument();
+    // Spec：面板挂载在输入区域上方（GroupChatCollabPanel 与 composer 之间）。
+    const collabPanel = screen.getByTestId('collab-panel');
+    const sender = screen.getByTestId('sender');
+    const questionRegion = screen.getByRole('region', { name: /Alpha 的问答/ });
+    expect(collabPanel.compareDocumentPosition(questionRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(questionRegion.compareDocumentPosition(sender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('bot 视角不渲染问答面板（Bot 不代答）', () => {
+    const botIdentity = { id: 'bot-a', kind: 'bot' as const, displayName: 'Alpha', online: true };
+    renderPane({ session: questionSession, activeIdentity: botIdentity, questions: makeQuestionsModel() });
+    expect(screen.queryByText('要部署到哪个环境？')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /等待回答/ })).not.toBeInTheDocument();
+  });
+
+  it('human 未加入会话时输入框由加入条接管，问答面板仍展示（humanAbsentOnly 不作为问答授权）', () => {
+    const absentSession: SessionView = {
+      ...session,
+      participants: [{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' }],
+    };
+    renderPane({
+      session: absentSession,
+      activeIdentity: humanIdentity,
+      userIdentityId: humanIdentity.id,
+      questions: makeQuestionsModel(),
+    });
+    // 输入框不可见（加入条接管）
+    expect(screen.queryByTestId('sender')).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /章梧 暂未加入当前会话/ })).toBeInTheDocument();
+    // 问答面板仍可见：Human 视角即展示，最终授权由 BCS 校验
+    expect(screen.getByText('要部署到哪个环境？')).toBeInTheDocument();
+  });
+
+  it('待处理问答不禁用普通聊天输入框', () => {
+    const send = jest.fn();
+    renderPane({
+      session: questionSession,
+      activeIdentity: humanIdentity,
+      userIdentityId: humanIdentity.id,
+      questions: makeQuestionsModel(),
+      send,
+    });
+    // 问答面板与输入框并存：面板不替代输入框
+    expect(screen.getByText('要部署到哪个环境？')).toBeInTheDocument();
+    const sender = screen.getByTestId('sender');
+    expect(sender).toHaveAttribute('data-loading', 'false');
+    // 问答出现时普通消息仍可发送
+    fireEvent.click(screen.getByTestId('sender-submit'));
+    expect(send).toHaveBeenCalledWith('@ALL-Bots 你们呢', ['bot-a'], undefined);
+  });
+
+  it('无会话不渲染问答面板', () => {
+    renderPane({ session: null, activeIdentity: humanIdentity, questions: makeQuestionsModel() });
+    expect(screen.getByText(/请选择或创建一个会话/)).toBeInTheDocument();
+    expect(screen.queryByText('要部署到哪个环境？')).not.toBeInTheDocument();
+  });
+});
 
 describe('GroupChatPane', () => {
   it('header 呈现群身份 chip（群名），不显会话标题（artboard-010 口径，会话由 Key 胶囊表达）', () => {

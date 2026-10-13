@@ -17,6 +17,7 @@ import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
 import { ComposerStatusBar } from './ComposerStatusBar';
 import { GroupChatMessageArea } from './GroupChatMessageArea';
+import { GroupQuestionPanel } from './GroupQuestionPanel';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
 import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
@@ -34,6 +35,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberMode,
     updateMemberScope,
     chat,
+    questions,
     supportState,
     connectionStatus,
     groupBootstrapProcessing = false,
@@ -215,6 +217,12 @@ export function GroupChatPane(props: GroupChatPaneProps) {
           cancellingDeliveryIds={cancellingDeliveryIds}
           onCancelDelivery={cancelDelivery}
         />
+        {/* ask_user 问答面板：仅 Human 视角挂载（Bot 不代答）。不参与 composerVisible 的
+            humanAbsentOnly 条件——Human 未加入但其拥有的 Bot 仍在会话内时仍可作答，授权由 BCS 校验。
+            Spec：面板位于输入区域上方，不替代、也不随问答待处理禁用普通聊天输入框。 */}
+        {session && activeIdentity?.kind === 'user' && questions ? (
+          <GroupQuestionPanel model={questions} participants={session.participants} />
+        ) : null}
         {/* 输入框仅在 human 视角显示：Bot 视角由协作面板控制发言；Human absent 时由「加入」条接管。
             帽条（发言模式/连接状态）与输入卡同层紧贴渲染（design 决策 7/8），与 humanAbsentOnly 互斥；
             横向 padding 收敛到本容器（GroupChatComposer 根节点不再自带 px），保证帽条 w-[calc(100%-26px)]
