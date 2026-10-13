@@ -56,6 +56,7 @@ CLASSIFIED: dict[str, dict[str, str]] = {
         ),
         "_tags": "adapter: serialization, tolerates the record's JSON-or-list tags",
         "_to_skill": "adapter: serialization, record → response schema",
+        "_to_security_observation": "adapter: serialization, persisted scan fact → response schema",
         "_uploaded_skill_response": "adapter: chooses 200 vs 201 and builds the envelope",
     },
     f"{_PREFIX}.identity.router": {},

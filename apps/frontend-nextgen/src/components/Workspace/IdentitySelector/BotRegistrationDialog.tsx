@@ -15,6 +15,8 @@ import { useBotRegistrationToken } from '@/pages/Workspace/hooks/useBotRegistrat
 import { Check, Copy, RefreshCw } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { QwenWorkRegistrationPanel } from './QwenWorkRegistrationPanel';
+
 type AccessMode = 'self' | 'auto';
 
 interface BotRegistrationDialogProps {
@@ -31,10 +33,13 @@ function formatExpiresAt(expiresAt: number | null): string | null {
 }
 
 export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogProps) {
+  const [engine, setEngine] = useState<'openclaw' | 'qwenwork'>('openclaw');
   const [mode, setMode] = useState<AccessMode>('self');
   const [copied, setCopied] = useState(false);
   const copiedTimeoutRef = useRef<number | null>(null);
-  const { token, expiresAt, isLoading, error, bcsEndpoint, retry } = useBotRegistrationToken(open);
+  const { token, expiresAt, isLoading, error, bcsEndpoint, retry } = useBotRegistrationToken(
+    open && engine === 'openclaw',
+  );
 
   useEffect(
     () => () => {
@@ -65,68 +70,81 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
-      <ModalContent size="lg" className="min-w-0 p-5">
+      <ModalContent size="lg" className="max-h-[85vh] min-w-0 overflow-y-auto p-5">
         <ModalHeader>
           <ModalTitle className="text-lg">接入外部 Bot</ModalTitle>
-          <ModalDescription className="leading-5">
-            选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。
-          </ModalDescription>
+          <ModalDescription className="leading-5">选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。</ModalDescription>
         </ModalHeader>
 
         <Segmented
-          value={mode}
-          onChange={(next) => {
-            setMode(next);
-            setCopied(false);
-          }}
+          value={engine}
+          onChange={setEngine}
           className="w-full"
           options={[
-            { value: 'self', label: '用户自助接入' },
-            { value: 'auto', label: 'Bot 自动接入' },
+            { value: 'openclaw', label: 'OpenClaw' },
+            { value: 'qwenwork', label: '千问办公' },
           ]}
         />
-
-        {isLoading ? (
-          <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-4">
-            <Skeleton.Line className="w-1/3" />
-            <Skeleton.Block className="h-24 w-full" />
-          </div>
-        ) : error ? (
-          <Empty
-            compact
-            className="rounded-lg border border-border bg-muted/40"
-            title="接入 Token 获取失败"
-            description={error}
-            action={
-              <Button variant="secondary" size="sm" onClick={retry}>
-                <RefreshCw aria-hidden className="size-3.5" />
-                重试
-              </Button>
-            }
-          />
+        {engine === 'qwenwork' ? (
+          <QwenWorkRegistrationPanel open={open} />
         ) : (
-          <div className="min-w-0 rounded-lg border border-border bg-muted/40">
-            <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-foreground">
-                  {mode === 'self' ? '方式一：用户自助接入' : '方式二：Bot 自动接入'}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {mode === 'self' ? '在 Bot 运行环境中执行以下命令。' : '将以下指引发送给目标 Bot 执行。'}
+          <>
+            <Segmented
+              value={mode}
+              onChange={(next) => {
+                setMode(next);
+                setCopied(false);
+              }}
+              className="w-full"
+              options={[
+                { value: 'self', label: '用户自助接入' },
+                { value: 'auto', label: 'Bot 自动接入' },
+              ]}
+            />
+
+            {isLoading ? (
+              <div className="space-y-3 rounded-lg border border-border bg-muted/40 p-4">
+                <Skeleton.Line className="w-1/3" />
+                <Skeleton.Block className="h-24 w-full" />
+              </div>
+            ) : error ? (
+              <Empty
+                compact
+                className="rounded-lg border border-border bg-muted/40"
+                title="接入 Token 获取失败"
+                description={error}
+                action={
+                  <Button variant="secondary" size="sm" onClick={retry}>
+                    <RefreshCw aria-hidden className="size-3.5" />
+                    重试
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="min-w-0 rounded-lg border border-border bg-muted/40">
+                <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-foreground">
+                      {mode === 'self' ? '方式一：用户自助接入' : '方式二：Bot 自动接入'}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {mode === 'self' ? '在 Bot 运行环境中执行以下命令。' : '将以下指引发送给目标 Bot 执行。'}
+                    </p>
+                  </div>
+                  <Button variant="secondary" size="sm" className="shrink-0 gap-1.5" onClick={copyCommand}>
+                    {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
+                    {copied ? '已复制' : '复制'}
+                  </Button>
+                </div>
+                <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
+                  {command}
+                </pre>
+                <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                  Token 有效期至：{formatExpiresAt(expiresAt)}。
                 </p>
               </div>
-              <Button variant="secondary" size="sm" className="shrink-0 gap-1.5" onClick={copyCommand}>
-                {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
-                {copied ? '已复制' : '复制'}
-              </Button>
-            </div>
-            <pre className="min-w-0 whitespace-pre-wrap break-all px-3 py-3 font-mono text-xs leading-5 text-foreground">
-              {command}
-            </pre>
-            <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-              Token 有效期至：{formatExpiresAt(expiresAt)}。
-            </p>
-          </div>
+            )}
+          </>
         )}
       </ModalContent>
     </Modal>

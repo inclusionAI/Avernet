@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotActionAvailability, BotDomain } from '@/services/botWorkshop';
-import { ArrowUpRight, FileText, HeartPulse, MessageSquare, Pencil } from 'lucide-react';
+import { ArrowUpRight, ClipboardList, FileText, HeartPulse, MessageSquare, Pencil } from 'lucide-react';
 import React from 'react';
 
 export interface BotPrimaryActionsCellProps {
@@ -12,6 +12,8 @@ export interface BotPrimaryActionsCellProps {
   onView: (bot: BotDomain) => void;
   onEdit?: (bot: BotDomain) => void;
   onOpenLogs?: (bot: BotDomain) => void;
+  onOpenTaskInstances?: (bot: BotDomain) => void;
+  canOpenTaskInstances?: (bot: BotDomain) => boolean;
   onHealthCheck?: (bot: BotDomain) => void;
   inventoryActions?: Partial<Record<'view' | 'chat' | 'edit', BotActionAvailability>>;
   healthCheckAvailability?: BotActionAvailability;
@@ -51,6 +53,8 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   onView,
   onEdit,
   onOpenLogs,
+  onOpenTaskInstances,
+  canOpenTaskInstances,
   onHealthCheck,
   inventoryActions = {},
   healthCheckAvailability,
@@ -127,6 +131,17 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
     </Button>
   );
 
+  const taskInstancesButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={`查看 ${bot.name} 任务实例`}
+      onClick={() => onOpenTaskInstances?.(bot)}
+    >
+      <ClipboardList className="size-3.5" />
+    </Button>
+  );
+
   const showChat = isAgentCodingBot
     ? Boolean(onConversation)
     : Boolean(inventoryActions.chat?.visible && onConversation);
@@ -135,6 +150,9 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   const showView = Boolean(inventoryActions.view?.visible);
   const showEdit = Boolean(inventoryActions.edit?.visible);
   const showLog = Boolean(logAction?.visible && onOpenLogs);
+  // 后端 routines 端点以 MEMBER 权限校验；这里仅为列表入口做同口径展示，
+  // Owner 或显式协作者（inventory 的 edit）才展示，最终仍由服务端授权兜底。
+  const showTaskInstances = Boolean(onOpenTaskInstances && canOpenTaskInstances?.(bot));
   const showHealth = Boolean(healthCheckAvailability?.visible && onHealthCheck);
 
   return (
@@ -176,6 +194,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
           {logButton}
         </IconAction>
       ) : null}
+      {showTaskInstances ? <IconAction label="任务实例">{taskInstancesButton}</IconAction> : null}
       {showHealth ? (
         <IconAction
           label="健康检查"

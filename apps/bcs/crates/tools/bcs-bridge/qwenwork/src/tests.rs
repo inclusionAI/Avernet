@@ -686,3 +686,6 @@ async fn query_end_does_not_hide_missing_tool_results_or_failed_main_requests() 
 #[cfg(unix)]
 #[path = "question_tests.rs"]
 mod question_tests;
+
+#[path = "failed_tool_tests.rs"]
+mod failed_tool_tests;

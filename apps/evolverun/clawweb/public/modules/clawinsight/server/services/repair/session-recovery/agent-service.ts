@@ -1,3 +1,4 @@
+import { comparableRequestPayload } from "../../../repositories/repair/agent-tool-call-record.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
@@ -10,15 +11,20 @@ import { sameAgentExecutionReport, AgentExecutionService, createAgentExecutionSt
 import { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { AgentToolContext, AgentRuntimeInspectInput, AgentRuntimeTargetSnapshot, AgentPlanAction } from "../common/agent-tools/contracts.js";
-import { redactValue, redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
+import { redactEvidenceValue, redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
 import { RecoverySessionReader } from "./session-reader.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { recoveryResult } from "./result.js";
-import type { RecoveryAgentExecutor, SessionRecoveryTaskService } from "./task-service.js";
+import type { RecoveryAgentExecutor } from "./task-service.js";
+import type { SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
 import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
+function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
+  return { ...redactEvidenceValue(body) as Record<string, unknown>,
+    requestDigest: createHash("sha256").update(comparableRequestPayload(body)).digest("hex") };
+}
 export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeTargetSnapshot {
   const fingerprint = createHash("sha256").update(JSON.stringify([target.environment, target.ownerId, target.botId,
     target.provider, target.bindingId, target.deviceId, target.sandboxId ?? null, target.activeEngine ?? null])).digest("hex");
@@ -27,7 +33,7 @@ export function recoveryTargetSnapshot(target: ResolvedBotTarget): AgentRuntimeT
 }
 
 /** Business adapter over existing AIS dispatch, workload tickets, tool ledger and Bot runtime. */
-export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
+export class SessionRecoveryAgentService implements RecoveryAgentExecutor, SessionRecoveryAgentApi {
   private readonly executions: AgentExecutionService;
   private readonly reader: RecoverySessionReader;
   private readonly runtimeTool: AgentRuntimeTool;
@@ -35,7 +41,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
   constructor(private readonly deps: {
     tasks: RecoveryTaskStore; repo: EvolveRepository; audit: AgentToolCallRepository;
     ais: AisExecutor; runtime: BotRuntime; targets: BotTargetResolver; trajectory?: RecoveryTrajectoryReader; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
-    business: () => SessionRecoveryTaskService; publicBaseUrl: string; snapshotId: number;
+    business: () => SessionRecoveryTaskApi; publicBaseUrl: string; snapshotId: number;
     packageId?: string; nasRoots?: readonly string[]; leaseSeconds: number; launchGraceSeconds: number; observationMs: number;
     now?: () => number;
   }) {
@@ -73,13 +79,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
     if (latest.execution?.executionId !== issued.execution.executionId || latest.execution.state === "ended") {
       await this.deps.ais.stopExecution(jobId); return;
     }
-    await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }));
+    const saved = await this.save(latest, value => ({ ...value, execution: { ...value.execution!, jobId } }), issued.execution.executionId);
+    if (saved.execution?.executionId !== issued.execution.executionId || saved.execution.state === "ended") await this.deps.ais.stopExecution(jobId);
   }
   async release(input: RecoveryStoredTask): Promise<void> {
     const task = await this.required(input.taskId);
     if (!task.execution || task.execution.state === "ended" || (input.execution && input.execution.executionId !== task.execution.executionId)) return;
     await this.save(task, value => ({ ...value, execution: this.executions.end(value.execution!),
-      timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] }));
+      timeline: [...value.timeline, this.event("execution", "本次执行结束，已保存任务上下文", { execution_id: value.execution!.executionId })] }), task.execution.executionId);
     // The wrapper sees ended on its next control poll and exits for Base to archive.
     // Forced cancellation is reserved for expired leases / the outer hard timeout.
   }
@@ -117,7 +124,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
         ...(body.from_line === undefined ? {} : { fromLine: body.from_line as number }), ...(body.offset === undefined ? {} : { offset: body.offset as number }), ...(body.limit === undefined ? {} : { limit: body.limit as number }) });
       if (task.requiresFreshObservation) {
         const latest = await this.required(task.taskId);
-        await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }));
+        await this.save(latest, value => ({ ...value, requiresFreshObservation: false, observationDeadlineAt: this.now() + this.deps.observationMs }), task.execution!.executionId);
       }
       return { ...output, delivery_key: this.latestDeliveryKey(task) };
     });
@@ -192,14 +199,14 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
   }
 
   async retryMessage(task: RecoveryStoredTask, body: Record<string, unknown>) {
-    if (task.level === "debug") return { status: "not_intervened" };
     const prior = task.timeline.find(event => event.kind === "operation" && (event.payload.request as Record<string, unknown>)?.clientRequestId === body.clientRequestId
       && (event.payload.result as Record<string, unknown>)?.initial_message === true);
     const initial = task.phase === "assess" || !!prior;
     if (!prior && (task.status !== "running" || (initial ? !!task.plan : task.phase !== "apply" || !task.plan?.approvedAt))) fail(409, "消息只能在初始判断或获批方案执行阶段由 Agent 决定");
     if (typeof body.message !== "string" || !body.message.trim() || body.message.length > 8000) fail(422, "重试消息格式无效");
     const key = initial ? task.request.delivery_key : `retry-${createHash("sha256").update(`${task.taskId}:${String(body.clientRequestId)}`).digest("hex").slice(0, 48)}`;
-    return this.tool(task, body, "retry_message", true, async () => {
+    return this.tool(task, body, "retry_message", task.level !== "debug", async () => {
+      if (task.level === "debug") return { status: "not_intervened", dry_run: true, delivery_key: key, message: body.message, initial_message: initial };
       const currentTarget = await this.deps.targets.resolve({ environment: task.request.target.env, ownerId: task.request.target.entity_id, botId: task.request.target.bot_id });
       if (recoveryTargetSnapshot(currentTarget).fingerprint !== task.runtimeTarget!.fingerprint) fail(409, "目标运行位置已变化，不能投递旧方案的重试消息");
       const originalId = this.originalSessionId(task);
@@ -275,12 +282,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
     const { call, created } = await this.deps.audit.createToolCall({ callId: `tc-${randomUUID()}`, taskId: task.taskId, stepId: task.current!.stepId,
       executionId: execution.executionId, authorizationScopeDigest: scope, clientRequestId: body.clientRequestId,
       toolName: name, operation: String(body.operation ?? name), actionId: typeof body.actionId === "string" ? body.actionId : null,
-      request: redactValue(body), isWrite: write, toolCallLedgerGuard: (calls, locked) => {
+      request: recoveryToolRequest(body), isWrite: write, toolCallLedgerGuard: (calls, locked) => {
         const config = locked.taskConfig as RecoveryStoredTask | undefined;
         if (!config || config.execution?.executionId !== execution.executionId || config.execution.state === "ended"
           || config.execution.leaseExpiresAt <= Math.floor(this.now() / 1000)) fail(409, "执行授权已变化");
         if (write && (config.level === "debug" || config.status !== "running")) fail(403, "当前不能执行实际干预");
-        if (write && name === "retry_message" && config.phase === "assess") {
+        if (name === "retry_message" && config.phase === "assess") {
           if (config.plan || calls.some(item => item.toolName === "retry_message")) fail(409, "初始消息已领取，不能再次发送");
         } else if (write && (config.phase !== "apply" || !config.plan?.approvedAt)) fail(403, "当前没有方案操作授权");
         if (write && name === "apply_action" && (config.plan?.digest !== task.plan?.digest
@@ -318,16 +325,17 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
       location: typeof (result as Record<string, unknown>)?.source === "string" ? String((result as Record<string, unknown>).source) : `tool-call:${callId}`,
       excerpt: JSON.stringify(result).slice(0, 2000) };
     const receipt = result as Record<string, unknown>;
-    const initialDelivery = name === "retry_message" && receipt.initial_message === true
+    const initialDelivery = name === "retry_message" && receipt.initial_message === true && receipt.dry_run !== true
       ? recoveryResult(current.request, receipt as unknown as Parameters<typeof recoveryResult>[1], Number(receipt.started_at_ms), Number(receipt.finished_at_ms)) : undefined;
     await this.save(current, value => value.evidence.some(item => item.evidence_id === evidenceId) ? value : ({ ...value, evidence: [...value.evidence, evidence],
       ...(initialDelivery ? { delivery: initialDelivery, observationDeadlineAt: initialDelivery.delivery.finished_at_ms + this.deps.observationMs } : {}),
-      timeline: [...value.timeline, this.event("operation", body.purpose as string, { tool_call_id: callId, request: redactValue(body), result: {
+      timeline: [...value.timeline, this.event("operation", body.purpose as string, { tool_call_id: callId, request: recoveryToolRequest(body), result: {
         delivery_confirmed: (result as Record<string, unknown>)?.delivery_confirmed,
         session_id: (result as Record<string, unknown>)?.session_id,
         delivery_key: (result as Record<string, unknown>)?.delivery_key,
         message: (result as Record<string, unknown>)?.message,
         initial_message: (result as Record<string, unknown>)?.initial_message,
+        dry_run: (result as Record<string, unknown>)?.dry_run,
       }, status, evidence_id: evidenceId, raw_tool_call_id: callId })] }));
     return evidenceId;
   }
@@ -346,9 +354,13 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor {
     return source ? String((source.payload.result as Record<string, unknown>).session_id) : undefined;
   }
   private async required(id: string) { const task = await this.deps.tasks.find(id); if (!task) fail(404, "自愈任务不存在"); return task; }
-  private async save(task: RecoveryStoredTask, change: (value: RecoveryStoredTask) => RecoveryStoredTask) {
+  private async save(task: RecoveryStoredTask, change: (value: RecoveryStoredTask) => RecoveryStoredTask, executionId?: string) {
     for (let attempt = 0; attempt < 5; attempt++) {
-      const saved = await this.deps.tasks.update(task.taskId, task.version, value => ({ ...change(value), version: value.version + 1 }));
+      if (executionId && task.execution?.executionId !== executionId) return task;
+      const saved = await this.deps.tasks.update(task.taskId, task.version, value => {
+        if (executionId && value.execution?.executionId !== executionId) fail(409, "旧执行不能更新新执行");
+        return { ...change(value), version: value.version + 1 };
+      });
       if (saved) return saved;
       task = await this.required(task.taskId);
     }

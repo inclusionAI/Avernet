@@ -19,9 +19,6 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import (
-    BotCollabLogRepositoryProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import (
     LocalSkillPackageStorage,
@@ -142,7 +139,9 @@ class _StorageFactory:
         directory = f"test-local/{directory_name or name}"
         return directory, LocalSkillPackageStorage(self._filesystem, directory)
 
-    def local_skill_package_location(self, *, name: str, directory_name=None, **_kwargs):
+    def local_skill_package_location(
+        self, *, name: str, directory_name=None, **_kwargs
+    ):
         return SimpleNamespace(
             directory=f"test-local/{directory_name or name}",
             layout="LEGACY",
@@ -293,12 +292,13 @@ def _seed_uploadable_bot(world) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
-            world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
             lambda: _DeviceContextResolverStub(),
             _RuntimeFactory(),
             SkillPackageValidator(SkillParser()),
             _LegacyPackageRuntime(),
+            lambda: SimpleNamespace(observe=lambda **_kwargs: None),
+            True,
         ),
         scope=None,
     )

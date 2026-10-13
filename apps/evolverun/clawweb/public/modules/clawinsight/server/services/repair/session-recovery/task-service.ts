@@ -5,7 +5,7 @@ import { SessionRecoveryError } from "./errors.js";
 import { parseRequest } from "./validation.js";
 import { recoveryHandbook } from "./handbook.js";
 import { decideRecoveryPlan, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan } from "./task-state.js";
-import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, SessionRecoveryApi } from "./contracts.js";
+import type { RecoveryActor, RecoveryAcknowledgment, RecoveryRequest, RecoveryResult, SessionRecoveryTaskApi } from "./contracts.js";
 import type { RecoveryEvidence, RecoveryJudgment, RecoveryLevel, RecoveryPlan, RecoveryTaskResult, RecoveryTimelineEvent, RecoveryStoredTask, RecoveryTaskStore } from "./task-contracts.js";
 
 export interface RecoveryAgentExecutor {
@@ -18,7 +18,7 @@ export interface RecoveryTaskNotifier {
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
 /** Owns the self-healing workflow; execution and controlled tools are injected. */
-export class SessionRecoveryTaskService implements SessionRecoveryApi {
+export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private readonly now: () => number;
   constructor(private readonly deps: {
     tasks: RecoveryTaskStore;
@@ -45,7 +45,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryApi {
     }
     const runtimeTarget = await this.deps.resolveTarget?.(request);
     const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level,
-      status: "running", phase: level === "debug" ? "plan" : "assess", version: 1, observationDeadlineAt: null, ownerDeadlineAt: null,
+      status: "running", phase: "assess", version: 1, observationDeadlineAt: null, ownerDeadlineAt: null,
       ...(runtimeTarget ? { runtimeTarget, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ target: request.target, level })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       plan: null, judgment: null, evidence: [], pending_results: [], timeline: [this.event("created", "service", "收到诊断并创建自愈任务", { request, handbook, initial_intervention: "agent" }),
         ...(level === "debug" ? [this.event("message", "service", "Debug：仅记录干预策略，不实际发送", { initial_intervention: "agent" })] : [])] };
@@ -80,16 +80,20 @@ export class SessionRecoveryTaskService implements SessionRecoveryApi {
   }
 
   async assess(taskId: string, version: number, input: { decision: "message" | "environment" | "observe"; summary: string; evidence_ids: string[] }): Promise<void> {
-    await this.mutate(taskId, version, value => {
+    const task = await this.mutate(taskId, version, value => {
       if (value.status !== "running" || value.phase !== "assess") this.fail(409, "当前不能提交初始判断");
       if (!["message", "environment", "observe"].includes(input.decision) || typeof input.summary !== "string" || !input.summary.trim()
         || input.summary.length > 8000 || containsSecret(input.summary) || !Array.isArray(input.evidence_ids) || !input.evidence_ids.length
         || input.evidence_ids.some(id => !value.evidence.some(item => item.evidence_id === id))) this.fail(422, "初始判断需要决策、理由及已保存的证据");
-      if (input.decision === "message" && !value.delivery) this.fail(409, "尚未留存 Agent 的初始消息投递结果");
+      if (input.decision === "message" && !value.delivery && !(value.level === "debug" && value.timeline.some(event =>
+        event.kind === "operation" && (event.payload.result as Record<string, unknown>)?.dry_run === true))) this.fail(409, "尚未留存 Agent 的初始消息或拟发送内容");
+      const debugFinished = value.level === "debug" && input.decision !== "environment";
       return { ...value, version: value.version + 1, phase: input.decision === "environment" ? "plan" : "observe",
+        ...(debugFinished ? { status: "completed" as const, judgment: { delivery: "unconfirmed" as const, response: "unknown" as const, effect: "not_intervened" as const, summary: input.summary, evidence_ids: input.evidence_ids } } : {}),
         observationDeadlineAt: input.decision === "environment" ? null : value.observationDeadlineAt ?? this.now() + this.deps.observationMs,
         timeline: [...value.timeline, this.event("assessment", "agent", input.summary, input)] };
     });
+    if (task.status === "completed") await this.deps.agent.release(task);
   }
 
   async observe(taskId: string, version: number, judgment: RecoveryJudgment, evidence: RecoveryEvidence[]): Promise<void> {

@@ -22,6 +22,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/avatar"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
         "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
@@ -508,6 +514,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(
         PermissionLevel.MEMBER
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations"): Check(
+        PermissionLevel.MEMBER
+    ),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
@@ -825,7 +834,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "GET",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",
-    ): NoCheck("Current Skill Owner Grant, adjudicated by the Skill service"),
+    ): NoCheck("Active Team Space membership, adjudicated by the Skill service"),
     (
         "PUT",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy",

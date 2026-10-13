@@ -11,8 +11,9 @@ interface UseBotRegistrationTokenResult {
   retry: () => void;
 }
 
-export function useBotRegistrationToken(open: boolean): UseBotRegistrationTokenResult {
+export function useBotRegistrationToken(open: boolean, providerSlug?: string): UseBotRegistrationTokenResult {
   const [requestSeq, setRequestSeq] = useState(0);
+  const [tokenScope, setTokenScope] = useState<string | undefined>(undefined);
   const [token, setToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -34,10 +35,14 @@ export function useBotRegistrationToken(open: boolean): UseBotRegistrationTokenR
 
     const controller = new AbortController();
     let cancelled = false;
+    setToken(null);
+    setExpiresAt(null);
+    setNote(null);
+    setTokenScope(providerSlug);
     setIsLoading(true);
     setError(null);
 
-    void botRegistrationService.getRegistrationToken(controller.signal).then((result) => {
+    void botRegistrationService.getRegistrationToken(controller.signal, providerSlug).then((result) => {
       if (cancelled) return;
       setIsLoading(false);
       if (result.ok) {
@@ -56,7 +61,16 @@ export function useBotRegistrationToken(open: boolean): UseBotRegistrationTokenR
       cancelled = true;
       controller.abort();
     };
-  }, [open, requestSeq]);
+  }, [open, requestSeq, providerSlug]);
 
-  return { token, expiresAt, note, isLoading, error, bcsEndpoint, retry };
+  const matchesScope = tokenScope === providerSlug;
+  return {
+    token: matchesScope ? token : null,
+    expiresAt: matchesScope ? expiresAt : null,
+    note: matchesScope ? note : null,
+    isLoading: open && (!matchesScope || isLoading),
+    error: matchesScope ? error : null,
+    bcsEndpoint,
+    retry,
+  };
 }

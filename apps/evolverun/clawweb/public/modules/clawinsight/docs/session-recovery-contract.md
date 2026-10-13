@@ -51,7 +51,7 @@ Creation stores the exact event/delivery identity and request fingerprint in the
 
 Task result snapshots are saved before callbacks in the existing task extension. Callback failure retains the exact version for retry; successful acceptance adds a timeline event. Callbacks never repeat the initial message or plan actions. Monitoring deduplicates by task ID and result version.
 
-Database definitions use the existing shared migration registry: v141 enlarging the existing task JSON column on managed databases. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
+Database definitions use the existing shared migration registry: v141 enlarging the existing task JSON column on managed databases. Managed deployment details are in `apps/evolverun/docs/clawweb/evolve-schema-v141/README.md`. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
 
 ## Validation boundary
 
@@ -78,3 +78,5 @@ server/services/notifications/dingtalk-sender.ts      # 治理与修复共用的
 公共工具不决定修复流程或批准方案；具体业务校验阶段、冻结目标和已批准操作后，调用同一工具实现。业务记录在各自任务内，操作回执进入共用审计账本。通知的鉴权、Token 缓存和投递只有一份实现；治理与自愈分别生成业务内容。内部 Host 只装配具体 Provider、轨迹读取器和运行配置。
 
 容器端公共执行代码由 OCB 的 `clawweb-skills/runtime/agent_runtime/` 维护，打包时放入两种 Skill 包；Repair 与自愈分别保留自己的 Skill 和业务主流程。专业 references 在 Repair 源目录维护，打包时交付给自愈包。没有安装到目标 Bot 的自愈手册，也没有后端直接发送的默认重试分支。
+
+Execution-scoped updates validate the execution identity inside each retried atomic change. Audit requests retain redacted business text and a canonical request digest, so a stable request ID cannot hide different advice or uploaded content. Debug follows assessment too: it records proposed advice and the decision, or a proposed environment plan, without sending messages or changing the environment.

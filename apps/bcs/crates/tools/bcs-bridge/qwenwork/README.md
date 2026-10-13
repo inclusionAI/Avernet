@@ -13,6 +13,35 @@ BCS WS / Provider webhook
   <- bridge encoder (chat / agent stream and terminal)
 ```
 
+## Initialize the desktop connection
+
+In a binary with the `init` command, register a QwenWork Bot first, then run:
+
+```sh
+bcs-bridge --config ~/.bcn-bridge/qwenwork.toml init --engine qwenwork
+```
+
+Use `0.1.4-beta.2` or newer; that distribution includes the initializer.
+
+Initialization detects exactly one installed `QwenWorkCN` or `QwenWork` database,
+validates its chat metadata schema read-only, generates separate channel and Hook
+credentials, and writes the registered Bot's engine options. It backs up both
+files, atomically writes private files, merges the required Hooks while preserving
+other Hooks, and reuses credentials on repeat execution. It never edits the
+WeCom channel database. Conflicting existing HTTP Hooks on the selected listener
+fail without modifying configuration.
+
+Fill the printed WebSocket URL, Bot ID and Secret in the desktop's WeCom Bot
+channel. Reload desktop Hooks, start bridge and enable the channel. The Secret
+is printed deliberately for local setup; do not paste that output into issues.
+
+If detection is ambiguous or your installation uses different paths, append
+`--option database_path=/absolute/path/agents.db` and/or
+`--option settings_path=/absolute/path/settings.json`. An alternate loopback
+listener can be chosen with `--option listen=127.0.0.1:52493`; use the resulting
+printed URL and health command. The command requires exactly one QwenWork Bot
+in the selected bridge configuration.
+
 ## Configure
 
 Register using the normal bridge flow with `--mode plugin --engine qwenwork`,
@@ -217,3 +246,35 @@ Tests: `cargo test -p bcs-bridge-qwenwork`. The ignored
 `QWENWORK_LIVE_SOCKET` and `QWENWORK_LIVE_PROMPT` values pointing to private local
 configuration. It never passes merely because a model prints the chosen answer:
 it requires an actual requested interaction and native tool result.
+
+When changing the listener with `init --option listen=...`, initialization removes
+only Hooks matching the previously saved listener URL and Hook credential.
+Other Hooks, including those sharing that URL with another credential, are preserved.
+A conflict at the new listener leaves both configuration files unchanged.
+
+## Hook migration and cleanup (beta.3)
+
+If `PostToolUseFailure` was configured for a compatible SDK, repeated init retains
+its matcher/timeout and listener migration updates its URL and credential. Init
+never adds this optional event on desktops that have not opted into it.
+
+Disable the WeCom channel and run `bcs-bridge stop`, then
+`bcs-bridge --config <registered-config> deinit --engine qwenwork` before removing
+the binary/config. Deinit removes only HTTP Hooks matching this Bot's saved URL
+and credential, including optional failure Hooks; it preserves other settings,
+creates a private backup and never reads/writes the desktop database. Reload
+Hooks afterward. Init persists the selected `settings_path` in engine options;
+older configurations using custom paths must pass it explicitly to deinit.
+The optional settings_path field requires beta.3; restore a pre-init backup before
+rolling its configuration back to beta.2. Configuration symlinks are preserved.
+Backups contain credentials: keep them private, and remove superseded backups
+manually when rollback is no longer needed. Cleanup does not revoke BCS tokens.
+
+QwenWorkCN 1.2.5's bundled SDK treats HTTP transport failures as non-blocking
+errors and continues PreToolUse when no decision is produced. Isolated execution
+of the bundled HTTP/aggregation/PreToolUse methods with a closed localhost port
+confirmed this behavior; a full model-driven desktop round trip was not performed.
+A slow endpoint
+can still delay a tool until its Hook deadline (300 seconds for opted-in questions).
+This is version-specific behavior, not a guarantee for future SDKs. Always remove
+unused global Hooks; do not rely on the bridge being unreachable as cleanup.
