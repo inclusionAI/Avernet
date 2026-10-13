@@ -1,7 +1,7 @@
 # Engine 传输层协议替换：v3 WebSocket 帧 → A2A（架构设计）
 
-日期：2026-10-13（v3，吸收两轮评审：v2 七项 + 本轮五项，前四项为实施前阻塞项）
-状态：**方向通过；Spike 获准；全客户端迁移未开闸（本轮四项 P1 修复后复审）**
+日期：2026-10-13（v4，吸收三轮评审：R1 七项 + R2 五项 + R3 三项 + 两处文档收尾）
+状态：**R3 阻塞项（安全重试判定机制）已修；总体方案收敛，按既有门禁推进 Spike → 1a → 1b；SDK 锁版/代理链路/真引擎行为以门禁实测为准，文档评审闭环**
 范围：engine adapter 传输层协议替换详设 + 全客户端迁移蓝图。BaaS / backend / BCS /
 前端 / 桌面各客户端线的详细改造各自后补 spec，本文只画依赖与阶段边界。
 分支：`feat/engine-a2a-protocol-replacement`
@@ -22,6 +22,10 @@
 | R2 | 幂等窗口失效后仍承诺同键安全重发 | P1 | 成立（v2 内部矛盾：进程内注册表 + 窗口外重执行 + 重发建议） | §8.5 窗口分离 + 禁止窗口外自动重发 |
 | R2 | 活任务精确回放路由不明 | P1 | 成立（spec §3.1.6：SubscribeToTask = 快照+实时，含不了游标回放） | §8.1 三路由显式化 |
 | R2 | "BCS 已传幂等键"依据不成立 | P2 | **成立**（`a2a_chat/mod.rs:902`：`idempotency_key: None`；run_id 只进帧 ID） | §6.2/§8.5 事实更正 + 迁移任务 |
+| R3 | "窗口内才可重试"缺可执行判定机制 | P1 | 成立（客户端无从得知服务端进程内记录是否存活；先检查后重发与重启存在竞态） | §8.5.2 retry-only 服务端原子判定（D14）+ F5 改真实故障注入 |
+| R3 | artifact 首块/lastChunk 语义歧义 | P2 | 成立（spec：lastChunk = 该 artifact 最后一块，非传输块结束） | §8.4 阶段表 |
+| R3 | HITL 重复提交与全局幂等规则冲突 | P2 | 成立（网络重试 vs 新业务操作两类请求需区分） | §8.6 处理顺序 + 分类 |
+| R3 | card 示例缺必填 skills / §13 引用方式 | 文档 | 成立（spec：skills 必填） | §6.5 最小 conversation skill；§13 直引 §3.1.2 |
 
 ## 1. 背景与问题
 
@@ -78,6 +82,7 @@ engine 模块当前的后端↔引擎信道是自定义 WebSocket JSON 帧协议
 | D11 | 幂等仅进程内承诺：窗口失效（重启/超窗）后契约 = 禁止自动重发，返回"执行结果未知"语义；不承诺跨重启重试安全 | v3 新增（R2-3） |
 | D12 | 活任务/终态任务的**精确回放**统一走恢复 extension（含游标回放+锁内转 live）；标准 `SubscribeToTask` 仅提供快照+实时（spec §3.1.6） | v3 新增（R2-4） |
 | D13 | BCS 需补齐幂等键传递（现在 `idempotency_key: None`）；逻辑请求 ID = A2aChatCommand.run_id，重试不得再生成 | v3 新增（R2-5） |
+| D14 | **retry-only 安全重试语义**：FIRST（首提，登记新键开执行）/ RETRY-ONLY（不确定结果后的重试）两类请求；服务端 kernel **原子**判定——记录在则返回既有结果，记录不在则原子返回"执行结果未知"且**不得创建新执行**；A2A metadata 与 v3 params 映射同一 kernel 操作；不引入持久化 | v4 新增（R3-1） |
 
 ## 4. 方案选择
 
@@ -146,7 +151,8 @@ Service API（Protocol，示意，契约语义以 §8 为准）：
 
 ```python
 class EngineChatService(Protocol):
-    async def start_task(self, engine, context, message, *, idempotency_key) -> TaskHandle
+    async def start_task(self, engine, context, message, *, idempotency_key,
+                         retry_only: bool = False) -> TaskHandle
     async def cancel_task(self, engine, task_id) -> CancelResult
     async def inject_context(self, engine, context, message) -> None
     async def resolve_interaction(self, engine, interaction_id, resolution) -> None
@@ -169,8 +175,11 @@ class EngineChatService(Protocol):
   `supportedInterfaces[].protocolBinding == "JSONRPC"` 且 `protocolVersion` 为 1.0 →
   走 A2A，否则 v3）；缓存失效 = 容器 rebuild/publish 事件 + TTL 兜底；回滚 =
   组件级配置开关
-- 跨协议超时换发：仅当幂等键仍在窗口内（§8.5）才可换协议自动重发；否则转
-  GetTask/结果未知处理（D11）
+- 跨协议超时换发：不确定结果后的自动重试必须携带 **retry-only 语义**（A2A 侧
+  SendMessage metadata 扩展；v3 侧帧 params 字段；两协议映射同一 kernel 操作，
+  §8.5/D14）；**禁止**以 FIRST 语义重发不确定结果——服务端无法探测记录是否
+  已随重启丢失（竞态），这是契约边界而非技术防护；收到"结果未知"后显式再执行
+  = 新用户操作（新幂等键）
 - 旧容器的去重行为不受新 kernel registry 保护：registry 只存在于升级后容器的
   kernel 中；旧容器上的重发保护 = v3 现状（未实证，见 §8.5 末条）
 
@@ -191,12 +200,16 @@ class EngineChatService(Protocol):
     "pushNotifications": false,
     "extensions": [ /* §8 extensions 声明 */ ]
   },
+  "skills": [
+    { "id": "conversation", "name": "Conversation",
+      "description": "<bot 描述摘要>" }
+  ],
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["text/plain", "application/json"]
 }
 ```
 
-`url` base 由部署侧注入（config 差异不进业务码道）；skills 来源 O3；extension URI
+`url` base 由部署侧注入（config 差异不进业务码道）；`skills` 为 spec 必填字段——card 示例已内置最小 conversation skill，G1a 可直接拿一份可校验 card；动态 skills 来源 = O3；extension URI
 命名在 G2 与 SDK 版本一起锁定。
 
 ### 6.6 鉴权与版本协商
@@ -274,9 +287,20 @@ extension 方法（A2A-Extensions 头协商）：message + contextId + 参与方
 依据：spec 将 Streaming 定义为 "Real-time, incremental updates for tasks (status
 changes, artifact updates)"——流是 Task 更新流，不是连续 Message 流。
 
-- **文本增量**：`TaskArtifactUpdateEvent`，run 级固定 `artifactId`（text artifact）：
-  每个传输块 `append: true`；块结束标记 `lastChunk: true`；终稿修正 = 同
-  `artifactId` 的 `append: false` 替换更新（对齐现前端对 final 覆盖快照的既有行为）
+- **文本增量**：`TaskArtifactUpdateEvent`，run 级固定 `artifactId`（text artifact）。
+  分块语义按阶段表定死——spec：`append` = 追加到**此前已发送的同 ID artifact**；
+  `lastChunk` = **该 artifact 的最后一块**（不是当前传输块结束）：
+
+  | 阶段 | append | lastChunk | 说明 |
+  |---|---|---|---|
+  | 首块（建立文本 artifact） | false/省略 | false | 建立 artifact |
+  | 中间增量块 | true | false | |
+  | 最后一块（无终稿替换） | true | true | 封口 |
+  | 完整终稿替换（如需） | false | true | 全量替换，为最终更新 |
+
+  终稿替换发出前**不得**提前宣布 artifact 结束；替换之后再进 Task 终态（对齐现
+  前端对 final 覆盖快照的既有行为）。验收用例：三段增量 + 一次完整终稿替换 →
+  最终文本正确、不中途结束、不重复追加（并入 G3）
 - 排序/去重：`artifactUpdate.metadata.seq` = §5 统一游标；客户端按序拼接、按
   `seq` 去重
 - `StreamResponse.message` 仅承载完整独立消息（如 inject 的回显），不作增量通道
@@ -284,7 +308,7 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
 - **不做**自定义连续-Message delta extension（若实测 artifact 方案无法承接某引擎
   的流形态，须回到本节重新评审并声明为显式 extension，不得默认其为标准行为）
 
-### 8.5 幂等契约（D8/D11：窗口分离，删除越窗安全重发承诺）
+### 8.5 幂等契约（D8/D11/D14：窗口分离、安全重试判定、删除越窗安全重发承诺）
 
 两个窗口**分开定义**，不得互相推导：
 
@@ -298,13 +322,27 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
 1. 幂等键：A2A 侧 = `messageId`；v3 侧 = `ChatSendParams.idempotency_key`。
    逻辑请求 ID 由客户端生成（BCS = `A2aChatCommand.run_id`，D13：重试不得再生成），
    映射到两协议的键字段；帧级断言：发送键非空且跨重试一致（contract test）
-2. **窗口内**（同键在 registry）：返回既有 task（未终态）或终态结果；窗口内
-   跨协议换发允许（同键）
-3. **窗口失效**（adapter 重启 / 幂等记录过期）：客户端得到/推断"**执行结果未知**"，
-   **禁止自动重发**；显式再执行 = 新的用户操作，客户端生成**新幂等键**。服务端
-   诚实声明：窗口外无 server 侧防护——重复副作用风险由契约显式转移给调用方决策
-4. F4 用例覆盖窗口内（正常）；F5 覆盖窗口外行为（响应丢失 + 重启/超窗 → 自动
-   重发被禁止；若调用方仍重发，行为 = 新执行，风险可在监控中观测）
+2. **retry-only 判定机制（D14，服务端原子）**：请求分两类，判定与处理在 kernel
+   内原子完成——客户端**无需**（也无法）预判服务端记录是否存活：
+
+   | 请求 | 记录查找结果 | 处理 |
+   |---|---|---|
+   | FIRST（首次提交） | 不存在 | 登记新键并开始执行 |
+   | FIRST | 存在 | 去重，返回既有 task/终态 |
+   | RETRY-ONLY（不确定结果后的重试） | 存在 | 返回既有 task/终态结果 |
+   | RETRY-ONLY | 不存在 | 原子返回"**执行结果未知**"（显式错误），**禁止创建新执行** |
+
+   - 携带方式：A2A SendMessage metadata 扩展（`avernet.retryOnly: true`）；v3 帧
+     params 字段；内部 extension，非 A2A 标准字段（附录 A.3 声明）
+   - spec"Send MAY idempotent by messageId"的兜底经此标志显式激活
+   - "世代/重试凭据"类替代方案不采用：首次响应丢失 + 记录消失时凭据同样不存在，
+     相比 retry-only 无增益、多一段实现面
+3. **窗口失效**（adapter 重启 / 幂等记录过期）：RETRY-ONLY 请求由上表原子返回
+   "执行结果未知"（安全重试可执行，D14）；**禁止**以 FIRST 语义自动重发不确定
+   结果；显式再执行 = 新的用户操作（客户端生成**新幂等键**），副作用风险显式
+   交回调用方决策
+4. F4 覆盖窗口内同键重发（含跨协议）；F5 覆盖**真实故障路径**下的 retry-only
+   拦截（服务端拒绝第二次执行，执行次数监控验证恰好一次）
 5. 事实边界：v3 引擎 adapter 当前对 `idempotency_key` 的实际去重行为**未实证**；
    D8 的保护只存在于新 kernel（升级后容器）。旧容器上的重发语义 = v3 现状，
    迁移期间 BCS/客户端不得对旧容器做跨协议安全重发假设（§10.3 矩阵备注）
@@ -315,9 +353,18 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
  （metadata，对齐现 interaction.requested 参数）
 - 决策：`SendMessage`，同 `taskId` + `contextId`（spec：不匹配 MUST 拒绝）；决策
   内容 = parts + metadata（对齐现 interaction.resolve）
-- 冲突：重复提交（已离开 input-required）→ 标准错误；审批期间 cancel → 取消
-  胜出，迟到 resolve → 任务已结束错误；未决超时 → 停留 input-required 至 run
-  deadline。TC-HITL 含「审批中取消」「重复提交」负例
+- **处理顺序与请求分类**（裁掉与 §8.5 幂等规则的冲突）：先查同键幂等记录，
+  再按 interaction 当前状态校验新操作——
+  - **A. 同一审批的网络重试**（审批已处理、响应丢失、客户端携**同 messageId**
+    重发）：查到记录 → 返回**先前处理结果**，不因状态已离开 input-required 而
+    把成功审批渲染成失败（TC-HITL-RETRY）
+  - **B. 对已解决 interaction 的新业务操作**（客户端用**新 messageId** 再次
+    批准/拒绝/修改）：记录未中后再校验状态 → "已解决/状态冲突"错误
+    （TC-HITL-DUP）
+- cancel 与已处理结果的关系：cancel 只改写 run 状态（run → canceled，且仅当
+  task 尚未到终态），**不回写已成功处理的 resolution 记录**——A 类网络重试仍可
+  取回历史决策结果；迟到 cancel 在运行方向胜出，但不覆盖既有成功结果。未决
+  超时 → 停留 input-required 至 run deadline
 
 ### 8.7 reset 契约
 
@@ -358,8 +405,9 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 - F2：task 终态后重连（180s 内：ReplayEvents 回放；窗外：拒绝 + GetTask 语义）
 - F3：无前台活跃 task 时后台 inject 经 session 订阅可见
 - F4：窗口内响应丢失，同幂等键重发（含跨协议）不二次执行
-- F5：窗口失效（重启/超窗）后：自动重发被契约禁止（客户端行为）；若仍发 = 新执行，
-  监控可见重复副作用计数
+- F5：**真实故障路径**：服务端执行完成 → 响应被截断 → adapter 重启（记录清零）→
+  客户端实际发起 retry-only 重发（测试**不**预告知"窗口已失效"）→ 服务端拒绝
+  第二次执行并返回"执行结果未知"；执行次数监控验证恰好一次
 - F6：活任务断线期间产生多条 delta / tool progress / interaction 事件；重连按
   `seq` 逐事件补齐（不只是终稿文本或当前快照）
 
@@ -465,17 +513,19 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 | `SubscribeToContext`/`UnsubscribeFromContext` | 会话级事件订阅 | chat.subscribe/unsubscribe |
 | inject | 旁观注入（非 Task） | chat.inject |
 | `ResetContext` | 会话历史重置 | sessions.reset |
-| （SendMessage metadata：`interactionId`、幂等键如需） | HITL 关联、去重 | interaction.resolve 的承载 = 同 task 续消息 |
+| （SendMessage metadata：`interactionId`） | HITL 关联 | interaction.resolve 的承载 = 同 task 续消息 |
+| （SendMessage metadata：`retryOnly`，D14） | 不确定结果后的安全重试（服务端原子判定） | v3 帧 params 的 retry 语义字段 |
 
 wire 样例 golden 文件在 G2 锁 SDK 后由官方样例生成回填（conformance golden，不手拼）。
 
 ## 13. 参考与证据
 
 - A2A spec v1.0.x：https://a2a-protocol.org/latest/specification/ （本附录为关键词
-  窗口提取，非全文通读；R2 评审引用的 §3.1.2 "两类流"枚举措辞未复现于提取窗口，
-  但结论由词汇表 Streaming 定义 + §3.1.6/§3.5 条款支持）
+  窗口提取，非全文通读；spec §3.1.2 对「单 Message 流 / Task 生命周期流」的
+  分类经 R3 评审核对原文确认，§8.4 的依据直接引用该条款；词汇表 Streaming
+  定义与 §3.1.6/§3.5 为补充证据）
 - 代码证据：`ws_server.py:830-877`（session 订阅）、`openclaw_resume.py:14-19/69-152`
   （恢复容量/CACHE_LIMIT/锁内交接）、`a2a_chat/mod.rs:902`（`idempotency_key:
   None`——v2 的"BCS 已传幂等键"失实，本轮更正；run_id 仅进帧 ID）、
   `docs/arch/arch.rules.md` 第 3/7/16/25 条
-- 评审记录：R1（5 P1+2 P2）+ R2（4 P1+1 P2），吸收映射见文首表
+- 评审记录：R1（5 P1+2 P2）+ R2（4 P1+1 P2）+ R3（1 P1+2 P2+2 文档收尾），吸收映射见文首表
