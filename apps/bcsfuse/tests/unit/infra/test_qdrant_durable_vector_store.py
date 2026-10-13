@@ -99,6 +99,31 @@ def _store(backend: FakePersistenceBackend, tmp_path) -> QdrantMySQLVectorStore:
     )
 
 
+def test_worker_payload_update_uses_scoped_durable_read(tmp_path) -> None:
+    class ScopedBackend(FakePersistenceBackend):
+        def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+            return [point for point in self.points.values()
+                    if point.id.startswith(f"{worker_id}:")]
+
+        def load_all(self) -> list[VectorPoint]:
+            raise AssertionError("worker update must not scan all vectors")
+
+    owner = "default:398718"
+    backend = ScopedBackend(points={
+        f"{owner}:default:full": _point(f"{owner}:default:full", "owner", worker_id=owner),
+        f"{owner}:nested:full": _point(
+            f"{owner}:nested:full", "other", worker_id=f"{owner}:nested",
+        ),
+    })
+    store = _store(backend, tmp_path)
+    try:
+        assert store.update_payload_by_worker(owner, {"runtime_state": "online"}) == 1
+        assert backend.points[f"{owner}:default:full"].payload["runtime_state"] == "online"
+        assert "runtime_state" not in backend.points[f"{owner}:nested:full"].payload
+    finally:
+        store.close()
+
+
 def test_text_queries_search_existing_payloads_before_and_after_rebuild(tmp_path, caplog):
     backend = FakePersistenceBackend()
     store = _store(backend, tmp_path)

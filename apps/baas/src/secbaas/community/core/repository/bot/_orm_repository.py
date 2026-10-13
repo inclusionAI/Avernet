@@ -11,7 +11,7 @@ from secbaas.community.logger import get_logger
 
 from ._orm_model import BotModel
 from ._protocol import BotRepository
-from ._record import BotRecord
+from ._record import BotRecord, RestoredBotRecord
 
 log = get_logger("orm")
 
@@ -714,3 +714,92 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
             synchronize_session=False,
         )
         log.info("[bot:complete_update_transfer] result: done")
+
+    @with_orm_session
+    def restore_bot_record_by_id(
+        self,
+        bot_id: int,
+        *,
+        modifier: str,
+    ) -> RestoredBotRecord | None:
+        """Atomically restore a bot record to live ACTIVE (see Protocol docstring).
+
+        Admin recovery operation that deliberately bypasses the state
+        machine ("RELEASED is terminal"): one method = one transaction, UK
+        ordering retire-siblings-BEFORE-revive (the 1205-deadlock pattern
+        from ``try_insert_pending_bot`` must not be reintroduced; see
+        ``RestoredBotRecord`` for the returned snapshot).
+        """
+        log.info(
+            "restore_bot_record_by_id: bot_id=%s, modifier=%s",
+            bot_id,
+            modifier,
+        )
+        from sqlalchemy import func as sa_func
+
+        target = self._session.query(BotModel).filter(BotModel.id == bot_id).first()
+        if target is None:
+            log.info("[bot:restore_bot_record_by_id] result: None")
+            return None
+        previous_status = target.status
+        previous_is_deleted = target.is_deleted or 0
+
+        try:
+            # 2. Retire live siblings FIRST: frees every live UK slot of
+            # this bot_uuid before the revive re-occupies the ACTIVE slot.
+            # Single direct transition (live, any-status) -> (RELEASED,
+            # own-row-id tombstone): no intermediate (RELEASED, 0) state
+            # and no UK cross-collision between siblings.
+            retired_sibling_count = int(
+                self._session.query(BotModel)
+                .filter(
+                    BotModel.bot_uuid == target.bot_uuid,
+                    BotModel.id != bot_id,
+                    BotModel.is_deleted == 0,
+                )
+                .update(
+                    {
+                        "status": "RELEASED",
+                        "is_deleted": BotModel.id,
+                        "modifier": modifier,
+                        "gmt_modified": sa_func.now(),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            # 3. Revive the target now that every live slot is free.
+            self._session.query(BotModel).filter(BotModel.id == bot_id).update(
+                {
+                    "is_deleted": 0,
+                    "status": "ACTIVE",
+                    "modifier": modifier,
+                    "gmt_modified": sa_func.now(),
+                },
+                synchronize_session=False,
+            )
+        except IntegrityError as exc:
+            raise BotRecordConflictError(
+                f"Restore bot_id={bot_id} conflicts on the live unique-key "
+                f"slot for bot_uuid={target.bot_uuid} (concurrent restore "
+                f"or publish); transaction rolled back"
+            ) from exc
+
+        # 4. Snapshot the restored row for the service layer.
+        restored_row = (
+            self._session.query(BotModel)
+            .filter(BotModel.id == bot_id)
+            .populate_existing()
+            .first()
+        )
+        snapshot = RestoredBotRecord(
+            record=restored_row.to_record(),
+            previous_status=previous_status,
+            previous_is_deleted=previous_is_deleted,
+            retired_sibling_count=retired_sibling_count,
+        )
+        log.info(
+            "[bot:restore_bot_record_by_id] result: %s->ACTIVE, retired=%s",
+            previous_status,
+            retired_sibling_count,
+        )
+        return snapshot

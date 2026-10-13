@@ -24,6 +24,7 @@ from src.domain.services.vector_persistence_backend import (
     BatchedVectorPersistenceBackend,
     IncrementalVectorPersistenceBackend,
     VectorPersistenceBackend,
+    WorkerScopedVectorPersistenceBackend,
 )
 from src.domain.services.vector_store_adapter import VectorStoreAdapter
 from src.infra.public.observability.storage_logging import (
@@ -161,10 +162,14 @@ class QdrantMySQLVectorStore(VectorStoreAdapter):
     def update_payload_by_worker(self, worker_id: str, payload_updates: dict) -> int:
         """Write through all exact-owner points, including locally unseen ones."""
         with self._index_lock:
+            if isinstance(self._persistence, WorkerScopedVectorPersistenceBackend):
+                source_points = self._persistence.load_by_worker(worker_id)
+            else:
+                source_points = self._persistence.load_all()
             points = [
                 VectorPoint(id=point.id, vector=point.vector,
                             payload={**point.payload, **payload_updates})
-                for point in self._persistence.load_all()
+                for point in source_points
                 if point.payload.get("worker_id") == worker_id
             ]
             self.upsert(points)

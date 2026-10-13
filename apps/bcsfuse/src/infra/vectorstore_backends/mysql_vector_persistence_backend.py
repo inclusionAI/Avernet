@@ -264,6 +264,39 @@ class MySQLVectorPersistenceBackend(VectorPersistenceBackend):
             self._finish_read(cursor)
 
     @_synchronized_connection
+    def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+        """Read one Worker's active vectors using the ID primary-key prefix."""
+        self._ensure_connection()
+        cursor = self._conn.cursor()
+        # LIKE wildcards can occur in Worker IDs; the colon separates the
+        # complete Worker ID from the profile and fragment suffix.
+        escaped_id = worker_id.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = f"{escaped_id}:%"
+        try:
+            cursor.execute(f"""
+                SELECT `id`, `vector`, `payload`
+                FROM {TABLE_NAME}
+                WHERE `id` LIKE %s ESCAPE '!'
+                  AND `is_deleted` = 0
+            """, (pattern,))
+            points = []
+            for row in cursor.fetchall():
+                try:
+                    payload = json.loads(row[2]) if row[2] else {}
+                    if payload.get("worker_id") != worker_id:
+                        continue
+                    points.append(VectorPoint(
+                        id=row[0], vector=self._deserialize_vector(row[1]), payload=payload,
+                    ))
+                except Exception as e:
+                    raise RuntimeError(f"Failed to decode persisted vector {row[0]}") from e
+            return points
+        except Error as e:
+            raise RuntimeError(f"Failed to load Worker vectors from MySQL: {e}") from e
+        finally:
+            self._finish_read(cursor)
+
+    @_synchronized_connection
     def _active_upper_id(self) -> str | None:
         self._ensure_connection()
         cursor = self._conn.cursor()

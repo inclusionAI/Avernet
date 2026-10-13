@@ -15,6 +15,16 @@ IncrementalVectorPersistenceBackend.load_changes_since(
 `VectorPersistenceBackend`. Providers that implement only the baseline
 contract do not support incremental synchronization.
 
+## Worker-scoped state updates
+
+`WorkerScopedVectorPersistenceBackend.load_by_worker(worker_id)` is an optional
+lookup used for runtime-state updates. It returns active points owned by the
+exact payload `worker_id`, including points missing from the local index.
+Providers that support it should constrain the database read before decoding
+vectors. The public SQL implementation uses the complete `worker_id + ':'` ID
+prefix on the primary key and escapes SQL `LIKE` wildcards. Providers without
+this capability retain the existing `load_all()` fallback.
+
 ## Bounded rebuild reads
 
 `QdrantMySQLVectorStore.rebuild_from_backend()` requires the optional
