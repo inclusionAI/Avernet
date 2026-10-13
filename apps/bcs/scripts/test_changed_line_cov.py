@@ -260,12 +260,25 @@ class GateIsReportOnlyTest(unittest.TestCase):
         bad_xml = self.run_gate("--cobertura", str(self.root / "missing.xml"), "--base-ref",
                                 "HEAD~1", "--changed-line-min", "60")
         self.assertEqual(bad_xml.returncode, 1, bad_xml.stdout)
+        # A report whose paths match no file in apps/bcs means the mapping is broken.
         report = self.root / "cobertura.xml"
         report.write_text(cobertura(str(self.bcs), [("crates/other/src/lib.rs", [(1, 1)])]))
-        unmapped = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1",
-                                 "--changed-line-min", "60")
-        self.assertEqual(unmapped.returncode, 1, unmapped.stdout)
-        self.assertIn("missing from the e2e report", unmapped.stdout)
+        broken = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1",
+                               "--changed-line-min", "60")
+        self.assertEqual(broken.returncode, 1, broken.stdout)
+        self.assertIn("path mapping is broken", broken.stdout)
+
+    def test_files_absent_from_report_are_listed_not_failed(self):
+        # build.rs / type-only files have no executable lines, so they are not in the report.
+        (self.bcs / "build.rs").write_text("fn main() {}\n")
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "add build.rs")
+        report = self.root / "cobertura.xml"
+        report.write_text(cobertura(str(self.bcs), [("crates/a/src/lib.rs", [(1, 1)])]))
+        proc = self.run_gate("--cobertura", str(report), "--base-ref", "HEAD~1",
+                             "--changed-line-min", "60")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("1 changed Rust file(s) with no executable lines", proc.stdout)
 
     def test_line_threshold_still_gates(self):
         self.summary.write_text(json.dumps({"data": [{"totals": {

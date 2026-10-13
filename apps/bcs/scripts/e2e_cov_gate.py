@@ -23,10 +23,12 @@ e2e run executed. Scope: Rust files in the e2e report (files matching
 --changed-line-min N gates it: coverage must be strictly greater than N%, but
 only when the change has at least --changed-line-min-lines (default 20)
 instrumentable lines in scope; smaller changes are reported only, and changes
-with no lines in scope are not applicable. With the gate on, the check fails
-closed: a missing base ref, a calculation error or a changed in-scope Rust file
-absent from the report fails the run instead of passing unverified. With the
-gate off (0, the default) the metric is report-only and never fails.
+with no lines in scope are not applicable. Changed Rust files absent from the
+report (build.rs, type-only files without function bodies) have no executable
+lines and are listed, not counted. With the gate on, the check fails closed: a
+missing base ref, a calculation error, or a report whose paths map to no file
+in apps/bcs (a broken path mapping) fails the run instead of passing
+unverified. With the gate off (0, the default) the metric is report-only.
 
 Usage:
   python3 scripts/e2e_cov_gate.py --summary <summary.json> \
@@ -153,6 +155,9 @@ def report_changed_lines(args):
         ).stdout.strip()
         changed = changed_line_cov.git_changed_lines(repo_root, args.base_ref)
         coverage = changed_line_cov.load_cobertura(args.cobertura, bcs_dir)
+        if not any(os.path.isfile(os.path.join(bcs_dir, path)) for path in coverage):
+            raise OSError("no file in %s maps to apps/bcs; report path mapping is broken"
+                          % args.cobertura)
     except (OSError, subprocess.CalledProcessError, changed_line_cov.ET.ParseError) as e:
         gh("%sE2E changed-line coverage could not be computed: %s" % (level, e))
         write_changed_json(args.changed_json, {
@@ -195,13 +200,10 @@ def report_changed_lines(args):
     if result.test_code:
         gh("    %d changed test-only file(s) (not counted)" % len(result.test_code))
     if result.unmapped:
-        # In scope but absent from the report: with the gate on these lines
-        # cannot be verified, so fail closed rather than pass them unseen.
-        gh("%s%d changed in-scope Rust file(s) missing from the e2e report: %s"
-           % (level, len(result.unmapped), ", ".join(result.unmapped[:10])))
-        if gated:
-            ok = False
-            status = "failed"
+        # Absent from the report means no executable lines (build.rs, type-only
+        # files); a broken path mapping is caught by the check above instead.
+        gh("    %d changed Rust file(s) with no executable lines in the e2e report "
+           "(not counted): %s" % (len(result.unmapped), ", ".join(result.unmapped[:10])))
 
     write_changed_json(args.changed_json, {
         "status": status, "base_ref": args.base_ref,
