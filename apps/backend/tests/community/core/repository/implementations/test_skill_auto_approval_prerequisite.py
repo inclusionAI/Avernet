@@ -192,7 +192,7 @@ def test_policy_column_defaults_to_manual_and_migration_covers_existing_bindings
     assert rows == [(1, 0), (2, 0)]
 
 
-def test_editor_approval_policy_is_owner_only_and_defaults_off(db) -> None:
+def test_editor_approval_policy_allows_member_read_and_owner_write(db) -> None:
     space_id, skill_id = _space_skill(db)
     repository = _skill_editor_requests(db)
 
@@ -214,13 +214,13 @@ def test_editor_approval_policy_is_owner_only_and_defaults_off(db) -> None:
     )
     assert (
         repository.get_editor_approval_policy(
-            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+            space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"
         )
         is True
     )
     with pytest.raises(SpaceSkillGrantForbiddenError):
         repository.get_editor_approval_policy(
-            space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"
+            space_id=space_id, skill_id=skill_id, actor_id="outsider", env="dev"
         )
     with pytest.raises(SpaceSkillGrantForbiddenError):
         repository.update_editor_approval_policy(
@@ -237,6 +237,24 @@ def test_editor_approval_policy_is_owner_only_and_defaults_off(db) -> None:
             .one()
         )
         member.role = SpaceRole.ADMIN.value
+    assert (
+        repository.get_editor_approval_policy(
+            space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"
+        )
+        is True
+    )
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repository.update_editor_approval_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="applicant-1",
+            auto_approve_editor_requests=False,
+            env="dev",
+        )
+    with db.orm_session() as session:
+        session.query(SpaceMemberModel).filter_by(
+            space_id=space_id, user_id="applicant-1", env="dev"
+        ).one().status = "INACTIVE"
     with pytest.raises(SpaceSkillGrantForbiddenError):
         repository.get_editor_approval_policy(
             space_id=space_id, skill_id=skill_id, actor_id="applicant-1", env="dev"

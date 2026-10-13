@@ -283,7 +283,7 @@ def test_skill_editor_request_auto_failure_is_not_success_on_wire(
     assert response.json()["data"] is None
 
 
-def test_skill_editor_approval_policy_is_owner_scoped_on_wire(
+def test_skill_editor_approval_policy_read_and_write_wire_contract(
     client, skill_editor_request_service
 ) -> None:
     skill_editor_request_service.get_approval_policy.return_value = False
