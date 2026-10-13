@@ -231,25 +231,15 @@ class AgentComputePlatformConfig:
     claude_code takes only CLAUDE.md).
     """
 
-    engine_type: str = ""
-    cluster_name: str = ""
-    bot_type: str = "personal"
-    owner_work_no: str = ""
-    identity_file: str = "SOUL.md"
+    default_engine: str = "openclaw"
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentComputePlatformConfig":
-        """Empty/missing sub-block returns the default (no error) — a
-        profile without a platform block simply has no binding. The
-        adapter validates placement at construction time (binding), not
-        at parse time."""
+        """Default engine for specs that don't name one."""
         block = block or {}
+        d = cls()
         return cls(
-            engine_type=_as_str(block, "engine_type"),
-            cluster_name=_as_str(block, "cluster_name"),
-            bot_type=_as_str(block, "bot_type", cls().bot_type),
-            owner_work_no=_as_str(block, "owner_work_no"),
-            identity_file=_as_str(block, "identity_file", "SOUL.md"),
+            default_engine=_as_str(block, "default_engine", d.default_engine),
         )
 
 

@@ -306,10 +306,4 @@ agentcompute:
     api_key: "${AGENTCOMPUTE_LLM_API_KEY:-}"
     default_model: "${AGENTCOMPUTE_LLM_MODEL:-}"
   artifact_store_root: "${AGENTCOMPUTE_ARTIFACT_ROOT:-/tmp/agentcompute/artifacts}"
-  platform:
-    engine_type: "openclaw"
-    cluster_name: "ACRA"
-    bot_type: "personal"
-    identity_file: "SOUL.md"
-    owner_work_no: "${AGENTCOMPUTE_PLATFORM_OWNER:-}"
 

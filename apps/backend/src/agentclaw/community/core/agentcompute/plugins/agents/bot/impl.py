@@ -56,6 +56,9 @@ class AvernetSubagent:
                     description=self._spec.role,
                     instructions=self._spec.instructions,
                     model=self._spec.model,
+                    engine=self._spec.engine,
+                    bot_type=self._spec.bot_type,
+                    identity_file=self._spec.identity_file,
                     metadata=dict(self._spec.metadata),
                 ),
                 # Platform identity follows the spawn's durable identity:

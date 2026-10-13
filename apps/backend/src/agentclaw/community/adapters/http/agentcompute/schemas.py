@@ -13,6 +13,9 @@ class AgentSpecDTO(BaseModel):
     instructions: str = ""
     kind: AgentKind = AgentKind.LLM
     model: str | None = None
+    engine: str | None = None
+    bot_type: str | None = None
+    identity_file: str | None = None
     metadata: dict[str, str] = {}
 
 

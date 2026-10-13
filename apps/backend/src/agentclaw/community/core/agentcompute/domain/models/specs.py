@@ -121,11 +121,26 @@ class RequestMetadata:
 
 @dataclass(frozen=True)
 class AgentSpec:
+    """One catalog agent entry — who the subagent is and HOW it provisions.
+
+    ``engine`` ``bot_type`` ``identity_file`` are the per-agent
+    provisioning parameters the host adapter reads: the submitter's
+    choice (one agent on teclaw, another on openclaw), not a
+    deployment-wide static. The adapter derives cluster from engine
+    (a bijection) and uses the authenticated user as the owner.
+    """
     name: str
     role: str
     instructions: str = ""
     kind: AgentKind = AgentKind.LLM
     model: ModelId | None = None
+    engine: str = ""
+    """Which engine serves this bot (teclaw/openclaw/claude_code);
+    the adapter derives the cluster from it."""
+    bot_type: str = "personal"
+    identity_file: str = "SOUL.md"
+    """Persona identity file in the manifest (SOUL.md, RULES.md,
+    CLAUDE.md for claude_code); engine-gated."""
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -133,12 +148,16 @@ class AgentSpec:
 class BotCreateSpec:
     """Structured bot create request — what crosses the BotPlatform seam.
 
-    The product creation vocabulary (bot_name/bot_desc) in semantic form:
-    the platform adapter translates this into the real create request and
-    composes the manifest document; agentcompute never sees a document.
+    The product creation vocabulary (bot_name/bot_desc) plus the
+    per-agent provision parameters (engine/bot_type/identity_file)
+    the catalog spec chose. The adapter derives cluster from engine
+    (a bijection, not a config) and composes the manifest document.
     """
     name: str
     description: str = ""
     instructions: str = ""
     model: ModelId | None = None
+    engine: str = ""
+    bot_type: str = "personal"
+    identity_file: str = "SOUL.md"
     metadata: dict[str, str] = field(default_factory=dict)

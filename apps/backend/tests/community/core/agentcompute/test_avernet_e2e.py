@@ -405,10 +405,8 @@ class TestAvernetKindEndToEnd:
         created = _stand_in_for_provisioning(world)
         grt = _ScriptedGrtChat(reply='{"answer": "survey ok"}')
         platform = AvernetBotPlatform(
-            config=AgentComputePlatformConfig(
-                engine_type="openclaw", cluster_name="ACRA",
-                owner_work_no=OWNER, identity_file="SOUL.md",
-            ),
+            config=AgentComputePlatformConfig(default_engine="openclaw"),
+            owner_id=OWNER,
             manifest_seam=world.get(ManifestCreationSeam),
             bot_service=world.get(BotServiceProtocol),
             passport_plugin=world.get(PassportPlugin),

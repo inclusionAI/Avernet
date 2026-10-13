@@ -196,7 +196,8 @@ class AgentComputeModule(Module):
 
     @provider
     @singleton
-    def bot_platform(self, injector) -> BotPlatform:
+    @inject
+    def bot_platform(self, injector: Injector) -> BotPlatform:
         """In-process host adapter from config.platform. Heavy imports
         are call-local: the bot_management chain is circular at module
         import time (bot_service→aicoding→bot_service), deferring the
@@ -214,7 +215,7 @@ class AgentComputeModule(Module):
         from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
         from agentclaw.community.plugin_api.passport import PassportPlugin
         cfg = injector.get(AgentComputeConfig).platform
-        if not cfg.engine_type:
+        if not cfg.default_engine:
             return None
         from agentclaw.community.plugins.community.agentcompute_platform import (
             AvernetBotPlatform,

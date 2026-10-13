@@ -40,11 +40,11 @@ CREATE_FLOW_SUBMIT = (
 )
 
 
-def _config(**over):
-    base = dict(engine_type="openclaw", cluster_name="ACRA",
-                owner_work_no="owner-1")
-    base.update(over)
-    return AgentComputePlatformConfig(**base)
+def _config():
+    # The config is now a single default-engine knob — engine/bot_type/
+    # identity_file are per-agent spec fields, and owner comes from the
+    # caller (the submitter), not from a static config.
+    return AgentComputePlatformConfig(default_engine="openclaw")
 
 
 class _Seam:
@@ -120,6 +120,7 @@ def _job(status, last_error=None):
 def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None, grt=None):
     return AvernetBotPlatform(
         config=config or _config(),
+        owner_id="owner-1",
         manifest_seam=seam or _Seam(),
         bot_service=bot_svc or _BotSvc(),
         passport_plugin=types.SimpleNamespace(),
@@ -132,35 +133,6 @@ def _mk(config=None, seam=None, apply_=None, repo=None, bot_svc=None, grt=None):
 
 
 # ── config validation ────────────────────────────────────────────────────
-
-
-class TestConfigValidation:
-
-    def test_non_creatable_engine_is_refused(self):
-        with pytest.raises(ValueError, match="not publicly creatable"):
-            _mk(config=_config(engine_type="aicoding"))
-
-    def test_cluster_mismatch_is_refused(self):
-        with pytest.raises(ValueError, match="pairs with cluster 'ACRA'"):
-            _mk(config=_config(cluster_name="ANDC"))
-
-    def test_teclaw_requires_andc(self):
-        with pytest.raises(ValueError, match="pairs with cluster 'ANDC'"):
-            _mk(config=_config(engine_type="teclaw"))
-
-    def test_claude_code_identity_is_engine_gated(self):
-        with pytest.raises(ValueError, match="claude_code engine takes only"):
-            _mk(config=_config(engine_type="claude_code", identity_file="SOUL.md"))
-
-    def test_teclaw_andc_claude_identity_pass(self):
-        platform = _mk(config=_config(engine_type="teclaw", cluster_name="ANDC"))
-        assert isinstance(platform, AvernetBotPlatform)
-        platform = _mk(config=_config(
-            engine_type="claude_code", identity_file="CLAUDE.md"))
-        assert isinstance(platform, AvernetBotPlatform)
-
-
-# ── create: determinism + document ───────────────────────────────────────
 
 
 class TestCreate:

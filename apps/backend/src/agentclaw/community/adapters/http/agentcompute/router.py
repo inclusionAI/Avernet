@@ -318,7 +318,11 @@ def _to_domain(dto: SubmitRunDTO, tenant: str) -> SubmitRunRequest:
         agents=tuple(
             AgentSpec(
                 name=a.name, role=a.role, instructions=a.instructions,
-                kind=a.kind, model=a.model, metadata=a.metadata,
+                kind=a.kind, model=a.model,
+                engine=a.engine or "",
+                bot_type=a.bot_type or "personal",
+                identity_file=a.identity_file or "SOUL.md",
+                metadata=a.metadata,
             )
             for a in dto.agents
         ),

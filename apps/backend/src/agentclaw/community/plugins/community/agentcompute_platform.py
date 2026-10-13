@@ -100,6 +100,7 @@ class AvernetBotPlatform(BotPlatform):
         self,
         *,
         config: AgentComputePlatformConfig,
+        owner_id: str = "",
         manifest_seam: ManifestCreationSeam,
         bot_service: Any,
         passport_plugin: Any,
@@ -109,8 +110,10 @@ class AvernetBotPlatform(BotPlatform):
         space_context: BusinessSpaceContextProtocol,
         grt_chat: GrtChatService,
     ) -> None:
-        self._validate_config(config)
-        self._cfg = config
+        # owner_id is the run's provisioning identity (the submitter);
+        # per-call: per_run when the swarm identity arrives via Run.user_id
+        self._default_owner = owner_id
+        self._default_engine = config.default_engine
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
         self._passport = passport_plugin
@@ -120,24 +123,6 @@ class AvernetBotPlatform(BotPlatform):
         self._space_context = space_context
         self._grt_chat = grt_chat
 
-    @staticmethod
-    def _validate_config(config: AgentComputePlatformConfig) -> None:
-        if config.engine_type not in _CREATABLE_ENGINES:
-            raise ValueError(
-                f"agentcompute_platform: engine_type {config.engine_type!r} is not "
-                f"publicly creatable (one of {sorted(_CREATABLE_ENGINES)})"
-            )
-        expected = "ANDC" if config.engine_type == "teclaw" else "ACRA"
-        if config.cluster_name != expected:
-            raise ValueError(
-                f"agentcompute_platform: engine {config.engine_type!r} pairs with "
-                f"cluster {expected!r}, not {config.cluster_name!r}"
-            )
-        if config.engine_type == "claude_code" and config.identity_file != _CLAUDE_CODE_IDENTITY:
-            raise ValueError(
-                "agentcompute_platform: the claude_code engine takes only the "
-                f"{_CLAUDE_CODE_IDENTITY} identity file"
-            )
 
     # ── create ────────────────────────────────────────────────────────────
 
@@ -160,7 +145,7 @@ class AvernetBotPlatform(BotPlatform):
                 "schema_version": 1,
                 "manifest": {
                     "identity": [{
-                        "type": self._cfg.identity_file,
+                        "type": spec.identity_file or "SOUL.md",
                         "content": spec.instructions,
                     }],
                 },
@@ -168,18 +153,18 @@ class AvernetBotPlatform(BotPlatform):
             sort_keys=False, allow_unicode=True, default_flow_style=False,
         )
         space = self._space_context.resolve_current(
-            owner_id=self._cfg.owner_work_no, header_space_id=None,
+            owner_id=self._default_owner, header_space_id=None,
         )
         submitted = submit_bot_creation_with_manifest(
-            user_id=self._cfg.owner_work_no,
-            nick_name=self._cfg.owner_work_no,
+            user_id=self._default_owner,
+            nick_name=self._default_owner,
             bot_id=bot_id,
             document=document,
-            modifier=self._cfg.owner_work_no,
+            modifier=self._default_owner,
             spec=HostCreateSpec(
-                entity_id=self._cfg.owner_work_no,
-                engine_type=self._cfg.engine_type,
-                bot_type=self._cfg.bot_type,
+                entity_id=self._default_owner,
+                engine_type=spec.engine or "openclaw",
+                bot_type=spec.bot_type or "personal",
                 bot_name=bot_name,
                 bot_desc=spec.description or None,
                 template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
@@ -200,7 +185,7 @@ class AvernetBotPlatform(BotPlatform):
     # ── status: the narrow table ──────────────────────────────────────────
 
     def bot_status(self, bot_id: BotId) -> str:
-        owner = self._cfg.owner_work_no
+        owner = self._default_owner
         bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
         job = self._manifest_seam.find_job(entity_id=owner, bot_id=bot_id)
 
@@ -259,7 +244,7 @@ class AvernetBotPlatform(BotPlatform):
     # ── delete ────────────────────────────────────────────────────────────
 
     def delete_bot(self, bot_id: BotId) -> bool:
-        owner = self._cfg.owner_work_no
+        owner = self._default_owner
         try:
             bot = self._bot_repo.get_by_id_and_entity(bot_id, owner)
             if bot is None:
@@ -286,7 +271,7 @@ class AvernetBotPlatform(BotPlatform):
             return pool.submit(asyncio.run, self._chat_once(bot_id, message)).result()
 
     async def _chat_once(self, bot_id: BotId, message: str) -> str:
-        sandbox_id = self._grt_chat.get_sandbox_id(bot_id, self._cfg.owner_work_no)
+        sandbox_id = self._grt_chat.get_sandbox_id(bot_id, self._default_owner)
         if not sandbox_id:
             raise RuntimeError(
                 f"bot {bot_id} has no runtime binding to chat through"
