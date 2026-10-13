@@ -179,6 +179,14 @@ export function useBotWorkshop() {
       if (bot.ownerId) params.set('owner_id', bot.ownerId);
       history.push(`/bot-workshop/logs?${params.toString()}`);
     },
+    openTaskInstances: (bot: BotDomain) => {
+      const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
+      history.push(`/bot-workshop/task-instances?${params.toString()}`);
+    },
+    // inventory 仅在 Owner 或显式协作者时暴露 edit；空间普通成员只有 view/chat，
+    // 不应显示受协作者权限保护的任务实例入口。
+    canOpenTaskInstances: (bot: BotDomain) =>
+      Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     creating: createFlow.creating,
     createAuthorization: createFlow.authorization,
     createSpaces: state.createScenario

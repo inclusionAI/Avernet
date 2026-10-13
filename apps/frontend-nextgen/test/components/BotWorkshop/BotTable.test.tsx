@@ -175,6 +175,32 @@ describe('BotTable health check action', () => {
   });
 });
 
+describe('BotTable task instances action', () => {
+  test('renders after logs for the owner or an explicit collaborator and opens the scoped list', () => {
+    const bot = mapBotDto({ bot_id: 'task-bot', bot_name: 'Task Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+    const onOpenTaskInstances = jest.fn();
+    renderTable(bot, {
+      onOpenTaskInstances,
+      canOpenTaskInstances: () => true,
+      onOpenLogs: noop,
+      getLogAction: () => ({ action: 'logs', visible: true, enabled: true }),
+    });
+
+    const logButton = screen.getByRole('button', { name: '查看 Task Bot 日志' });
+    const taskButton = screen.getByRole('button', { name: '查看 Task Bot 任务实例' });
+    expect(logButton.compareDocumentPosition(taskButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(taskButton);
+    expect(onOpenTaskInstances).toHaveBeenCalledWith(bot);
+  });
+
+  test('hides task instances from an unrelated space member', () => {
+    const bot = mapBotDto({ bot_id: 'other-bot', bot_name: 'Other Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+    renderTable(bot, { onOpenTaskInstances: jest.fn(), canOpenTaskInstances: () => false });
+
+    expect(screen.queryByRole('button', { name: '查看 Other Bot 任务实例' })).not.toBeInTheDocument();
+  });
+});
+
 describe('BotTable conversation action', () => {
   test('renders the conversation entry and delegates navigation', () => {
     const bot = mapBotDto({
