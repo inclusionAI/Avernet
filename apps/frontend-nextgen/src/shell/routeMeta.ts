@@ -132,6 +132,8 @@ export const routeMetaList: RouteMeta[] = [
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
+    // 编辑器是独立工作台；全局主导航仅在返回 Bot 管理列表后恢复，避免与编辑器内的模块导航并列。
+    navigationVisibility: 'hidden',
   },
   {
     path: '/bot-workshop/logs',
