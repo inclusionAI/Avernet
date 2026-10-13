@@ -168,7 +168,9 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     ]["get"]
     assert conversation_lookup["x-avernet-security"] == collaboration_http_security
     assert conversation_lookup["operationId"] == "list_channel_conversations_by_session"
-    assert {param["name"]: param["required"] for param in conversation_lookup["parameters"]} == {
+    assert {
+        param["name"]: param["required"] for param in conversation_lookup["parameters"]
+    } == {
         "bcs_session_id": True,
         "channel_type": False,
     }
