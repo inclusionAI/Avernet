@@ -1,6 +1,6 @@
 [package]
 name = "avernet-goal-cli"
-version = "1.0.0-dev"
+version = "1.0.0"
 edition = "2024"
 description = "avernet-goal-cli CLI 工具"
 license = "Apache-2.0"

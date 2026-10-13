@@ -182,7 +182,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "avernet-goal-cli"
-version = "1.0.0-dev"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "clap",

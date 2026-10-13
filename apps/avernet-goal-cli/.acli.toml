@@ -48,3 +48,71 @@ source = "src/api/client.rs"
 line = 130
 confidence = "high"
 client = "self.get"
+
+# 架构风险声明（由 acli arch init 自动推断生成，需 owner 确认）
+#
+# [risk] 字段说明：
+#   capability_type  CLI 整体能力类型，取值：
+#     dev      研发/查询/CI/CD/可观测等研发辅助能力
+#     ops      部署/发布/切流/扩缩/排障等运维能力
+#     data     数据库/缓存/消息/数据读写能力
+#     resource 机器/网络/存储/容器等基础设施资源能力
+#   schema_version   风险声明 schema 版本，当前固定 1
+#   review_required  整份风险声明是否仍需 Owner 确认；确认后设为 false
+#
+# [[risk.commands]] 字段说明：
+#   path              命令调用路径（如 "task delete"，非源码文件路径）
+#   risk_level        风险等级：L1=只读低风险 L2=低危写 L3=高危写(需显式确认) L4=高危变更(需评审/灰度/回滚)
+#   write             是否会产生写操作或副作用
+#   scope.cross_app   是否跨应用
+#   scope.cross_tenant 是否跨租户
+#
+# 写命令默认要求收口在应用级；跨应用或跨租户需要重点确认。
+# 请先确认 CLI 级 capability_type，再逐条确认命令的 risk_level、write、scope。
+# 确认后执行: acli validate --check=arch
+[risk]
+schema_version = 1
+capability_type = "data"
+review_required = false
+
+[[risk.commands]]
+path = "resume"
+risk_level = "L2"
+write = true
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "get"
+risk_level = "L1"
+write = false
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "submit"
+risk_level = "L2"
+write = true
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "batch schema"
+risk_level = "L1"
+write = false
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "batch example"
+risk_level = "L1"
+write = false
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "batch validate"
+risk_level = "L1"
+write = false
+scope = { cross_app = false, cross_tenant = false }
+
+[[risk.commands]]
+path = "batch submit"
+risk_level = "L2"
+write = true
+scope = { cross_app = false, cross_tenant = false }
