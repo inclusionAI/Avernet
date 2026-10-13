@@ -32,9 +32,10 @@
 - **基因组策略配置**（锁定基因、可变基因、固定项、风险覆盖），以及在记录补丁时
   对其进行的结构性强制执行；
 - 内容寻址：文件字节通过摘要在现有 manifest 内容存储中被引用；
-- 将修订版**编译**为一份已固定版本的 Manifest 文档加上一个记忆投影，供应用
-  和评估 Bot 使用。*记忆投影*是基因组中的精选记忆条目，交给引擎适配器写入引擎
-  自己的记忆格式（对 OpenClaw 来说就是它的记忆文件）；见 §7；
+- 将修订版**编译**为一份已固定版本的 Manifest 文档，供应用和评估 Bot 使用。
+  精选记忆放在该文档新增的 `memory` 类别中；应用时，引擎适配器把这些条目写入
+  引擎自己的记忆格式（对 OpenClaw 来说就是它的记忆文件）。这一交接就是
+  *记忆投影*；见 §7；
 - 任意两个修订版之间的差异。
 
 它明确**不**负责：
@@ -86,7 +87,7 @@
 | `GenomePatch` | 针对具名基础修订版的、带类型的逐项变更；进化策略唯一可提交的内容 | 由进化策略（通过[进化运行](06-evolution-run.zh-CN.md)）或人提交；由注册表校验 | 以内容寻址方式存储；其摘要即候选 id |
 | `PatchOp` | 补丁中的一项（`file.edit`、`skill.add`、`memory.add`……） | 补丁的一部分 | 每个操作映射到一个风险等级 |
 | `MemoryItem` | 一条精选记忆事实/规则/教训，带键 | 基因组（精选记忆） | 由补丁操作添加、更新和退役 |
-| `CompiledManifest` | 编译为已固定版本的 Manifest 文档加记忆投影的修订版 | 基因组注册表（派生而来，不作为事实存储） | 按需为应用和评估 Bot 生成 |
+| `CompiledManifest` | 渲染为一份普通 Manifest 文档（已固定版本，每个类别都存在）的修订版，另附修订版 id 和该文档的摘要用于记账 | 基因组注册表（派生而来，不作为事实存储） | 按需为应用和评估 Bot 生成 |
 
 ### 2.1 基因
 
@@ -201,6 +202,22 @@ class MemorySpec:
     items_digest: Digest             # where the stored list of MemoryItem is, e.g. "sha256:9e20…"
 ```
 
+以一个客服 Bot 为例，`items_digest` 指向的已存储列表：
+
+```jsonc
+// Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
+[
+  {"key": "returns-window",                       // stable name; memory.update / memory.retire address it
+   "text": "Returns are accepted within 30 days of delivery.",
+   "tags": ["returns"],
+   "source": ["episode:ep_97", "feedback:fb_204"]},   // the sessions and feedback it was learned from
+  {"key": "customer-tier-rules",
+   "text": "Gold customers get free return shipping.",
+   "tags": ["billing", "returns"],
+   "source": ["episode:ep_91"]}
+]
+```
+
 模式示例。精选集合中有 `returns-window` = "Returns are accepted within 30
 days."。运行期间，Bot 自己写入了 `returns-window` = "Returns are accepted
 within 14 days."，以及一个新条目 `vip-contact`。在下一次应用时：
@@ -222,7 +239,7 @@ class ResourceEntry:
 @dataclass(frozen=True)
 class McpServerEntry:
     server_code: str                 # the MCP server's registered code, e.g. "mcp.x.meet"
-    config_digest: Digest            # where this bot's stored config for that server is
+    digest: Digest                   # where this bot's stored config for that server is
 
 @dataclass(frozen=True)
 class CliToolEntry:
@@ -272,7 +289,7 @@ class GenomeSpec:
   },
   "resources": [{"path": "data/kb/", "digest": "sha256:d4a7…"}],
   "tools": {
-    "mcp": [{"server_code": "mcp.x.meet", "config_digest": "sha256:52c8…"}],
+    "mcp": [{"server_code": "mcp.x.meet", "digest": "sha256:52c8…"}],
     "cli_tools": [{"name": "shopctl", "digest": "sha256:a613…", "version": "2.3.0"}]
   },
   "engine_config": {                              // allowlisted keys only; no floats in hashed content
@@ -321,9 +338,11 @@ class GenomePolicy:
 
 - **在记录补丁时**（§6.2）：针对锁定基因的操作、`mutable_genes` 之外的操作，
   以及针对固定条目的操作都会被拒绝。
-- **在配置绑定时**：绑定的 `allowed_genes` 必须保持在该 Bot 的策略配置范围内
-  （锁定基因保持锁定）；不匹配会在任何付费运行开始前被拒绝。绑定的定义见
-  [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。
+- **在配置绑定时**：一个**绑定**把一个进化策略挂接到该 Bot 上：用哪个策略、何时
+  运行、可以修改哪些基因（`allowed_genes`）以及它的预算。一个 Bot 有一组绑定（即它的
+  进化策略配置），例如每晚针对人设和技能运行的 ClawEvolve。绑定的 `allowed_genes`
+  必须保持在该 Bot 的策略配置范围内（锁定基因保持锁定）；不匹配会在任何付费运行
+  开始前被拒绝。绑定的定义见 [06-evolution-run.zh-CN.md](06-evolution-run.zh-CN.md)。
 - **在提交候选时**：晋升的静态底线检查（`FloorCheck`）会在花费任何验证成本之前
   再次检查“未触及任何锁定基因或固定条目”；见 [08-promotion.zh-CN.md](08-promotion.zh-CN.md)。
 
@@ -434,15 +453,19 @@ class FixedRefName(StrEnum):
     CANARY = "canary"
     DRAFT = "draft"
 
-# A ref name is a FixedRefName value, or a run candidate ref of the exact form
-# "candidate/<run_id>/<n>" (validated on write; no other names exist).
-RefName = str
+@dataclass(frozen=True)
+class CandidateRefName:
+    """The ref of one submitted candidate; serialized as "candidate/<run_id>/<n>" (§5.2)."""
+    run_id: str                      # the Evolution Run that submitted it, e.g. "run_7f3"
+    n: int                           # 1 for the run's first candidate, 2 for the second, …
+
+RefName = FixedRefName | CandidateRefName   # on the wire: "active" or "candidate/run_7f3/1"; any other
+                                            # string fails to parse, so no free-form names exist
 
 @dataclass(frozen=True)
 class GenomeRef:
-    name: RefName                    # e.g. "active", "candidate/run_7f3/1"
+    name: RefName
     revision: RevisionId             # the revision it points at now
-    seq: int                         # that revision's seq, for display ("r42")
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None        # required for active/previous/canary moves
@@ -461,7 +484,6 @@ class RefUpdate:
 {
   "name": "active",
   "revision": "sha256:a90b…",
-  "seq": 41,
   "moved_at": "2026-10-01T09:30:00Z",
   "moved_by": {"kind": "user", "actor": "user_owner_1"},
   "reason": "approved after review of run_6c2"
@@ -472,58 +494,61 @@ class RefUpdate:
 
 ```python
 class EditKind(StrEnum):             # full set fixed by RSI-02
-    REPLACE_SECTION = "replace_section"   # replace the body under a Markdown heading
-    INSERT_AFTER = "insert_after"         # insert text after an anchor line
+    REPLACE_SECTION = "replace_section"   # replace everything under a Markdown heading; the heading line stays
+    INSERT_AFTER = "insert_after"         # insert text directly below one exact line
 
 @dataclass(frozen=True)
 class TextEdit:
     kind: EditKind
     content: str                     # the new text to write
-    heading: str | None = None       # REPLACE_SECTION only, e.g. "## Escalation"
-    anchor: str | None = None        # INSERT_AFTER only, e.g. "## Tone"
+    heading: str | None = None       # REPLACE_SECTION only: the heading line, e.g. "## Escalation"
+    anchor: str | None = None        # INSERT_AFTER only: the line to insert below, e.g. "## Tone"
 
 @dataclass(frozen=True)
 class DigestRef:
     digest: Digest                   # a file uploaded first with PUT …/genome/content
 
-class FileOpKind(StrEnum):
-    UNIFIED_DIFF = "unified_diff"    # the only kind in v1
-
 @dataclass(frozen=True)
-class UnifiedDiff:
-    kind: FileOpKind
+class FileDiff:
     path: str                        # file inside the skill, e.g. "SKILL.md"
-    diff: str                        # a unified diff against that file in the base revision
+    diff: str                        # the change to that file in unified diff format (what `git diff` prints)
 
 @dataclass(frozen=True)
-class FileEdit:                      # op "file.edit": persona md, SKILL.md, resource text files
-    target: str                      # "persona/SOUL.md", "skills/refund-policy/SKILL.md"
+class FileEdit:
+    """Op "file.edit": structured edits to one text file (persona md, SKILL.md, resource text)."""
+    target: str                      # the file, e.g. "persona/SOUL.md", "skills/refund-policy/SKILL.md"
     edits: list[TextEdit]
 
 @dataclass(frozen=True)
-class SkillAdd:                      # op "skill.add"
+class SkillAdd:
+    """Op "skill.add": a new bot-owned skill."""
     name: str                        # the new skill's name, e.g. "invoice-lookup"
     files: dict[str, str | DigestRef]   # path in the skill -> small text inline, or a larger file uploaded first
 
 @dataclass(frozen=True)
-class SkillUpdate:                   # op "skill.update"
-    name: str                        # an existing bot-owned skill
-    file_ops: list[UnifiedDiff]
+class SkillUpdate:
+    """Op "skill.update": changes files of an existing bot-owned skill."""
+    name: str                        # the skill, e.g. "refund-policy"
+    file_diffs: list[FileDiff]
 
 @dataclass(frozen=True)
-class MemoryAdd:                     # op "memory.add"
+class MemoryAdd:
+    """Op "memory.add": a new curated memory item."""
     item: MemoryItem
 
 @dataclass(frozen=True)
-class MemoryUpdate:                  # op "memory.update" (proposed): replaces text, tags, source of an existing key
+class MemoryUpdate:
+    """Op "memory.update" (proposed): replaces the text, tags, and source of an existing key."""
     item: MemoryItem
 
 @dataclass(frozen=True)
-class MemoryRetire:                  # op "memory.retire"
+class MemoryRetire:
+    """Op "memory.retire": retires an item; it stays in history."""
     key: str                         # the item to retire
 
 @dataclass(frozen=True)
-class EngineConfigSet:               # op "engine_config.set"; allowlisted keys only
+class EngineConfigSet:
+    """Op "engine_config.set": one allowlisted engine config key."""
     key: str                         # e.g. "reasoning_effort" (allowlist: open decision G-4)
     value: str                       # always a string, e.g. "high" (no floats in hashed content)
 
@@ -553,7 +578,7 @@ class GenomePatch:
      "files": {"SKILL.md": "---\nname: invoice-lookup\n---\nLook up an invoice by order id…",   // small text: inline
                "scripts/lookup.py": {"digest": "sha256:6b1d…"}}},                              // larger file: uploaded first
     {"op": "skill.update", "name": "refund-policy",
-     "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ -12,3 +12,4 @@ partial refunds…"}]},
+     "file_diffs": [{"path": "SKILL.md", "diff": "@@ -12,3 +12,4 @@ partial refunds…"}]},
     {"op": "memory.add",                                  // itemized memory, see §7
      "item": {"key": "customer-tier-rules", "text": "Gold customers get free return shipping.", "tags": ["billing"], "source": ["episode:ep_91"]}},
     {"op": "memory.update",                               // proposed op, see §6.1
@@ -569,17 +594,38 @@ class GenomePatch:
 此示例一次性展示了所有操作类型。按照 §2.3 的策略配置，它会被拒绝，因为
 `skills.refund-policy` 在那里被固定（§6.2）；真实的补丁只会触及可变且未固定的基因。
 
+下面用上例中的两处编辑，说明两种 `file.edit` 如何修改文件：
+
+```text
+Before (persona/SOUL.md)          After
+------------------------          -----
+## Tone                           ## Tone
+Be friendly and brief.            Confirm the order id before quoting amounts.   <- insert_after "## Tone":
+                                  Be friendly and brief.                            new line directly below the anchor
+## Escalation                     ## Escalation                                  <- replace_section "## Escalation":
+Escalate when the customer        Escalate to a human when a refund exceeds        heading kept, everything under it
+asks for a manager.               the policy limit…                                 up to the next heading of the same
+Always apologise first.                                                             or higher level is replaced
+## Closing                        ## Closing
+```
+
+`skill.update` 则为每个变更的文件携带一个 unified diff：即 `git diff` 和 `diff -u`
+输出的标准文本差异格式，用 `@@` 标出 hunk 头，`-` 表示删除的行，`+` 表示新增的行。
+
 ### 2.7 CompiledManifest
 
 ```python
 @dataclass(frozen=True)
 class CompiledManifest:
-    revision_id: RevisionId
-    document: dict                   # the Manifest document apply consumes (Manifest schema v1 shape, below);
-                                     # every category present; file entries point at the content store by digest (§8 item 6)
-    document_digest: Digest          # digest of that document; recorded on the apply report
-    memory_projection: MemorySpec | None   # the curated memory and its mode, handed to the engine adapter (§7)
+    revision_id: RevisionId          # bookkeeping: which revision this was compiled from (not inside the document)
+    document: dict                   # a plain Manifest document, exactly what apply consumes (shape below)
+    document_digest: Digest          # bookkeeping: digest of that document, to tell later which bytes were applied
 ```
+
+`document` 就是一份 Manifest 文档。除 §8 列出的 Manifest 变更外，编译不会给
+Manifest 格式增加任何东西：每个类别都存在，文件条目按摘要指向内容存储（§8 第 6
+项），精选记忆就是 Manifest 新增的 `memory` 类别（§8 第 5 项）。另外两个字段是
+放在文档旁边用于记账的信息，不会发送给应用。
 
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
@@ -594,10 +640,10 @@ class CompiledManifest:
                  {"name": "quality-check", "source": {"content_store": "sha256:0c55…"}}],
       "resources": [{"path": "data/kb/", "source": {"content_store": "sha256:d4a7…"}}],
       "mcp": [],
-      "cli_tools": [{"name": "shopctl", "source": {"content_store": "sha256:a613…"}}]
+      "cli_tools": [{"name": "shopctl", "source": {"content_store": "sha256:a613…"}}],
+      "memory": {"mode": "seed", "items": {"source": {"content_store": "sha256:9e20…"}}}   // new category, §8 item 5
     }
-  },
-  "memory_projection": {"mode": "seed", "items_digest": "sha256:9e20…"}
+  }
 }
 ```
 
@@ -831,7 +877,7 @@ CAS 引用移动和编译步骤。
 | --- | --- | --- |
 | `file.edit` | 一个文本文件：人设 md、`SKILL.md`、资源文本文件 | 结构化编辑：`replace_section`（按标题）、`insert_after`（按锚点） |
 | `skill.add` | 一个新的 Bot 自有技能 | 小型文本内联；较大的文件先通过 `PUT …/genome/content` 上传，再按摘要引用 |
-| `skill.update` | 一个现有 Bot 自有技能的文件 | `unified_diff` 文件操作 |
+| `skill.update` | 一个现有 Bot 自有技能的文件 | 每个变更的文件一个 unified diff（`git diff` 格式） |
 | `memory.add` | 添加一条精选记忆条目 | 条目携带 `key`、`text`、`tags`、`source` 证据 |
 | `memory.update` *（提议）* | 按键替换一条现有条目的文本、标签和来源 | 记忆整合需要它（[04-default-strategies.zh-CN.md](04-default-strategies.zh-CN.md)）；旧版本保留在历史中 |
 | `memory.retire` | 按键退役一条条目 | 已退役的条目不会从历史中删除 |
@@ -915,7 +961,9 @@ CAS 引用移动和编译步骤。
   （`source`）。每次变更都是一个小型、可评审、拥有自己风险等级（§6.3）的操作。
   对一个大文件的编辑则两者都做不到。
 
-到引擎上的投影由引擎负责：依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用），Backend 不得知晓引擎路径。提议的
+**精选记忆如何到达引擎。** 它和其他每个类别一样传递：编译进 Manifest 文档的
+`memory` 类别（§8 第 5 项），并由 Manifest 应用来应用，后者把条目和模式交给引擎
+适配器。到引擎上的投影由引擎负责：依据仓库根目录 `AGENTS.md` 的规则（“物理布局归 Engine Runtime 及其带版本的布局契约所有”；ADR 0014 是这条规则的一个应用），Backend 不得知晓引擎路径。提议的
 **引擎记忆投影契约**（工作项 RSI-05），一个由引擎适配器实现的 Plugin API：
 
 ```python
@@ -934,8 +982,9 @@ class EngineMemoryProjection(Protocol):
 
 - 引擎在能力矩阵中按模式声明支持情况；teclaw 的支持与其他类别一样，通过
   `BotConfigArtifact` 契约实现。
-- 这修改了“保留文件从不被触碰”的规则，因此它是 DR-1 的一项明确后果，必须与引擎
-  负责人确认。
+- 这修改了“保留文件从不被触碰”的规则。它是 DR-1 的一项明确后果（建立在 Manifest
+  之上的 Bot 基因组是进化的单元，因此精选记忆必须是其一部分），必须与引擎负责人
+  确认。
 - **过渡方案：** 在 RSI-05 落地之前，记忆进化仅限于一个由平台管理、并声明为人设
   文件的文件（例如 `LESSONS.md`）。这无需引擎变更；在此之前 `spec.memory` 保持为空。
 
@@ -1127,7 +1176,7 @@ class GenomeRegistry(Protocol):
 
     # --- apply / materialisation -----------------------------------------
     def compile(self, bot: BotRef, rev: RevisionId) -> CompiledManifest:
-        """Pinned, total Manifest document plus memory projection. Used by Promotion (apply,
+        """Pinned, total Manifest document (curated memory in its `memory` category). Used by Promotion (apply,
         service-bot publish) and Verification (eval bot materialisation)."""
 ```
 
@@ -1288,11 +1337,11 @@ GET /openapi/v1/bots/bot_123/genome/refs
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 {
   "refs": [
-    {"name": "active", "revision": "sha256:a90b…", "seq": 41, "moved_at": "2026-10-01T09:30:00Z",
+    {"name": "active", "revision": "sha256:a90b…", "moved_at": "2026-10-01T09:30:00Z",
      "moved_by": {"kind": "user", "actor": "user_owner_1"}, "reason": "approved after review of run_6c2"},
-    {"name": "previous", "revision": "sha256:5d02…", "seq": 40, "moved_at": "2026-10-01T09:30:00Z",
+    {"name": "previous", "revision": "sha256:5d02…", "moved_at": "2026-10-01T09:30:00Z",
      "moved_by": {"kind": "user", "actor": "user_owner_1"}, "reason": "approved after review of run_6c2"},
-    {"name": "candidate/run_7f3/1", "revision": "sha256:7c1e…", "seq": 42, "moved_at": "2026-10-08T03:12:00Z",
+    {"name": "candidate/run_7f3/1", "revision": "sha256:7c1e…", "moved_at": "2026-10-08T03:12:00Z",
      "moved_by": {"kind": "strategy_run", "actor": "clawevolve/bot-evolution@2.0.0", "run_id": "run_7f3"}, "reason": null}
   ]
 }
@@ -1314,7 +1363,7 @@ GET /openapi/v1/bots/bot_123/genome/refs
 ```jsonc
 // Illustrative. Comments explain the example only; the canonical form is plain JSON (RFC 8785).
 // Response 200
-{"name": "draft", "revision": "sha256:7c1e…", "seq": 42, "moved_at": "2026-10-08T10:02:00Z",
+{"name": "draft", "revision": "sha256:7c1e…", "moved_at": "2026-10-08T10:02:00Z",
  "moved_by": {"kind": "user", "actor": "user_owner_1"}, "reason": null}
 ```
 

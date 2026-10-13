@@ -1378,7 +1378,7 @@ SDK 抛出 `BudgetExhausted`（状态码定义于
 {
   "patch": {"patch_schema": 1, "base": "sha256:a90b…",
             "ops": [{"op": "skill.update", "name": "refund-policy",
-                     "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ -3,1 +3,1 @@ …"}]},
+                     "file_diffs": [{"path": "SKILL.md", "diff": "@@ -3,1 +3,1 @@ …"}]},
                     {"op": "file.edit", "target": "persona/SOUL.md",
                      "edits": [{"kind": "replace_section", "heading": "## Escalation", "content": "…"}]}]},
   "rationale": "Round 2: train 82% vs best 78%; fixes trigger misses on partial refunds",

@@ -1737,7 +1737,7 @@ Response `200`:
     "patch_schema": 1,
     "base": "sha256:a90b…",
     "ops": [{"op": "skill.update", "name": "refund-policy",
-             "file_ops": [{"kind": "unified_diff", "path": "SKILL.md", "diff": "@@ -3,1 +3,1 @@ …"}]}],
+             "file_diffs": [{"path": "SKILL.md", "diff": "@@ -3,1 +3,1 @@ …"}]}],
     "rationale": "",
     "evidence": []
   }

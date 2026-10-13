@@ -820,8 +820,9 @@ the only way evolution changes a bot.
    on the Genome Registry's refs. A concurrent promotion loses with `409`
    and changes nothing. The ref log records actor and reason.
 2. **Revision status.** The target revision's status becomes `promoted`.
-3. **Apply.** The revision is compiled to a pinned Manifest document plus a
-   memory projection ([01-genome.md](01-genome.md)) and applied:
+3. **Apply.** The revision is compiled to a pinned Manifest document, with
+   curated memory in its `memory` category ([01-genome.md](01-genome.md)),
+   and applied:
    - **Personal bot:** through Manifest apply. Manifest apply is a one-shot
      command, not a controller (ADR 0018); the apply report records
      `revision_id` and the compiled document digest.

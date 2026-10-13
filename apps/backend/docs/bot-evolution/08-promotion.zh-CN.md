@@ -790,8 +790,9 @@ open ──approve──▶ approved   (Promotion created; revision status → p
    通过一次比较并交换完成。并发的晋升会以 `409` 失败，
    且不做任何改变。引用日志记录参与者和原因。
 2. **修订版状态。** 目标修订版的状态变为 `promoted`。
-3. **应用。** 修订版被编译为固定版本的 Manifest 文档加上
-   记忆投影（[01-genome.zh-CN.md](01-genome.zh-CN.md)）并被应用：
+3. **应用。** 修订版被编译为固定版本的 Manifest 文档，精选记忆放在其
+   `memory` 类别中（[01-genome.zh-CN.md](01-genome.zh-CN.md)），
+   然后被应用：
    - **个人 bot：** 通过 Manifest apply。Manifest apply 是一次性
      命令，而不是控制器（ADR 0018）；apply 报告记录
      `revision_id` 和编译后文档的摘要。
