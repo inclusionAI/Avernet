@@ -54,7 +54,9 @@ router = APIRouter(
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
     route_class=PublicAPIRoute,
 )
-SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
+SetIdPath = Annotated[
+    str, Path(pattern=r"^[0-9]+$", description="Decimal SkillSet identifier.")
+]
 SkillIdPath = Annotated[str, Path(description="Decimal Skill identifier.")]
 McpServerCodePath = Annotated[
     str,

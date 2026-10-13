@@ -27,7 +27,9 @@ router = APIRouter(
     tags=["skill-center-references"],
     route_class=PublicAPIRoute,
 )
-SetIdPath = Annotated[str, Path(description="Decimal SkillSet identifier.")]
+SetIdPath = Annotated[
+    str, Path(pattern=r"^[0-9]+$", description="Decimal SkillSet identifier.")
+]
 ReferenceIdPath = Annotated[str, Path(description="Durable Reference item identifier.")]
 IdempotencyKeyHeader = Annotated[
     str,

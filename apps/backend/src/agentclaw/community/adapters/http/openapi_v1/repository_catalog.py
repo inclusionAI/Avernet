@@ -86,7 +86,11 @@ async def repository_tree(
 @envelope_errors
 async def get_repository_skill(
     skill_id: Annotated[
-        str, Path(description="Decimal public identifier of the shared Repo Skill.")
+        str,
+        Path(
+            pattern=r"^[0-9]+$",
+            description="Decimal public identifier of the shared Repo Skill.",
+        ),
     ],
     request: Request,
     _actor_id: UserIdDep,
