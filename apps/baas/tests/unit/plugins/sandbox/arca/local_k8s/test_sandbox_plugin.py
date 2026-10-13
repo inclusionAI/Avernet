@@ -15,6 +15,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     OutBoundOperationRuleUpdatedMode,
     ResourceSpecification,
+    Storage,
 )
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandbox,
@@ -336,6 +337,306 @@ class TestLocalK8sPluginCreate:
 
             with pytest.raises(ValueError, match="requires an image"):
                 plugin.create_sync_sandbox(template_id="openclaw-default")
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_with_bot_id_creates_shared_pvc_and_subpath(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """携带 bot_id 时，应创建共享 PVC 并以 storage_id 为 subPath 挂载到 /home/admin。"""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "tpl-test-abc-12345-xyz12"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        # 模拟 PVC 不存在，触发创建。
+        from kubernetes.client.rest import ApiException
+        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
+
+        bot_id = "test-bot-123"
+        expected_pvc_name = "bot-shared-data"
+        sandbox = plugin.create_sync_sandbox(
+            template_id="openclaw-default",
+            metadata={"bot_id": bot_id},
+        )
+
+        # 共享 PVC 被创建
+        mock_core.create_namespaced_persistent_volume_claim.assert_called_once()
+        pvc = mock_core.create_namespaced_persistent_volume_claim.call_args[1]["body"]
+        assert pvc.metadata.name == expected_pvc_name
+        assert pvc.spec.access_modes == ["ReadWriteOnce"]
+        assert pvc.spec.resources.requests["storage"] == "10Gi"
+
+        # Deployment 挂载了共享 PVC
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        volumes = deployment.spec.template.spec.volumes
+        assert len(volumes) == 2
+        assert volumes[0].name == "header-rules"
+        assert volumes[1].name == "bot-data"
+        assert volumes[1].persistent_volume_claim.claim_name == expected_pvc_name
+
+        # bot-runtime 容器以 storage_id 为 subPath 挂载到 /home/admin
+        bot_container = deployment.spec.template.spec.containers[0]
+        assert bot_container.volume_mounts[0].name == "bot-data"
+        assert bot_container.volume_mounts[0].mount_path == "/home/admin"
+        assert bot_container.volume_mounts[0].sub_path == bot_id
+
+        # Deployment 和 Pod 模板带有 storage-id 注解
+        expected_annotations = {"secbaas.local-k8s.io/storage-id": bot_id}
+        assert deployment.metadata.annotations == expected_annotations
+        assert deployment.spec.template.metadata.annotations == expected_annotations
+
+        # sandbox 携带 storage，供 destroy 时清理
+        info = sandbox.get_info()
+        assert info.storage is not None
+        assert info.storage.storage_id == bot_id
+        assert info.storage.type == "pvc"
+        assert info.storage.path == "/home/admin"
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_prefers_storage_param(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """storage 参数优先级高于 metadata.bot_id，与 backend composer 对齐。"""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        # 模拟 PVC 不存在，触发创建。
+        from kubernetes.client.rest import ApiException
+        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(status=404)
+
+        storage_id = "backend-bot-456"
+        sandbox = plugin.create_sync_sandbox(
+            template_id="openclaw-default",
+            metadata={"bot_id": "metadata-bot-123"},
+            storage=Storage(
+                storage_id=storage_id,
+                type="nas",
+                path="/home/admin",
+                quota="2Gi",
+            ),
+        )
+
+        # 共享 PVC 名称与 storage_id 无关；subPath 使用 storage_id。
+        pvc = mock_core.create_namespaced_persistent_volume_claim.call_args[1]["body"]
+        assert pvc.metadata.name == "bot-shared-data"
+        assert pvc.spec.resources.requests["storage"] == "10Gi"
+
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        bot_container = deployment.spec.template.spec.containers[0]
+        assert bot_container.volume_mounts[0].sub_path == storage_id
+        assert deployment.metadata.annotations == {
+            "secbaas.local-k8s.io/storage-id": storage_id
+        }
+        info = sandbox.get_info()
+        assert info.storage.storage_id == storage_id
+        assert info.storage.quota == "2Gi"
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_without_bot_id_skips_pvc(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """未提供 bot_id 时，不创建 PVC，保持原有行为。"""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        sandbox = plugin.create_sync_sandbox(template_id="openclaw-default")
+
+        mock_core.create_namespaced_persistent_volume_claim.assert_not_called()
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        volumes = deployment.spec.template.spec.volumes
+        assert len(volumes) == 1
+        assert volumes[0].name == "header-rules"
+        assert deployment.metadata.annotations is None
+        assert sandbox.get_info().storage is None
+
+    @patch.dict(os.environ, {"LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH": "/tmp/bot-shared-data"})
+    def test_delete_storage_removes_subpath(self, plugin, mock_client) -> None:
+        """delete_storage 应删除共享 PVC 中该 storage_id 对应的 subPath 目录。"""
+        import tempfile
+        from pathlib import Path
+
+        bot_id = "cleanup-bot"
+        host_path = "/tmp/bot-shared-data"
+        subpath = Path(host_path) / bot_id
+
+        # 使用临时目录模拟 host mount，避免污染真实路径。
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(
+                os.environ,
+                {"LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH": tmpdir},
+                clear=False,
+            ):
+                subpath = Path(tmpdir) / bot_id
+                subpath.mkdir()
+                (subpath / "file.txt").write_text("data")
+
+                result = plugin.delete_storage(bot_id, "test-tenant")
+
+            assert result is True
+            assert not subpath.exists()
+
+    def test_delete_storage_no_host_mount_is_noop(self, plugin, mock_client) -> None:
+        """未配置共享 PVC host mount 路径时 delete_storage 应为幂等 no-op。"""
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH": ""},
+            clear=False,
+        ):
+            result = plugin.delete_storage("missing-bot", "test-tenant")
+            assert result is True
+
+    @patch("kubernetes.client.AppsV1Api")
+    def test_connect_sync_sandbox_restores_storage_id_from_annotation(
+        self,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """重连时应从 Deployment 注解恢复 storage id 并重建 storage。"""
+        bot_id = "reconnect-bot"
+        deployment_name = "tpl-test-abc"
+
+        mock_deployment = MagicMock()
+        mock_deployment.metadata.annotations = {
+            "secbaas.local-k8s.io/storage-id": bot_id,
+        }
+        mock_apps = MagicMock()
+        mock_apps.read_namespaced_deployment.return_value = mock_deployment
+        mock_apps_cls.return_value = mock_apps
+
+        with patch.object(
+            LocalK8sArcaSandboxPlugin,
+            "_find_pod_name",
+            return_value="bot-pod",
+        ):
+            sandbox = plugin.connect_sync_sandbox(deployment_name)
+
+        mock_apps.read_namespaced_deployment.assert_called_once_with(
+            name=deployment_name, namespace="default"
+        )
+        info = sandbox.get_info()
+        assert info.storage is not None
+        assert info.storage.storage_id == bot_id
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_shared_pvc_is_created_idempotently(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """共享 PVC 已存在时不再重复创建。"""
+        from kubernetes.client.rest import ApiException
+
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_core.read_namespaced_persistent_volume_claim.side_effect = ApiException(
+            status=404
+        )
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        plugin.create_sync_sandbox(
+            template_id="openclaw-default",
+            metadata={"bot_id": "bot-1"},
+        )
+
+        # 第一次调用创建 PVC
+        mock_core.create_namespaced_persistent_volume_claim.assert_called_once()
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_shared_pvc_reuses_existing(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """共享 PVC 已存在时直接复用。"""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_core.read_namespaced_persistent_volume_claim.return_value = MagicMock()
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        plugin.create_sync_sandbox(
+            template_id="openclaw-default",
+            metadata={"bot_id": "bot-1"},
+        )
+
+        # 已存在则不创建
+        mock_core.create_namespaced_persistent_volume_claim.assert_not_called()
+
+        # Deployment 仍使用共享 PVC
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        volumes = deployment.spec.template.spec.volumes
+        assert volumes[1].persistent_volume_claim.claim_name == "bot-shared-data"
+
+    def test_shared_pvc_name_is_env_overridable(self) -> None:
+        """共享 PVC 名称可通过环境变量覆盖。"""
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _shared_pvc_name,
+        )
+
+        with patch.dict(
+            os.environ, {"LOCAL_K8S_SHARED_PVC_NAME": "my-shared-data"}, clear=False
+        ):
+            assert _shared_pvc_name() == "my-shared-data"
+
+        # 默认值
+        with patch.dict(
+            os.environ, {"LOCAL_K8S_SHARED_PVC_NAME": ""}, clear=False
+        ):
+            assert _shared_pvc_name() == "bot-shared-data"
 
 
 class TestLocalK8sPluginResolve:
