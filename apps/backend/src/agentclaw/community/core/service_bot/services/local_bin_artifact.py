@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+import tempfile
 import time
 from typing import Any
 
@@ -66,19 +67,36 @@ def sync_local_bin_artifact(
         if target_bin.exists():
             if not target_bin.is_dir():
                 raise NotADirectoryError("home artifact bin is not a directory")
-            # COSEC: clean only the fixed, validated version-root bin snapshot;
-            # never delete the version/home directory or follow parent links.
-            run_command(
-                cmd=["sudo", "rm", "-rf", "--", str(target_bin)],
-                command_name="remove local bin artifact",
-                error_message="remove local bin artifact failed",
-            )
         reason = ""
         if is_excluded(".local/bin", build_ignore_paths):
             reason = "excluded"
         elif not source_bin.exists() and not source_bin.is_symlink():
             reason = "source_missing"
         if reason:
+            if target_bin.exists():
+                # Only the validated bin snapshot is synchronized against an
+                # empty source; the version root and other Home data stay put.
+                logger.info(
+                    "service_bot.local_bin.cleanup.request " + fields
+                    + " reason=%s cleanup_method=rsync",
+                    *context, reason,
+                )
+                with tempfile.TemporaryDirectory(prefix="service-bot-cli-empty-") as empty_dir:
+                    run_command(
+                        cmd=[
+                            # Empty-source cleanup needs deletion only; do not
+                            # apply the temporary directory's mode/owner to bin.
+                            "sudo", "rsync", "-r", "--delete", "--delete-excluded",
+                            f"{empty_dir}/", f"{target_bin}/",
+                        ],
+                        command_name="rsync local bin artifact cleanup",
+                        error_message="rsync local bin artifact cleanup failed",
+                    )
+                logger.info(
+                    "service_bot.local_bin.cleanup.success " + fields
+                    + " reason=%s cleanup_method=rsync elapsed_ms=%s",
+                    *context, reason, round((time.monotonic() - started) * 1000),
+                )
             logger.info(
                 "service_bot.local_bin.skip " + fields + " reason=%s elapsed_ms=%s",
                 *context, reason, round((time.monotonic() - started) * 1000),
