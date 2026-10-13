@@ -79,6 +79,11 @@ impl GroupManagement {
             ));
         }
 
+        let mut scope_actors = requested.iter().map(|(id, _, _, _)| id.clone()).collect::<Vec<_>>();
+        scope_actors.push(originator.clone());
+        if let Some(caller) = &cmd.caller_actor_id { scope_actors.push(caller.clone()); }
+        let collaboration_owner = self.registry.collaboration_owner(&scope_actors).await?;
+
         let mut seen = HashSet::new();
         let mut participants = Vec::with_capacity(requested.len());
         let mut participant_ids = Vec::with_capacity(requested.len());
@@ -231,6 +236,10 @@ impl GroupManagement {
             self.ensure_all_bots_public(&group.participants).await?;
         }
         group.visibility = visibility;
+
+        if collaboration_owner.is_some() {
+            if group.visibility != "private" { return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into())); }
+        }
 
         self.group.upsert(group.clone()).await?;
 
@@ -481,6 +490,8 @@ impl GroupManagement {
                 )
             }
         };
+
+        self.registry.collaboration_owner(&[caller.into(), target.bot_uuid.clone()]).await?;
 
         let (group, created) = self
             .group

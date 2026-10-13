@@ -1,11 +1,39 @@
 //! Workbench session/chat authorization for the legacy Group service.
 
 use super::*;
+use bcs_service_api::Group;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkbenchAuthorizedHuman {
     pub(crate) actor_id: String,
     pub(crate) staff_no: String,
+}
+
+impl GroupManagement {
+    async fn authorize_workbench_provider_scope(
+        &self, group: &Group, session_id: Option<&str>, actor_id: Option<&str>,
+    ) -> Result<(), WorkbenchUseCaseError> {
+        let actor_id = actor_id.ok_or(WorkbenchUseCaseError::Unauthorized)?;
+        let mut actors = group.participants.iter().map(|p| p.bot_uuid.clone()).collect::<Vec<_>>();
+        actors.push(actor_id.into());
+        let restricted = self.registry.collaboration_owner(&actors).await.map_err(|error| match error {
+            ServiceError::Forbidden(_) => WorkbenchUseCaseError::ForbiddenCollaborationScope,
+            other => WorkbenchUseCaseError::Service(other),
+        })?.is_some();
+        if !restricted { return Ok(()); }
+        if let Some(session_id) = session_id {
+            if let Some(session) = self.session_management.get(session_id).await
+                .map_err(|e| WorkbenchUseCaseError::Service(ServiceError::InternalError(e.to_string())))?
+                .filter(|session| session.group_id == group.id) {
+                actors.extend(session.participants.iter().map(|p| p.bot_uuid.clone()));
+            }
+        }
+        self.registry.collaboration_owner(&actors).await.map_err(|error| match error {
+            ServiceError::Forbidden(_) => WorkbenchUseCaseError::ForbiddenCollaborationScope,
+            other => WorkbenchUseCaseError::Service(other),
+        })?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -19,6 +47,7 @@ impl WorkbenchSessionService for GroupManagement {
             .get(&command.group_id)
             .await
             .ok_or_else(|| WorkbenchUseCaseError::GroupNotFound(command.group_id.clone()))?;
+        self.authorize_workbench_provider_scope(&group, command.session_id.as_deref(), command.bound_actor_id.as_deref()).await?;
 
         let (authenticated, legacy_participants) = match self
             .authorize_workbench_group_access(&group, command.bound_actor_id.as_deref())
@@ -118,6 +147,7 @@ impl WorkbenchSessionService for GroupManagement {
             .get(&command.group_id)
             .await
             .ok_or_else(|| WorkbenchUseCaseError::GroupNotFound(command.group_id.clone()))?;
+        self.authorize_workbench_provider_scope(&group, command.session_id.as_deref(), command.bound_actor_id.as_deref()).await?;
         let auth = match self
             .authorize_workbench_group_access(&group, command.bound_actor_id.as_deref())
             .await
@@ -184,6 +214,10 @@ impl WorkbenchSessionService for GroupManagement {
             })?
             .filter(|session| session.group_id == command.group_id)
             .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+
+        if let Some(group) = self.group.get(&command.group_id).await {
+            self.authorize_workbench_provider_scope(&group, Some(&command.session_id), Some(actor_id)).await?;
+        }
 
         let direct_humans = session
             .participants

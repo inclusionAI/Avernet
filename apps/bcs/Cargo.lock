@@ -1320,6 +1320,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
+ "bcs-bot-store",
  "bcs-event-store",
  "bcs-friend",
  "bcs-group-store",

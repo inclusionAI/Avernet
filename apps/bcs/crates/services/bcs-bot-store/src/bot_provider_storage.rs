@@ -59,6 +59,9 @@ impl DbProviderStore {
 
 #[async_trait]
 impl BotProviderRepoPort for DbProviderStore {
+    async fn collaboration_actors(&self, ids: &[String]) -> ServiceResult<Vec<bcs_service_api::port::repo::collaboration_actor::CollaborationActor>> {
+        self.collaboration_actor_rows(ids).await
+    }
     async fn get_provider_bot_by_ref(&self, provider_id: &str, provider_bot_ref: &str) -> ServiceResult<Option<BotProviderRecord>> {
         let rows = self.db.query(DbStatement::with_params(
             "SELECT * FROM bcs_bots WHERE env = ? AND provider_id = ? AND provider_bot_ref = ?",

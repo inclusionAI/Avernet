@@ -42,3 +42,7 @@ The crate owns group session business rules and lifecycle decisions. It does not
 
 - `cargo test --package bcs-group --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-group --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Provider collaboration scope
+
+Group creation, membership, Human invitations and workbench access enforce the live Provider collaboration boundary across current participants. Group mutation validation precedes optimistic version fencing. No owner fence is persisted after the last restricted participant leaves.

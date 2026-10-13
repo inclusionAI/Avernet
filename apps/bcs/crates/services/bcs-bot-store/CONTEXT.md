@@ -72,3 +72,7 @@ projection writes are unchanged. No separate registration table is created or
 queried. Upstream migrations remain
 unchanged; this PR's unused drafts were consolidated before its first deployment.
 See docs/provider-bot-storage-migration.md for rollout limitations.
+
+## Provider collaboration scope
+
+Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (maximum 256 actors per read); no policy cache or group policy table is introduced. Provider metadata writes atomically reject relaxation of same_owner, including stale ordinary PATCH config.

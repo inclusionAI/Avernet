@@ -85,3 +85,7 @@ BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletio
 changes through the injected projection. Delivery switching validates affiliation
 before owner-edge writes. Bot control-plane views hydrate upstream affiliation from
 Bot metadata without treating it as HTTP delivery or adding gateway-only privileges.
+
+## Provider collaboration scope
+
+Provider collaboration scope is resolved from live Provider metadata by BotRegistryCoreService.collaboration_owner. Same-owner authorization uses persisted created_by; missing affiliated Providers and malformed policies fail closed. Provider admin commands expose optional scope, and cannot relax same_owner. See specs/2026-10-13-provider-collaboration-scope/spec.md.

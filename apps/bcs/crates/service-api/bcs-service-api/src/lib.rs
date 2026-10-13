@@ -12,6 +12,7 @@ pub mod application;
 pub mod bot_runtime_use_cases;
 pub mod bot_use_cases;
 pub mod core;
+pub use bcs_domain::provider::ProviderCollaborationScope;
 pub mod friends;
 pub mod group_use_cases;
 pub mod human_actors;

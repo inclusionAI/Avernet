@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 #[path = "bot_provider_storage.rs"]
 mod bot_storage;
+#[path = "collaboration_actor_storage.rs"]
+mod collaboration_actor_storage;
 #[path = "memory_bot_provider_storage.rs"]
 mod memory_bot_storage;
 pub use memory_bot_storage::MemoryBotProviderStore;
@@ -112,6 +114,7 @@ impl ProviderRepoPort for MemoryProviderStore {
         let Some(provider) = providers.get_mut(provider_id) else {
             return Ok(None);
         };
+        if let Some(config) = config { reject_policy_relaxation(&provider.config, config)?; }
         if let Some(name) = name {
             provider.name = name.to_string();
         }
@@ -629,12 +632,28 @@ impl ProviderRepoPort for DbProviderStore {
         assignments.push(now_clause.to_string());
         params.push(DbValue::from(provider_id));
         params.push(DbValue::from(env.as_str()));
-        self.execute("update_provider_metadata", DbStatement::with_params(format!(
-            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?",
+        // Guard at the write boundary, so a stale ordinary PATCH cannot overwrite
+        // a concurrently tightened policy. Both dialects evaluate this atomically.
+        let guard = if config.is_some_and(|config| bcs_service_api::ProviderCollaborationScope::from_config(config)
+            .is_ok_and(|scope| scope == bcs_service_api::ProviderCollaborationScope::Standard)) {
+            match self.flavor {
+                DbSqlFlavor::Mysql => " AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(config, '$.collaboration_scope')), 'standard') <> 'same_owner'",
+                DbSqlFlavor::Sqlite => " AND COALESCE(json_extract(config, '$.collaboration_scope'), 'standard') <> 'same_owner'",
+            }
+        } else { "" };
+        if let Some(config) = config { bcs_service_api::ProviderCollaborationScope::from_config(config)?; }
+        let affected = self.execute("update_provider_metadata", DbStatement::with_params(format!(
+            "UPDATE bcs_providers SET {} WHERE provider_id = ? AND env = ?{guard}",
             assignments.join(", "),
         ), params)).await?;
         self.providers.invalidate(&format!("{env}:{provider_id}"));
-        self.get_provider(provider_id).await
+        let updated = self.get_provider(provider_id).await?;
+        if affected == 0 {
+            if let (Some(current), Some(config)) = (&updated, config) {
+                reject_policy_relaxation(&current.config, config)?;
+            }
+        }
+        Ok(updated)
     }
 
     async fn update_provider_disabled(
@@ -1803,4 +1822,13 @@ mod tests {
         assert_eq!(page.records.len(), 1);
         assert_eq!(page.records[0].bot_uuid, "bot-c");
     }
+}
+
+fn reject_policy_relaxation(current: &str, incoming: &str) -> ServiceResult<()> {
+    use bcs_service_api::ProviderCollaborationScope;
+    if ProviderCollaborationScope::from_config(current)? == ProviderCollaborationScope::SameOwner
+        && ProviderCollaborationScope::from_config(incoming)? != ProviderCollaborationScope::SameOwner {
+        return Err(ServiceError::Forbidden("same_owner Provider policy cannot be relaxed".into()));
+    }
+    Ok(())
 }

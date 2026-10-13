@@ -699,6 +699,13 @@ impl A2aChat {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
 
+        if self.registry.collaboration_owner(&[from_bot_id.into(), target_bot_id.into()]).await?.is_some() {
+            if target.status == ActorStatus::Hidden {
+                return Err(ServiceError::Forbidden("target Bot is hidden".into()));
+            }
+            return Ok(target);
+        }
+
         if from_bot_id == target_bot_id {
             return Ok(target);
         }
@@ -718,6 +725,7 @@ impl A2aChat {
         from_bot_id: &str,
         target_bot_id: &str,
     ) -> ServiceResult<RegisteredBot> {
+        self.registry.collaboration_owner(&[from_bot_id.into(), target_bot_id.into()]).await?;
         let target = self
             .registry
             .get(target_bot_id)
