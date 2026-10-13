@@ -36,6 +36,8 @@ export function resolveRepairTaskControlPlaneEnvironment(
 
 export type RepairConfig = {
   publicBaseUrl: string;
+  /** Standard Base package; absent only for legacy/test compositions. */
+  packageId?: string;
   controlPlaneEnvironment: RepairControlPlaneEnvironment;
   aisSnapshotIds: Record<RepairControlPlaneEnvironment, number>;
   decisionGraceSeconds: number;
@@ -58,12 +60,13 @@ export function resolveRepairConfig(configPath?: string): RepairConfig {
   const currentEnvironment = getCurrentEnv();
   const resolved: RepairConfig = {
     publicBaseUrl: resolveInsightHandoffConfig().publicBaseUrl,
+    ...(process.env.REPAIR_AIS_USE_BASE === "true" ? { packageId: "clawevolve-repair" } : {}),
     controlPlaneEnvironment: currentEnvironment === "prod" ? "prod" : "pre",
     aisSnapshotIds: repair.aisSnapshotIds,
     decisionGraceSeconds: repair.decisionGraceSeconds,
     contextWaitSeconds: repair.contextWaitSeconds,
     executionLeaseSeconds: repair.executionLeaseSeconds,
-    heartbeatIntervalSeconds: repair.heartbeatIntervalSeconds,
+    heartbeatIntervalSeconds: 20,
     agentTimeoutSeconds: repair.agentTimeoutSeconds,
     agentCloseoutTimeoutSeconds: repair.agentCloseoutTimeoutSeconds,
     maxAgentAutoRecoveries: repair.maxAgentAutoRecoveries,

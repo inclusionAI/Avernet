@@ -1,6 +1,6 @@
-import { digestJson } from "../evolve/plan-source-contract.js";
-import { assertRepairAuditSecretFree } from "../../repositories/repair-repository.js";
-import { REDACTED_SECRET_TEXT } from "./redaction.js";
+import { digestJson } from "../../evolve/plan-source-contract.js";
+import { assertRepairAuditSecretFree } from "../../../repositories/repair/repair-repository.js";
+import { REDACTED_SECRET_TEXT } from "@avernet/clawweb-shared/server/services/redaction";
 
 const MAX_PROJECTION_DEPTH = 64;
 const REDACTED_FIELD_COUNT_KEY = "__repair_redacted_auth_field_count";

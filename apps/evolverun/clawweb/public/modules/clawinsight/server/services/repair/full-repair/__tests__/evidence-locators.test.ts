@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evidenceLocatorsFromText } from "../evidence-locators.js";
+import { evidenceLocatorsFromText } from "../../common/agent-tools/evidence-locators.js";
 
 describe("evidenceLocatorsFromText", () => {
   it("extracts exact paths and normalizes stack line suffixes", () => {

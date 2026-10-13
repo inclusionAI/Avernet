@@ -220,6 +220,8 @@ export type EvolveOptimizeVersionRow = {
 };
 
 export type EvolveBotRuntime = {
+  entityId?: string;
+  entityType?: string;
   activeEngine: string | null;
   botType: string | null;
   hasServiceBot: boolean;
@@ -1912,11 +1914,11 @@ export class EvolveRepository {
 
   private async resolveOwnedEvolveBotRuntime(userId: string, botId: string, env?: string): Promise<EvolveBotRuntime | null> {
     const rows = await this.botDb.query<{
-      active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
+      entity_id: string; entity_type: string; active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
       device_provider: string | null; device_id: string | null;
       device_props: unknown; binding_status: string | null; env: string | null;
     }>(
-      `SELECT b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
+      `SELECT b.entity_id, b.entity_type, b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
               d.device_provider, d.device_id, d.device_props, d.status AS binding_status,
               COALESCE(d.env, b.env) AS env
        FROM ac_bots b
@@ -1957,6 +1959,7 @@ export class EvolveRepository {
       [botId, userId, userId, env ?? "", env ?? ""],
     ).catch(() => []);
     return {
+      entityId: row.entity_id, entityType: row.entity_type,
       activeEngine: row.active_engine,
       botType: row.bot_type,
       hasServiceBot: Number(publishedRows[0]?.published_count ?? 0) > 0,

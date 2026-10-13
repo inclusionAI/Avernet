@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMigrations, SqliteDatabase } from "@avernet/clawweb-shared/server/db";
 import { mysqlDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import { migrations } from "@avernet/clawweb-shared/server/schema";
-import { redactPersistableText } from "../../services/repair/redaction.js";
+import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import {
   RepairRepository,
   RepairToolCallCompletionConflictError,
@@ -352,7 +352,7 @@ describe("Repair tool-call ledger", () => {
     await expect(repo.createToolCall(toolInput(taskId, stepId, "guarded-create", {
       toolCallLedgerGuard: (calls, context) => {
         expect(calls).toEqual([]);
-        expect(context).toEqual({ runtimeTargetVersion: 7 });
+        expect(context).toMatchObject({ runtimeTargetVersion: 7 });
         throw rejected;
       },
     }))).rejects.toBe(rejected);
@@ -368,7 +368,7 @@ describe("Repair tool-call ledger", () => {
       ignoreActiveToolCallId: source.call.callId,
       toolCallLedgerGuard: (calls, context) => {
         expect(calls.map((call) => call.callId)).toEqual([source.call.callId]);
-        expect(context).toEqual({ runtimeTargetVersion: 7 });
+        expect(context).toMatchObject({ runtimeTargetVersion: 7 });
         throw rejected;
       },
     })).rejects.toBe(rejected);

@@ -31,8 +31,8 @@ import { createAdminConsentToken } from "../services/insight/admin-consent.js";
 import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import { InsightTaskCreationError } from "../services/evolve/insight-task-service.js";
 import type { CreateInsightTaskInput, InsightTaskCreationResult } from "@avernet/clawevolve/server/internal/module-api";
-import type { RepairTaskService } from "../services/repair/repair-runtime.js";
-import { RepairError } from "../services/repair/errors.js";
+import type { RepairTaskService } from "../services/repair/full-repair/repair-runtime.js";
+import { AgentToolError as RepairError } from "../services/repair/common/agent-tools/errors.js";
 
 const MAX_PAGE_SIZE = 100;
 

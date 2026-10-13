@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AntLogsCollector, AntLogsCollectResult, LogEntry } from "../../antlogs-collector.js";
-import type { RepairTaskContext } from "../contracts.js";
-import { RepairLogTool, selectRepairLogSources } from "../log-tool.js";
+import type { AntLogsCollector, AntLogsCollectResult, LogEntry } from "../../../../antlogs-collector.js";
+import type { AgentToolContext } from "../contracts.js";
+import { AgentLogTool, selectAgentLogSources } from "../log-tool.js";
 
 const context = {
   target: { botId: "bot-1", ownerId: "user-1" },
@@ -11,7 +11,7 @@ const context = {
     errorText: null,
     timeRange: { from: 1_000, to: 2_000 },
   },
-} as RepairTaskContext;
+} as AgentToolContext;
 
 function collector(entries: LogEntry[]): AntLogsCollector {
   const source = {
@@ -41,9 +41,9 @@ function collector(entries: LogEntry[]): AntLogsCollector {
   return { search: vi.fn(async () => result) } as unknown as AntLogsCollector;
 }
 
-describe("RepairLogTool result bounds", () => {
+describe("AgentLogTool result bounds", () => {
   it("keeps small results inline without truncation", async () => {
-    const tool = new RepairLogTool(collector([{
+    const tool = new AgentLogTool(collector([{
       timestamp: "2026-08-19T00:00:00Z",
       level: "INFO",
       source: "agentclaw",
@@ -59,7 +59,7 @@ describe("RepairLogTool result bounds", () => {
 
   it("redacts signed-query credentials found in historical log messages", async () => {
     const secret = "historical-log-signature-canary";
-    const tool = new RepairLogTool(collector([{
+    const tool = new AgentLogTool(collector([{
       timestamp: "2026-08-19T00:00:00Z",
       level: "ERROR",
       source: "agentclaw",
@@ -81,7 +81,7 @@ describe("RepairLogTool result bounds", () => {
       message: index === 14 ? "authorization=historical-secret" : `safe-entry-${index}`,
       metadata: {},
     }));
-    const tool = new RepairLogTool(collector(entries), ["agentclaw"]);
+    const tool = new AgentLogTool(collector(entries), ["agentclaw"]);
 
     const result = await tool.search(context, { identifiers: ["botId"], limit: 20 });
     const returned = result.entries as Array<{ message: string }>;
@@ -93,7 +93,7 @@ describe("RepairLogTool result bounds", () => {
   });
 
   it("preserves useful AntLogs context when only one field contains a credential", async () => {
-    const tool = new RepairLogTool(collector([{
+    const tool = new AgentLogTool(collector([{
       timestamp: "2026-08-20T13:48:00Z",
       level: "INFO",
       source: "agentclaw",
@@ -117,7 +117,7 @@ describe("RepairLogTool result bounds", () => {
       message: `${index}:${"x".repeat(1_024)}`,
       metadata: { traceId: `trace-${index}-${"y".repeat(240)}` },
     }));
-    const tool = new RepairLogTool(collector(entries), ["agentclaw"]);
+    const tool = new AgentLogTool(collector(entries), ["agentclaw"]);
 
     const result = await tool.search(context, { identifiers: ["botId"], limit: 200 });
 
@@ -160,7 +160,7 @@ describe("RepairLogTool result bounds", () => {
       allSourcesSucceeded: false,
       collectorType: "antlogs",
     });
-    const tool = new RepairLogTool(antlogs, ["agentclaw", "clawweb"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw", "clawweb"]);
 
     const result = await tool.search(context, { identifiers: ["botId"] });
 
@@ -172,10 +172,10 @@ describe("RepairLogTool result bounds", () => {
   });
 });
 
-describe("RepairLogTool query safety", () => {
+describe("AgentLogTool query safety", () => {
   it("uses the issue time range only as the default when no explicit range is requested", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await tool.search(context, { identifiers: ["botId"] });
 
@@ -187,7 +187,7 @@ describe("RepairLogTool query safety", () => {
 
   it("allows explicit historical log ranges outside the issue window without a duration limit", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await tool.search(context, {
       identifiers: ["botId"],
@@ -203,7 +203,7 @@ describe("RepairLogTool query safety", () => {
 
   it("rejects only malformed or reversed explicit log ranges", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await expect(tool.search(context, {
       identifiers: ["botId"],
@@ -214,7 +214,7 @@ describe("RepairLogTool query safety", () => {
   });
 
   it("uses explicit Repair defaults and excludes clawweb from both default and allowed sources", async () => {
-    const selected = selectRepairLogSources([
+    const selected = selectAgentLogSources([
       { name: "后端", app: "agentclaw", defaultEnabled: true },
       { name: "ARCA", app: "arcaagentclaw", defaultEnabled: true },
       { name: "BCN", app: "agentclawscs", defaultEnabled: false },
@@ -227,7 +227,7 @@ describe("RepairLogTool query safety", () => {
       defaultSourceNames: ["后端", "BCN"],
     });
     const antlogs = collector([]);
-    const tool = new RepairLogTool(
+    const tool = new AgentLogTool(
       antlogs,
       selected.allowedSourceNames,
       selected.defaultSourceNames,
@@ -241,7 +241,7 @@ describe("RepairLogTool query safety", () => {
   });
 
   it("fails closed on duplicate source names instead of relying on collector first-match resolution", () => {
-    const selected = selectRepairLogSources([
+    const selected = selectAgentLogSources([
       { name: "BACKEND", app: "clawweb", defaultEnabled: true },
       { name: " backend ", app: "agentclaw", defaultEnabled: true },
       { name: "BCN", app: "agentclawscs", defaultEnabled: true },
@@ -274,7 +274,7 @@ describe("RepairLogTool query safety", () => {
       allSourcesSucceeded: false,
       collectorType: "antlogs",
     });
-    const tool = new RepairLogTool(antlogs, ["后端"], ["后端"]);
+    const tool = new AgentLogTool(antlogs, ["后端"], ["后端"]);
 
     const result = await tool.search(context, { identifiers: ["botId"] });
 
@@ -285,7 +285,7 @@ describe("RepairLogTool query safety", () => {
 
   it("passes a single Bot ID to AntLogs as an unquoted token", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await tool.search({
       ...context,
@@ -300,7 +300,7 @@ describe("RepairLogTool query safety", () => {
 
   it("combines multiple identifiers with the supported lowercase and operator", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await tool.search(context, { identifiers: ["botId", "ownerId"] });
 
@@ -311,7 +311,7 @@ describe("RepairLogTool query safety", () => {
 
   it("converts arbitrary error text to bounded literal tokens without LogQL syntax", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await tool.search({
       ...context,
@@ -329,7 +329,7 @@ describe("RepairLogTool query safety", () => {
 
   it("fails closed when an identifier contains no safe searchable token", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     await expect(tool.search({
       ...context,
@@ -343,7 +343,7 @@ describe("RepairLogTool query safety", () => {
 
   it("rejects secret-bearing error text without echoing it or calling AntLogs", async () => {
     const antlogs = collector([]);
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
     const secret = "sk-sensitive-value-1234567890";
 
     let caught: unknown;
@@ -368,7 +368,7 @@ describe("RepairLogTool query safety", () => {
         throw new Error(leakedDetail);
       }),
     } as unknown as AntLogsCollector;
-    const tool = new RepairLogTool(antlogs, ["agentclaw"]);
+    const tool = new AgentLogTool(antlogs, ["agentclaw"]);
 
     let caught: unknown;
     try {

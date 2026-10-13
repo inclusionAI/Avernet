@@ -15,9 +15,9 @@ import {
   RepairToolCallIdempotencyConflictError,
   RepairToolCallWorkloadConflictError,
   type TransitionRepairStepInput,
-} from "../../../repositories/repair-repository.js";
-import type { AistudioService } from "../../aistudio-service.js";
-import type { MistOssObjectStore } from "../../object-storage/oss-object-store.js";
+} from "../../../../repositories/repair/repair-repository.js";
+import type { AistudioService } from "../../../aistudio-service.js";
+import type { MistOssObjectStore } from "../../../object-storage/oss-object-store.js";
 import {
   LEGACY_REPAIR_PLAN_VERSION,
   REPAIR_CONTRACT_VERSION,
@@ -31,7 +31,7 @@ import {
   type RepairTarget,
   type RepairWorkloadIdentity,
 } from "../contracts.js";
-import type { ImprovementDetail } from "../../insight/contracts.js";
+import type { ImprovementDetail } from "../../../insight/contracts.js";
 import type { RepairConfig } from "../config.js";
 import { RepairTaskService, REPAIR_PARAMS_KEY } from "../repair-runtime.js";
 import { DatabaseRepairWorkloadVerifier } from "../workload-verifier.js";
@@ -151,6 +151,22 @@ function fakeRepositories(): { repo: EvolveRepository; repairRepo: RepairReposit
   let rowId = 1;
 
   const repo = {
+    createStep: vi.fn(async (input: Parameters<EvolveRepository['createStep']>[0]) => {
+      const step = { id: rowId++, step_id: input.stepId, task_id: input.taskId, step_type: input.stepType,
+        step_no: input.stepNo, round_no: null, command: input.command, status: "created", ext_json: JSON.stringify(input.ext),
+        output_json: null, summary: null, error_code: null, error_message: null, bot_run_id: null } as EvolveStepRow;
+      steps.set(input.stepId, step); return step;
+    }),
+    updateStepStatus: vi.fn(async (stepId: string, input: Parameters<EvolveRepository['updateStepStatus']>[1]) => {
+      const step = steps.get(stepId)!;
+      if (input.expectedStep && (step.status !== input.expectedStep.status || step.output_json !== input.expectedStep.output_json)) return false;
+      step.status = input.status;
+      if (input.output !== undefined) step.output_json = JSON.stringify(input.output);
+      if (input.summary !== undefined) step.summary = input.summary;
+      if (input.errorCode !== undefined) step.error_code = input.errorCode;
+      if (input.errorMessage !== undefined) step.error_message = input.errorMessage;
+      return true;
+    }),
     findTask: vi.fn(async (taskId: string) => tasks.get(taskId) ?? null),
     findStep: vi.fn(async (stepId: string) => steps.get(stepId) ?? null),
     listSteps: vi.fn(async (taskId: string) => [...steps.values()]
@@ -5503,7 +5519,7 @@ describe("RepairTaskService execution contract", () => {
       executionTarget: "Bot 容器路径 /home/admin/.openclaw/openclaw.json",
       safeInvocation: {
         kind: "readonly_command",
-        command: expect.stringContaining("sed -n '1,20p'"),
+        command: expect.stringContaining("NR >= 1 && NR <= 20"),
       },
       resultSummary: "文件片段读取完成，返回 2 行。",
       conclusion: {
@@ -5955,5 +5971,38 @@ describe("RepairTaskService execution contract", () => {
       conclusionZh: "The port inspection failed before returning runtime evidence.",
       nextAction: "Continue with another bounded read-only check.",
     })).resolves.toMatchObject({ recorded: true, sourceToolCallId: failed.callId });
+  });
+});
+
+
+describe("Repair Base outer execution lifecycle", () => {
+  it("dispatches a standard package with credentials separated from business parameters", async () => {
+    harness.repairConfig.packageId = "clawevolve-repair";
+    const created = await createTask({ modelApiKey: "base-model-key-fixture" } as never);
+    const params = JSON.parse(harness.execute.mock.calls[0][1][REPAIR_PARAMS_KEY]);
+    expect(params).toMatchObject({ taskType: "repair", stepId: created.config.aisExecution!.stepId, attempt: 1,
+      runtime: { clawwebUrl: created.config.publicBaseUrl, package: { packageId: "clawevolve-repair" } } });
+    expect(params.input.credentials.executionTicket).toBeTruthy();
+    expect(params.input.repair.runtime.executionTicket).toBeUndefined();
+    expect(params.input.repair.runtime.singleStep).toBeUndefined();
+    expect(params.stepId).not.toBe(created.config.current.stepId);
+    expect((await harness.repo.findStep(params.stepId))!.step_no).toBe(-1);
+  });
+  it("a hard timeout during business execution preserves context for the same Repair task", async () => {
+    harness.repairConfig.packageId = "clawevolve-repair";
+    const created = await createTask();
+    const task = (await harness.repo.findTask(created.taskId))!, step = (await harness.repo.findStep(created.config.aisExecution!.stepId))!;
+    expect(await harness.service.handleAisStatus({ task, step, report: { status: "failed", errorCode: "TASK_TIMEOUT", errorMessage: "timeout" } })).toMatchObject({ applied: true });
+    const saved = (await harness.repo.findTask(created.taskId))!;
+    expect(saved.status).toBe("waiting_context"); expect(JSON.parse(saved.config_json).execution.state).toBe("ended");
+    expect((await harness.repo.findStep(created.config.current.stepId))!.status).toBe("interrupted");
+  });
+  it("an outer failure preserves a saved Owner waiting state", async () => {
+    harness.repairConfig.packageId = "clawevolve-repair";
+    const created = await createTask(); await harness.repo.updateTaskState({ taskId: created.taskId, status: "waiting_approval" });
+    const task = (await harness.repo.findTask(created.taskId))!, step = (await harness.repo.findStep(created.config.aisExecution!.stepId))!;
+    await harness.service.handleAisStatus({ task, step, report: { status: "failed", errorCode: "TASK_TIMEOUT" } });
+    expect((await harness.repo.findTask(created.taskId))!.status).toBe("waiting_approval");
+    expect(JSON.parse((await harness.repo.findTask(created.taskId))!.config_json).execution.state).toBe("ended");
   });
 });

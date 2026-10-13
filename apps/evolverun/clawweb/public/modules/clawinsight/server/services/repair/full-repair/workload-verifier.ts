@@ -1,40 +1,17 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Request } from "express";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { RepairTaskConfig, RepairWorkloadIdentity } from "./contracts.js";
 import { REPAIR_CONTRACT_VERSION } from "./contracts.js";
-import { RepairError } from "./errors.js";
-
-const TICKET_PREFIX = "ce_repair_";
+import { AgentToolError as RepairError } from "../common/agent-tools/errors.js";
 
 export interface RepairWorkloadVerifier {
   verify(req: Request): Promise<RepairWorkloadIdentity>;
 }
+export { issueAgentExecutionTicket as issueRepairExecutionTicket, digestAgentExecutionTicket as digestRepairExecutionTicket, equalDigest } from "../common/agent-execution.js";
+import { digestAgentExecutionTicket as digestRepairExecutionTicket, equalDigest, parseAgentExecutionTicket } from "../common/agent-execution.js";
 
-export function digestRepairExecutionTicket(ticket: string): string {
-  return createHash("sha256").update(ticket, "utf8").digest("hex");
-}
-
-export function issueRepairExecutionTicket(): { ticket: string; digest: string } {
-  const ticket = `${TICKET_PREFIX}${randomBytes(32).toString("base64url")}`;
-  return { ticket, digest: digestRepairExecutionTicket(ticket) };
-}
-
-function bearerTicket(req: Request): string {
-  const authorization = req.header("authorization")?.trim() ?? "";
-  const match = /^Bearer\s+(\S+)$/i.exec(authorization);
-  const ticket = match?.[1] ?? "";
-  if (!ticket.startsWith(TICKET_PREFIX) || ticket.length > 256) {
-    throw new RepairError(401, "repair_execution_ticket_missing", "Repair execution ticket 缺失或无效");
-  }
-  return ticket;
-}
-
-function equalDigest(actual: string, expected: string): boolean {
-  if (!/^[a-f0-9]{64}$/.test(expected)) return false;
-  const left = Buffer.from(actual, "hex");
-  const right = Buffer.from(expected, "hex");
-  return left.length === right.length && timingSafeEqual(left, right);
+export function bearerTicket(req: Request): string {
+  return parseAgentExecutionTicket(req.header("authorization"));
 }
 
 function parseConfig(raw: string): RepairTaskConfig {
