@@ -261,6 +261,63 @@ class TestMySQLVectorPersistenceBackendContract:
         assert backend.load_all() == []
         assert connection.rollback_calls == 1
 
+    def test_load_by_worker_escapes_prefix_and_checks_exact_owner(self):
+        import json
+        import pickle
+
+        from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+            MySQLVectorPersistenceBackend,
+        )
+
+        owner = "team_!%:worker"
+        vector = pickle.dumps([0.1, 0.2])
+
+        class Cursor:
+            def __init__(self):
+                self.sql = None
+                self.params = None
+                self.closed = False
+
+            def execute(self, sql, params=None):
+                self.sql = sql
+                self.params = params
+
+            def fetchall(self):
+                return [
+                    (f"{owner}:default:full", vector, json.dumps({"worker_id": owner})),
+                    (f"{owner}:nested:full", vector, json.dumps({"worker_id": f"{owner}:nested"})),
+                ]
+
+            def close(self):
+                self.closed = True
+
+        class Connection:
+            def __init__(self):
+                self.read_cursor = Cursor()
+                self.rollback_calls = 0
+
+            def is_connected(self):
+                return True
+
+            def cursor(self):
+                return self.read_cursor
+
+            def rollback(self):
+                self.rollback_calls += 1
+
+        backend = MySQLVectorPersistenceBackend()
+        backend._conn = Connection()
+        backend._schema_initialized = True
+
+        points = backend.load_by_worker(owner)
+
+        assert [point.id for point in points] == [f"{owner}:default:full"]
+        assert points[0].vector == [0.1, 0.2]
+        assert "`id` LIKE %s ESCAPE '!'" in backend._conn.read_cursor.sql
+        assert backend._conn.read_cursor.params == ("team!_!!!%:worker:%",)
+        assert backend._conn.read_cursor.closed
+        assert backend._conn.rollback_calls == 1
+
     def test_logs_have_correlation_id(self):
         """Test that all log events include correlation_id.
 

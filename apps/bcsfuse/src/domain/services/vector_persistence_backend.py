@@ -177,6 +177,15 @@ class BatchedVectorPersistenceBackend(Protocol):
 
 
 @runtime_checkable
+class WorkerScopedVectorPersistenceBackend(Protocol):
+    """Optional durable lookup for a Worker's active vectors."""
+
+    def load_by_worker(self, worker_id: str) -> list[VectorPoint]:
+        """Return active points whose payload owns the exact worker_id."""
+        ...
+
+
+@runtime_checkable
 class IncrementalVectorPersistenceBackend(VectorPersistenceBackend, Protocol):
     """Persistence backend that exposes an ordered durable change feed."""
 
