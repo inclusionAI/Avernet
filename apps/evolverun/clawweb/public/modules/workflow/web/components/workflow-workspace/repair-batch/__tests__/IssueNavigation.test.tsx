@@ -351,7 +351,7 @@ it('offers later-page node and problem-type facets on the first selection page',
   result.items = Array.from({ length: 25 }, (_, index) => ({ ...item(String(index)),
     context: { nodeId: index < 20 ? 'first-node' : 'later-node', failureMode: index < 20 ? 'timeout' : 'output' } }))
   result.facets = { nodes: ['first-node', 'later-node'], failureModes: ['timeout', 'output'] }
-  render(<RepairSelectionWorkspace workflowId="wf" includeHistorical={false} selected={[]} selectedItems={[]}
+  render(<RepairSelectionWorkspace workflowId="wf" includeHistorical={false} refreshToken={0} selected={[]} selectedItems={[]}
     instructions="" busy={false} reason="" error="" onInstructions={vi.fn()} onToggle={vi.fn()} onResult={vi.fn()}
     onDetail={vi.fn()} onGenerate={vi.fn()} onBack={vi.fn()} />)
   expect(await screen.findByRole('option', { name: 'later-node' })).toBeVisible()

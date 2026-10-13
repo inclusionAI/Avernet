@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { render, repairApi, repairPage, openIssueRepairs, closeIssue } from './evolution-issue-fixture'
+import { render, repairApi, repairItem, repairPage, openIssueRepairs, closeIssue } from './evolution-issue-fixture'
 import EvolutionTab from '../EvolutionTab'
 
 describe('repair selection workspace', () => {
@@ -25,8 +25,12 @@ describe('repair selection workspace', () => {
     expect(repairApi.task).toHaveBeenCalledWith('FIX-2')
   })
 
-  it('shows disposition confirmation inside the selection workspace', async () => {
-    repairApi.candidates.mockResolvedValue(repairPage())
+  it('confirms disposition and refreshes the selection row without allowing stale reselection', async () => {
+    let disposed = false
+    repairApi.candidates.mockImplementation(() => Promise.resolve(repairPage({
+      items: [{ ...repairItem(), state: disposed ? 'no_action' : 'pending' }],
+    })))
+    repairApi.disposition.mockImplementation(() => { disposed = true; return Promise.resolve({}) })
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
     await waitFor(() => expect(repairApi.candidates).toHaveBeenCalled())
     await openIssueRepairs(false)
@@ -39,6 +43,11 @@ describe('repair selection workspace', () => {
     await userEvent.type(within(confirm).getByRole('textbox', { name: '处置原因' }), '保留现有规则')
     await userEvent.click(within(confirm).getByRole('button', { name: '确认' }))
     await waitFor(() => expect(repairApi.disposition).toHaveBeenCalledWith('item-1', expect.objectContaining({ action: 'no_action' })))
+    expect(await screen.findByText('已暂不处理，可恢复后重新选择')).toBeVisible()
+    const checkbox = screen.getByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' })
+    expect(checkbox).not.toBeChecked()
+    expect(checkbox).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeDisabled()
   })
 
   it('rejects an oversized Pack draft before posting it', async () => {

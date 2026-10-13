@@ -130,7 +130,7 @@ export default function RepairTaskPanel({ detail, canEdit, onFeedback, onCancel,
     <aside className="space-y-4 xl:sticky xl:top-4">
       <section className="rounded-lg border border-input bg-card p-5"><h3 className="text-sm font-semibold">一次任务，多轮候选</h3><p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">{detail.taskId}</p>
         <p className="mt-3 text-xs leading-5 text-muted-foreground">基线不变，分支隔离。每轮失败与成功记录独立保留。</p>
-        <div className="mt-4 divide-y divide-slate-100">{detail.revisions.slice().sort((a, b) => b.revision - a.revision).map(item => <button key={item.revision} onClick={() => { setSelectedRevision(item.revision); setDiff(null); setShowDiff(true) }} className="block w-full py-3 text-left">
+        <div className="mt-4 divide-y divide-border/50">{detail.revisions.slice().sort((a, b) => b.revision - a.revision).map(item => <button key={item.revision} onClick={() => { setSelectedRevision(item.revision); setDiff(null); setShowDiff(true) }} className="block w-full py-3 text-left">
           <p className={`text-xs font-medium ${item.revision === revision.revision ? 'text-primary' : 'text-foreground'}`}>v{item.revision} · {phases[item.phase]}</p><p className="mt-1 truncate font-mono text-[10px] text-muted-foreground/70">{typeof item.draft?.candidateCommit === 'string' ? item.draft.candidateCommit : '未生成候选 commit'}</p>
         </button>)}</div>
       </section>

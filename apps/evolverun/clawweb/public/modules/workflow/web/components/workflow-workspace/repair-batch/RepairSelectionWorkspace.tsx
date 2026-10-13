@@ -6,9 +6,9 @@ import { changeSummary, sourceRunCount } from './RepairItemDetail'
 import { exclusion, itemTitle, primary, states } from './repair-view'
 import { selectionConflicts } from './repair-selection'
 
-export default function RepairSelectionWorkspace({ workflowId, includeHistorical, selected, selectedItems, instructions, busy, reason, error,
+export default function RepairSelectionWorkspace({ workflowId, includeHistorical, refreshToken, selected, selectedItems, instructions, busy, reason, error,
   onInstructions, onToggle, onResult, onDetail, onGenerate, onBack }: {
-  workflowId: string; includeHistorical: boolean; selected: string[]; selectedItems: RepairInboxItem[];
+  workflowId: string; includeHistorical: boolean; refreshToken: number; selected: string[]; selectedItems: RepairInboxItem[];
   instructions: string; busy: boolean; reason: string; error: string;
   onInstructions: (value: string) => void; onToggle: (id: string) => void; onResult: (result: RepairCandidatesResponse) => void;
   onDetail: (item: RepairInboxItem) => void; onGenerate: () => void; onBack: () => void
@@ -29,7 +29,7 @@ export default function RepairSelectionWorkspace({ workflowId, includeHistorical
       .catch(e => { if (current) { setReadError(e instanceof Error ? e.message : String(e)); setData(null) } })
       .finally(() => { if (current) setLoading(false) })
     return () => { current = false }
-  }, [workflowId, includeHistorical, page, node, failureMode, reload])
+  }, [workflowId, includeHistorical, refreshToken, page, node, failureMode, reload])
   const rows = (data?.items ?? []).filter(item => !query || `${itemTitle(item)} ${item.context?.nodeId ?? ''}`.toLowerCase().includes(query.toLowerCase()))
   const selectable = rows.filter(item => !exclusion(item))
   const allSelected = selectable.length > 0 && selectable.every(item => selected.includes(item.itemId))

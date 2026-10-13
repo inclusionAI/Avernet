@@ -420,12 +420,12 @@ function DiagnosisPanel({
     : <p className="text-sm text-slate-600">请选择问题查看修复建议。</p>
 
   const dispositionDialog = disposition && <RepairDialog title={disposition.action === 'restore' ? '恢复待处理' : '暂不处理'} busy={repairBusy} onClose={() => setDisposition(null)}>
-        <p className="text-xs leading-5 text-slate-500">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
-        <label className="mt-4 block text-xs font-medium text-slate-700">原因
+        <p className="text-xs leading-5 text-muted-foreground">只处置当前建议内容版本，原始问题、证据和历史任务都会保留。</p>
+        <label className="mt-4 block text-xs font-medium text-foreground">原因
           <textarea aria-label="处置原因" rows={4} maxLength={2000} value={dispositionReason} disabled={repairBusy}
-            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 p-3 font-normal leading-5" />
+            onChange={event => setDispositionReason(event.target.value)} className="mt-2 w-full rounded-lg border border-input bg-background p-3 font-normal leading-5 text-foreground" />
         </label>
-        {repairActionError && <p role="alert" className="mt-3 text-xs text-red-600">{repairActionError}</p>}
+        {repairActionError && <p role="alert" className="mt-3 text-xs text-destructive">{repairActionError}</p>}
         <button type="button" className={`${primary} mt-4`} disabled={repairBusy || !dispositionReason.trim()} onClick={() => void submitDisposition()}>
           {repairBusy ? '提交中…' : '确认'}
         </button>
@@ -434,7 +434,7 @@ function DiagnosisPanel({
   if (selectedTaskId) return <RepairTaskDialog workflowId={workflowId} taskId={selectedTaskId} includeHistorical={includeHistorical}
     canEdit={canEdit && repairData?.canEdit === true} onClose={() => setSelectedTaskId('')} onChanged={() => setRepairRefresh(value => value + 1)} />
   if (draftOpen) return <>
-    <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} selected={selectedRepairIds}
+    <RepairSelectionWorkspace workflowId={workflowId} includeHistorical={includeHistorical} refreshToken={repairRefresh} selected={selectedRepairIds}
       selectedItems={selectedItems} instructions={instructions} busy={repairBusy} reason={generationReason} error={repairActionError}
       onInstructions={setInstructions} onToggle={toggleRepairItem} onResult={acceptRepairPage} onDetail={item => {
         setSelectionItems(current => ({ ...current, [item.itemId]: item })); setSelectedRepairItemId(item.itemId)
