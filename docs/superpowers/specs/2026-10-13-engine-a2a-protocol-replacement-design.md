@@ -1,7 +1,7 @@
 # Engine 传输层协议替换：v3 WebSocket 帧 → A2A（架构设计）
 
-日期：2026-10-13（v4，吸收三轮评审：R1 七项 + R2 五项 + R3 三项 + 两处文档收尾）
-状态：**R3 阻塞项（安全重试判定机制）已修；总体方案收敛，按既有门禁推进 Spike → 1a → 1b；SDK 锁版/代理链路/真引擎行为以门禁实测为准，文档评审闭环**
+日期：2026-10-13（v5，四轮评审：R1 七项 + R2 五项 + R3 三项 + R4 两项 P2 修正）
+状态：**总体方案评审通过（R4）；文档评审结束，转入代码与实测证据评审；全客户端迁移/收割按各阶段退出条件单独批准**
 范围：engine adapter 传输层协议替换详设 + 全客户端迁移蓝图。BaaS / backend / BCS /
 前端 / 桌面各客户端线的详细改造各自后补 spec，本文只画依赖与阶段边界。
 分支：`feat/engine-a2a-protocol-replacement`
@@ -26,6 +26,8 @@
 | R3 | artifact 首块/lastChunk 语义歧义 | P2 | 成立（spec：lastChunk = 该 artifact 最后一块，非传输块结束） | §8.4 阶段表 |
 | R3 | HITL 重复提交与全局幂等规则冲突 | P2 | 成立（网络重试 vs 新业务操作两类请求需区分） | §8.6 处理顺序 + 分类 |
 | R3 | card 示例缺必填 skills / §13 引用方式 | 文档 | 成立（spec：skills 必填） | §6.5 最小 conversation skill；§13 直引 §3.1.2 |
+| R4 | retry-only wire 字段名不一致（正文 `avernet.retryOnly` vs 附录裸 `retryOnly`；v3 无键名） | P2 | 成立（分裂实现即破坏 D14：未读到标志→按 FIRST 执行） | §8.5.2 wire 字段表（唯一路径）+ A.3 同步 |
+| R4 | conversation skill 缺必填 tags | P2 | 成立（spec §4.4.5：AgentSkill `tags` 必填） | §6.5 补 `"tags": ["conversation"]` + golden fixture 注记 |
 
 ## 1. 背景与问题
 
@@ -202,14 +204,15 @@ class EngineChatService(Protocol):
   },
   "skills": [
     { "id": "conversation", "name": "Conversation",
-      "description": "<bot 描述摘要>" }
+      "description": "<bot 描述摘要>",
+      "tags": ["conversation"] }
   ],
   "defaultInputModes": ["text/plain"],
   "defaultOutputModes": ["text/plain", "application/json"]
 }
 ```
 
-`url` base 由部署侧注入（config 差异不进业务码道）；`skills` 为 spec 必填字段——card 示例已内置最小 conversation skill，G1a 可直接拿一份可校验 card；动态 skills 来源 = O3；extension URI
+`url` base 由部署侧注入（config 差异不进业务码道）；`skills` 与 skill 内 `tags` 均为 spec 必填（§4.4.5：tags 为必填数组、至少一元素）——card 示例已内置最小 conversation skill（含 tags），G1a 可直接拿一份可校验 card；生成 golden fixture 时去掉示意注释并替换占位 url；动态 skills 来源 = O3；extension URI
 命名在 G2 与 SDK 版本一起锁定。
 
 ### 6.6 鉴权与版本协商
@@ -321,7 +324,8 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
 
 1. 幂等键：A2A 侧 = `messageId`；v3 侧 = `ChatSendParams.idempotency_key`。
    逻辑请求 ID 由客户端生成（BCS = `A2aChatCommand.run_id`，D13：重试不得再生成），
-   映射到两协议的键字段；帧级断言：发送键非空且跨重试一致（contract test）
+   映射到两协议的键字段；帧级断言：发送键非空且跨重试一致（contract test）；
+   同键不同内容 → 显式键冲突错误（防止不同请求被误判为同一操作）
 2. **retry-only 判定机制（D14，服务端原子）**：请求分两类，判定与处理在 kernel
    内原子完成——客户端**无需**（也无法）预判服务端记录是否存活：
 
@@ -332,8 +336,21 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
    | RETRY-ONLY（不确定结果后的重试） | 存在 | 返回既有 task/终态结果 |
    | RETRY-ONLY | 不存在 | 原子返回"**执行结果未知**"（显式错误），**禁止创建新执行** |
 
-   - 携带方式：A2A SendMessage metadata 扩展（`avernet.retryOnly: true`）；v3 帧
-     params 字段；内部 extension，非 A2A 标准字段（附录 A.3 声明）
+   - **wire 字段表（唯一命名，两壳共用）**：
+
+     | 协议 | JSON 路径 | 类型/缺省 | 适用方法 |
+     |---|---|---|---|
+     | A2A（JSON-RPC 绑定） | `params.metadata["avernet.retryOnly"]` | bool / false | `SendMessage` **与 `SendStreamingMessage`** |
+     | v3 | `params.extensions["retry_only"]` | bool / false | `chat.send` |
+
+     v3 复用既有 `extensions` 载体先例（BCS `build_chat_send_frame` 的
+     `caller_wait_mode` 即走此路径）。样例：A2A `"params": {"message": {}, 
+     "metadata": {"avernet.retryOnly": true}}`；v3 `"params": {"extensions": 
+     {"retry_only": true}}`
+   - 载荷校验：请求声明启用该 extension（A2A-Extensions 头）但字段缺失或类型
+     错误 → **显式拒绝**，不得静默按 FIRST 执行
+   - 共同契约测试：v3 壳与 A2A 壳调用**同一组** kernel contract test，断言标志
+     穿壳进入 kernel 并命中 RETRY-ONLY 分支
    - spec"Send MAY idempotent by messageId"的兜底经此标志显式激活
    - "世代/重试凭据"类替代方案不采用：首次响应丢失 + 记录消失时凭据同样不存在，
      相比 retry-only 无增益、多一段实现面
@@ -341,8 +358,8 @@ changes, artifact updates)"——流是 Task 更新流，不是连续 Message �
    "执行结果未知"（安全重试可执行，D14）；**禁止**以 FIRST 语义自动重发不确定
    结果；显式再执行 = 新的用户操作（客户端生成**新幂等键**），副作用风险显式
    交回调用方决策
-4. F4 覆盖窗口内同键重发（含跨协议）；F5 覆盖**真实故障路径**下的 retry-only
-   拦截（服务端拒绝第二次执行，执行次数监控验证恰好一次）
+4. F4 覆盖窗口内同键重发（含跨协议）；F5 真实故障（次数证据由外部记录器持有）；
+   F7 全链路保真与混合部署回退；F8 并发首提与键冲突
 5. 事实边界：v3 引擎 adapter 当前对 `idempotency_key` 的实际去重行为**未实证**；
    D8 的保护只存在于新 kernel（升级后容器）。旧容器上的重发语义 = v3 现状，
    迁移期间 BCS/客户端不得对旧容器做跨协议安全重发假设（§10.3 矩阵备注）
@@ -407,7 +424,15 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 - F4：窗口内响应丢失，同幂等键重发（含跨协议）不二次执行
 - F5：**真实故障路径**：服务端执行完成 → 响应被截断 → adapter 重启（记录清零）→
   客户端实际发起 retry-only 重发（测试**不**预告知"窗口已失效"）→ 服务端拒绝
-  第二次执行并返回"执行结果未知"；执行次数监控验证恰好一次
+  第二次执行并返回"执行结果未知"。执行次数证据由**测试控制的上游 stub / 外部
+  记录器**持有——adapter 内存计数随被测重启销毁，不能自证；三方断言：原请求
+  已执行、重启后 retry-only 返回未知、上游恰好收到一次执行
+- F7：**retry-only 全链路保真**：标志须穿过 客户端→SDK→代理→壳 到达 kernel；
+  混合部署回退场景（旧容器、能力缓存过期、容器回滚、协议回退 v3）不得把
+  retry-only 退化为 FIRST——不支持该扩展的目标按"结果未知"处理而非换路重发；
+  通用 HTTP/SDK 自动重试不得绕过（自动重试请求须注入 retry-only 或直接禁用）
+- F8：**并发首次与键冲突**：两个相同逻辑请求（同键）并发 FIRST 到达 → 只创建
+  一个执行；同键不同内容 → 显式键冲突错误
 - F6：活任务断线期间产生多条 delta / tool progress / interaction 事件；重连按
   `seq` 逐事件补齐（不只是终稿文本或当前快照）
 
@@ -514,7 +539,7 @@ task 不受影响、订阅不撤销、事件缓冲按 run 独立。TC-RESET 对�
 | inject | 旁观注入（非 Task） | chat.inject |
 | `ResetContext` | 会话历史重置 | sessions.reset |
 | （SendMessage metadata：`interactionId`） | HITL 关联 | interaction.resolve 的承载 = 同 task 续消息 |
-| （SendMessage metadata：`retryOnly`，D14） | 不确定结果后的安全重试（服务端原子判定） | v3 帧 params 的 retry 语义字段 |
+| （`params.metadata["avernet.retryOnly"]`，D14；`SendStreamingMessage` 同样适用） | 不确定结果后的安全重试（服务端原子判定） | v3 `params.extensions["retry_only"]` |
 
 wire 样例 golden 文件在 G2 锁 SDK 后由官方样例生成回填（conformance golden，不手拼）。
 
@@ -528,4 +553,5 @@ wire 样例 golden 文件在 G2 锁 SDK 后由官方样例生成回填（conform
   （恢复容量/CACHE_LIMIT/锁内交接）、`a2a_chat/mod.rs:902`（`idempotency_key:
   None`——v2 的"BCS 已传幂等键"失实，本轮更正；run_id 仅进帧 ID）、
   `docs/arch/arch.rules.md` 第 3/7/16/25 条
-- 评审记录：R1（5 P1+2 P2）+ R2（4 P1+1 P2）+ R3（1 P1+2 P2+2 文档收尾），吸收映射见文首表
+- 评审记录：R1（5 P1+2 P2）+ R2（4 P1+1 P2）+ R3（1 P1+2 P2+2 文档收尾）
+  + R4（总体方案通过 + 2 P2 修正），吸收映射见文首表
