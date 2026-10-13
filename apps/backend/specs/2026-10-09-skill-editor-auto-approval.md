@@ -8,11 +8,11 @@ and migration from #2533 remain authoritative; this change adds no second flag.
 ## Public contract
 
 `GET/PUT /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-approval-policy`
-read or replace `{"auto_approve_editor_requests": boolean}`. Only the active
-OWNER Grant of a live Team Space Skill may read or write. Other users and
-Personal Space Skills cannot manage this policy. PUT requires a strict boolean
-and rejects unknown fields. New and existing bindings default to false after
-the binding migration is applied.
+read or replace `{"auto_approve_editor_requests": boolean}`. Active Team Space
+members may read the policy of a live Skill; only its active OWNER Grant may
+replace it. Non-members and Personal Space Skills cannot read or manage this
+policy. PUT requires a strict boolean and rejects unknown fields. New and
+existing bindings default to false after the binding migration is applied.
 
 `POST /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests`
 remains the Skill product's application entry. Its response fields are
