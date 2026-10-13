@@ -8,6 +8,7 @@ import {
   getBot,
   listBotInventory,
   pollBotAuthStatus,
+  refetchBotEngine,
   restartBot,
   restartBotEngine,
   restartLocalBot,
@@ -258,6 +259,9 @@ export const botWorkshopService = {
   },
   async restartEngine(id: string) {
     await restartBotEngine(id);
+  },
+  async refetchEngine(id: string) {
+    await refetchBotEngine(id);
   },
   /**
    * 重启发布的服务 runtime（`POST /bots/{id}/lifecycle/restart`，复用 botEditorService 既有封装）。
