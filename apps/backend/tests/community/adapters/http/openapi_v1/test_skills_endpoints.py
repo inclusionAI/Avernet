@@ -607,6 +607,7 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
+        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/security-observations": {"get"},
     }
     for path in (
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",

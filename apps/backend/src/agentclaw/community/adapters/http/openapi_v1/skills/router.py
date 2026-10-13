@@ -9,6 +9,7 @@ their existing market, Space, and SkillSet surfaces.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated, Any, Literal
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
@@ -63,7 +64,19 @@ from agentclaw.community.core.skill_center.services.skill_query_service import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
+    LocalSkillNotFoundError,
 )
+from agentclaw.community.core.repository.protocols.local_skill_security_observation import (
+    LocalSkillSecurityObservationRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.skill_center.local_skill_security_observation import (
+    LocalSkillSecurityObservation,
+)
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
@@ -78,7 +91,11 @@ from .schemas import (
     SkillPublishStatus,
     SkillState,
     SkillUpload,
+    SkillSecurityObservation,
+    SkillSecurityHandoffFailure,
+    SkillSecurityObservations,
 )
+
 from fastapi import (
     APIRouter,
     Body,
@@ -90,6 +107,8 @@ from fastapi import (
     Response,
     UploadFile,
 )
+
+logger = logging.getLogger(__name__)
 
 publish_status_router = APIRouter(
     prefix="/openapi/v1/bots/skills",
@@ -365,6 +384,150 @@ async def get_skill(
     # rather than through the helper — one read, not two.
     _require_skills_grant(caller, record)
     return envelope(_to_skill(record), request)
+
+
+def _to_security_observation(
+    observation: LocalSkillSecurityObservation,
+) -> SkillSecurityObservation:
+    return SkillSecurityObservation(
+        observation_id=observation.observation_id,
+        sha256=observation.sha256,
+        check_id=observation.check_id,
+        processing_status=observation.processing_status,
+        risk_status=observation.risk_status,
+        report=observation.report,
+        detail_url=observation.detail_url,
+        error_code=observation.error_code,
+        error_message=observation.error_message,
+        scan_started_at=observation.scan_started_at,
+        scan_completed_at=observation.scan_completed_at,
+        created_at=observation.created_at,
+    )
+
+
+@router.get(
+    "/{skill_id}/security-observations",
+    response_model=Envelope[SkillSecurityObservations],
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def get_skill_security_observations(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    page: PageParamsDep,
+    request: Request,
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
+    security_config: LocalSkillSecurityObservationConfig = Injected(
+        LocalSkillSecurityObservationConfig
+    ),
+    repository: LocalSkillSecurityObservationRepositoryProtocol = Injected(
+        LocalSkillSecurityObservationRepositoryProtocol
+    ),
+    bot_repository: BotRepository = Injected(BotRepository),
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
+) -> Envelope[SkillSecurityObservations]:
+    """Read the current and historical scans for a visible Bot-local Skill."""
+    if not skill_id.isdecimal():
+        raise LocalSkillNotFoundError()
+    record = query_service.get_local_skill(skill_id=skill_id, actor_id=user_id)
+    if (
+        str(record.get("bolt_id")) != bot_id
+        or str(record.get("user_id")) != owner_id
+        or not str(record.get("git_path") or "").startswith("local://")
+    ):
+        raise LocalSkillNotFoundError()
+    _require_skills_grant(caller, record)
+    if not security_config.enabled:
+        return envelope(
+            SkillSecurityObservations(
+                provider_skill_id=None, current=None, current_status="UNKNOWN",
+                current_failure=None, history=Page(total=0, items=[]),
+            ),
+            request,
+        )
+    incarnation_id = repository.get_formal_incarnation_id(
+        env=get_current_env(), bot_id=bot_id, owner_id=owner_id,
+        skill_id=int(skill_id),
+    )
+    if not incarnation_id:
+        return envelope(
+            SkillSecurityObservations(
+                provider_skill_id=None, current=None, current_status="UNKNOWN",
+                current_failure=None, history=Page(total=0, items=[]),
+            ),
+            request,
+        )
+    scope = {
+        "env": get_current_env(),
+        "bot_id": bot_id,
+        "owner_id": owner_id,
+        "skill_id": int(skill_id),
+        "incarnation_id": incarnation_id,
+    }
+    identity = repository.get_identity_for_asset(**scope)
+    current = repository.get_current_for_asset(**scope)
+    latest_handoff = repository.get_latest_handoff_for_asset(**scope)
+    current_failure = None
+    current_status = current.processing_status if current else "UNKNOWN"
+    if (
+        latest_handoff is not None
+        and (current is None or latest_handoff.upload_order > current.upload_order)
+    ):
+        current = None
+        if latest_handoff.stage not in {"PENDING", "OBSERVED"}:
+            current_status = "OBSERVATION_FAILED"
+            current_failure = SkillSecurityHandoffFailure(
+                observation_id=latest_handoff.observation_id,
+                sha256=latest_handoff.sha256,
+                stage=latest_handoff.stage,
+                snapshot_verified=latest_handoff.snapshot_verified,
+            )
+        else:
+            current_status = "UNKNOWN"
+    # The scan table can be unavailable after a successful observation-mode
+    # upload. Never show a prior package's PASS for the currently installed
+    # bytes when that exact upload left no durable scan row.
+    bot = bot_repository.get_by_id_and_owner(bot_id, owner_id)
+    try:
+        installed_digest = (
+            await upload_service.installed_package_digest(
+                bot=bot, bot_id=bot_id, owner_id=owner_id,
+                name=str(record["name"]),
+            ) if bot is not None else None
+        )
+    except Exception:
+        logger.exception(
+            "Local Skill current security digest read failed bot_id=%s skill_id=%s",
+            bot_id, skill_id,
+        )
+        installed_digest = None
+    if latest_handoff is not None and installed_digest != latest_handoff.sha256:
+        current_failure = None
+        current_status = "UNKNOWN"
+    if current is None or installed_digest != current.sha256:
+        current = None
+        if current_failure is None:
+            current_status = "UNKNOWN"
+    total, history = repository.page_for_asset(
+        **scope, page=page.page, page_size=page.page_size
+    )
+    return envelope(
+        SkillSecurityObservations(
+            provider_skill_id=identity.provider_skill_id if identity else None,
+            current=_to_security_observation(current) if current else None,
+            current_status=current_status,
+            current_failure=current_failure,
+            history=Page(
+                total=total, items=[_to_security_observation(item) for item in history]
+            ),
+        ),
+        request,
+    )
 
 
 @router.get(

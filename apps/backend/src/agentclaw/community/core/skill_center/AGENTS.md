@@ -13,6 +13,7 @@
 | 产品链路 | Router（位于 `community/adapters/http/openapi_v1/`） | 主要服务及后续入口 |
 | --- | --- | --- |
 | Bot Skill 列表、详情、内容、参数 | `skills/router.py`：`/{bot_id}/skills`，`/{skill_id}`、`/content`、`/parameters` | `SkillQueryService`；有效态经 `BotCapabilityStateReader`，内容按来源解析 |
+| Local Skill 安全观察查询 | `skills/router.py`：`/{bot_id}/skills/{skill_id}/security-observations` | 先按当前 Bot/Owner/MEMBER 权限确认 `local://` 资产，再按相同租户、环境、Bot、Owner、Skill ID 读取当前上传记录及数据库分页历史；不以裸扫描 ID 授权 |
 | Bot-local 上传、删除 | 同文件：`/upload`、`/upload-folder`、DELETE `/{skill_id}` | `LocalSkillUploadService`、`LocalSkillDeleteService`；设备文件操作和资产维护 |
 | 单 Skill 激活/停用 | 同文件：`/{skill_id}/activate`、`/deactivate` | `DirectActivationService` → Desired-State UoW → Runtime Projector |
 | 共享资产 README、兼容发布状态 | 同文件独立 Router：`/skills/{skill_id}/readme`、发布状态资源 | README 不要求目标 Bot；不要和 Bot 参数值、Space Publication Attempt 混用 |
@@ -58,6 +59,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | Space 归属、Owner/Manager | `community/core/models/space_skill.py` 的 `ac_skill_space_binding`、`ac_skill_grant`；旧 `ac_skill_member` 不是新 Space Grant |
 | Draft 租约 | 同文件 `ac_skill_draft_edit_lease`；holder 与递增 fencing token |
 | 不可变已发布版本、发布过程 | 同文件 `ac_skill_version`、`ac_skill_publication_attempt`；Version 与 Attempt 是不同对象 |
+| Local Skill 安全观察身份与上传历史 | 单表 `ac_local_skill_security_observation` 保存 `tc:<uuid>`、上传顺序、快照、扫描和同步状态；正式资产复用现有 `ac_skill.skill_uuid` 栅栏区分删除后复用的数字 ID，不新增列，协作日志不承担上传审计 |
 | 异步市场引用 | `community/core/models/skill_center_reference.py` 的 batch/item 两张表 |
 | Bot 生效身份 | `ac_bot_skill_installation`、`ac_bot_mcp_installation`；行存在表示 active，不能当作“安装过但停用”的历史记录 |
 | Bot MCP 显式覆盖 | `ac_bot_mcp_config`；仅保存 Manifest 显式字段，缺失字段继续继承 user config / Center default |
@@ -94,6 +96,10 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。
 - Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义；仅 AICoding Legacy 可将同 Bot、同 Skill 的历史 Claude Code Host/NAS 或 Engine-view locator 解析到当前 Runtime Package Location，记录的 `git_path` 不改写。Pool、Teclaw、其他 Engine、跨 Bot/Skill 及任意目录前缀继续在写入前拒绝。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `apps/backend/`）。
+- Local 上传或替换的四条成功路径统一在 `LocalSkillUploadService` 持有 edit guard 时，把本次校验的 canonical ZIP 交给 `LocalSkillSecurityUploadHook`。公共部署默认 Noop；仅显式启用的企业装配使用真实观察服务，先保存不可变快照，再绑定 `tc:<uuid>` 身份、冻结本次名称与描述、登记独立观察记录，并为扫描和资产同步分别入队。该后置链路故障需记录可定位证据和可补报状态，不能把已成功的同步上传改判为失败；后台任务不得从可变 Runtime 目录重建旧包。当前观察结果不拦截 Skill 使用。
+- 观察交接有期限；超时后释放 edit guard、记录上传 ID/摘要/精确快照 locator 和 handoff-failure 事实。晚返线程受取消栅栏约束，不能把旧包选为当前。补报必须先读回原快照并核对摘要；数据库不可用时至少输出含阶段与归属的结构化日志。完整原包不可得时不能冒称可补扫。
+- `HANDOFF_TIMEOUT` 中已有完整冻结元数据和持久上传顺序的记录也可恢复：慢写入的快照暂未出现时继续等待，出现后才读回核对摘要并补建观察；若观察记录已写入、只是超时清除了当前与同步目标指针，补报要在同一上传顺序栅栏下恢复这些指针和 handoff 阶段。旧上传仍不能覆盖更新包，不能仅凭超时后的短暂 `NOT_FOUND` 把它判为永久缺包。
+- 后台恢复从持久安全记录枚举环境内所有租户，再逐租户执行观察/同步分页恢复，不依赖请求外默认租户；发现查询使用环境和状态前缀索引。预约交接时即冻结名称、描述、创建人、摘要和精确快照定位；超过交接期限的 `PENDING`、写入/读回结果不确定的 `SNAPSHOT_UNCERTAIN` 与已验证的 `IDENTITY_FAILED` 均须重新读回原快照并核对摘要后才能补建观察。未验证的 `PENDING` 或 `SNAPSHOT_UNCERTAIN` 即使 OSS 暂时返回 `NOT_FOUND` 也继续恢复轮询，因为超时的 put 线程可能晚返；曾验证存在的包再缺失、或读回内容摘要不匹配才标记终态。旧包不能覆盖较新的当前观察。不可恢复的制品失败要终止元数据同步重排。四条正式上传成功分支的持久审计日志自增 ID 是安全交接顺序，未预约故障也携带这个顺序，不能用晚插入的安全表 ID 覆盖较新上传。内部顺序不进入公开上传响应。
 - Local 内容替换、删除与 Skills Pool 文件迁移通过其 edit guard 协调。声明 `skills.local_package.apply.v1` 的标准 Engine 以及全量切流的 Teclaw 接收 canonical ZIP 并在运行时完成 staging、exact replace、rollback 和 cleanup；Backend 只传 `skill_name + LEGACY|POOL`，校验返回 digest 后写 DB。旧标准 Engine 在写前 capability 明确缺失时继续走 Legacy Adapter；新请求发出后任何不确定结果都禁止回落旧协议。Replace 逐字保留既有 `git_path`，Engine `target_path` 只作诊断。运行时成功后的 DB 失败不反向删除文件，重试同一完整包收敛。删除则在权限、引用和就绪检查后，先委托运行时以一次包级操作删除完整内容根，再删除 Backend 元数据，不再由 Backend 执行文件枚举、quarantine、逐文件删除或恢复。运行时删除只有成功才允许进入元数据删除；两者不属于同一事务。该 guard 的用途与普通 Set/Direct 命令不同；不能把 `_mutation_flow.py` 的无 Runtime 补偿规则推广到其他文件写入。
 - `git://...`：Repo 内容定位；`services/git_sync.py::GitSyncService` 管理 bootstrap、周期同步、DB/缓存、OSS 散目录及下载包。Backend 启动只注册周期任务，不以远程 Git/OSS 对账作为就绪条件；首次自动对账等待完整同步周期并叠加既有 jitter。同步周期必须为正数、jitter 不能为负，无效环境配置在构造期 fail-fast。`sync_bootstrap()` 继续供显式手动同步及周期同步发现本地 bare repo 缺失时自愈；bootstrap clone 不设置进程级全局超时，Git 明确失败后仍进入既有 OSS fallback。发布的 Singlebox 默认配置不提供远程 Repo URL，是启动期本地 seed 的明确例外：只从已有的 host-side `~/aiworkbench/skills-repo` 初始化 SQLite 和 MarketCache，本地目录不存在时记录缺失并继续启动。显式运行时 overlay 配置 URL 时同样按周期对账，不在启动期 clone。改 Git 供给时同时核对 `repository_catalog_service.py` 和实际消费端，避免只验证 DB。
 - `center://<skill_code>`：SC 外部定位。`skill_code` 可为普通字符串，不要求 UUID，也不等于运行时名称。
@@ -269,6 +275,24 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 以上测试路径除第一项外均相对 `apps/backend/`。检查接口时从 Router 回溯到注入 Protocol、服务、Repository/Plugin 和错误映射；检查后台链路时再追到生命周期注册和 TaskQueue handler。列出尚未验证的外部消费者，避免以返回 200 或 Task enqueue 成功作为最终验收。
 
 历史 Spec 和前端联调文档位于 `apps/backend/specs/2026-08-20-skill-capability-upgrade/`，Installation 设计位于 `apps/backend/specs/2026-08-24-installation-single-source-of-truth/`。它们用于追溯决定；旧术语、废弃状态和未实现接口须与本文件及当前代码逐项核对后再使用。
+
+## Local Skill 安全观察任务
+
+企业部署显式启用后，正式 Local Skill 上传成功可保存每次上传的不可变快照与安全观察记录；公共部署默认不观察。`local_skill_security_scan` 从该快照校验摘要，并由企业适配提供同一快照的下载地址，提交检查后按 `checkId` 轮询；`local_skill_security_sync` 独立同步当前正式资产元数据，删除成功后还要同步 `OFFLINE`/已删除墓碑。身份、每次上传顺序、扫描和同步状态都存在单张观察表，不依赖协作日志；检测 `REJECT` 是已完成报告，不改变上传成功结果。扫描提交先持久化 `SUBMITTING` 栅栏，响应无法确认时转 `SUBMIT_UNKNOWN`，不得依赖 TaskQueue 的存活任务去重重新提交。后台 reconciler 会按观察记录重排漏入队或超时的可恢复任务；同一安全身份的元数据同步使用同一任务 key，并始终读取最新目标。若观察表预留失败，则无精确包自动补报事实，当前读取按安装包摘要不一致显示 `UNKNOWN`，需重传或人工补扫。观察历史按持久上传顺序倒序列出。灵智枢传输和现有 Bot OSS 下载地址签发由企业适配实现，公共 Core 只依赖 `LocalSkillSecurityProviderProtocol`。
+
+本期上传与替换观察仅接设备上传入口；Manifest 管理的 Local Skill 创建/替换属于后续统一写入口改造。扫描提交的最后一次数据库抢占必须同时验证对应正式资产及其 UUID 仍存在；已提交的检查在资产删除后仍可继续轮询历史报告。
+
+删除观察沿用非阻塞故障边界：正式 Local Skill 删除成功后，墓碑写入失败仍返回删除成功，但必须记录 Bot、Owner、Skill、操作者用于人工补录；人工补录前核对正式资产已不存在，并以最后一条扫描记录恢复 `DELETED` 墓碑，随后由 reconciler 重试 OFFLINE 同步。普通业务数据写入失败仍按仓库通用规则返回错误。
+
+观察配置关闭时，scan/sync handler 仍注册以安全结束此前遗留的队列投递，且无需对象存储提供不可变快照能力；设备与 Manifest 删除都不写观察事实，handler 不读取快照或调用外部提供方，reconciler 停止补投递。重新启用并重启后，reconciler 根据仍待处理的持久观察事实补建任务。关闭配置不是将未完成检查判定为通过或失败。
+
+观察配置关闭时，安全观察查询接口在校验 Local Skill 访问权限后返回 `UNKNOWN` 和空历史，不读取扫描表。启用时，正式上传成功后在 Bot 编辑锁内绑定现有 `ac_skill.skill_uuid`；绑定失败只跳过观察并显式记错。扫描表读写和后台恢复均以该 UUID 校验正式资产，避免 SQLite 数字 ID 复用串到旧身份。
+
+本地前置校验不能证明外部 A/B 元数据写入最终顺序。启用企业适配前须验证 Plugin API V1 的外部修订比较或等效串行能力，以及 DETECTING/REJECT 资产同步语义；未验证时不宣称该链路完成。
+
+CommunityDatabase 使用 PostgreSQL 且 `create_schema=false` 时，启用观察前执行 `sql/2026_10_13_local_skill_security_observation_postgresql.sql` 创建单张观察表；启动校验该表的全部 ORM 映射列，缺失时拒绝服务。`create_schema=true` 由 schema bootstrap 建表。旧三表草稿若已有数据，须单独审查迁移，不能用 `CREATE TABLE IF NOT EXISTS` 视为已升级。
+
+CommunityDatabase 的 operator-managed SQLite（`create_schema=false`）在启动前须具备 `ac_skill` 和单张观察表；启动缺表或缺关键列即失败。`create_schema=true` 的 SQLite 由 bootstrap 建表，不修改现有 `ac_skill`。旧草稿观察表仍需单独迁移。
 
 ## 数字员工共享凭证保护
 
